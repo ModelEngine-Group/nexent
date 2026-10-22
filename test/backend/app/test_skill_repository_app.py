@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for management.api.skill.skill_repository module."""
 
+from test.common.contract_stubs import install_business_contract_stubs
 import json
 import os
 import sys
@@ -20,7 +21,7 @@ sys.path.insert(0, backend_dir)
 sys.modules.setdefault("services.skill_repository_service", MagicMock())
 sys.modules.setdefault("gateway.authentication.identity", MagicMock())
 
-consts_model = types.ModuleType("contracts.models")
+consts_model = types.ModuleType("contracts.agent")
 
 
 class _SkillRepositoryListingCreateRequest(BaseModel):
@@ -42,9 +43,9 @@ class _TagAssignmentFilter(BaseModel):
 consts_model.SkillRepositoryListingCreateRequest = _SkillRepositoryListingCreateRequest
 consts_model.SkillRepositoryInstallRequest = _SkillRepositoryInstallRequest
 consts_model.TagAssignmentFilter = _TagAssignmentFilter
-sys.modules["contracts.models"] = consts_model
+install_business_contract_stubs(consts_model)
 
-from contracts import exceptions as exceptions_module
+from contracts.errors import exceptions as exceptions_module
 
 
 def _ensure_exception(name):

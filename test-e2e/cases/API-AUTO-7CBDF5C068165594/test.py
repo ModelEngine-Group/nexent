@@ -15,7 +15,7 @@ import httpx
 from fastapi import FastAPI
 
 from runtime.api.agent.execution import agent_runtime_router
-from contracts.exceptions import RuntimeCapacityExceededError, RuntimeQueueTimeoutError
+from contracts.errors.exceptions import RuntimeCapacityExceededError, RuntimeQueueTimeoutError
 
 
 def _build_app() -> FastAPI:

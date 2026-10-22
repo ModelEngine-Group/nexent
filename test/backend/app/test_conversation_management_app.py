@@ -10,8 +10,8 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException, ValidationError
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, ValidationError
 
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -351,7 +351,7 @@ async def test_rename_conversation_success(conversation_mocks):
 
 @pytest.mark.asyncio
 async def test_automatic_fallback_rename_returns_false_without_claiming_a_write(conversation_mocks):
-    from contracts.models import RenameRequest
+    from contracts.conversation import RenameRequest
 
     conversation_mocks['get_current_user_id'].return_value = ("user", "tenant")
     conversation_mocks['rename_conversation'].return_value = False
@@ -485,7 +485,7 @@ async def test_delete_conversations_batch_failure(conversation_mocks):
 @pytest.mark.asyncio
 async def test_delete_conversations_batch_token_expired(conversation_mocks):
     """Expired token on batch delete maps to 401."""
-    from contracts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     conversation_mocks['get_current_user_id'].side_effect = TokenExpiredError(
         "expired")
@@ -671,7 +671,7 @@ async def test_update_opinion_failure(conversation_mocks):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("route", ["opinion", "lookup"])
 async def test_missing_message_returns_404(conversation_mocks, route):
-    from contracts.exceptions import ConversationNotFoundError
+    from contracts.errors.exceptions import ConversationNotFoundError
 
     request_obj = MagicMock(message_id=123, opinion="Y", conversation_id=1, message_index=0)
     if route == "opinion":
@@ -725,7 +725,7 @@ async def test_get_message_id_failure(conversation_mocks):
 @pytest.mark.asyncio
 async def test_conversation_endpoints_token_expired(conversation_mocks):
     """Every conversation management endpoint maps an expired token to 401."""
-    from contracts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     request_obj = MagicMock()
     request_obj.title = "t"
@@ -754,7 +754,7 @@ async def test_conversation_endpoints_token_expired(conversation_mocks):
 @pytest.mark.asyncio
 async def test_generate_conversation_title_token_expired(conversation_mocks):
     """Expired token on title generation maps to 401."""
-    from contracts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     request_obj = MagicMock()
     request_obj.conversation_id = 1
@@ -774,7 +774,7 @@ async def test_generate_conversation_title_token_expired(conversation_mocks):
 async def test_update_conversation_knowledge_scope_token_expired(conversation_mocks):
     """Expired token on knowledge-scope update maps to 401."""
     from management.api.conversation.conversation_management import update_conversation_knowledge_scope_endpoint
-    from contracts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     request_obj = MagicMock()
     request_obj.scope = None

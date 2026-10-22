@@ -7,7 +7,7 @@ from uuid import UUID
 
 import pytest
 
-from contracts.exceptions import ForbiddenError
+from contracts.errors.exceptions import ForbiddenError
 from management.db.file import attachment as attachment_db
 from management.services.agent import service as agent_service
 

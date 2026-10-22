@@ -5,7 +5,7 @@ from typing import Dict, Iterable, Optional, Tuple
 
 from sqlalchemy import or_, select
 
-from consts.const import ASSET_OWNER_TENANT_ID
+from contracts.constants.identity import ASSET_OWNER_TENANT_ID
 from management.db.client import get_db_session
 from management.db.models import AgentInfo
 

@@ -20,13 +20,8 @@ All endpoints scope results by ``tenant_id`` derived from the auth token.
 
 from __future__ import annotations
 
-from contracts.api.management_memory_memory_provider import ProviderConfigCreate, ProviderConfigUpdate, TestIngestRequest, TestSearchRequest
-from contracts.api.management_memory_memory_provider import (
-    ProviderConfigCreate,
-    ProviderConfigUpdate,
-    TestIngestRequest,
-    TestSearchRequest,
-)
+from contracts.memory import ProviderConfigCreate, ProviderConfigUpdate, TestIngestRequest, TestSearchRequest
+from contracts.memory import ProviderConfigCreate, ProviderConfigUpdate, TestIngestRequest, TestSearchRequest
 
 import logging
 from http import HTTPStatus

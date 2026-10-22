@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP endpoints for the independent AIDP search connector."""
 
-from contracts.api.management_knowledge_base_ind_aidp import IndependentAidpKnowledgeBaseListRequest
+from contracts.knowledge import IndependentAidpKnowledgeBaseListRequest
 from io import BytesIO
 
 from typing import Optional

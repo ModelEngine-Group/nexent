@@ -8,8 +8,9 @@ import asyncio
 import logging
 from typing import Any
 
-from contracts.agent_repository import STATUS_SHARED
-from consts.const import SYSTEM_TENANT_ID, SYSTEM_USER_ID, OFFICIAL_AGENTS_PATH, OFFICIAL_AGENT_PROFILES
+from contracts.constants.agent import STATUS_SHARED
+from contracts.constants.identity import SYSTEM_TENANT_ID, SYSTEM_USER_ID
+from consts.const import OFFICIAL_AGENTS_PATH, OFFICIAL_AGENT_PROFILES
 
 from management.db.agent.repository import create_agent, find_agent_id_by_agent_name
 from management.db.agent.catalog import upsert_agent_repository_record

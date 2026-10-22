@@ -9,10 +9,10 @@ from datetime import datetime, timezone
 from typing import Any
 
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, ENABLE_AIDP_KNOWLEDGE
-from contracts.error_code import ErrorCode
-from contracts.evaluation_limits import MAX_CASES_PER_SET
-from contracts.evaluation_status import EvalRunStatus
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.constants.evaluation import MAX_CASES_PER_SET
+from contracts.constants.evaluation import EvalRunStatus
+from contracts.errors.exceptions import AppException
 from management.db.agent.version import query_version_list
 from management.db.client import get_db_session
 from management.db.models import AgentEvaluation, EvaluationSet, EvaluationSetCase, KnowledgeRecord

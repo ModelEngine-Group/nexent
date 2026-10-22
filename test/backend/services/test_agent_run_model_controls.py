@@ -12,7 +12,7 @@ from test.backend.services import test_agent_service as legacy
 @pytest.mark.asyncio
 @pytest.mark.parametrize('rejected_stage', ['selection', 'controls'])
 async def test_model_preflight_rejection_precedes_conversation_writes(monkeypatch, rejected_stage):
-    from contracts.exceptions import RunModelControlsError
+    from contracts.errors.exceptions import RunModelControlsError
     from management.services.model import run_controls
     subscription = legacy.agent_subscription
     request = legacy.AgentRequest(agent_id=7, query='fixture', model_id=9)

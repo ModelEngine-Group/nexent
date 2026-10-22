@@ -130,9 +130,9 @@ patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
-from contracts.exceptions import MCPConnectionError, MCPNameIllegal, MCPContainerError, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError
-from backend.consts.const import PERMISSION_READ, PERMISSION_EDIT
-from contracts.models import MCPConfigRequest
+from contracts.errors.exceptions import MCPConnectionError, MCPNameIllegal, MCPContainerError, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError
+from contracts.constants.identity import PERMISSION_READ, PERMISSION_EDIT
+from contracts.tool import MCPConfigRequest
 
 # Functions to test
 from management.services.mcp.service import (

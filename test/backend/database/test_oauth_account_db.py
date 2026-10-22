@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 import unittest
@@ -24,8 +26,9 @@ consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default-tenant"
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
-sys.modules["contracts.exceptions"] = MagicMock()
+install_shared_contract_stub(MagicMock(), 'exceptions')
 sys.modules["boto3"] = MagicMock()
 
 sqlalchemy_mock = MagicMock()

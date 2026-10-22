@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
-from contracts.models import TagAssignmentFilter
+from contracts.tag import TagAssignmentFilter
 from management.db.tag.repository import TagManagementDB
 from management.services.tag.library import TagManagementService
 

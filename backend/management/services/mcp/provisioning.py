@@ -8,8 +8,8 @@ import tempfile
 from typing import Awaitable, Callable
 
 from consts.const import NEXENT_MCP_DOCKER_IMAGE
-from contracts.exceptions import MCPConnectionError, McpNameConflictError, MCPNameIllegal, McpPortConflictError, McpValidationError
-from contracts.models import MCPConfigRequest
+from contracts.errors.exceptions import MCPConnectionError, McpNameConflictError, MCPNameIllegal, McpPortConflictError, McpValidationError
+from contracts.tool import MCPConfigRequest
 from management.db.mcp.remote import check_mcp_name_exists
 from management.services.mcp.common import (
     logger,

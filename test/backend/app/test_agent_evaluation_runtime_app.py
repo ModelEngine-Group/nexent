@@ -8,10 +8,10 @@ import pytest
 from fastapi import HTTPException
 
 from runtime.api.evaluation import execution as runtime_app
-from contracts.api.runtime_evaluation_execution import EvaluationRunRequest, TrialRunRequest
+from contracts.evaluation import EvaluationRunRequest, RuntimeEvaluationTrialRunRequest as TrialRunRequest
 from runtime.api.evaluation.execution import dispatch_evaluation_run_api, trial_run_evaluation_api
-from contracts.evaluation_status import EvalRunStatus
-from contracts.exceptions import AppException
+from contracts.constants.evaluation import EvalRunStatus
+from contracts.errors.exceptions import AppException
 
 
 @pytest.mark.asyncio

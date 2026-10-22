@@ -17,7 +17,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-026")
 def test_tag_governance_translates_capacity_conflict_and_usage(monkeypatch) -> None:
-    from contracts.exceptions import TagManagementConflictError
+    from contracts.errors.exceptions import TagManagementConflictError
     from management.services.tag.library import TagManagementService
 
     for message, scope in [

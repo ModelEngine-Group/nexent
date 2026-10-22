@@ -11,8 +11,9 @@ from sqlalchemy.orm import Query, Session
 
 from management.db.conversation import repository as db
 from management.services.conversation import service as conversations
-from contracts.exceptions import WorkbenchConfigVersionConflict
-from contracts.models import ConversationKnowledgeScopeRequest, WorkbenchSessionConfig
+from contracts.errors.exceptions import WorkbenchConfigVersionConflict
+from contracts.knowledge import ConversationKnowledgeScopeRequest
+from contracts.agent import WorkbenchSessionConfig
 
 
 def scope(provider, ids):

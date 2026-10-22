@@ -14,7 +14,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from contracts.models import HistoryItem, NL2AgentRunRequest
+from contracts.conversation import HistoryItem
+from contracts.agent import NL2AgentRunRequest
 from nexent.core.agents.agent_model import AgentConfig
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.models.capacity_budget import ContextBudgetSnapshot

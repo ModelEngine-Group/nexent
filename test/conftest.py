@@ -99,11 +99,9 @@ def _restore_project_packages():
 # lightweight stub during collection.  Keep the agent-stream constant
 # available as a fully-qualified module so later imports do not depend on the
 # replacement parent still behaving like a package.
-_agent_consts_stub = types.ModuleType("contracts.agent_constants")
-_agent_consts_stub.SAFE_AGENT_STREAM_ERROR_MESSAGE = (
-    "Agent execution failed. Please try again later."
-)
-sys.modules.setdefault("contracts.agent_constants", _agent_consts_stub)
+# The business constant module is lightweight and also owns workspace, stream,
+# and official-skill defaults. Keep its complete real exports available.
+from contracts.constants import agent as _agent_constants
 
 # Stub xlrd — only required when tests exercise ``evaluation_set_excel_utils``
 # in environments where the optional SDK is not installed.  We register a

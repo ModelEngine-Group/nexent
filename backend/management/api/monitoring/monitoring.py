@@ -6,8 +6,8 @@ Provides model performance metrics aggregated from model_monitoring_record_t.
 Uses an independent database connection pool to avoid impacting business operations.
 """
 
-from contracts.models import ConversationResponse
-from contracts.exceptions import TokenExpiredError
+from contracts.conversation import ConversationResponse
+from contracts.errors.exceptions import TokenExpiredError
 import logging
 from http import HTTPStatus
 from typing import Annotated, Any
@@ -16,8 +16,8 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from sqlalchemy import text
 
 from consts.const import ENABLE_TELEMETRY, MONITORING_DASHBOARD_ALLOWED_ROLES, MONITORING_DASHBOARD_URL, MONITORING_PROVIDER
-from contracts.models import ConversationResponse
-from contracts.exceptions import TokenExpiredError
+from contracts.conversation import ConversationResponse
+from contracts.errors.exceptions import TokenExpiredError
 from management.db.client import get_monitoring_db_session
 from gateway.authentication.identity import get_current_user_id
 

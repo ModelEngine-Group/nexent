@@ -30,10 +30,6 @@ class NorthboundContext:
     token_id: int = 0
 
 
-OAUTH_PENDING_EXPIRE_SECONDS = 10 * 60
-OAUTH_PENDING_PURPOSE = "oauth_account_completion"
-
-
 class PendingOAuthIdentity(TypedDict):
     provider: str
     provider_user_id: str

@@ -1,8 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Build the ephemeral NL2Agent configuration."""
 
 import json
 
-from consts.const import LANGUAGE
+from contracts.constants.localization import LANGUAGE
 from nexent.core.agents.agent_model import AgentConfig, ToolConfig
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.agents.prompt.meta import compose_nl2agent_system

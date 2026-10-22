@@ -6,13 +6,8 @@ from dataclasses import FrozenInstanceError, asdict
 
 import pytest
 
-from contracts.agent import (
-    AgentModelProjection,
-    AgentRunContext,
-    SystemAgentRef,
-    WorkbenchReleaseManifest,
-    WORKBENCH_OFFICIAL_SKILL_NAMES,
-)
+from contracts.agent import AgentModelProjection, AgentRunContext, SystemAgentRef, WorkbenchReleaseManifest
+from contracts.constants.agent import WORKBENCH_OFFICIAL_SKILL_NAMES
 
 
 def test_system_reference_preserves_identity_and_frozen_fields():

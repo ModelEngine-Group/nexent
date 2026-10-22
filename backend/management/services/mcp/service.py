@@ -9,9 +9,10 @@ import tempfile
 from contextlib import AsyncExitStack
 from typing import Awaitable, Callable
 
-from consts.const import CAN_EDIT_ALL_USER_ROLES, MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_DOCKER_IMAGE, PERMISSION_EDIT, PERMISSION_READ
-from contracts.exceptions import MCPConnectionError, MCPContainerError, McpNameConflictError, MCPNameIllegal, McpNotFoundError, McpPortConflictError, McpValidationError
-from contracts.models import MCPConfigRequest
+from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
+from consts.const import MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_DOCKER_IMAGE
+from contracts.errors.exceptions import MCPConnectionError, MCPContainerError, McpNameConflictError, MCPNameIllegal, McpNotFoundError, McpPortConflictError, McpValidationError
+from contracts.tool import MCPConfigRequest
 from management.db.identity.group import query_group_ids_by_user
 from management.db.mcp.market import get_mcp_market_record_by_source_mcp_id, update_mcp_market_record
 from management.db.mcp.remote import check_enabled_mcp_name_exists, check_mcp_name_exists, create_mcp_record, delete_mcp_record_by_container_id, delete_mcp_record_by_id, get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_record_by_id_and_tenant, get_mcp_records_by_tenant, update_mcp_record_by_name_and_url, update_mcp_record_container_fields_by_id, update_mcp_record_enabled_by_id, update_mcp_record_manage_fields_by_id, update_mcp_record_registry_json_by_id, update_mcp_record_status_by_id, update_mcp_status_by_name_and_url

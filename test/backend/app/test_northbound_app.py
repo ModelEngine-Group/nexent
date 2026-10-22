@@ -19,7 +19,7 @@ from io import BytesIO
 with pytest.MonkeyPatch.context() as import_mocks:
     import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
     from gateway.api.northbound.routes import router
-from contracts.exceptions import ConversationNotFoundError, ForbiddenError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, NotFoundException, UnauthorizedError, SignatureValidationError, ValidationError
+from contracts.errors.exceptions import ConversationNotFoundError, ForbiddenError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, NotFoundException, UnauthorizedError, SignatureValidationError, ValidationError
 
 
 app = FastAPI()
@@ -1299,7 +1299,7 @@ def test_update_conversation_title_limit_exceeded():
 
 def test_update_conversation_title_not_found():
     """Test update conversation title returns 404 when conversation not found."""
-    from contracts.exceptions import ConversationNotFoundError
+    from contracts.errors.exceptions import ConversationNotFoundError
 
     with patch('gateway.api.northbound.routes._get_northbound_context', new_callable=AsyncMock) as mock_ctx, \
             patch('gateway.api.northbound.routes.update_conversation_title', new_callable=AsyncMock) as mock_update:

@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import pytest
-from contracts.models import ToolValidateRequest
+from contracts.tool import ToolValidateRequest
 from pydantic import ValidationError
 
 

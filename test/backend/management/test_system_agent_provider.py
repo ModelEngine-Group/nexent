@@ -7,17 +7,15 @@ from dataclasses import FrozenInstanceError
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from contracts.models import AgentInfoRequest
-from contracts.agent import WORKBENCH_OFFICIAL_SKILL_NAMES
+from contracts.agent import AgentInfoRequest
+from contracts.constants.agent import WORKBENCH_OFFICIAL_SKILL_NAMES
 
 from management.services.agent.system import (
     WORKBENCH_MAIN_SYSTEM_KEY,
     SystemAgentProvider,
     WorkbenchAgentError,
 )
-from contracts.agent import (
-    SystemAgentRef,
-)
+from contracts.agent import SystemAgentRef
 
 
 def _agent(provider: SystemAgentProvider, **overrides):

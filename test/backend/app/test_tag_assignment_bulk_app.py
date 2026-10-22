@@ -2,7 +2,7 @@
 
 import pytest
 from management.api.tag import tag_management as tag_management_app
-from contracts.models import TagAssignmentBulkReplaceRequest
+from contracts.tag import TagAssignmentBulkReplaceRequest
 
 
 @pytest.mark.asyncio

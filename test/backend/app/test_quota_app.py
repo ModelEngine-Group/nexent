@@ -18,8 +18,8 @@ from management.api.knowledge_base import quota as quota_app
 from management.utils.app_factory import create_app
 from management.api.file.file_management import upload_files
 from management.api.knowledge_base.quota import tenant_quota_router, platform_quota_router, personal_quota_router
-from contracts.exceptions import AppException, PlatformQuotaConflictError, QuotaExceededError
-from contracts.error_code import ErrorCode
+from contracts.errors.exceptions import AppException, PlatformQuotaConflictError, QuotaExceededError
+from contracts.errors.codes import ErrorCode
 
 GB = 1024 * 1024 * 1024
 
@@ -1366,7 +1366,7 @@ class TestTokenExpiredMapping:
         ],
     )
     def test_tenant_quota_endpoints_token_expired(self, client, method, url, payload):
-        from contracts.exceptions import TokenExpiredError
+        from contracts.errors.exceptions import TokenExpiredError
 
         with patch(
             "management.api.knowledge_base.quota.get_current_user_id",
@@ -1390,7 +1390,7 @@ class TestTokenExpiredMapping:
         ],
     )
     def test_platform_quota_endpoints_token_expired(self, client, method, url, payload):
-        from contracts.exceptions import TokenExpiredError
+        from contracts.errors.exceptions import TokenExpiredError
 
         with patch(
             "management.api.knowledge_base.quota._require_platform_quota_manager", return_value="SU"

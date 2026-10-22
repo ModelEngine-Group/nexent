@@ -26,7 +26,7 @@ from nexent.core.tools.create_scheduled_task_tool import (
     CreateScheduledTaskProposalTool,
 )
 
-from contracts.exceptions import AgentAutomationError, AutomationConversationAlreadyBoundError, AutomationScheduleInvalidError
+from contracts.errors.exceptions import AgentAutomationError, AutomationConversationAlreadyBoundError, AutomationScheduleInvalidError
 from management.services.automation.service import agent_automation_facade
 from contracts.automation import AutomationProposalCreateRequest
 from management.services.automation.prompt import detect_instruction_language

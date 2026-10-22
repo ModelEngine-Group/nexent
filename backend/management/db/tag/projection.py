@@ -2,7 +2,7 @@
 
 """Tenant-scoped persistence for document tag retrieval projections."""
 
-from contracts.persistence.tag_projection import ACTIVE_DELETE_FLAG, KNOWLEDGE_DOCUMENT_TYPE, SYNCED_STATUS
+from contracts.constants.tag import ACTIVE_DELETE_FLAG, KNOWLEDGE_DOCUMENT_TYPE, SYNCED_STATUS
 from datetime import datetime, timezone
 from typing import Any
 

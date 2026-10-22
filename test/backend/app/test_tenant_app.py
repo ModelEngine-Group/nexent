@@ -8,7 +8,7 @@ import sys
 import os
 
 # Import exception classes and models
-from contracts.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, AsyncMock, patch
 
 
 # Import exceptions
-from contracts.exceptions import NotFoundException, ValidationError, UnauthorizedError
+from contracts.errors.exceptions import NotFoundException, ValidationError, UnauthorizedError
 
 # Add path for correct imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))

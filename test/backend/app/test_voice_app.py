@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-from contracts.exceptions import VoiceServiceException, STTConnectionException
+from contracts.errors.exceptions import VoiceServiceException, STTConnectionException
 
 
 class MockVoiceService:

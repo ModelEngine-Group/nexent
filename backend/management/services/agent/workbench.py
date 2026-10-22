@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 from nexent.core.agents.agent_model import AgentConfig
 
-from contracts.exceptions import ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
-from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
-from contracts.models import WorkbenchSessionConfig
+from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
+from contracts.agent import WorkbenchSessionConfig
 from management.db.skill import repository as skill_db
 from management.db.tool.repository import query_tools_by_ids
 from management.db.agent.repository import search_agent_info_by_agent_id
@@ -301,7 +301,7 @@ class RuntimeMountService:
         Callers consume the returned tree and scope summary before starting a
         model. Resource checks are separate from the pure root compilation.
         """
-        from contracts.models import ConversationKnowledgeScopeRequest
+        from contracts.knowledge import ConversationKnowledgeScopeRequest
         from management.services.knowledge_base.scope import resolve_executable_knowledge_scope
 
         scope = ConversationKnowledgeScopeRequest.model_validate(dict(tree.overlay.knowledge_scope or {}))

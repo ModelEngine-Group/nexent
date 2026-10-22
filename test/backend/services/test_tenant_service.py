@@ -27,7 +27,7 @@ patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
 patch('management.db.client.MinioClient',
       return_value=minio_client_mock).start()
 
-from contracts.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError
 from management.services.permission.identity.tenants import (
     backfill_workbench_main_agents,
     get_tenant_info,
@@ -132,7 +132,7 @@ class TestGetTenantInfo:
 
     def test_get_tenant_info_ignores_virtual_default_tenant(self, service_mocks):
         """Virtual default tenant should not be materialized as a managed tenant."""
-        from consts.const import DEFAULT_TENANT_ID
+        from contracts.constants.identity import DEFAULT_TENANT_ID
 
         result = get_tenant_info(DEFAULT_TENANT_ID)
 
@@ -258,7 +258,7 @@ class TestGetTenantsPaginated:
 
     def test_get_tenants_paginated_excludes_virtual_tenants(self, service_mocks):
         """Virtual/system tenants must not appear in admin tenant listings."""
-        from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+        from contracts.constants.identity import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
         tenant_ids = ["tenant1", ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID, "", "tenant2"]
         tenant_infos = [
@@ -515,7 +515,7 @@ class TestWorkbenchMainBackfill:
 
     def test_backfill_filters_virtual_tenants_and_isolates_failures(self):
         """UT-BE-SAL-006: one tenant failure does not block the batch."""
-        from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+        from contracts.constants.identity import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
         tenant_ids = [
             "tenant-a",

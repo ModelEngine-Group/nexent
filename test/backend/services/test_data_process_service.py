@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import asyncio
 import base64
 import io
@@ -51,6 +53,7 @@ mock_const.REDIS_BACKEND_URL = "redis://mock:6379/0"
 mock_const.REDIS_URL = "redis://mock:6379/0"
 mock_const.MAX_CONCURRENT_CONVERSIONS = 3
 sys.modules['consts.const'] = mock_const
+install_business_constant_stubs(mock_const)
 
 # Stub torch (data_process_service.py imports it unconditionally).
 _torch_mod = types.ModuleType('torch')
@@ -59,12 +62,12 @@ _torch_mod.float16 = 'float16'
 _torch_mod.no_grad = lambda: (_ for _ in ()).throw(StopIteration)  # callable that acts as context manager decorator
 sys.modules.setdefault('torch', _torch_mod)
 
-# Stub contracts.models — data_process_service.py imports BatchTaskRequest from it.
-_model_mod = types.ModuleType('contracts.models')
+# Stub contracts.agent — data_process_service.py imports BatchTaskRequest from it.
+_model_mod = types.ModuleType('contracts.agent')
 
 
 class _BatchTaskRequest:
-    """Lightweight stand-in for contracts.models.BatchTaskRequest.
+    """Lightweight stand-in for contracts.knowledge.BatchTaskRequest.
 
     Implements just enough to support `request.sources` iteration that
     production code uses inside `create_batch_tasks_impl`.
@@ -74,10 +77,10 @@ class _BatchTaskRequest:
         self.sources = sources or []
 
 _model_mod.BatchTaskRequest = _BatchTaskRequest
-sys.modules.setdefault('contracts.models', _model_mod)
+sys.modules.setdefault('contracts.agent', _model_mod)
 
-# Stub contracts.exceptions with real exception classes so assertRaises works correctly
-_exceptions_mod = types.ModuleType('contracts.exceptions')
+# Stub contracts.errors.exceptions with real exception classes so assertRaises works correctly
+_exceptions_mod = types.ModuleType('contracts.errors.exceptions')
 
 
 class AppException(Exception):
@@ -110,7 +113,7 @@ _exceptions_mod.OfficeConversionException = OfficeConversionException
 _exceptions_mod.FileTooLargeException = FileTooLargeException
 _exceptions_mod.UnsupportedFileTypeException = UnsupportedFileTypeException
 _exceptions_mod.QuotaExceededError = QuotaExceededError
-sys.modules['contracts.exceptions'] = _exceptions_mod
+install_shared_contract_stub(_exceptions_mod, 'exceptions')
 
 # Stub management.services.file.upload (new import in data_process_service)
 if 'management.services.file.upload' not in sys.modules:
@@ -1724,7 +1727,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.side_effect = ["task_id_1", "task_id_2"]
 
-        from contracts.models import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1795,7 +1798,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.return_value = "task_id_1"
 
-        from contracts.models import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1841,7 +1844,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.return_value = "task_id_1"
 
-        from contracts.models import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1885,7 +1888,7 @@ class TestDataProcessService(unittest.TestCase):
         3. No tasks are created when all sources are invalid
         4. The method returns an empty list
         """
-        from contracts.models import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1922,7 +1925,7 @@ class TestDataProcessService(unittest.TestCase):
         2. The method returns an empty list
         3. No errors occur during processing
         """
-        from contracts.models import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(sources=[])
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
@@ -1946,7 +1949,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.return_value = "task_id_1"
 
-        from contracts.models import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1983,7 +1986,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.return_value = "task_id_1"
 
-        from contracts.models import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -2033,7 +2036,7 @@ class TestDataProcessService(unittest.TestCase):
         """A single Celery submission exception must not discard later files."""
         mock_submit_chain.side_effect = [RuntimeError("broker unavailable"), "task_id_2"]
 
-        from contracts.models import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(sources=[
             {"source": "/tmp/a.txt", "source_type": "local", "index_name": "idx", "file_id": "fid-a"},
             {"source": "/tmp/b.txt", "source_type": "local", "index_name": "idx", "file_id": "fid-b"},
@@ -2054,7 +2057,7 @@ class TestDataProcessService(unittest.TestCase):
     @pytest.mark.asyncio
     async def async_test_create_batch_tasks_impl_empty_task_id(self, mock_submit_chain):
         """An empty task id is reported as a durable per-file submission failure."""
-        from contracts.models import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(sources=[{
             "source": "/tmp/a.txt",
             "source_type": "local",

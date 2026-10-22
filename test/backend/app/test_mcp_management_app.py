@@ -27,7 +27,7 @@ patch('management.db.client.MinioClient', return_value=minio_mock).start()
 patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
-from contracts.exceptions import McpNotFoundError, McpValidationError, McpNameConflictError, UnauthorizedError
+from contracts.errors.exceptions import McpNotFoundError, McpValidationError, McpNameConflictError, UnauthorizedError
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from http import HTTPStatus

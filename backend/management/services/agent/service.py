@@ -5,11 +5,15 @@ from collections import deque
 from typing import Optional
 from uuid import uuid4
 
-from contracts.agent_unavailable_reasons import AgentUnavailableReason
-from consts.const import CAN_EDIT_ALL_USER_ROLES, LANGUAGE, MODEL_CONFIG_MAPPING
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AgentNotFoundError, AgentRelationValidationError, AppException, ForbiddenError, TenantResourceLimitError
-from contracts.models import AgentInfoRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, SkillInstanceInfoRequest, ToolInstanceInfoRequest
+from contracts.constants.agent import AgentUnavailableReason
+from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES
+from contracts.constants.localization import LANGUAGE
+from contracts.constants.model import MODEL_CONFIG_MAPPING
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AgentNotFoundError, AgentRelationValidationError, AppException, ForbiddenError, TenantResourceLimitError
+from contracts.agent import AgentInfoRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest
+from contracts.skill import SkillInstanceInfoRequest
+from contracts.tool import ToolInstanceInfoRequest
 from management.db.a2a import repository as a2a_agent_db
 from management.db.skill import repository as skill_db
 from management.db.a2a.repository import query_external_sub_agents

@@ -11,10 +11,11 @@ from typing import (
     Optional,
 )
 
-from contracts.agent_repository import STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED
-from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE, TOOL_TYPE_MAPPING
-from contracts.exceptions import ForbiddenError
-from contracts.models import ToolSourceEnum
+from contracts.constants.agent import STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED
+from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
+from contracts.constants.tool import TOOL_TYPE_MAPPING
+from contracts.errors.exceptions import ForbiddenError
+from contracts.tool import ToolSourceEnum
 from management.db.skill import repository as skill_db
 from management.db.a2a.repository import get_server_agent_ids
 from management.db.agent.repository import clear_agent_new_mark, delete_agent_by_id, delete_agent_relationship, is_system_agent, query_agent_info_by_ids, query_agent_list_candidates_by_tenant_id, query_all_agent_info_by_tenant_id, query_sub_agents_id_list, search_agent_id_by_agent_name, search_agent_info_by_agent_id

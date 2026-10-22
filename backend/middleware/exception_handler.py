@@ -16,9 +16,9 @@ from fastapi import Request, Response, HTTPException
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from contracts.error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
-from contracts.error_message import ErrorMessage
-from contracts.exceptions import QuotaExceededError
+from contracts.errors.codes import ErrorCode, ERROR_CODE_HTTP_STATUS
+from contracts.errors.messages import ErrorMessage
+from contracts.errors.exceptions import QuotaExceededError
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class ExceptionHandlerMiddleware(BaseHTTPMiddleware):
             return response
         except Exception as exc:
             # Check if it's an AppException by looking for the error_code attribute
-            # This handles both import path variations (backend.contracts.exceptions vs contracts.exceptions)
+            # This handles both import path variations (contracts.errors.exceptions vs contracts.errors.exceptions)
             if hasattr(exc, 'error_code'):
                 # This is an AppException - get http_status from mapping
                 logger.error(

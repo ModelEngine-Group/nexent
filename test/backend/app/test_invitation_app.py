@@ -33,8 +33,8 @@ patch('management.db.client.MinioClient', return_value=minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes and models
-from contracts.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
-from contracts.models import InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
+from contracts.errors.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
+from contracts.identity import InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
 
 # Import the modules we need
 from fastapi.testclient import TestClient

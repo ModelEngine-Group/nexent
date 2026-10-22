@@ -6,6 +6,7 @@ can verify the service's policy enforcement, idempotency handling, and
 delegation to the index service.
 """
 
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import types
 from unittest.mock import MagicMock
@@ -192,6 +193,7 @@ consts_mod.ES_API_KEY = ""
 consts_mod.ES_HOST = ""
 sys.modules["consts"] = consts_pkg
 sys.modules["consts.const"] = consts_mod
+install_business_constant_stubs(consts_mod)
 
 
 # ---------------------------------------------------------------------------

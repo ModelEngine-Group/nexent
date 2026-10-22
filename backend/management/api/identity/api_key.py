@@ -1,8 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Authenticated tenant administration endpoints for API keys."""
 
-from contracts.exceptions import ForbiddenError, NotFoundException, UnauthorizedError, ValidationError
-from contracts.models import ApiKeyTargetRequest
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, UnauthorizedError, ValidationError
+from contracts.identity import ApiKeyTargetRequest
 import logging
 from http import HTTPStatus
 from typing import Any, Dict, Optional
@@ -10,8 +10,8 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
-from contracts.exceptions import ForbiddenError, NotFoundException, UnauthorizedError, ValidationError
-from contracts.models import ApiKeyTargetRequest
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, UnauthorizedError, ValidationError
+from contracts.identity import ApiKeyTargetRequest
 from management.services.permission.api_keys import (
     list_tenant_api_keys,
     refresh_user_api_key,

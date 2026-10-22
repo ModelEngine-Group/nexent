@@ -56,7 +56,7 @@ patch('management.db.identity.group.remove_user_from_all_groups').start()
 patch('management.db.identity.group.query_groups_by_users', return_value={}).start()
 
 # Import unit under test
-from contracts.exceptions import ForbiddenError, NotFoundException
+from contracts.errors.exceptions import ForbiddenError, NotFoundException
 from management.services.permission.identity.users import (
     delete_user_and_cleanup,
     get_users,

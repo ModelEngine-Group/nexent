@@ -22,7 +22,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import consts.const as _runtime_const
 from consts.const import MODEL_CATALOG_JSON_PATH, MODELS_DEV_CATALOG_JSON_PATH
-from contracts.models import ModelCatalogProfile, ModelCatalogProviderInfo
+from contracts.model import ModelCatalogProfile, ModelCatalogProviderInfo
 
 MODEL_REASONING_WIRE_PROFILES_PATH = getattr(_runtime_const, "MODEL_REASONING_WIRE_PROFILES_PATH", "")
 

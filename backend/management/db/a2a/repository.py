@@ -18,19 +18,14 @@ from management.utils.a2a import (
     _get_protocol_binding_mapping,
     _make_default_interfaces,
 )
-from contracts.persistence.a2a_repository import (
-    DEFAULT_CACHE_TTL_HOURS,
-    PROTOCOL_GRPC,
-    PROTOCOL_HTTP_JSON,
-    PROTOCOL_JSONRPC,
-)
+from contracts.constants.a2a import DEFAULT_CACHE_TTL_HOURS, PROTOCOL_GRPC, PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from contracts.exceptions import AgentNotFoundError
+from contracts.errors.exceptions import AgentNotFoundError
 from management.db.models import (
     AgentInfo,
     A2AExternalAgent,

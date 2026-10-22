@@ -509,7 +509,7 @@ class TestGetCurrentUserInfo:
     @patch('management.api.identity.mock_user_management.get_user_info', new_callable=AsyncMock)
     def test_get_user_info_unauthorized_error(self, mock_get_user_info):
         """Test UnauthorizedError exception handling"""
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
         
         # Setup mock to raise UnauthorizedError
         mock_get_user_info.side_effect = UnauthorizedError("User information not found")

@@ -8,7 +8,7 @@ import pytest
 from management.services.repository import precheck as precheck
 from management.services.repository.precheck import _check_model_available
 from management.services.model.resolver import is_model_available
-from contracts.models import ModelConnectStatusEnum
+from contracts.constants.model import ModelConnectStatusEnum
 
 CASE_ID = "UT-BE-AUTO-51975A59626F5BE8"
 TENANT_ID = "tenant-with-run-id"

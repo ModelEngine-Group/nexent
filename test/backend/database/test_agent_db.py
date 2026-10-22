@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 from pathlib import Path
 import types
@@ -33,6 +35,7 @@ consts_mock.const.MAX_AGENTS_PER_TENANT = 1000
 # 将模拟的consts模块添加到sys.modules中
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 
 class TenantResourceLimitError(ValueError):
@@ -58,14 +61,14 @@ class TenantResourceLimitError(ValueError):
         }
 
 
-exceptions_mock = types.ModuleType("contracts.exceptions")
+exceptions_mock = types.ModuleType("contracts.errors.exceptions")
 exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
 class AgentNotFoundError(ValueError):
     """Test stub preserving the Agent lookup error type."""
 
 
 exceptions_mock.AgentNotFoundError = AgentNotFoundError
-sys.modules["contracts.exceptions"] = exceptions_mock
+install_shared_contract_stub(exceptions_mock, 'exceptions')
 
 # 模拟utils模块
 utils_mock = types.ModuleType("utils")
@@ -148,7 +151,7 @@ for module_name, function_name in (
     sys.modules[module_name] = collaborator
 
 from management.db.agent.repository import search_agent_info_by_agent_id, search_agent_id_by_agent_name, find_agent_id_by_agent_name, search_blank_sub_agent_by_main_agent_id, query_sub_agents_id_list, query_sub_agent_relations, resolve_sub_agent_version_no, create_agent, _enforce_tenant_agent_limit, update_agent, delete_agent_by_id, query_all_agent_info_by_tenant_id, insert_related_agent, delete_related_agent, delete_agent_relationship, update_related_agents, batch_search_agent_display_names
-from contracts.exceptions import TenantResourceLimitError
+from contracts.errors.exceptions import TenantResourceLimitError
 
 
 @pytest.fixture(autouse=True)

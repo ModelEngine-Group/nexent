@@ -13,7 +13,7 @@ from typing import Any, Iterable
 
 from pydantic import BaseModel
 
-from contracts.models import AgentRepositorySnapshot, KnowledgeBaseSeed
+from contracts.agent import AgentRepositorySnapshot, KnowledgeBaseSeed
 
 logger = logging.getLogger("official_agent_bundle_service")
 

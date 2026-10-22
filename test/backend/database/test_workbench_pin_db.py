@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.dml import Update
 
-from contracts.exceptions import ConversationNotFoundError
+from contracts.errors.exceptions import ConversationNotFoundError
 from management.db.conversation import pins as pins
 
 STAMP = datetime(2026, 10, 1, tzinfo=timezone.utc)

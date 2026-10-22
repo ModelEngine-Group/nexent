@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "backend"))
 
-from contracts.exceptions import AgentToolImportError
+from contracts.errors.exceptions import AgentToolImportError
 from management.services.agent.policy import portable_tool_params, validate_import_tool_params
 
 

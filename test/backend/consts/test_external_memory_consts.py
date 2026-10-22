@@ -2,7 +2,8 @@
 
 """Contract tests for external-memory runtime configuration."""
 
-import backend.consts.const as const
+from contracts.constants import memory as const_memory
+from consts import const
 
 
 def test_ac_p3_36_ingest_has_no_deployment_master_switch():
@@ -10,4 +11,4 @@ def test_ac_p3_36_ingest_has_no_deployment_master_switch():
 
 
 def test_ac_p3_37_agent_memory_units_are_allowed_for_external_ingest():
-    assert "agent" in const.EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES
+    assert "agent" in const_memory.EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES

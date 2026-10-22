@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.api.management_evaluation_agent_evaluation import CreateEvaluationRequest, TrialRunRequest, _AUTH_REQUIRED_MSG, _UNKNOWN_ID
+from contracts.evaluation import CreateEvaluationRequest, AgentEvaluationTrialRunRequest as TrialRunRequest
+from contracts.constants.evaluation import _AUTH_REQUIRED_MSG, _UNKNOWN_ID
 import logging
 from http import HTTPStatus
 from typing import Any
@@ -8,8 +9,8 @@ from fastapi import APIRouter, Body, Header, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, StrictInt, TypeAdapter, ValidationError
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException, UnauthorizedError
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, UnauthorizedError
 
 # AppException is caught by global middleware (maps ErrorCode to HTTP status)
 from management.db.evaluation.runs import update_annotation_schema_ids

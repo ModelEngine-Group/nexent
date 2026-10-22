@@ -8,24 +8,10 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from management.services.automation import service as facade_module
-from contracts.exceptions import AutomationCapabilityBindingInvalidError, AutomationCapabilityNotReadyError, AutomationConversationAlreadyBoundError, AutomationNotFoundError, AutomationScheduleInvalidError
+from contracts.errors.exceptions import AutomationCapabilityBindingInvalidError, AutomationCapabilityNotReadyError, AutomationConversationAlreadyBoundError, AutomationNotFoundError, AutomationScheduleInvalidError
 from management.services.automation.service import AgentAutomationFacade
 from management.services.automation.intent import AutomationIntentContext
-from contracts.automation import (
-    AutomationProposalCreateRequest,
-    AutomationProposalPatchRequest,
-    AutomationProposalConfirmRequest,
-    AutomationProposalStatus,
-    AutomationRunStatus,
-    AutomationTaskCreateRequest,
-    AutomationTaskPatchRequest,
-    CapabilityBinding,
-    CapabilityResolution,
-    CapabilityType,
-    ScheduleMode,
-    ScheduleRuleType,
-    ScheduleTrigger,
-)
+from contracts.automation import AutomationProposalCreateRequest, AutomationProposalPatchRequest, AutomationProposalConfirmRequest, AutomationProposalStatus, AutomationRunStatus, AutomationTaskCreateRequest, AutomationTaskPatchRequest, CapabilityBinding, CapabilityResolution, CapabilityType, ScheduleMode, ScheduleRuleType, ScheduleTrigger
 from management.services.automation.prompt import AutomationTaskContent
 
 

@@ -1,12 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Manual Dreaming run and audit endpoints."""
 
-from contracts.api.management_memory_memory_dreaming import DreamingRunRequest, DreamingScheduleRequest, USER_DREAMING_SCOPE
-from contracts.api.management_memory_memory_dreaming import (
-    DreamingRunRequest,
-    DreamingScheduleRequest,
-    USER_DREAMING_SCOPE,
-)
+from contracts.memory import DreamingRunRequest, DreamingScheduleRequest
+from contracts.constants.memory import USER_DREAMING_SCOPE
+from contracts.memory import DreamingRunRequest, DreamingScheduleRequest
+from contracts.constants.memory import USER_DREAMING_SCOPE
 from http import HTTPStatus
 from datetime import datetime, timezone
 from typing import Annotated, Literal, Optional

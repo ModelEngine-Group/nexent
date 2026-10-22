@@ -15,7 +15,7 @@ from runtime.api.agent import execution as agent_app_execution
 from management.api.skill import skill as skill_app
 from runtime.api.skill import creation as skill_app_creation
 from agents import create_agent_info
-from contracts.exceptions import ForbiddenError
+from contracts.errors.exceptions import ForbiddenError
 from management.services.model import run_controls
 from nexent.core.agents.agent_model import AgentConfig
 import permissions.depends as depends

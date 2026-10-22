@@ -3,6 +3,8 @@
 """Unit tests for agent_evaluation_service focusing on the new
 delete-only-creator behavior and the failed-cases-only Excel report."""
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_contract_stubs
 from test.backend.management.import_patching import bind_import_attribute, set_import_attribute
 
 import sys
@@ -281,14 +283,14 @@ _db_models_module.ModelRecord = MagicMock()
 sys.modules["management.db.models"] = _db_models_module
 _db_pkg.db_models = _db_models_module
 
-# contracts.models referenced by the service
+# contracts.agent referenced by the service
 _consts_pkg = _register_package("consts")
-_consts_model_module = types.ModuleType("contracts.models")
+_consts_model_module = types.ModuleType("contracts.agent")
 _consts_model_module.AgentRequest = MagicMock()
-sys.modules["contracts.models"] = _consts_model_module
+install_business_contract_stubs(_consts_model_module)
 _consts_pkg.model = _consts_model_module
 
-_consts_error_code_module = types.ModuleType("contracts.error_code")
+_consts_error_code_module = types.ModuleType("contracts.errors.codes")
 
 
 class _ErrorCode:
@@ -320,20 +322,20 @@ class _ErrorCode:
 
 
 _consts_error_code_module.ErrorCode = _ErrorCode
-sys.modules["contracts.error_code"] = _consts_error_code_module
+install_shared_contract_stub(_consts_error_code_module, 'error_code')
 _consts_pkg.error_code = _consts_error_code_module
 
-_consts_limits_module = types.ModuleType("contracts.evaluation_limits")
+_consts_limits_module = types.ModuleType("contracts.constants.evaluation")
 _consts_limits_module.DEFAULT_PASS_THRESHOLD = 0.8
 _consts_limits_module.MAX_CONCURRENT_RUNS = 10
 _consts_limits_module.MAX_EVALUATORS_PER_RUN = 3
 _consts_limits_module.MAX_TOTAL_RUNS = 100
 _consts_limits_module.MAX_TURNS_PER_SESSION = 20
 _consts_limits_module.MAX_CASES_PER_SET = 10000
-sys.modules["contracts.evaluation_limits"] = _consts_limits_module
+install_shared_contract_stub(_consts_limits_module, 'evaluation_limits')
 _consts_pkg.evaluation_limits = _consts_limits_module
 
-_consts_status_module = types.ModuleType("contracts.evaluation_status")
+_consts_status_module = types.ModuleType("contracts.constants.evaluation")
 _consts_status_module.MAX_FAILURE_EXAMPLES = 5
 _consts_status_module.EvalCaseStatus = type(
     "EvalCaseStatus",
@@ -360,10 +362,10 @@ _consts_status_module.EvalRunStatus = type(
         "CANCELLED": "CANCELLED",
     },
 )
-sys.modules["contracts.evaluation_status"] = _consts_status_module
+install_shared_contract_stub(_consts_status_module, 'evaluation_status')
 _consts_pkg.evaluation_status = _consts_status_module
 
-_consts_exceptions_module = types.ModuleType("contracts.exceptions")
+_consts_exceptions_module = types.ModuleType("contracts.errors.exceptions")
 
 
 class _AppException(Exception):
@@ -381,7 +383,7 @@ _consts_exceptions_module.NoInviteCodeException = Exception
 _consts_exceptions_module.MCPConnectionError = Exception
 _consts_exceptions_module.ToolExecutionException = Exception
 _consts_exceptions_module.VoiceServiceException = Exception
-sys.modules["contracts.exceptions"] = _consts_exceptions_module
+install_shared_contract_stub(_consts_exceptions_module, 'exceptions')
 _consts_pkg.exceptions = _consts_exceptions_module
 
 # adapters (Jiuwen SDK) stubs
@@ -656,7 +658,7 @@ def _make_case(case_id: int, *, status: str, score, pass_status: str | None):
 
 
 def test_delete_agent_evaluation_run_only_creator_allowed(service_module):
-    from contracts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     service_module.get_agent_evaluation.return_value = {
         "agent_evaluation_id": 1,
         "tenant_id": "t1",
@@ -673,7 +675,7 @@ def test_delete_agent_evaluation_run_only_creator_allowed(service_module):
 
 
 def test_delete_agent_evaluation_run_admin_can_delete_others(service_module):
-    from contracts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     # Shared mocks keep their call history across tests in this module; reset
     # before acting so assert_called/assert_not_called see only this test.
     service_module.hard_delete_agent_evaluation.reset_mock()
@@ -691,7 +693,7 @@ def test_delete_agent_evaluation_run_admin_can_delete_others(service_module):
 
 
 def test_delete_agent_evaluation_run_dev_cannot_delete_others(service_module):
-    from contracts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     # Shared mocks keep their call history across tests in this module; reset
     # before acting so assert_called/assert_not_called see only this test.
     service_module.hard_delete_agent_evaluation.reset_mock()
@@ -709,7 +711,7 @@ def test_delete_agent_evaluation_run_dev_cannot_delete_others(service_module):
 
 
 def test_delete_agent_evaluation_run_unknown_role_rejected(service_module):
-    from contracts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     # Shared mocks keep their call history across tests in this module; reset
     # before acting so assert_called/assert_not_called see only this test.
     service_module.hard_delete_agent_evaluation.reset_mock()
@@ -895,7 +897,7 @@ def test_list_agent_evaluation_cases_impl_forwards_pagination(service_module):
 
 def test_delete_agent_evaluation_run_not_found_raises(service_module):
     """A missing run bubbles up the ``AppException`` from the DB layer."""
-    from contracts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     _wire_full_db_module(service_module)
     service_module.get_agent_evaluation.side_effect = AppException(
         error_code="AGENT_EVALUATION_NOT_FOUND",
@@ -909,7 +911,7 @@ def test_delete_agent_evaluation_run_not_found_raises(service_module):
 
 def test_delete_agent_evaluation_run_creator_missing_raises(service_module):
     """``created_by`` is None on the run record — never matches any user."""
-    from contracts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     _wire_full_db_module(service_module)
     service_module.get_agent_evaluation.return_value = {
         "agent_evaluation_id": 1,
@@ -1243,7 +1245,7 @@ def test_create_agent_evaluation_run_happy_path(service_module):
 
 def test_create_agent_evaluation_run_empty_set_raises(service_module):
     """An evaluation set with no cases is rejected before any DB writes happen."""
-    from contracts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
     _wire_full_db_module(service_module)
     service_module.get_evaluation_set_cases_all.return_value = []
 
@@ -1572,12 +1574,12 @@ class TestValidateCodeEvaluator:
         service_module.validate_code_evaluator(_valid_evaluator_code(var_keyword=True))
 
     def test_syntax_error_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="Code syntax error"):
             service_module.validate_code_evaluator("def :")
 
     def test_forbidden_operations_raises(self, service_module, monkeypatch):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         set_import_attribute(monkeypatch,
             service_module, "_scan_shell_calls", MagicMock(return_value=["open"])
         )
@@ -1585,14 +1587,14 @@ class TestValidateCodeEvaluator:
             service_module.validate_code_evaluator("x = 1")
 
     def test_dunder_globals_escape_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="forbidden operations"):
             service_module.validate_code_evaluator(
                 "esc = json.JSONDecoder.__init__.__globals__['__builtins__']"
             )
 
     def test_dunder_class_chain_escape_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="forbidden operations"):
             service_module.validate_code_evaluator(
                 "esc = ().__class__.__base__.__subclasses__()"
@@ -1608,22 +1610,22 @@ class TestValidateCodeEvaluator:
         service_module.validate_code_evaluator(code)
 
     def test_undefined_name_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="forbidden or undefined name"):
             service_module.validate_code_evaluator("undefined_name()")
 
     def test_exec_error_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="Code execution failed"):
             service_module.validate_code_evaluator("1 / 0")
 
     def test_missing_evaluate_callable_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="must define"):
             service_module.validate_code_evaluator("x = 1")
 
     def test_missing_required_params_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException, match="missing required parameters"):
             service_module.validate_code_evaluator(
                 "def evaluate(query):\n    return {'score': 1}"
@@ -1987,7 +1989,7 @@ class TestScoreWithEvaluators:
 
 class TestCheckRunLimits:
     def test_active_limit_raises(self, service_module, monkeypatch):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         set_import_attribute(monkeypatch, service_module, "count_active_runs", MagicMock(return_value=10))
         set_import_attribute(monkeypatch, service_module, "count_total_runs", MagicMock(return_value=0))
         with pytest.raises(AppException) as excinfo:
@@ -1995,7 +1997,7 @@ class TestCheckRunLimits:
         assert excinfo.value.error_code == service_module.ErrorCode.COMMON_RATE_LIMIT_EXCEEDED
 
     def test_total_limit_raises(self, service_module, monkeypatch):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         set_import_attribute(monkeypatch, service_module, "count_active_runs", MagicMock(return_value=0))
         set_import_attribute(monkeypatch, service_module, "count_total_runs", MagicMock(return_value=100))
         with pytest.raises(AppException):
@@ -2015,18 +2017,18 @@ class TestValidateAndFreezeEvaluators:
         assert service_module._validate_and_freeze_evaluators(None, "t1", None, "zh") is None
 
     def test_too_many_raises(self, service_module, monkeypatch):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException):
             service_module._validate_and_freeze_evaluators([1, 2, 3, 4], "t1", None, "zh")
 
     def test_not_found_raises(self, service_module, monkeypatch):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         set_import_attribute(monkeypatch, service_module, "get_evaluator", MagicMock(return_value=None))
         with pytest.raises(AppException):
             service_module._validate_and_freeze_evaluators([1], "t1", None, "zh")
 
     def test_not_published_raises(self, service_module, monkeypatch):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         set_import_attribute(monkeypatch,
             service_module, "get_evaluator", MagicMock(return_value=self._evaluator("DRAFT"))
         )
@@ -2049,7 +2051,7 @@ class TestValidateAndFreezeEvaluators:
 
 class TestCreateNoSetModeRun:
     def test_query_count_out_of_range_raises(self, service_module, monkeypatch):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException):
             service_module._create_no_set_mode_run(
                 "t1", "u1", 1, 1, 99, None, None, 0, "zh", None
@@ -2133,7 +2135,7 @@ class TestExtractCasesFromMarkdownFence:
         assert cases == [{"inputs": {"query": "q"}}]
 
     def test_no_fence_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException) as excinfo:
             service_module._extract_cases_from_markdown_fence("no fence here")
         assert (
@@ -2142,7 +2144,7 @@ class TestExtractCasesFromMarkdownFence:
         )
 
     def test_bad_json_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException):
             service_module._extract_cases_from_markdown_fence("```json\n[oops]\n```")
 
@@ -2161,12 +2163,12 @@ class TestParseCasesFromLlmResponse:
         assert cases == [{"a": 1}]
 
     def test_empty_list_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException):
             service_module._parse_cases_from_llm_response("[]")
 
     def test_non_list_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         with pytest.raises(AppException):
             service_module._parse_cases_from_llm_response('{"a": 1}')
 
@@ -2182,7 +2184,7 @@ class TestGenerateTestQueries:
         }
 
     def test_profile_missing_raises(self, service_module, monkeypatch):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         profile_utils = sys.modules["management.services.agent.profile"]
         set_import_attribute(monkeypatch, profile_utils, "fetch_agent_profile", MagicMock(return_value=None))
         with pytest.raises(AppException) as excinfo:
@@ -2190,7 +2192,7 @@ class TestGenerateTestQueries:
         assert excinfo.value.error_code == service_module.ErrorCode.AGENT_EVALUATION_AGENT_NOT_FOUND
 
     def test_llm_failure_raises(self, service_module, monkeypatch):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         profile_utils = sys.modules["management.services.agent.profile"]
         set_import_attribute(monkeypatch, profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
         set_import_attribute(monkeypatch,
@@ -2206,7 +2208,7 @@ class TestGenerateTestQueries:
         )
 
     def test_no_valid_queries_raises(self, service_module, monkeypatch):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         profile_utils = sys.modules["management.services.agent.profile"]
         set_import_attribute(monkeypatch, profile_utils, "fetch_agent_profile", MagicMock(return_value=self._profile()))
         # Non-empty list whose queries are all blank -> filtered to nothing -> EMPTY.
@@ -2738,7 +2740,7 @@ class TestAnalysisHelpers:
 
     def test_call_analysis_llm_and_parse_non_dict_raises(self, service_module):
         from nexent.core.agents.prompt.auxiliary import AuxiliaryPrompt
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         bind_import_attribute(service_module, 'call_llm_for_system_prompt', MagicMock(return_value='[1, 2]'))
         with pytest.raises(AppException) as excinfo:
             service_module._call_analysis_llm_and_parse(
@@ -2765,7 +2767,7 @@ class TestGenerateAnalysisReportImpl:
         return run
 
     def test_run_not_found_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         service_module.get_agent_evaluation.return_value = None
         with pytest.raises(AppException) as excinfo:
             service_module.generate_analysis_report_impl(1, "t1")
@@ -2780,7 +2782,7 @@ class TestGenerateAnalysisReportImpl:
         assert service_module.generate_analysis_report_impl(1, "t1") == cached
 
     def test_not_ready_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         self._run(service_module, status="RUNNING")
         with pytest.raises(AppException) as excinfo:
             service_module.generate_analysis_report_impl(1, "t1")
@@ -2803,7 +2805,7 @@ class TestGenerateAnalysisReportImpl:
         )
 
     def test_llm_failure_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         self._run(service_module)
         bind_import_attribute(service_module, 'list_agent_evaluation_cases', MagicMock(return_value=[]))
         bind_import_attribute(service_module, 'get_evaluator', MagicMock(return_value=None))
@@ -2817,7 +2819,7 @@ class TestGenerateAnalysisReportImpl:
         )
 
     def test_non_dict_llm_response_raises(self, service_module):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         self._run(service_module)
         bind_import_attribute(service_module, 'list_agent_evaluation_cases', MagicMock(return_value=[]))
         bind_import_attribute(service_module, 'get_evaluator', MagicMock(return_value=None))

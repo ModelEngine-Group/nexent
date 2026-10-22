@@ -15,21 +15,9 @@ from management.services.conversation.service import (
 from management.services.automation import agent_identity as agent_identity_adapter
 from management.services.automation.capabilities import resolve_agent_capabilities, validate_bindings_available
 from management.services.automation.conversation import automation_conversation_adapter
-from contracts.exceptions import AutomationCapabilityBindingInvalidError, AutomationCapabilityNotReadyError, AutomationConversationAlreadyBoundError, AutomationNotFoundError, AutomationScheduleInvalidError
+from contracts.errors.exceptions import AutomationCapabilityBindingInvalidError, AutomationCapabilityNotReadyError, AutomationConversationAlreadyBoundError, AutomationNotFoundError, AutomationScheduleInvalidError
 from management.services.automation.intent import AutomationIntentContext, automation_intent_analyzer
-from contracts.automation import (
-    AutomationProposalConfirmRequest,
-    AutomationProposalCreateRequest,
-    AutomationProposalPatchRequest,
-    AutomationProposalStatus,
-    AutomationRunStatus,
-    AutomationSource,
-    AutomationTaskCreateRequest,
-    AutomationTaskPatchRequest,
-    AutomationTaskStatus,
-    CapabilityBinding,
-    ScheduleTrigger,
-)
+from contracts.automation import AutomationProposalConfirmRequest, AutomationProposalCreateRequest, AutomationProposalPatchRequest, AutomationProposalStatus, AutomationRunStatus, AutomationSource, AutomationTaskCreateRequest, AutomationTaskPatchRequest, AutomationTaskStatus, CapabilityBinding, ScheduleTrigger
 from management.services.automation.prompt import (
     AutomationPromptContext,
     AutomationTaskContent,

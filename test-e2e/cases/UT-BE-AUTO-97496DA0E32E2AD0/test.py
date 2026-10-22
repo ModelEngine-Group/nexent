@@ -2,7 +2,7 @@
 
 import pytest
 
-from contracts.agent_unavailable_reasons import AgentUnavailableReason
+from contracts.constants.agent import AgentUnavailableReason
 from management.services.agent.read import apply_duplicate_name_availability_rules
 
 CASE_ID = 'UT-BE-AUTO-97496DA0E32E2AD0'

@@ -5,8 +5,9 @@
 import logging
 from uuid import uuid4
 
-from consts.const import PERMISSION_EDIT, PERMISSION_READ, TAG_DOCUMENT_PROJECTION_ENABLED
-from contracts.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
+from contracts.constants.identity import PERMISSION_EDIT, PERMISSION_READ
+from consts.const import TAG_DOCUMENT_PROJECTION_ENABLED
+from contracts.errors.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
 from management.db.tag.repository import TagManagementDB
 from management.db.agent.repository import query_agent_info_by_ids
 from management.db.tool.repository import query_tenant_tools_by_ids

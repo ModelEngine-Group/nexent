@@ -17,7 +17,7 @@ sys.modules.setdefault("management.services.notification.service", MagicMock())
 sys.modules.setdefault("gateway.authentication.identity", MagicMock())
 
 from management.api.notification.notification import router
-from contracts.exceptions import NotFoundException, UnauthorizedError
+from contracts.errors.exceptions import NotFoundException, UnauthorizedError
 
 app = FastAPI()
 app.include_router(router)

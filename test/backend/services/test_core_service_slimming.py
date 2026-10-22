@@ -226,7 +226,7 @@ def model_resolver(monkeypatch):
     status = types.SimpleNamespace(
         AVAILABLE=types.SimpleNamespace(value="available"), get_value=lambda value: value or "not_detected"
     )
-    dependency(monkeypatch, "contracts.models", ModelConnectStatusEnum=status)
+    dependency(monkeypatch, "contracts.constants.model", ModelConnectStatusEnum=status)
     dependency(
         monkeypatch, "management.db.model.repository",
         get_model_by_model_id=lambda *args: None, get_model_records=lambda *args: [],
@@ -291,7 +291,7 @@ def agent_reader(monkeypatch, model_resolver):
         monkeypatch, "management.db.tool.repository", search_tools_for_sub_agent=lambda **kwargs: [],
         check_tool_is_available=lambda ids: [True] * len(ids),
     )
-    load_source(monkeypatch, "backend/contracts/agent_unavailable_reasons.py", "contracts.agent_unavailable_reasons")
+    load_source(monkeypatch, "backend/contracts/constants/agent.py", "contracts.constants.agent")
     return load_source(monkeypatch, "backend/management/services/agent/read.py", "slimming_agent_reader")
 
 

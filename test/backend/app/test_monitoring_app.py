@@ -300,7 +300,7 @@ class TestMonitoringStatus:
     def test_endpoint_returns_401_on_token_expired(self, mock_auth):
         """Expired token maps to 401 for /monitoring/models."""
         from management.api.monitoring.monitoring import router
-        from contracts.exceptions import TokenExpiredError
+        from contracts.errors.exceptions import TokenExpiredError
 
         app = FastAPI()
         app.include_router(router)

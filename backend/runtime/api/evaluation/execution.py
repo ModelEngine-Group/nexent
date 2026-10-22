@@ -1,9 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Internal runtime endpoints for agent-evaluation execution."""
 
-from contracts.evaluation_status import EvalRunStatus
-from contracts.exceptions import AppException
-from contracts.api.runtime_evaluation_execution import EvaluationRunRequest, TrialRunRequest
+from contracts.constants.evaluation import EvalRunStatus
+from contracts.errors.exceptions import AppException
+from contracts.evaluation import EvaluationRunRequest, RuntimeEvaluationTrialRunRequest as TrialRunRequest
 import logging
 from http import HTTPStatus
 from typing import Annotated
@@ -12,8 +12,8 @@ from fastapi import APIRouter, Header, HTTPException
 from nexent.core.concurrency import ManagedTaskSpec
 from pydantic import BaseModel, Field
 
-from contracts.evaluation_status import EvalRunStatus
-from contracts.exceptions import AppException
+from contracts.constants.evaluation import EvalRunStatus
+from contracts.errors.exceptions import AppException
 from management.db.evaluation.runs import claim_agent_evaluation_run, get_agent_evaluation
 from infrastructure.concurrency import runtime_thread_manager
 from gateway.authentication.identity import verify_internal_runtime_jwt

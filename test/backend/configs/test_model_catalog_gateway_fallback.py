@@ -183,7 +183,7 @@ def test_effort_only_profile_keeps_gateway_factory_and_actual_url(catalog):
 
 @pytest.mark.parametrize("enabled", [True, False])
 def test_resolved_gateway_controls_build_generic_sdk_parameters(catalog, enabled):
-    from contracts.models import ReasoningCapability
+    from contracts.model import ReasoningCapability
     from management.services.model.reasoning import normalize_reasoning_params
     from nexent.core.models.openai_llm import OpenAIModel
 

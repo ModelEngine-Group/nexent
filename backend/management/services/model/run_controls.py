@@ -8,7 +8,7 @@ from typing import Any
 
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 
-from contracts.exceptions import RunModelControlsError
+from contracts.errors.exceptions import RunModelControlsError
 from management.db.model.repository import get_model_by_model_id
 from management.services.model.reasoning import reasoning_controls
 
@@ -34,7 +34,7 @@ def validate_agent_model_selection(request, tenant_id: str, lookup: Callable[...
     if request.entrypoint != "workbench" and not request.is_debug and request.agent_id:
         configured = _agent_record_for_run(request, tenant_id, lookup).get("model_ids") or []
         if configured and selected_id not in configured:
-            from contracts.exceptions import ForbiddenError
+            from contracts.errors.exceptions import ForbiddenError
 
             raise ForbiddenError("The selected model is not configured for this Agent")
 
@@ -165,7 +165,7 @@ def preflight_turn_controls(request, tenant_id: str, agent_record: dict | None =
         if configured:
             model_id = configured[0]
         else:
-            from consts.const import MODEL_CONFIG_MAPPING
+            from contracts.constants.model import MODEL_CONFIG_MAPPING
             from management.services.configuration.tenant.settings import tenant_config_manager
             default_record = tenant_config_manager.get_model_config(MODEL_CONFIG_MAPPING["llm"], tenant_id)
             model_id = (default_record or {}).get("model_id")

@@ -3,7 +3,7 @@
 
 This module exposes HTTP endpoints under the prefix "/model". It follows the App
 layer contract:
-- Parse and validate inputs using Pydantic models from `contracts.models` and FastAPI parameters.
+- Parse and validate inputs using Pydantic models from `contracts.agent` and FastAPI parameters.
 - Delegate business logic to services and database layer; do not implement core logic here.
 - Map domain/service exceptions to HTTP where necessary; avoid leaking internals.
 - Return structured responses consistent with existing patterns for backward compatibility.
@@ -16,42 +16,15 @@ caller's own. Identity is resolved from the bearer token into a
 ``CurrentUser`` and propagated as ``user_id`` / ``tenant_id`` to services.
 """
 
-from contracts.api.management_model_model_managment import MODEL_CREATE_PERMISSION, MODEL_DELETE_PERMISSION, MODEL_READ_PERMISSION, MODEL_UPDATE_PERMISSION, _AUDIT_SAFE_MODEL_KEYS, _CATALOG_UNAVAILABLE_MESSAGE, _MANAGE_ALLOWED_ROLES
-from contracts.models import BatchCreateModelsRequest, BackfillDefaultsRequest, CapacitySuggestionFields, ModelRequest, ModelProbeRequest, ModelCapacitySuggestionRequest, ModelCapacitySuggestionResponse, ProviderModelRequest, ManageTenantModelListRequest, ManageTenantModelListResponse, ManageTenantModelCreateRequest, ManageTenantModelUpdateRequest, ManageTenantModelDeleteRequest, ManageTenantModelHealthcheckRequest, ManageBatchCreateModelsRequest, ManageProviderModelListRequest, ManageProviderModelCreateRequest, FIXED_INFERENCE_FIELDS_BY_TYPE
-from contracts.exceptions import TokenExpiredError, ModelProviderError
-from contracts.api.management_model_model_managment import (
-    MODEL_CREATE_PERMISSION,
-    MODEL_DELETE_PERMISSION,
-    MODEL_READ_PERMISSION,
-    MODEL_UPDATE_PERMISSION,
-    _AUDIT_SAFE_MODEL_KEYS,
-    _CATALOG_UNAVAILABLE_MESSAGE,
-    _MANAGE_ALLOWED_ROLES,
-)
+from contracts.constants.model import MODEL_CREATE_PERMISSION, MODEL_DELETE_PERMISSION, MODEL_READ_PERMISSION, MODEL_UPDATE_PERMISSION, _AUDIT_SAFE_MODEL_KEYS, _CATALOG_UNAVAILABLE_MESSAGE, _MANAGE_ALLOWED_ROLES
+from contracts.model import BatchCreateModelsRequest, BackfillDefaultsRequest, CapacitySuggestionRequestFields as CapacitySuggestionFields, ModelRequest, ModelProbeRequest, ModelCapacitySuggestionRequest, ModelCapacitySuggestionResponse, ProviderModelRequest, ManageTenantModelListRequest, ManageTenantModelListResponse, ManageTenantModelCreateRequest, ManageTenantModelUpdateRequest, ManageTenantModelDeleteRequest, ManageTenantModelHealthcheckRequest, ManageBatchCreateModelsRequest, ManageProviderModelListRequest, ManageProviderModelCreateRequest, FIXED_INFERENCE_FIELDS_BY_TYPE
+from contracts.errors.exceptions import TokenExpiredError, ModelProviderError
+from contracts.constants.model import MODEL_CREATE_PERMISSION, MODEL_DELETE_PERMISSION, MODEL_READ_PERMISSION, MODEL_UPDATE_PERMISSION, _AUDIT_SAFE_MODEL_KEYS, _CATALOG_UNAVAILABLE_MESSAGE, _MANAGE_ALLOWED_ROLES
 import asyncio
 import logging
 import re
 
-from contracts.models import (
-    BatchCreateModelsRequest,
-    BackfillDefaultsRequest,
-    CapacitySuggestionFields,
-    ModelRequest,
-    ModelProbeRequest,
-    ModelCapacitySuggestionRequest,
-    ModelCapacitySuggestionResponse,
-    ProviderModelRequest,
-    ManageTenantModelListRequest,
-    ManageTenantModelListResponse,
-    ManageTenantModelCreateRequest,
-    ManageTenantModelUpdateRequest,
-    ManageTenantModelDeleteRequest,
-    ManageTenantModelHealthcheckRequest,
-    ManageBatchCreateModelsRequest,
-    ManageProviderModelListRequest,
-    ManageProviderModelCreateRequest,
-    FIXED_INFERENCE_FIELDS_BY_TYPE,
-)
+from contracts.model import BatchCreateModelsRequest, BackfillDefaultsRequest, CapacitySuggestionRequestFields as CapacitySuggestionFields, ModelRequest, ModelProbeRequest, ModelCapacitySuggestionRequest, ModelCapacitySuggestionResponse, ProviderModelRequest, ManageTenantModelListRequest, ManageTenantModelListResponse, ManageTenantModelCreateRequest, ManageTenantModelUpdateRequest, ManageTenantModelDeleteRequest, ManageTenantModelHealthcheckRequest, ManageBatchCreateModelsRequest, ManageProviderModelListRequest, ManageProviderModelCreateRequest, FIXED_INFERENCE_FIELDS_BY_TYPE
 from consts.const import CAPACITY_SUGGESTION_ENABLED
 
 from fastapi import APIRouter, Depends, Header, Query, HTTPException, Request
@@ -91,7 +64,7 @@ from gateway.authentication.dependencies import authenticate
 from permissions.depends import require
 from permissions.models import CurrentUser
 from gateway.authentication.identity import get_current_user_id
-from contracts.exceptions import TokenExpiredError, ModelProviderError
+from contracts.errors.exceptions import TokenExpiredError, ModelProviderError
 from nexent.core.concurrency import run_blocking
 from management.db.model.repository import get_model_by_model_id
 
@@ -1325,7 +1298,7 @@ async def get_inference_field_specs(
 
     v2.6.0: The frontend uses this to dynamically render the advanced-settings
     form for each model type (LLM/Embedding/STT/TTS/...). Defining the field
-    set in one place (backend contracts.models) avoids hardcoding two copies.
+    set in one place (backend contracts.agent) avoids hardcoding two copies.
     """
     try:
         try:

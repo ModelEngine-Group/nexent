@@ -4,8 +4,8 @@
 
 from typing import Any, Dict, Optional
 
-from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_PRIVATE, PERMISSION_READ
-from contracts.exceptions import ForbiddenError
+from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_PRIVATE, PERMISSION_READ
+from contracts.errors.exceptions import ForbiddenError
 from management.db.identity.group import query_group_ids_by_user
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.utils.serialization import convert_list_to_string

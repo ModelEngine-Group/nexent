@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from contracts.persistence import skill_repository as skill_db_skill_repository
+from contracts.constants import skill as skill_db_skill_repository
 import logging
 from contextlib import contextmanager
 

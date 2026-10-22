@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from test.backend.app import test_agent_app as legacy
-from contracts.exceptions import AgentNotFoundError
+from contracts.errors.exceptions import AgentNotFoundError
 
 
 @pytest.mark.parametrize("lookup", ["detail", "name"])

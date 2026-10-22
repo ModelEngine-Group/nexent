@@ -137,13 +137,13 @@ def _app_module_state():
 
 
 def _exc(error_code, message):
-    from contracts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
 
     return AppException(error_code, message)
 
 
 def _code(name):
-    from contracts.error_code import ErrorCode
+    from contracts.errors.codes import ErrorCode
 
     return getattr(ErrorCode, name)
 
@@ -224,7 +224,7 @@ class TestCreateEvaluation:
         assert app.create_agent_evaluation_run_impl.call_args.kwargs["query_count"] == 5
 
     def test_401_on_unauthorized(self, client):
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_info=MagicMock(side_effect=UnauthorizedError()))
         response = client.post(
@@ -304,7 +304,7 @@ class TestListEvaluations:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.get("/agent-evaluations?agent_ids=%5B1%5D")
@@ -351,7 +351,7 @@ class TestGetEvaluation:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.get("/agent-evaluations/1")
@@ -384,7 +384,7 @@ class TestListCases:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.get("/agent-evaluations/1/cases")
@@ -418,7 +418,7 @@ class TestStats:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.get("/agent-evaluations/1/stats")
@@ -458,7 +458,7 @@ class TestDownloadReport:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(
             get_current_user_info=MagicMock(side_effect=UnauthorizedError())
@@ -507,7 +507,7 @@ class TestAnalyze:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.post("/agent-evaluations/1/analyze")
@@ -539,7 +539,7 @@ class TestUpdateAnnotationSchemas:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.put(
@@ -585,7 +585,7 @@ class TestDeleteEvaluation:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.delete("/agent-evaluations/1")
@@ -623,7 +623,7 @@ class TestTrialRun:
         assert app.forward_agent_evaluation_trial_run.call_args.kwargs["query"] == "hello"
 
     def test_401_on_unauthorized(self, client):
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.post(

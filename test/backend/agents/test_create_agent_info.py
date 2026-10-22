@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_contract_stubs
 import pytest
 import sys
 import types
@@ -18,7 +20,7 @@ consts_const.NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = (
     "KnowledgeBaseSearchTool", "ReadSkillMdTool", "ReadSkillConfigTool", "AidpSearchTool",
 )
 
-# Mock contracts.models module with HistoryItem class
+# Mock contracts.agent module with HistoryItem class
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 
@@ -62,7 +64,7 @@ class ToolExecutionException(Exception):
     pass
 
 
-consts_model_module = types.ModuleType("contracts.models")
+consts_model_module = types.ModuleType("contracts.agent")
 consts_model_module.HistoryItem = HistoryItem
 
 
@@ -79,14 +81,13 @@ class MockToolParamsRequest(BaseModel):
 consts_model_module.HistoryItem = HistoryItem
 consts_model_module.AgentToolParamsRequest = MockAgentToolParamsRequest
 consts_model_module.ToolParamsRequest = MockToolParamsRequest
-sys.modules["contracts.models"] = consts_model_module
-sys.modules["contracts.capability_profiles"] = types.ModuleType(
-    "contracts.capability_profiles"
-)
-sys.modules["contracts.capability_profiles"].CATALOG = {}
+install_business_contract_stubs(consts_model_module)
+_catalog_stub = types.ModuleType("contracts.constants.model")
+_catalog_stub.CATALOG = {}
+install_shared_contract_stub(_catalog_stub, 'model_catalog')
 
-# Mock contracts.exceptions module with ValidationError
-consts_exceptions_module = types.ModuleType("contracts.exceptions")
+# Mock contracts.errors.exceptions module with ValidationError
+consts_exceptions_module = types.ModuleType("contracts.errors.exceptions")
 consts_exceptions_module.ValidationError = ValidationError
 consts_exceptions_module.WorkbenchError = WorkbenchError
 class RunModelControlsError(ValueError):
@@ -98,9 +99,9 @@ consts_exceptions_module.RunModelControlsError = RunModelControlsError
 consts_exceptions_module.MCPConnectionError = MCPConnectionError
 consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
-sys.modules["contracts.exceptions"] = consts_exceptions_module
+install_shared_contract_stub(consts_exceptions_module, 'exceptions')
 
-consts_tool_labels_module = types.ModuleType("contracts.tool_labels")
+consts_tool_labels_module = types.ModuleType("contracts.constants.tool")
 consts_tool_labels_module.SYSTEM_MANAGED_TOOL_NAMES = frozenset({
     "store_memory",
     "search_memory",
@@ -108,7 +109,7 @@ consts_tool_labels_module.SYSTEM_MANAGED_TOOL_NAMES = frozenset({
     "upload_to_s3",
     "parallel_executor",
 })
-sys.modules["contracts.tool_labels"] = consts_tool_labels_module
+install_shared_contract_stub(consts_tool_labels_module, 'tool_labels')
 
 # Also add model and exceptions to consts module attributes
 consts_module = sys.modules.get("consts")
@@ -119,7 +120,7 @@ if consts_module:
     setattr(
         consts_module,
         "capability_profiles",
-        sys.modules["contracts.capability_profiles"],
+        sys.modules["contracts.constants.model"],
     )
 
 # Also add model to consts module attributes (with AgentToolParamsRequest and ToolParamsRequest)
@@ -670,17 +671,17 @@ def test_ut_be_dpr_007_prompt_runtime_flags_follow_backend_configuration(
     assert verification.enabled is verification_enabled
     assert is_local is expected_local
 
-# Import HistoryItem for testing (from mocked contracts.models)
-HistoryItem = sys.modules["contracts.models"].HistoryItem
+# Import HistoryItem for testing (from mocked contracts.agent)
+HistoryItem = sys.modules["contracts.conversation"].HistoryItem
 
-# Import ValidationError for testing (from mocked contracts.exceptions)
-ValidationError = sys.modules["contracts.exceptions"].ValidationError
+# Import ValidationError for testing (from mocked contracts.errors.exceptions)
+ValidationError = sys.modules["contracts.errors.exceptions"].ValidationError
 
 # Import ToolParamsRequest for testing
-ToolParamsRequest = sys.modules["contracts.models"].ToolParamsRequest
+ToolParamsRequest = sys.modules["contracts.tool"].ToolParamsRequest
 
 # Import constants for testing
-from consts.const import MODEL_CONFIG_MAPPING
+from contracts.constants.model import MODEL_CONFIG_MAPPING
 
 
 class TestResolveInputBudget:

@@ -3,6 +3,8 @@
 """
 Unit tests for management.services.skill.service module.
 """
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 import io
@@ -180,7 +182,7 @@ consts_const_mock.CAN_EDIT_ALL_USER_ROLES = {"ADMIN"}
 consts_const_mock.PERMISSION_EDIT = "EDIT"
 consts_const_mock.PERMISSION_PRIVATE = "PRIVATE"
 consts_const_mock.PERMISSION_READ = "READ_ONLY"
-consts_exceptions_mock = types.ModuleType('contracts.exceptions')
+consts_exceptions_mock = types.ModuleType('contracts.errors.exceptions')
 
 class SkillException(Exception):
     pass
@@ -199,7 +201,8 @@ consts_exceptions_mock.SkillDuplicateError = type('SkillDuplicateError', (Except
 
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
-sys.modules['contracts.exceptions'] = consts_exceptions_mock
+install_business_constant_stubs(consts_const_mock)
+install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 
 # Skill deletion invokes tag cleanup after the skill record is removed.  Keep
 # this SkillService unit suite isolated from the tag service's separate graph.
@@ -2222,7 +2225,7 @@ class TestParseYamlFallbackPyyamlErrorPaths:
 
     def test_invalid_yaml_raises_skill_exception(self):
         from management.services.skill.service import _parse_yaml_fallback_pyyaml
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             _parse_yaml_fallback_pyyaml("invalid: yaml: : :")
             assert False, "Should have raised"
@@ -2242,7 +2245,7 @@ class TestParseSkillParamsFromConfigBytesErrorPaths:
 
     def test_json_non_dict_raises_exception(self):
         from management.services.skill.service import _parse_skill_params_from_config_bytes
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             _parse_skill_params_from_config_bytes(b'["list", "not", "dict"]')
             assert False, "Should have raised"
@@ -2383,7 +2386,7 @@ allowed-tools:
         service.skill_manager = mock_manager
         service._overlay_params_from_local_config_yaml = lambda x: x
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
@@ -2442,7 +2445,7 @@ name: existing_skill
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
@@ -2585,7 +2588,7 @@ description: Updated via ZIP
 
         service = create_test_service()
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.update_skill_from_file("nonexistent", b"---\nname: x\n---", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -2607,7 +2610,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.list_skills(tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -2624,7 +2627,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill("any_skill", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -2641,7 +2644,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_by_id(1, tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -2657,7 +2660,7 @@ class TestSkillServiceErrorHandling:
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.load_skill_directory("any_skill")
             assert False, "Should have raised"
@@ -2673,7 +2676,7 @@ class TestSkillServiceErrorHandling:
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_scripts("any_skill")
             assert False, "Should have raised"
@@ -2690,7 +2693,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_content("any_skill")
             assert False, "Should have raised"
@@ -2707,7 +2710,7 @@ class TestSkillServiceErrorHandling:
 
         service = create_test_service()
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.build_skills_summary()
             assert False, "Should have raised"
@@ -2733,7 +2736,7 @@ class TestSkillServiceCreateSkillErrorPaths:
         service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=TEST_LOCAL_SKILLS_DIR)
 
         with patch('os.path.isfile', return_value=True):
-            from contracts.exceptions import SkillException
+            from contracts.errors.exceptions import SkillException
             try:
                 service.create_skill({"name": "local_conflict"})
                 assert False, "Should have raised"
@@ -3272,7 +3275,7 @@ class TestGetSkillScripts:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_scripts("nonexistent")
             assert False, "Should have raised"
@@ -3864,7 +3867,7 @@ class TestSkillServiceCreateFromMdWithInvalidParse:
         service.skill_manager = mock_manager
 
         content = b"invalid content"
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(content, skill_name=None)
             assert False, "Should have raised"
@@ -4032,7 +4035,7 @@ class TestSkillServiceCreateFromZipWithBadZipFile:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(b"not a zip file", file_type="zip")
             assert False, "Should have raised"
@@ -4070,7 +4073,7 @@ description: Some content
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
@@ -4443,7 +4446,7 @@ class TestSkillServiceDeleteError:
         service = SkillService(tenant_id="test-tenant")
         service.skill_manager = mock_manager
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.delete_skill("to_delete", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -4594,7 +4597,7 @@ class TestSkillServiceGetSkillFileContentError:
 
         with patch('os.path.isfile', return_value=True):
             with patch('builtins.open', side_effect=IOError("Read error")):
-                from contracts.exceptions import SkillException
+                from contracts.errors.exceptions import SkillException
                 try:
                     service.get_skill_file_content("test_skill", "file.txt")
                     assert False, "Should have raised"
@@ -4613,7 +4616,7 @@ class TestSkillServiceLoadSkillDirectoryError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.load_skill_directory("test_skill")
             assert False, "Should have raised"
@@ -4649,7 +4652,7 @@ class TestSkillServiceGetSkillScriptsError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_scripts("nonexistent")
             assert False, "Should have raised"
@@ -4668,7 +4671,7 @@ class TestSkillServiceGetEnabledSkillsForAgentError:
         )
 
         service = SkillService()
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_enabled_skills_for_agent(agent_id=1, tenant_id="tenant1")
             assert False, "Should have raised"
@@ -4688,7 +4691,7 @@ class TestSkillServiceBuildSkillsSummaryError:
 
         service = create_test_service()
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.build_skills_summary(tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -4708,7 +4711,7 @@ class TestSkillServiceGetSkillContentError:
 
         service = create_test_service()
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_content("any_skill", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -4727,7 +4730,7 @@ class TestSkillServiceGetSkillFileTreeError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.get_skill_file_tree("test_skill")
             assert False, "Should have raised"
@@ -5157,7 +5160,7 @@ class TestParamsDictToStorableWithInvalidData:
             def __repr__(self):
                 raise ValueError("Cannot serialize")
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             _params_dict_to_storable({"key": BadJson()})
             assert False, "Should have raised"
@@ -5258,7 +5261,7 @@ class TestSkillServiceCreateSkillErrorPaths:
         service._resolve_local_skills_dir_for_overlay = MagicMock(return_value=None)
         service._overlay_params_from_local_config_yaml = lambda x: x
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill({"name": "new_skill"})
             assert False, "Should have raised"
@@ -5277,7 +5280,7 @@ class TestSkillServiceCreateSkillFromFileZipError:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(b"PK\x03\x04not a valid zip content", file_type="zip")
             assert False, "Should have raised"
@@ -5310,7 +5313,7 @@ description: Exists
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.create_skill_from_file(zip_buffer.getvalue(), file_type="zip")
             assert False, "Should have raised"
@@ -5330,7 +5333,7 @@ class TestSkillServiceUpdateSkillFromFileNotFound:
 
         service = create_test_service()
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.update_skill_from_file("nonexistent", b"---\nname: x\n---", tenant_id="test-tenant")
             assert False, "Should have raised"
@@ -5358,7 +5361,7 @@ class TestSkillServiceUpdateFromMdInvalidParse:
         service = SkillService()
         service.skill_manager = mock_manager
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service._save_skill_upload(b"invalid content", "existing", kind="md", update=True, tenant_id=None, user_id=None)
             assert False, "Should have raised"
@@ -5386,7 +5389,7 @@ name: skill
 
         service = SkillService()
 
-        from contracts.exceptions import SkillException
+        from contracts.errors.exceptions import SkillException
         try:
             service.update_skill_from_file(
                 "nonexistent",
@@ -5575,7 +5578,7 @@ class TestSkillServiceDeleteSkillRmtreeError:
 
         with patch('os.path.exists', return_value=True):
             with patch('shutil.rmtree', side_effect=Exception("rmtree error")):
-                from contracts.exceptions import SkillException
+                from contracts.errors.exceptions import SkillException
                 try:
                     service.delete_skill("to_delete", tenant_id="test-tenant")
                     assert False, "Should have raised"

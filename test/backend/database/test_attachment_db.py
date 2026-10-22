@@ -5,6 +5,7 @@ Unit tests for backend/management/db/file/attachment.py
 Tests attachment database utility functions
 """
 
+from test.common.contract_stubs import install_business_constant_stubs
 import os
 import sys
 import pytest
@@ -25,6 +26,7 @@ consts_mock.const.S3_URL_PREFIX = "s3://"
 
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 # Mock boto3
 boto3_mock = MagicMock()

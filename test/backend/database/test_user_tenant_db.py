@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
@@ -25,6 +27,7 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -71,8 +74,8 @@ sys.modules['management.db.models'] = db_models_mock
 
 # Mock exceptions module
 exceptions_mock = MagicMock()
-sys.modules['contracts.exceptions'] = exceptions_mock
-sys.modules['contracts.exceptions'] = exceptions_mock
+install_shared_contract_stub(exceptions_mock, 'exceptions')
+install_shared_contract_stub(exceptions_mock, 'exceptions')
 
 # Mock SQLAlchemy exception for testing
 class MockSQLAlchemyError(Exception):

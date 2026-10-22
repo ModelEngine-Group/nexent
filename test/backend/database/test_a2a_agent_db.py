@@ -6,6 +6,7 @@ Tests all public functions including external agent operations,
 server agent operations, task operations, message operations,
 nacos config operations, and artifact operations.
 """
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
@@ -14,7 +15,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
 
-from contracts.exceptions import AgentNotFoundError
+from contracts.errors.exceptions import AgentNotFoundError
 
 # ---------------------------------------------------------------------------
 # Mock consts module
@@ -23,6 +24,7 @@ consts_mock = MagicMock()
 consts_mock.const = MagicMock()
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 
 # ---------------------------------------------------------------------------

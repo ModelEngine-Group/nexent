@@ -4,7 +4,7 @@
 
 from typing import Optional
 
-from contracts.exceptions import TokenExpiredError
+from contracts.errors.exceptions import TokenExpiredError
 
 
 def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:

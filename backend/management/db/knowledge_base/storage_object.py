@@ -4,11 +4,8 @@
 
 from __future__ import annotations
 
-from contracts.persistence.knowledge_base_storage_object import (
-    COMMITTED_STATUS,
-    DELETED_STATUS,
-    StorageObjectConflictError,
-)
+from contracts.constants.knowledge import COMMITTED_STATUS, DELETED_STATUS
+from contracts.errors.exceptions import StorageObjectConflictError
 from typing import Any, Dict, List, Optional, Sequence
 
 from sqlalchemy import func

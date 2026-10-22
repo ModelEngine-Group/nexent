@@ -159,8 +159,8 @@ sys.modules['sqlalchemy.sql'] = MagicMock()
 # DO NOT mock consts - import real ones
 # The backend path is already in sys.path via sys.path.insert above
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from consts.const import ENABLE_JIUWEN_SDK
 
 # Mock boto3 and minio client before importing the module under test
@@ -1151,8 +1151,8 @@ class TestPromptService(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.generate_and_save_system_prompt_impl')
     def test_gen_system_prompt_streamable_with_app_exception(self, mock_generate_impl):
         """Test gen_system_prompt_streamable handles AppException and returns error through SSE"""
-        from contracts.error_code import ErrorCode
-        from contracts.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
+        from contracts.errors.exceptions import AppException
 
         # Setup - mock generate_and_save_system_prompt_impl to raise AppException
         mock_generate_impl.side_effect = AppException(

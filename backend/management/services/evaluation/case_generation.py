@@ -4,9 +4,9 @@ import json
 import re
 from typing import Any
 
-from contracts.error_code import ErrorCode
-from contracts.evaluation_limits import MAX_TURNS_PER_SESSION
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.constants.evaluation import MAX_TURNS_PER_SESSION
+from contracts.errors.exceptions import AppException
 from management.services.evaluation.common import (
     _QUERY_FORMAT_ERR_MSG,
     logger,

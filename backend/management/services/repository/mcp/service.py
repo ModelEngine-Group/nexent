@@ -3,10 +3,10 @@
 import logging
 from datetime import datetime
 from typing import Any, Dict, FrozenSet, List, Tuple
-from consts.const import CAN_EDIT_ALL_USER_ROLES
-from contracts.exceptions import MCPConnectionError, McpNameConflictError, McpNotFoundError, McpValidationError, UnauthorizedError
-from contracts.mcp_market import STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_MARKET_STATUSES
-from contracts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_MCP_REPOSITORY
+from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES
+from contracts.errors.exceptions import MCPConnectionError, McpNameConflictError, McpNotFoundError, McpValidationError, UnauthorizedError
+from contracts.constants.tool import STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_MARKET_STATUSES
+from contracts.constants.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_MCP_REPOSITORY
 from management.db.mcp.market import check_mcp_market_name_exists, create_mcp_market_record, delete_mcp_market_record_by_id, get_mcp_market_record_by_id, get_mcp_market_records, get_mcp_market_tag_stats_by_tenant, increment_mcp_market_download_count, list_mcp_market_records_by_status, list_mcp_market_records_by_tenant_and_user, update_mcp_market_record, update_mcp_market_status
 from management.db.mcp.remote import clear_mcp_record_market_id, update_mcp_record_market_id_by_id, update_mcp_record_manage_fields_by_id
 from management.db.identity.user_tenant import get_user_tenant_by_user_id

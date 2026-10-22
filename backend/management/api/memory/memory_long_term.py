@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP API for versioned tenant and user Markdown long-term memory."""
 
-from contracts.api.management_memory_memory_long_term import ActivateVersionRequest, CreateVersionRequest
+from contracts.memory import ActivateVersionRequest, CreateVersionRequest
 from http import HTTPStatus
 from typing import Literal, Optional
 

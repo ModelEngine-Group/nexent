@@ -8,6 +8,8 @@ This module tests the northbound-facing service layer functions including:
 - Agent info listing
 - Rate limiting and idempotency
 """
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import sys
 import os
 import types
@@ -48,7 +50,7 @@ class RuntimeMetadataValidationError(ValueError):
         super().__init__(message)
 
 
-# Mock contracts.exceptions
+# Mock contracts.errors.exceptions
 class LimitExceededError(Exception):
     pass
 
@@ -68,7 +70,7 @@ class RuntimeUpstreamError(Exception):
     pass
 
 
-consts_exceptions_mod = types.ModuleType("contracts.exceptions")
+consts_exceptions_mod = types.ModuleType("contracts.errors.exceptions")
 consts_exceptions_mod.LimitExceededError = LimitExceededError
 consts_exceptions_mod.UnauthorizedError = UnauthorizedError
 consts_exceptions_mod.ConversationNotFoundError = ConversationNotFoundError
@@ -77,14 +79,14 @@ consts_exceptions_mod.RuntimeServiceUnavailableError = RuntimeServiceUnavailable
 consts_exceptions_mod.RuntimeUpstreamError = RuntimeUpstreamError
 consts_exceptions_mod.AppException = AppException
 consts_exceptions_mod.RuntimeMetadataValidationError = RuntimeMetadataValidationError
-sys.modules["contracts.exceptions"] = consts_exceptions_mod
-sys.modules["contracts.exceptions"] = consts_exceptions_mod
+install_shared_contract_stub(consts_exceptions_mod, 'exceptions')
+install_shared_contract_stub(consts_exceptions_mod, 'exceptions')
 
-consts_error_code_mod = types.ModuleType("contracts.error_code")
+consts_error_code_mod = types.ModuleType("contracts.errors.codes")
 consts_error_code_mod.ErrorCode = ErrorCode
 consts_error_code_mod.RuntimeMetadataValidationCode = RuntimeMetadataValidationCode
-sys.modules["contracts.error_code"] = consts_error_code_mod
-sys.modules["contracts.error_code"] = consts_error_code_mod
+install_shared_contract_stub(consts_error_code_mod, 'error_code')
+install_shared_contract_stub(consts_error_code_mod, 'error_code')
 
 # Mock consts.const
 consts_const_mod = types.ModuleType("consts.const")
@@ -101,6 +103,7 @@ consts_const_mod.NORTHBOUND_IDEMPOTENCY_TTL_SECONDS = 600
 consts_const_mod.NORTHBOUND_RATE_LIMIT_ENABLED = True
 consts_const_mod.NORTHBOUND_RATE_LIMIT_PER_MINUTE = 120
 sys.modules["consts.const"] = consts_const_mod
+install_business_constant_stubs(consts_const_mod)
 
 # Mock consts package
 consts_package = types.ModuleType("consts")
@@ -270,7 +273,7 @@ services_package.knowledge_scope_service = knowledge_scope_service_mod
 services_package.vectordatabase_service = vectordatabase_service_mod
 sys.modules["services"] = services_package
 
-# Mock contracts.models - create stub classes
+# Mock contracts.agent - create stub classes
 class AgentRequestStub:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
@@ -279,10 +282,10 @@ class AgentRequestStub:
 class ToolParamsRequestStub:
     pass
 
-consts_model_mod = types.ModuleType("contracts.models")
+consts_model_mod = types.ModuleType("contracts.agent")
 consts_model_mod.AgentRequest = AgentRequestStub
 consts_model_mod.ToolParamsRequest = ToolParamsRequestStub
-sys.modules["contracts.models"] = consts_model_mod
+install_business_contract_stubs(consts_model_mod)
 
 # Now import the module under test
 from services import northbound_service as ns

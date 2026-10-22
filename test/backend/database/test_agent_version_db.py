@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
@@ -23,6 +24,7 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -77,7 +79,7 @@ sys.modules['management.db.models'] = db_models_mock
 # Now we can safely import the module being tested
 from management.db.agent import version as agent_version_db_module
 from management.db.agent.version import search_version_by_version_no, search_version_by_id, query_version_list, query_current_version_no, query_agent_snapshot, query_agent_draft, insert_version, update_version_status, update_version, update_agent_current_version, insert_agent_snapshot, insert_tool_snapshot, insert_relation_snapshot, update_agent_snapshot, delete_agent_snapshot, delete_tool_snapshot, delete_relation_snapshot, delete_skill_snapshot, query_skill_instances_snapshot, insert_skill_snapshot, get_next_version_no, delete_version, batch_search_version_names, batch_query_current_version_nos
-from contracts.persistence.agent_version import SOURCE_TYPE_NORMAL, SOURCE_TYPE_ROLLBACK, STATUS_RELEASED, STATUS_DISABLED, STATUS_ARCHIVED
+from contracts.constants.agent import SOURCE_TYPE_NORMAL, SOURCE_TYPE_ROLLBACK, STATUS_RELEASED, STATUS_DISABLED, STATUS_ARCHIVED
 
 
 class MockAgentVersion:

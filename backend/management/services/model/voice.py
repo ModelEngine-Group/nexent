@@ -11,7 +11,7 @@ from nexent.core.models.volc_tts_model import VolcTTSConfig, VolcTTSModel
 from nexent.core.models.ali_tts_model import AliTTSConfig, AliTTSModel
 
 from consts.const import TEST_VOICE_PATH, TEST_PCM_PATH
-from contracts.exceptions import VoiceServiceException, STTConnectionException, TTSConnectionException
+from contracts.errors.exceptions import VoiceServiceException, STTConnectionException, TTSConnectionException
 from management.db.model.repository import get_model_records
 from management.services.configuration.tenant.settings import tenant_config_manager
 

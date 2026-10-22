@@ -13,7 +13,7 @@ from unittest.mock import Mock, AsyncMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-from contracts.exceptions import VoiceServiceException, STTConnectionException, TTSConnectionException
+from contracts.errors.exceptions import VoiceServiceException, STTConnectionException, TTSConnectionException
 
 
 # ---------------------------------------------------------------------------

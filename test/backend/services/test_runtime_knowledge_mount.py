@@ -57,7 +57,7 @@ def test_rejects_connection_range_and_invalid_parameters(mocker, params):
 
 
 def test_selected_range_replaces_defaults_before_tool_construction(mocker):
-    from contracts.models import ConversationKnowledgeScopeRequest
+    from contracts.knowledge import ConversationKnowledgeScopeRequest
     from management.services.knowledge_base import scope as scopes
 
     mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", False)
@@ -83,7 +83,7 @@ def test_selected_range_replaces_defaults_before_tool_construction(mocker):
 
 
 def test_connection_credentials_cannot_be_saved_as_session_parameters():
-    from contracts.models import ConversationKnowledgeScopeRequest
+    from contracts.knowledge import ConversationKnowledgeScopeRequest
 
     with pytest.raises(ValueError):
         ConversationKnowledgeScopeRequest.model_validate({"retrieval_config": {"api_key": "secret"}})

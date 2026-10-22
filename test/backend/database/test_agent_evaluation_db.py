@@ -243,7 +243,7 @@ class TestClaimAgentEvaluationRun:
 class TestGetAgentEvaluation:
     def test_raises_value_error_when_not_found(self, session_factory, monkeypatch):
         from management.db.evaluation import runs as agent_evaluation_db
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
 
         session, _ = session_factory
         # Force ``.first()`` to return None for the primary lookup.
@@ -651,7 +651,7 @@ class TestListCases:
 class TestGetAgentEvaluationCase:
     def test_raises_when_not_found(self, session_factory, monkeypatch):
         from management.db.evaluation import runs as agent_evaluation_db
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
 
         session, _ = session_factory
 

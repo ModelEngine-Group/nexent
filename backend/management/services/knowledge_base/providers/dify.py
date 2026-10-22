@@ -13,8 +13,8 @@ from typing import Any, Dict
 
 import httpx
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from nexent.utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("dify_service")

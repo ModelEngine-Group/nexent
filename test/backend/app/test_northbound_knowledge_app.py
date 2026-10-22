@@ -4,6 +4,8 @@
 Unit tests for northbound_knowledge_app ASSET_OWNER-scoped endpoints.
 """
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import os
 import sys
 import types
@@ -126,7 +128,7 @@ consts_module = types.ModuleType("consts")
 consts_module.__path__ = [os.path.join(backend_dir, "consts")]
 sys.modules["consts"] = consts_module
 
-consts_exceptions_module = types.ModuleType("contracts.exceptions")
+consts_exceptions_module = types.ModuleType("contracts.errors.exceptions")
 class AppException(Exception):
     def __init__(self, error_code, message=None, details=None):
         self.error_code = error_code
@@ -149,7 +151,7 @@ class AppException(Exception):
 consts_exceptions_module.LimitExceededError = type("LimitExceededError", (Exception,), {})
 consts_exceptions_module.UnauthorizedError = type("UnauthorizedError", (Exception,), {})
 consts_exceptions_module.AppException = AppException
-sys.modules["contracts.exceptions"] = consts_exceptions_module
+install_shared_contract_stub(consts_exceptions_module, 'exceptions')
 
 from pydantic import BaseModel, Field  # noqa: E402
 
@@ -161,14 +163,14 @@ class HybridSearchRequest(BaseModel):
     weight_accurate: float = Field(0.5, ge=0.0, le=1.0)
 
 
-consts_model_module = types.ModuleType("contracts.models")
+consts_model_module = types.ModuleType("contracts.agent")
 consts_model_module.ProcessParams = type(
     "ProcessParams",
     (),
     {"__init__": lambda self, **kwargs: None},
 )
 consts_model_module.HybridSearchRequest = HybridSearchRequest
-sys.modules["contracts.models"] = consts_model_module
+install_business_contract_stubs(consts_model_module)
 
 consts_const_module = types.ModuleType("consts.const")
 consts_const_module.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
@@ -180,6 +182,7 @@ class VectorDatabaseType:
 
 consts_const_module.VectorDatabaseType = VectorDatabaseType
 sys.modules["consts.const"] = consts_const_module
+install_business_constant_stubs(consts_const_module)
 
 utils_auth_module = types.ModuleType("gateway.authentication.identity")
 utils_auth_module.generate_session_jwt = MagicMock(return_value="jwt-token")
@@ -200,8 +203,8 @@ file_management_app_module.build_content_disposition_header = MagicMock(
 sys.modules["management.utils.file_http"] = file_management_app_module
 
 from gateway.api.knowledge_base.routes import router
-from consts.const import ASSET_OWNER_TENANT_ID
-from contracts.exceptions import AppException, LimitExceededError, UnauthorizedError
+from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.errors.exceptions import AppException, LimitExceededError, UnauthorizedError
 
 ASSET_CTX = NorthboundContext(
     request_id="req-1",

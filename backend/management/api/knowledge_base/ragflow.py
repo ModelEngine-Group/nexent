@@ -4,8 +4,8 @@ RAGFlow App Layer
 FastAPI endpoints for RAGFlow knowledge base operations.
 """
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
@@ -13,8 +13,8 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from management.services.knowledge_base.providers.ragflow import fetch_ragflow_datasets_impl
 
 router = APIRouter(prefix="/ragflow")

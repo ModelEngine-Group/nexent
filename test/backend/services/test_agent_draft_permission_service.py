@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
 
-from contracts.exceptions import AgentDraftEditError
+from contracts.errors.exceptions import AgentDraftEditError
 from management.services.agent.authorization import require_agent_draft_edit
 
 

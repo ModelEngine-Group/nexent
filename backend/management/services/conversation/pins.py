@@ -2,7 +2,7 @@
 
 """Workbench pin service identity and relationship boundary."""
 
-from contracts.exceptions import UnauthorizedError, ValidationError
+from contracts.errors.exceptions import UnauthorizedError, ValidationError
 from management.db.conversation.pins import list_workbench_pins, set_workbench_pin
 
 

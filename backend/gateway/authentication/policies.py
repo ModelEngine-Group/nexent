@@ -5,7 +5,7 @@
 from typing import Optional
 
 from contracts.authentication import AuthenticatedIdentity, CredentialKind
-from contracts.exceptions import TokenExpiredError
+from contracts.errors.exceptions import TokenExpiredError
 from gateway.authentication.credentials import extract_bearer_token
 
 

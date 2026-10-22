@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -20,6 +21,7 @@ consts_mod.MEMORY_PROVIDER_PLUGINS_DIR = "/tmp/test-memory-provider-plugins"
 consts_pkg.const = consts_mod
 sys.modules["consts"] = consts_pkg
 sys.modules["consts.const"] = consts_mod
+install_business_constant_stubs(consts_mod)
 
 nexent_pkg = types.ModuleType("nexent")
 memory_pkg = types.ModuleType("nexent.memory")

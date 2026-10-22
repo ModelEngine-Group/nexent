@@ -6,6 +6,8 @@ Integration test for document vector operations.
 This module validates the embedding and clustering workflow using deterministic
 fixtures so the clustering assertions stay stable across environments.
 """
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -33,16 +35,17 @@ consts_const_mock.MESSAGE_ROLE = {"USER": "user", "ASSISTANT": "assistant", "SYS
 consts_const_mock.THINK_START_PATTERN = "<think>"
 consts_const_mock.THINK_END_PATTERN = "</think>"
 consts_mock.const = consts_const_mock
-# Mock contracts.error_code and contracts.exceptions
+# Mock contracts.errors.codes and contracts.errors.exceptions
 consts_error_code_mock = MagicMock()
 consts_error_code_mock.ErrorCode = MagicMock()
 consts_exceptions_mock = MagicMock()
 consts_exceptions_mock.AppException = Exception
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
-sys.modules['contracts.error_code'] = consts_error_code_mock
-sys.modules['contracts.exceptions'] = consts_exceptions_mock
-sys.modules['contracts.models'] = consts_mock.model
+install_business_constant_stubs(consts_const_mock)
+install_shared_contract_stub(consts_error_code_mock, 'error_code')
+install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
+install_business_contract_stubs(consts_mock.model)
 
 # Add backend to path before patching backend modules
 current_dir = os.path.dirname(os.path.abspath(__file__))

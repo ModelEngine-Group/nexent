@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import json
 import os
 import sys
@@ -24,6 +26,7 @@ consts_mock.const.DEFAULT_TENANT_ID = "default"
 consts_mock.const.JWT_EXPIRY_SECONDS = 7200
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 consts_model_mock = MagicMock()
 
@@ -36,14 +39,15 @@ class _OAuthCompleteRequest:
 
 
 consts_model_mock.OAuthCompleteRequest = _OAuthCompleteRequest
-sys.modules["contracts.models"] = consts_model_mock
+install_business_contract_stubs(consts_model_mock)
 
 oauth_providers_mock = MagicMock()
 oauth_providers_mock.get_all_provider_definitions.return_value = {
     "github": MagicMock(),
     "wechat": MagicMock(),
 }
-sys.modules["contracts.oauth_providers"] = oauth_providers_mock
+for _provider_export in ("get_provider_definition", "is_provider_enabled", "get_all_provider_definitions"):
+    setattr(consts_mock.const, _provider_export, getattr(oauth_providers_mock, _provider_export))
 
 
 class _OAuthProviderError(Exception):
@@ -74,7 +78,7 @@ exceptions_mock.tenant_resource_limit_error_payload = lambda error: {
     "message": str(error),
     "details": error.details,
 }
-sys.modules["contracts.exceptions"] = exceptions_mock
+install_shared_contract_stub(exceptions_mock, 'exceptions')
 
 sys.modules["database"] = MagicMock()
 database_oauth_mock = MagicMock()

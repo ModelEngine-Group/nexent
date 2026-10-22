@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,6 +19,7 @@ consts_const.W_AGENT_SHORT_TERM = 0.6
 consts_const.W_EXTERNAL = 0.4
 consts_const.VectorDatabaseType = MagicMock()
 sys.modules["consts.const"] = consts_const
+install_business_constant_stubs(consts_const)
 sys.modules["consts"] = types.ModuleType("consts")
 
 nexent_pkg = types.ModuleType("nexent")

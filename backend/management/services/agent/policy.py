@@ -5,7 +5,7 @@
 from copy import deepcopy
 from typing import Any, Optional
 
-from contracts.exceptions import AgentToolImportError
+from contracts.errors.exceptions import AgentToolImportError
 
 
 def build_sandbox_policy(tenant_id: str, agent_type: str) -> Optional[dict]:

@@ -475,7 +475,7 @@ def mock_convert_list_to_string(items):
         apply_duplicate_name_availability_rules as _apply_duplicate_name_availability_rules,
     )
     from nexent.core.agents.prompt.meta import render_name_template as _render_prompt_template
-    from contracts.models import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
+    from contracts.agent import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
 
     # Ensure db_client is set to our mock after import
     from management.db import client as db_client_module
@@ -567,7 +567,7 @@ sys.modules["infrastructure.observability.bootstrap"] = MagicMock()
 # =============================================================================
 
 from nexent.core.agents.agent_model import ToolConfig
-from contracts.models import AgentNameBatchCheckItem, AgentNameBatchCheckRequest, AgentNameBatchRegenerateItem, AgentNameBatchRegenerateRequest
+from contracts.agent import AgentNameBatchCheckItem, AgentNameBatchCheckRequest, AgentNameBatchRegenerateItem, AgentNameBatchRegenerateRequest
 
 # Set up mock for nexent.monitor
 monitoring_manager_mock = MagicMock()
@@ -642,7 +642,7 @@ sys.modules[
 # Other test modules may have imported the production model module before this
 # file installs its lightweight SDK types. Reload it against this file's
 # ``MockToolConfig`` so model validation uses one consistent class identity.
-sys.modules.pop("contracts.models", None)
+sys.modules.pop("contracts.agent", None)
 if hasattr(sys.modules.get("consts"), "model"):
     delattr(sys.modules["consts"], "model")
 
@@ -709,7 +709,7 @@ from management.services.agent.read import (
     apply_duplicate_name_availability_rules as _apply_duplicate_name_availability_rules,
 )
 from nexent.core.agents.prompt.meta import render_name_template as _render_prompt_template
-from contracts.models import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
+from contracts.agent import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, AgentRequest
 
 # =============================================================================
 # Setup and teardown for each test
@@ -1116,7 +1116,7 @@ async def test_update_agent_info_impl_exception_handling(mock_update_agent):
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_reraises_agent_quota_error(mock_update_agent):
     """Agent quota errors must pass through without generic error wrapping."""
-    from contracts.exceptions import TenantResourceLimitError
+    from contracts.errors.exceptions import TenantResourceLimitError
     limit_error = TenantResourceLimitError('Tenant agent limit reached: maximum 1000 agents per tenant', resource='agents', scope='tenant', limit=1000, current_count=1000)
     mock_update_agent.side_effect = limit_error
     request = MagicMock()
@@ -3117,7 +3117,7 @@ async def test_list_agent_page_keeps_duplicate_warning_when_original_is_off_page
 
 @pytest.mark.asyncio
 async def test_list_agent_page_filters_visibility_before_count_and_enrichment(monkeypatch):
-    from consts.const import PERMISSION_PRIVATE
+    from contracts.constants.identity import PERMISSION_PRIVATE
 
     candidates = [
         {"agent_id": 1, "name": "Mine", "created_by": "alice", "group_ids": "2"},
@@ -7315,7 +7315,7 @@ async def test_main_model_fallback_to_quick_config(
     )
 
     # Verify: Quick config model was requested
-    from consts.const import MODEL_CONFIG_MAPPING
+    from contracts.constants.model import MODEL_CONFIG_MAPPING
 
     mock_tenant_config_manager.get_model_config.assert_called_with(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=mock_tenant_id
@@ -7384,7 +7384,7 @@ async def test_business_logic_model_fallback_to_quick_config(
     )
 
     # Verify: Quick config model was requested for business logic model
-    from consts.const import MODEL_CONFIG_MAPPING
+    from contracts.constants.model import MODEL_CONFIG_MAPPING
 
     mock_tenant_config_manager.get_model_config.assert_called_with(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=mock_tenant_id
@@ -7519,7 +7519,7 @@ async def test_no_quick_config_model_available(
     )
 
     # Verify: Quick config was attempted
-    from consts.const import MODEL_CONFIG_MAPPING
+    from contracts.constants.model import MODEL_CONFIG_MAPPING
 
     mock_tenant_config_manager.get_model_config.assert_called_with(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=mock_tenant_id
@@ -8132,7 +8132,7 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
     import_agent_impl should handle DFS ordering and establish relationships correctly.
     This covers the branch where managed agents are not yet imported (agent_stack.extend path).
     """
-    from contracts.models import ExportAndImportAgentInfo, ExportAndImportDataFormat
+    from contracts.agent import ExportAndImportAgentInfo, ExportAndImportDataFormat
     root_agent = ExportAndImportAgentInfo(agent_id=1, name='root', display_name='Root', description='root', business_description='root', max_steps=5, provide_run_summary=False, duty_prompt=None, constraint_prompt=None, few_shots_prompt=None, enabled=True, tools=[], managed_agents=[2])
     child_agent = ExportAndImportAgentInfo(agent_id=2, name='child', display_name='Child', description='child', business_description='child', max_steps=5, provide_run_summary=False, duty_prompt=None, constraint_prompt=None, few_shots_prompt=None, enabled=True, tools=[], managed_agents=[])
     export_data = ExportAndImportDataFormat(agent_id=1, agent_info={'1': root_agent, '2': child_agent}, mcp_info=[])
@@ -8166,7 +8166,7 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
 async def test_check_agent_name_conflict_batch_impl_detects_conflicts(monkeypatch):
     existing_agents = [{'agent_id': 10, 'name': 'dup_name', 'display_name': 'Dup Display'}, {'agent_id': 11, 'name': 'unique', 'display_name': 'Unique'}]
     monkeypatch.setattr('management.services.agent.service.query_all_agent_info_by_tenant_id', lambda tenant_id: existing_agents, raising=False)
-    from contracts.models import AgentNameBatchCheckItem, AgentNameBatchCheckRequest
+    from contracts.agent import AgentNameBatchCheckItem, AgentNameBatchCheckRequest
     request = AgentNameBatchCheckRequest(items=[AgentNameBatchCheckItem(name='dup_name', display_name='Another'), AgentNameBatchCheckItem(name='', display_name=None)])
     result = await agent_service.check_agent_name_conflict_batch_impl(request, identity=AuthenticatedIdentity('test_user', 'test_tenant'))
     assert result[0]['name_conflict'] is True
@@ -8227,7 +8227,7 @@ async def test_regenerate_agent_name_batch_impl_uses_llm(monkeypatch):
 async def test_regenerate_agent_name_batch_impl_no_model(monkeypatch):
     monkeypatch.setattr('management.services.agent.service.query_all_agent_info_by_tenant_id', lambda tenant_id: [], raising=False)
     monkeypatch.setattr('management.services.agent.service.tenant_config_manager.get_model_config', lambda key, tenant_id: None, raising=False)
-    from contracts.models import AgentNameBatchRegenerateItem, AgentNameBatchRegenerateRequest
+    from contracts.agent import AgentNameBatchRegenerateItem, AgentNameBatchRegenerateRequest
     request = AgentNameBatchRegenerateRequest(items=[AgentNameBatchRegenerateItem(agent_id=1, name='dup', display_name='Dup')])
     with pytest.raises(ValueError):
         await agent_service.regenerate_agent_name_batch_impl(request, identity=AuthenticatedIdentity('test_user', 'test_tenant'))
@@ -9564,7 +9564,7 @@ async def test_clear_agent_new_mark_impl_with_special_characters():
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_create_agent_with_ingroup_permission(mock_get_user_group_ids, mock_convert_list_to_string, mock_create_agent, mock_query_all_tools, mock_query_tool_instances_by_id, mock_create_or_update_tool):
     """Test creating agent with ingroup_permission set."""
-    from consts.const import PERMISSION_READ, PERMISSION_EDIT, PERMISSION_PRIVATE
+    from contracts.constants.identity import PERMISSION_READ, PERMISSION_EDIT, PERMISSION_PRIVATE
     mock_get_user_group_ids.return_value = '1,2,3'
     mock_convert_list_to_string.return_value = '1,2'
     mock_create_agent.return_value = {'agent_id': 123}
@@ -9652,7 +9652,7 @@ async def test_list_all_agent_info_impl_creator_with_private_permission_no_group
     mock_get_model,
 ):
     """Test that creators cannot see their own agents if no group overlap, even with PRIVATE permission."""
-    from consts.const import PERMISSION_PRIVATE
+    from contracts.constants.identity import PERMISSION_PRIVATE
 
     mock_agents = [
         {
@@ -9714,7 +9714,7 @@ async def test_list_all_agent_info_impl_creator_with_private_permission_with_gro
     mock_get_model,
 ):
     """Test that creators can see their own agents with PRIVATE permission if there is group overlap."""
-    from consts.const import PERMISSION_PRIVATE
+    from contracts.constants.identity import PERMISSION_PRIVATE
 
     mock_agents = [
         {
@@ -9775,7 +9775,7 @@ async def test_list_all_agent_info_impl_non_creator_with_private_permission_hidd
     mock_get_model,
 ):
     """Test that non-creators cannot see agents with PRIVATE permission even with group overlap."""
-    from consts.const import PERMISSION_PRIVATE
+    from contracts.constants.identity import PERMISSION_PRIVATE
 
     mock_agents = [
         {
@@ -9835,7 +9835,7 @@ async def test_list_all_agent_info_impl_permission_assignment_creator_gets_edit(
     mock_get_model,
 ):
     """Test that creators get PERMISSION_EDIT regardless of ingroup_permission."""
-    from consts.const import PERMISSION_READ, PERMISSION_EDIT
+    from contracts.constants.identity import PERMISSION_READ, PERMISSION_EDIT
 
     mock_agents = [
         {
@@ -9895,7 +9895,7 @@ async def test_list_all_agent_info_impl_permission_assignment_non_creator_uses_i
     mock_get_model,
 ):
     """Test that non-creators use ingroup_permission when set."""
-    from consts.const import PERMISSION_READ, PERMISSION_EDIT
+    from contracts.constants.identity import PERMISSION_READ, PERMISSION_EDIT
 
     mock_agents = [
         {
@@ -9982,7 +9982,7 @@ async def test_list_all_agent_info_impl_admin_gets_edit_permission(
     mock_get_model,
 ):
     """Test that admin users (can_edit_all) get PERMISSION_EDIT regardless of ingroup_permission."""
-    from consts.const import PERMISSION_READ, PERMISSION_EDIT
+    from contracts.constants.identity import PERMISSION_READ, PERMISSION_EDIT
 
     mock_agents = [
         {
@@ -10042,7 +10042,7 @@ async def test_list_all_agent_info_impl_asset_owner_agent_read_only_for_admin(
     mock_get_model,
 ):
     """ASSET_OWNER-scoped agents are READ_ONLY for non-ASSET_OWNER roles even when admin."""
-    from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+    from contracts.constants.identity import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
 
     mock_agents = [
         {
@@ -10123,7 +10123,7 @@ async def test_get_agent_info_impl_asset_owner_agent_read_only_for_admin(
     mock_skill_service,
 ):
     """ASSET_OWNER-scoped agent detail is READ_ONLY for ADMIN viewers."""
-    from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+    from contracts.constants.identity import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
 
     agent_info = {
         "agent_id": 99,
@@ -10172,7 +10172,7 @@ async def test_get_agent_info_impl_asset_owner_agent_read_only_for_dev(
     mock_skill_service,
 ):
     """ASSET_OWNER-scoped agent detail is READ_ONLY for DEV even with ingroup EDIT."""
-    from consts.const import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+    from contracts.constants.identity import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
 
     agent_info = {
         "agent_id": 99,
@@ -10221,7 +10221,7 @@ async def test_get_agent_info_impl_asset_owner_role_gets_edit(
     mock_skill_service,
 ):
     """ASSET_OWNER role creator retains EDIT on ASSET_OWNER-scoped agent detail."""
-    from consts.const import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+    from contracts.constants.identity import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
 
     agent_info = {
         "agent_id": 99,
@@ -10402,7 +10402,7 @@ def test_get_agent_by_name_impl_success(mock_search, mock_query_versions):
 @patch("management.services.agent.management.search_agent_id_by_agent_name")
 def test_get_agent_by_name_impl_not_found(mock_search, mock_query_versions):
     """An expected Agent lookup miss retains its domain exception."""
-    from contracts.exceptions import AgentNotFoundError
+    from contracts.errors.exceptions import AgentNotFoundError
 
     lookup_error = AgentNotFoundError("agent not found")
     mock_search.side_effect = lookup_error
@@ -10536,7 +10536,7 @@ def _bridge_legacy_model_lookup_patch():
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_skill_update_exception(mock_query_skills, mock_create_skill):
     """Test that exception in skill update is raised as ValueError."""
-    from contracts.models import AgentInfoRequest
+    from contracts.agent import AgentInfoRequest
     mock_request = MagicMock(spec=AgentInfoRequest)
     mock_request.agent_id = 1
     mock_request.name = 'Test'
@@ -10733,7 +10733,7 @@ async def test_export_agent_with_skills_impl_with_zip(mock_collect_skills, mock_
     """Test export_agent_with_skills_impl returns ZIP when agent has skills."""
     from management.services.agent.service import export_agent_with_skills_impl
     from management.services.agent import transfer as ag_svc
-    from contracts.models import SkillZipEntry
+    from contracts.skill import SkillZipEntry
     import io
     import zipfile
     mock_search_info.return_value = {'name': 'my_agent', 'display_name': 'My Agent'}
@@ -10793,7 +10793,7 @@ async def test_import_agent_with_skills_impl_reuses_existing_skills():
     """A use-existing resolution links the existing skill instead of failing."""
     from management.services.agent.service import import_agent_with_skills_impl
     from management.services.agent import transfer as ag_svc
-    from contracts.models import SkillResolution
+    from contracts.skill import SkillResolution
     existing_skills = [{'name': 'ExistingSkill', 'skill_id': 99}]
     skills = [MagicMock(skill_name='ExistingSkill', skill_zip_base64='SGVsbG8gV29ybGQ='), MagicMock(skill_name='NewSkill', skill_zip_base64='SGVsbG8gV29ybGQ=')]
     mock_agent_info = MagicMock()
@@ -10816,7 +10816,7 @@ async def test_import_agent_with_skills_impl_duplicate_raises_by_default():
     """Default behaviour still hard-gates duplicate skill names."""
     from management.services.agent.service import import_agent_with_skills_impl
     from management.services.agent import transfer as ag_svc
-    from contracts.exceptions import SkillDuplicateError
+    from contracts.errors.exceptions import SkillDuplicateError
     existing_skills = [{'name': 'ExistingSkill', 'skill_id': 99}]
     skills = [MagicMock(skill_name='ExistingSkill', skill_zip_base64='SGVsbG8gV29ybGQ=')]
     mock_agent_info = MagicMock()
@@ -10850,7 +10850,7 @@ async def test_import_agent_with_skills_impl_no_main_agent():
 @pytest.mark.asyncio
 async def test_import_agent_with_skills_impl_resolves_existing_and_renamed_per_agent():
     """Use-existing and renamed skills should link to their original owning agents."""
-    from contracts.models import SkillResolution
+    from contracts.skill import SkillResolution
     from management.services.agent.service import import_agent_with_skills_impl
     from management.services.agent import transfer as ag_svc
     agent_info = types.SimpleNamespace(agent_id=1, agent_info={'1': types.SimpleNamespace(agent_id=1, skill_names=['ExistingSkill'], tools=[]), '2': types.SimpleNamespace(agent_id=2, skill_names=['RenamedSkill', 'NewSkill', 'MissingSkill'], tools=[])})
@@ -10896,7 +10896,7 @@ def test_render_prompt_template_empty_string():
 async def test_update_agent_info_impl_related_agent_query_error(mock_query_sub):
     """Test update_agent_info_impl handles related agent query error."""
     from management.services.agent.service import update_agent_info_impl
-    from contracts.models import AgentInfoRequest
+    from contracts.agent import AgentInfoRequest
     mock_request = MagicMock(spec=AgentInfoRequest)
     mock_request.agent_id = 1
     mock_request.name = 'Test'
@@ -10935,7 +10935,7 @@ async def test_update_agent_info_impl_related_external_agents(mock_query_sub, mo
     """Test update_agent_info_impl handles external agent relations."""
     from management.services.agent.service import update_agent_info_impl
     from management.services.agent import service as ag_svc
-    from contracts.models import AgentInfoRequest
+    from contracts.agent import AgentInfoRequest
     mock_query_sub.return_value = []
     mock_request = MagicMock(spec=AgentInfoRequest)
     mock_request.agent_id = 1
@@ -10977,7 +10977,7 @@ async def test_update_agent_info_impl_external_agent_remove_relation(mock_query_
     """Test that external agent relation can be removed."""
     from management.services.agent.service import update_agent_info_impl
     from management.services.agent import service as ag_svc
-    from contracts.models import AgentInfoRequest
+    from contracts.agent import AgentInfoRequest
     mock_query_sub.return_value = []
     mock_request = MagicMock(spec=AgentInfoRequest)
     mock_request.agent_id = 1
@@ -11019,7 +11019,7 @@ async def test_update_agent_info_impl_external_agent_relation_exists(mock_query_
     """Test that existing external agent relation is skipped (no exception)."""
     from management.services.agent.service import update_agent_info_impl
     from management.services.agent import service as ag_svc
-    from contracts.models import AgentInfoRequest
+    from contracts.agent import AgentInfoRequest
     mock_query_sub.return_value = []
     mock_request = MagicMock(spec=AgentInfoRequest)
     mock_request.agent_id = 1
@@ -11062,7 +11062,7 @@ async def test_update_agent_info_impl_external_agent_relation_exists(mock_query_
 async def test_import_agent_impl_already_imported():
     """Test import_agent_impl handles already-imported agent (continue path)."""
     from management.services.agent.service import import_agent_impl
-    from contracts.models import ExportAndImportDataFormat, ExportAndImportAgentInfo
+    from contracts.agent import ExportAndImportDataFormat, ExportAndImportAgentInfo
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
     mock_agent_info.agent_id = 1
     mock_agent_info.name = 'agent_1'
@@ -11103,7 +11103,7 @@ async def test_import_agent_impl_already_imported():
 async def test_update_agent_info_impl_skill_unselected(mock_query_skills, mock_create_skill):
     """Test that unselected skills are disabled (lines 952-954)."""
     from management.services.agent.service import update_agent_info_impl
-    from contracts.models import AgentInfoRequest
+    from contracts.agent import AgentInfoRequest
     mock_query_skills.return_value = [{'skill_id': 1, 'skill_description': 'desc1'}, {'skill_id': 3, 'skill_description': 'desc3'}]
     mock_request = MagicMock(spec=AgentInfoRequest)
     mock_request.agent_id = 1
@@ -11142,7 +11142,7 @@ async def test_update_agent_info_impl_skill_unselected(mock_query_skills, mock_c
 @patch('management.services.agent.service.skill_db.query_skill_instances_by_agent_id')
 async def test_update_agent_info_impl_persists_structured_skill_config(mock_query_skills, mock_create_skill, mock_get_valid_skill_ids):
     """The main agent save persists per-agent skill values in the same transaction flow."""
-    from contracts.models import AgentInfoRequest, AgentSkillInstanceRequest
+    from contracts.agent import AgentInfoRequest, AgentSkillInstanceRequest
     from management.services.agent.service import update_agent_info_impl
     mock_get_valid_skill_ids.return_value = {2}
     mock_query_skills.return_value = [{'skill_id': 1, 'config_values': {'preserved': True}}]
@@ -11191,8 +11191,8 @@ async def test_update_agent_info_impl_persists_structured_skill_config(mock_quer
 @patch('management.services.agent.service.skill_db.query_skill_instances_by_agent_id')
 async def test_update_agent_info_impl_rejects_unavailable_skill_id(mock_query_skills, mock_get_valid_skill_ids):
     """Updating with a skill id that does not exist must raise a domain error, not 500."""
-    from contracts.models import AgentInfoRequest, AgentSkillInstanceRequest
-    from contracts.exceptions import AppException
+    from contracts.agent import AgentInfoRequest, AgentSkillInstanceRequest
+    from contracts.errors.exceptions import AppException
     from management.services.agent.service import update_agent_info_impl
     mock_get_valid_skill_ids.return_value = set()
     mock_query_skills.return_value = []
@@ -11248,7 +11248,7 @@ async def test_generate_stream_unexpected_exception():
 async def test_import_agent_impl_continue_path():
     """Test import_agent_impl handles continue in DFS loop."""
     from management.services.agent.service import import_agent_impl
-    from contracts.models import ExportAndImportDataFormat, ExportAndImportAgentInfo
+    from contracts.agent import ExportAndImportDataFormat, ExportAndImportAgentInfo
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
     mock_agent_info.agent_id = 1
     mock_agent_info.name = 'agent_1'
@@ -11303,7 +11303,7 @@ async def test_import_agent_impl_continue_path():
 async def test_import_agent_by_agent_id_tool_param_error(mock_query_tools, mock_create):
     """Test import_agent_by_agent_id raises error for invalid tool param."""
     from management.services.agent.service import import_agent_by_agent_id
-    from contracts.models import ExportAndImportAgentInfo
+    from contracts.agent import ExportAndImportAgentInfo
 
     mock_tool = MagicMock()
     mock_tool.class_name = "TestTool"
@@ -11350,7 +11350,7 @@ async def test_import_agent_by_agent_id_tool_param_error(mock_query_tools, mock_
 async def test_import_agent_by_agent_id_invalid_max_steps():
     """Test import_agent_by_agent_id raises error for invalid max_steps."""
     from management.services.agent.service import import_agent_by_agent_id
-    from contracts.models import ExportAndImportAgentInfo
+    from contracts.agent import ExportAndImportAgentInfo
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
     mock_agent_info.agent_id = 1
@@ -11383,7 +11383,7 @@ async def test_import_agent_by_agent_id_invalid_max_steps():
 async def test_import_agent_by_agent_id_invalid_name():
     """Test import_agent_by_agent_id raises error for invalid agent name."""
     from management.services.agent.service import import_agent_by_agent_id
-    from contracts.models import ExportAndImportAgentInfo
+    from contracts.agent import ExportAndImportAgentInfo
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
     mock_agent_info.agent_id = 1
@@ -11421,7 +11421,7 @@ async def test_import_agent_by_agent_id_publish_version_error(
 ):
     """Test import_agent_by_agent_id handles publish_version_impl exception."""
     from management.services.agent.service import import_agent_by_agent_id
-    from contracts.models import ExportAndImportAgentInfo
+    from contracts.agent import ExportAndImportAgentInfo
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
     mock_agent_info.agent_id = 1
@@ -11481,7 +11481,7 @@ async def test_import_agent_by_agent_id_publish_version_error(
 def test_save_messages_user_with_messages_error():
     """Test save_messages raises error when messages provided for user."""
     from management.services.agent.service import save_messages
-    from backend.consts.const import MESSAGE_ROLE
+    from contracts.constants.conversation import MESSAGE_ROLE
 
     agent_request = MagicMock()
 
@@ -11494,7 +11494,7 @@ def test_save_messages_user_with_messages_error():
 def test_save_messages_assistant_without_messages_error():
     """Test save_messages raises error when messages missing for assistant."""
     from management.services.agent.service import save_messages
-    from backend.consts.const import MESSAGE_ROLE
+    from contracts.constants.conversation import MESSAGE_ROLE
 
     agent_request = MagicMock()
 
@@ -11508,7 +11508,7 @@ async def test_update_agent_info_impl_external_agent_list_error():
     """Test update_agent_info_impl handles external agent list error."""
     from management.services.agent.service import update_agent_info_impl
     from management.services.agent import service as ag_svc
-    from contracts.models import AgentInfoRequest
+    from contracts.agent import AgentInfoRequest
     mock_request = MagicMock(spec=AgentInfoRequest)
     mock_request.agent_id = 1
     mock_request.name = 'Test'
@@ -11543,8 +11543,8 @@ async def test_update_agent_info_impl_external_agent_list_error():
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_example_questions_exceed_limit():
     """Test update_agent_info_impl raises AppException when example_questions exceeds 6 items."""
-    from contracts.error_code import ErrorCode
-    from contracts.exceptions import AppException
+    from contracts.errors.codes import ErrorCode
+    from contracts.errors.exceptions import AppException
     request = MagicMock()
     request.agent_id = 123
     request.model_id = None
@@ -11569,7 +11569,7 @@ async def test_update_agent_info_impl_example_questions_exceed_limit():
 async def test_export_agent_dict_impl_uses_pinned_sub_agent_versions(mock_export_agent_by_id, mock_query_relations, mock_resolve_version):
     """BFS export should enqueue sub-agents with their pinned version numbers."""
     from management.services.agent.service import export_agent_dict_impl
-    from contracts.models import ExportAndImportAgentInfo
+    from contracts.agent import ExportAndImportAgentInfo
     root_agent = ExportAndImportAgentInfo(agent_id=1, name='root', display_name='Root', description='desc', business_description='biz', max_steps=5, provide_run_summary=False, enabled=True, tools=[], managed_agents=[2])
     child_agent = ExportAndImportAgentInfo(agent_id=2, name='child', display_name='Child', description='desc', business_description='biz', max_steps=5, provide_run_summary=False, enabled=True, tools=[], managed_agents=[])
 
@@ -12598,7 +12598,7 @@ async def test_stream_agent_chunks_error_during_stream(mock_stream):
     from management.services.agent.execution import (
         _stream_agent_chunks,
     )
-    from contracts.models import AgentRequest
+    from contracts.agent import AgentRequest
 
     # Create a generator that raises an error
     async def error_generator():
@@ -12684,7 +12684,7 @@ async def test_stream_agent_chunks_captures_final_answer(mock_stream):
     from management.services.agent.execution import (
         _stream_agent_chunks,
     )
-    from contracts.models import AgentRequest
+    from contracts.agent import AgentRequest
 
     # Create a generator with final answer
     async def chunk_generator():
@@ -18700,7 +18700,7 @@ def test_is_agent_running_returns_false_when_run_is_missing(mocker):
 @pytest.mark.asyncio
 async def test_import_agent_with_skills_rejects_parameters_before_dependency_writes(mocker):
     from management.services.agent import transfer as management
-    from contracts.exceptions import AgentToolImportError
+    from contracts.errors.exceptions import AgentToolImportError
     mocker.patch.object(agent_transfer, 'query_all_tools', return_value=[{'class_name': 'AidpSearchTool', 'source': 'local', 'params': [{'name': 'kds_list'}]}])
     skill_service = mocker.patch.object(agent_transfer, 'SkillService')
     import_agents = mocker.patch.object(agent_transfer, 'import_agent_impl', new_callable=AsyncMock)

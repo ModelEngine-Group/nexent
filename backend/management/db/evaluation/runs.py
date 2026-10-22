@@ -6,9 +6,9 @@ from typing import Any
 
 from sqlalchemy import Float, select
 
-from contracts.error_code import ErrorCode
-from contracts.evaluation_status import EvalRunStatus
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.constants.evaluation import EvalRunStatus
+from contracts.errors.exceptions import AppException
 from management.utils.orm import as_dict
 from management.db.client import get_db_session
 from management.db.models import AgentEvaluation, AgentEvaluationCase, AgentInfo, EvaluationSet, ModelRecord

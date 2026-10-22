@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from backend.consts.const import _collect_version_candidates, _read_version_from, _resolve_app_version
+from consts.const import _collect_version_candidates, _read_version_from, _resolve_app_version
 
 
 def _str_path(p):
@@ -97,7 +97,7 @@ class TestCollectVersionCandidates:
         assert os.path.normpath("/opt/nexent/VERSION") in candidates
 
         # Local layout is derived from this module's parents[2] + "VERSION".
-        import backend.consts.const as const_module
+        from consts import const as const_module
 
         expected_local = (
             Path(const_module.__file__).resolve().parents[2] / "VERSION"
@@ -156,7 +156,7 @@ class TestResolveAppVersion:
             paths = [_FakePath(contents) for _path, contents in string_contents_pairs]
             installed["paths"] = paths
             monkeypatch.setattr(
-                "backend.consts.const._collect_version_candidates",
+                "consts.const._collect_version_candidates",
                 lambda: paths,
             )
             return paths
@@ -223,7 +223,7 @@ class TestResolveAppVersion:
         # local repo-root VERSION file, and assert that the helper picks
         # up the real on-disk version. This guards the integration between
         # the candidate enumeration and the parsing layer.
-        import backend.consts.const as const_module
+        from consts import const as const_module
 
         local_path = Path(const_module.__file__).resolve().parents[2] / "VERSION"
 
@@ -231,7 +231,7 @@ class TestResolveAppVersion:
             return [local_path]
 
         monkeypatch.setattr(
-            "backend.consts.const._collect_version_candidates", _candidate
+            "consts.const._collect_version_candidates", _candidate
         )
         monkeypatch.delenv("APP_VERSION_FILE", raising=False)
 

@@ -16,14 +16,14 @@ def build_preview_pdf_object_key(object_name: str, *, temporary: bool = False) -
     return f"preview/{directory}/{stem}_{suffix}.{extension}"
 
 from consts.const import DATA_PROCESS_SERVICE
-from consts.const import FILE_PREVIEW_SIZE_LIMIT
-from contracts.exceptions import FileTooLargeException
-from contracts.exceptions import NotFoundException
-from consts.const import OFFICE_MIME_TYPES
-from contracts.exceptions import OfficeConversionException
+from contracts.constants.file import FILE_PREVIEW_SIZE_LIMIT
+from contracts.errors.exceptions import FileTooLargeException
+from contracts.errors.exceptions import NotFoundException
+from contracts.constants.file import OFFICE_MIME_TYPES
+from contracts.errors.exceptions import OfficeConversionException
 from typing import Optional
 from typing import Tuple
-from contracts.exceptions import UnsupportedFileTypeException
+from contracts.errors.exceptions import UnsupportedFileTypeException
 import asyncio
 from management.db.file.attachment import copy_file
 from management.db.file.attachment import delete_file

@@ -1,9 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
-from contracts.exceptions import DuplicateError
-from contracts.scheduler import VALID_SUMMARY_FREQUENCIES
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
+from contracts.errors.exceptions import DuplicateError
+from contracts.constants.knowledge import VALID_SUMMARY_FREQUENCIES
 from management.utils.orm import as_dict
 import logging
 import uuid
@@ -13,10 +13,10 @@ from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from consts.const import MAX_KNOWLEDGE_BASES_PER_TENANT, MAX_KNOWLEDGE_BASES_PER_USER, MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
-from contracts.exceptions import DuplicateError
-from contracts.scheduler import VALID_SUMMARY_FREQUENCIES
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
+from contracts.errors.exceptions import DuplicateError
+from contracts.constants.knowledge import VALID_SUMMARY_FREQUENCIES
 from management.utils.orm import as_dict
 from management.db.client import get_db_session
 from management.db.models import KnowledgeRecord

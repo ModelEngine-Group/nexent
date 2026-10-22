@@ -2,6 +2,8 @@
 
 """Unit tests for management.db.agent.catalog."""
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 from datetime import datetime
 from unittest.mock import MagicMock
@@ -18,6 +20,7 @@ consts_mock.const.CAN_EDIT_ALL_USER_ROLES = frozenset({"admin"})
 consts_mock.const.PERMISSION_EDIT = "edit"
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 agent_repository_consts = MagicMock()
 agent_repository_consts.STATUS_NOT_SHARED = "not_shared"
@@ -27,7 +30,7 @@ agent_repository_consts.STATUS_SHARED = "shared"
 agent_repository_consts.OWNERSHIP_ALL = "all"
 agent_repository_consts.OWNERSHIP_CREATED = "created"
 agent_repository_consts.OWNERSHIP_OTHERS = "others"
-sys.modules["contracts.agent_repository"] = agent_repository_consts
+install_shared_contract_stub(agent_repository_consts, 'agent_repository')
 
 boto3_mock = MagicMock()
 sys.modules["boto3"] = boto3_mock

@@ -37,7 +37,7 @@ patch('management.db.client.MinioClient', return_value=minio_mock).start()
 patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
-from contracts.exceptions import MCPContainerError, MCPConnectionError
+from contracts.errors.exceptions import MCPContainerError, MCPConnectionError
 from management.services.mcp.containers import MCPContainerManager
 from nexent.container import ContainerError, ContainerConnectionError
 

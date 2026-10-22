@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from contracts.models import NL2SkillRunRequest
+from contracts.agent import NL2SkillRunRequest
 from services import nl2skill_service as nl2skill_service
 from services.nl2skill_service import (
     _assemble_draft_content,

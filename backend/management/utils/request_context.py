@@ -2,7 +2,7 @@
 
 
 import logging
-from contracts.localization import LANGUAGE
+from contracts.constants.localization import LANGUAGE
 from typing import Optional
 from fastapi import Request
 

@@ -5,7 +5,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from contracts.models import AgentRequest
+from contracts.agent import AgentRequest
 
 
 @pytest.mark.parametrize("field,value", [

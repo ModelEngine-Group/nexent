@@ -1,8 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import pytest
 
-from consts.const import PERMISSION_READ
+from contracts.constants.identity import PERMISSION_READ
 from management.services.knowledge_base.listing import (
     _merge_ordered_info,
     _sort_key,

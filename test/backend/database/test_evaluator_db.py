@@ -112,10 +112,10 @@ def _install_stubs():
             "AGENT_EVALUATION_EVALUATOR_IN_USE": "AGENT_EVALUATION_EVALUATOR_IN_USE",
         },
     )
-    _ec_mod = mk_mod("contracts.error_code", ErrorCode=_Err)
+    _ec_mod = mk_mod("contracts.errors.codes", ErrorCode=_Err)
     _consts_pkg.error_code = _ec_mod
     _ERS = type("ERS", (), {"PENDING": "PENDING", "RUNNING": "RUNNING"})
-    _es_mod = mk_mod("contracts.evaluation_status", EvalRunStatus=_ERS)
+    _es_mod = mk_mod("contracts.constants.evaluation", EvalRunStatus=_ERS)
     _consts_pkg.evaluation_status = _es_mod
 
     class _AppException(Exception):
@@ -125,7 +125,7 @@ def _install_stubs():
             self.message = msg
             self.extra = extra
 
-    _ex_mod = mk_mod("contracts.exceptions", AppException=_AppException)
+    _ex_mod = mk_mod("contracts.errors.exceptions", AppException=_AppException)
     _consts_pkg.exceptions = _ex_mod
 
     # management.db.client.get_db_session – wired lazily by the harness per test.

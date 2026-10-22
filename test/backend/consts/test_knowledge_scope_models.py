@@ -5,7 +5,7 @@
 import pytest
 from pydantic import ValidationError
 
-from contracts.models import AidpKnowledgeScopeRequest, ConversationKnowledgeScopeRequest, ConversationKnowledgeScopeUpdateRequest, LocalKnowledgeScopeRequest
+from contracts.knowledge import AidpKnowledgeScopeRequest, ConversationKnowledgeScopeRequest, ConversationKnowledgeScopeUpdateRequest, LocalKnowledgeScopeRequest
 
 
 def test_local_defaults_to_inherit_with_no_ids():

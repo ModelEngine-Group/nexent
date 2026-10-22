@@ -43,7 +43,7 @@ def _configure_early_workbench_run(monkeypatch, canonical, conversation):
 @pytest.mark.asyncio
 async def test_existing_workbench_commits_config_and_metadata_atomically(monkeypatch):
     from fastapi import Request
-    from contracts.models import WorkbenchSessionConfig
+    from contracts.agent import WorkbenchSessionConfig
     canonical = WorkbenchSessionConfig.model_validate({'mode': 'single_agent_chat', 'agent_mounts': [{'agent_id': 7}]})
     conversation = {'workbench_config': canonical.model_dump(mode='json'), 'workbench_config_version': 2, 'runtime_metadata': {'old': True}, 'runtime_metadata_version': 4, 'knowledge_scope': None}
     request = _request(entrypoint='workbench', workbench=canonical, expected_workbench_config_version=2, metadata={'ticket': 'NEX-1'}, expected_metadata_version=4)
@@ -65,7 +65,7 @@ async def test_existing_workbench_commits_config_and_metadata_atomically(monkeyp
 @pytest.mark.asyncio
 async def test_new_workbench_conversation_persists_canonical_config(monkeypatch):
     from fastapi import Request
-    from contracts.models import WorkbenchSessionConfig
+    from contracts.agent import WorkbenchSessionConfig
     canonical = WorkbenchSessionConfig.model_validate({'mode': 'single_agent_chat', 'agent_mounts': [{'agent_id': 7}]})
     request = _request(conversation_id=None, entrypoint='workbench', workbench=canonical)
     _configure_early_workbench_run(monkeypatch, canonical, None)
@@ -81,7 +81,7 @@ async def test_new_workbench_conversation_persists_canonical_config(monkeypatch)
 @pytest.mark.asyncio
 async def test_workbench_run_requires_configuration_after_request_normalization(monkeypatch):
     from fastapi import Request
-    from contracts.models import WorkbenchSessionConfig
+    from contracts.agent import WorkbenchSessionConfig
     canonical = WorkbenchSessionConfig.model_validate({'mode': 'single_agent_chat', 'agent_mounts': [{'agent_id': 7}]})
     request = _request(conversation_id=None, entrypoint='workbench', workbench=canonical)
     request.__dict__['workbench'] = None

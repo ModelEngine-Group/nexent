@@ -17,12 +17,13 @@ from nexent.core.agents.prompt.meta import (
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.concurrency import ManagedExecution, ManagedTaskSpec
 
-from consts.const import LANGUAGE, ENABLE_JIUWEN_SDK
-from contracts.tool_labels import PARALLEL_EXECUTOR_TOOL_NAME
-from contracts.error_code import ErrorCode
-from contracts.error_message import ErrorMessage
-from contracts.exceptions import AppException
-from contracts.models import AgentInfoRequest
+from contracts.constants.localization import LANGUAGE
+from consts.const import ENABLE_JIUWEN_SDK
+from contracts.constants.tool import PARALLEL_EXECUTOR_TOOL_NAME
+from contracts.errors.codes import ErrorCode
+from contracts.errors.messages import ErrorMessage
+from contracts.errors.exceptions import AppException
+from contracts.agent import AgentInfoRequest
 from management.db.agent.repository import search_agent_info_by_agent_id, query_all_agent_info_by_tenant_id, query_sub_agents_id_list
 from management.db.model.repository import get_model_by_model_id
 from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names

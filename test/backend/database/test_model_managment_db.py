@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import importlib
 import sys
 import pytest
@@ -26,7 +27,8 @@ consts_mock.const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 # Register mocked consts module in sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
-sys.modules['contracts.models'] = consts_mock.model
+install_business_constant_stubs(consts_mock.const)
+install_business_contract_stubs(consts_mock.model)
 
 # Mock utils module used by target module
 utils_mock = MagicMock()

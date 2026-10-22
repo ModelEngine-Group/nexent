@@ -12,8 +12,9 @@ from management.db.identity.invitation import query_invitation_by_code, query_in
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.db.identity.group import query_group_ids_by_user
 from management.db.identity.role_permission import check_role_permission
-from consts.const import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, ENABLE_ASSET_OWNER_ROLE
-from contracts.exceptions import NotFoundException, UnauthorizedError, DuplicateError
+from contracts.constants.identity import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE
+from consts.const import ENABLE_ASSET_OWNER_ROLE
+from contracts.errors.exceptions import NotFoundException, UnauthorizedError, DuplicateError
 from management.services.permission.identity.groups import get_tenant_default_group_id
 from management.services.permission.asset_owner import require_asset_owner_enabled
 from management.utils.serialization import convert_string_to_list

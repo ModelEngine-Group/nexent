@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.authentication import OAUTH_PENDING_EXPIRE_SECONDS, OAUTH_PENDING_PURPOSE, PendingOAuthIdentity
+from contracts.constants.identity import OAUTH_PENDING_EXPIRE_SECONDS, OAUTH_PENDING_PURPOSE
+from contracts.authentication import PendingOAuthIdentity
 import json
 import logging
 import os
@@ -13,10 +14,11 @@ from urllib.parse import urlencode, quote
 import jwt
 from pydantic import EmailStr, TypeAdapter, ValidationError as PydanticValidationError
 
-from consts.const import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID, OAUTH_CALLBACK_BASE_URL, OAUTH_LOGIN_MODE, OAUTH_SSL_VERIFY, OAUTH_CA_BUNDLE, SUPABASE_JWT_SECRET, JWT_EXPIRY_SECONDS
-from contracts.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError
+from contracts.constants.identity import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+from consts.const import OAUTH_CALLBACK_BASE_URL, OAUTH_LOGIN_MODE, OAUTH_SSL_VERIFY, OAUTH_CA_BUNDLE, SUPABASE_JWT_SECRET, JWT_EXPIRY_SECONDS
+from contracts.errors.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError
 from management.services.permission.asset_owner import require_asset_owner_enabled
-from contracts.oauth_providers import get_all_provider_definitions, get_provider_definition, is_provider_enabled
+from consts.const import get_all_provider_definitions, get_provider_definition, is_provider_enabled
 from management.db.identity.oauth_account import delete_oauth_account, get_oauth_account_by_provider, get_soft_deleted_oauth_account, insert_oauth_account, list_oauth_accounts_by_user_id, reactivate_oauth_account, update_oauth_account_tokens
 from management.db.identity.user_tenant import get_user_tenant_by_user_id, insert_user_tenant
 

@@ -4,7 +4,7 @@
 
 import logging
 
-from contracts.exceptions import AppException
+from contracts.errors.exceptions import AppException
 from ext_components.aidp.consts.aidp_exceptions import AidpKbNotFoundError
 from ext_components.aidp.services import aidp_permission_service as perms
 from ext_components.aidp.services.aidp_access_service import (

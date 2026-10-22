@@ -6,8 +6,9 @@ from http import HTTPStatus
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
-from contracts.exceptions import OfficeConversionException
-from contracts.models import BatchTaskRequest, ConvertStateRequest, TaskRequest
+from contracts.errors.exceptions import OfficeConversionException
+from contracts.knowledge import BatchTaskRequest, TaskRequest
+from contracts.agent import ConvertStateRequest
 from data_process.parse_tasks import load_chunks_from_redis
 from data_process.tasks import process_sync, submit_process_forward_chain
 from data_process.utils import get_task_details as get_task_details_util

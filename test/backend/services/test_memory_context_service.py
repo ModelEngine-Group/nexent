@@ -22,6 +22,7 @@ Covers:
 
 from __future__ import annotations
 
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock
@@ -349,6 +350,7 @@ class _VectorDatabaseType:
 consts_mod.VectorDatabaseType = _VectorDatabaseType
 sys.modules["consts"] = consts_pkg
 sys.modules["consts.const"] = consts_mod
+install_business_constant_stubs(consts_mod)
 
 
 # ---------------------------------------------------------------------------

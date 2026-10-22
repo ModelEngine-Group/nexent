@@ -4,6 +4,7 @@
 Unit tests for backend/management/db/mcp/market.py
 """
 
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 
@@ -27,6 +28,7 @@ consts_mock.const.POSTGRES_DB = "test_db"
 consts_mock.const.POSTGRES_PORT = 5432
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 # Mock management.db.client
 def _as_dict(obj):

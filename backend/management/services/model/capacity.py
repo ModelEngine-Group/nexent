@@ -8,14 +8,7 @@ import time
 from typing import Any, Dict, Mapping, Optional
 
 from consts.const import CAPACITY_SUGGESTION_ENABLED, CAPACITY_VISIBILITY_ENABLED, NEXENT_LITELLM_JSON
-from contracts.model import (
-    CapabilityProfileLike,
-    CapacitySuggestionConfidence,
-    CapacitySuggestionFields,
-    CapacitySuggestionMatchKind,
-    CapacitySuggestionResult,
-    ProfileKey,
-)
+from contracts.model import CapabilityProfileLike, CapacitySuggestionConfidence, CapacitySuggestionFields, CapacitySuggestionMatchKind, CapacitySuggestionResult, ProfileKey
 from management.db.model.repository import get_model_records
 from management.services.model.names import add_repo_to_name
 
@@ -264,7 +257,7 @@ def pick_provider(
 
 
 def _get_default_catalog() -> Mapping[ProfileKey, CapabilityProfileLike]:
-    from contracts.capability_profiles import CATALOG
+    from contracts.constants.model import CATALOG
 
     return CATALOG
 

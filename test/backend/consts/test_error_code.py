@@ -7,7 +7,7 @@ Tests the ErrorCode enum and ERROR_CODE_HTTP_STATUS mapping
 to ensure error codes are properly defined and mapped.
 """
 import pytest
-from contracts.error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
+from contracts.errors.codes import ErrorCode, ERROR_CODE_HTTP_STATUS
 
 
 class TestErrorCodeEnum:

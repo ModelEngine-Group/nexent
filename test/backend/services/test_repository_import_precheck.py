@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for repository import precheck."""
 
+from test.common.contract_stubs import install_business_contract_stubs
 import sys
 import types
 from enum import Enum
@@ -33,7 +34,7 @@ sys.modules.setdefault("management.db.identity.group", MagicMock())
 sys.modules.setdefault("management.db.identity.user_tenant", MagicMock())
 sys.modules.setdefault("management.db.client", MagicMock())
 
-_consts_model = types.ModuleType("contracts.models")
+_consts_model = types.ModuleType("contracts.agent")
 
 
 class _RepositoryImportRequirementType(str):
@@ -86,7 +87,7 @@ _consts_model.RepositoryImportRequirementType = _RepositoryImportRequirementType
 _consts_model.RepositoryImportRequirementItem = _RepositoryImportRequirementItem
 _consts_model.RepositoryImportPrecheckResponse = _RepositoryImportPrecheckResponse
 _consts_model.ToolSourceEnum = _ToolSourceEnum
-sys.modules["contracts.models"] = _consts_model
+install_business_contract_stubs(_consts_model)
 
 # Keep model availability real while isolating adapter construction and config.
 sys.modules.setdefault("management.services.model.adapter", MagicMock())

@@ -2,11 +2,11 @@
 
 from typing import Any, Dict, Optional
 
-from contracts.agent_repository import STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_REPOSITORY_STATUSES
-from consts.const import SYSTEM_TENANT_ID
-from contracts.exceptions import UnauthorizedError
-from contracts.models import AgentRepositorySnapshot
-from contracts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
+from contracts.constants.agent import STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_REPOSITORY_STATUSES
+from contracts.constants.identity import SYSTEM_TENANT_ID
+from contracts.errors.exceptions import UnauthorizedError
+from contracts.agent import AgentRepositorySnapshot
+from contracts.constants.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.agent.catalog import get_agent_repository_by_agent_id, get_agent_repository_by_id, insert_agent_repository_record, update_agent_repository_by_id, update_agent_repository_status_by_id
 from management.db.agent.version import search_version_by_version_no

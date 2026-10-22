@@ -2,6 +2,7 @@
 
 """Unit tests for agent marketplace repository service."""
 
+from test.common.contract_stubs import install_business_contract_stubs
 from test.backend.management.import_patching import patch_import_context, patch_import_object_context, set_import_attribute
 
 import sys
@@ -144,7 +145,7 @@ _consts_model_mock.ModelConnectStatusEnum = _ModelConnectStatusEnum
 _consts_model_mock.ToolSourceEnum = _ToolSourceEnum
 _consts_model_mock.RepositoryImportRequirementItem = _RepositoryImportRequirementItem
 _consts_model_mock.RepositoryImportPrecheckResponse = _RepositoryImportPrecheckResponse
-sys.modules["contracts.models"] = _consts_model_mock
+install_business_contract_stubs(_consts_model_mock)
 
 _agent_service_mock = MagicMock()
 _agent_service_mock.collect_skill_zip_entries = MagicMock(return_value=[])
@@ -171,9 +172,9 @@ sys.modules["management.services.agent.service"] = _agent_service_mock
 _notification_service_mock = MagicMock()
 sys.modules["management.services.notification.service"] = _notification_service_mock
 
-from consts.const import ASSET_OWNER_TENANT_ID
-from contracts.exceptions import UnauthorizedError
-from contracts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
+from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.errors.exceptions import UnauthorizedError
+from contracts.constants.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 
 from management.services.repository.agent import listing as ars
 

@@ -6,7 +6,7 @@ import pytest
 
 from test.backend.app import test_a2a_client_app as legacy
 from management.api.a2a import a2a_client as app
-from contracts.exceptions import AgentNotFoundError, ForbiddenError
+from contracts.errors.exceptions import AgentNotFoundError, ForbiddenError
 
 
 @pytest.mark.parametrize("method", ["post", "delete"])

@@ -6,7 +6,7 @@ These endpoints are for internal use only (user authentication required).
 They are NOT registered to any FastAPI app - only used by internal code.
 """
 
-from contracts.api.management_a2a_a2a_server import A2AServerSettings
+from contracts.a2a import ManagementA2AServerSettings as A2AServerSettings
 import logging
 from typing import Any, Dict, Optional
 from typing_extensions import Annotated

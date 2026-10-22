@@ -5,6 +5,7 @@ Unit tests for knowledge_summary_app module.
 These tests focus on testing the app layer endpoints with services mocked.
 All module mocks are provided by conftest.py.
 """
+from test.common.contract_stubs import install_business_contract_stubs
 import asyncio
 import sys
 import os
@@ -88,9 +89,9 @@ sys.modules['management.services.knowledge_base.service'] = vectordatabase_servi
 sys.modules['management.services.knowledge_base.task_state'] = types.ModuleType('management.services.knowledge_base.task_state')
 sys.modules['management.services.permission.identity.groups'] = types.ModuleType('management.services.permission.identity.groups')
 
-# knowledge_summary_app only needs this request model from contracts.models. Keeping
+# knowledge_summary_app only needs this request model from contracts.agent. Keeping
 # it local avoids importing unrelated EmailStr models and optional validators.
-consts_model_mock = types.ModuleType('contracts.models')
+consts_model_mock = types.ModuleType('contracts.agent')
 
 
 class ChangeSummaryRequest(BaseModel):
@@ -98,7 +99,7 @@ class ChangeSummaryRequest(BaseModel):
 
 
 consts_model_mock.ChangeSummaryRequest = ChangeSummaryRequest
-sys.modules['contracts.models'] = consts_model_mock
+install_business_contract_stubs(consts_model_mock)
 
 # Mock utils modules used by knowledge_summary_app to avoid deep DB/storage import chains
 utils_auth_utils_mock = types.ModuleType('gateway.authentication.identity')
@@ -526,7 +527,7 @@ class TestTokenExpired:
 
     @patch('management.api.knowledge_base.knowledge_summary.get_current_user_info')
     def test_auto_summary_token_expired(self, mock_user_info, test_data):
-        from contracts.exceptions import TokenExpiredError
+        from contracts.errors.exceptions import TokenExpiredError
 
         mock_user_info.side_effect = TokenExpiredError("expired")
 
@@ -540,7 +541,7 @@ class TestTokenExpired:
 
     @patch('management.api.knowledge_base.knowledge_summary.get_current_user_id')
     def test_change_summary_token_expired(self, mock_user_id, test_data):
-        from contracts.exceptions import TokenExpiredError
+        from contracts.errors.exceptions import TokenExpiredError
 
         mock_user_id.side_effect = TokenExpiredError("expired")
 

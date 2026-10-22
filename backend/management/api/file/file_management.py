@@ -1,8 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.exceptions import AppException, FileTooLargeException, NotFoundException, QuotaExceededError, UnauthorizedError, UnsupportedFileTypeException
-from contracts.models import ProcessParams
-from contracts.task_recovery import CONFIG_SERVICE_NAME
+from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, QuotaExceededError, UnauthorizedError, UnsupportedFileTypeException
+from contracts.knowledge import ProcessParams
+from contracts.constants.runtime import CONFIG_SERVICE_NAME
 from management.utils.file_http import _build_datamate_url_from_parts, _build_object_etag, _normalize_datamate_download_url, _parse_range_header, build_content_disposition_header
 import base64
 import logging
@@ -17,16 +17,9 @@ from fastapi import Path as PathParam
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
 from management.utils.knowledge_permission import require_knowledge_base_edit_permission
-from contracts.exceptions import (
-    AppException,
-    FileTooLargeException,
-    NotFoundException,
-    QuotaExceededError,
-    UnauthorizedError,
-    UnsupportedFileTypeException,
-)
-from contracts.models import ProcessParams
-from contracts.task_recovery import CONFIG_SERVICE_NAME
+from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, QuotaExceededError, UnauthorizedError, UnsupportedFileTypeException
+from contracts.knowledge import ProcessParams
+from contracts.constants.runtime import CONFIG_SERVICE_NAME
 from management.services.file.service import (
     check_file_access,
     delete_file_impl,

@@ -11,7 +11,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List
 
-from consts.const import EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES
+from contracts.constants.memory import EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES
 from management.db.memory import external_ingest_event_log as memory_external_ingest_event_log_db
 from management.db.memory import provider_config_param as memory_provider_config_param_db
 from nexent.memory.models import (

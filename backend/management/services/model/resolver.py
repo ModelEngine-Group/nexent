@@ -4,7 +4,7 @@
 import logging
 from typing import Any, Optional
 
-from contracts.models import ModelConnectStatusEnum
+from contracts.constants.model import ModelConnectStatusEnum
 from contracts.model import ModelDescriptor
 from management.db.model.repository import get_model_by_model_id, get_model_records
 from management.services.model.adapter import build_adapter_fresh

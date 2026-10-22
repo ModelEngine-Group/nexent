@@ -2,6 +2,7 @@
 
 """Unit tests for official agent listing service."""
 
+from test.common.contract_stubs import install_business_contract_stubs
 import json
 import sys
 import types
@@ -19,9 +20,9 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-# Mock contracts.models before importing the service under test so the module stays
-# isolated from other test files that install their own fake contracts.models.
-consts_model = types.ModuleType("contracts.models")
+# Mock contracts.agent before importing the service under test so the module stays
+# isolated from other test files that install their own fake contracts.agent.
+consts_model = types.ModuleType("contracts.agent")
 
 
 class _ModelConnectStatusEnum(Enum):
@@ -196,9 +197,9 @@ consts_model.AgentRepositorySnapshot = _AgentRepositorySnapshot
 consts_model.ProcessParams = _ProcessParams
 consts_model.ToolInstanceInfoRequest = _ToolInstanceInfoRequest
 # The naming service imports model_management_db, which imports this helper
-# while the test intentionally replaces contracts.models with an isolated stub.
+# while the test intentionally replaces contracts.agent with an isolated stub.
 consts_model.filter_extra_params = lambda params: params
-sys.modules["contracts.models"] = consts_model
+install_business_contract_stubs(consts_model)
 
 from management.services.repository.agent import official as official_agent_service  # noqa: E402
 
@@ -1394,7 +1395,7 @@ async def test_create_knowledge_bases_uploads_binary_docs(tmp_path):
     with patch.dict(
         sys.modules,
         {
-            "contracts.models": consts_model,
+            "contracts.agent": consts_model,
             "management.db.knowledge_base.repository": fake_kb_db,
             "management.services.knowledge_base.common": fake_kb_common,
             "management.services.knowledge_base.service": fake_kb_service,

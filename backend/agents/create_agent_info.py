@@ -37,7 +37,7 @@ from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 from nexent.memory import models as memory_models
 
-from contracts.capability_profiles import CATALOG as CAPABILITY_CATALOG
+from contracts.constants.model import CATALOG as CAPABILITY_CATALOG
 
 from management.services.file.service import validate_urls_access
 from management.services.model.resolver import get_rerank_model, is_model_available
@@ -49,7 +49,7 @@ from management.services.knowledge_base.service import (
 from management.services.mcp.service import get_remote_mcp_server_list
 from management.services.memory.providers.service import get_memory_external_provider_service
 
-from contracts.persistence.a2a_repository import PROTOCOL_JSONRPC
+from contracts.constants.a2a import PROTOCOL_JSONRPC
 from management.services.configuration.user.memory import build_memory_context
 from management.services.knowledge_base.providers.aidp import create_ind_aidp_image_url_builder
 from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
@@ -83,10 +83,12 @@ from management.services.agent.context import (
 from infrastructure.http.client import create_httpx_client
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from infrastructure.redis import get_redis_client
-from consts.const import AGENT_WORKSPACE_ROOT, NEXENT_SANDBOX_WORKSPACE_MODE, NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT, NEXENT_SANDBOX_FAILURE_POLICY, AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LANGUAGE, LLM_INCLUDE_LOGPROBS, MODEL_RESPONSE_DIAGNOSTIC_CHUNKS, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, TOKEN, MINIO_DEFAULT_BUCKET, MODEL_CONFIG_MAPPING, NEXENT_SANDBOX_DEFAULT_LEVEL, NEXENT_SANDBOX_WORKSPACE_VOLUME, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS, NEXENT_TOOL_FASTPATH_ENABLED, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS
-from contracts.models import ToolParamsRequest
-from contracts.exceptions import ValidationError, WorkbenchError
-from contracts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
+from consts.const import AGENT_WORKSPACE_ROOT, NEXENT_SANDBOX_WORKSPACE_MODE, NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT, NEXENT_SANDBOX_FAILURE_POLICY, AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LLM_INCLUDE_LOGPROBS, MODEL_RESPONSE_DIAGNOSTIC_CHUNKS, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, TOKEN, MINIO_DEFAULT_BUCKET, NEXENT_SANDBOX_DEFAULT_LEVEL, NEXENT_SANDBOX_WORKSPACE_VOLUME, NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS, NEXENT_TOOL_FASTPATH_ENABLED, RUNTIME_MCP_CLOSE_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS
+from contracts.constants.localization import LANGUAGE
+from contracts.constants.model import MODEL_CONFIG_MAPPING
+from contracts.tool import ToolParamsRequest
+from contracts.errors.exceptions import ValidationError, WorkbenchError
+from contracts.constants.tool import SYSTEM_MANAGED_TOOL_NAMES
 
 from .tool_user_context import resolve_tool_user_context
 
@@ -2775,7 +2777,7 @@ async def create_agent_run_info(
         from management.services.model.run_controls import overlay_root_model
         selected_config = next((m for m in model_list if m.cite_name == agent_config.model_name), None)
         if selected_config is None:
-            from contracts.exceptions import RunModelControlsError
+            from contracts.errors.exceptions import RunModelControlsError
             raise RunModelControlsError("model_not_available")
         legacy = {}
         if reasoning_effort is not None:

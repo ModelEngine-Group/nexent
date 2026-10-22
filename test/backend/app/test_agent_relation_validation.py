@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from test.backend.app import test_agent_app as legacy
-from contracts.exceptions import AgentNotFoundError, AgentRelationValidationError
+from contracts.errors.exceptions import AgentNotFoundError, AgentRelationValidationError
 
 
 @pytest.mark.parametrize("error, status, message", [

@@ -22,11 +22,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
-from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException, ForbiddenError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
-from contracts.models import NL2AgentRunRequest
-from contracts.exceptions import AgentDraftEditError
+from contracts.constants.agent import AGENT_PROMPTS_HIDDEN_FLAG
+from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, ForbiddenError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.agent import NL2AgentRunRequest
+from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
 
 # Filter out deprecation warnings from third-party libraries
@@ -78,7 +79,7 @@ for p in patches:
 # Import target endpoints with all external dependencies patched
 
 # Mock external dependencies before importing the modules that use them
-# Stub agent model types used by contracts.models and Workbench knowledge services.
+# Stub agent model types used by contracts.agent and Workbench knowledge services.
 agent_model_stub = types.ModuleType("agent_model")
 
 
@@ -791,8 +792,8 @@ def test_agent_run_api_exception(mocker, mock_auth_header):
 
 @pytest.mark.asyncio
 async def test_agent_run_api_maps_forbidden_conversation_to_403(mocker):
-    from contracts.exceptions import ForbiddenError
-    from contracts.models import AgentRequest
+    from contracts.errors.exceptions import ForbiddenError
+    from contracts.agent import AgentRequest
     from fastapi import HTTPException
     from starlette.requests import Request
 
@@ -827,8 +828,8 @@ async def test_agent_run_api_maps_forbidden_conversation_to_403(mocker):
 
 @pytest.mark.asyncio
 async def test_agent_run_api_maps_scope_validation_to_422(mocker):
-    from contracts.exceptions import ValidationError
-    from contracts.models import AgentRequest
+    from contracts.errors.exceptions import ValidationError
+    from contracts.agent import AgentRequest
     from starlette.requests import Request
 
     from runtime.api.agent.execution import agent_run_api
@@ -1613,7 +1614,7 @@ def test_import_agent_api_success_with_skills(mocker, mock_auth_header):
 
 def test_import_agent_api_duplicate_error(mocker, mock_auth_header):
     """Test import_agent_api with SkillDuplicateError."""
-    from contracts.exceptions import SkillDuplicateError
+    from contracts.errors.exceptions import SkillDuplicateError
     mock_import_agent = mocker.patch(
         "management.api.agent.agent.import_agent_impl", new_callable=AsyncMock)
     mock_import_agent.side_effect = SkillDuplicateError(

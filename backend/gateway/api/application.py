@@ -5,7 +5,7 @@ Northbound API with A2A support.
 This module combines northbound app with A2A server endpoints.
 """
 
-from contracts.api.gateway_application import A2AServerSettings, JSONRPCRequest
+from contracts.a2a import GatewayA2AServerSettings as A2AServerSettings, JSONRPCRequest
 import asyncio
 import base64
 import hashlib
@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from management.utils.app_factory import create_app
-from contracts.task_recovery import NORTHBOUND_SERVICE_NAME
+from contracts.constants.runtime import NORTHBOUND_SERVICE_NAME
 from consts.const import NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS
 from nexent.core.concurrency import (
     ManagedTaskSpec,

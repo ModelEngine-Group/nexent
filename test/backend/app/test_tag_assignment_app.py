@@ -2,8 +2,8 @@
 
 import pytest
 from management.api.tag import tag_management as tag_management_app
-from contracts.exceptions import TagManagementNotFoundError
-from contracts.models import TagAssignmentBulkTarget, TagAssignmentReplaceRequest
+from contracts.errors.exceptions import TagManagementNotFoundError
+from contracts.tag import TagAssignmentBulkTarget, TagAssignmentReplaceRequest
 from fastapi import HTTPException
 from pydantic import ValidationError
 from starlette.routing import Match

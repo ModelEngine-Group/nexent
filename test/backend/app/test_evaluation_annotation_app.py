@@ -83,10 +83,10 @@ def _install_stubs():
         pass
 
     _consts_pkg = _register_package("consts")
-    _ec_mod = mk_mod("contracts.error_code", ErrorCode=_ErrorCode)
+    _ec_mod = mk_mod("contracts.errors.codes", ErrorCode=_ErrorCode)
     _consts_pkg.error_code = _ec_mod
     _ex_mod = mk_mod(
-        "contracts.exceptions",
+        "contracts.errors.exceptions",
         AppException=_AppException,
         UnauthorizedError=_UnauthorizedError,
     )

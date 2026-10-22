@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
+from test.common.contract_stubs import install_business_contract_stubs
+from contracts.errors.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 
 from test.backend.management.import_patching import patch_import_context, patch_imports, set_import_attribute
 import asyncio
@@ -93,7 +94,7 @@ mcpadapt_smolagents_adapter_mock._sanitize_function_name = lambda name: name
 sys.modules['mcpadapt'] = mcpadapt_mock
 sys.modules['mcpadapt.smolagents_adapter'] = mcpadapt_smolagents_adapter_mock
 
-# Patch smolagents and its sub-modules before importing contracts.models to avoid ImportError
+# Patch smolagents and its sub-modules before importing contracts.agent to avoid ImportError
 mock_smolagents = MagicMock()
 sys.modules['smolagents'] = mock_smolagents
 
@@ -599,29 +600,18 @@ patch('services.tenant_config_service.build_knowledge_name_mapping',
       MagicMock()).start()
 patch('management.db.knowledge_base.repository.get_knowledge_name_map_by_index_names', MagicMock()).start()
 
-# Ensure this module always uses the real contracts.models instead of mocks injected by other test files.
-_consts_model = sys.modules.get("contracts.models")
-if _consts_model is None or isinstance(_consts_model, MagicMock) or not hasattr(_consts_model, "ToolInfo"):
-    consts_pkg = sys.modules.get("consts")
-    if consts_pkg is None or not isinstance(consts_pkg, types.ModuleType):
-        consts_pkg = types.ModuleType("consts")
-        consts_pkg.__path__ = [str(REPO_ROOT / "backend" / "consts")]
-        sys.modules["consts"] = consts_pkg
-    model_path = REPO_ROOT / "backend" / 'contracts' / 'models.py'
-    spec = importlib.util.spec_from_file_location("contracts.models", model_path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(module)
-    sys.modules["contracts.models"] = module
-    setattr(consts_pkg, "model", module)
+# Ensure this module always uses the real tool contracts instead of mocks
+# injected by other test files. The business owner is importable directly.
+_tool_contracts = importlib.import_module("contracts.tool")
+importlib.reload(_tool_contracts)
 
-# Reload service module so ToolInfo/ToolSourceEnum bindings come from the real contracts.models.
+# Reload service module so ToolInfo/ToolSourceEnum bind to the real tool contracts.
 from management.services.tool import configuration as _tool_cfg_service
 importlib.reload(_tool_cfg_service)
 patch_import_context('management.services.tool.configuration.get_embedding_model_by_index_name', MagicMock()).start()
 
 # Import consts after patching dependencies
-from contracts.models import ToolInfo, ToolSourceEnum, ToolInstanceInfoRequest, ToolValidateRequest
+from contracts.tool import ToolInfo, ToolSourceEnum, ToolInstanceInfoRequest, ToolValidateRequest
 
 
 class TestPythonTypeToJsonSchema:
@@ -1010,7 +1000,7 @@ class TestUpdateToolInfoImpl:
         mock_request = Mock(spec=ToolInstanceInfoRequest)
         mock_request.version_no = 5
         mock_request.__dict__ = {"agent_id": 1, "tool_id": 1, "version_no": 5}
-        from contracts.exceptions import AgentDraftEditError
+        from contracts.errors.exceptions import AgentDraftEditError
         from management.services.tool.configuration import update_tool_info_impl
         with pytest.raises(AgentDraftEditError, match="agent_not_draft"):
             update_tool_info_impl(mock_request, "test_tenant", "test_user")
@@ -5403,7 +5393,7 @@ class TestUpdateToolInfoImplAidpPermission:
     def test_rejects_new_unauthorized_id(
         self, mock_snapshot, mock_existing, mock_create_update
     ):
-        from contracts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         mock_snapshot.return_value = types.SimpleNamespace(
             accessible_id_set={"kb1"},
@@ -5741,7 +5731,7 @@ def test_update_tool_info_preserves_existing_kds_when_key_missing(mocker):
 
 def test_update_tool_info_rejects_new_kds_when_aidp_unavailable(mocker):
     """When AIDP is unreachable and the submission adds ids, the edit must fail."""
-    from contracts.exceptions import ValidationError
+    from contracts.errors.exceptions import ValidationError
 
     patch_imports(mocker,
         "management.services.tool.configuration.require_agent_draft_edit"
@@ -5903,13 +5893,13 @@ class TestCoerceParamValue:
         assert _tool_cfg_service._coerce_param_value("t", "p", "number", 2.5, "le") == 2.5
 
     def test_invalid_numeric_raises_valid_type(self):
-        from contracts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         with pytest.raises(ValidationError, match="p must be a valid integer"):
             _tool_cfg_service._coerce_param_value("t", "p", "integer", "abc", "ge")
 
     def test_non_integer_for_integer_type_raises(self):
-        from contracts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         with pytest.raises(ValidationError, match="p must be an integer"):
             _tool_cfg_service._coerce_param_value("t", "p", "integer", 1.5, "ge")
@@ -5931,7 +5921,7 @@ class TestApplyParamConstraints:
         _tool_cfg_service._apply_param_constraints("t", "p", "integer", 0, {})
 
     def test_ge_violation_raises(self):
-        from contracts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         with pytest.raises(ValidationError, match="top_k must be >= 1"):
             _tool_cfg_service._apply_param_constraints(
@@ -5944,7 +5934,7 @@ class TestApplyParamConstraints:
         )
 
     def test_le_violation_raises(self):
-        from contracts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         with pytest.raises(ValidationError, match="top_k must be <= 100"):
             _tool_cfg_service._apply_param_constraints(
@@ -5952,7 +5942,7 @@ class TestApplyParamConstraints:
             )
 
     def test_min_length_violation_raises(self):
-        from contracts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         with pytest.raises(ValidationError, match="name length must be >= 3"):
             _tool_cfg_service._apply_param_constraints(
@@ -5995,7 +5985,7 @@ class TestValidateToolParamRanges:
             _tool_cfg_service._validate_tool_param_ranges(1, {"top_k": 0})
 
     def test_violation_raises(self):
-        from contracts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         tool = self._tool([{"name": "top_k", "type": "integer", "constraints": {"ge": 1}}])
         with patch_import_context(

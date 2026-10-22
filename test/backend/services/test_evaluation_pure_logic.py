@@ -233,6 +233,9 @@ def _install_sys_modules_stubs() -> None:
 
     def _mk_mod(name: str, **attrs) -> types.ModuleType:
         m = types.ModuleType(name)
+        if name == "contracts.constants.evaluation" and name in sys.modules:
+            # Limits and status doubles now share their business module.
+            m.__dict__.update(vars(sys.modules[name]))
         for k, v in attrs.items():
             setattr(m, k, v)
         sys.modules[name] = m
@@ -282,12 +285,12 @@ def _install_sys_modules_stubs() -> None:
         "ErrorCode", (), {"COMMON_VALIDATION_ERROR": "COMMON_VALIDATION_ERROR"}
     )
     _ec_mod = _mk_mod(
-        "contracts.error_code",
+        "contracts.errors.codes",
         ErrorCode=_ErrCode,
     )
     _consts_pkg.error_code = _ec_mod
     _el_mod = _mk_mod(
-        "contracts.evaluation_limits",
+        "contracts.constants.evaluation",
         DEFAULT_PASS_THRESHOLD=0.5,
         MAX_CONCURRENT_RUNS=5,
         MAX_EVALUATORS_PER_RUN=5,
@@ -296,7 +299,7 @@ def _install_sys_modules_stubs() -> None:
     )
     _consts_pkg.evaluation_limits = _el_mod
     _es_mod = _mk_mod(
-        "contracts.evaluation_status",
+        "contracts.constants.evaluation",
         EvalCaseStatus=type("ECS", (), {}),
         EvalPassStatus=type("EPS", (), {}),
         EvalRunStatus=type("ERS", (), {}),
@@ -311,12 +314,12 @@ def _install_sys_modules_stubs() -> None:
             self.message = msg
 
     _ex_mod = _mk_mod(
-        "contracts.exceptions",
+        "contracts.errors.exceptions",
         AppException=_AppException,
         UnauthorizedError=type("UnauthorizedError", (Exception,), {}),
     )
     _consts_pkg.exceptions = _ex_mod
-    _m_mod = _mk_mod("contracts.models", AgentRequest=type("AgentRequest", (), {}))
+    _m_mod = _mk_mod("contracts.agent", AgentRequest=type("AgentRequest", (), {}))
     _consts_pkg.model = _m_mod
 
     # ---- database – every imported name wired as MagicMock -----------------

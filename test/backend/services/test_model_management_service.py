@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import os
 import importlib
 import logging
@@ -15,7 +17,7 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 
-# Stub external modules required by contracts.models before importing services
+# Stub external modules required by contracts.agent before importing services
 if "nexent" not in sys.modules:
     sys.modules["nexent"] = mock.MagicMock()
 if "nexent.core" not in sys.modules:
@@ -71,8 +73,8 @@ install_serialization_stub(sys.modules["management.db.client"])
 if "database" in sys.modules:
     setattr(sys.modules["database"], "client", database_client_mod)
 
-# Stub contracts.models to avoid deep dependencies
-consts_model_mod = types.ModuleType("contracts.models")
+# Stub contracts.agent to avoid deep dependencies
+consts_model_mod = types.ModuleType("contracts.agent")
 
 
 class _EnumItem:
@@ -106,7 +108,7 @@ class _ProcessParams:
 
 
 def _infer_model_type_from_name(model_name: str) -> str:
-    """Mock implementation mirroring the real contracts.models._infer_model_type_from_name."""
+    """Mock implementation mirroring the real contracts.model._infer_model_type_from_name."""
     if not model_name:
         return "llm"
     name = model_name.lower()
@@ -151,7 +153,7 @@ consts_model_mod.ModelConnectStatusEnum = _ModelConnectStatusEnum
 consts_model_mod.ToolValidateRequest = _ToolValidateRequest
 consts_model_mod.ProcessParams = _ProcessParams
 consts_model_mod._infer_model_type_from_name = _infer_model_type_from_name
-sys.modules["contracts.models"] = consts_model_mod
+install_business_contract_stubs(consts_model_mod)
 if "consts" not in sys.modules:
     sys.modules["consts"] = types.ModuleType("consts")
 
@@ -191,6 +193,7 @@ consts_const_mod.ES_API_KEY = ""
 consts_const_mod.ES_USERNAME = ""
 consts_const_mod.ES_PASSWORD = ""
 sys.modules["consts.const"] = consts_const_mod
+install_business_constant_stubs(consts_const_mod)
 
 # Stub sqlalchemy.sql.func used by management.services.configuration.tenant.settings
 sqlalchemy_sql_mod = types.ModuleType("sqlalchemy.sql")
@@ -203,8 +206,8 @@ class _Func:
 sqlalchemy_sql_mod.func = _Func()
 sys.modules["sqlalchemy.sql"] = sqlalchemy_sql_mod
 
-# Stub contracts.provider used by service
-consts_provider_mod = types.ModuleType("contracts.provider")
+# Stub contracts.constants.model used by service
+consts_provider_mod = types.ModuleType("contracts.constants.model")
 
 
 class _ProviderEnum:
@@ -221,7 +224,7 @@ consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL = "wss://dashscope.aliyuncs.com/
 consts_provider_mod.DASHSCOPE_STT_BASE_URL = consts_provider_mod.DASHSCOPE_REALTIME_BASE_URL
 consts_provider_mod.TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
 consts_provider_mod.MODEL_ENGINE_URL_MARKER = "open/router"
-sys.modules["contracts.provider"] = consts_provider_mod
+install_shared_contract_stub(consts_provider_mod, 'provider')
 
 # Stub management.services.model.provider used by service
 services_provider_mod = types.ModuleType("management.services.model.provider")

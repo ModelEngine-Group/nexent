@@ -4,7 +4,7 @@ from copy import deepcopy
 from math import isfinite
 
 from consts.const import ENABLE_AIDP_KNOWLEDGE
-from contracts.exceptions import ValidationError
+from contracts.errors.exceptions import ValidationError
 from management.db.tool.repository import query_all_tools
 
 MANAGED_CLASSES = {"KnowledgeBaseSearchTool", "AidpSearchTool"}

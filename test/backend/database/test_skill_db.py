@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """Unit tests for management.db.skill.repository module."""
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import sys
 import os
 import types
@@ -42,14 +44,15 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 consts_mock.const.MAX_SKILLS_PER_TENANT = 1000
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
-sys.modules['contracts.models'] = MagicMock()
+install_business_constant_stubs(consts_mock.const)
+install_business_contract_stubs(MagicMock())
 
-error_code_mock = types.ModuleType('contracts.error_code')
+error_code_mock = types.ModuleType('contracts.errors.codes')
 error_code_mock.ErrorCode = types.SimpleNamespace(
     TENANT_RESOURCE_EXCEEDED="120104",
     FILE_TOO_LARGE="000403",
 )
-exceptions_mock = types.ModuleType('contracts.exceptions')
+exceptions_mock = types.ModuleType('contracts.errors.exceptions')
 
 class AppException(Exception):
     def __init__(self, _error_code=None, message=None, details=None):
@@ -63,8 +66,8 @@ class TenantResourceLimitError(AppException):
 
 exceptions_mock.AppException = AppException
 exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
-sys.modules['contracts.error_code'] = error_code_mock
-sys.modules['contracts.exceptions'] = exceptions_mock
+install_shared_contract_stub(error_code_mock, 'error_code')
+install_shared_contract_stub(exceptions_mock, 'exceptions')
 
 client_mock = MagicMock()
 client_mock.MinioClient = MagicMock()

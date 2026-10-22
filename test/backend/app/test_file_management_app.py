@@ -7,6 +7,7 @@ We stub external dependencies before importing the app module to avoid
 side effects and real network/storage calls.
 """
 
+from test.common.contract_stubs import install_shared_contract_stub
 import sys
 import types
 from typing import Any, AsyncGenerator, Dict, List
@@ -191,12 +192,12 @@ sys.modules["management.services.knowledge_base.ingestion"] = fmu_stub
 setattr(utils_pkg, "file_management_utils", fmu_stub)
 
 
-# Stub contracts.models.ProcessParams
+# Stub contracts.knowledge.ProcessParams
 consts_pkg = types.ModuleType("consts")
 consts_pkg.__path__ = [os.path.join(BACKEND_ROOT, "consts")]
 sys.modules.setdefault("consts", consts_pkg)
 
-model_stub = types.ModuleType("contracts.models")
+model_stub = types.ModuleType("contracts.agent")
 class ProcessParams:  # minimal stub
     def __init__(
         self,
@@ -212,11 +213,11 @@ class ProcessParams:  # minimal stub
         self.authorization = authorization
         self.model_id = model_id
 model_stub.ProcessParams = ProcessParams
-sys.modules.setdefault("contracts.models", model_stub)
+sys.modules.setdefault("contracts.agent", model_stub)
 setattr(consts_pkg, "model", model_stub)
 
-# Stub contracts.exceptions with real exception classes so isinstance checks work
-exceptions_stub = types.ModuleType("contracts.exceptions")
+# Stub contracts.errors.exceptions with real exception classes so isinstance checks work
+exceptions_stub = types.ModuleType("contracts.errors.exceptions")
 class AppException(Exception): pass
 class NotFoundException(Exception): pass
 class OfficeConversionException(Exception): pass
@@ -232,7 +233,7 @@ exceptions_stub.UnsupportedFileTypeException = UnsupportedFileTypeException
 exceptions_stub.FileTooLargeException = FileTooLargeException
 exceptions_stub.QuotaExceededError = QuotaExceededError
 exceptions_stub.UnauthorizedError = UnauthorizedError
-sys.modules["contracts.exceptions"] = exceptions_stub
+install_shared_contract_stub(exceptions_stub, 'exceptions')
 setattr(consts_pkg, "exceptions", exceptions_stub)
 
 
@@ -2234,7 +2235,7 @@ async def test_preview_file_malformed_range_returns_416(monkeypatch):
 @pytest.mark.asyncio
 async def test_preview_file_too_large_error(monkeypatch):
     """FileTooLargeException from resolve_preview_file -> HTTP 413."""
-    _FileTooLargeException = sys.modules["contracts.exceptions"].FileTooLargeException
+    _FileTooLargeException = sys.modules["contracts.errors.exceptions"].FileTooLargeException
 
     async def fake_resolve(object_name):
         raise _FileTooLargeException("File size 110 MB exceeds the 100 MB preview limit")
@@ -2254,7 +2255,7 @@ async def test_preview_file_too_large_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_preview_file_not_found_from_resolve(monkeypatch):
     """NotFoundException from resolve_preview_file -> HTTP 404."""
-    _NotFoundException = sys.modules["contracts.exceptions"].NotFoundException
+    _NotFoundException = sys.modules["contracts.errors.exceptions"].NotFoundException
 
     async def fake_resolve(object_name):
         raise _NotFoundException("The specified key does not exist")
@@ -2274,7 +2275,7 @@ async def test_preview_file_not_found_from_resolve(monkeypatch):
 @pytest.mark.asyncio
 async def test_preview_file_not_found_from_stream(monkeypatch):
     """NotFoundException from get_preview_stream -> HTTP 404."""
-    not_found_exception = sys.modules["contracts.exceptions"].NotFoundException
+    not_found_exception = sys.modules["contracts.errors.exceptions"].NotFoundException
 
     monkeypatch.setattr(file_management_app, "resolve_preview_file",
                         AsyncMock(return_value=("knowledge_base/test.pdf", "application/pdf", 1024)))
@@ -2318,7 +2319,7 @@ async def test_preview_file_unexpected_error_from_stream(monkeypatch):
 @pytest.mark.asyncio
 async def test_preview_file_unsupported_format_error(monkeypatch):
     """UnsupportedFileTypeException from resolve_preview_file -> HTTP 400."""
-    _UnsupportedFileTypeException = sys.modules["contracts.exceptions"].UnsupportedFileTypeException
+    _UnsupportedFileTypeException = sys.modules["contracts.errors.exceptions"].UnsupportedFileTypeException
 
     async def fake_resolve(object_name):
         raise _UnsupportedFileTypeException("Unsupported file format for preview")
@@ -2375,7 +2376,7 @@ async def test_preview_file_maps_unauthorized_error(monkeypatch):
 @pytest.mark.asyncio
 async def test_preview_file_office_conversion_error(monkeypatch):
     """OfficeConversionException (subclass of Exception) -> HTTP 500."""
-    _OfficeConversionException = sys.modules["contracts.exceptions"].OfficeConversionException
+    _OfficeConversionException = sys.modules["contracts.errors.exceptions"].OfficeConversionException
 
     async def fake_resolve(object_name):
         raise _OfficeConversionException("LibreOffice conversion failed")

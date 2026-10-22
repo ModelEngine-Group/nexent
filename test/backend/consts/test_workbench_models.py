@@ -5,7 +5,7 @@
 import pytest
 from pydantic import ValidationError
 
-from contracts.models import AgentRequest, WorkbenchSessionConfig
+from contracts.agent import AgentRequest, WorkbenchSessionConfig
 
 
 def _single_agent_payload() -> dict:

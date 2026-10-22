@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.exceptions import AppException, MCPConnectionError, NotFoundException, ValidationError, TokenExpiredError
-from contracts.models import ToolInstanceInfoRequest, ToolInstanceSearchRequest, ToolValidateRequest
+from contracts.errors.exceptions import AppException, MCPConnectionError, NotFoundException, ValidationError, TokenExpiredError
+from contracts.tool import ToolInstanceInfoRequest, ToolInstanceSearchRequest, ToolValidateRequest
 import logging
 from http import HTTPStatus
 from typing import Optional, Dict, Any, List
@@ -10,8 +10,8 @@ from fastapi import APIRouter, Header, HTTPException, Body, Query, Request
 from fastapi.responses import JSONResponse
 from nexent.core.concurrency import run_blocking
 
-from contracts.exceptions import AppException, MCPConnectionError, NotFoundException, ValidationError, TokenExpiredError
-from contracts.models import ToolInstanceInfoRequest, ToolInstanceSearchRequest, ToolValidateRequest
+from contracts.errors.exceptions import AppException, MCPConnectionError, NotFoundException, ValidationError, TokenExpiredError
+from contracts.tool import ToolInstanceInfoRequest, ToolInstanceSearchRequest, ToolValidateRequest
 from management.services.tool.configuration import (
     search_tool_info_impl,
     update_tool_info_impl,
@@ -24,7 +24,7 @@ from management.services.tool.configuration import (
     delete_openapi_service,
     _refresh_openapi_services_in_mcp,
 )
-from contracts.exceptions import AgentDraftEditError, ResourceBindingError
+from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingError
 from management.db.identity.user_tenant import get_user_email_map
 from management.services.monitor.audit import record_security_event
 from gateway.authentication.identity import get_current_user_id

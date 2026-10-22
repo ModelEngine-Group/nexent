@@ -336,10 +336,10 @@ def test_agent_shared_types_and_utilities_have_canonical_locations():
     shared_types = {
         "AgentModelProjection", "AgentRunContext", "SystemAgentRef", "WorkbenchReleaseManifest",
         "OptimizeRequest", "OptimizeResult",
-        "OptimizeRequest", "OptimizeResult",
     }
     contract = ast.parse((BACKEND_ROOT / "contracts/agent.py").read_text(encoding="utf-8"))
-    assert {node.name for node in contract.body if isinstance(node, ast.ClassDef)} == shared_types
+    # The business file also owns the API request models after their migration.
+    assert shared_types <= {node.name for node in contract.body if isinstance(node, ast.ClassDef)}
     for source in (MANAGEMENT_SERVICES / "agent").glob("*.py"):
         tree = ast.parse(source.read_text(encoding="utf-8"))
         assert not {node.name for node in tree.body if isinstance(node, ast.ClassDef)} & shared_types

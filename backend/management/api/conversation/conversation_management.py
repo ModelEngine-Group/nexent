@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.models import BatchDeleteConversationRequest, ConversationKnowledgeScopeUpdateRequest, WorkbenchConfigUpdateRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
-from contracts.exceptions import AppException, ConversationNotFoundError, ValidationError, TokenExpiredError, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.conversation import BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
+from contracts.knowledge import ConversationKnowledgeScopeUpdateRequest
+from contracts.agent import WorkbenchConfigUpdateRequest
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError, TokenExpiredError, WorkbenchConfigVersionConflict, WorkbenchError
 import logging
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, Optional
@@ -8,25 +10,10 @@ from typing import Annotated, Any, Dict, Optional
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from consts.const import ENABLE_AGENT_WORKBENCH
 
-from contracts.models import (
-    BatchDeleteConversationRequest,
-    ConversationKnowledgeScopeUpdateRequest,
-    WorkbenchConfigUpdateRequest,
-    ConversationRequest,
-    ConversationResponse,
-    GenerateTitleRequest,
-    MessageIdRequest,
-    OpinionRequest,
-    RenameRequest,
-)
-from contracts.exceptions import (
-    AppException,
-    ConversationNotFoundError,
-    ValidationError,
-    TokenExpiredError,
-    WorkbenchConfigVersionConflict,
-    WorkbenchError,
-)
+from contracts.conversation import BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
+from contracts.knowledge import ConversationKnowledgeScopeUpdateRequest
+from contracts.agent import WorkbenchConfigUpdateRequest
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError, TokenExpiredError, WorkbenchConfigVersionConflict, WorkbenchError
 from management.db.conversation.repository import get_conversation_list_page
 from management.services.conversation.service import (
     create_new_conversation,

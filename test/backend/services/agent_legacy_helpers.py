@@ -9,7 +9,7 @@ from collections import deque
 
 from fastapi.responses import JSONResponse
 
-from contracts.models import ExportAndImportAgentInfo
+from contracts.agent import ExportAndImportAgentInfo
 from management.db.agent.repository import delete_related_agent, insert_related_agent, query_sub_agents_id_list, search_agent_id_by_agent_name
 
 logger = logging.getLogger(__name__)

@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from test.common.contract_stubs import install_business_contract_stubs
 from pathlib import Path
 import sys
 import types
@@ -36,7 +37,7 @@ _stub_nexent_openai_model()
 # Exercise the real Jinja renderer used by SDK prompt assembly.
 import jinja2
 
-# Stub nexent.core.agents.agent_model to satisfy imports in contracts.models and agent_run_manager
+# Stub nexent.core.agents.agent_model to satisfy imports in contracts.agent and agent_run_manager
 agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
 agent_model_mod.ToolConfig = object
 agent_model_mod.AgentRunInfo = object
@@ -70,8 +71,8 @@ embedding_mod.OpenAICompatibleEmbedding = object
 embedding_mod.JinaEmbedding = object
 sys.modules["nexent.core.models.embedding_model"] = embedding_mod
 #
-# Stub contracts.models to avoid pydantic/email-validator heavy imports during tests.
-consts_model_mod = types.ModuleType("contracts.models")
+# Stub contracts.agent to avoid pydantic/email-validator heavy imports during tests.
+consts_model_mod = types.ModuleType("contracts.agent")
 class AgentRequest:
     def __init__(self, **kwargs):
         for k, v in kwargs.items():
@@ -112,16 +113,16 @@ consts_model_mod.MessageRequest = MessageRequest
 
 
 def filter_extra_params(model_type, extra_params):
-    """Minimal stub mirroring contracts.models.filter_extra_params for import-chain compat."""
+    """Minimal stub mirroring contracts.model.filter_extra_params for import-chain compat."""
     if not extra_params:
         return extra_params
     return dict(extra_params)
 
 
 consts_model_mod.filter_extra_params = filter_extra_params
-sys.modules["contracts.models"] = consts_model_mod
-# Also ensure contracts.models resolves to our stub for tests that import via contracts.models
-sys.modules["contracts.models"] = consts_model_mod
+install_business_contract_stubs(consts_model_mod)
+# Also ensure contracts.agent resolves to our stub for tests that import via contracts.agent
+install_business_contract_stubs(consts_model_mod)
 
 
 class HistoryItem:
@@ -196,8 +197,9 @@ backend_database_mod.client = backend_database_client_mod
 
 sys.modules["backend.database"] = backend_database_mod
 
-from contracts.models import MessageRequest, AgentRequest, MessageUnit
-from contracts.exceptions import ValidationError
+from contracts.conversation import MessageRequest, MessageUnit
+from contracts.agent import AgentRequest
+from contracts.errors.exceptions import ValidationError
 import unittest
 import json
 import asyncio
@@ -1461,7 +1463,7 @@ class TestUpdateConversationTitle(unittest.TestCase):
         """Should raise ConversationNotFoundError when conversation doesn't exist."""
         mock_rename.return_value = False
         from management.services.conversation.service import update_conversation_title
-        from contracts.exceptions import ConversationNotFoundError
+        from contracts.errors.exceptions import ConversationNotFoundError
 
         with self.assertRaises(ConversationNotFoundError):
             update_conversation_title(123, "New Title", "user-1")
@@ -2040,7 +2042,7 @@ class TestSaveSkillFilesToConversation(unittest.TestCase):
 
 def test_missing_message_raises_not_found_domain_error():
     import pytest
-    from contracts.exceptions import ConversationNotFoundError
+    from contracts.errors.exceptions import ConversationNotFoundError
 
     with patch('management.services.conversation.service.update_message_opinion', return_value=False):
         with pytest.raises(ConversationNotFoundError):

@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import types
 import importlib.machinery
-from contracts.exceptions import NotFoundException, UnauthorizedError, ValidationError
+from contracts.errors.exceptions import NotFoundException, UnauthorizedError, ValidationError
 import sys
 import pytest
 from unittest.mock import patch, MagicMock

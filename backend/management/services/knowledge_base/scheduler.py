@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional
 
-from contracts.scheduler import FREQUENCY_MAP, SCHEDULER_CHECK_INTERVAL_SECONDS
+from contracts.constants.knowledge import FREQUENCY_MAP, SCHEDULER_CHECK_INTERVAL_SECONDS
 from management.db.knowledge_base.repository import get_knowledge_bases_for_auto_summary
 from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
 from management.services.configuration.tenant.settings import tenant_config_manager

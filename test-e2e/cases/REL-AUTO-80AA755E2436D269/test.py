@@ -13,8 +13,8 @@ import logging
 
 import pytest
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 
 
 TENANT_ID = 'tenant-d5-failopen'

@@ -5,8 +5,8 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, desc, func, insert, select, update
 
-from consts.const import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
-from contracts.models import filter_extra_params
+from contracts.constants.knowledge import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
+from contracts.model import filter_extra_params
 from management.utils.orm import as_dict
 from management.db.client import db_client, get_db_session
 from management.db.models import ModelRecord

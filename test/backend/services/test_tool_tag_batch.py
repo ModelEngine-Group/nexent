@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from management.api.tag import tag_management as tag_management_app
-from contracts.exceptions import ValidationError as DomainValidationError
-from contracts.models import ToolTagAssignmentBatchRequest
+from contracts.errors.exceptions import ValidationError as DomainValidationError
+from contracts.tag import ToolTagAssignmentBatchRequest
 from management.db.tag.repository import TagManagementDB
 from management.db.tool.repository import query_tenant_tools_by_ids
 from management.services.tag.library import TagManagementService

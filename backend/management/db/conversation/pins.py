@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy import func, select, text, update
 
-from contracts.exceptions import ConversationNotFoundError
+from contracts.errors.exceptions import ConversationNotFoundError
 from contracts.conversation import conversation_time_as_utc
 from management.db.client import get_db_session
 from management.db.models import ConversationRecord

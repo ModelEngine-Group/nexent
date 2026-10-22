@@ -3,7 +3,7 @@
 Tenant management API endpoints
 """
 
-from contracts.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 import logging
 from typing import Optional
 
@@ -11,15 +11,8 @@ from fastapi import APIRouter, Body, Header, HTTPException, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
-from contracts.models import PaginationRequest, TenantCreateRequest, TenantUpdateRequest
-from contracts.exceptions import (
-    ForbiddenError,
-    NotFoundException,
-    TenantResourceLimitError,
-    UnauthorizedError,
-    ValidationError,
-    tenant_resource_limit_error_payload,
-)
+from contracts.identity import PaginationRequest, TenantCreateRequest, TenantUpdateRequest
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.tenants import (
     create_tenant,

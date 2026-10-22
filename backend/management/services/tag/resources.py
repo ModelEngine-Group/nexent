@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol, TypeVar
 
-from consts.const import PERMISSION_EDIT, PERMISSION_READ
+from contracts.constants.identity import PERMISSION_EDIT, PERMISSION_READ
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.agent.catalog import get_agent_repository_by_id
 from management.db.knowledge_base.repository import get_knowledge_record

@@ -96,7 +96,7 @@ def sample_model_data():
 @pytest.mark.asyncio
 async def test_suggest_capacity_success(client, auth_header, user_credentials, mocker):
     """Test standalone capacity suggestion endpoint."""
-    from contracts.models import CapacitySuggestionFields, ModelCapacitySuggestionResponse
+    from contracts.model import CapacitySuggestionRequestFields as CapacitySuggestionFields, ModelCapacitySuggestionResponse
 
     mocker.patch('management.api.model.model_managment.get_current_user_id', return_value=user_credentials)
     mock_suggest = mocker.patch(
@@ -144,7 +144,7 @@ async def test_suggest_capacity_success(client, auth_header, user_credentials, m
 def test_suggest_capacity_includes_reasoning_capability(mocker):
     """The shared model/base-URL lookup is returned to custom-access callers."""
     from management.api.model.model_managment import _suggest_capacity_for_request
-    from contracts.models import ModelCapacitySuggestionRequest
+    from contracts.model import ModelCapacitySuggestionRequest
     from management.services.model.capacity import (
         CapacitySuggestionMatchKind,
         CapacitySuggestionResult,
@@ -2179,7 +2179,7 @@ class TestModelAuditEntries:
 @pytest.mark.parametrize("status_code", [401, 403, 502])
 def test_provider_domain_error_preserves_upstream_http_contract(client, auth_header, mocker, endpoint, status_code):
     """Map the model domain error to develop's unchanged HTTP status and detail."""
-    from contracts.exceptions import ModelProviderError
+    from contracts.errors.exceptions import ModelProviderError
 
     discover = mocker.patch(
         "management.api.model.model_managment.create_provider_models_for_tenant",

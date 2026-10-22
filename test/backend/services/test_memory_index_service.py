@@ -6,6 +6,7 @@ The pure-kNN branch is exercised end-to-end through the retrieval service
 tests in :mod:`test_memory_retrieval_service`.
 """
 
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import types
 from unittest.mock import MagicMock
@@ -125,6 +126,7 @@ consts_const.VectorDatabaseType = _VectorDatabaseType
 consts_pkg.const = consts_const
 sys.modules["consts"] = consts_pkg
 sys.modules["consts.const"] = consts_const
+install_business_constant_stubs(consts_const)
 
 vdb_service = types.ModuleType("management.services.knowledge_base.service")
 

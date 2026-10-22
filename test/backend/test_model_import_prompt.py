@@ -8,7 +8,7 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 
-from backend.contracts import models as model_consts
+from contracts import agent as model_consts
 
 
 @pytest.fixture

@@ -4,7 +4,7 @@
 
 from typing import Any, Dict, List, Optional
 
-from consts.const import PERMISSION_READ
+from contracts.constants.identity import PERMISSION_READ
 
 
 def apply_read_only_to_asset_indices_info(result: Dict[str, Any]) -> Dict[str, Any]:

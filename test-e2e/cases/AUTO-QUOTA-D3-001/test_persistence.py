@@ -22,8 +22,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from management.api.conversation import conversation_management as routes
-from contracts.exceptions import AppException
-from contracts.models import MessageRequest, MessageUnit
+from contracts.errors.exceptions import AppException
+from contracts.conversation import MessageRequest, MessageUnit
 from contracts.conversation import MessageSource, encode_activity_cursor
 from management.db.conversation import repository as db
 from management.db.conversation import pins as pins

@@ -174,8 +174,8 @@ class TestFetchDifyDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_auth_error(self, dify_mocks):
         """Test endpoint with authentication error."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer invalid-token"
         dify_api_base = "https://dify.example.com"
@@ -200,8 +200,8 @@ class TestFetchDifyDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_service_validation_error(self, dify_mocks):
         """Test endpoint with service layer validation error (ValueError)."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -225,8 +225,8 @@ class TestFetchDifyDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_service_error(self, dify_mocks):
         """Test endpoint with general service layer error."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -253,8 +253,8 @@ class TestFetchDifyDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_http_error_from_service(self, dify_mocks):
         """Test endpoint when service raises HTTP-related exception."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -280,8 +280,8 @@ class TestFetchDifyDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_request_error_from_service(self, dify_mocks):
         """Test endpoint when service raises request error."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -294,8 +294,8 @@ class TestFetchDifyDatasetsApi:
         dify_mocks['fetch_dify'].side_effect = Exception(
             "Dify API request failed: Connection refused")
 
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         with pytest.raises(AppException) as exc_info:
             await fetch_dify_datasets_api(
@@ -482,7 +482,7 @@ class TestFetchDifyDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_logger_error_call(self, dify_mocks):
         """Test that endpoint logs errors appropriately."""
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -619,7 +619,7 @@ class TestDifyAppExceptionHandlers:
         dify_mocks['fetch_dify'].side_effect = Exception(
             "URL connection error")
 
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
 
         with pytest.raises(AppException) as exc_info:
             await fetch_dify_datasets_api(
@@ -643,8 +643,8 @@ class TestFetchDifyDatasetsApiConfigValidation:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_invalid_dify_api_base_none(self):
         """Test endpoint raises DIFY_CONFIG_INVALID when dify_api_base is None."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = None
@@ -673,8 +673,8 @@ class TestFetchDifyDatasetsApiConfigValidation:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_invalid_dify_api_base_integer(self):
         """Test endpoint raises DIFY_CONFIG_INVALID when dify_api_base is an integer."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = 12345  # Invalid type - should be string
@@ -703,8 +703,8 @@ class TestFetchDifyDatasetsApiConfigValidation:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_invalid_dify_api_base_object(self):
         """Test endpoint raises DIFY_CONFIG_INVALID when dify_api_base is an object without rstrip."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         # Invalid type - should be string
@@ -733,8 +733,8 @@ class TestFetchDifyDatasetsApiConfigValidation:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_invalid_dify_api_base_list(self):
         """Test endpoint raises DIFY_CONFIG_INVALID when dify_api_base is a list."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         # Invalid type - should be string
@@ -763,8 +763,8 @@ class TestFetchDifyDatasetsApiConfigValidation:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_dify_config_invalid_logs_error_message(self):
         """Test that DIFY_CONFIG_INVALID error logs the actual exception message."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         # This will cause AttributeError: 'NoneType' object has no attribute 'rstrip'
@@ -841,8 +841,8 @@ class TestAppExceptionReRaising:
     @pytest.mark.asyncio
     async def test_service_raises_app_exception_re_raised_to_middleware(self):
         """Test that AppException from service is re-raised for global middleware."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -879,8 +879,8 @@ class TestAppExceptionReRaising:
     @pytest.mark.asyncio
     async def test_service_raises_dify_config_invalid_app_exception(self):
         """Test that DIFY_CONFIG_INVALID AppException from service is re-raised."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -914,8 +914,8 @@ class TestAppExceptionReRaising:
     @pytest.mark.asyncio
     async def test_service_raises_dify_auth_error_app_exception(self):
         """Test that DIFY_AUTH_ERROR AppException from service is re-raised."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -949,8 +949,8 @@ class TestAppExceptionReRaising:
     @pytest.mark.asyncio
     async def test_service_raises_app_exception_with_details(self):
         """Test that AppException with details from service is re-raised."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -987,8 +987,8 @@ class TestAppExceptionReRaising:
     @pytest.mark.asyncio
     async def test_service_raises_dify_rate_limit_app_exception(self):
         """Test that DIFY_RATE_LIMIT AppException from service is re-raised."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -1022,8 +1022,8 @@ class TestAppExceptionReRaising:
     @pytest.mark.asyncio
     async def test_app_exception_not_wrapped_or_converted(self):
         """Test that AppException is not wrapped or converted to another exception."""
-        from contracts.exceptions import AppException
-        from contracts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"

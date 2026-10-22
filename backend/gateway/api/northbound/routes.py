@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.exceptions import ConversationNotFoundError, ForbiddenError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, NotFoundException, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
-from contracts.models import ApiKeyTargetRequest, ApiUserBatchCreateRequest, GenerateTitleRequest, ToolParamsRequest
+from contracts.errors.exceptions import ConversationNotFoundError, ForbiddenError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, NotFoundException, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
+from contracts.conversation import GenerateTitleRequest
+from contracts.tool import ToolParamsRequest
 from gateway.authentication.dependencies import get_northbound_context as _get_northbound_context
 from contracts.authentication import NorthboundContext
 import logging
@@ -15,22 +17,11 @@ from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import ValidationError as PydanticValidationError
 
-from contracts.models import reject_legacy_agent_fields
-from contracts.exceptions import (
-    ConversationNotFoundError,
-    ForbiddenError,
-    LimitExceededError,
-    RuntimeServiceTimeoutError,
-    RuntimeServiceUnavailableError,
-    RuntimeUpstreamError,
-    TenantResourceLimitError,
-    UnauthorizedError,
-    NotFoundException,
-    UnauthorizedError,
-    ValidationError,
-    tenant_resource_limit_error_payload,
-)
-from contracts.models import ApiKeyTargetRequest, ApiUserBatchCreateRequest, GenerateTitleRequest, ToolParamsRequest
+from contracts.agent import reject_legacy_agent_fields
+from contracts.errors.exceptions import ConversationNotFoundError, ForbiddenError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, TenantResourceLimitError, UnauthorizedError, NotFoundException, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.identity import ApiKeyTargetRequest, ApiUserBatchCreateRequest
+from contracts.conversation import GenerateTitleRequest
+from contracts.tool import ToolParamsRequest
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.services.permission.api_keys import (
     create_api_users_batch,

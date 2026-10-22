@@ -10,9 +10,9 @@ import pytest
 
 from shared.config import repo_root
 
-from contracts.error_code import ERROR_CODE_HTTP_STATUS, ErrorCode
-from contracts.error_message import ErrorMessage
-from contracts.exceptions import AppException
+from contracts.errors.codes import ERROR_CODE_HTTP_STATUS, ErrorCode
+from contracts.errors.messages import ErrorMessage
+from contracts.errors.exceptions import AppException
 
 CASE_ID = "API-AUTO-6A4110F4BD10BA0F"
 EXPECTED_CODE = "060109"

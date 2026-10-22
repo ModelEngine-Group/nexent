@@ -9,8 +9,10 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from management.db.client import get_db_session
 from management.db.models import TenantConfig, TenantGroupInfo
-from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_GROUP_ID, DEFAULT_TENANT_ID, MAX_TENANT_COUNT, TENANT_ID, TENANT_NAME
-from contracts.exceptions import TenantResourceLimitError
+from contracts.constants.identity import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+from contracts.constants.configuration import DEFAULT_GROUP_ID, TENANT_ID, TENANT_NAME
+from consts.const import MAX_TENANT_COUNT
+from contracts.errors.exceptions import TenantResourceLimitError
 
 
 logger = logging.getLogger("tenant_config_db")

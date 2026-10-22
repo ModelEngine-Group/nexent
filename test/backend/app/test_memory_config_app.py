@@ -33,7 +33,7 @@ patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
-from contracts.exceptions import UnauthorizedError
+from contracts.errors.exceptions import UnauthorizedError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from http import HTTPStatus

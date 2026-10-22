@@ -2,6 +2,7 @@
 
 """Unit tests for the knowledge-base source-object storage ledger DAL."""
 
+from contracts.errors import exceptions as storage_db_knowledge_base_storage_object_exceptions
 from contextlib import nullcontext
 import sys
 import types
@@ -22,7 +23,7 @@ from test.common.database_stubs import install_serialization_stub
 install_serialization_stub(sys.modules["management.db.client"])
 
 from management.db.knowledge_base import storage_object as storage_db
-from contracts.persistence import knowledge_base_storage_object as storage_db_knowledge_base_storage_object
+from contracts.constants import knowledge as storage_db_knowledge_base_storage_object
 
 if previous_client_module is None:
     sys.modules.pop("management.db.client", None)
@@ -193,7 +194,7 @@ def test_commit_storage_object_rejects_different_ownership_or_size(
         **call_overrides,
     }
 
-    with pytest.raises(storage_db_knowledge_base_storage_object.StorageObjectConflictError):
+    with pytest.raises(storage_db_knowledge_base_storage_object_exceptions.StorageObjectConflictError):
         storage_db.commit_storage_object(**payload)
 
 

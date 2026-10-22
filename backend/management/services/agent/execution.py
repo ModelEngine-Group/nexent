@@ -15,8 +15,12 @@ from typing import (
 from agents.agent_run_manager import (
     agent_run_manager,
 )
-from consts.const import MESSAGE_ROLE, MODEL_CONFIG_MAPPING, RUNTIME_CANCEL_POLL_INTERVAL_SECONDS, STREAM_STATUS_EVENT
-from contracts.models import AgentRequest, MessageRequest
+from contracts.constants.conversation import MESSAGE_ROLE
+from contracts.constants.model import MODEL_CONFIG_MAPPING
+from consts.const import RUNTIME_CANCEL_POLL_INTERVAL_SECONDS
+from contracts.constants.agent import STREAM_STATUS_EVENT
+from contracts.agent import AgentRequest
+from contracts.conversation import MessageRequest
 from management.db.conversation.repository import get_units_by_message
 from management.services.agent.artifacts import (
     enrich_file_uploads_with_presigned_urls as _enrich_file_uploads_with_presigned_urls,

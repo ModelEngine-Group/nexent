@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Any, BinaryIO, Dict, List, Optional, Tuple
 
 from management.db.client import minio_client
-from consts.const import S3_URL_PREFIX
+from contracts.constants.knowledge import S3_URL_PREFIX
 from consts.const import NORTHBOUND_EXTERNAL_URL
 from urllib.parse import quote
 

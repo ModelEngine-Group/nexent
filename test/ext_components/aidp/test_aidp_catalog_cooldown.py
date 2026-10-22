@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from ext_components.aidp.services import aidp_access_service as service
 from ext_components.aidp.services import aidp_service
 

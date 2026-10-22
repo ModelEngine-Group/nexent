@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 from test.backend.management.import_patching import set_import_attribute
 import sys
 import types
@@ -27,11 +28,12 @@ def stub_project_modules(monkeypatch, tmp_path):
     setattr(const_mod, "DATA_PROCESS_SERVICE", "http://data-process")
     setattr(const_mod, "LIBREOFFICE_PROFILE_DIR", str(tmp_path / "lo-profile"))
     sys.modules["consts.const"] = const_mod
+    install_business_constant_stubs(const_mod)
 
-    # contracts.models
-    model_mod = types.ModuleType("contracts.models")
+    # contracts.agent
+    model_mod = types.ModuleType("contracts.agent")
     setattr(model_mod, "ProcessParams", _ProcessParams)
-    sys.modules["contracts.models"] = model_mod
+    install_business_contract_stubs(model_mod)
 
     # management.db.file.attachment
     attach_mod = types.ModuleType("management.db.file.attachment")

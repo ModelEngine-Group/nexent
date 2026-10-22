@@ -2,6 +2,8 @@
 
 """Unit tests for management.api.agent.agent_repository module."""
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_contract_stubs
 import importlib
 import json
 import os
@@ -25,7 +27,7 @@ importlib.import_module("management.services.repository.agent.sync")
 sys.modules.setdefault("management.services.repository.agent.listing", MagicMock())
 sys.modules.setdefault("gateway.authentication.identity", MagicMock())
 
-consts_model = types.ModuleType("contracts.models")
+consts_model = types.ModuleType("contracts.agent")
 
 
 class _AgentRepositoryListingCreateRequest(BaseModel):
@@ -56,9 +58,9 @@ class _TagAssignmentFilter(BaseModel):
 
 
 consts_model.TagAssignmentFilter = _TagAssignmentFilter
-sys.modules["contracts.models"] = consts_model
+install_business_contract_stubs(consts_model)
 
-consts_exceptions_mock = types.ModuleType("contracts.exceptions")
+consts_exceptions_mock = types.ModuleType("contracts.errors.exceptions")
 consts_exceptions_mock.SkillDuplicateError = type('SkillDuplicateError', (Exception,), {})
 consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,), {})
 consts_exceptions_mock.NotFoundException = type('NotFoundException', (Exception,), {})
@@ -66,7 +68,7 @@ consts_exceptions_mock.ValidationError = type('ValidationError', (Exception,), {
 consts_exceptions_mock.AppException = type('AppException', (Exception,), {})
 consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
 consts_exceptions_mock.AgentToolImportError = type("AgentToolImportError", (ValueError,), {})
-sys.modules["contracts.exceptions"] = consts_exceptions_mock
+install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 
 consts_pkg = sys.modules.get("consts")
 if consts_pkg is None:
@@ -1094,7 +1096,7 @@ def test_import_agent_from_repository_api_passes_tenant_id(
 
 
 def test_import_tool_parameter_error_returns_400(mocker, mock_auth_header):
-    from contracts.exceptions import AgentToolImportError
+    from contracts.errors.exceptions import AgentToolImportError
 
     mocker.patch("management.api.agent.agent_repository.get_current_user_id", return_value=("user", "test_tenant_id"))
     mocker.patch(

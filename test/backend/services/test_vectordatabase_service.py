@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import asyncio
 import importlib
 import io
@@ -110,7 +112,7 @@ setattr(nexent_memory_module, 'memory_service', memory_service_module)
 embedding_model_module = types.ModuleType('nexent.core.models.embedding_model')
 
 
-consts_exceptions_mod = types.ModuleType("contracts.exceptions")
+consts_exceptions_mod = types.ModuleType("contracts.errors.exceptions")
 
 
 class AppException(Exception):
@@ -162,7 +164,7 @@ consts_exceptions_mod.TenantResourceLimitError = TenantResourceLimitError
 # Use real consts.const/scheduler (env vars are configured in test/conftest.py)
 consts_pkg = importlib.import_module("consts")
 consts_const_mod = importlib.import_module("consts.const")
-consts_scheduler_mod = importlib.import_module("contracts.scheduler")
+consts_scheduler_mod = importlib.import_module("contracts.constants.knowledge")
 
 # The shared test bootstrap can load a reduced consts stub before this module.
 # Supply the knowledge-base service constants required by the refactored module.
@@ -181,10 +183,12 @@ if not hasattr(consts_const_mod, "VectorDatabaseType"):
 
 sys.modules["consts"] = consts_pkg
 sys.modules["consts.const"] = consts_const_mod
-sys.modules["contracts.exceptions"] = consts_exceptions_mod
-sys.modules["contracts.models"] = MagicMock()
-sys.modules["contracts.scheduler"] = consts_scheduler_mod
-sys.modules["contracts.error_code"] = MagicMock()
+install_business_constant_stubs(consts_const_mod)
+install_shared_contract_stub(consts_exceptions_mod, 'exceptions')
+install_business_contract_stubs(MagicMock())
+install_shared_contract_stub(consts_scheduler_mod, 'scheduler')
+install_shared_contract_stub(MagicMock(), 'error_code')
+identity_constants = importlib.import_module('contracts.constants.identity')
 
 
 class _VectorDatabaseCore:
@@ -2225,7 +2229,7 @@ class TestElasticSearchService(unittest.TestCase):
                 patch('management.services.knowledge_base.management.tenant_config_manager') as mock_tenant_cfg, \
                 patch('management.services.knowledge_base.management.update_last_doc_update_time'):
             mock_get_record.return_value = {
-                "tenant_id": consts_const_mod.DEFAULT_TENANT_ID}
+                "tenant_id": identity_constants.DEFAULT_TENANT_ID}
             mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 6}
 
             result = ElasticSearchService.index_documents(
@@ -2237,7 +2241,7 @@ class TestElasticSearchService(unittest.TestCase):
 
             self.assertTrue(result["success"])
             mock_tenant_cfg.get_model_config.assert_called_once_with(
-                key="MULTI_EMBEDDING_ID", tenant_id=consts_const_mod.DEFAULT_TENANT_ID
+                key="MULTI_EMBEDDING_ID", tenant_id=identity_constants.DEFAULT_TENANT_ID
             )
 
     def test_index_documents_fetches_image_bytes(self):
@@ -2252,7 +2256,7 @@ class TestElasticSearchService(unittest.TestCase):
                 patch('management.services.knowledge_base.management.get_file_stream') as mock_get_stream, \
                 patch('management.services.knowledge_base.management.update_last_doc_update_time'):
             mock_get_record.return_value = {
-                "tenant_id": consts_const_mod.DEFAULT_TENANT_ID}
+                "tenant_id": identity_constants.DEFAULT_TENANT_ID}
             mock_tenant_cfg.get_model_config.return_value = {"chunk_batch": 5}
             mock_get_stream.return_value = io.BytesIO(b"img-bytes")
 
@@ -3453,7 +3457,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.search_hybrid(
             index_names=["test_index"],
             query="test query",
-            tenant_id=consts_const_mod.DEFAULT_TENANT_ID,
+            tenant_id=identity_constants.DEFAULT_TENANT_ID,
             top_k=10,
             weight_accurate=0.5,
             vdb_core=self.mock_vdb_core
@@ -3480,7 +3484,7 @@ class TestElasticSearchService(unittest.TestCase):
             top_k=10,
             weight_accurate=0.5
         )
-        mock_get_embedding_by_index.assert_called_once_with(consts_const_mod.DEFAULT_TENANT_ID, "test_index")
+        mock_get_embedding_by_index.assert_called_once_with(identity_constants.DEFAULT_TENANT_ID, "test_index")
 
     def test_apply_document_tag_predicates_keeps_only_matching_documents(self):
         tag_projection_module = types.ModuleType('management.services.knowledge_base.tag_projection')
@@ -3597,7 +3601,7 @@ class TestElasticSearchService(unittest.TestCase):
             ElasticSearchService.search_hybrid(
                 index_names=["test_index"],
                 query="test query",
-                tenant_id=consts_const_mod.DEFAULT_TENANT_ID,
+                tenant_id=identity_constants.DEFAULT_TENANT_ID,
                 top_k=10,
                 weight_accurate=0.5,
                 vdb_core=self.mock_vdb_core
@@ -3639,7 +3643,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.search_hybrid(
             index_names=["test_index"],
             query="test query",
-            tenant_id=consts_const_mod.DEFAULT_TENANT_ID,
+            tenant_id=identity_constants.DEFAULT_TENANT_ID,
             top_k=10,
             weight_accurate=0.0,
             vdb_core=self.mock_vdb_core
@@ -3658,7 +3662,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.search_hybrid(
             index_names=["test_index"],
             query="test query",
-            tenant_id=consts_const_mod.DEFAULT_TENANT_ID,
+            tenant_id=identity_constants.DEFAULT_TENANT_ID,
             top_k=10,
             weight_accurate=1.0,
             vdb_core=self.mock_vdb_core
@@ -3676,7 +3680,7 @@ class TestElasticSearchService(unittest.TestCase):
         result = ElasticSearchService.search_hybrid(
             index_names=["test_index"],
             query="test query",
-            tenant_id=consts_const_mod.DEFAULT_TENANT_ID,
+            tenant_id=identity_constants.DEFAULT_TENANT_ID,
             top_k=10,
             weight_accurate=0.3,
             vdb_core=self.mock_vdb_core
@@ -5288,8 +5292,8 @@ class TestRethrowOrPlain(unittest.TestCase):
     def test_get_vector_db_core_datamate_type(self, mock_datamate_core, mock_tenant_config_manager):
         """get_vector_db_core returns DataMateCore for DATAMATE type."""
         from management.services.knowledge_base.service import get_vector_db_core
-        from contracts.storage import VectorDatabaseType
-        from consts.const import DATAMATE_URL
+        from contracts.constants.knowledge import VectorDatabaseType
+        from contracts.constants.configuration import DATAMATE_URL
 
         # Setup mocks
         mock_tenant_config_manager.get_app_config.return_value = DATAMATE_URL
@@ -5308,8 +5312,8 @@ class TestRethrowOrPlain(unittest.TestCase):
     def test_get_vector_db_core_datamate_success(self, mock_datamate_core, mock_tenant_config_manager):
         """get_vector_db_core returns DataMateCore when DATAMATE type with valid tenant_id and configured URL."""
         from management.services.knowledge_base.service import get_vector_db_core
-        from contracts.storage import VectorDatabaseType
-        from consts.const import DATAMATE_URL
+        from contracts.constants.knowledge import VectorDatabaseType
+        from contracts.constants.configuration import DATAMATE_URL
 
         # Setup mocks
         mock_tenant_config_manager.get_app_config.return_value = "https://datamate.example.com"
@@ -5331,7 +5335,7 @@ class TestRethrowOrPlain(unittest.TestCase):
     def test_get_vector_db_core_datamate_no_url_configured(self, mock_tenant_config_manager):
         """get_vector_db_core raises ValueError when DATAMATE type with tenant_id but no URL configured."""
         from management.services.knowledge_base.service import get_vector_db_core
-        from contracts.storage import VectorDatabaseType
+        from contracts.constants.knowledge import VectorDatabaseType
 
         # Setup mock to return None (no URL configured)
         mock_tenant_config_manager.get_app_config.return_value = None
@@ -5348,7 +5352,7 @@ class TestRethrowOrPlain(unittest.TestCase):
     def test_get_vector_db_core_datamate_no_tenant_id(self):
         """get_vector_db_core raises ValueError when DATAMATE type without tenant_id."""
         from management.services.knowledge_base.service import get_vector_db_core
-        from contracts.storage import VectorDatabaseType
+        from contracts.constants.knowledge import VectorDatabaseType
 
         # Execute and Assert
         with self.assertRaises(ValueError) as exc:
@@ -7103,7 +7107,7 @@ class TestCoverageImprovement(unittest.TestCase):
         """Test create_chunk handles exception from vdb_core.create_chunk (lines 1858-1861)."""
         mock_get_record.return_value = {"embedding_model_id": 1, "tenant_id": "tenant-1"}
         self.mock_vdb_core.create_chunk.side_effect = Exception("ES error")
-        from contracts.models import ChunkCreateRequest
+        from contracts.knowledge import ChunkCreateRequest
         with self.assertRaises(Exception) as ctx:
             ElasticSearchService.create_chunk(
                 index_name="test-index",
@@ -7122,7 +7126,7 @@ class TestCoverageImprovement(unittest.TestCase):
     # Tests for update_chunk exception (lines 1899-1902)
     def test_update_chunk_vdb_exception(self):
         """Test update_chunk handles exception from vdb_core (lines 1899-1902)."""
-        from contracts.models import ChunkUpdateRequest
+        from contracts.knowledge import ChunkUpdateRequest
         self.mock_vdb_core.update_chunk.side_effect = Exception("ES error")
         with self.assertRaises(Exception) as ctx:
             ElasticSearchService.update_chunk(
@@ -7443,7 +7447,7 @@ class TestCoverageImprovement(unittest.TestCase):
         """Test create_chunk handles exception when getting knowledge record (lines 1812-1813)."""
         mock_get_record.side_effect = Exception("DB error")
         self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
-        from contracts.models import ChunkCreateRequest
+        from contracts.knowledge import ChunkCreateRequest
         with patch('management.services.knowledge_base.service.get_embedding_model_by_id',
                    return_value=(MagicMock(), 1)):
             result = ElasticSearchService.create_chunk(
@@ -7468,7 +7472,7 @@ class TestCoverageImprovement(unittest.TestCase):
         mock_model.get_embeddings.side_effect = Exception("Embedding service error")
         mock_get_model.return_value = (mock_model, 1)
         self.mock_vdb_core.create_chunk.return_value = {"id": "chunk-1"}
-        from contracts.models import ChunkCreateRequest
+        from contracts.knowledge import ChunkCreateRequest
         result = ElasticSearchService.create_chunk(
             index_name="test-index",
             chunk_request=ChunkCreateRequest(chunk_id="c1", content="test"),
@@ -7484,7 +7488,7 @@ class TestCoverageImprovement(unittest.TestCase):
     # Tests for update_chunk - empty payload (line 1890)
     def test_update_chunk_empty_payload(self):
         """Test update_chunk raises when no update fields supplied (line 1890)."""
-        from contracts.models import ChunkUpdateRequest
+        from contracts.knowledge import ChunkUpdateRequest
         # Mock _build_chunk_payload to return empty dict
         with patch.object(ElasticSearchService, '_build_chunk_payload', return_value={}):
             with self.assertRaises(Exception) as ctx:

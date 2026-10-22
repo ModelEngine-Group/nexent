@@ -11,26 +11,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 import jwt
-from consts.const import (
-    ASSET_OWNER_ROLE,
-    ASSET_OWNER_TENANT_ID,
-    DEBUG_JWT_EXPIRE_SECONDS,
-    DEFAULT_TENANT_ID,
-    DEFAULT_USER_ID,
-    IS_SPEED_MODE,
-    JWT_EXPIRY_SECONDS,
-    LANGUAGE,
-    SERVICE_ROLE_KEY,
-    SUPABASE_JWT_SECRET,
-    SUPABASE_KEY,
-    SUPABASE_URL,
-)
-from contracts.authentication import OAUTH_PENDING_PURPOSE
-from contracts.exceptions import (
-    LimitExceededError,
-    TokenExpiredError,
-    UnauthorizedError,
-)
+from contracts.constants.identity import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID, DEFAULT_USER_ID
+from consts.const import DEBUG_JWT_EXPIRE_SECONDS, IS_SPEED_MODE, JWT_EXPIRY_SECONDS, SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET, SUPABASE_KEY, SUPABASE_URL
+from contracts.constants.localization import LANGUAGE
+from contracts.constants.identity import OAUTH_PENDING_PURPOSE
+from contracts.errors.exceptions import LimitExceededError, TokenExpiredError, UnauthorizedError
 from fastapi import Header, Request
 from gateway.authentication.credentials import extract_bearer_token
 from gateway.authentication.internal import verify_internal_runtime_jwt
@@ -121,7 +106,7 @@ def validate_aksk_authentication(
 
     Returns True when valid, otherwise raises domain exceptions.
     """
-    from contracts.exceptions import SignatureValidationError
+    from contracts.errors.exceptions import SignatureValidationError
 
     try:
         access_key, ts, sig = extract_aksk_headers(headers)

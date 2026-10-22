@@ -4,7 +4,7 @@
 
 import logging
 
-from consts.const import LANGUAGE
+from contracts.constants.localization import LANGUAGE
 from management.db.agent.repository import query_all_agent_info_by_tenant_id
 from management.services.agent.prompt import (
     load_default_generation_prompt,

@@ -146,7 +146,7 @@ class _ServiceStub:
 
     async def convert_office_to_pdf_impl(self, object_name: str, pdf_object_name: str) -> None:
         """Stub: raise OfficeConversionException for sentinel inputs, otherwise succeed."""
-        from contracts.exceptions import OfficeConversionException
+        from contracts.errors.exceptions import OfficeConversionException
         if object_name == "fail.docx":
             raise OfficeConversionException("conversion failed")
         if object_name == "err.docx":
@@ -158,12 +158,12 @@ def stub_modules(monkeypatch):
     # monkeypatch.setitem restores the real modules after each test; direct
     # sys.modules assignment would leak the stubs into later test files that
     # share the same pytest process.
-    # contracts.models
-    model_mod = types.ModuleType("contracts.models")
+    # contracts.agent
+    model_mod = types.ModuleType("contracts.agent")
     model_mod.TaskRequest = _TaskRequest
     model_mod.BatchTaskRequest = _BatchTaskRequest
     model_mod.ConvertStateRequest = _ConvertStateRequest
-    monkeypatch.setitem(sys.modules, "contracts.models", model_mod)
+    monkeypatch.setitem(sys.modules, "contracts.agent", model_mod)
 
     # data_process.tasks
     tasks_mod = types.ModuleType("data_process.tasks")

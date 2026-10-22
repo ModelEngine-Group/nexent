@@ -5,9 +5,10 @@ import random
 import time
 from typing import Callable, List, Optional
 
-from consts.const import MESSAGE_ROLE, THINK_END_PATTERN, THINK_START_PATTERN
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.constants.conversation import MESSAGE_ROLE
+from contracts.constants.agent import THINK_END_PATTERN, THINK_START_PATTERN
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from management.db.model.repository import get_model_by_model_id
 from management.services.model.adapter import get_llm_adapter_from_config
 from nexent.core.models.retry import get_retry_after_seconds

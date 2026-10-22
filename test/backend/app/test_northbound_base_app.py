@@ -6,6 +6,8 @@ Unit tests for northbound_base_app module.
 Tests cover FastAPI application configuration, CORS middleware, router inclusion,
 and basic A2A endpoint routing and error handling.
 """
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import asyncio
 import os
 import sys
@@ -125,14 +127,14 @@ consts_module = types.ModuleType("consts")
 consts_module.__path__ = [os.path.join(backend_dir, "consts")]
 sys.modules['consts'] = consts_module
 
-# contracts.models - only exceptions and AgentRequest needed by apps
+# contracts.agent - only exceptions and AgentRequest needed by apps
 class HybridSearchRequest(BaseModel):
     query: str = Field(..., min_length=1)
     index_names: list = Field(..., min_length=1)
     top_k: int = Field(10, ge=1, le=100)
     weight_accurate: float = Field(0.5, ge=0.0, le=1.0)
 
-consts_model_module = types.ModuleType("contracts.models")
+consts_model_module = types.ModuleType("contracts.agent")
 consts_model_module.LimitExceededError = type("LimitExceededError", (Exception,), {})
 consts_model_module.UnauthorizedError = type("UnauthorizedError", (Exception,), {})
 consts_model_module.SignatureValidationError = type("SignatureValidationError", (Exception,), {})
@@ -140,10 +142,10 @@ consts_model_module.AgentRequest = type("AgentRequest", (), {})
 consts_model_module.ProcessParams = type("ProcessParams", (), {})
 consts_model_module.HybridSearchRequest = HybridSearchRequest
 consts_module.model = consts_model_module
-sys.modules['contracts.models'] = consts_model_module
+install_business_contract_stubs(consts_model_module)
 
-# contracts.exceptions
-consts_exceptions_module = types.ModuleType("contracts.exceptions")
+# contracts.errors.exceptions
+consts_exceptions_module = types.ModuleType("contracts.errors.exceptions")
 consts_exceptions_module.AppException = type("AppException", (Exception,), {})
 consts_exceptions_module.LimitExceededError = consts_model_module.LimitExceededError
 consts_exceptions_module.UnauthorizedError = consts_model_module.UnauthorizedError
@@ -154,7 +156,7 @@ consts_exceptions_module.NotFoundException = type("NotFoundException", (Exceptio
 consts_exceptions_module.UnsupportedFileTypeException = type("UnsupportedFileTypeException", (Exception,), {})
 consts_exceptions_module.FileTooLargeException = type("FileTooLargeException", (Exception,), {})
 consts_module.exceptions = consts_exceptions_module
-sys.modules['contracts.exceptions'] = consts_exceptions_module
+install_shared_contract_stub(consts_exceptions_module, 'exceptions')
 
 # consts.const - stub used by northbound_knowledge_app
 consts_const_module = types.ModuleType("consts.const")
@@ -166,6 +168,7 @@ class VectorDatabaseType:
 
 consts_const_module.VectorDatabaseType = VectorDatabaseType
 sys.modules["consts.const"] = consts_const_module
+install_business_constant_stubs(consts_const_module)
 
 
 class _ManagerState:
@@ -341,7 +344,7 @@ async def _async_iter(items):
 # SAFE TO IMPORT THE TARGET MODULE
 # ---------------------------------------------------------------------------
 from gateway.api import application as northbound_base_app_module
-from contracts.api.gateway_application import A2AServerSettings
+from contracts.a2a import GatewayA2AServerSettings as A2AServerSettings
 from gateway.api.application import northbound_app as app
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

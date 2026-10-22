@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Annotation schema management + annotation data API."""
 
-from contracts.api.management_evaluation_evaluation_annotation import BatchUpsertRequest, CreateSchemaRequest
+from contracts.evaluation import BatchUpsertRequest, CreateSchemaRequest
 import logging
 from collections import Counter
 from http import HTTPStatus
@@ -11,8 +11,8 @@ from fastapi import APIRouter, Body, Header, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException, UnauthorizedError
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, UnauthorizedError
 from management.db.evaluation.annotation import (
     batch_upsert_annotations,
     count_annotations_for_schema,

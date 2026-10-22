@@ -1,8 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from management.utils.orm import filter_property, as_dict
-from contracts.models import ToolSourceEnum
-from contracts.tool_labels import BUILTIN_LABEL_MAP
+from contracts.tool import ToolSourceEnum
+from contracts.constants.tool import BUILTIN_LABEL_MAP
 import json
 import logging
 import re
@@ -12,8 +12,8 @@ from sqlalchemy import cast, or_
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session
 
-from contracts.models import ToolSourceEnum
-from contracts.tool_labels import BUILTIN_LABEL_MAP
+from contracts.tool import ToolSourceEnum
+from contracts.constants.tool import BUILTIN_LABEL_MAP
 from management.utils.orm import as_dict, filter_property
 from management.db.client import get_db_session
 from management.db.models import ToolInfo, ToolInstance

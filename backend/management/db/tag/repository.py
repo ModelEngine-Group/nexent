@@ -2,21 +2,14 @@
 
 """Tenant-scoped persistence operations for unified tag management."""
 
-from contracts.persistence.tag_repository import (
-    ACTIVE_DELETE_FLAG,
-    ACTIVE_STATUS,
-    DELETED_DELETE_FLAG,
-    NO_VALUE_TAG_NORMALIZED_VALUE,
-    RESOURCE_ASSIGNMENT_LIMIT,
-    SYSTEM_BUCKET_KEYS,
-)
+from contracts.constants.tag import ACTIVE_DELETE_FLAG, ACTIVE_STATUS, DELETED_DELETE_FLAG, NO_VALUE_TAG_NORMALIZED_VALUE, RESOURCE_ASSIGNMENT_LIMIT, SYSTEM_BUCKET_KEYS
 import base64
 import json
 from collections import defaultdict
 from collections.abc import Iterable
 from typing import Any
 
-from contracts.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
+from contracts.errors.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
 from management.db.client import get_db_session
 from management.db.models import ResourceTagAssignment, TagBucket, TagBucketResourceType, TagDefinition, TagValue
 from sqlalchemy import and_, func

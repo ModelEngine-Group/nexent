@@ -27,14 +27,10 @@ TEST_PCM_PATH = os.path.join(os.path.dirname(
     os.path.dirname(__file__)), 'assets', 'test_voice.pcm')
 
 
-# Vector database providers
-
-
 # Elasticsearch Configuration
 ES_HOST = os.getenv("ELASTICSEARCH_HOST")
 ES_API_KEY = os.getenv("ELASTICSEARCH_API_KEY")
 ES_PASSWORD = os.getenv("ELASTIC_PASSWORD")
-ES_USERNAME = "elastic"
 ELASTICSEARCH_SERVICE = os.getenv("ELASTICSEARCH_SERVICE")
 
 # Data Processing Service Configuration
@@ -45,16 +41,11 @@ TABLE_TRANSFORMER_MODEL_PATH = os.getenv("TABLE_TRANSFORMER_MODEL_PATH")
 UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv(
     "UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH"
 )
-
-
-# Upload Configuration
-MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
 # Knowledge-base uploads have an independently configurable hard ceiling.
 MAX_KNOWLEDGE_FILE_SIZE_MB = parse_positive_int(
     os.getenv("MAX_KNOWLEDGE_FILE_SIZE_MB"), "MAX_KNOWLEDGE_FILE_SIZE_MB", 100
 )
 MAX_KNOWLEDGE_FILE_SIZE_BYTES = MAX_KNOWLEDGE_FILE_SIZE_MB * 1024 * 1024
-MAX_CONCURRENT_UPLOADS = 5
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 AGENT_WORKSPACE_ROOT = os.getenv('AGENT_WORKSPACE_ROOT', '/mnt/nexent/workdir')
 NEXENT_SANDBOX_WORKSPACE_MODE = os.getenv('NEXENT_SANDBOX_WORKSPACE_MODE', 'legacy')
@@ -121,28 +112,11 @@ OFFICIAL_AGENTS_PATH = os.getenv(
 )
 
 OFFICIAL_AGENT_PROFILES = os.getenv("OFFICIAL_AGENT_PROFILES", "")
-SYSTEM_TENANT_ID = "system"
-SYSTEM_USER_ID = "system"
-
-
-# Preview Configuration
-FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024  # 100MB
-# Limit concurrent Office-to-PDF conversions
-MAX_CONCURRENT_CONVERSIONS = 5
 # LibreOffice profile directory
 LIBREOFFICE_PROFILE_DIR = os.getenv(
     "LIBREOFFICE_PROFILE_DIR",
     str(Path.home() / ".cache" / "nexent" / "libreoffice-profile"),
 )
-# Supported Office file MIME types
-OFFICE_MIME_TYPES = [
-    'application/msword',  # .doc
-    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  # .docx
-    'application/vnd.ms-excel',  # .xls
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  # .xlsx
-    'application/vnd.ms-powerpoint',  # .ppt
-    'application/vnd.openxmlformats-officedocument.presentationml.presentation'  # .pptx
-]
 
 
 # Supabase Configuration
@@ -219,11 +193,6 @@ EXA_SEARCH_API_KEY = os.getenv('EXA_SEARCH_API_KEY')
 # Image Filter Configuration
 IMAGE_FILTER = os.getenv("IMAGE_FILTER", "false").lower() == "true"
 
-
-# Default User and Tenant IDs
-DEFAULT_USER_ID = "user_id"
-DEFAULT_TENANT_ID = "tenant_id"
-
 # Tenant resource hard limits. Environment variables override these defaults.
 MAX_TENANT_COUNT = parse_positive_int(os.getenv("MAX_TENANT_COUNT"), "MAX_TENANT_COUNT", 100)
 MAX_USERS_PER_TENANT = parse_positive_int(os.getenv("MAX_USERS_PER_TENANT"), "MAX_USERS_PER_TENANT", 10_000)
@@ -268,36 +237,9 @@ MAX_EVALUATION_SET_FILE_SIZE_MB = parse_positive_int(
 )
 MAX_EVALUATION_SET_FILE_SIZE_BYTES = MAX_EVALUATION_SET_FILE_SIZE_MB * 1024 * 1024
 
-# Invitation code type for asset administrator registration
-ASSET_OWNER_INVITE_CODE_TYPE = "ASSET_OWNER_INVITE"
-
-# User role identifier for asset administrators
-ASSET_OWNER_ROLE = "ASSET_OWNER"
-
-# Tenant ID for asset administrators (virtual tenant, not a real tenant)
-ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
-
-# MinIO prefix for ASSET_OWNER-scoped attachment uploads (attachments/asset_owner/{user_id}/...)
-ASSET_OWNER_ATTACHMENTS_PREFIX = "attachments/asset_owner"
-
 # When false, block ASSET_OWNER invites, registrations, and sign-in.
 ENABLE_ASSET_OWNER_ROLE = os.getenv(
     "ENABLE_ASSET_OWNER_ROLE", "false").lower() == "true"
-
-# HTTP detail key: asset owner must register via OAuth, not email/password signup.
-ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL = "ASSET_OWNER_USE_OAUTH"
-
-# Roles that can edit all resources within a tenant (permission = EDIT).
-# Keep this centralized to avoid drifting role logic across modules.
-CAN_EDIT_ALL_USER_ROLES = {"SU", "ADMIN", "SPEED", "ASSET_OWNER"}
-
-# Permission constants used by list endpoints (e.g., /agent/list, /mcp/list).
-PERMISSION_READ = "READ_ONLY"
-PERMISSION_EDIT = "EDIT"
-PERMISSION_PRIVATE = "PRIVATE"
-
-# Response flag when system prompts are withheld from non-ASSET_OWNER callers.
-AGENT_PROMPTS_HIDDEN_FLAG = "prompts_hidden"
 
 # W11 capacity suggestion rollout flags.
 CAPACITY_SUGGESTION_ENABLED = os.getenv(
@@ -326,7 +268,6 @@ MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
 MINIO_REGION = os.getenv("MINIO_REGION")
 MINIO_DEFAULT_BUCKET = os.getenv("MINIO_DEFAULT_BUCKET")
 MINIO_SECURE = os.getenv("MINIO_SECURE", "true").lower() == "true"
-S3_URL_PREFIX = "s3://"
 
 
 # Postgres Configuration
@@ -469,21 +410,6 @@ CLUSTER = os.getenv("CLUSTER", "volcano_tts")
 VOICE_TYPE = os.getenv("VOICE_TYPE", "zh_male_jieshuonansheng_mars_bigtts")
 SPEED_RATIO = float(os.getenv("SPEED_RATIO", "1.3"))
 
-
-# Memory Feature
-MEMORY_SWITCH_KEY = "MEMORY_SWITCH"
-DREAMING_SWITCH_KEY = "DREAMING_SWITCH"
-MEMORY_AGENT_SHARE_KEY = "MEMORY_AGENT_SHARE"
-DISABLE_AGENT_ID_KEY = "DISABLE_AGENT_ID"
-DISABLE_USERAGENT_ID_KEY = "DISABLE_USERAGENT_ID"
-EXTERNAL_PROVIDER_TOP_K_KEY = "EXTERNAL_PROVIDER_TOP_K"
-DEFAULT_MEMORY_SWITCH_KEY = "Y"
-DEFAULT_DREAMING_SWITCH_KEY = "Y"
-DEFAULT_MEMORY_AGENT_SHARE_KEY = "always"
-DEFAULT_EXTERNAL_PROVIDER_TOP_K = 20
-# Boolean value representations for configuration parsing
-BOOLEAN_TRUE_VALUES = {"true", "1", "y", "yes", "on"}
-
 # ===== Memory System =====
 
 # MMR (Maximal Marginal Relevance) configuration
@@ -533,34 +459,6 @@ PROVIDER_REQUEST_TIMEOUT_SECONDS = int(
     os.getenv("PROVIDER_REQUEST_TIMEOUT_SECONDS", "30")
 )
 
-# External provider protocol defaults. Provider records control whether each
-# configured integration participates in search and ingest.
-EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = (
-    "agent",
-    "model_output",
-    "model_output_thinking",
-    "model_output_deep_thinking",
-    "model_output_code",
-    "final_answer",
-    "error",
-    "search_content",
-    "tool",
-    "parse",
-    "execution_logs",
-    "picture_web",
-    "memory_search",
-    "verification",
-    "max_steps_reached",
-)
-
-
-DEFAULT_LLM_MAX_TOKENS = 4096
-
-
-# Embedding Model Chunk Size Defaults
-DEFAULT_EXPECTED_CHUNK_SIZE = 1024
-DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
-
 
 # MCP Server
 LOCAL_MCP_SERVER = os.getenv("NEXENT_MCP_SERVER")
@@ -594,93 +492,6 @@ DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 # User info query source control: "supabase" or "pg" (default: "supabase" for backward compatibility)
 USER_INFO_QUERY_SOURCE = os.getenv(
     'USER_INFO_QUERY_SOURCE', 'supabase').lower()
-
-# Memory Search Status Messages (for i18n placeholders)
-MEMORY_SEARCH_START_MSG = "<MEM_START>"
-MEMORY_SEARCH_DONE_MSG = "<MEM_DONE>"
-MEMORY_SEARCH_FAIL_MSG = "<MEM_FAILED>"
-
-# Tool Type Mapping (for display normalization)
-TOOL_TYPE_MAPPING = {
-    "mcp": "MCP",
-    "langchain": "LangChain",
-    "local": "Local",
-}
-
-# Default Language Configuration
-try:
-    from backend.contracts.localization import LANGUAGE
-except ModuleNotFoundError:
-    from contracts.localization import LANGUAGE
-
-# Message Role Constants
-MESSAGE_ROLE = {
-    "USER": "user",
-    "ASSISTANT": "assistant",
-    "SYSTEM": "system"
-}
-
-# Knowledge summary max token limits
-KNOWLEDGE_SUMMARY_MAX_TOKENS_ZH = 300
-KNOWLEDGE_SUMMARY_MAX_TOKENS_EN = 120
-
-# Host Configuration Constants
-LOCALHOST_IP = "127.0.0.1"
-LOCALHOST_NAME = "localhost"
-DOCKER_INTERNAL_HOST = "host.docker.internal"
-
-
-# Mock User Management Configuration (for speed mode)
-MOCK_USER = {
-    "id": DEFAULT_USER_ID,
-    "email": "mock@example.com",
-    "role": "admin"
-}
-
-MOCK_SESSION = {
-    "access_token": "mock_access_token",
-    "refresh_token": "mock_refresh_token",
-    "expires_at": None,  # Will be set dynamically
-    "expires_in_seconds": 315360000  # 10 years
-}
-
-MODEL_CONFIG_MAPPING = {
-    "llm": "LLM_ID",
-    "embedding": "EMBEDDING_ID",
-    "multiEmbedding": "MULTI_EMBEDDING_ID",
-    "rerank": "RERANK_ID",
-    "vlm": "VLM_ID",
-    "vlm2": "VLM2_ID",
-    "vlm3": "VLM3_ID",
-    "vlm4": "VLM4_ID",
-    "stt": "STT_ID",
-    "tts": "TTS_ID"
-}
-
-ICON_TYPE = "ICON_TYPE"
-ICON_KEY = "ICON_KEY"
-AVATAR_URI = "AVATAR_URI"
-CUSTOM_ICON_URL = "CUSTOM_ICON_URL"
-TENANT_NAME = "TENANT_NAME"
-TENANT_ID = "TENANT_ID"
-DEFAULT_GROUP_ID = "DEFAULT_GROUP_ID"
-DATAMATE_URL = "DATAMATE_URL"
-
-# Task Status Constants
-TASK_STATUS = {
-    "WAIT_FOR_PROCESSING": "WAIT_FOR_PROCESSING",
-    "WAIT_FOR_FORWARDING": "WAIT_FOR_FORWARDING",
-    "PROCESSING": "PROCESSING",
-    "FORWARDING": "FORWARDING",
-    "COMPLETED": "COMPLETED",
-    "PROCESS_FAILED": "PROCESS_FAILED",
-    "FORWARD_FAILED": "FORWARD_FAILED",
-}
-
-# Deep Thinking Constants
-THINK_START_PATTERN = "<think>"
-THINK_END_PATTERN = "</think>"
-
 
 # Telemetry and Monitoring Configuration (OTLP Protocol)
 MONITORING_PROVIDER = os.getenv("MONITORING_PROVIDER", "")
@@ -764,10 +575,6 @@ if LANGSMITH_PROJECT:
     OTLP_HEADERS["Langsmith-Project"] = LANGSMITH_PROJECT
 if OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION:
     OTLP_HEADERS["x-langfuse-ingestion-version"] = OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION
-
-
-DEFAULT_ZH_TITLE = "新对话"
-DEFAULT_EN_TITLE = "New Conversation"
 
 
 # Model Engine Configuration
@@ -912,23 +719,10 @@ NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS = (
     os.getenv("NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS", "true").lower() == "true"
 )
 
-
-# Skill Creation Streaming Configuration
-STREAMABLE_CONTENT_TYPES = frozenset([
-    "model_output_thinking",
-    "model_output_code",
-    "model_output_deep_thinking",
-    "tool",
-    "execution_logs",
-])
-
 # LLM Model Configuration
 LLM_INCLUDE_LOGPROBS = os.getenv("LLM_INCLUDE_LOGPROBS", "false").lower() == "true"
 """When True, adds logprobs=true to every chat.completions.create request body,
 enabling the provider to return log probability information in the response."""
-
-# SSE streaming event type for status messages
-STREAM_STATUS_EVENT = "event: stream_status\n"
 
 # Model Catalog - 预置模型目录配置文件路径
 MODEL_CATALOG_JSON_PATH = os.getenv(
@@ -959,3 +753,173 @@ MODEL_REASONING_WIRE_PROFILES_PATH = os.getenv(
 MODEL_RESPONSE_DIAGNOSTIC_CHUNKS = os.getenv(
     "NEXENT_MODEL_DIAGNOSTIC_CHUNKS", os.getenv("NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT", "0")
 ) == "1"
+
+
+from typing import Dict
+try:
+    from contracts.identity import OAuthProviderDefinition
+except ModuleNotFoundError as exc:
+    if exc.name != "contracts":
+        raise
+    from backend.contracts.identity import OAuthProviderDefinition
+
+GITHUB_PROVIDER = OAuthProviderDefinition(
+    name="github",
+    display_name="GitHub",
+    icon="github",
+    authorize_url="https://github.com/login/oauth/authorize",
+    authorize_params={"scope": "read:user user:email"},
+    token_url="https://github.com/login/oauth/access_token",
+    token_error_key="error",
+    token_error_message_key="error_description",
+    userinfo_url="https://api.github.com/user",
+    userinfo_field_map={
+        "id": "id",
+        "email": "email",
+        "username": "login",
+    },
+    userinfo_needs_email_fetch=True,
+    userinfo_email_url="https://api.github.com/user/emails",
+    client_id_env="GITHUB_OAUTH_CLIENT_ID",
+    client_secret_env="GITHUB_OAUTH_CLIENT_SECRET",
+)
+
+GDE_PROVIDER = OAuthProviderDefinition(
+    name="gde",
+    display_name="Gde",
+    icon="gde",
+    authorize_url=f"{os.getenv('GDE_URL')}/dspcas/oauth2.0/authorize",
+    authorize_param_map={"client_id": "client_id", "redirect_uri": "redirect_uri"},
+    token_url=f"{os.getenv('GDE_URL')}/dspcas/v2/oauth2.0/accessToken",
+    token_params_map={
+        "client_id": "client_id",
+        "client_secret": "secret",
+        "code": "code",
+        "grant_type": "grant_type",
+        "redirect_uri": "redirect_uri",
+    },
+    token_error_key="errorCode",
+    token_error_message_key="errorMessage",
+    userinfo_url=f"{os.getenv('GDE_URL')}/dspcas/oauth2.0/profile",
+    userinfo_params={"access_token": "{access_token}"},
+    userinfo_field_map={"id": "attributes.userId", "username": "id"},
+    client_id_env="GDE_OAUTH_CLIENT_ID",
+    client_secret_env="GDE_OAUTH_CLIENT_SECRET",
+)
+
+LINK_APP_PROVIDER = OAuthProviderDefinition(
+    name="link_app",
+    display_name="Link App",
+    icon="link_app",
+    authorize_url=f"{os.getenv('LINK_APP_URL')}/CNS/oauth2/authorize",
+    authorize_params={"response_type": "code", "scope": "read write"},
+    token_url=f"{os.getenv('LINK_APP_URL')}/CNS/oauth2/token",
+    token_params_map={
+        "client_id": "client_id",
+        "client_secret": "client_secret",
+        "code": "code",
+        "grant_type": "grant_type",
+        "redirect_uri": "redirect_uri",
+    },
+    token_error_key="error",
+    token_error_message_key="error_description",
+    userinfo_url=f"{os.getenv('LINK_APP_URL')}/CNS/getUserInfo",
+    userinfo_field_map={
+        "id": "data.id",
+        "email": "data.email",
+        "username": "data.username",
+    },
+    client_id_env="LINK_APP_OAUTH_CLIENT_ID",
+    client_secret_env="LINK_APP_OAUTH_CLIENT_SECRET",
+)
+
+WECHAT_PROVIDER = OAuthProviderDefinition(
+    name="wechat",
+    display_name="WeChat",
+    icon="wechat",
+    authorize_url="https://open.weixin.qq.com/connect/qrconnect",
+    authorize_params={"response_type": "code", "scope": "snsapi_login"},
+    authorize_fragment="#wechat_redirect",
+    authorize_param_map={
+        "client_id": "appid",
+        "redirect_uri": "redirect_uri",
+        "scope": "scope",
+        "state": "state",
+    },
+    encode_redirect_uri=True,
+    token_url="https://api.weixin.qq.com/sns/oauth2/access_token",
+    token_method="GET",
+    token_params_map={
+        "client_id": "appid",
+        "client_secret": "secret",
+        "code": "code",
+        "grant_type": "grant_type",
+    },
+    token_error_key="errcode",
+    token_error_message_key="errmsg",
+    token_response_id_key="openid",
+    userinfo_url="https://api.weixin.qq.com/sns/userinfo",
+    userinfo_auth_scheme="",
+    userinfo_params={"openid": "{openid}"},
+    userinfo_field_map={
+        "id": "openid",
+        "email": "",
+        "username": "nickname",
+    },
+    client_id_env="WECHAT_OAUTH_APP_ID",
+    client_secret_env="WECHAT_OAUTH_APP_SECRET",
+    enabled_check="ENABLE_WECHAT_OAUTH",
+)
+
+HUAWEI_PROVIDER = OAuthProviderDefinition(
+    name="huawei",
+    display_name="Huawei",
+    icon="huawei",
+    authorize_url=f"{os.getenv('UNIPORTAL_URL')}/saaslogin1/oauth2/authorize",
+    authorize_params={"scope": "base.profile", "response_type": "code"},
+    token_url=f"{os.getenv('UNIPORTAL_URL')}/saaslogin1/oauth2/accesstoken",
+    token_error_key="error",
+    token_error_message_key="error_description",
+    userinfo_url=f"{os.getenv('UNIPORTAL_URL')}/saaslogin1/oauth2/userinfo",
+    userinfo_params={
+        "access_token": "{access_token}",
+        "client_id": f"{os.getenv('HUAWEI_OAUTH_CLIENT_ID')}",
+        "scope": "base.profile"
+    },
+    userinfo_field_map={
+        "id": "globalUserID",
+        "email": "email",
+        "username": "givenName",
+    },
+    client_id_env="HUAWEI_OAUTH_CLIENT_ID",
+    client_secret_env="HUAWEI_OAUTH_CLIENT_SECRET",
+)
+
+OAUTH_PROVIDER_REGISTRY: Dict[str, OAuthProviderDefinition] = {
+    "github": GITHUB_PROVIDER,
+    "wechat": WECHAT_PROVIDER,
+    "gde": GDE_PROVIDER,
+    "link_app": LINK_APP_PROVIDER,
+    "huawei": HUAWEI_PROVIDER
+}
+
+
+def get_provider_definition(provider: str) -> OAuthProviderDefinition:
+    return OAUTH_PROVIDER_REGISTRY[provider]
+
+
+def is_provider_enabled(definition: OAuthProviderDefinition) -> bool:
+    if definition.enabled_check:
+        return os.getenv(definition.enabled_check, "false").lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+
+    client_id = os.getenv(definition.client_id_env, "")
+    client_secret = os.getenv(definition.client_secret_env, "")
+    return bool(client_id and client_secret)
+
+
+def get_all_provider_definitions() -> Dict[str, OAuthProviderDefinition]:
+    return dict(OAUTH_PROVIDER_REGISTRY)

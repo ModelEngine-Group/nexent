@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from management.utils.app_factory import create_app
-from contracts.task_recovery import CONFIG_SERVICE_NAME
+from contracts.constants.runtime import CONFIG_SERVICE_NAME
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -59,7 +59,7 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from contracts.task_recovery import CONFIG_SERVICE_NAME
+from contracts.constants.runtime import CONFIG_SERVICE_NAME
 from infrastructure.concurrency import config_thread_manager
 
 logger = logging.getLogger("base_app")

@@ -16,9 +16,11 @@ from collections import deque
 from typing import Dict, List, Optional
 
 from agents.create_agent_info import create_tool_config_list
-from consts.const import MODEL_CONFIG_MAPPING
-from contracts.exceptions import ForbiddenError, SkillDuplicateError
-from contracts.models import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo, SkillInstanceInfoRequest, SkillResolution, SkillZipEntry, ToolInstanceInfoRequest
+from contracts.constants.model import MODEL_CONFIG_MAPPING
+from contracts.errors.exceptions import ForbiddenError, SkillDuplicateError
+from contracts.agent import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo
+from contracts.skill import SkillInstanceInfoRequest, SkillResolution, SkillZipEntry
+from contracts.tool import ToolInstanceInfoRequest
 from management.db.skill import repository as skill_db
 from management.db.agent.repository import create_agent, insert_related_agent, is_system_agent, query_all_agent_info_by_tenant_id, query_sub_agent_relations, query_sub_agents_id_list, resolve_sub_agent_version_no, search_agent_info_by_agent_id
 from management.db.identity.group import query_group_ids_by_user

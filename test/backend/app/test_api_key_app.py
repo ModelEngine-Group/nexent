@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from management.api.identity.api_key import router
-from contracts.exceptions import ForbiddenError, NotFoundException, UnauthorizedError, ValidationError
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, UnauthorizedError, ValidationError
 
 
 app = FastAPI()

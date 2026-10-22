@@ -23,8 +23,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.append(backend_dir)
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException, QuotaExceededError
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, QuotaExceededError
 
 # Patch environment variables before any imports that might use them
 # Environment variables are now configured in conftest.py
@@ -1410,7 +1410,7 @@ class TestCheckFileAccess:
 
     def test_check_file_access_asset_owner_write_uses_storage_resolver(self):
         from management.services.file.service import check_file_access
-        from consts.const import ASSET_OWNER_TENANT_ID
+        from contracts.constants.identity import ASSET_OWNER_TENANT_ID
 
         knowledge_storage_stub.resolve_storage_object_access.return_value = True
 
@@ -1429,7 +1429,7 @@ class TestCheckFileAccess:
 
     def test_check_file_access_denies_asset_owner_write_for_wrong_tenant(self):
         from management.services.file.service import check_file_access
-        from consts.const import ASSET_OWNER_TENANT_ID
+        from contracts.constants.identity import ASSET_OWNER_TENANT_ID
 
         assert check_file_access(
             "attachments/asset_owner/user1/doc.pdf",
@@ -1529,7 +1529,7 @@ class TestCheckFileAccess:
     def test_check_file_access_asset_owner_prefix_requires_asset_owner_tenant(self):
         """Asset-owner attachment paths are restricted to the asset-owner tenant."""
         from management.services.file.service import check_file_access
-        from consts.const import ASSET_OWNER_TENANT_ID
+        from contracts.constants.identity import ASSET_OWNER_TENANT_ID
 
         path = "attachments/asset_owner/user1/doc.pdf"
         assert check_file_access(path, "user1", ASSET_OWNER_TENANT_ID) is True
@@ -1541,7 +1541,7 @@ class TestResolveMinioUploadFolder:
 
     def test_asset_owner_tenant_uses_dedicated_prefix(self):
         from management.services.file.service import resolve_minio_upload_folder
-        from consts.const import ASSET_OWNER_TENANT_ID
+        from contracts.constants.identity import ASSET_OWNER_TENANT_ID
 
         result = resolve_minio_upload_folder(
             folder="attachments",
@@ -2666,7 +2666,7 @@ class TestResolvePreviewFile:
     async def test_file_too_large_raises_exception(self):
         """Files exceeding FILE_PREVIEW_SIZE_LIMIT raise FileTooLargeException."""
         from management.services.file.service import resolve_preview_file, FILE_PREVIEW_SIZE_LIMIT
-        from contracts.exceptions import FileTooLargeException
+        from contracts.errors.exceptions import FileTooLargeException
 
         oversized = FILE_PREVIEW_SIZE_LIMIT + 1
         with patch_import_context('management.services.file.service.file_exists', return_value=True), \
@@ -2680,7 +2680,7 @@ class TestResolvePreviewFile:
     async def test_unsupported_file_type_raises_exception(self):
         """Unsupported content types raise UnsupportedFileTypeException."""
         from management.services.file.service import resolve_preview_file
-        from contracts.exceptions import UnsupportedFileTypeException
+        from contracts.errors.exceptions import UnsupportedFileTypeException
 
         with patch_import_context('management.services.file.service.file_exists', return_value=True), \
              patch_import_context('management.services.file.service.get_file_size_from_minio', return_value=1024), \
@@ -2696,7 +2696,7 @@ class TestResolvePreviewFile:
     async def test_missing_direct_preview_file_raises_not_found(self):
         """Missing direct-preview file should raise NotFoundException instead of resolving as empty."""
         from management.services.file.service import resolve_preview_file
-        from contracts.exceptions import NotFoundException
+        from contracts.errors.exceptions import NotFoundException
 
         with patch_import_context('management.services.file.service.file_exists', return_value=False):
             with pytest.raises(NotFoundException) as exc_info:
@@ -2732,7 +2732,7 @@ class TestGetPreviewStream:
     def test_raises_not_found_when_stream_is_none(self):
         """Raises NotFoundException when no-range stream source returns None."""
         from management.services.file.service import get_preview_stream
-        from contracts.exceptions import NotFoundException
+        from contracts.errors.exceptions import NotFoundException
 
         with patch_import_context('management.services.file.service.get_file_stream_raw', return_value=None):
             with pytest.raises(NotFoundException) as exc_info:
@@ -2860,7 +2860,7 @@ class TestConvertOfficeToCachedPdf:
     async def test_http_error_re_raises_exception(self):
         """Non-200 HTTP response from data-process raises a sanitized OfficeConversionException."""
         from management.services.file.service import _convert_office_to_cached_pdf
-        from contracts.exceptions import OfficeConversionException
+        from contracts.errors.exceptions import OfficeConversionException
 
         mock_response = MagicMock()
         mock_response.status_code = 503
@@ -2891,7 +2891,7 @@ class TestConvertOfficeToCachedPdf:
     async def test_copy_failure_re_raises_and_cleans_up_temp(self):
         """copy_file failure raises a sanitized OfficeConversionException and cleans up temp file."""
         from management.services.file.service import _convert_office_to_cached_pdf
-        from contracts.exceptions import OfficeConversionException
+        from contracts.errors.exceptions import OfficeConversionException
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -2925,7 +2925,7 @@ class TestConvertOfficeToCachedPdf:
     async def test_office_conversion_exception_passthrough(self):
         """Existing OfficeConversionException should be re-raised without wrapping."""
         from management.services.file.service import _convert_office_to_cached_pdf
-        from contracts.exceptions import OfficeConversionException
+        from contracts.errors.exceptions import OfficeConversionException
 
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(side_effect=OfficeConversionException("upstream conversion failed"))
@@ -2952,7 +2952,7 @@ class TestConvertOfficeToCachedPdf:
     async def test_non_office_exception_is_wrapped(self):
         """Unexpected exceptions should be wrapped as OfficeConversionException with cause."""
         from management.services.file.service import _convert_office_to_cached_pdf
-        from contracts.exceptions import OfficeConversionException
+        from contracts.errors.exceptions import OfficeConversionException
 
         mock_client = AsyncMock()
         mock_client.post = AsyncMock(side_effect=RuntimeError("network broken"))

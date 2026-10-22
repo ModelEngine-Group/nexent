@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from test.common.contract_stubs import install_business_constant_stubs
 import os
 import sys
 import unittest
@@ -52,6 +53,7 @@ consts_mock.const.DEFAULT_TENANT_ID = "tenant_id"
 consts_mock.const.LOCAL_SESSION_MAX_AGE_SECONDS = 3600
 sys.modules["consts"] = consts_mock
 sys.modules["consts.const"] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 sys.modules["management.db.identity.cas_session"] = MagicMock()
 sys.modules["management.db.identity.oauth_account"] = MagicMock()

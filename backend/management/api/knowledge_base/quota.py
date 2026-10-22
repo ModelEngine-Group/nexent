@@ -5,13 +5,8 @@ Quota management API endpoints.
 Provides tenant-level and platform-level quota configuration and usage tracking.
 """
 
-from contracts.api.management_knowledge_base_quota import PERSONAL_KB_CAPACITY_MANAGE_PERMISSION, PERSONAL_KB_CAPACITY_READ_PERMISSION, QUOTA_PAYLOAD_DESCRIPTION, TARGET_TENANT_ID_DESCRIPTION
-from contracts.api.management_knowledge_base_quota import (
-    PERSONAL_KB_CAPACITY_MANAGE_PERMISSION,
-    PERSONAL_KB_CAPACITY_READ_PERMISSION,
-    QUOTA_PAYLOAD_DESCRIPTION,
-    TARGET_TENANT_ID_DESCRIPTION,
-)
+from contracts.constants.knowledge import PERSONAL_KB_CAPACITY_MANAGE_PERMISSION, PERSONAL_KB_CAPACITY_READ_PERMISSION, QUOTA_PAYLOAD_DESCRIPTION, TARGET_TENANT_ID_DESCRIPTION
+from contracts.constants.knowledge import PERSONAL_KB_CAPACITY_MANAGE_PERMISSION, PERSONAL_KB_CAPACITY_READ_PERMISSION, QUOTA_PAYLOAD_DESCRIPTION, TARGET_TENANT_ID_DESCRIPTION
 import logging
 from http import HTTPStatus
 from typing import Any, Dict, Optional
@@ -19,8 +14,8 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 
-from consts.const import ASSET_OWNER_TENANT_ID
-from contracts.exceptions import AppException, PlatformQuotaConflictError, TokenExpiredError
+from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.errors.exceptions import AppException, PlatformQuotaConflictError, TokenExpiredError
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from gateway.authentication.dependencies import authenticate
 from permissions.depends import require

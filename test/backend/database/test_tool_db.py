@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
@@ -34,7 +36,7 @@ consts_mock.const.POSTGRES_DB = "test_db"
 consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 
-# Mock contracts.models module and ToolSourceEnum
+# Mock contracts.agent module and ToolSourceEnum
 # Create a mock ToolSourceEnum that supports .value attribute access
 
 class MockEnumMember:
@@ -47,7 +49,7 @@ class MockToolSourceEnum:
     MCP = MockEnumMember("mcp")
     LANGCHAIN = MockEnumMember("langchain")
 
-# Create contracts.models as a proper module-like object
+# Create contracts.agent as a proper module-like object
 
 
 class MockModelModule:
@@ -56,20 +58,21 @@ class MockModelModule:
 
 consts_mock.model = MockModelModule()
 
-# Mock contracts.tool_labels with BUILTIN_LABEL_MAP
+# Mock contracts.constants.tool with BUILTIN_LABEL_MAP
 tool_labels_mock = MagicMock()
 tool_labels_mock.BUILTIN_LABEL_MAP = {}
 consts_mock.tool_labels = tool_labels_mock
 
 # consts_mock must have __path__ to be recognized as a package
-# so that `from contracts.tool_labels import ...` works
+# so that `from contracts.constants.tool import ...` works
 consts_mock.__path__ = []
 
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
-sys.modules['contracts.models'] = consts_mock.model
-sys.modules['contracts.tool_labels'] = tool_labels_mock
+install_business_constant_stubs(consts_mock.const)
+install_business_contract_stubs(consts_mock.model)
+install_shared_contract_stub(tool_labels_mock, 'tool_labels')
 
 # Mock utils module
 utils_mock = MagicMock()

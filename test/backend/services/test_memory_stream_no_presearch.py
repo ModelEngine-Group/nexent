@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from contracts.models import AgentRequest
+from contracts.agent import AgentRequest
 from management.services.agent import execution as agent_execution
 from management.services.agent import run as agent_run
 

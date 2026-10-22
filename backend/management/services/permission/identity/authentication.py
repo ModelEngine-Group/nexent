@@ -11,15 +11,16 @@ from pydantic import EmailStr
 
 from management.services.permission.identity.provider import get_supabase_client, get_supabase_admin_client, delete_supabase_user
 from gateway.authentication.identity import calculate_expires_at, get_jwt_expiry_seconds, ensure_cas_session_active_from_authorization, resolve_tenant_id_from_user_tenant_record
-from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY, ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
+from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY
+from contracts.constants.identity import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
 
 from management.services.permission.asset_owner import (
     filter_accessible_routes_for_asset_owner_feature,
     require_asset_owner_enabled,
 )
-from contracts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, TenantResourceLimitError, ValidationError
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, TenantResourceLimitError, ValidationError
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 
 from management.db.model.repository import create_model_record
 from management.db.identity.user_tenant import insert_user_tenant, get_user_tenant_by_user_id

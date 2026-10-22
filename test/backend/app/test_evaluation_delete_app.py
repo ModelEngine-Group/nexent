@@ -178,13 +178,13 @@ class TestEvaluationDeleteEndpoints(unittest.TestCase):
     # ------------------------------------------------------------------
     @staticmethod
     def _exc(error_code, message):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
 
         return AppException(error_code, message)
 
     @staticmethod
     def _code(name):
-        from contracts.error_code import ErrorCode
+        from contracts.errors.codes import ErrorCode
 
         return getattr(ErrorCode, name)
 

@@ -1,17 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.models import GeneratePromptRequest, OptimizePromptSectionRequest, OptimizePromptBadCaseRequest, OptimizePromptFromDebugRequest
+from contracts.agent import GeneratePromptRequest, OptimizePromptSectionRequest, OptimizePromptBadCaseRequest, OptimizePromptFromDebugRequest
 import logging
 from http import HTTPStatus
 from typing import Optional
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from contracts.models import (
-    GeneratePromptRequest,
-    OptimizePromptSectionRequest,
-    OptimizePromptBadCaseRequest,
-    OptimizePromptFromDebugRequest,
-)
+from contracts.agent import GeneratePromptRequest, OptimizePromptSectionRequest, OptimizePromptBadCaseRequest, OptimizePromptFromDebugRequest
 from management.services.agent.prompt_generation import (
     gen_system_prompt_streamable,
     OptimizeRequest,

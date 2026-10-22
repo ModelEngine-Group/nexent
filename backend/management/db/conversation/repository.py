@@ -1,14 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.persistence.conversation_repository import (
-    CHAT_MODE_VALUES,
-    ConversationHistory,
-    HISTORY_SUMMARY_UNIT_TYPE,
-    HistorySummaryPersistenceError,
-    ImageRecord,
-    MessageRecord,
-    SearchRecord,
-)
+from contracts.constants.conversation import CHAT_MODE_VALUES, HISTORY_SUMMARY_UNIT_TYPE
+from contracts.conversation import ConversationHistory, ImageRecord, MessageRecord, SearchRecord
+from contracts.errors.exceptions import HistorySummaryPersistenceError
 import json
 from copy import deepcopy
 from datetime import datetime
@@ -17,15 +11,10 @@ from typing import Any, Dict, List, Optional, Sequence, Set, TypedDict
 from sqlalchemy import and_, asc, desc, func, insert, or_, select, text, update
 from sqlalchemy.orm import Session
 
-from consts.const import MAX_CONVERSATION_TURNS, MAX_CONVERSATIONS_PER_USER, MESSAGE_ROLE
-from contracts.error_code import ErrorCode
-from contracts.exceptions import (
-    AppException,
-    ConversationNotFoundError,
-    RuntimeMetadataVersionConflict,
-    WorkbenchConfigVersionConflict,
-    WorkbenchError,
-)
+from consts.const import MAX_CONVERSATION_TURNS, MAX_CONVERSATIONS_PER_USER
+from contracts.constants.conversation import MESSAGE_ROLE
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict, WorkbenchConfigVersionConflict, WorkbenchError
 from contracts.conversation import MessageSource, decode_activity_cursor, encode_activity_cursor
 from management.db.models import KnowledgeRecord
 
@@ -78,7 +67,7 @@ def _get_user_tenant(user_id: str) -> Optional[Dict[str, Any]]:
 
 def _get_effective_tenant_id(user_tenant: Dict[str, Any]) -> str:
     """Resolve legacy empty tenant fields consistently with authentication."""
-    from consts.const import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+    from contracts.constants.identity import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
     tenant_id = user_tenant.get("tenant_id")
     if tenant_id:

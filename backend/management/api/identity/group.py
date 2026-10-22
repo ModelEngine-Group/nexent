@@ -3,8 +3,8 @@
 Group management API endpoints
 """
 
-from contracts.models import GroupCreateRequest, GroupUpdateRequest, GroupUserRequest, GroupListRequest, SetDefaultGroupRequest, GroupMembersUpdateRequest
-from contracts.exceptions import NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.identity import GroupCreateRequest, GroupUpdateRequest, GroupUserRequest, GroupListRequest, SetDefaultGroupRequest, GroupMembersUpdateRequest
+from contracts.errors.exceptions import NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 import logging
 from typing import Optional
 
@@ -12,21 +12,8 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
-from contracts.models import (
-    GroupCreateRequest,
-    GroupUpdateRequest,
-    GroupUserRequest,
-    GroupListRequest,
-    SetDefaultGroupRequest,
-    GroupMembersUpdateRequest,
-)
-from contracts.exceptions import (
-    NotFoundException,
-    TenantResourceLimitError,
-    UnauthorizedError,
-    ValidationError,
-    tenant_resource_limit_error_payload,
-)
+from contracts.identity import GroupCreateRequest, GroupUpdateRequest, GroupUserRequest, GroupListRequest, SetDefaultGroupRequest, GroupMembersUpdateRequest
+from contracts.errors.exceptions import NotFoundException, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.groups import (
     create_group, get_group_info, update_group, delete_group,

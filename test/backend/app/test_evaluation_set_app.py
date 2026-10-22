@@ -121,13 +121,13 @@ if _adapters_pkg is None or not getattr(_adapters_pkg, "__path__", None):
 # class keeps these tests faithful to production behaviour.
 # ---------------------------------------------------------------------------
 def _exc(error_code, message):
-    from contracts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
 
     return AppException(error_code, message)
 
 
 def _code(name):
-    from contracts.error_code import ErrorCode
+    from contracts.errors.codes import ErrorCode
 
     return getattr(ErrorCode, name)
 
@@ -564,7 +564,7 @@ class TestCreateValidation:
         evaluation_set_app.create_empty_evaluation_set.assert_not_called()
 
     def test_401_on_unauthorized(self, client):
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         evaluation_set_app = _mock_service_impl(None)
         evaluation_set_app.get_current_user_id = MagicMock(
@@ -588,7 +588,7 @@ class TestUploadErrorPaths:
         # the AppException propagates).
         import asyncio
 
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
 
         from management.api.evaluation.evaluation_set import upload_evaluation_set_api
 
@@ -1055,7 +1055,7 @@ class TestGenerateCasesAsync:
         # The generate endpoint has no dedicated UnauthorizedError handler, so
         # the legacy UnauthorizedError falls through to the generic handler and
         # is wrapped as SYSTEM_INTERNAL_ERROR (500).
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         evaluation_set_app = _mock_service_impl(None)
         evaluation_set_app.get_current_user_id = MagicMock(

@@ -6,7 +6,7 @@ FastAPI endpoints for Haotian external knowledge base operations.
 This module provides proxy APIs so the frontend does not call external services directly.
 """
 
-from contracts.api.management_knowledge_base_haotian import HaotianListRequest, HaotianTestConnectionRequest
+from contracts.knowledge import HaotianListRequest, HaotianTestConnectionRequest
 import logging
 from http import HTTPStatus
 from typing import Optional, Dict

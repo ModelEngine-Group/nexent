@@ -42,8 +42,8 @@ auth_utils_mock.get_current_user_info = MagicMock(return_value=("user_1", "tenan
 sys.modules["gateway.authentication.identity"] = auth_utils_mock
 sys.modules["gateway.authentication.identity"] = auth_utils_mock
 
-from contracts.error_code import RuntimeMetadataValidationCode
-from contracts.exceptions import AppException, RuntimeMetadataValidationError
+from contracts.errors.codes import RuntimeMetadataValidationCode
+from contracts.errors.exceptions import AppException, RuntimeMetadataValidationError
 
 from management.api.a2a.a2a_client import router
 

@@ -3,10 +3,10 @@
 import json
 from typing import Any
 
-from contracts.error_code import ErrorCode
-from contracts.evaluation_limits import DEFAULT_PASS_THRESHOLD
-from contracts.evaluation_status import MAX_FAILURE_EXAMPLES, EvalPassStatus, EvalRunStatus
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.constants.evaluation import DEFAULT_PASS_THRESHOLD
+from contracts.constants.evaluation import MAX_FAILURE_EXAMPLES, EvalPassStatus, EvalRunStatus
+from contracts.errors.exceptions import AppException
 from management.db.evaluation.runs import get_agent_evaluation, list_agent_evaluation_cases, update_agent_evaluation_analysis_report
 from management.db.evaluation.evaluator import get_evaluator
 from management.services.evaluation.common import (

@@ -1,6 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 from test.backend.management.import_patching import set_import_attribute
-from contracts.exceptions import AppException, AgentRunException, LimitExceededError, MCPConnectionError, MCPNameIllegal, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError, MemoryPreparationException, NoInviteCodeException, IncorrectInviteCodeException, OfficeConversionException, UnsupportedFileTypeException, FileTooLargeException, UserRegistrationException, TimeoutException, SignatureValidationError, UnauthorizedError, TokenExpiredError, ValidationError, NotFoundException, MEConnectionException, VoiceServiceException, VoiceConfigException, STTConnectionException, TTSConnectionException, ToolExecutionException, MCPContainerError, DuplicateError, DataMateConnectionError, SkillDuplicateError, SkillException, OAuthProviderError, OAuthLinkError, TaskNotFoundError, UnsupportedOperationError
+from contracts.errors.exceptions import AppException, AgentRunException, LimitExceededError, MCPConnectionError, MCPNameIllegal, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError, MemoryPreparationException, NoInviteCodeException, IncorrectInviteCodeException, OfficeConversionException, UnsupportedFileTypeException, FileTooLargeException, UserRegistrationException, TimeoutException, SignatureValidationError, UnauthorizedError, TokenExpiredError, ValidationError, NotFoundException, MEConnectionException, VoiceServiceException, VoiceConfigException, STTConnectionException, TTSConnectionException, ToolExecutionException, MCPContainerError, DuplicateError, DataMateConnectionError, SkillDuplicateError, SkillException, OAuthProviderError, OAuthLinkError, TaskNotFoundError, UnsupportedOperationError
 import time
 import sys
 import os
@@ -111,7 +113,7 @@ sys.modules['management.db.identity.token'] = MagicMock(
 # ``LimitExceededError`` classes on the mock so tests that catch them can
 # still match; we also expose ``AppException`` and other exception classes
 # used by sibling test files so that imports like
-# ``from contracts.exceptions import AppException`` succeed later in the
+# ``from contracts.errors.exceptions import AppException`` succeed later in the
 # pytest run. ``run_all_test.py`` runs every test file in a separate
 # pytest process, so this mock is only visible inside this test file.
 consts_const_mock = MagicMock()
@@ -120,11 +122,12 @@ consts_const_mock.DEFAULT_USER_ID = "user_id"
 consts_const_mock.DEFAULT_TENANT_ID = "tenant_id"
 consts_const_mock.IS_SPEED_MODE = False
 sys.modules['consts.const'] = consts_const_mock
+install_business_constant_stubs(consts_const_mock)
 
 # Mock exceptions module with real exception classes. All known exception
-# classes from ``contracts.exceptions`` are imported above and re-
+# classes from ``contracts.errors.exceptions`` are imported above and re-
 # exported on the mock below, so any code (in this file or in modules it
-# imports) that does ``from contracts.exceptions import SomeException`` still
+# imports) that does ``from contracts.errors.exceptions import SomeException`` still
 # gets a real class rather than a MagicMock. ``run_all_test.py`` runs
 # every test file in a separate pytest process, so this mock only affects
 # this file's own session.
@@ -169,7 +172,7 @@ for _exc_name in (
     "UnsupportedOperationError",
 ):
     setattr(consts_exceptions_mock, _exc_name, locals()[_exc_name])
-sys.modules['contracts.exceptions'] = consts_exceptions_mock
+install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 sys.modules['nexent'] = MagicMock()
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()

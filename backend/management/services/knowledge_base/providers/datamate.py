@@ -8,7 +8,7 @@ This service layer uses the DataMate SDK client to interact with DataMate APIs.
 import logging
 from typing import Dict, List, Any, Optional
 
-from consts.const import DATAMATE_URL
+from contracts.constants.configuration import DATAMATE_URL
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.db.knowledge_base.repository import upsert_knowledge_record, get_knowledge_info_by_tenant_and_source, delete_knowledge_record
 from nexent.vector_database.datamate_core import DataMateCore

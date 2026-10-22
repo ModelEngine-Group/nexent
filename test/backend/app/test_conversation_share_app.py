@@ -276,7 +276,7 @@ def test_preview_share_asset_endpoint_resolve_file_error(mocker):
 
 def test_create_conversation_share_endpoint_token_expired(mocker):
     """Expired token maps to 401 instead of falling through to 500."""
-    from contracts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     mocker.patch(
         "management.api.conversation.conversation_share.get_current_user_id",

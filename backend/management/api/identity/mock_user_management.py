@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.exceptions import UnauthorizedError
-from contracts.models import UserSignInRequest, UserSignUpRequest
+from contracts.errors.exceptions import UnauthorizedError
+from contracts.identity import UserSignInRequest, UserSignUpRequest
 import logging
 from datetime import datetime, timedelta
 
@@ -8,9 +8,9 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 from http import HTTPStatus
 
-from consts.const import MOCK_USER, MOCK_SESSION
-from contracts.exceptions import UnauthorizedError
-from contracts.models import UserSignInRequest, UserSignUpRequest
+from contracts.constants.identity import MOCK_USER, MOCK_SESSION
+from contracts.errors.exceptions import UnauthorizedError
+from contracts.identity import UserSignInRequest, UserSignUpRequest
 from management.services.permission.identity.authentication import get_user_info
 
 logger = logging.getLogger("mock_user_management_app")

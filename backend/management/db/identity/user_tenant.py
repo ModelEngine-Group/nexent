@@ -9,11 +9,12 @@ from typing import Any, List, Dict, Optional
 
 from sqlalchemy import exists, func, or_, text
 
-from consts.const import DEFAULT_TENANT_ID, MAX_ADMINS_PER_TENANT, MAX_SUPER_ADMIN_COUNT, MAX_USERS_PER_TENANT
+from contracts.constants.identity import DEFAULT_TENANT_ID
+from consts.const import MAX_ADMINS_PER_TENANT, MAX_SUPER_ADMIN_COUNT, MAX_USERS_PER_TENANT
 from management.utils.orm import as_dict
 from management.db.client import get_db_session
 from management.db.models import TenantGroupInfo, TenantGroupUser, UserOAuthAccount, UserTenant
-from contracts.exceptions import TenantResourceLimitError
+from contracts.errors.exceptions import TenantResourceLimitError
 
 logger = logging.getLogger(__name__)
 

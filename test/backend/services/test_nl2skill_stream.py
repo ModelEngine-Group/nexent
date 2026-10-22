@@ -10,7 +10,7 @@ import pytest
 
 from nexent.core.utils.observer import MessageObserver
 
-from contracts.models import NL2SkillRunRequest
+from contracts.agent import NL2SkillRunRequest
 import services.nl2skill_service as service
 
 

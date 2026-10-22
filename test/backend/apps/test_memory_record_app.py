@@ -6,6 +6,7 @@ services so the request/response shape can be validated without touching
 the database or Elasticsearch.
 """
 
+from test.common.contract_stubs import install_shared_contract_stub
 import logging
 import sys
 import types
@@ -112,10 +113,10 @@ sys.modules["gateway.authentication.identity"] = auth_utils_mod
 
 # Stub exceptions
 consts_pkg = types.ModuleType("consts")
-exceptions_mod = types.ModuleType("contracts.exceptions")
+exceptions_mod = types.ModuleType("contracts.errors.exceptions")
 exceptions_mod.UnauthorizedError = type("UnauthorizedError", (Exception,), {})
 sys.modules["consts"] = consts_pkg
-sys.modules["contracts.exceptions"] = exceptions_mod
+install_shared_contract_stub(exceptions_mod, 'exceptions')
 
 
 @pytest.fixture

@@ -8,8 +8,8 @@ from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, TOKEN
-from contracts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
-from contracts.models import ToolSourceEnum, ToolValidateRequest
+from contracts.errors.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
+from contracts.tool import ToolSourceEnum, ToolValidateRequest
 from management.db.client import minio_client
 from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names
 from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_server_by_name_and_tenant

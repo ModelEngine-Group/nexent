@@ -69,8 +69,8 @@ def _install_stubs():
             self.extra = extra
 
     _consts = _register_package("consts")
-    _consts.error_code = _mk_mod("contracts.error_code", ErrorCode=_ErrorCode)
-    _consts.exceptions = _mk_mod("contracts.exceptions", AppException=_AppException)
+    _consts.error_code = _mk_mod("contracts.errors.codes", ErrorCode=_ErrorCode)
+    _consts.exceptions = _mk_mod("contracts.errors.exceptions", AppException=_AppException)
 
     _db = _register_package("database")
     _db.evaluator_db = _mk_mod(

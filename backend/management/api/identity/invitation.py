@@ -3,8 +3,8 @@
 Invitation management API endpoints
 """
 
-from contracts.models import InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
-from contracts.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
+from contracts.identity import InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
+from contracts.errors.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
 import logging
 from typing import Optional
 
@@ -12,8 +12,8 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from http import HTTPStatus
 from starlette.responses import JSONResponse
 
-from contracts.models import InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
-from contracts.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
+from contracts.identity import InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
+from contracts.errors.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.invitations import (
     create_invitation_code, update_invitation_code, get_invitation_by_code,

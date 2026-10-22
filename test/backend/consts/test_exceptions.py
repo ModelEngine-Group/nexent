@@ -6,8 +6,8 @@ Unit tests for Exception classes.
 Tests the AppException class and helper functions.
 """
 import pytest
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException, TenantResourceLimitError, raise_error, tenant_resource_limit_error_payload
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, TenantResourceLimitError, raise_error, tenant_resource_limit_error_payload
 
 
 class TestAppException:
@@ -213,43 +213,43 @@ class TestLegacyExceptions:
 
     def test_agent_run_exception_exists(self):
         """Test AgentRunException can be instantiated."""
-        from contracts.exceptions import AgentRunException
+        from contracts.errors.exceptions import AgentRunException
         exc = AgentRunException("Agent run failed")
         assert str(exc) == "Agent run failed"
 
     def test_limit_exceeded_error_exists(self):
         """Test LimitExceededError can be instantiated."""
-        from contracts.exceptions import LimitExceededError
+        from contracts.errors.exceptions import LimitExceededError
         exc = LimitExceededError("Rate limit exceeded")
         assert str(exc) == "Rate limit exceeded"
 
     def test_unauthorized_error_exists(self):
         """Test UnauthorizedError can be instantiated."""
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
         exc = UnauthorizedError("Unauthorized")
         assert str(exc) == "Unauthorized"
 
     def test_validation_error_exists(self):
         """Test ValidationError can be instantiated."""
-        from contracts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
         exc = ValidationError("Validation failed")
         assert str(exc) == "Validation failed"
 
     def test_not_found_exception_exists(self):
         """Test NotFoundException can be instantiated."""
-        from contracts.exceptions import NotFoundException
+        from contracts.errors.exceptions import NotFoundException
         exc = NotFoundException("Resource not found")
         assert str(exc) == "Resource not found"
 
     def test_mcp_connection_error_exists(self):
         """Test MCPConnectionError can be instantiated."""
-        from contracts.exceptions import MCPConnectionError
+        from contracts.errors.exceptions import MCPConnectionError
         exc = MCPConnectionError("MCP connection failed")
         assert str(exc) == "MCP connection failed"
 
     def test_data_mate_connection_error_exists(self):
         """Test DataMateConnectionError can be instantiated."""
-        from contracts.exceptions import DataMateConnectionError
+        from contracts.errors.exceptions import DataMateConnectionError
         exc = DataMateConnectionError("DataMate connection failed")
         assert str(exc) == "DataMate connection failed"
 
@@ -259,25 +259,25 @@ class TestLegacyAliases:
 
     def test_parameter_invalid_error_alias(self):
         """Test ParameterInvalidError alias exists."""
-        from contracts.exceptions import ParameterInvalidError
+        from contracts.errors.exceptions import ParameterInvalidError
         assert ParameterInvalidError is not None
 
     def test_timeout_error_alias(self):
         """Test TimeoutError alias exists."""
-        from contracts.exceptions import TimeoutError
+        from contracts.errors.exceptions import TimeoutError
         assert TimeoutError is not None
 
     def test_user_not_found_error_alias(self):
         """Test UserNotFoundError alias exists."""
-        from contracts.exceptions import UserNotFoundError
+        from contracts.errors.exceptions import UserNotFoundError
         assert UserNotFoundError is not None
 
     def test_tenant_not_found_error_alias(self):
         """Test TenantNotFoundError alias exists."""
-        from contracts.exceptions import TenantNotFoundError
+        from contracts.errors.exceptions import TenantNotFoundError
         assert TenantNotFoundError is not None
 
     def test_agent_not_found_error_alias(self):
         """Test AgentNotFoundError alias exists."""
-        from contracts.exceptions import AgentNotFoundError
+        from contracts.errors.exceptions import AgentNotFoundError
         assert AgentNotFoundError is not None

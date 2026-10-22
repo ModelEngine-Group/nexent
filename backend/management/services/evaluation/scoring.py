@@ -6,9 +6,9 @@ from concurrent.futures import as_completed
 from math import isfinite
 from typing import Any
 
-from contracts.error_code import ErrorCode
-from contracts.evaluation_limits import DEFAULT_PASS_THRESHOLD
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.constants.evaluation import DEFAULT_PASS_THRESHOLD
+from contracts.errors.exceptions import AppException
 from infrastructure.concurrency import runtime_thread_manager
 from management.services.evaluation.common import (
     _EVALUATOR_FILENAME,

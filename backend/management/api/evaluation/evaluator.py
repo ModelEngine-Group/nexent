@@ -1,7 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.api.management_evaluation_evaluator import CreateEvaluatorRequest, EvaluatorFields, ExportEvaluatorsRequest, GenerateEvaluatorRequest, UpdateEvaluatorRequest, _UNAUTHORIZED_MESSAGE
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException, UnauthorizedError
+from contracts.evaluation import CreateEvaluatorRequest, EvaluatorFields, ExportEvaluatorsRequest, GenerateEvaluatorRequest, UpdateEvaluatorRequest
+from contracts.constants.evaluation import _UNAUTHORIZED_MESSAGE
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, UnauthorizedError
 import io
 import json
 import logging
@@ -11,8 +12,8 @@ from fastapi import APIRouter, Body, File, Header, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException, UnauthorizedError
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, UnauthorizedError
 from management.services.evaluation.evaluators import (
     create_evaluator_impl,
     delete_evaluator_impl,

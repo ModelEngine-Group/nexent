@@ -2,7 +2,7 @@
 
 import logging
 
-from contracts.error_message import ErrorMessage
+from contracts.errors.messages import ErrorMessage
 
 logger = logging.getLogger("tool_configuration_service")
 

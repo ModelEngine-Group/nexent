@@ -3,13 +3,13 @@
 
 from typing import Any
 from typing import Dict
-from contracts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING
+from contracts.constants.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING
 from typing import Optional
-from contracts.notification import SCOPE_TENANT_ADMIN
-from contracts.notification import SCOPE_USER
-from contracts.notification import EVENT_TYPE_REPOSITORY_REVIEW_APPROVED, EVENT_TYPE_REPOSITORY_REVIEW_REJECTED
-from contracts.agent_repository import STATUS_REJECTED
-from contracts.agent_repository import STATUS_SHARED
+from contracts.constants.notification import SCOPE_TENANT_ADMIN
+from contracts.constants.notification import SCOPE_USER
+from contracts.constants.notification import EVENT_TYPE_REPOSITORY_REVIEW_APPROVED, EVENT_TYPE_REPOSITORY_REVIEW_REJECTED
+from contracts.constants.agent import STATUS_REJECTED
+from contracts.constants.agent import STATUS_SHARED
 from management.db.notification.repository import create_notification
 
 import logging

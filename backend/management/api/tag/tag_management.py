@@ -2,42 +2,15 @@
 
 """HTTP endpoints for managing fixed tenant tag libraries."""
 
-from contracts.models import SkillTagAssignmentBatchRequest, KnowledgeTagAssignmentBatchRequest, AgentTagAssignmentBatchRequest, TagAssignmentBulkOutcome, TagAssignmentBulkReplaceRequest, TagAssignmentReplaceRequest, TagAssignmentResponse, TagDefinitionCreateRequest, TagDefinitionResponse, TagDefinitionUpdateRequest, TagDefinitionUsageResponse, TagDeleteResponse, TagDocumentBatchStatusRequest, TagDocumentBatchStatusResponse, TagDocumentProjectionStatusResponse, TagLegacyFlatTagsProjectionResponse, TagLibraryResponse, TagOrderUpdateRequest, TagResourceFilterRequest, TagResourceFilterResponse, TagStatusUpdateRequest, TagValueCreateRequest, TagValueResponse, TagValueUpdateRequest, TagValueUsageResponse, ToolTagAssignmentBatchRequest
-from contracts.api.management_tag_tag_management import TAG_CONFLICT_RESPONSES
+from contracts.tag import SkillTagAssignmentBatchRequest, KnowledgeTagAssignmentBatchRequest, AgentTagAssignmentBatchRequest, TagAssignmentBulkOutcome, TagAssignmentBulkReplaceRequest, TagAssignmentReplaceRequest, TagAssignmentResponse, TagDefinitionCreateRequest, TagDefinitionResponse, TagDefinitionUpdateRequest, TagDefinitionUsageResponse, TagDeleteResponse, TagDocumentBatchStatusRequest, TagDocumentBatchStatusResponse, TagDocumentProjectionStatusResponse, TagLegacyFlatTagsProjectionResponse, TagLibraryResponse, TagOrderUpdateRequest, TagResourceFilterRequest, TagResourceFilterResponse, TagStatusUpdateRequest, TagValueCreateRequest, TagValueResponse, TagValueUpdateRequest, TagValueUsageResponse, ToolTagAssignmentBatchRequest
+from contracts.tag import TAG_CONFLICT_RESPONSES
 from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
-from consts.const import CAN_EDIT_ALL_USER_ROLES
-from contracts.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
-from contracts.models import (
-    SkillTagAssignmentBatchRequest,
-    KnowledgeTagAssignmentBatchRequest,
-    AgentTagAssignmentBatchRequest,
-    TagAssignmentBulkOutcome,
-    TagAssignmentBulkReplaceRequest,
-    TagAssignmentReplaceRequest,
-    TagAssignmentResponse,
-    TagDefinitionCreateRequest,
-    TagDefinitionResponse,
-    TagDefinitionUpdateRequest,
-    TagDefinitionUsageResponse,
-    TagDeleteResponse,
-    TagDocumentBatchStatusRequest,
-    TagDocumentBatchStatusResponse,
-    TagDocumentProjectionStatusResponse,
-    TagLegacyFlatTagsProjectionResponse,
-    TagLibraryResponse,
-    TagOrderUpdateRequest,
-    TagResourceFilterRequest,
-    TagResourceFilterResponse,
-    TagStatusUpdateRequest,
-    TagValueCreateRequest,
-    TagValueResponse,
-    TagValueUpdateRequest,
-    TagValueUsageResponse,
-    ToolTagAssignmentBatchRequest,
-)
+from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES
+from contracts.errors.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
+from contracts.tag import SkillTagAssignmentBatchRequest, KnowledgeTagAssignmentBatchRequest, AgentTagAssignmentBatchRequest, TagAssignmentBulkOutcome, TagAssignmentBulkReplaceRequest, TagAssignmentReplaceRequest, TagAssignmentResponse, TagDefinitionCreateRequest, TagDefinitionResponse, TagDefinitionUpdateRequest, TagDefinitionUsageResponse, TagDeleteResponse, TagDocumentBatchStatusRequest, TagDocumentBatchStatusResponse, TagDocumentProjectionStatusResponse, TagLegacyFlatTagsProjectionResponse, TagLibraryResponse, TagOrderUpdateRequest, TagResourceFilterRequest, TagResourceFilterResponse, TagStatusUpdateRequest, TagValueCreateRequest, TagValueResponse, TagValueUpdateRequest, TagValueUsageResponse, ToolTagAssignmentBatchRequest
 from management.db.identity.role_permission import check_role_permission
 from fastapi import APIRouter, Header, HTTPException, Query
 from management.services.tag.library import TagManagementService

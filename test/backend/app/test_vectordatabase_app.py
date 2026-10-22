@@ -4,6 +4,7 @@ Unit tests for the Elasticsearch application endpoints.
 These tests verify the behavior of the Elasticsearch API without actual database connections.
 All external services and dependencies are mocked to isolate the tests.
 """
+from test.common.contract_stubs import install_business_contract_stubs
 import os
 import sys
 import logging
@@ -23,8 +24,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.insert(0, backend_dir)
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 
 # Environment variables are now configured in conftest.py
 
@@ -73,7 +74,7 @@ patch('management.db.client.db_client').start()
 # Mock Elasticsearch to prevent connection errors
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
-# Create a mock for contracts.models and patch it before any imports.
+# Create a mock for contracts.agent and patch it before any imports.
 # For models used in FastAPI endpoints, provide real Pydantic classes so that
 # FastAPI dependency and schema generation does not fail during router import.
 consts_model_mock = MagicMock()
@@ -103,7 +104,7 @@ consts_model_mock.ChunkCreateRequest = _ChunkCreateRequest
 consts_model_mock.ChunkUpdateRequest = _ChunkUpdateRequest
 
 # Patch the module import before importing backend modules
-sys.modules['contracts.models'] = consts_model_mock
+install_business_contract_stubs(consts_model_mock)
 
 # Create mocks for these services if they can't be imported
 ElasticSearchService = MagicMock()
@@ -112,8 +113,8 @@ RedisService = MagicMock()
 # Import routes and services
 from management.api.knowledge_base.vectordatabase import create_new_index, router
 from nexent.vector_database.elasticsearch_core import ElasticSearchCore
-from contracts.exceptions import AppException, DuplicateError
-from contracts.error_code import ErrorCode
+from contracts.errors.exceptions import AppException, DuplicateError
+from contracts.errors.codes import ErrorCode
 
 # Create test client
 app = FastAPI()
@@ -3724,7 +3725,7 @@ TOKEN_EXPIRED_ENDPOINTS = [
 )
 def test_vdb_endpoints_return_401_on_token_expired(method, url, kwargs, auth_fn):
     """Expired token maps to 401 on every authenticated VDB endpoint."""
-    from contracts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
     from http import HTTPStatus
 
     with patch(

@@ -1,10 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.api.management_knowledge_base_vectordatabase import INTERNAL_INDEX_NAME_DESC
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException, DuplicateError, TokenExpiredError
-from contracts.models import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
-from contracts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
+from contracts.constants.knowledge import INTERNAL_INDEX_NAME_DESC
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, DuplicateError, TokenExpiredError
+from contracts.knowledge import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
+from contracts.constants.knowledge import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
 from management.utils.knowledge_permission import require_knowledge_base_edit_permission, require_knowledge_base_read_permission
 import json
 import logging
@@ -18,11 +18,11 @@ from nexent.core.concurrency import run_blocking
 from nexent.vector_database.base import VectorDatabaseCore
 
 from management.utils.knowledge_permission import require_knowledge_base_edit_permission, require_knowledge_base_read_permission
-from consts.const import ASSET_OWNER_TENANT_ID
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException, DuplicateError, TokenExpiredError
-from contracts.models import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
-from contracts.scheduler import SUMMARY_FREQUENCY_OPTIONS_FOR_API, VALID_SUMMARY_FREQUENCIES
+from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, DuplicateError, TokenExpiredError
+from contracts.knowledge import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
+from contracts.constants.knowledge import SUMMARY_FREQUENCY_OPTIONS_FOR_API, VALID_SUMMARY_FREQUENCIES
 from management.db.knowledge_base.repository import get_index_name_by_knowledge_name, get_knowledge_record
 from management.db.model.repository import get_model_by_model_id
 from management.services.knowledge_base.service import (

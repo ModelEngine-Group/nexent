@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from contracts.authentication import CredentialKind
-from contracts.exceptions import TokenExpiredError
+from contracts.errors.exceptions import TokenExpiredError
 from gateway.authentication import identity, internal
 from gateway.authentication.credentials import extract_bearer_token
 from gateway.authentication.policies import authenticate_identity
@@ -228,7 +228,7 @@ def test_internal_runtime_token_cannot_be_used_as_a_browser_session(session_poli
 
 
 def test_pending_account_token_cannot_be_used_as_a_browser_session(session_policy):
-    from contracts.authentication import OAUTH_PENDING_PURPOSE
+    from contracts.constants.identity import OAUTH_PENDING_PURPOSE
 
     with pytest.raises(TokenExpiredError, match="credential policy"):
         authenticate_identity(signed_session(purpose=OAUTH_PENDING_PURPOSE))
@@ -238,8 +238,8 @@ def test_pending_oauth_identity_requires_signed_purpose_and_provider(
     session_policy, monkeypatch
 ):
     from gateway.authentication import oauth
-    from contracts.authentication import OAUTH_PENDING_PURPOSE
-    from contracts.exceptions import OAuthLinkError
+    from contracts.constants.identity import OAUTH_PENDING_PURPOSE
+    from contracts.errors.exceptions import OAuthLinkError
 
     monkeypatch.setattr(oauth, "SUPABASE_JWT_SECRET", identity.SUPABASE_JWT_SECRET)
     token = signed_session(

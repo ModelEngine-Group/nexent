@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Focused unit tests for skill repository service."""
 
+from test.common.contract_stubs import install_shared_contract_stub
 import base64
 import sys
 import types
@@ -36,8 +37,8 @@ _consts_package = sys.modules.get("consts")
 if _consts_package is not None and not hasattr(_consts_package, "__path__"):
     _consts_package.__path__ = []
 
-if "contracts.agent_repository" not in sys.modules:
-    consts_agent_repository_mock = types.ModuleType("contracts.agent_repository")
+if "contracts.constants.agent" not in sys.modules:
+    consts_agent_repository_mock = types.ModuleType("contracts.constants.agent")
     consts_agent_repository_mock.OWNERSHIP_ALL = "all"
     consts_agent_repository_mock.OWNERSHIP_CREATED = "created"
     consts_agent_repository_mock.OWNERSHIP_OTHERS = "others"
@@ -56,7 +57,7 @@ if "contracts.agent_repository" not in sys.modules:
         "rejected",
         "shared",
     }
-    sys.modules["contracts.agent_repository"] = consts_agent_repository_mock
+    install_shared_contract_stub(consts_agent_repository_mock, 'agent_repository')
 
 consts_const_module = sys.modules.get("consts.const")
 if consts_const_module is not None:
@@ -187,7 +188,7 @@ sys.modules["management.services.skill.service"] = _skill_service_module_mock
 _notification_service_mock = MagicMock()
 sys.modules["management.services.notification.service"] = _notification_service_mock
 
-from contracts import exceptions as exceptions_module
+from contracts.errors import exceptions as exceptions_module
 
 
 def _ensure_exception(name):
@@ -215,7 +216,7 @@ if not _has_duplicate_names:
 
 from services import skill_repository_service as srs
 
-from contracts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_SKILL_REPOSITORY
+from contracts.constants.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_SKILL_REPOSITORY
 
 
 @pytest.fixture(autouse=True)

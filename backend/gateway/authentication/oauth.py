@@ -4,8 +4,9 @@ from typing import Dict
 
 import jwt
 from consts.const import SUPABASE_JWT_SECRET
-from contracts.authentication import OAUTH_PENDING_PURPOSE, PendingOAuthIdentity
-from contracts.exceptions import OAuthLinkError, OAuthProviderError
+from contracts.constants.identity import OAUTH_PENDING_PURPOSE
+from contracts.authentication import PendingOAuthIdentity
+from contracts.errors.exceptions import OAuthLinkError, OAuthProviderError
 
 
 def parse_pending_oauth_token(pending_token: str) -> PendingOAuthIdentity:

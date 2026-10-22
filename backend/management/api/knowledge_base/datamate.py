@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
-from contracts.exceptions import DataMateConnectionError, TokenExpiredError
+from contracts.knowledge import SyncDatamateRequest
+from contracts.errors.exceptions import DataMateConnectionError, TokenExpiredError
 import logging
 from typing import Optional
 
@@ -16,7 +16,7 @@ from management.services.knowledge_base.providers.datamate import (
     check_datamate_connection,
 )
 from gateway.authentication.identity import get_current_user_id
-from contracts.exceptions import DataMateConnectionError, TokenExpiredError
+from contracts.errors.exceptions import DataMateConnectionError, TokenExpiredError
 
 router = APIRouter(prefix="/datamate")
 logger = logging.getLogger("datamate_app")

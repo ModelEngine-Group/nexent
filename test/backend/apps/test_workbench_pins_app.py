@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from management.api.conversation import workbench_pins as routes
-from contracts.exceptions import ConversationNotFoundError, TokenExpiredError, UnauthorizedError, ValidationError
+from contracts.errors.exceptions import ConversationNotFoundError, TokenExpiredError, UnauthorizedError, ValidationError
 
 
 @pytest.fixture

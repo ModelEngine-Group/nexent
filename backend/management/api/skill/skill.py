@@ -1,8 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.exceptions import AppException, ForbiddenError, SkillException, UnauthorizedError
-from contracts.models import SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
-from contracts.api.management_skill_skill import ASSET_OWNER_SKILL_VIEW_DENIED, InstallSkillsRequest, _NOT_FOUND_TEXT
+from contracts.errors.exceptions import AppException, ForbiddenError, SkillException, UnauthorizedError
+from contracts.skill import SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
+from contracts.constants.skill import ASSET_OWNER_SKILL_VIEW_DENIED, _NOT_FOUND_TEXT
+from contracts.skill import InstallSkillsRequest
 import logging
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional
@@ -11,15 +12,16 @@ from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
-from contracts.exceptions import AppException, ForbiddenError, SkillException, UnauthorizedError
+from contracts.errors.exceptions import AppException, ForbiddenError, SkillException, UnauthorizedError
 from consts.const import ENABLE_AGENT_WORKBENCH
-from contracts.models import NL2SkillRunRequest, SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
+from contracts.agent import NL2SkillRunRequest
+from contracts.skill import SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
 from permissions.depends import require
 from permissions.models import CurrentUser
-from contracts.exceptions import RunModelControlsError
+from contracts.errors.exceptions import RunModelControlsError
 from management.services.permission.asset_owner import can_view_skill
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
-from contracts.exceptions import AgentDraftEditError, ResourceBindingError
+from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingError
 from management.services.agent.authorization import require_agent_draft_edit
 from services.nl2skill_service import create_nl2skill_stream
 from management.services.conversation.creation_history import (

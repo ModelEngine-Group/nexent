@@ -5,10 +5,12 @@ from typing import Any, Dict, List, Optional
 
 from nexent.core.models.sampling import resolve_sampling
 
-from consts.const import DOCKER_INTERNAL_HOST, LOCALHOST_IP, LOCALHOST_NAME, MODEL_CONFIG_MAPPING
-from contracts.exceptions import ModelProviderError
-from contracts.models import ModelConnectStatusEnum, _infer_model_type_from_name
-from contracts.provider import DASHSCOPE_BASE_URL, DASHSCOPE_REALTIME_BASE_URL, MODEL_ENGINE_URL_MARKER, SILICON_BASE_URL, TOKENPONY_BASE_URL, ProviderEnum
+from contracts.constants.runtime import DOCKER_INTERNAL_HOST, LOCALHOST_IP, LOCALHOST_NAME
+from contracts.constants.model import MODEL_CONFIG_MAPPING
+from contracts.errors.exceptions import ModelProviderError
+from contracts.constants.model import ModelConnectStatusEnum
+from contracts.model import _infer_model_type_from_name
+from contracts.constants.model import DASHSCOPE_BASE_URL, DASHSCOPE_REALTIME_BASE_URL, MODEL_ENGINE_URL_MARKER, SILICON_BASE_URL, TOKENPONY_BASE_URL, ProviderEnum
 from management.db.model.repository import create_model_record, delete_model_record, get_model_by_model_id, get_model_by_name_factory, get_model_records, get_models_by_display_name, get_models_by_tenant_factory_type, update_model_record
 from management.db.configuration.tenant import get_single_config_info, insert_config, update_config_by_tenant_config_id
 from management.services.model.names import (

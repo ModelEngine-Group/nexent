@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from contracts.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
+from contracts.errors.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
 from management.services.tag.library import TagManagementService
 from management.services.tag.resources import AuthenticatedCaller
 from sqlalchemy.exc import DBAPIError, IntegrityError

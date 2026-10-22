@@ -4,7 +4,7 @@
 User management API endpoints
 """
 
-from contracts.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UnauthorizedError, tenant_resource_limit_error_payload
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UnauthorizedError, tenant_resource_limit_error_payload
 import logging
 from http import HTTPStatus
 from typing import Optional
@@ -12,14 +12,8 @@ from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Request
 from starlette.responses import JSONResponse
 
-from contracts.models import UserListRequest, UserUpdateRequest
-from contracts.exceptions import (
-    ForbiddenError,
-    NotFoundException,
-    TenantResourceLimitError,
-    UnauthorizedError,
-    tenant_resource_limit_error_payload,
-)
+from contracts.identity import UserListRequest, UserUpdateRequest
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UnauthorizedError, tenant_resource_limit_error_payload
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.users import (
     delete_user_and_cleanup, get_users_for_requester, update_user_for_requester

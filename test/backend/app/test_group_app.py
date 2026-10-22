@@ -33,8 +33,8 @@ patch('management.db.client.MinioClient', return_value=minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes and models
-from contracts.exceptions import NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
-from contracts.models import GroupCreateRequest, GroupUpdateRequest, GroupUserRequest, GroupListRequest, SetDefaultGroupRequest, GroupMembersUpdateRequest
+from contracts.errors.exceptions import NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
+from contracts.identity import GroupCreateRequest, GroupUpdateRequest, GroupUserRequest, GroupListRequest, SetDefaultGroupRequest, GroupMembersUpdateRequest
 
 # Import the modules we need
 from fastapi.testclient import TestClient

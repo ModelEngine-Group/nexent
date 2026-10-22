@@ -2,11 +2,11 @@
 
 from typing import Any
 
-from contracts.error_code import ErrorCode
-from contracts.evaluation_limits import DEFAULT_PASS_THRESHOLD
-from contracts.evaluation_status import EvalCaseStatus, EvalPassStatus, EvalRunStatus
-from contracts.exceptions import AppException
-from contracts.models import AgentRequest
+from contracts.errors.codes import ErrorCode
+from contracts.constants.evaluation import DEFAULT_PASS_THRESHOLD
+from contracts.constants.evaluation import EvalCaseStatus, EvalPassStatus, EvalRunStatus
+from contracts.errors.exceptions import AppException
+from contracts.agent import AgentRequest
 
 try:
     from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
@@ -20,7 +20,7 @@ from datetime import datetime
 from statistics import mean
 
 from adapters.exception import JiuwenSDKUnavailableError
-from contracts.evaluation_limits import MAX_TURNS_PER_SESSION
+from contracts.constants.evaluation import MAX_TURNS_PER_SESSION
 from management.db.evaluation.runs import create_agent_evaluation_cases, get_agent_evaluation, list_agent_evaluation_cases, update_agent_evaluation_case_result, update_agent_evaluation_status
 from management.db.client import get_db_session
 from management.db.models import ModelRecord

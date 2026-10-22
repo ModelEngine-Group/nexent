@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.exceptions import STTConnectionException, TTSConnectionException
+from contracts.errors.exceptions import STTConnectionException, TTSConnectionException
 import asyncio
 import logging
 from http import HTTPStatus
@@ -7,8 +7,8 @@ from http import HTTPStatus
 from fastapi import APIRouter, WebSocket, HTTPException
 from fastapi.responses import JSONResponse
 
-from contracts.exceptions import VoiceServiceException, STTConnectionException, TTSConnectionException, VoiceConfigException
-from contracts.models import VoiceConnectivityRequest, VoiceConnectivityResponse
+from contracts.errors.exceptions import VoiceServiceException, STTConnectionException, TTSConnectionException, VoiceConfigException
+from contracts.voice import VoiceConnectivityRequest, VoiceConnectivityResponse
 from management.services.model.voice import get_voice_service
 
 logger = logging.getLogger("voice_app")

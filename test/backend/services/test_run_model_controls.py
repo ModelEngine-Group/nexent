@@ -8,8 +8,8 @@ import pytest
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 from pydantic import ValidationError
 
-from contracts.exceptions import ForbiddenError, RunModelControlsError
-from contracts.models import AgentRequest, NL2AgentRunRequest, NL2SkillRunRequest, RuntimeGenerationOverrides
+from contracts.errors.exceptions import ForbiddenError, RunModelControlsError
+from contracts.agent import AgentRequest, NL2AgentRunRequest, NL2SkillRunRequest, RuntimeGenerationOverrides
 from management.services.model import run_controls
 
 EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -236,7 +236,7 @@ def test_preflight_uses_agent_default_and_overrides_without_mutating_catalog(pre
 
 @pytest.mark.parametrize("default", [{"model_id": 9}, {}, None])
 def test_preflight_resolves_tenant_default_or_rejects_missing_default(mocker, preflight_models, default):
-    from consts.const import MODEL_CONFIG_MAPPING
+    from contracts.constants.model import MODEL_CONFIG_MAPPING
     from management.services.configuration.tenant.settings import tenant_config_manager
 
     catalog, _factory, _bases, roots = preflight_models

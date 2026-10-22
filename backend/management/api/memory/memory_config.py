@@ -18,8 +18,8 @@ Routes retained:
 - DELETE `/memory/config/disable_useragent/{agent_id}`: Remove a disabled user-agent id.
 """
 
-from contracts.models import MemoryAgentShareMode
-from contracts.exceptions import UnauthorizedError
+from contracts.memory import MemoryAgentShareMode
+from contracts.errors.exceptions import UnauthorizedError
 import logging
 from datetime import datetime
 from typing import Any, Optional
@@ -28,9 +28,9 @@ from http import HTTPStatus
 from fastapi import APIRouter, Body, Header, Path, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from consts.const import MEMORY_AGENT_SHARE_KEY, MEMORY_SWITCH_KEY, DREAMING_SWITCH_KEY, EXTERNAL_PROVIDER_TOP_K_KEY, BOOLEAN_TRUE_VALUES
-from contracts.models import MemoryAgentShareMode
-from contracts.exceptions import UnauthorizedError
+from contracts.constants.memory import MEMORY_AGENT_SHARE_KEY, MEMORY_SWITCH_KEY, DREAMING_SWITCH_KEY, EXTERNAL_PROVIDER_TOP_K_KEY, BOOLEAN_TRUE_VALUES
+from contracts.memory import MemoryAgentShareMode
+from contracts.errors.exceptions import UnauthorizedError
 from management.services.configuration.user.memory import (
     add_disabled_agent_id,
     add_disabled_useragent_id,

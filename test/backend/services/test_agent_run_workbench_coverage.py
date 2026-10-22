@@ -106,7 +106,7 @@ def test_apply_workbench_runtime_plan_attaches_all_runtime_overrides(monkeypatch
 async def test_prepare_agent_run_forwards_workbench_runtime_state(
     monkeypatch, stored_generation
 ):
-    from contracts.models import WorkbenchGenerationConfig
+    from contracts.agent import WorkbenchGenerationConfig
 
     request = _request()
     request.__dict__["_runtime_knowledge_context"] = {"policy": "strict"}
@@ -187,7 +187,7 @@ async def test_prepare_agent_run_forwards_workbench_runtime_state(
 @pytest.mark.asyncio
 async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeypatch):
     from fastapi import Request
-    from contracts.models import WorkbenchSessionConfig
+    from contracts.agent import WorkbenchSessionConfig
     canonical = WorkbenchSessionConfig.model_validate({'mode': 'single_agent_chat', 'agent_mounts': [{'agent_id': 7, 'version_no': 3}]})
     request = _request(entrypoint='workbench', workbench=None, expected_workbench_config_version=2)
     conversation = {'conversation_id': 123, 'workbench_config': canonical.model_dump(mode='json'), 'workbench_config_version': 2, 'runtime_metadata': {'existing': True}, 'runtime_metadata_version': 4, 'knowledge_scope': None}
@@ -239,7 +239,7 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
 @pytest.mark.asyncio
 async def test_run_agent_stream_rejects_disabled_workbench_entrypoint(monkeypatch):
     from fastapi import Request
-    from contracts.models import WorkbenchSessionConfig
+    from contracts.agent import WorkbenchSessionConfig
     workbench = WorkbenchSessionConfig.model_validate({'mode': 'single_agent_chat', 'agent_mounts': [{'agent_id': 7}]})
     request = _request(entrypoint='workbench', workbench=workbench)
     monkeypatch.setattr(agent_subscription, 'ENABLE_AGENT_WORKBENCH', False)
@@ -274,7 +274,7 @@ async def test_run_agent_stream_rejects_conversation_entrypoint_mismatch(monkeyp
 @pytest.mark.asyncio
 async def test_run_agent_stream_rejects_stale_metadata_version(monkeypatch):
     from fastapi import Request
-    from contracts.models import WorkbenchSessionConfig
+    from contracts.agent import WorkbenchSessionConfig
     workbench = WorkbenchSessionConfig.model_validate({'mode': 'single_agent_chat', 'agent_mounts': [{'agent_id': 7}]})
     request = _request(entrypoint='workbench', workbench=workbench, metadata={'ticket': 'NEX-1'}, expected_metadata_version=2)
     monkeypatch.setattr(agent_subscription, 'ENABLE_AGENT_WORKBENCH', True)

@@ -3,6 +3,9 @@
 """
 Unit tests for management.api.skill.skill module.
 """
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
+from contracts import skill as skill_app_management_skill_skill_skill
 import sys
 import os
 import io
@@ -109,16 +112,17 @@ nexent_skills_mock.SkillManager = MockSkillManager
 
 # Mock consts
 consts_mock = types.ModuleType('consts')
-consts_exceptions_mock = types.ModuleType('contracts.exceptions')
-consts_model_mock = types.ModuleType('contracts.models')
+consts_exceptions_mock = types.ModuleType('contracts.errors.exceptions')
+consts_model_mock = types.ModuleType('contracts.agent')
 consts_const_mock = types.ModuleType('consts.const')
-consts_agent_mock = types.ModuleType('contracts.agent_constants')
+consts_agent_mock = types.ModuleType('contracts.constants.agent')
 consts_agent_mock.SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
 sys.modules['consts'] = consts_mock
-sys.modules['contracts.agent_constants'] = consts_agent_mock
-sys.modules['contracts.exceptions'] = consts_exceptions_mock
-sys.modules['contracts.models'] = consts_model_mock
+install_shared_contract_stub(consts_agent_mock, 'agent_constants')
+install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
+install_business_contract_stubs(consts_model_mock)
 sys.modules['consts.const'] = consts_const_mock
+install_business_constant_stubs(consts_const_mock)
 consts_const_mock.MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
 consts_const_mock.APP_VERSION = "v2.0.2"
 consts_const_mock.ENABLE_AGENT_WORKBENCH = False
@@ -334,7 +338,7 @@ nexent_storage_minio_config_mock.MinIOStorageConfig = MockMinIOStorageConfig
 
 # Now import the app module
 from management.api.skill import skill as skill_app
-from contracts.api import management_skill_skill as skill_app_management_skill_skill
+from contracts.constants import skill as skill_app_management_skill_skill
 from runtime.api.skill import creation as skill_app_creation
 
 
@@ -2451,7 +2455,7 @@ class TestInstallSkillsEndpoint:
             side_effect=AppException("quota", "limit reached"),
         )
 
-        request = skill_app_management_skill_skill.InstallSkillsRequest(skill_names=["skill"])
+        request = skill_app_management_skill_skill_skill.InstallSkillsRequest(skill_names=["skill"])
         with pytest.raises(AppException):
             await skill_app.install_skills(request=request, http_request=None, authorization="token")
 

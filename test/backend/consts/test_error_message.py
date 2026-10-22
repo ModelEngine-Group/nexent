@@ -6,8 +6,8 @@ Unit tests for Error Message definitions.
 Tests the ErrorMessage class and its methods for getting error messages.
 """
 import pytest
-from contracts.error_code import ErrorCode
-from contracts.error_message import ErrorMessage
+from contracts.errors.codes import ErrorCode
+from contracts.errors.messages import ErrorMessage
 
 
 @pytest.mark.parametrize(

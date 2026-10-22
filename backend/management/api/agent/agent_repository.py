@@ -1,7 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.models import AgentRepositoryListingCreateRequest, KnowledgeBaseResolution, SkillResolution, TagAssignmentFilter
-from contracts.exceptions import AgentToolImportError
+from contracts.agent import AgentRepositoryListingCreateRequest
+from contracts.knowledge import KnowledgeBaseResolution
+from contracts.skill import SkillResolution
+from contracts.tag import TagAssignmentFilter
+from contracts.errors.exceptions import AgentToolImportError
 import json
 import logging
 from http import HTTPStatus
@@ -10,13 +13,11 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from starlette.responses import JSONResponse, Response
 
-from contracts.exceptions import SkillDuplicateError, UnauthorizedError
-from contracts.models import (
-    AgentRepositoryListingCreateRequest,
-    KnowledgeBaseResolution,
-    SkillResolution,
-    TagAssignmentFilter,
-)
+from contracts.errors.exceptions import SkillDuplicateError, UnauthorizedError
+from contracts.agent import AgentRepositoryListingCreateRequest
+from contracts.knowledge import KnowledgeBaseResolution
+from contracts.skill import SkillResolution
+from contracts.tag import TagAssignmentFilter
 from management.services.repository.agent.listing import (
     check_repository_import_precheck_impl,
     create_agent_repository_listing_impl,
@@ -34,7 +35,7 @@ from management.services.repository.agent.listing import (
 from management.services.monitor.audit import record_security_event
 from management.services.repository.agent.sync import sync_official_agents
 from gateway.authentication.identity import get_current_user_context, get_current_user_id
-from contracts.exceptions import AgentToolImportError
+from contracts.errors.exceptions import AgentToolImportError
 
 logger = logging.getLogger(__name__)
 agent_repository_router = APIRouter(prefix="/repository/agent")

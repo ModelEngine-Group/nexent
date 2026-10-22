@@ -10,11 +10,11 @@ import pytest
 
 def _load_builtin_label_map():
     """Load the real BUILTIN_LABEL_MAP even if consts has been mocked."""
-    # Ensure the real contracts.tool_labels module is loaded
+    # Ensure the real contracts.constants.tool module is loaded
     for key in list(sys.modules):
         if key.startswith('consts'):
             del sys.modules[key]
-    from contracts.tool_labels import BUILTIN_LABEL_MAP
+    from contracts.constants.tool import BUILTIN_LABEL_MAP
     return BUILTIN_LABEL_MAP
 
 
@@ -50,7 +50,7 @@ class TestBuiltinLabelMap:
         for key in list(sys.modules):
             if key.startswith('consts'):
                 del sys.modules[key]
-        import contracts.tool_labels
-        doc = contracts.tool_labels.__doc__
+        import contracts.constants.tool
+        doc = contracts.constants.tool.__doc__
         assert doc is not None
         assert "deploy/sql/migrations/v2.3_merged_migrations.sql" in doc

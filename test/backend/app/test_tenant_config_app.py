@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_business_constant_stubs
 import unittest
 import json
 import os
@@ -50,6 +51,7 @@ const_mock.HIDE_HOME_PAGE = False
 sys.modules['services.tenant_config_service'] = services_mock
 sys.modules['gateway.authentication.identity'] = auth_mock
 sys.modules['consts.const'] = const_mock
+install_business_constant_stubs(const_mock)
 
 # Now import FastAPI components and the router
 from fastapi import FastAPI

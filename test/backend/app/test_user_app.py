@@ -52,7 +52,7 @@ patch('management.db.client.MinioClient', return_value=minio_mock).start()
 patch('management.db.client.MinioClient', return_value=minio_mock).start()
 
 # Import exception classes
-from contracts.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
 
 # Import the modules we need
 from fastapi.testclient import TestClient

@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 import types
@@ -9,7 +11,7 @@ from unittest.mock import MagicMock
 
 # First mock the consts package to avoid ModuleNotFoundError.
 # ``consts`` must be a real package-like module (i.e. carry ``__path__``) so
-# that child imports such as ``from contracts.exceptions import ...`` resolve
+# that child imports such as ``from contracts.errors.exceptions import ...`` resolve
 # through sys.modules instead of failing with "not a package". ``const``
 # stays a MagicMock so tests can attach whatever constants they need.
 from types import ModuleType
@@ -32,7 +34,7 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 consts_mock.const.TENANT_ID = "tenant_id"
 
 # Provide the exceptions submodule used by tenant_config_db at import time.
-consts_exceptions_mock = ModuleType("contracts.exceptions")
+consts_exceptions_mock = ModuleType("contracts.errors.exceptions")
 
 
 class TenantResourceLimitError(Exception):
@@ -44,9 +46,10 @@ consts_exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
-sys.modules['contracts.exceptions'] = consts_exceptions_mock
+install_business_constant_stubs(consts_mock.const)
+install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 
-exceptions_mock = types.ModuleType("contracts.exceptions")
+exceptions_mock = types.ModuleType("contracts.errors.exceptions")
 
 
 class MockTenantResourceLimitError(Exception):
@@ -54,7 +57,7 @@ class MockTenantResourceLimitError(Exception):
 
 
 exceptions_mock.TenantResourceLimitError = MockTenantResourceLimitError
-sys.modules['contracts.exceptions'] = exceptions_mock
+install_shared_contract_stub(exceptions_mock, 'exceptions')
 
 # Mock utils module
 utils_mock = MagicMock()

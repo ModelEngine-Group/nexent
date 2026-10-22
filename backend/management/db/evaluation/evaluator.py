@@ -5,9 +5,9 @@
 import logging
 from typing import Any
 
-from contracts.error_code import ErrorCode
-from contracts.evaluation_status import EvalRunStatus
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.constants.evaluation import EvalRunStatus
+from contracts.errors.exceptions import AppException
 from management.db.client import get_db_session
 
 

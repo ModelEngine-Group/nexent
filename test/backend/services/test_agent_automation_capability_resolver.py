@@ -4,11 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from management.services.automation import capabilities as capability_resolver
-from contracts.automation import (
-    CapabilityBinding,
-    CapabilityResolution,
-    CapabilityType,
-)
+from contracts.automation import CapabilityBinding, CapabilityResolution, CapabilityType
 
 
 def test_binding_helpers_preserve_runtime_identity_and_metadata():

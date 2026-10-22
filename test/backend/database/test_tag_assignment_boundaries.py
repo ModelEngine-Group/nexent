@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
-from contracts.exceptions import TagManagementConflictError
+from contracts.errors.exceptions import TagManagementConflictError
 from management.db.tag.repository import TagManagementDB
 
 

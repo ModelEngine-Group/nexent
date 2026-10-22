@@ -1,8 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 
-from consts.const import ASSET_OWNER_ATTACHMENTS_PREFIX
-from consts.const import ASSET_OWNER_TENANT_ID
+from contracts.constants.identity import ASSET_OWNER_ATTACHMENTS_PREFIX
+from contracts.constants.identity import ASSET_OWNER_TENANT_ID
 from typing import Dict
 from typing import List
 from typing import Optional

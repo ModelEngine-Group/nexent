@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[4]
 
 class PromptValidationTests(unittest.TestCase):
     def setUp(self):
-        model_source = ROOT / "backend/contracts/models.py"
+        model_source = ROOT / "backend/contracts/agent.py"
         model_node = next(n for n in ast.parse(model_source.read_text(encoding="utf-8")).body
                           if isinstance(n, ast.ClassDef) and n.name == "GeneratePromptRequest")
         namespace = {"BaseModel": BaseModel, "Field": Field, "field_validator": field_validator,

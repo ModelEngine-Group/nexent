@@ -5,6 +5,7 @@ Unit tests for backend/management/db/client.py
 Tests PostgresClient, MinioClient, and utility functions
 """
 
+from test.common.contract_stubs import install_business_constant_stubs
 import os
 import sys
 import pytest
@@ -22,6 +23,7 @@ consts_mock.const = MagicMock()
 
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 # Mock boto3
 boto3_mock = MagicMock()

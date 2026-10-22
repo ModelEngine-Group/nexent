@@ -17,8 +17,9 @@ import logging
 from contextvars import ContextVar
 from typing import Any, Optional
 
-from consts.const import DATAMATE_URL, ES_API_KEY, ES_HOST
-from contracts.storage import VectorDatabaseType
+from contracts.constants.configuration import DATAMATE_URL
+from consts.const import ES_API_KEY, ES_HOST
+from contracts.constants.knowledge import VectorDatabaseType
 from management.db.knowledge_base.repository import get_knowledge_record
 from management.services.model.resolver import (
     get_embedding_model_by_id,

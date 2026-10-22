@@ -4,8 +4,9 @@ import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
 
-from contracts.exceptions import ForbiddenError, SkillDuplicateError, UnauthorizedError
-from contracts.models import SkillRepositoryInstallRequest, SkillRepositoryListingCreateRequest, TagAssignmentFilter
+from contracts.errors.exceptions import ForbiddenError, SkillDuplicateError, UnauthorizedError
+from contracts.skill import SkillRepositoryInstallRequest, SkillRepositoryListingCreateRequest
+from contracts.tag import TagAssignmentFilter
 from fastapi import APIRouter, Body, Header, HTTPException, Query
 from services.skill_repository_service import (
     count_my_editable_skills_impl,

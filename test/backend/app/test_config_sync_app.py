@@ -303,7 +303,7 @@ async def test_load_config_empty_auth_header(config_mocks):
 @pytest.mark.asyncio
 async def test_save_config_token_expired(config_mocks):
     """Expired token on save_config maps to 401."""
-    from contracts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     global_config = MagicMock()
     config_mocks['get_current_user_id'].side_effect = TokenExpiredError("expired")
@@ -319,7 +319,7 @@ async def test_save_config_token_expired(config_mocks):
 @pytest.mark.asyncio
 async def test_load_config_token_expired(config_mocks):
     """Expired token on load_config maps to 401."""
-    from contracts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     config_mocks['get_user_info'].side_effect = TokenExpiredError("expired")
 

@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, AppException, UnauthorizedError, TenantResourceLimitError, ValidationError, tenant_resource_limit_error_payload
-from contracts.error_code import ErrorCode
+from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, AppException, UnauthorizedError, TenantResourceLimitError, ValidationError, tenant_resource_limit_error_payload
+from contracts.errors.codes import ErrorCode
 from gateway.authentication.credentials import extract_bearer_token
 import logging
 
@@ -12,19 +12,10 @@ from typing import Optional
 
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
-from consts.const import ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
-from contracts.models import UserSignInRequest, UserSignUpRequest, UpdatePasswordRequest
-from contracts.exceptions import (
-    NoInviteCodeException,
-    IncorrectInviteCodeException,
-    UserRegistrationException,
-    AppException,
-    UnauthorizedError,
-    TenantResourceLimitError,
-    ValidationError,
-    tenant_resource_limit_error_payload,
-)
-from contracts.error_code import ErrorCode
+from contracts.constants.identity import ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
+from contracts.identity import UserSignInRequest, UserSignUpRequest, UpdatePasswordRequest
+from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, AppException, UnauthorizedError, TenantResourceLimitError, ValidationError, tenant_resource_limit_error_payload
+from contracts.errors.codes import ErrorCode
 from management.services.permission.identity.cas import build_logout_url, CasAuthenticationError
 from gateway.authentication.identity import get_authorized_client, validate_token, get_session_by_authorization
 from management.services.permission.identity.authentication import check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, get_user_info, create_token, list_tokens_by_user, delete_token, update_password, get_provider_username

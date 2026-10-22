@@ -39,9 +39,9 @@ sys.modules['management.services.skill.transfer'] = MagicMock()
 
 from management.services.permission import asset_owner as asset_owner_visibility_mock
 
-from contracts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException, TenantResourceLimitError, ValidationError
-from contracts.error_code import ErrorCode
-from consts.const import ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_TENANT_ID
+from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException, TenantResourceLimitError, ValidationError
+from contracts.errors.codes import ErrorCode
+from contracts.constants.identity import ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_TENANT_ID
 
 ASSET_OWNER_RESOURCES_ROUTE = "/asset-owner-resources"
 
@@ -1000,7 +1000,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
 
     async def test_signup_user_with_weak_password(self):
         """Test signup with weak password raises AppException (line 143)"""
-        from contracts.error_code import ErrorCode
+        from contracts.errors.codes import ErrorCode
 
         with self.assertRaises(AppException) as context:
             await signup_user_with_invitation("test@example.com", "weak", invite_code="VALID123")

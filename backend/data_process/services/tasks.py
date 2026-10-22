@@ -17,10 +17,11 @@ import redis
 from celery import states
 from PIL import Image
 
-from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, MAX_CONCURRENT_CONVERSIONS, REDIS_BACKEND_URL, REDIS_URL
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException, OfficeConversionException
-from contracts.models import BatchTaskRequest
+from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, REDIS_BACKEND_URL, REDIS_URL
+from contracts.constants.file import MAX_CONCURRENT_CONVERSIONS
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, OfficeConversionException
+from contracts.knowledge import BatchTaskRequest
 from data_process.app import app as celery_app
 from data_process.tasks import submit_process_forward_chain
 from data_process.utils import (

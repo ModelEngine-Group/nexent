@@ -149,8 +149,8 @@ def test_creation_requires_embedding_and_trims_description():
     ({"description": "New description"}, True),
 ])
 def test_unified_save_commits_permissions_before_optional_aidp(monkeypatch, metadata, remote_fails):
-    from contracts.error_code import ErrorCode
-    from contracts.exceptions import AppException
+    from contracts.errors.codes import ErrorCode
+    from contracts.errors.exceptions import AppException
     from ext_components.aidp.apps import aidp_mgmt_app
     from ext_components.aidp.services import aidp_kb_update_service as service
 
@@ -681,7 +681,7 @@ class TestListKnowledgeBases:
              patch.object(aidp_mgmt_app, "get_aidp_kb_impl",
                           side_effect=AppException(ErrorCode.AIDP_SERVICE_ERROR, "down")), \
              patch.object(aidp_permission_service, "update_resource_status") as mock_status:
-            from contracts.error_code import ErrorCode as _E
+            from contracts.errors.codes import ErrorCode as _E
             response = client.get("/aidp-mgmt/knowledge-bases", headers=_bearer())
         assert response.status_code == HTTPStatus.OK
         body = response.json()
@@ -811,8 +811,8 @@ class TestListKnowledgeBases:
 
 # Use a lazy import for AppException at module load to avoid breaking the
 # fastapi exception handler fixture.
-from contracts.exceptions import AppException
-from contracts.error_code import ErrorCode
+from contracts.errors.exceptions import AppException
+from contracts.errors.codes import ErrorCode
 
 
 # --- Update KB ------------------------------------------------------------
@@ -1408,7 +1408,7 @@ class TestAuthEdgeCases:
     def test_unauthorized_error_from_get_current_user_id_returns_401(self, monkeypatch):
         """get_current_user_id raises UnauthorizedError -> _auth catches and returns 401."""
         from ext_components.aidp.apps import aidp_mgmt_app
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         monkeypatch.setattr(
             aidp_mgmt_app.auth_utils_module, "get_current_user_id",

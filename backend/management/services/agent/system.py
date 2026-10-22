@@ -5,13 +5,12 @@
 import logging
 from typing import Any
 
-from consts.const import APP_VERSION, ENABLE_AIDP_KNOWLEDGE, LANGUAGE
-from contracts.exceptions import WorkbenchAgentError
-from contracts.models import AgentInfoRequest, ToolInstanceInfoRequest
-from contracts.agent import (
-    SystemAgentRef,
-    WorkbenchReleaseManifest,
-)
+from consts.const import APP_VERSION, ENABLE_AIDP_KNOWLEDGE
+from contracts.constants.localization import LANGUAGE
+from contracts.errors.exceptions import WorkbenchAgentError
+from contracts.agent import AgentInfoRequest
+from contracts.tool import ToolInstanceInfoRequest
+from contracts.agent import SystemAgentRef, WorkbenchReleaseManifest
 from management.db.skill import repository as skill_db
 from management.db.agent.repository import clear_agent_new_mark, create_agent, search_system_agent, update_agent, update_system_agent_revision
 from management.db.skill.repository import delete_skills_by_agent_id

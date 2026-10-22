@@ -7,23 +7,14 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from starlette.responses import JSONResponse, StreamingResponse
 from consts.const import ENABLE_AGENT_WORKBENCH
-from contracts.models import AgentRequest, NL2AgentRunRequest
-from contracts.exceptions import (
-    ForbiddenError,
-    AppException,
-    UnauthorizedError,
-    ValidationError,
-    RuntimeCapacityExceededError,
-    RuntimeQueueTimeoutError,
-    WorkbenchConfigVersionConflict,
-    WorkbenchError,
-)
+from contracts.agent import AgentRequest, NL2AgentRunRequest
+from contracts.errors.exceptions import ForbiddenError, AppException, UnauthorizedError, ValidationError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, WorkbenchConfigVersionConflict, WorkbenchError
 from permissions.depends import require
 from permissions.models import CurrentUser
 from management.services.agent.service import run_agent_stream, stop_agent_tasks
-from contracts.exceptions import AgentDraftEditError
+from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
-from contracts.exceptions import RunModelControlsError
+from contracts.errors.exceptions import RunModelControlsError
 from management.services.conversation.creation_history import prepare_creation_history, persist_creation_stream
 from gateway.authentication.identity import get_current_user_info, get_current_user_id
 from gateway.authentication.internal import verify_internal_runtime_jwt

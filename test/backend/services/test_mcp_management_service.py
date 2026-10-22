@@ -57,7 +57,7 @@ try:
 except Exception:
     pass
 
-from contracts.exceptions import McpNotFoundError, McpNameConflictError, UnauthorizedError
+from contracts.errors.exceptions import McpNotFoundError, McpNameConflictError, UnauthorizedError
 
 from management.services.repository.mcp.service import (
     _to_community_card,

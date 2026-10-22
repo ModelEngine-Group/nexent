@@ -1,10 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.storage import VectorDatabaseType
-from contracts.exceptions import AppException, LimitExceededError, UnauthorizedError
-from contracts.models import HybridSearchRequest, ProcessParams
-from contracts.task_recovery import NORTHBOUND_SERVICE_NAME
-from contracts.api.gateway_knowledge_base_routes import RATE_LIMIT_EXCEEDED_DETAIL
+from contracts.constants.knowledge import VectorDatabaseType
+from contracts.errors.exceptions import AppException, LimitExceededError, UnauthorizedError
+from contracts.knowledge import HybridSearchRequest, ProcessParams
+from contracts.constants.runtime import NORTHBOUND_SERVICE_NAME
+from contracts.constants.knowledge import RATE_LIMIT_EXCEEDED_DETAIL
 import base64
 import logging
 from http import HTTPStatus
@@ -13,11 +13,11 @@ from typing import Optional, Dict, Any, List, Annotated
 from fastapi import APIRouter, Body, File, Form, Path, Path as PathParam, Query, Request, HTTPException, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 
-from consts.const import ASSET_OWNER_TENANT_ID
-from contracts.storage import VectorDatabaseType
-from contracts.exceptions import AppException, LimitExceededError, UnauthorizedError
-from contracts.models import HybridSearchRequest, ProcessParams
-from contracts.task_recovery import NORTHBOUND_SERVICE_NAME
+from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.constants.knowledge import VectorDatabaseType
+from contracts.errors.exceptions import AppException, LimitExceededError, UnauthorizedError
+from contracts.knowledge import HybridSearchRequest, ProcessParams
+from contracts.constants.runtime import NORTHBOUND_SERVICE_NAME
 from management.db.knowledge_base.repository import get_index_name_by_knowledge_name
 from management.services.file.service import (
     upload_files_impl,

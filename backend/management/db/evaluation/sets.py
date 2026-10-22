@@ -5,8 +5,8 @@ from typing import Any
 
 from sqlalchemy import or_
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from management.utils.orm import as_dict
 from management.db.client import get_db_session
 from management.db.models import AgentEvaluation, EvaluationSet, EvaluationSetCase

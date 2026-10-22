@@ -8,16 +8,16 @@ including fetching knowledge spaces and transforming responses to a format
 compatible with the frontend.
 """
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 import logging
 from http import HTTPStatus
 
 from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from management.services.knowledge_base.providers.idata import (
     fetch_idata_knowledge_spaces_impl,
     fetch_idata_datasets_impl,

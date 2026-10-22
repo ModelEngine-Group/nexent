@@ -1,7 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.models import AgentInfoRequest, AgentIDRequest, ConversationResponse, AgentImportRequest, SkillConflictCheckRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest, TagAssignmentFilter, WorkbenchCapabilityPreviewRequest
-from contracts.exceptions import AgentNotFoundError, AgentRelationValidationError, ForbiddenError, SkillDuplicateError, AppException, TenantResourceLimitError, tenant_resource_limit_error_payload, ValidationError, WorkbenchError
+from contracts.agent import AgentInfoRequest, AgentIDRequest, AgentImportRequest, SkillConflictCheckRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest, WorkbenchCapabilityPreviewRequest
+from contracts.conversation import ConversationResponse
+from contracts.tag import TagAssignmentFilter
+from contracts.errors.exceptions import AgentNotFoundError, AgentRelationValidationError, ForbiddenError, SkillDuplicateError, AppException, TenantResourceLimitError, tenant_resource_limit_error_payload, ValidationError, WorkbenchError
 import json
 from contracts.authentication import AuthenticatedIdentity
 import logging
@@ -12,36 +14,12 @@ from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking
 from starlette.responses import JSONResponse, Response
-from consts.const import ASSET_OWNER_TENANT_ID, ENABLE_AGENT_WORKBENCH
-from contracts.models import (
-    AgentInfoRequest,
-    AgentIDRequest,
-    ConversationResponse,
-    AgentImportRequest,
-    SkillConflictCheckRequest,
-    AgentNameBatchCheckRequest,
-    AgentNameBatchRegenerateRequest,
-    VersionPublishRequest,
-    VersionListResponse,
-    VersionDetailResponse,
-    VersionStatusRequest,
-    CurrentVersionResponse,
-    VersionCompareRequest,
-    VersionUpdateRequest,
-    TagAssignmentFilter,
-    WorkbenchCapabilityPreviewRequest,
-)
-from contracts.exceptions import (
-    AgentNotFoundError,
-    AgentRelationValidationError,
-    ForbiddenError,
-    SkillDuplicateError,
-    AppException,
-    TenantResourceLimitError,
-    tenant_resource_limit_error_payload,
-    ValidationError,
-    WorkbenchError,
-)
+from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from consts.const import ENABLE_AGENT_WORKBENCH
+from contracts.agent import AgentInfoRequest, AgentIDRequest, AgentImportRequest, SkillConflictCheckRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest, WorkbenchCapabilityPreviewRequest
+from contracts.conversation import ConversationResponse
+from contracts.tag import TagAssignmentFilter
+from contracts.errors.exceptions import AgentNotFoundError, AgentRelationValidationError, ForbiddenError, SkillDuplicateError, AppException, TenantResourceLimitError, tenant_resource_limit_error_payload, ValidationError, WorkbenchError
 from permissions.depends import require
 from permissions.models import CurrentUser
 from management.services.permission.asset_owner import apply_agent_detail_prompt_visibility
@@ -74,9 +52,9 @@ from management.services.agent.workbench import (
 from management.services.agent.system import (
     ensure_workbench_main_agent,
 )
-from contracts.exceptions import AgentDraftEditError
+from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
-from contracts.exceptions import RunModelControlsError
+from contracts.errors.exceptions import RunModelControlsError
 from management.services.conversation.creation_history import (
     prepare_creation_history,
     persist_creation_stream,

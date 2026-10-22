@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.exceptions import MCPConnectionError, McpNameConflictError, McpNotFoundError, McpValidationError, UnauthorizedError
-from contracts.models import CommunityListRequest, CommunityPublishRequest, CommunityReviewActionRequest, CommunityReviewListRequest, CommunityStatusUpdateRequest, CommunityUpdateRequest
+from contracts.errors.exceptions import MCPConnectionError, McpNameConflictError, McpNotFoundError, McpValidationError, UnauthorizedError
+from contracts.tool import CommunityListRequest, CommunityPublishRequest, CommunityReviewActionRequest, CommunityReviewListRequest, CommunityStatusUpdateRequest, CommunityUpdateRequest
 import logging
 from typing import Annotated, Optional
 
@@ -8,21 +8,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from http import HTTPStatus
 
-from contracts.exceptions import (
-    MCPConnectionError,
-    McpNameConflictError,
-    McpNotFoundError,
-    McpValidationError,
-    UnauthorizedError,
-)
-from contracts.models import (
-    CommunityListRequest,
-    CommunityPublishRequest,
-    CommunityReviewActionRequest,
-    CommunityReviewListRequest,
-    CommunityStatusUpdateRequest,
-    CommunityUpdateRequest,
-)
+from contracts.errors.exceptions import MCPConnectionError, McpNameConflictError, McpNotFoundError, McpValidationError, UnauthorizedError
+from contracts.tool import CommunityListRequest, CommunityPublishRequest, CommunityReviewActionRequest, CommunityReviewListRequest, CommunityStatusUpdateRequest, CommunityUpdateRequest
 from management.services.repository.mcp.service import (
     list_community_mcp_services,
     list_community_mcp_tag_stats,

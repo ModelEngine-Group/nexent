@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from contracts.exceptions import TagManagementNotFoundError, ValidationError
+from contracts.errors.exceptions import TagManagementNotFoundError, ValidationError
 from management.services.tag import library as service_module
 from management.services.tag.library import TagManagementService
 from management.services.tag.resources import (

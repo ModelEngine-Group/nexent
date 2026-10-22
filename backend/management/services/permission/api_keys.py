@@ -5,7 +5,7 @@
 import uuid
 from typing import Any, Dict, List, Optional
 
-from contracts.exceptions import ForbiddenError, NotFoundException, ValidationError
+from contracts.errors.exceptions import ForbiddenError, NotFoundException, ValidationError
 from management.db.client import get_db_session
 from management.db.identity.group import add_user_to_group, query_groups
 from management.db.identity.token import create_token, generate_access_key, list_active_tokens_by_tenant, soft_delete_tokens_by_user

@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.models import GlobalConfig
-from contracts.exceptions import TokenExpiredError
+from contracts.model import GlobalConfig
+from contracts.errors.exceptions import TokenExpiredError
 import logging
 from http import HTTPStatus
 from typing import Optional
@@ -8,8 +8,8 @@ from typing import Optional
 from fastapi import APIRouter, Header, Request, HTTPException
 from fastapi.responses import JSONResponse
 
-from contracts.models import GlobalConfig
-from contracts.exceptions import TokenExpiredError
+from contracts.model import GlobalConfig
+from contracts.errors.exceptions import TokenExpiredError
 from management.services.monitor.audit import record_security_event
 from management.services.configuration.tenant.service import save_config_impl, load_config_impl
 from gateway.authentication.identity import get_current_user_id, get_current_user_info

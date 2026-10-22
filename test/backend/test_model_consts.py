@@ -1,37 +1,46 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from contracts import conversation as model_consts_conversation
+from contracts import identity as model_consts_identity
+from contracts import knowledge as model_consts_knowledge
+from contracts import memory as model_consts_memory
+from contracts import model as model_consts_model
+from contracts import skill as model_consts_skill
+from contracts import tool as model_consts_tool
+from contracts import voice as model_consts_voice
+from contracts.constants import model as model_consts_model_constants
 import pytest
 from pydantic import ValidationError
 
-from backend.contracts import models as model_consts
+from contracts import agent as model_consts
 
 
 def test_model_connect_status_enum_defaults_and_get_value():
-    assert model_consts.ModelConnectStatusEnum.get_default() == "not_detected"
-    assert model_consts.ModelConnectStatusEnum.get_value("") == "not_detected"
-    assert model_consts.ModelConnectStatusEnum.get_value(None) == "not_detected"
-    assert model_consts.ModelConnectStatusEnum.get_value("available") == "available"
+    assert model_consts_model_constants.ModelConnectStatusEnum.get_default() == "not_detected"
+    assert model_consts_model_constants.ModelConnectStatusEnum.get_value("") == "not_detected"
+    assert model_consts_model_constants.ModelConnectStatusEnum.get_value(None) == "not_detected"
+    assert model_consts_model_constants.ModelConnectStatusEnum.get_value("available") == "available"
 
 
 def test_model_request_and_validation():
     # Basic construction
-    mr = model_consts.ModelRequest(model_name="mymodel", model_type="llm")
+    mr = model_consts_model.ModelRequest(model_name="mymodel", model_type="llm")
     assert mr.model_name == "mymodel"
     assert mr.model_type == "llm"
 
     # Chunk create request requires non-empty content
     with pytest.raises(ValidationError):
-        model_consts.ChunkCreateRequest(content="")
+        model_consts_knowledge.ChunkCreateRequest(content="")
 
     # Valid chunk create
-    req = model_consts.ChunkCreateRequest(content="a", title="t", filename="f")
+    req = model_consts_knowledge.ChunkCreateRequest(content="a", title="t", filename="f")
     assert req.content == "a"
     assert req.title == "t"
     assert req.filename == "f"
 
 
 def test_conversation_knowledge_scope_validates_three_state_contract():
-    scope = model_consts.ConversationKnowledgeScopeRequest.model_validate({
+    scope = model_consts_knowledge.ConversationKnowledgeScopeRequest.model_validate({
         "local": {"mode": "override", "knowledge_ids": [" 12 ", "12", "13"]},
         "aidp": {"mode": "disabled", "kds_ids": []},
     })
@@ -40,17 +49,17 @@ def test_conversation_knowledge_scope_validates_three_state_contract():
     assert scope.aidp.mode == "disabled"
 
     with pytest.raises(ValidationError):
-        model_consts.ConversationKnowledgeScopeRequest.model_validate({
+        model_consts_knowledge.ConversationKnowledgeScopeRequest.model_validate({
             "local": {"mode": "override", "knowledge_ids": []},
         })
 
     with pytest.raises(ValidationError):
-        model_consts.ConversationKnowledgeScopeRequest.model_validate({
+        model_consts_knowledge.ConversationKnowledgeScopeRequest.model_validate({
             "aidp": {"mode": "inherit", "kds_ids": ["unexpected"]},
         })
 
     with pytest.raises(ValidationError):
-        model_consts.ConversationKnowledgeScopeRequest.model_validate({
+        model_consts_knowledge.ConversationKnowledgeScopeRequest.model_validate({
             "aidp": {
                 "mode": "override",
                 "kds_ids": [f"kds-{index}" for index in range(11)],
@@ -59,11 +68,11 @@ def test_conversation_knowledge_scope_validates_three_state_contract():
 
 
 def test_skill_repository_install_request_limits_target_name_to_100_characters():
-    request = model_consts.SkillRepositoryInstallRequest(target_name="x" * 100)
+    request = model_consts_skill.SkillRepositoryInstallRequest(target_name="x" * 100)
     assert len(request.target_name) == 100
 
     with pytest.raises(ValidationError):
-        model_consts.SkillRepositoryInstallRequest(target_name="x" * 101)
+        model_consts_skill.SkillRepositoryInstallRequest(target_name="x" * 101)
 
 
 def test_model_request_threads_w11_capacity_and_accept_fields():
@@ -73,7 +82,7 @@ def test_model_request_threads_w11_capacity_and_accept_fields():
     field set here prevents a silent rename from dropping a column on the
     DB row or breaking the accept counter.
     """
-    fields = set(model_consts.ModelRequest.model_fields.keys())
+    fields = set(model_consts_model.ModelRequest.model_fields.keys())
     required = {
         # W1/W2 capacity columns (persisted)
         "context_window_tokens",
@@ -98,11 +107,11 @@ def test_model_request_threads_w11_capacity_and_accept_fields():
     ("request_type", "required_fields"),
     [
         (
-            model_consts.ManageTenantModelCreateRequest,
+            model_consts_model.ManageTenantModelCreateRequest,
             {"tenant_id", "model_name", "model_type"},
         ),
         (
-            model_consts.ManageTenantModelUpdateRequest,
+            model_consts_model.ManageTenantModelUpdateRequest,
             {"tenant_id", "current_display_name"},
         ),
     ],
@@ -141,7 +150,7 @@ def test_capacity_suggestion_response_has_required_fields():
     (e.g. suggested_provider -> canonical_provider) trips a test instead
     of silently dropping the field from the API contract.
     """
-    fields = set(model_consts.ModelCapacitySuggestionResponse.model_fields.keys())
+    fields = set(model_consts_model.ModelCapacitySuggestionResponse.model_fields.keys())
     required = {
         "suggestions",
         "match_kind",
@@ -161,7 +170,7 @@ def test_capacity_suggestion_response_has_required_fields():
 def test_filter_extra_params_passes_through_custom_object():
     """__custom__ sub-object is preserved regardless of model_type, alongside
     the existing allow-listed keys like enable_thinking."""
-    result = model_consts.filter_extra_params(
+    result = model_consts_model.filter_extra_params(
         "llm",
         {
             "enable_thinking": True,
@@ -182,35 +191,35 @@ def test_filter_extra_params_passes_through_custom_object():
 
 
 def test_filter_extra_params_accepts_reasoning_effort_for_llm_only():
-    assert model_consts.filter_extra_params(
+    assert model_consts_model.filter_extra_params(
         "llm", {"reasoning_effort": "high"}
     ) == {"reasoning_effort": "high"}
-    assert model_consts.filter_extra_params(
+    assert model_consts_model.filter_extra_params(
         "llm", {"reasoning_effort": "unsupported"}
     ) is None
-    assert model_consts.filter_extra_params(
+    assert model_consts_model.filter_extra_params(
         "embedding", {"reasoning_effort": "high"}
     ) is None
 
 
 def test_filter_extra_params_validates_reasoning_switch():
-    assert model_consts.filter_extra_params(
+    assert model_consts_model.filter_extra_params(
         "llm", {"enable_thinking": True, "reasoning_effort": "medium"}
     ) == {"enable_thinking": True, "reasoning_effort": "medium"}
-    assert model_consts.filter_extra_params(
+    assert model_consts_model.filter_extra_params(
         "llm", {"enable_thinking": False, "reasoning_effort": "high"}
     ) == {"enable_thinking": False, "reasoning_effort": "high"}
-    assert model_consts.filter_extra_params(
+    assert model_consts_model.filter_extra_params(
         "llm", {"enable_thinking": "true"}
     ) is None
 
 
 def test_filter_extra_params_validates_reasoning_budget_tokens():
-    assert model_consts.filter_extra_params(
+    assert model_consts_model.filter_extra_params(
         "llm", {"reasoning_budget_tokens": 4096}
     ) == {"reasoning_budget_tokens": 4096}
     for value in (True, 0, -1, "4096"):
-        assert model_consts.filter_extra_params(
+        assert model_consts_model.filter_extra_params(
             "llm", {"reasoning_budget_tokens": value}
         ) is None
 
@@ -218,7 +227,7 @@ def test_filter_extra_params_validates_reasoning_budget_tokens():
 def test_filter_extra_params_passes_through_custom_for_all_types():
     """__custom__ is type-agnostic: it survives for embedding/rerank/vlm too."""
     for model_type in ("embedding", "rerank", "vlm", "stt", "tts"):
-        result = model_consts.filter_extra_params(
+        result = model_consts_model.filter_extra_params(
             model_type,
             {"__custom__": {"k1": "v1", "k2": "0.5"}},
         )
@@ -229,17 +238,17 @@ def test_filter_extra_params_passes_through_custom_for_all_types():
 
 def test_filter_extra_params_drops_invalid_custom_shape():
     """__custom__ must be a dict; non-dict values are dropped entirely."""
-    result = model_consts.filter_extra_params("llm", {"__custom__": "not-a-dict"})
+    result = model_consts_model.filter_extra_params("llm", {"__custom__": "not-a-dict"})
     assert result is None
 
-    result = model_consts.filter_extra_params("llm", {"__custom__": ["list", "not", "dict"]})
+    result = model_consts_model.filter_extra_params("llm", {"__custom__": ["list", "not", "dict"]})
     assert result is None
 
 
 def test_filter_extra_params_drops_invalid_custom_entries():
     """Inside __custom__: non-string keys and non-JSON values are dropped
     individually; valid siblings survive."""
-    result = model_consts.filter_extra_params(
+    result = model_consts_model.filter_extra_params(
         "llm",
         {
             "__custom__": {
@@ -261,7 +270,7 @@ def test_filter_extra_params_drops_invalid_custom_entries():
 def test_filter_extra_params_keeps_custom_alongside_allowed_keys():
     """__custom__ coexists with the type's allow-listed extra_params keys."""
     # LLM allows enable_thinking in extra_params; __custom__ rides alongside.
-    result = model_consts.filter_extra_params(
+    result = model_consts_model.filter_extra_params(
         "llm",
         {"enable_thinking": False, "unknown_key": "dropped", "__custom__": {"x": "1"}},
     )
@@ -270,15 +279,15 @@ def test_filter_extra_params_keeps_custom_alongside_allowed_keys():
 
 def test_filter_extra_params_drops_empty_custom():
     """An empty __custom__ dict (or all-invalid entries) yields no __custom__ key."""
-    assert model_consts.filter_extra_params("llm", {"__custom__": {}}) is None
-    assert model_consts.filter_extra_params(
+    assert model_consts_model.filter_extra_params("llm", {"__custom__": {}}) is None
+    assert model_consts_model.filter_extra_params(
         "llm", {"__custom__": {"bad": {"nested": object()}}}
     ) is None
 
 def test_user_sign_up_request_validation():
     """Test UserSignUpRequest validation rules"""
     # Valid signup request
-    req = model_consts.UserSignUpRequest(
+    req = model_consts_identity.UserSignUpRequest(
         email="test@example.com",
         password="password123",
         invite_code="INVITE123"
@@ -289,7 +298,7 @@ def test_user_sign_up_request_validation():
     assert req.auto_login is True
 
     # Invite code is stripped of whitespace
-    req = model_consts.UserSignUpRequest(
+    req = model_consts_identity.UserSignUpRequest(
         email="test@example.com",
         password="password123",
         invite_code="  CODE123  "
@@ -298,7 +307,7 @@ def test_user_sign_up_request_validation():
 
     # Empty invite code raises
     with pytest.raises(ValidationError):
-        model_consts.UserSignUpRequest(
+        model_consts_identity.UserSignUpRequest(
             email="test@example.com",
             password="password123",
             invite_code="   "
@@ -306,7 +315,7 @@ def test_user_sign_up_request_validation():
 
     # Password min length validation
     with pytest.raises(ValidationError):
-        model_consts.UserSignUpRequest(
+        model_consts_identity.UserSignUpRequest(
             email="test@example.com",
             password="short",
             invite_code="CODE123"
@@ -315,7 +324,7 @@ def test_user_sign_up_request_validation():
 
 def test_update_password_request():
     """Test UpdatePasswordRequest validation"""
-    req = model_consts.UpdatePasswordRequest(
+    req = model_consts_identity.UpdatePasswordRequest(
         old_password="oldpass123",
         new_password="newpassword123"
     )
@@ -324,7 +333,7 @@ def test_update_password_request():
 
     # New password too short
     with pytest.raises(ValidationError):
-        model_consts.UpdatePasswordRequest(
+        model_consts_identity.UpdatePasswordRequest(
             old_password="oldpass123",
             new_password="short"
         )
@@ -333,7 +342,7 @@ def test_update_password_request():
 def test_user_update_request():
     """Test UserUpdateRequest validation"""
     # Valid with role
-    req = model_consts.UserUpdateRequest(
+    req = model_consts_identity.UserUpdateRequest(
         username="newname",
         email="new@example.com",
         role="ADMIN"
@@ -343,17 +352,17 @@ def test_user_update_request():
 
     # Invalid role pattern
     with pytest.raises(ValidationError):
-        model_consts.UserUpdateRequest(role="INVALID_ROLE")
+        model_consts_identity.UserUpdateRequest(role="INVALID_ROLE")
 
     # Optional fields can be None
-    req = model_consts.UserUpdateRequest()
+    req = model_consts_identity.UserUpdateRequest()
     assert req.username is None
     assert req.role is None
 
 
 def test_oauth_complete_request():
     """Test OAuthCompleteRequest"""
-    req = model_consts.OAuthCompleteRequest(
+    req = model_consts_identity.OAuthCompleteRequest(
         password="password123",
         invite_code="CODE123"
     )
@@ -362,7 +371,7 @@ def test_oauth_complete_request():
     assert req.email is None
 
     # With optional email
-    req = model_consts.OAuthCompleteRequest(
+    req = model_consts_identity.OAuthCompleteRequest(
         email="user@example.com",
         password="password123",
         invite_code="CODE123"
@@ -373,7 +382,7 @@ def test_oauth_complete_request():
 def test_model_config_hierarchy():
     """Test ModelConfig, AppConfig, and GlobalConfig hierarchy"""
     # Build a complete config
-    app_config = model_consts.AppConfig(
+    app_config = model_consts_model.AppConfig(
         appName="Legacy App",
         appDescription="Legacy description",
         iconType="icon",
@@ -384,7 +393,7 @@ def test_model_config_hierarchy():
     assert "appDescription" not in app_config.model_dump()
 
     # Single model config
-    single_model = model_consts.SingleModelConfig(
+    single_model = model_consts_model.SingleModelConfig(
         modelName="gpt-4",
         displayName="GPT-4",
         dimension=1536
@@ -393,7 +402,7 @@ def test_model_config_hierarchy():
     assert single_model.dimension == 1536
 
     # STT model config
-    stt_model = model_consts.STTModelConfig(
+    stt_model = model_consts_model.STTModelConfig(
         modelName="whisper",
         displayName="Whisper",
         modelFactory="openai",
@@ -404,7 +413,7 @@ def test_model_config_hierarchy():
     assert stt_model.accessToken == "token123"
 
     # TTS model config
-    tts_model = model_consts.TTSModelConfig(
+    tts_model = model_consts_model.TTSModelConfig(
         modelName="tts-1",
         displayName="TTS-1"
     )
@@ -424,8 +433,8 @@ def test_agent_request_validation():
 
     # With history
     history = [
-        model_consts.HistoryItem(role="user", content="Hello"),
-        model_consts.HistoryItem(role="assistant", content="Hi there")
+        model_consts_conversation.HistoryItem(role="user", content="Hello"),
+        model_consts_conversation.HistoryItem(role="assistant", content="Hi there")
     ]
     req = model_consts.AgentRequest(
         query="Follow up",
@@ -447,9 +456,9 @@ def test_agent_request_validation():
     # With tool_params
     req = model_consts.AgentRequest(
         query="Search",
-        tool_params=model_consts.ToolParamsRequest(
+        tool_params=model_consts_tool.ToolParamsRequest(
             agents={
-                "main": model_consts.AgentToolParamsRequest(
+                "main": model_consts_tool.AgentToolParamsRequest(
                     tools={"search": {"max_results": 10}}
                 )
             }
@@ -462,12 +471,12 @@ def test_agent_request_validation():
 def test_message_unit_and_message_request():
     """Test MessageUnit and MessageRequest"""
     # MessageUnit
-    msg = model_consts.MessageUnit(type="text", content="Hello world")
+    msg = model_consts_conversation.MessageUnit(type="text", content="Hello world")
     assert msg.type == "text"
     assert msg.content == "Hello world"
     assert msg.tool_call_id is None
 
-    msg_with_tool = model_consts.MessageUnit(
+    msg_with_tool = model_consts_conversation.MessageUnit(
         type="tool_call",
         content="Calling search",
         tool_call_id="call_123"
@@ -475,7 +484,7 @@ def test_message_unit_and_message_request():
     assert msg_with_tool.tool_call_id == "call_123"
 
     # MessageRequest
-    msg_req = model_consts.MessageRequest(
+    msg_req = model_consts_conversation.MessageRequest(
         conversation_id=1,
         message_idx=5,
         role="user",
@@ -488,15 +497,15 @@ def test_message_unit_and_message_request():
 def test_conversation_request_response():
     """Test ConversationRequest and ConversationResponse"""
     # Default title is Chinese
-    req = model_consts.ConversationRequest()
+    req = model_consts_conversation.ConversationRequest()
     assert req.title == "新对话"
 
     # Custom title
-    req = model_consts.ConversationRequest(title="My Chat")
+    req = model_consts_conversation.ConversationRequest(title="My Chat")
     assert req.title == "My Chat"
 
     # Response
-    resp = model_consts.ConversationResponse(
+    resp = model_consts_conversation.ConversationResponse(
         code=200,
         message="Success",
         data={"id": 123}
@@ -507,7 +516,7 @@ def test_conversation_request_response():
 
 def test_rename_request():
     """Test RenameRequest"""
-    req = model_consts.RenameRequest(
+    req = model_consts_conversation.RenameRequest(
         conversation_id=42,
         name="New Name"
     )
@@ -521,13 +530,13 @@ def test_batch_task_request():
         {"source": "file1.pdf", "source_type": "minio"},
         {"source": "file2.pdf", "source_type": "minio"}
     ]
-    req = model_consts.BatchTaskRequest(sources=sources)
+    req = model_consts_knowledge.BatchTaskRequest(sources=sources)
     assert len(req.sources) == 2
 
 
 def test_indexing_response():
     """Test IndexingResponse"""
-    resp = model_consts.IndexingResponse(
+    resp = model_consts_knowledge.IndexingResponse(
         success=True,
         message="Indexed successfully",
         total_indexed=100,
@@ -540,7 +549,7 @@ def test_indexing_response():
 def test_chunk_create_update_requests():
     """Test ChunkCreateRequest and ChunkUpdateRequest"""
     # Create request
-    chunk = model_consts.ChunkCreateRequest(
+    chunk = model_consts_knowledge.ChunkCreateRequest(
         content="This is chunk content",
         title="Chunk 1",
         filename="doc.pdf",
@@ -551,7 +560,7 @@ def test_chunk_create_update_requests():
     assert chunk.metadata["source"] == "manual"
 
     # Update request
-    update = model_consts.ChunkUpdateRequest(
+    update = model_consts_knowledge.ChunkUpdateRequest(
         content="Updated content",
         title="Updated Title"
     )
@@ -562,7 +571,7 @@ def test_chunk_create_update_requests():
 def test_hybrid_search_request():
     """Test HybridSearchRequest validation"""
     # Valid request
-    req = model_consts.HybridSearchRequest(
+    req = model_consts_knowledge.HybridSearchRequest(
         query="search term",
         index_names=["index1", "index2"],
         top_k=50,
@@ -575,14 +584,14 @@ def test_hybrid_search_request():
 
     # Empty index_names raises
     with pytest.raises(ValidationError):
-        model_consts.HybridSearchRequest(
+        model_consts_knowledge.HybridSearchRequest(
             query="search",
             index_names=[]
         )
 
     # top_k out of range
     with pytest.raises(ValidationError):
-        model_consts.HybridSearchRequest(
+        model_consts_knowledge.HybridSearchRequest(
             query="search",
             index_names=["index1"],
             top_k=200
@@ -590,7 +599,7 @@ def test_hybrid_search_request():
 
     # weight_accurate out of range
     with pytest.raises(ValidationError):
-        model_consts.HybridSearchRequest(
+        model_consts_knowledge.HybridSearchRequest(
             query="search",
             index_names=["index1"],
             weight_accurate=1.5
@@ -614,7 +623,7 @@ def test_convert_state_request():
 
 def test_process_params():
     """Test ProcessParams model"""
-    params = model_consts.ProcessParams(
+    params = model_consts_knowledge.ProcessParams(
         chunking_strategy="basic",
         source_type="minio",
         index_name="test-index",
@@ -682,7 +691,7 @@ def test_bad_case_and_optimize_requests():
 
 def test_generate_title_request():
     """Test GenerateTitleRequest"""
-    req = model_consts.GenerateTitleRequest(
+    req = model_consts_conversation.GenerateTitleRequest(
         conversation_id=42,
         question="How do I learn Python?",
         model_id=7,
@@ -691,7 +700,7 @@ def test_generate_title_request():
     assert "Python" in req.question
     assert req.model_id == 7
 
-    legacy_req = model_consts.GenerateTitleRequest(
+    legacy_req = model_consts_conversation.GenerateTitleRequest(
         conversation_id=42,
         question="How do I learn Python?",
     )
@@ -702,7 +711,7 @@ def test_generate_title_request():
 def test_generate_title_request_rejects_non_positive_model_id(model_id):
     """GenerateTitleRequest only accepts positive explicit model IDs."""
     with pytest.raises(ValueError):
-        model_consts.GenerateTitleRequest(
+        model_consts_conversation.GenerateTitleRequest(
             conversation_id=42,
             question="How do I learn Python?",
             model_id=model_id,
@@ -728,7 +737,7 @@ def test_agent_info_request():
 
 def test_tool_instance_requests():
     """Test ToolInstanceInfoRequest and ToolInstanceSearchRequest"""
-    tool_inst = model_consts.ToolInstanceInfoRequest(
+    tool_inst = model_consts_tool.ToolInstanceInfoRequest(
         tool_id=1,
         agent_id=2,
         params={"max_results": 5},
@@ -737,7 +746,7 @@ def test_tool_instance_requests():
     assert tool_inst.tool_id == 1
     assert tool_inst.params["max_results"] == 5
 
-    tool_search = model_consts.ToolInstanceSearchRequest(
+    tool_search = model_consts_tool.ToolInstanceSearchRequest(
         tool_id=1,
         agent_id=2
     )
@@ -746,7 +755,7 @@ def test_tool_instance_requests():
 
 def test_skill_instance_info_request():
     """Test SkillInstanceInfoRequest"""
-    req = model_consts.SkillInstanceInfoRequest(
+    req = model_consts_skill.SkillInstanceInfoRequest(
         skill_id=1,
         agent_id=2,
         enabled=True,
@@ -758,15 +767,15 @@ def test_skill_instance_info_request():
 
 def test_tool_source_enum():
     """Test ToolSourceEnum"""
-    assert model_consts.ToolSourceEnum.LOCAL.value == "local"
-    assert model_consts.ToolSourceEnum.MCP.value == "mcp"
-    assert model_consts.ToolSourceEnum.LANGCHAIN.value == "langchain"
-    assert model_consts.ToolSourceEnum.BUILTIN.value == "builtin"
+    assert model_consts_tool.ToolSourceEnum.LOCAL.value == "local"
+    assert model_consts_tool.ToolSourceEnum.MCP.value == "mcp"
+    assert model_consts_tool.ToolSourceEnum.LANGCHAIN.value == "langchain"
+    assert model_consts_tool.ToolSourceEnum.BUILTIN.value == "builtin"
 
 
 def test_tool_info():
     """Test ToolInfo model"""
-    info = model_consts.ToolInfo(
+    info = model_consts_tool.ToolInfo(
         name="search",
         description="Search the web",
         params=[{"name": "query", "type": "string"}],
@@ -785,7 +794,7 @@ def test_tool_info():
 
 def test_change_summary_request():
     """Test ChangeSummaryRequest"""
-    req = model_consts.ChangeSummaryRequest(
+    req = model_consts_knowledge.ChangeSummaryRequest(
         summary_result="The file is about AI"
     )
     assert "AI" in req.summary_result
@@ -793,7 +802,7 @@ def test_change_summary_request():
 
 def test_message_id_request():
     """Test MessageIdRequest"""
-    req = model_consts.MessageIdRequest(
+    req = model_consts_conversation.MessageIdRequest(
         conversation_id=42,
         message_index=5
     )
@@ -803,29 +812,29 @@ def test_message_id_request():
 
 def test_pagination_request():
     """Test PaginationRequest validation"""
-    req = model_consts.PaginationRequest(page=1, page_size=20)
+    req = model_consts_identity.PaginationRequest(page=1, page_size=20)
     assert req.page == 1
     assert req.page_size == 20
 
     # Page must be >= 1
     with pytest.raises(ValidationError):
-        model_consts.PaginationRequest(page=0)
+        model_consts_identity.PaginationRequest(page=0)
 
     # Page_size must be <= 100
     with pytest.raises(ValidationError):
-        model_consts.PaginationRequest(page=1, page_size=150)
+        model_consts_identity.PaginationRequest(page=1, page_size=150)
 
 
 def test_mcp_source_type_enum():
     """Test MCPSourceType enum"""
-    assert model_consts.MCPSourceType.LOCAL.value == "local"
-    assert model_consts.MCPSourceType.MCP_REGISTRY.value == "mcp_registry"
-    assert model_consts.MCPSourceType.COMMUNITY.value == "community"
+    assert model_consts_tool.MCPSourceType.LOCAL.value == "local"
+    assert model_consts_tool.MCPSourceType.MCP_REGISTRY.value == "mcp_registry"
+    assert model_consts_tool.MCPSourceType.COMMUNITY.value == "community"
 
 
 def test_add_mcp_service_request():
     """Test AddMcpServiceRequest with strip validators"""
-    req = model_consts.AddMcpServiceRequest(
+    req = model_consts_tool.AddMcpServiceRequest(
         name="  my-mcp  ",
         server_url="  https://mcp.example.com  ",
         description="  A test MCP  "
@@ -837,7 +846,7 @@ def test_add_mcp_service_request():
 
 def test_update_mcp_service_request():
     """Test UpdateMcpServiceRequest"""
-    req = model_consts.UpdateMcpServiceRequest(
+    req = model_consts_tool.UpdateMcpServiceRequest(
         mcp_id=1,
         name="updated-mcp",
         tags=["tag1", "tag2"],
@@ -849,7 +858,7 @@ def test_update_mcp_service_request():
 
 def test_community_list_request():
     """Test CommunityListRequest"""
-    req = model_consts.CommunityListRequest(
+    req = model_consts_tool.CommunityListRequest(
         search="  search term  ",
         tag="  ai  ",
         transport_type="url",
@@ -862,7 +871,7 @@ def test_community_list_request():
 
 def test_capacity_bare_model():
     """Test CapacityCoverageBareModel"""
-    model = model_consts.CapacityCoverageBareModel(
+    model = model_consts_model.CapacityCoverageBareModel(
         model_id=1,
         model_name="gpt-4",
         model_type="llm",
@@ -875,11 +884,11 @@ def test_capacity_bare_model():
 
 def test_capacity_coverage_response():
     """Test CapacityCoverageResponse"""
-    resp = model_consts.CapacityCoverageResponse(
+    resp = model_consts_model.CapacityCoverageResponse(
         total_llm_vlm=10,
         bare_count=3,
         bare_models=[
-            model_consts.CapacityCoverageBareModel(
+            model_consts_model.CapacityCoverageBareModel(
                 model_id=1,
                 model_name="model1",
                 model_type="llm"
@@ -892,14 +901,14 @@ def test_capacity_coverage_response():
 
 def test_memory_agent_share_mode():
     """Test MemoryAgentShareMode enum"""
-    assert model_consts.MemoryAgentShareMode.default() == model_consts.MemoryAgentShareMode.NEVER
-    assert model_consts.MemoryAgentShareMode.ALWAYS.value == "always"
-    assert model_consts.MemoryAgentShareMode.ASK.value == "ask"
+    assert model_consts_memory.MemoryAgentShareMode.default() == model_consts_memory.MemoryAgentShareMode.NEVER
+    assert model_consts_memory.MemoryAgentShareMode.ALWAYS.value == "always"
+    assert model_consts_memory.MemoryAgentShareMode.ASK.value == "ask"
 
 
 def test_tenant_management_requests():
     """Test TenantCreateRequest and TenantUpdateRequest"""
-    create_req = model_consts.TenantCreateRequest(
+    create_req = model_consts_identity.TenantCreateRequest(
         tenant_name="New Tenant",
         skill_ids=[1, 2, 3],
         locale="zh"
@@ -908,7 +917,7 @@ def test_tenant_management_requests():
     assert len(create_req.skill_ids) == 3
     assert create_req.locale == "zh"
 
-    update_req = model_consts.TenantUpdateRequest(
+    update_req = model_consts_identity.TenantUpdateRequest(
         tenant_name="Updated Tenant"
     )
     assert update_req.tenant_name == "Updated Tenant"
@@ -916,19 +925,19 @@ def test_tenant_management_requests():
 
 def test_group_management_requests():
     """Test GroupCreateRequest, GroupUpdateRequest, GroupListRequest"""
-    create_req = model_consts.GroupCreateRequest(
+    create_req = model_consts_identity.GroupCreateRequest(
         tenant_id="tenant-1",
         group_name="Admins",
         group_description="Admin group"
     )
     assert create_req.tenant_id == "tenant-1"
 
-    update_req = model_consts.GroupUpdateRequest(
+    update_req = model_consts_identity.GroupUpdateRequest(
         group_name="Super Admins"
     )
     assert update_req.group_name == "Super Admins"
 
-    list_req = model_consts.GroupListRequest(
+    list_req = model_consts_identity.GroupListRequest(
         tenant_id="tenant-1",
         page=1,
         page_size=50,
@@ -940,7 +949,7 @@ def test_group_management_requests():
 
 def test_user_list_request():
     """Test UserListRequest"""
-    req = model_consts.UserListRequest(
+    req = model_consts_identity.UserListRequest(
         tenant_id="tenant-1",
         page=2,
         page_size=25
@@ -951,7 +960,7 @@ def test_user_list_request():
 
 def test_invitation_requests():
     """Test invitation-related request models"""
-    create_req = model_consts.InvitationCreateRequest(
+    create_req = model_consts_identity.InvitationCreateRequest(
         tenant_id="tenant-1",
         code_type="ADMIN_INVITE",
         capacity=5,
@@ -960,7 +969,7 @@ def test_invitation_requests():
     assert create_req.code_type == "ADMIN_INVITE"
     assert create_req.capacity == 5
 
-    update_req = model_consts.InvitationUpdateRequest(
+    update_req = model_consts_identity.InvitationUpdateRequest(
         capacity=10,
         expiry_date="2026-06-30"
     )
@@ -1018,7 +1027,7 @@ def test_current_version_response():
 
 def test_skill_management_requests():
     """Test SkillCreateRequest and SkillUpdateRequest"""
-    create_req = model_consts.SkillCreateRequest(
+    create_req = model_consts_skill.SkillCreateRequest(
         name="my-skill",
         description="A custom skill",
         content="# SKILL\n\nThis is my skill",
@@ -1028,11 +1037,11 @@ def test_skill_management_requests():
     assert create_req.name == "my-skill"
     assert len(create_req.tool_ids) == 2
 
-    file_data = model_consts.SkillFileData(
+    file_data = model_consts_skill.SkillFileData(
         path="scripts/helper.py",
         content="def help(): pass"
     )
-    update_req = model_consts.SkillUpdateRequest(
+    update_req = model_consts_skill.SkillUpdateRequest(
         name="updated-skill",
         files=[file_data]
     )
@@ -1042,12 +1051,12 @@ def test_skill_management_requests():
 
 def test_skill_repository_requests():
     """Test skill repository request models"""
-    install_req = model_consts.SkillRepositoryInstallRequest(
+    install_req = model_consts_skill.SkillRepositoryInstallRequest(
         target_name="my-installed-skill"
     )
     assert install_req.target_name == "my-installed-skill"
 
-    listing_req = model_consts.SkillRepositoryListingDetailResponse(
+    listing_req = model_consts_skill.SkillRepositoryListingDetailResponse(
         skill_repository_id=1,
         name="shared-skill",
         status="approved",
@@ -1059,7 +1068,7 @@ def test_skill_repository_requests():
 
 def test_manage_tenant_model_requests():
     """Test manage tenant model request models"""
-    list_req = model_consts.ManageTenantModelListRequest(
+    list_req = model_consts_model.ManageTenantModelListRequest(
         tenant_id="tenant-1",
         model_type="llm",
         page=1,
@@ -1068,14 +1077,14 @@ def test_manage_tenant_model_requests():
     assert list_req.tenant_id == "tenant-1"
     assert list_req.model_type == "llm"
 
-    health_req = model_consts.ManageTenantModelHealthcheckRequest(
+    health_req = model_consts_model.ManageTenantModelHealthcheckRequest(
         tenant_id="tenant-1",
         display_name="GPT-4",
         model_type="llm"
     )
     assert health_req.tenant_id == "tenant-1"
 
-    delete_req = model_consts.ManageTenantModelDeleteRequest(
+    delete_req = model_consts_model.ManageTenantModelDeleteRequest(
         tenant_id="tenant-1",
         display_name="Old Model"
     )
@@ -1084,7 +1093,7 @@ def test_manage_tenant_model_requests():
 
 def test_batch_create_models_request():
     """Test BatchCreateModelsRequest"""
-    req = model_consts.BatchCreateModelsRequest(
+    req = model_consts_model.BatchCreateModelsRequest(
         api_key="key123",
         models=[{"name": "model1"}, {"name": "model2"}],
         provider="openai",
@@ -1095,14 +1104,14 @@ def test_batch_create_models_request():
 
 def test_provider_model_requests():
     """Test provider model request models"""
-    list_req = model_consts.ManageProviderModelListRequest(
+    list_req = model_consts_model.ManageProviderModelListRequest(
         tenant_id="tenant-1",
         provider="silicon",
         model_type="llm"
     )
     assert list_req.provider == "silicon"
 
-    create_req = model_consts.ManageProviderModelCreateRequest(
+    create_req = model_consts_model.ManageProviderModelCreateRequest(
         tenant_id="tenant-1",
         provider="openai",
         model_type="llm",
@@ -1167,7 +1176,7 @@ def test_agent_repository_snapshot():
         agent_info={},
         mcp_info=[],
         skills=[
-            model_consts.SkillZipEntry(
+            model_consts_skill.SkillZipEntry(
                 skill_name="my-skill",
                 skill_zip_base64="base64data=="
             )
@@ -1271,7 +1280,7 @@ def test_nl2_skill_run_ignores_retired_complexity_field():
 
 def test_model_api_config():
     """Test ModelApiConfig"""
-    config = model_consts.ModelApiConfig(
+    config = model_consts_model.ModelApiConfig(
         apiKey="secret-key",
         modelUrl="https://api.example.com"
     )
@@ -1280,16 +1289,16 @@ def test_model_api_config():
 
 def test_add_container_mcp_service_request():
     """Test AddContainerMcpServiceRequest"""
-    mcp_config = model_consts.MCPConfigRequest(
+    mcp_config = model_consts_tool.MCPConfigRequest(
         mcpServers={
-            "server1": model_consts.MCPServerConfig(
+            "server1": model_consts_tool.MCPServerConfig(
                 command="npx",
                 args=["-y", "server1"],
                 port=5020
             )
         }
     )
-    req = model_consts.AddContainerMcpServiceRequest(
+    req = model_consts_tool.AddContainerMcpServiceRequest(
         name="container-mcp",
         description="A container MCP",
         port=5020,
@@ -1300,7 +1309,7 @@ def test_add_container_mcp_service_request():
 
 def test_list_mcp_services_query():
     """Test ListMcpServicesQuery with strip validation"""
-    req = model_consts.ListMcpServicesQuery(
+    req = model_consts_tool.ListMcpServicesQuery(
         tag="  ai  "
     )
     assert req.tag == "ai"
@@ -1308,27 +1317,27 @@ def test_list_mcp_services_query():
 
 def test_port_conflict_check_request():
     """Test PortConflictCheckRequest"""
-    req = model_consts.PortConflictCheckRequest(
+    req = model_consts_tool.PortConflictCheckRequest(
         port=8080
     )
     assert req.port == 8080
 
     # Invalid port range
     with pytest.raises(ValidationError):
-        model_consts.PortConflictCheckRequest(port=0)
+        model_consts_tool.PortConflictCheckRequest(port=0)
 
     with pytest.raises(ValidationError):
-        model_consts.PortConflictCheckRequest(port=70000)
+        model_consts_tool.PortConflictCheckRequest(port=70000)
 
 
 def test_community_review_requests():
     """Test community review request models"""
-    review_list = model_consts.CommunityReviewListRequest(
+    review_list = model_consts_tool.CommunityReviewListRequest(
         status="  pending  "
     )
     assert review_list.status == "pending"
 
-    review_action = model_consts.CommunityReviewActionRequest(
+    review_action = model_consts_tool.CommunityReviewActionRequest(
         review_id=1,
         content="  Approved  "
     )
@@ -1337,7 +1346,7 @@ def test_community_review_requests():
 
 def test_group_members_update_request():
     """Test GroupMembersUpdateRequest"""
-    req = model_consts.GroupMembersUpdateRequest(
+    req = model_consts_identity.GroupMembersUpdateRequest(
         user_ids=["user1", "user2", "user3"]
     )
     assert len(req.user_ids) == 3
@@ -1345,24 +1354,24 @@ def test_group_members_update_request():
 
 def test_set_default_group_request():
     """Test SetDefaultGroupRequest"""
-    req = model_consts.SetDefaultGroupRequest(
+    req = model_consts_identity.SetDefaultGroupRequest(
         default_group_id=5
     )
     assert req.default_group_id == 5
 
     # Invalid group_id
     with pytest.raises(ValidationError):
-        model_consts.SetDefaultGroupRequest(default_group_id=0)
+        model_consts_identity.SetDefaultGroupRequest(default_group_id=0)
 
 
 def test_voice_connectivity_models():
     """Test VoiceConnectivityRequest and VoiceConnectivityResponse"""
-    req = model_consts.VoiceConnectivityRequest(
+    req = model_consts_voice.VoiceConnectivityRequest(
         model_type="stt"
     )
     assert req.model_type == "stt"
 
-    resp = model_consts.VoiceConnectivityResponse(
+    resp = model_consts_voice.VoiceConnectivityResponse(
         connected=True,
         model_type="tts",
         message="Service available"
@@ -1372,7 +1381,7 @@ def test_voice_connectivity_models():
 
 def test_tool_validate_request():
     """Test ToolValidateRequest"""
-    req = model_consts.ToolValidateRequest(
+    req = model_consts_tool.ToolValidateRequest(
         name="search",
         source="local",
         usage="search(query)",
@@ -1385,7 +1394,7 @@ def test_tool_validate_request():
 
 def test_update_knowledge_list_request():
     """Test UpdateKnowledgeListRequest"""
-    req = model_consts.UpdateKnowledgeListRequest(
+    req = model_consts_knowledge.UpdateKnowledgeListRequest(
         nexent=["index1", "index2"],
         datamate=["dm-index1"]
     )
@@ -1395,7 +1404,7 @@ def test_update_knowledge_list_request():
 
 def test_mcp_update_request():
     """Test MCPUpdateRequest"""
-    req = model_consts.MCPUpdateRequest(
+    req = model_consts_tool.MCPUpdateRequest(
         current_service_name="old-name",
         current_mcp_url="https://old.example.com",
         new_service_name="new-name",
@@ -1407,7 +1416,7 @@ def test_mcp_update_request():
 
 def test_invitation_list_request():
     """Test InvitationListRequest"""
-    req = model_consts.InvitationListRequest(
+    req = model_consts_identity.InvitationListRequest(
         tenant_id="tenant-1",
         page=2,
         page_size=50
@@ -1418,7 +1427,7 @@ def test_invitation_list_request():
 
 def test_invitation_response():
     """Test InvitationResponse"""
-    resp = model_consts.InvitationResponse(
+    resp = model_consts_identity.InvitationResponse(
         invitation_id=1,
         invitation_code="INV123",
         code_type="ADMIN_INVITE",
@@ -1433,7 +1442,7 @@ def test_invitation_response():
 
 def test_manage_tenant_model_list_response():
     """Test ManageTenantModelListResponse"""
-    resp = model_consts.ManageTenantModelListResponse(
+    resp = model_consts_model.ManageTenantModelListResponse(
         tenant_id="tenant-1",
         tenant_name="Test Tenant",
         models=[{"name": "model1"}, {"name": "model2"}],
@@ -1476,14 +1485,14 @@ def test_agent_repository_listing_detail_response():
 
 def test_community_publish_update_requests():
     """Test CommunityPublishRequest and CommunityUpdateRequest"""
-    publish = model_consts.CommunityPublishRequest(
+    publish = model_consts_tool.CommunityPublishRequest(
         mcp_id=1,
         name="new-mcp",
         tags=["featured"]
     )
     assert publish.mcp_id == 1
 
-    update = model_consts.CommunityUpdateRequest(
+    update = model_consts_tool.CommunityUpdateRequest(
         market_id=1,
         description="Updated description"
     )
@@ -1492,7 +1501,7 @@ def test_community_publish_update_requests():
 
 def test_community_status_update_request():
     """Test CommunityStatusUpdateRequest"""
-    req = model_consts.CommunityStatusUpdateRequest(
+    req = model_consts_tool.CommunityStatusUpdateRequest(
         status="shared",
         content="Approved for community"
     )
@@ -1501,14 +1510,14 @@ def test_community_status_update_request():
 
 def test_delete_mcp_service_request():
     """Test DeleteMcpServiceRequest"""
-    req = model_consts.DeleteMcpServiceRequest(
+    req = model_consts_tool.DeleteMcpServiceRequest(
         mcp_id=42
     )
     assert req.mcp_id == 42
 
 
 def test_reasoning_capability_normalizes_unsupported_profiles():
-    capability = model_consts.ReasoningCapability(
+    capability = model_consts_model.ReasoningCapability(
         status="unsupported",
         levels=["low"],
         default="low",
@@ -1521,7 +1530,7 @@ def test_reasoning_capability_normalizes_unsupported_profiles():
 
 
 def test_reasoning_capability_accepts_toggle_without_effort_levels():
-    capability = model_consts.ReasoningCapability(
+    capability = model_consts_model.ReasoningCapability(
         status="supported",
         control="toggle",
         wire_format="thinking_toggle",
@@ -1532,13 +1541,13 @@ def test_reasoning_capability_accepts_toggle_without_effort_levels():
 
 def test_reasoning_control_validates_effort_and_budget_shapes():
     with pytest.raises(ValidationError):
-        model_consts.ReasoningControl(type="effort")
+        model_consts_model.ReasoningControl(type="effort")
 
     with pytest.raises(ValidationError):
-        model_consts.ReasoningControl(type="budget_tokens", min=1024)
+        model_consts_model.ReasoningControl(type="budget_tokens", min=1024)
 
     with pytest.raises(ValidationError):
-        model_consts.ReasoningControl(type="budget_tokens", min=4096, max=1024)
+        model_consts_model.ReasoningControl(type="budget_tokens", min=4096, max=1024)
 
 
 @pytest.mark.parametrize(
@@ -1558,4 +1567,4 @@ def test_reasoning_control_validates_effort_and_budget_shapes():
 )
 def test_reasoning_capability_rejects_invalid_profiles(payload):
     with pytest.raises(ValidationError):
-        model_consts.ReasoningCapability(**payload)
+        model_consts_model.ReasoningCapability(**payload)

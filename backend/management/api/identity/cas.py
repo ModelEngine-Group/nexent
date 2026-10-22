@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlsplit
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from contracts.exceptions import TenantResourceLimitError, tenant_resource_limit_error_payload
+from contracts.errors.exceptions import TenantResourceLimitError, tenant_resource_limit_error_payload
 
 from management.services.permission.identity.cas import (
     CAS_SERVER_URL,

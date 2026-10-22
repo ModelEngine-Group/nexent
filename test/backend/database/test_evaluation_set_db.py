@@ -140,7 +140,7 @@ class TestListEvaluationSets:
 
 class TestGetEvaluationSet:
     def test_raises_when_not_found(self, session_factory):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory
@@ -289,7 +289,7 @@ class TestSoftDelete:
         assert updates["updated_by"] == "u1"
 
     def test_raises_when_not_found(self, session_factory):
-        from contracts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
         from management.db.evaluation import sets as evaluation_set_db
 
         session, _ = session_factory

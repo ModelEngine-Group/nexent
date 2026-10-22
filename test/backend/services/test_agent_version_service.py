@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import asyncio
 import sys
 import types
@@ -31,8 +33,9 @@ consts_mock.const.PERMISSION_READ = "READ_ONLY"
 
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
-consts_exceptions_mod = types.ModuleType("contracts.exceptions")
+consts_exceptions_mod = types.ModuleType("contracts.errors.exceptions")
 
 
 class ValidationError(Exception):
@@ -40,9 +43,9 @@ class ValidationError(Exception):
 
 
 consts_exceptions_mod.ValidationError = ValidationError
-sys.modules['contracts.exceptions'] = consts_exceptions_mod
+install_shared_contract_stub(consts_exceptions_mod, 'exceptions')
 
-# Mock contracts.agent_unavailable_reasons
+# Mock contracts.constants.agent
 agent_unavailable_reasons_mock = MagicMock()
 agent_unavailable_reasons_mock.AgentUnavailableReason = type('AgentUnavailableReason', (), {
     'DUPLICATE_NAME': 'duplicate_name',
@@ -61,7 +64,7 @@ agent_unavailable_reasons_mock.AgentUnavailableReason = type('AgentUnavailableRe
         'model_unavailable', 'tool_unavailable', 'all_tools_disabled', 'agent_not_found'
     ]),
 })()
-sys.modules['contracts.agent_unavailable_reasons'] = agent_unavailable_reasons_mock
+install_shared_contract_stub(agent_unavailable_reasons_mock, 'agent_unavailable_reasons')
 
 # Mock utils module
 utils_mock = MagicMock()

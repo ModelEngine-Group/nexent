@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from management.api.memory import memory_dreaming as memory_dreaming_app
-from contracts.api import management_memory_memory_dreaming as memory_dreaming_app_management_memory_memory_dreaming
+from contracts import memory as memory_dreaming_app_management_memory_memory_dreaming
 
 
 def test_ac009_user_scope_does_not_require_agent_id():

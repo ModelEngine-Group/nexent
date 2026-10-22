@@ -19,8 +19,8 @@ from management.services.knowledge_base.quota import (
     DEFAULT_CRITICAL_THRESHOLD,
     _usage_cache,
 )
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException, PlatformQuotaConflictError
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, PlatformQuotaConflictError
 
 
 @pytest.fixture
@@ -608,7 +608,7 @@ class TestPlatformQuota:
         assert raised.value.error == "PlatformCapacityBelowAllocation"
 
     def test_allocation_state_excludes_virtual_tenants(self):
-        from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+        from contracts.constants.identity import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
         with patch(
             "management.db.configuration.tenant.get_all_tenant_ids",

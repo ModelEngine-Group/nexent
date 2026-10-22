@@ -23,7 +23,7 @@ by the client.
 
 from __future__ import annotations
 
-from contracts.api.management_memory_memory_record import CreateMemoryRequest, SearchMemoryRequest, UpdateMemoryRequest
+from contracts.memory import CreateMemoryRequest, SearchMemoryRequest, UpdateMemoryRequest
 
 import logging
 from http import HTTPStatus

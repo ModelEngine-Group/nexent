@@ -3,6 +3,8 @@
 """Unit tests for evaluation_set_service focusing on the new
 delete-with-reference-count behavior."""
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import sys
 import types
 from pathlib import Path
@@ -107,13 +109,13 @@ _services_pkg = _register_package("services")
 _services_pkg.__path__ = [str(_BACKEND_DIR / "services")]
 
 _consts_pkg = _register_package("consts")
-_consts_model_module = types.ModuleType("contracts.models")
+_consts_model_module = types.ModuleType("contracts.agent")
 _consts_model_module.AgentRequest = MagicMock()
-sys.modules["contracts.models"] = _consts_model_module
+install_business_contract_stubs(_consts_model_module)
 _consts_pkg.model = _consts_model_module
 
-# ── contracts.error_code stub with all enumerators referenced by service ──
-_consts_error_code_module = types.ModuleType("contracts.error_code")
+# ── contracts.errors.codes stub with all enumerators referenced by service ──
+_consts_error_code_module = types.ModuleType("contracts.errors.codes")
 
 
 class _ErrorCode:
@@ -132,17 +134,17 @@ class _ErrorCode:
 
 
 _consts_error_code_module.ErrorCode = _ErrorCode
-sys.modules["contracts.error_code"] = _consts_error_code_module
+install_shared_contract_stub(_consts_error_code_module, 'error_code')
 _consts_pkg.error_code = _consts_error_code_module
 
-# ── contracts.evaluation_limits stub ──
-_consts_limits_module = types.ModuleType("contracts.evaluation_limits")
+# ── contracts.constants.evaluation stub ──
+_consts_limits_module = types.ModuleType("contracts.constants.evaluation")
 _consts_limits_module.MAX_CASES_PER_SET = 10000
-sys.modules["contracts.evaluation_limits"] = _consts_limits_module
+install_shared_contract_stub(_consts_limits_module, 'evaluation_limits')
 _consts_pkg.evaluation_limits = _consts_limits_module
 
-# ── contracts.evaluation_status stub ──
-_consts_status_module = types.ModuleType("contracts.evaluation_status")
+# ── contracts.constants.evaluation stub ──
+_consts_status_module = types.ModuleType("contracts.constants.evaluation")
 
 
 class _EvalRunStatus:
@@ -154,11 +156,11 @@ class _EvalRunStatus:
 
 
 _consts_status_module.EvalRunStatus = _EvalRunStatus
-sys.modules["contracts.evaluation_status"] = _consts_status_module
+install_shared_contract_stub(_consts_status_module, 'evaluation_status')
 _consts_pkg.evaluation_status = _consts_status_module
 
-# ── contracts.exceptions stub (real Exception subclass so try/except works) ──
-_consts_exceptions_module = types.ModuleType("contracts.exceptions")
+# ── contracts.errors.exceptions stub (real Exception subclass so try/except works) ──
+_consts_exceptions_module = types.ModuleType("contracts.errors.exceptions")
 
 class _AppException(Exception):
     def __init__(self, error_code=None, message=None, details=None, *args, **kwargs):
@@ -169,7 +171,7 @@ class _AppException(Exception):
 
 
 _consts_exceptions_module.AppException = _AppException
-sys.modules["contracts.exceptions"] = _consts_exceptions_module
+install_shared_contract_stub(_consts_exceptions_module, 'exceptions')
 _consts_pkg.exceptions = _consts_exceptions_module
 
 # ── consts.const stub (env switches + AIDP credentials) ──
@@ -179,6 +181,7 @@ _consts_const_module.AIDP_SERVER_URL = "http://aidp.example"
 _consts_const_module.AIDP_API_KEY = "test-key"
 _consts_const_module.AIDP_TENANT_ID = "aidp"
 sys.modules["consts.const"] = _consts_const_module
+install_business_constant_stubs(_consts_const_module)
 _consts_pkg.const = _consts_const_module
 
 # Function-body imports used by the AIDP KB helpers.

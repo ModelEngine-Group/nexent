@@ -22,7 +22,10 @@ import zipfile
 from typing import Dict, List, Optional
 
 from consts.const import OFFICIAL_AGENTS_PATH
-from contracts.models import KnowledgeBaseResolution, KnowledgeBaseSeedDoc, ModelConnectStatusEnum, OfficialAgentAgentInfo, OfficialAgentBundle, OfficialAgentInstallItem, OfficialAgentInstallStep, OfficialAgentListItem, OfficialAgentMcpPreview, SkillResolution, SkillZipEntry
+from contracts.knowledge import KnowledgeBaseResolution
+from contracts.agent import KnowledgeBaseSeedDoc, OfficialAgentAgentInfo, OfficialAgentBundle, OfficialAgentInstallItem, OfficialAgentInstallStep, OfficialAgentListItem, OfficialAgentMcpPreview
+from contracts.constants.model import ModelConnectStatusEnum
+from contracts.skill import SkillResolution, SkillZipEntry
 from management.services.agent.naming import (
     check_agent_value_duplicate,
     generate_unique_agent_value,
@@ -724,7 +727,7 @@ async def _index_binary_docs(
 
     from starlette.datastructures import UploadFile
 
-    from contracts.models import ProcessParams
+    from contracts.knowledge import ProcessParams
     from management.services.file.service import upload_files_impl
     from management.services.knowledge_base.ingestion import trigger_data_process
 
@@ -802,7 +805,7 @@ def _update_existing_agent_kb_refs(
     user_id: str,
 ) -> None:
     """Repair KB tool references on an Agent from an earlier partial install."""
-    from contracts.models import ToolInstanceInfoRequest
+    from contracts.tool import ToolInstanceInfoRequest
     from management.db.tool.repository import create_or_update_tool_by_tool_info, query_all_tools, query_tool_instances_by_agent_id
 
     bundle_tools = {

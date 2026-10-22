@@ -7,7 +7,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from contracts.models import HybridSearchRequest
+from contracts.knowledge import HybridSearchRequest
 
 EXPECTED_FIELDS = {'query', 'index_names', 'top_k', 'weight_accurate', 'tag_predicates'}
 

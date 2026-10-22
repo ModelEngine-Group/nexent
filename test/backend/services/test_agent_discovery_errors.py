@@ -5,7 +5,7 @@
 import pytest
 
 from test.backend.services import test_agent_service as legacy
-from contracts.exceptions import AgentNotFoundError
+from contracts.errors.exceptions import AgentNotFoundError
 from management.services.agent import management, service
 
 

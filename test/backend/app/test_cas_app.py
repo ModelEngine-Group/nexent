@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from contracts.exceptions import TenantResourceLimitError
+from contracts.errors.exceptions import TenantResourceLimitError
 
 test_dir = os.path.dirname(__file__)
 backend_dir = os.path.abspath(os.path.join(test_dir, "../../../backend"))

@@ -12,7 +12,7 @@ from pydantic import ValidationError
 import services.nl2agent_service as nl2agent_service
 from management.services.tool import configuration as tool_configuration_service
 import tool_collection.mcp.nl2agent_mcp_tools as nl2agent_mcp_tools_module
-from contracts.exceptions import AgentDraftEditError
+from contracts.errors.exceptions import AgentDraftEditError
 from management.services.tool.configuration import get_tool_from_remote_mcp_server
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,

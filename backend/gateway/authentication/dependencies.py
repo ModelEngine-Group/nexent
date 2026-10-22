@@ -7,7 +7,7 @@ from typing import Optional
 
 from consts.const import IS_SPEED_MODE
 from contracts.authentication import CredentialKind, NorthboundContext
-from contracts.exceptions import LimitExceededError, UnauthorizedError
+from contracts.errors.exceptions import LimitExceededError, UnauthorizedError
 from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from gateway.authentication.policies import authenticate_identity

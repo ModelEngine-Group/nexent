@@ -6,8 +6,8 @@ import json
 import httpx
 import pytest
 
-from contracts.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
-from contracts.models import AgentRequest
+from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
+from contracts.agent import AgentRequest
 from management.services.agent import runtime_client as proxy
 
 

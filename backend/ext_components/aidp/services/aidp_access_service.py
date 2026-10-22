@@ -13,8 +13,8 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from ext_components.aidp.services import aidp_permission_service
 from ext_components.aidp.services.aidp_service import fetch_all_aidp_knowledge_bases_impl
 

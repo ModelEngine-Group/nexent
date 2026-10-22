@@ -33,8 +33,8 @@ from sqlalchemy.exc import IntegrityError
 from starlette.background import BackgroundTask
 
 from consts.const import AIDP_API_KEY, AIDP_SERVER_URL
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException, UnauthorizedError
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, UnauthorizedError
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpGroupValidationError,

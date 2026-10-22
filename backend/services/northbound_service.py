@@ -13,10 +13,12 @@ from fastapi.responses import StreamingResponse
 from nexent.core.concurrency import ManagedTaskSpec
 
 
-from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, ASSET_OWNER_TENANT_ID, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS, NORTHBOUND_RATE_LIMIT_ENABLED, NORTHBOUND_RATE_LIMIT_PER_MINUTE
-from contracts.exceptions import AppException, RuntimeMetadataValidationError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ConversationNotFoundError
-from contracts.error_code import ErrorCode, RuntimeMetadataValidationCode
-from contracts.models import AgentRequest, ToolParamsRequest
+from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS, NORTHBOUND_RATE_LIMIT_ENABLED, NORTHBOUND_RATE_LIMIT_PER_MINUTE
+from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.errors.exceptions import AppException, RuntimeMetadataValidationError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ConversationNotFoundError
+from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
+from contracts.agent import AgentRequest
+from contracts.tool import ToolParamsRequest
 from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id
 from management.db.conversation.repository import get_conversation_list, get_conversation_messages
 from management.db.identity.token import get_latest_usage_metadata, log_token_usage

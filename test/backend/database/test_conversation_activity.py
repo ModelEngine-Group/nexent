@@ -13,8 +13,8 @@ import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.dml import Insert, Update
 
-from contracts.exceptions import AppException
-from contracts.models import AgentRequest
+from contracts.errors.exceptions import AppException
+from contracts.agent import AgentRequest
 from contracts.conversation import MessageSource, decode_activity_cursor, encode_activity_cursor
 from management.db.conversation import repository as db
 

@@ -1,21 +1,15 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.exceptions import UnauthorizedError
+from contracts.errors.exceptions import UnauthorizedError
 import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
-from contracts.exceptions import UnauthorizedError
-from contracts.exceptions import AgentAutomationError, AutomationConversationAlreadyBoundError, AutomationNotFoundError
+from contracts.errors.exceptions import UnauthorizedError
+from contracts.errors.exceptions import AgentAutomationError, AutomationConversationAlreadyBoundError, AutomationNotFoundError
 from management.services.automation.service import agent_automation_facade
-from contracts.automation import (
-    AutomationProposalConfirmRequest,
-    AutomationProposalCreateRequest,
-    AutomationProposalPatchRequest,
-    AutomationResponse,
-    AutomationTaskPatchRequest,
-)
+from contracts.automation import AutomationProposalConfirmRequest, AutomationProposalCreateRequest, AutomationProposalPatchRequest, AutomationResponse, AutomationTaskPatchRequest
 from gateway.authentication.identity import get_current_user_id
 
 logger = logging.getLogger("agent_automation_app")

@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Notification API endpoints."""
 
-from contracts.exceptions import NotFoundException, UnauthorizedError
+from contracts.errors.exceptions import NotFoundException, UnauthorizedError
 import logging
 from http import HTTPStatus
 from typing import Annotated, Optional
@@ -9,7 +9,7 @@ from typing import Annotated, Optional
 from fastapi import APIRouter, Body, Header, HTTPException, Query
 from starlette.responses import JSONResponse
 
-from contracts.exceptions import NotFoundException, UnauthorizedError
+from contracts.errors.exceptions import NotFoundException, UnauthorizedError
 from management.services.notification.service import list_notifications, mark_notifications_read
 from gateway.authentication.identity import get_current_user_id
 

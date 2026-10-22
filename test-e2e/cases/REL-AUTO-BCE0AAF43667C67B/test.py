@@ -6,7 +6,7 @@ import pytest
 from fastapi.encoders import jsonable_encoder
 
 from consts.const import NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS
-from contracts.task_recovery import NORTHBOUND_SERVICE_NAME
+from contracts.constants.runtime import NORTHBOUND_SERVICE_NAME
 from nexent.core.concurrency import ManagerState, get_default_thread_manager
 from management import recovery as startup_recovery_service
 from management.services.agent.run_state import runtime_state_service

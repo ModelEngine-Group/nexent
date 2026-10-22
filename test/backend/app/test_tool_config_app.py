@@ -26,7 +26,7 @@ patch('management.db.client.MinioClient', return_value=minio_mock).start()
 patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
-from contracts.exceptions import MCPConnectionError, NotFoundException
+from contracts.errors.exceptions import MCPConnectionError, NotFoundException
 
 import pytest
 from fastapi.testclient import TestClient
@@ -1322,7 +1322,7 @@ def test_search_tool_info_passthrough_http_exception(mock_search_tool_info, mock
 @patch('management.api.tool.tool_config.update_tool_info_impl')
 def test_update_tool_info_validation_error_bad_request(mock_update_tool_info, mock_get_user_id):
     """ValidationError from the impl maps to HTTP 400."""
-    from contracts.exceptions import ValidationError
+    from contracts.errors.exceptions import ValidationError
 
     mock_get_user_id.return_value = ("user123", "tenant456")
     mock_update_tool_info.side_effect = ValidationError("invalid params")
@@ -1360,7 +1360,7 @@ class TestTokenExpiredMapping:
 
     @patch('management.api.tool.tool_config.get_current_user_id')
     def test_list_tools_token_expired(self, mock_get_user_id):
-        from contracts.exceptions import TokenExpiredError
+        from contracts.errors.exceptions import TokenExpiredError
 
         mock_get_user_id.side_effect = TokenExpiredError("expired")
         response = client.get("/tool/list")
@@ -1368,7 +1368,7 @@ class TestTokenExpiredMapping:
 
     @patch('management.api.tool.tool_config.get_current_user_id')
     def test_search_tool_token_expired(self, mock_get_user_id):
-        from contracts.exceptions import TokenExpiredError
+        from contracts.errors.exceptions import TokenExpiredError
 
         mock_get_user_id.side_effect = TokenExpiredError("expired")
         response = client.post(
@@ -1377,7 +1377,7 @@ class TestTokenExpiredMapping:
 
     @patch('management.api.tool.tool_config.get_current_user_id')
     def test_update_tool_token_expired(self, mock_get_user_id):
-        from contracts.exceptions import TokenExpiredError
+        from contracts.errors.exceptions import TokenExpiredError
 
         mock_get_user_id.side_effect = TokenExpiredError("expired")
         response = client.post(
@@ -1393,7 +1393,7 @@ class TestTokenExpiredMapping:
 
     @patch('management.api.tool.tool_config.get_current_user_id')
     def test_load_last_tool_config_token_expired(self, mock_get_user_id):
-        from contracts.exceptions import TokenExpiredError
+        from contracts.errors.exceptions import TokenExpiredError
 
         mock_get_user_id.side_effect = TokenExpiredError("expired")
         response = client.get("/tool/load_config/123")
@@ -1401,7 +1401,7 @@ class TestTokenExpiredMapping:
 
     @patch('management.api.tool.tool_config.get_current_user_id')
     def test_list_openapi_services_token_expired(self, mock_get_user_id):
-        from contracts.exceptions import TokenExpiredError
+        from contracts.errors.exceptions import TokenExpiredError
 
         mock_get_user_id.side_effect = TokenExpiredError("expired")
         response = client.get("/tool/openapi_services")
@@ -1409,7 +1409,7 @@ class TestTokenExpiredMapping:
 
     @patch('management.api.tool.tool_config.get_current_user_id')
     def test_update_tool_labels_token_expired(self, mock_get_user_id):
-        from contracts.exceptions import TokenExpiredError
+        from contracts.errors.exceptions import TokenExpiredError
 
         mock_get_user_id.side_effect = TokenExpiredError("expired")
         response = client.put(

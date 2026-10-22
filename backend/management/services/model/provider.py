@@ -3,9 +3,10 @@
 import logging
 from typing import List
 
-from consts.const import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
-from contracts.models import ModelConnectStatusEnum, ModelRequest
-from contracts.provider import DASHSCOPE_REALTIME_BASE_URL, ProviderEnum
+from contracts.constants.knowledge import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
+from contracts.constants.model import ModelConnectStatusEnum
+from contracts.model import ModelRequest
+from contracts.constants.model import DASHSCOPE_REALTIME_BASE_URL, ProviderEnum
 from management.db.model.repository import get_models_by_tenant_factory_type
 from management.services.model.names import add_repo_to_name, split_repo_name
 from management.services.model.probe import (

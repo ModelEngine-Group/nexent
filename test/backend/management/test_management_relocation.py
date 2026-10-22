@@ -54,7 +54,7 @@ def test_relocated_service_implementations_stay_below_1500_lines():
     # relocations have separate ownership checks in test_api_db_directory_architecture.
     paths.extend(BACKEND / "contracts" / name for name in (
         "__init__.py", "a2a.py", "agent.py", "automation.py", "file.py",
-        "knowledge.py", "model.py", "runtime.py", "tag.py",
+        "knowledge.py", "model.py", "constants/runtime.py", "tag.py",
     ))
     oversized = {}
     for path in paths:

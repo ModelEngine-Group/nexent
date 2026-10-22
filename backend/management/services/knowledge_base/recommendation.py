@@ -73,7 +73,7 @@ def load_visible_knowledge(
             and str(row.get("resource_status") or "ACTIVE").upper() == "ACTIVE"
         ]
 
-    from consts.const import ASSET_OWNER_TENANT_ID
+    from contracts.constants.identity import ASSET_OWNER_TENANT_ID
     from management.db.knowledge_base.repository import get_knowledge_metadata_by_index_names
     from management.services.knowledge_base.common import get_vector_db_core
     from management.services.knowledge_base.service import ElasticSearchService

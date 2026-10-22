@@ -2,10 +2,10 @@
 
 """Skill instance and skill info database operations."""
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from management.utils.skill_params import strip_params_comments_for_db
-from contracts.persistence.skill_repository import SKILL_DESCRIPTION_MAX_LENGTH
+from contracts.constants.skill import SKILL_DESCRIPTION_MAX_LENGTH
 import json
 import logging
 from datetime import datetime
@@ -17,8 +17,8 @@ from management.db.client import get_db_session
 from management.utils.orm import filter_property, as_dict
 from management.db.models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
 from consts.const import MAX_SKILLS_PER_TENANT
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from management.utils.skill_params import strip_params_comments_for_db
 from management.utils.serialization import convert_list_to_string, convert_string_to_list
 

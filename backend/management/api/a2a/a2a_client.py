@@ -6,18 +6,8 @@ These endpoints allow users to discover and manage external A2A agents.
 Used internally for configuring A2A sub-agents.
 """
 
-from contracts.api.management_a2a_a2a_client import AddRelationRequest, ChatRequest, CreateNacosConfigRequest, DiscoverFromNacosRequest, DiscoverFromUrlRequest, TestNacosConnectionRequest, UpdateAgentProtocolRequest, UpdateExternalAgentSecurityCredentialsRequest, UpdateNacosConfigRequest
-from contracts.api.management_a2a_a2a_client import (
-    AddRelationRequest,
-    ChatRequest,
-    CreateNacosConfigRequest,
-    DiscoverFromNacosRequest,
-    DiscoverFromUrlRequest,
-    TestNacosConnectionRequest,
-    UpdateAgentProtocolRequest,
-    UpdateExternalAgentSecurityCredentialsRequest,
-    UpdateNacosConfigRequest,
-)
+from contracts.a2a import AddRelationRequest, ChatRequest, CreateNacosConfigRequest, DiscoverExternalAgentFromNacosRequest as DiscoverFromNacosRequest, DiscoverExternalAgentFromUrlRequest as DiscoverFromUrlRequest, TestNacosConnectionRequest, UpdateAgentProtocolRequest, UpdateExternalAgentSecurityCredentialsRequest, UpdateNacosConfigRequest
+from contracts.a2a import AddRelationRequest, ChatRequest, CreateNacosConfigRequest, DiscoverExternalAgentFromNacosRequest as DiscoverFromNacosRequest, DiscoverExternalAgentFromUrlRequest as DiscoverFromUrlRequest, TestNacosConnectionRequest, UpdateAgentProtocolRequest, UpdateExternalAgentSecurityCredentialsRequest, UpdateNacosConfigRequest
 import logging
 import uuid
 from typing import Annotated, Any, Dict, List, Optional
@@ -27,8 +17,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from contracts.error_code import ErrorCode, RuntimeMetadataValidationCode
-from contracts.exceptions import AgentNotFoundError, AppException, ForbiddenError, RuntimeMetadataValidationError
+from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
+from contracts.errors.exceptions import AgentNotFoundError, AppException, ForbiddenError, RuntimeMetadataValidationError
 
 from management.services.agent.a2a.catalog import (
     a2a_client_service,

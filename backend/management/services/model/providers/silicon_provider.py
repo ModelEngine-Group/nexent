@@ -4,8 +4,8 @@ import re
 from typing import Dict, List
 
 import httpx
-from consts.const import DEFAULT_LLM_MAX_TOKENS
-from contracts.provider import SILICON_GET_URL
+from contracts.constants.agent import DEFAULT_LLM_MAX_TOKENS
+from contracts.constants.model import SILICON_GET_URL
 from management.services.model.providers.base import (
     AbstractModelProvider,
     _classify_provider_error,

@@ -26,8 +26,8 @@ from backend.middleware.exception_handler import (
     create_error_response,
     create_success_response,
 )
-from contracts.exceptions import AppException
-from contracts.error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
+from contracts.errors.exceptions import AppException
+from contracts.errors.codes import ErrorCode, ERROR_CODE_HTTP_STATUS
 from unittest.mock import patch, MagicMock, AsyncMock, Mock
 
 

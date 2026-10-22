@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.api.management_conversation_conversation_share import CreateConversationShareRequest
-from contracts.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException, TokenExpiredError
+from contracts.conversation import CreateConversationShareRequest
+from contracts.errors.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException, TokenExpiredError
 import logging
 from datetime import datetime
 from http import HTTPStatus
@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from contracts.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException, TokenExpiredError
+from contracts.errors.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException, TokenExpiredError
 from management.services.conversation.sharing import (
     create_share_snapshot_service,
     get_share_asset_service,

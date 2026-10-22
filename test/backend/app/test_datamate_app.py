@@ -106,7 +106,7 @@ class TestDataMateApp:
         datamate_mocks['sync_datamate'].return_value = expected_result
 
         # Create request with None datamate_url (default behavior)
-        from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+        from contracts.knowledge import SyncDatamateRequest
         request = SyncDatamateRequest(datamate_url=None)
 
         # Execute - call the endpoint with request body
@@ -160,7 +160,7 @@ class TestDataMateApp:
         datamate_mocks['sync_datamate'].side_effect = service_error
 
         # Create request with None datamate_url
-        from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+        from contracts.knowledge import SyncDatamateRequest
         request = SyncDatamateRequest(datamate_url=None)
 
         # Execute and Assert
@@ -319,7 +319,7 @@ class TestDataMateApp:
         datamate_mocks['sync_datamate'].return_value = expected_result
 
         # Create request with None datamate_url
-        from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+        from contracts.knowledge import SyncDatamateRequest
         request = SyncDatamateRequest(datamate_url=None)
 
         # Execute
@@ -373,12 +373,12 @@ class TestDataMateApp:
             "test_user_id", "test_tenant_id")
 
         # Mock custom service exception
-        from contracts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
         custom_error = UnauthorizedError("Custom auth error")
         datamate_mocks['sync_datamate'].side_effect = custom_error
 
         # Create request with None datamate_url
-        from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+        from contracts.knowledge import SyncDatamateRequest
         request = SyncDatamateRequest(datamate_url=None)
 
         # Execute and Assert
@@ -403,7 +403,7 @@ class TestDataMateApp:
             "test_user_id", "test_tenant_id")
 
         # Mock custom service exception
-        from contracts.exceptions import LimitExceededError
+        from contracts.errors.exceptions import LimitExceededError
         custom_error = LimitExceededError("Rate limit exceeded")
         datamate_mocks['fetch_files'].side_effect = custom_error
 
@@ -437,7 +437,7 @@ class TestDataMateApp:
         datamate_mocks['sync_datamate'].return_value = expected_result
 
         # Create request with custom datamate_url
-        from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+        from contracts.knowledge import SyncDatamateRequest
         request = SyncDatamateRequest(datamate_url=custom_datamate_url)
 
         # Execute - call the endpoint with request body
@@ -474,7 +474,7 @@ class TestDataMateApp:
         datamate_mocks['sync_datamate'].return_value = expected_result
 
         # Create request with explicit None datamate_url
-        from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+        from contracts.knowledge import SyncDatamateRequest
         request = SyncDatamateRequest(datamate_url=None)
 
         # Execute - call the endpoint with request body containing None
@@ -513,7 +513,7 @@ class TestDataMateApp:
         datamate_mocks['sync_datamate'].return_value = expected_result
 
         # Create request with empty string datamate_url
-        from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+        from contracts.knowledge import SyncDatamateRequest
         request = SyncDatamateRequest(datamate_url=empty_datamate_url)
 
         # Execute - call the endpoint with request body
@@ -550,7 +550,7 @@ class TestDataMateApp:
         datamate_mocks['sync_datamate'].return_value = expected_result
 
         # Create request with HTTPS datamate_url
-        from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+        from contracts.knowledge import SyncDatamateRequest
         request = SyncDatamateRequest(datamate_url=https_datamate_url)
 
         # Execute - call the endpoint with request body
@@ -586,7 +586,7 @@ async def test_datamate_connection_endpoint_success(datamate_mocks):
     datamate_mocks['check_connection'].return_value = (True, "")
 
     # Create request with None datamate_url (default behavior)
-    from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+    from contracts.knowledge import SyncDatamateRequest
     request = SyncDatamateRequest(datamate_url=None)
 
     # Execute
@@ -627,7 +627,7 @@ async def test_datamate_connection_endpoint_connection_failed(datamate_mocks):
     datamate_mocks['check_connection'].return_value = (False, error_message)
 
     # Create request with None datamate_url
-    from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+    from contracts.knowledge import SyncDatamateRequest
     request = SyncDatamateRequest(datamate_url=None)
 
     # Execute and Assert
@@ -659,7 +659,7 @@ async def test_datamate_connection_endpoint_auth_error(datamate_mocks):
         "Invalid token")
 
     # Create request with None datamate_url
-    from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+    from contracts.knowledge import SyncDatamateRequest
     request = SyncDatamateRequest(datamate_url=None)
 
     # Execute and Assert
@@ -689,7 +689,7 @@ async def test_datamate_connection_endpoint_service_error(datamate_mocks):
     datamate_mocks['check_connection'].side_effect = service_error
 
     # Create request with None datamate_url
-    from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+    from contracts.knowledge import SyncDatamateRequest
     request = SyncDatamateRequest(datamate_url=None)
 
     # Execute and Assert
@@ -719,7 +719,7 @@ async def test_datamate_connection_endpoint_none_auth_header(datamate_mocks):
     datamate_mocks['check_connection'].return_value = (True, "")
 
     # Create request with None datamate_url
-    from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+    from contracts.knowledge import SyncDatamateRequest
     request = SyncDatamateRequest(datamate_url=None)
 
     # Execute
@@ -753,7 +753,7 @@ async def test_datamate_connection_endpoint_with_custom_url(datamate_mocks):
     datamate_mocks['check_connection'].return_value = (True, "")
 
     # Create request with custom datamate_url
-    from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+    from contracts.knowledge import SyncDatamateRequest
     request = SyncDatamateRequest(datamate_url=custom_datamate_url)
 
     # Execute
@@ -793,7 +793,7 @@ async def test_datamate_connection_endpoint_connection_disabled(datamate_mocks):
         False, "ModelEngine is disabled")
 
     # Create request with None datamate_url
-    from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+    from contracts.knowledge import SyncDatamateRequest
     request = SyncDatamateRequest(datamate_url=None)
 
     # Execute and Assert
@@ -823,7 +823,7 @@ async def test_datamate_connection_endpoint_no_url_configured(datamate_mocks):
         False, "DataMate URL not configured")
 
     # Create request with None datamate_url
-    from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+    from contracts.knowledge import SyncDatamateRequest
     request = SyncDatamateRequest(datamate_url=None)
 
     # Execute and Assert
@@ -883,7 +883,7 @@ async def test_datamate_connection_endpoint_empty_url_in_request(datamate_mocks)
         False, "DataMate URL not configured")
 
     # Create request with empty string datamate_url
-    from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
+    from contracts.knowledge import SyncDatamateRequest
     request = SyncDatamateRequest(datamate_url=empty_datamate_url)
 
     # Execute and Assert
@@ -904,7 +904,7 @@ async def test_datamate_connection_endpoint_empty_url_in_request(datamate_mocks)
 @pytest.mark.asyncio
 async def test_sync_datamate_knowledges_token_expired(datamate_mocks):
     """Expired token on sync_datamate_knowledges maps to 401."""
-    from contracts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     datamate_mocks['get_current_user_id'].side_effect = TokenExpiredError(
         "expired")
@@ -918,7 +918,7 @@ async def test_sync_datamate_knowledges_token_expired(datamate_mocks):
 @pytest.mark.asyncio
 async def test_get_datamate_knowledge_base_files_token_expired(datamate_mocks):
     """Expired token on file list endpoint maps to 401."""
-    from contracts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     datamate_mocks['get_current_user_id'].side_effect = TokenExpiredError(
         "expired")
@@ -933,8 +933,8 @@ async def test_get_datamate_knowledge_base_files_token_expired(datamate_mocks):
 @pytest.mark.asyncio
 async def test_datamate_connection_endpoint_token_expired(datamate_mocks):
     """Expired token on connection test endpoint maps to 401."""
-    from contracts.api.management_knowledge_base_datamate import SyncDatamateRequest
-    from contracts.exceptions import TokenExpiredError
+    from contracts.knowledge import SyncDatamateRequest
+    from contracts.errors.exceptions import TokenExpiredError
 
     datamate_mocks['get_current_user_id'].side_effect = TokenExpiredError(
         "expired")

@@ -6,6 +6,8 @@ Tests all MCP record database operations with comprehensive coverage.
 Uses mocked database sessions to avoid real DB connections.
 """
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 
@@ -33,6 +35,7 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 # Mock utils
 utils_mock = MagicMock()
@@ -70,8 +73,8 @@ sys.modules['management.db.models'] = db_models_mock
 
 # Mock exceptions
 exceptions_mock = MagicMock()
-sys.modules['contracts.exceptions'] = exceptions_mock
-sys.modules['contracts.exceptions'] = exceptions_mock
+install_shared_contract_stub(exceptions_mock, 'exceptions')
+install_shared_contract_stub(exceptions_mock, 'exceptions')
 
 # Now import the functions to be tested
 from management.db.mcp.remote import create_mcp_record, delete_mcp_record_by_name_and_url, delete_mcp_record_by_container_id, update_mcp_status_by_name_and_url, update_mcp_record_by_name_and_url, update_mcp_record_manage_fields_by_id, update_mcp_record_enabled_by_id, update_mcp_record_status_by_id, update_mcp_record_container_fields_by_id, delete_mcp_record_by_id, get_mcp_records_by_tenant, get_mcp_records_by_container_port, get_mcp_server_by_name_and_tenant, get_mcp_authorization_token_by_name_and_url, get_mcp_record_by_id_and_tenant, get_mcp_custom_headers_by_name_and_url, check_mcp_name_exists, check_enabled_mcp_name_exists, update_mcp_record_market_id_by_id, clear_mcp_record_market_id, update_mcp_record_registry_json_by_id

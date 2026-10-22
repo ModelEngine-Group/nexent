@@ -6,8 +6,8 @@ import logging
 
 import pytest
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from management.services.knowledge_base import management as kb_management
 from management.services.knowledge_base.management import (
     KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES,

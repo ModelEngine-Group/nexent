@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
-from contracts.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
-from contracts.models import TagAssignmentBulkTarget
+from contracts.errors.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
+from contracts.tag import TagAssignmentBulkTarget
 from management.services.tag.library import TagManagementService
 from management.services.tag.resources import AuthenticatedCaller
 

@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 from management.api.tag import tag_management as tag_app
-from contracts.models import TagDocumentBatchStatusRequest
+from contracts.tag import TagDocumentBatchStatusRequest
 
 AUTHORIZATION = "Bearer auth-token"
 

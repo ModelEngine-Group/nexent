@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import aiofiles
 from consts.const import OFFICIAL_SKILLS_ZIP_PATH
-from contracts.exceptions import AppException
+from contracts.errors.exceptions import AppException
 from management.db.skill import repository as skill_db
 from management.services.skill.files import (
     _local_skill_schema_yaml_path,

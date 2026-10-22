@@ -6,12 +6,12 @@ import json
 import logging
 from typing import Any, Dict, Optional
 
-from contracts.agent_constants import SAFE_AGENT_STREAM_ERROR_MESSAGE
+from contracts.constants.agent import SAFE_AGENT_STREAM_ERROR_MESSAGE
 
 try:
-    from contracts.agent_constants import REASONING_CONFIGURATION_ERROR_CODE, SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE
+    from contracts.constants.agent import REASONING_CONFIGURATION_ERROR_CODE, SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE
 except ImportError:  # Compatibility with slim test/runtime consts stubs.
-    from backend.contracts.agent_constants import REASONING_CONFIGURATION_ERROR_CODE, SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE
+    from contracts.constants.agent import REASONING_CONFIGURATION_ERROR_CODE, SAFE_REASONING_CONFIGURATION_ERROR_MESSAGE
 
 
 logger = logging.getLogger(__name__)

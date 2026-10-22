@@ -20,7 +20,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-027")
 def test_legacy_hitl_fields_are_rejected_and_normal_query_remains_valid() -> None:
-    from contracts.models import AgentRequest
+    from contracts.agent import AgentRequest
 
     assert AgentRequest(query="continue safely").query == "continue safely"
     for legacy_field, value in (

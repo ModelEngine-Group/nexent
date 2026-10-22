@@ -4,6 +4,8 @@ Unit tests for backend/management/db/knowledge_base/repository.py
 Tests knowledge database utility functions
 """
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 import types
@@ -77,11 +79,12 @@ consts_mock.const.POSTGRES_PORT = '5432'
 consts_mock.const.DEFAULT_TENANT_ID = 'default_tenant'
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
-# Mock contracts.scheduler module
+# Mock contracts.constants.knowledge module
 consts_scheduler_mock = MagicMock()
 consts_scheduler_mock.VALID_SUMMARY_FREQUENCIES = ["1h", "3h", "6h", "1d", "1w", None]
-sys.modules['contracts.scheduler'] = consts_scheduler_mock
+install_shared_contract_stub(consts_scheduler_mock, 'scheduler')
 
 # Mock MinioClient and PostgresClient
 minio_client_mock2 = MagicMock()
@@ -199,7 +202,7 @@ def test_lock_and_check_knowledge_name_available(mock_session):
 
 
 def test_lock_and_check_knowledge_name_conflict(mock_session):
-    from contracts.exceptions import DuplicateError
+    from contracts.errors.exceptions import DuplicateError
 
     session, query = mock_session
     query.filter.return_value.first.return_value = object()

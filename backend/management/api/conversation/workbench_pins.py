@@ -2,7 +2,7 @@
 
 """Authenticated Workbench history pin endpoints."""
 
-from contracts.exceptions import ConversationNotFoundError, TokenExpiredError, UnauthorizedError, ValidationError
+from contracts.errors.exceptions import ConversationNotFoundError, TokenExpiredError, UnauthorizedError, ValidationError
 import logging
 from typing import Annotated, Optional
 
@@ -10,7 +10,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Path
 from fastapi.responses import JSONResponse
 from pydantic import StrictBool
 
-from contracts.exceptions import ConversationNotFoundError, TokenExpiredError, UnauthorizedError, ValidationError
+from contracts.errors.exceptions import ConversationNotFoundError, TokenExpiredError, UnauthorizedError, ValidationError
 from management.services.conversation.pins import get_workbench_pins, update_workbench_pin
 from gateway.authentication.identity import get_current_user_id
 

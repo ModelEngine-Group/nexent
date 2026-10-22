@@ -104,11 +104,11 @@ with patch('nexent.storage.storage_client_factory.create_storage_client_from_con
         from management.api.knowledge_base.idata import router
         from management.utils.app_factory import register_exception_handlers
         # Import ErrorCode and AppException the same way as the endpoint function does
-        # The endpoint uses: from contracts.error_code import ErrorCode
-        # The endpoint uses: from contracts.exceptions import AppException
+        # The endpoint uses: from contracts.errors.codes import ErrorCode
+        # The endpoint uses: from contracts.errors.exceptions import AppException
         # So we import them the same way to ensure type matching
-        from contracts.error_code import ErrorCode
-        from contracts.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
+        from contracts.errors.exceptions import AppException
         from management.services.knowledge_base.providers.idata import (
             fetch_idata_knowledge_spaces_impl,
             fetch_idata_datasets_impl,

@@ -58,7 +58,7 @@ from ext_components.aidp.consts.aidp_exceptions import (  # noqa: E402
     AidpKbPermissionDeniedError,
     AidpGroupValidationError,
 )
-from consts.const import CAN_EDIT_ALL_USER_ROLES
+from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES
 
 
 # --- Helpers --------------------------------------------------------------

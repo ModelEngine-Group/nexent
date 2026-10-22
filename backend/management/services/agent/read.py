@@ -4,7 +4,7 @@
 
 from typing import Dict, Optional
 
-from contracts.agent_unavailable_reasons import AgentUnavailableReason
+from contracts.constants.agent import AgentUnavailableReason
 from contracts.agent import AgentModelProjection
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.model.repository import get_model_by_model_id_ignore_delete, get_valid_model_ids

@@ -36,7 +36,7 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "backend")):
 MODULE_UNDER_TEST = "management.services.evaluation.reporting.report"
 
 _STUB_SLOTS = [
-    ("contracts.evaluation_report_labels", "get_report_labels"),
+    ("contracts.constants.evaluation", "get_report_labels"),
     ("management.db.evaluation.runs", "get_agent_evaluation"),
     ("management.db.evaluation.annotation", "list_annotation_schemas"),
     ("management.db.evaluation.annotation", "list_annotations_by_evaluation_id"),
@@ -75,7 +75,7 @@ def _mk_mod(name: str, **attrs) -> types.ModuleType:
 def _install_stubs():
     _consts = _register_package("consts")
     _consts.evaluation_report_labels = _mk_mod(
-        "contracts.evaluation_report_labels",
+        "contracts.constants.evaluation",
         get_report_labels=MagicMock(name="get_report_labels"),
     )
     _db = _register_package("database")

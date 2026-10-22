@@ -35,7 +35,7 @@ _SENSITIVE_KEY_PARTS = (
 @pytest.mark.parametrize('case', special_case_params(['REL-AUTO-53457E34A331A3FF']))
 def test_config_lifespan_startup_recovery_shutdown_capacity(case, monkeypatch, caplog):
     import consts.const as const
-    from contracts.task_recovery import CONFIG_SERVICE_NAME
+    from contracts.constants.runtime import CONFIG_SERVICE_NAME
 
     from management.services.evaluation import maintenance as evaluation_maintenance
     from management import recovery as startup_recovery

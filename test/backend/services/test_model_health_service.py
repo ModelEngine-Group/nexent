@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import os
 import sys
 import types
@@ -30,8 +32,8 @@ _MOCKED_MODULE_NAMES = (
     "management.services.model.names",
     "consts",
     "consts.const",
-    "contracts.models",
-    "contracts.provider",
+    "contracts.agent",
+    "contracts.constants.model",
     "nexent",
     "nexent.core",
     "nexent.core.agents",
@@ -70,8 +72,9 @@ consts_const_module.LOCALHOST_IP = "127.0.0.1"
 consts_const_module.LOCALHOST_NAME = "localhost"
 consts_const_module.DOCKER_INTERNAL_HOST = "host.docker.internal"
 sys.modules['consts.const'] = consts_const_module
-sys.modules['contracts.models'] = MockModule()
-sys.modules['contracts.provider'] = MockModule()
+install_business_constant_stubs(consts_const_module)
+install_business_contract_stubs(MockModule())
+install_shared_contract_stub(MockModule(), 'provider')
 
 # Mock nexent packages and modules with proper hierarchy
 sys.modules['nexent'] = MockModule()

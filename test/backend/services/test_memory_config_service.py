@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import sys
 import os
 import unittest
@@ -10,14 +11,14 @@ from enum import Enum
 # Ensure backend modules can be imported and avoid real MinIO init
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-# Stub contracts.models for MemoryAgentShareMode
-consts_model = types.ModuleType("contracts.models")
+# Stub contracts.agent for MemoryAgentShareMode
+consts_model = types.ModuleType("contracts.agent")
 class MemoryAgentShareMode(str, Enum):
     ALWAYS = "always"
     ASK = "ask"
     NEVER = "never"
 consts_model.MemoryAgentShareMode = MemoryAgentShareMode
-sys.modules["contracts.models"] = consts_model
+install_business_contract_stubs(consts_model)
 
 # Stub consts.const values used by service
 consts_const = types.ModuleType("consts.const")
@@ -32,6 +33,7 @@ consts_const.DEFAULT_MEMORY_AGENT_SHARE_KEY = MemoryAgentShareMode.NEVER.value
 consts_const.EXTERNAL_PROVIDER_TOP_K_KEY = "EXTERNAL_PROVIDER_TOP_K"
 consts_const.DEFAULT_EXTERNAL_PROVIDER_TOP_K = 5
 sys.modules["consts.const"] = consts_const
+install_business_constant_stubs(consts_const)
 
 # Stub nexent.core.agents.agent_model for MemoryContext and MemoryUserConfig
 agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")

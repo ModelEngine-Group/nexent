@@ -4,7 +4,7 @@
 
 import pytest
 
-from contracts import models as model
+from contracts import agent as model
 from management.db.models import AgentInfo, TableBase
 from management.services.agent import naming, prompt
 from nexent.core.agents.prompt.meta import compose_agent_generation_user

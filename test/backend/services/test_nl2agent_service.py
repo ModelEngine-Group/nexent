@@ -18,7 +18,8 @@ from nexent.core.utils.observer import ProcessType
 from pydantic import ValidationError
 
 from consts.const import TOKEN
-from contracts.models import HistoryItem, NL2AgentRunRequest
+from contracts.conversation import HistoryItem
+from contracts.agent import NL2AgentRunRequest
 from services.nl2agent_service import (
     Nl2AgentCompletionError,
     Nl2AgentDraftSaveError,

@@ -2,6 +2,7 @@
 
 """Focused unit tests for skill repository database helpers."""
 
+from test.common.contract_stubs import install_shared_contract_stub
 import sys
 from datetime import datetime
 from unittest.mock import MagicMock
@@ -11,7 +12,7 @@ import pytest
 
 agent_repository_consts = MagicMock()
 agent_repository_consts.STATUS_NOT_SHARED = "not_shared"
-sys.modules["contracts.agent_repository"] = agent_repository_consts
+install_shared_contract_stub(agent_repository_consts, 'agent_repository')
 
 client_mock = MagicMock()
 client_mock.get_db_session = MagicMock()

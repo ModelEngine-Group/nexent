@@ -6,6 +6,7 @@ Unit tests for backend/management/db/tool/outer_api.py
 Tests CRUD operations for OpenAPI services (MCP service level).
 """
 
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import pytest
 from unittest.mock import MagicMock
@@ -26,6 +27,7 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 client_mock = MagicMock()
 client_mock.get_db_session = MagicMock()

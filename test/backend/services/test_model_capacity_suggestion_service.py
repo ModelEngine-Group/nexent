@@ -410,11 +410,11 @@ def test_fuzzy_catalog_match_returns_none_for_unrelated_name():
 
 @pytest.fixture(scope="module")
 def _pydantic_models():
-    """Lazy-load Pydantic models from contracts.models, skipping the entire
+    """Lazy-load Pydantic models from contracts.agent, skipping the entire
     test group when the SDK import chain is unavailable (e.g. missing
     smolagents/mem0 in the test environment)."""
     try:
-        from contracts.models import CapacityCoverageBareModel, CapacityCoverageResponse, CapacitySuggestionFields, ModelCapacitySuggestionResponse
+        from contracts.model import CapacityCoverageBareModel, CapacityCoverageResponse, CapacitySuggestionRequestFields as CapacitySuggestionFields, ModelCapacitySuggestionResponse
         return {
             "CapacitySuggestionFields": CapacitySuggestionFields,
             "ModelCapacitySuggestionResponse": ModelCapacitySuggestionResponse,
@@ -422,7 +422,7 @@ def _pydantic_models():
             "CapacityCoverageResponse": CapacityCoverageResponse,
         }
     except (ImportError, ModuleNotFoundError):
-        pytest.skip("contracts.models import chain unavailable (missing SDK deps)")
+        pytest.skip("contracts.agent import chain unavailable (missing SDK deps)")
 
 
 def test_capacity_suggestion_fields_model_dump_shape(_pydantic_models):

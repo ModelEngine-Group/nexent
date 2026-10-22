@@ -3,8 +3,8 @@ import math
 
 import pytest
 
-from contracts.exceptions import RuntimeMetadataValidationError
-from contracts.error_code import RuntimeMetadataValidationCode
+from contracts.errors.exceptions import RuntimeMetadataValidationError
+from contracts.errors.codes import RuntimeMetadataValidationCode
 
 from infrastructure.serialization.runtime_metadata import (
     MAX_RUNTIME_METADATA_ARRAY_ITEMS,

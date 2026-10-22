@@ -242,7 +242,7 @@ class TestModelCatalogLoaderSmoke:
         assert resolve_reasoning_capability(model_name, provider_hint=provider_hint) is None
 
     def test_pydantic_models_match_catalog(self):
-        from contracts.models import ModelCatalogProfile, ModelCatalogProviderInfo
+        from contracts.model import ModelCatalogProfile, ModelCatalogProviderInfo
         from configs.model_catalog_loader import (
             list_catalog_providers,
             get_model_profile,
@@ -601,7 +601,7 @@ class TestModelsDevReasoningResolution:
 
     def test_catalog_profile_reasoning_overlay_keeps_profile_when_unmatched(self):
         import configs.model_catalog_loader as loader
-        from contracts.models import ModelCatalogProfile
+        from contracts.model import ModelCatalogProfile
 
         profile = ModelCatalogProfile(
             model_name="model",
@@ -614,7 +614,7 @@ class TestModelsDevReasoningResolution:
             assert loader._enrich_catalog_profile_reasoning("provider", "model", profile) is profile
 
     def test_budget_control_accepts_zero_minimum(self):
-        from contracts.models import ReasoningControl
+        from contracts.model import ReasoningControl
 
         control = ReasoningControl(type="budget_tokens", min=0, max=262144)
         assert control.min == 0

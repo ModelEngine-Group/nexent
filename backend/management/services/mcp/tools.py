@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.exceptions import MCPConnectionError, McpNotFoundError, McpValidationError
+from contracts.errors.exceptions import MCPConnectionError, McpNotFoundError, McpValidationError
 from management.db.mcp.market import get_mcp_market_record_by_source_mcp_id, update_mcp_market_record
 from management.db.mcp.remote import get_mcp_record_by_id_and_tenant, update_mcp_record_registry_json_by_id
 

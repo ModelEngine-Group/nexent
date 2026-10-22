@@ -17,9 +17,9 @@ backend_path = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '../../../backend'))
 sys.path.insert(0, backend_path)
 
-# Import AppException from contracts.exceptions where it is defined
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+# Import AppException from contracts.errors.exceptions where it is defined
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from management.utils.app_factory import create_app, register_exception_handlers
 
 class TestCreateApp:
@@ -717,7 +717,7 @@ class TestQuotaExceededErrorHandler:
 
     def test_quota_exceeded_error_returns_413(self):
         """Test QuotaExceededError returns 413 with correct body."""
-        from contracts.exceptions import QuotaExceededError
+        from contracts.errors.exceptions import QuotaExceededError
 
         app = FastAPI()
         register_exception_handlers(app)
@@ -923,7 +923,7 @@ class TestGenericHandlerAppExceptionDelegation:
 
     def test_token_expired_exception_handler(self):
         """Test TokenExpiredError handler returns 401 with TOKEN_EXPIRED code."""
-        from contracts.exceptions import TokenExpiredError
+        from contracts.errors.exceptions import TokenExpiredError
 
         app = FastAPI()
         register_exception_handlers(app)

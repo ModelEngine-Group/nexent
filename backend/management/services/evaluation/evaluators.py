@@ -7,8 +7,8 @@ import logging
 import re
 from typing import Any, Optional
 
-from contracts.error_code import ErrorCode
-from contracts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from management.db.evaluation.evaluator import create_evaluator, delete_evaluator, delete_evaluator_version, get_evaluator, list_evaluator_versions, list_evaluators, publish_evaluator, restore_evaluator_version, update_evaluator
 from management.services.agent.profile import (
     fetch_agent_profile,

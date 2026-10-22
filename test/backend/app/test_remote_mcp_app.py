@@ -56,7 +56,7 @@ patch('consts.const.ENABLE_UPLOAD_IMAGE', True).start()
 patch('management.services.mcp.containers.create_container_client_from_config').start()
 patch('management.services.mcp.containers.DockerContainerConfig').start()
 
-from contracts.exceptions import MCPConnectionError, MCPNameIllegal, MCPContainerError, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError, UnauthorizedError, TenantResourceLimitError
+from contracts.errors.exceptions import MCPConnectionError, MCPNameIllegal, MCPContainerError, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError, UnauthorizedError, TenantResourceLimitError
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from http import HTTPStatus

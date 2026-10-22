@@ -35,8 +35,8 @@ patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
-from contracts.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException, TenantResourceLimitError, ValidationError
-from contracts.error_code import ErrorCode
+from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException, TenantResourceLimitError, ValidationError
+from contracts.errors.codes import ErrorCode
 from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
 
 # Import the modules we need

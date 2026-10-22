@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 from sqlalchemy import text
 
 from consts.const import MAX_MCP_SERVICES_PER_TENANT
-from contracts.exceptions import TenantResourceLimitError
+from contracts.errors.exceptions import TenantResourceLimitError
 from management.utils.orm import as_dict, filter_property
 from management.db.client import get_db_session
 from management.db.models import McpRecord

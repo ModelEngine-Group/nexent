@@ -3,7 +3,7 @@
 
 from typing import Optional
 from consts.const import SUPABASE_JWT_SECRET
-from contracts.exceptions import TokenExpiredError
+from contracts.errors.exceptions import TokenExpiredError
 import jwt
 import time
 
