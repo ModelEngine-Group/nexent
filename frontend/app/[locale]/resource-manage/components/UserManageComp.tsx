@@ -71,7 +71,6 @@ import SkillList from "./resources/SkillList";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
-import { Can } from "@/components/permission/Can";
 import {
   getPasswordChecks,
   getStrengthLevel,
@@ -1067,7 +1066,7 @@ function TenantList({
 export default function UserManageComp() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
-  const { user } = useAuthorizationContext();
+  const { user, hasPermission } = useAuthorizationContext();
   const { isSpeedMode, enableAidpKnowledge } = useDeployment();
   const params = useParams();
   const locale = (params as { locale?: string })?.locale || "en";
@@ -1084,6 +1083,9 @@ export default function UserManageComp() {
 
   // Check if user is super admin (speed mode or admin role)
   const isSuperAdmin = isSpeedMode || user?.role === USER_ROLES.SU;
+  // Speed mode bypasses interactive authorization. Do not hide the tenant
+  // selector while the normal permission context is still being initialized.
+  const canListTenants = isSpeedMode || hasPermission("tenant.list:read");
 
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -1263,8 +1265,7 @@ export default function UserManageComp() {
       </div>
       <div className="flex-1 min-h-0 h-full">
         <div className="flex h-full gap-6">
-          {isSuperAdmin && (
-            <Can permission="tenant.list:read">
+          {isSuperAdmin && canListTenants && (
               <Col
                 className="flex h-full shrink-0 flex-col"
                 style={{ width: 300 }}
@@ -1299,7 +1300,6 @@ export default function UserManageComp() {
                   </div>
                 </div>
               </Col>
-            </Can>
           )}
           <Col className="min-w-0 min-h-0 flex-1 flex flex-col">
             <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-sm h-full flex flex-col gap-4 overflow-hidden p-4 px-8">
