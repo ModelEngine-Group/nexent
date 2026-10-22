@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
@@ -61,7 +62,9 @@ journey("TFP-D4-001", async (context) => {
   });
   const expand = async (message: Locator) => {
     for (let count = 0; count < 30; count += 1) {
-      const closed = message.locator('.aui-reasoning-root button[data-state="closed"]');
+      const closed = message.locator(
+        '.aui-reasoning-root button[data-state="closed"], [data-slot="tool-group-trigger"][data-state="closed"]',
+      );
       if (!(await closed.count())) return;
       await closed.first().click();
     }
@@ -104,9 +107,20 @@ journey("TFP-D4-001", async (context) => {
   };
   const run = async (promoted: boolean) => {
     await fixture("reset", promoted ? ["--promoted"] : []);
-    if (promoted) await chat.newConversation(owned.display);
-    else await chat.openAgent(owned.display);
-    await chat.selectMode("执行");
+    if (promoted) {
+      await page.getByRole("button", { name: "新对话", exact: true }).click();
+      await expect(chat.userMessages()).toHaveCount(0);
+      await expect(chat.assistantMessages()).toHaveCount(0);
+      await expect(page.getByRole("combobox")).toContainText(owned.display);
+    } else {
+      await chat.openAgent(owned.display);
+    }
+    const mode = page.getByRole("button", { name: /^(规划|执行)模式$/ })
+      .and(page.locator('[aria-haspopup="dialog"]'));
+    await mode.click();
+    await page.getByRole("dialog").getByRole("button", { name: "执行模式", exact: true }).click();
+    await expect(mode).toHaveAttribute("aria-expanded", "false");
+    await expect(mode).toHaveText("执行模式");
     pending = { prompt: `Execute controlled TFP ${promoted ? "promotion" : "cold"} verification.`, promoted };
     await chat.startMessage(pending.prompt);
     await Promise.all(recordings);
