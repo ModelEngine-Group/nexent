@@ -1979,6 +1979,8 @@
   "mcpConfig.openapiService.form.serverUrl": "服务地址",
   "mcpConfig.openapiService.form.serverUrlPlaceholder": "请输入服务地址",
   "mcpConfig.openapiService.form.openapiJson": "OpenAPI JSON配置",
+  "mcpConfig.openapiService.form.sslVerifyLabel": "校验 SSL 证书",
+  "mcpConfig.openapiService.form.sslVerifyWarning": "关闭后将跳过服务器证书校验，仅建议用于受控内网或已知自签名证书的 API，可能降低连接安全性",
   "mcpConfig.openapiService.message.serviceNameRequired": "请输入服务名称",
   "mcpConfig.openapiService.message.serverUrlRequired": "请输入服务地址",
   "mcpConfig.openApiToMcp.toolList.title": "已转换的MCP工具",

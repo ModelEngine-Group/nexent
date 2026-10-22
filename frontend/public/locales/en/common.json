@@ -2084,6 +2084,8 @@
   "mcpConfig.openapiService.form.serverUrl": "Server URL",
   "mcpConfig.openapiService.form.serverUrlPlaceholder": "Please enter server URL",
   "mcpConfig.openapiService.form.openapiJson": "OpenAPI JSON",
+  "mcpConfig.openapiService.form.sslVerifyLabel": "Verify SSL certificate",
+  "mcpConfig.openapiService.form.sslVerifyWarning": "Disabling this skips server certificate verification. Use only for controlled internal APIs or known self-signed certificates; connection security may be reduced.",
   "mcpConfig.openapiService.message.serviceNameRequired": "Please enter service name",
   "mcpConfig.openapiService.message.serverUrlRequired": "Please enter server URL",
   "mcpConfig.openApiToMcp.toolList.title": "Converted MCP Tools",

@@ -25,6 +25,7 @@ def import_openapi_service(
     user_id: str,
     service_description: str = None,
     headers_template: Dict[str, Any] = None,
+    ssl_verify: bool = True,
     force_update: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -61,6 +62,7 @@ def import_openapi_service(
         user_id=user_id,
         description=service_description,
         headers_template=headers_template,
+        ssl_verify=ssl_verify,
     )
 
     logger.info(f"Imported service '{service_name}' for tenant {tenant_id}")
