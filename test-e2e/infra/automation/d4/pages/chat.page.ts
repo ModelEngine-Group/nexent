@@ -1,7 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { expect, type Locator, type Page } from "playwright/test";
-import { writeFileSync } from "node:fs";
+import { expect, type FileChooser, type Locator, type Page, type Response } from "playwright/test";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { appPath } from "../runner/runtime-config";
 
 /** A path or a full setFiles payload (name/mimeType/buffer). */
@@ -9,6 +10,7 @@ type AttachmentPayload = string | Parameters<FileChooser["setFiles"]>[0];
 
 export class ChatPage {
   private lastServerConversationId?: number;
+  private stoppedConversationId?: number;
 
   constructor(readonly page: Page) {}
 
@@ -20,20 +22,36 @@ export class ChatPage {
     return this.page.locator("[data-slot='aui_user-message-root']");
   }
 
+  composerInput(): Locator {
+    return this.page.locator("[data-workbench-composer], .aui-lexical-input");
+  }
+
+  async composerText(): Promise<string> {
+    return this.composerInput().evaluate(element =>
+      element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement
+        ? element.value : element.textContent ?? "");
+  }
+
   activeThread(): Locator {
     return this.page.locator("[data-active='true']").filter({ has: this.page.locator("button") }).first();
   }
 
   async currentThreadTitle(): Promise<string> {
-    const active = this.activeThread();
-    await expect(active).toBeVisible();
-    const title = (await active.locator("span.truncate").first().innerText()).trim();
-    if (!title) throw new Error("active conversation has no visible sidebar title");
+    // Resolve the owned server ID before reload; a title refresh can replace
+    // the transient local sidebar item while the same conversation is open.
+    const title = await this.persistedThreadTitle(this.currentConversationId());
+    await expect(this.threadButton(title)).toHaveCount(1);
+    await expect(this.threadButton(title)).toBeVisible();
     return title;
   }
 
   async openAgent(displayName: string): Promise<void> {
     await this.page.goto(appPath("/newchat"), { waitUntil: "domcontentloaded" });
+    // Navigation can restore the previous Agent chat; open discovery explicitly.
+    const search = this.page.getByPlaceholder("搜索智能体名称");
+    const discovery = this.page.getByRole("button", { name: "发现智能体", exact: true });
+    await expect(search.or(discovery)).toBeVisible();
+    if (!(await search.isVisible())) await discovery.click();
     await this.selectAgent(displayName);
   }
 
@@ -57,36 +75,66 @@ export class ChatPage {
   }
 
   async selectMode(mode: "规划" | "执行"): Promise<void> {
-    const button = this.page.getByRole("button", { name: mode, exact: true });
-    await button.click();
-    await expect(button).toHaveClass(/bg-blue-50/);
+    const label = `${mode}模式`;
+    const trigger = this.page.getByRole("button", { name: /^(规划|执行)模式$/, exact: true })
+      .and(this.page.locator('button[aria-haspopup="dialog"]'));
+    await expect(trigger).toBeVisible();
+    if ((await trigger.innerText()).trim() !== label) {
+      await trigger.click();
+      await this.page.getByRole("dialog").getByRole("button", { name: label, exact: true }).click();
+    }
+    await expect(trigger).toHaveText(label);
   }
 
-  /** Composer is a Lexical contenteditable with an empty placeholder, so read innerText. */
-  async composerText(): Promise<string> {
-    const composer = this.page.locator("[data-workbench-composer], .aui-lexical-input").first();
-    await expect(composer).toBeVisible();
-    const text = await composer.innerText();
-    return text.replace(/\u200b/g, "").trim();
-  }
-
+  /** Poll the composer until its text matches, for async transcription and streamed input. */
   async expectComposerText(pattern: string | RegExp, timeout = 30_000): Promise<void> {
     await expect.poll(async () => this.composerText(), { timeout }).toMatch(pattern);
   }
 
   async startMessage(prompt: string): Promise<Locator> {
     const before = await this.assistantMessages().count();
-    const composer = this.page.locator("[data-workbench-composer], .aui-lexical-input");
-    await composer.fill(prompt);
-    const runResponse = this.page.waitForResponse(
-      (response) => response.request().method() === "POST"
-        && response.url().includes("/api/agent/run")
-        && response.request().postDataJSON()?.query === prompt
-        && (response.headers()["content-type"] || "").includes("text/event-stream"),
-      { timeout: 120_000 },
-    );
-    await this.page.getByRole("button", { name: "发送", exact: true }).click();
-    const response = await runResponse;
+    const composer = this.composerInput();
+    const started = Date.now();
+    let response: Response;
+    for (let attempt = 1; ; attempt += 1) {
+      await composer.fill(prompt);
+      const runResponse = this.page.waitForResponse(
+        response => response.request().method() === "POST"
+          && response.url().includes("/api/agent/run")
+          && response.request().postDataJSON()?.query === prompt,
+        { timeout: 120_000 },
+      );
+      await this.page.getByRole("button", { name: "发送", exact: true }).click();
+      response = await runResponse;
+      if (response.headers()["x-stream-status"] !== "conflict") break;
+      const recoveringOwnedStop = this.stoppedConversationId !== undefined
+        && Number(response.request().postDataJSON()?.conversation_id) === this.stoppedConversationId;
+      const root = process.env.RESULT_DIR;
+      if (root) {
+        mkdirSync(join(root, "runtime"), { recursive: true });
+        appendFileSync(join(root, "runtime/send-recovery.jsonl"), JSON.stringify({
+          kind: "agent_run_conflict", after_owned_stop: recoveringOwnedStop,
+          conversation_id: this.lastServerConversationId, attempt, elapsed_ms: Date.now() - started,
+        }) + "\n");
+      }
+      // Stop publishes history before the physical worker releases its lease.
+      // Only this explicit pre-admission rejection permits a bounded retry;
+      // an accepted run or any other error is never resubmitted here.
+      if (!recoveringOwnedStop || Date.now() - started >= 60_000) {
+        const error = new Error("Previous owned run did not release its execution lease within the bounded Stop recovery window");
+        error.name = "ProductFailure";
+        throw error;
+      }
+      await expect(this.assistantMessages()).toHaveCount(before);
+      await expect.poll(() => this.composerText()).toBe(prompt);
+      await this.page.waitForTimeout(1000);
+    }
+    this.stoppedConversationId = undefined;
+    if (!response.ok() || !(response.headers()["content-type"] || "").includes("text/event-stream")) {
+      const error = new Error(`Agent run did not return an accepted SSE response: HTTP ${response.status()}`);
+      error.name = "ProductFailure";
+      throw error;
+    }
     const headers = await response.allHeaders();
     let rawConversationId = headers["conversation_id"];
     if (!rawConversationId) {
@@ -159,6 +207,7 @@ export class ChatPage {
     if (!response.ok() || body?.status !== "success") {
       throw new Error("agent stop failed: HTTP " + response.status() + " body=" + JSON.stringify(body));
     }
+    this.stoppedConversationId = this.currentConversationId();
     // A cancelled message is incomplete, so it has no Completed badge.
     await expect(this.page.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout: 120_000 });
     await expect(this.page.locator("[data-workbench-composer], .aui-lexical-input")).toBeEditable();
@@ -199,7 +248,7 @@ export class ChatPage {
         contains_expected_marker:text.includes(marker), final_contains_expected_marker:final.includes(marker),
         final_is_success:final.trim()==="success", final_length:final.length};
     });
-    writeFileSync(path, JSON.stringify({http_status:response.status(), code:payload.code,
+    writeFileSync(path, JSON.stringify({conversation_id:this.currentConversationId(), http_status:response.status(), code:payload.code,
       streaming_status:history?.streaming_message?.status || null, messages,
       ui_user_count:await this.userMessages().count(), ui_assistant_count:await this.assistantMessages().count()},null,2)+"\n");
   }
@@ -224,12 +273,14 @@ export class ChatPage {
   }
 
   async renameActiveThread(title: string): Promise<void> {
+    // Resolve the persisted row after a new local thread becomes server-owned.
+    await this.openThread(await this.currentThreadTitle());
     const active = this.activeThread();
     await expect(active).toBeVisible();
     await active.hover();
     await active.locator("button").last().click();
     await this.page.getByRole("menuitem", { name: "重命名", exact: true }).click();
-    const input = active.locator("input[type='text']");
+    const input = active.getByRole("textbox", { name: "重命名", exact: true });
     await expect(input).toBeVisible();
     await input.fill(title);
     const renamed = this.page.waitForResponse(
@@ -251,22 +302,16 @@ export class ChatPage {
   }
 
   async newConversation(displayName: string): Promise<void> {
-    // A history item can also be named New Chat. Only the creation action has Plus.
+    // A history item can also be named New Chat. Scope to the creation icon.
     const create = this.page.getByRole("button", { name: /新建?对话/, exact: true })
-      .filter({ has: this.page.locator("svg.lucide-plus") });
+      .filter({ has: this.page.locator("svg.lucide-square-pen") });
     await expect(create).toHaveCount(1);
     await create.click();
-    const search = this.page.getByPlaceholder("搜索智能体名称");
-    await expect(search).toBeVisible();
-    await search.fill(displayName);
-    // Same precise card scoping as selectAgent: the card's accessible name
-    // mixes name, description and the 更多操作 menu.
-    const card = this.page.locator("div[role='button']").filter({
-      has: this.page.getByText(displayName, { exact: true }),
-    });
-    await expect(card).toHaveCount(1);
-    await card.click();
-    await expect(this.page.locator("[data-workbench-composer], .aui-lexical-input")).toBeVisible();
+    // New Chat resets this conversation while retaining the selected Agent.
+    await expect(this.page.getByRole("heading", { name: displayName, exact: true })).toBeVisible();
+    await expect(this.composerInput()).toBeEditable();
+    await expect(this.userMessages()).toHaveCount(0);
+    await expect(this.assistantMessages()).toHaveCount(0);
   }
 
   threadButton(title: string): Locator {
@@ -334,26 +379,26 @@ export class ChatPage {
   }
 
   async selectKnowledge(name: string): Promise<void> {
-    await this.page.getByRole("button", { name: /知识库：/ }).click();
+    await this.page.getByRole("button", { name: "知识库", exact: true }).click();
     const dialog = this.page.getByRole("dialog", { name: "当前对话知识库" });
     // The current scope modal selects ResourceCards directly, not a mode radio.
-    await dialog.getByRole("searchbox", { name: "搜索知识库" }).fill(name);
+    await dialog.getByRole("searchbox").fill(name);
     const item = dialog.getByRole("option", { name, exact: true });
     await expect(item).toBeVisible();
     if ((await item.getAttribute("aria-selected")) !== "true") await item.click();
     await expect(item).toHaveAttribute("aria-selected", "true");
-    await dialog.getByRole("button", { name: /^确\s*定$/ }).click();
-    await expect(dialog).toHaveCount(0);
+    await dialog.getByRole("button", { name: "确认", exact: true }).click();
+    await expect(dialog).toBeHidden();
   }
 
   async assertKnowledgeSelected(name: string, selected: boolean): Promise<void> {
-    await this.page.getByRole("button", { name: /知识库：/ }).click();
+    await this.page.getByRole("button", { name: "知识库", exact: true }).click();
     const dialog = this.page.getByRole("dialog", { name: "当前对话知识库" });
-    await dialog.getByRole("searchbox", { name: "搜索知识库" }).fill(name);
+    await dialog.getByRole("searchbox").fill(name);
     await expect(dialog.getByRole("option", { name, exact: true }))
       .toHaveAttribute("aria-selected", String(selected));
     // Inspection must not save or change the conversation's scope.
-    await dialog.getByRole("button", { name: /^取\s*消$/ }).click();
+    await dialog.getByRole("button", { name: "关闭", exact: true }).last().click();
     await expect(dialog).toBeHidden();
   }
 

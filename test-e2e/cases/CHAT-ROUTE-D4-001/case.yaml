@@ -6,6 +6,7 @@ case:
   feature_id: CHAT-SIDEBAR
   requirement_ids:
   - CHAT-ROUTE-SYNC-20261020
+  - WB-HISTORY-DETAIL-20261022
   business_rule_ids:
   - CHAT-SIDEBAR-RULE-005
   title: Workbench selection synchronizes URL and document reload target
@@ -35,6 +36,7 @@ case:
   - Saved selection and URL agree without document navigation or losing the in-memory draft during switching.
   - Document reload restores the explicitly selected saved history.
   - New conversation clears stale saved identity and reload remains on the landing view.
+  - Saved history entry, re-entry and reload each issue exactly one detail GET; repeated active selection issues none.
   forbidden_side_effects:
   - No generation, deletion, pin writes or persisted draft changes; no cross-conversation message writes.
   observations:
@@ -60,6 +62,11 @@ case:
     description: New conversation clears stale URL identity and survives reload as a landing view.
     steps: [3]
     expected_results: [3]
+    forbidden_side_effects: [1]
+  - id: AC-04
+    description: Entry, re-entry and reload share one detail request without repeated active-selection reads.
+    steps: [1, 2]
+    expected_results: [4]
     forbidden_side_effects: [1]
   actor: Authenticated Workbench user
   journey:

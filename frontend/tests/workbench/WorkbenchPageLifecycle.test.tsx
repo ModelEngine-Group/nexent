@@ -4,6 +4,8 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import {
   useCallback,
   useReducer,
+  useState,
+  useLayoutEffect,
   type ComponentProps,
   type ReactNode,
 } from "react";
@@ -19,6 +21,8 @@ import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import WorkbenchPage from "@/features/workbench/WorkbenchPage";
 import { conversationService } from "@/services/conversationService";
+import { QueryClient } from "@tanstack/react-query";
+import { createConversationDetailLoader } from "@/lib/conversationDetails";
 
 const view = vi.hoisted(() => ({
   threadId: "a" as string | undefined,
@@ -88,6 +92,16 @@ vi.mock("@assistant-ui/react", () => ({
 vi.mock("@/features/workbench/providers/WorkbenchSessionProvider", () => ({
   WorkbenchSessionProvider: ({ children }: { children: ReactNode }) => children,
   useWorkbenchSession: () => {
+    const [conversationDetails] = useState(() =>
+      createConversationDetailLoader(new QueryClient(), "page-test")
+    );
+    const active = view.items.find(
+      (item) => item.id === view.threadId
+    )?.remoteId;
+    useLayoutEffect(
+      () => conversationDetails.activate(active),
+      [conversationDetails, active]
+    );
     const [state, dispatch] = useReducer(workbenchReducer, {
       ...initialWorkbenchState,
       config,
@@ -99,6 +113,7 @@ vi.mock("@/features/workbench/providers/WorkbenchSessionProvider", () => ({
       []
     );
     return {
+      conversationDetails,
       runtime,
       selectedAgent: null,
       isLoadingAgents: false,
@@ -435,6 +450,27 @@ it("ignores delayed loads and saves from an inactive conversation", async () => 
   expect(runConfig().threadId).toBe("101");
   expect(runConfig().workbenchConfig.model_id).toBe(11);
   expect(runConfig().workbenchConfigVersion).toBe(101);
+});
+
+it("a version conflict bypasses shared history and preserves input and model parameters", async () => {
+  render(<WorkbenchPage />);
+  await waitFor(() =>
+    expect(view.props?.runtimeMetadata).toEqual({ owner: "101" })
+  );
+  expect(conversationService.getById).toHaveBeenCalledTimes(1);
+  const fresh = { ...detail(101), workbench_config_version: 999 };
+  vi.mocked(conversationService.getById).mockResolvedValue(fresh);
+  await act(async () =>
+    runConfig().onWorkbenchConfigConflict("Keep this question")
+  );
+  expect(conversationService.getById).toHaveBeenCalledTimes(2);
+  expect(runConfig().workbenchConfigVersion).toBe(999);
+  expect(runConfig().workbenchConfig.generation_config).toEqual(
+    config.generation_config
+  );
+  expect(runtime.thread.composer.setText).toHaveBeenCalledWith(
+    "Keep this question"
+  );
 });
 
 it("uses the server-issued ID first and preserves exact model config and version", async () => {

@@ -46,12 +46,12 @@ journey("PW-CHAT-02", async (context) => {
     steps: [
       async () => {
         await chat.selectMode("执行");
-        await expect(page.locator("[data-workbench-composer], .aui-lexical-input")).toBeVisible();
+        await expect(chat.composerInput()).toBeVisible();
         return `opened /newchat with ${agentDisplay} and confirmed Execution mode`;
       },
       async () => {
         const prompt = `必须调用工具 ${toolName}，不要猜测；工具完成后只回复它返回的测试编号。`;
-        await page.locator("[data-workbench-composer], .aui-lexical-input").fill(prompt);
+        await chat.composerInput().fill(prompt);
         return `entered an explicit ${toolName} request`;
       },
       async () => {
@@ -99,7 +99,7 @@ journey("PW-CHAT-02", async (context) => {
     ],
     assertions: [
       async () => {
-        const composer = page.locator("[data-workbench-composer], .aui-lexical-input");
+        const composer = chat.composerInput();
         await composer.fill(`COMPOSER-READY-${token}`);
         await expect(page.getByRole("button", { name: "发送", exact: true })).toBeEnabled();
         await composer.fill("");

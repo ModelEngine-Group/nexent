@@ -2,9 +2,26 @@
 
 vi.mock("@/app/i18n", () => ({ default: { t: (key: string) => key, language: "zh" } }));
 import React from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, expect, test, vi } from "vitest";
+import { act, cleanup, fireEvent, render as renderComponent, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ThreadList, BatchSelectionProvider, BatchSidebarFooter } from "@/app/newchat/assistant-ui/thread-list";
+const queryClients: QueryClient[] = [];
+const render = (ui: React.ReactNode) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClients.push(client);
+  return renderComponent(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+};
+afterEach(async () => {
+  await act(async () => {
+    cleanup();
+    for (const client of queryClients) {
+      await client.cancelQueries();
+      client.clear();
+    }
+    queryClients.length = 0;
+  });
+});
 const fixture = vi.hoisted(() => ({
   items: [{ id: "saved", remoteId: "42", title: "Saved conversation", custom: { agentId: 7 } }, { id: "draft", title: "Unsent draft", custom: { agentId: 7 } }],
   availableAgents: [{ agent_id: 7, display_name: "Agent Seven", name: "Agent Seven" }],
@@ -15,6 +32,12 @@ const fixture = vi.hoisted(() => ({
   confirm: vi.fn(),
   mainThreadId: "saved",
 }));
+const render = (ui: React.ReactElement) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderComponent(ui, {
+    wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  });
+};
 vi.mock("@assistant-ui/react", async () => {
   const React = await import("react");
   const Context = React.createContext(0);
@@ -45,6 +68,76 @@ vi.mock("@/components/ui/tooltip", () => {
   return { Tooltip: Wrap, TooltipTrigger: Wrap, TooltipContent: () => null };
 });
 beforeEach(() => { fixture.items = [{ id: "saved", remoteId: "42", title: "Saved conversation", custom: { agentId: 7 } }, { id: "draft", title: "Unsent draft", custom: { agentId: 7 } }]; fixture.mainThreadId = "saved"; });
+
+test("[CHAT-SIDEBAR-D1-001] history search expands matching Agent groups and restores manual expansion", () => {
+  fixture.rename.mockClear();
+  fixture.deleteBatch.mockClear();
+  fixture.items = [
+    { id: "saved", remoteId: "42", title: "Seven active", custom: { agentId: 7 } },
+    { id: "seven-other", remoteId: "43", title: "Seven older", custom: { agentId: 7 } },
+    { id: "eight-budget", remoteId: "44", title: "Quarterly budget", custom: { agentId: 8 } },
+    { id: "eight-notes", remoteId: "45", title: "Eight notes", custom: { agentId: 8 } },
+  ];
+  fixture.availableAgents = [
+    { agent_id: 7, display_name: "Agent Seven", name: "Agent Seven" },
+    { agent_id: 8, display_name: "Agent Eight", name: "Agent Eight" },
+  ];
+  const { rerender } = render(<ThreadList newChatDesign activeThreadId="saved" />);
+  fireEvent.click(screen.getByRole("button", { name: "Agent Seven" }));
+  expect(screen.getByText("Seven older")).toBeVisible();
+  expect(screen.queryByText("Quarterly budget")).toBeNull();
+
+  rerender(<ThreadList newChatDesign activeThreadId="saved" searchQuery=" budget " />);
+  expect(screen.getByRole("button", { name: "Agent Eight" })).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByText("Quarterly budget")).toBeVisible();
+  expect(screen.queryByText("Eight notes")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Agent Seven" })).toBeNull();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    fireEvent.click(screen.getByRole("button", { name: "Agent Eight" }));
+    expect(screen.getByRole("button", { name: "Agent Eight" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Quarterly budget")).toBeNull();
+    rerender(<ThreadList newChatDesign activeThreadId="saved" searchQuery="Agent Eight" />);
+    expect(screen.getByRole("button", { name: "Agent Eight" })).toHaveAttribute("aria-expanded", "false");
+    rerender(<ThreadList newChatDesign activeThreadId="saved" searchQuery=" budget " />);
+    expect(screen.getByRole("button", { name: "Agent Eight" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Quarterly budget")).toBeVisible();
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Agent Eight" }));
+  rerender(<ThreadList newChatDesign activeThreadId="saved" searchQuery="" />);
+  rerender(<ThreadList newChatDesign activeThreadId="saved" searchQuery=" budget " />);
+  expect(screen.getByText("Quarterly budget")).toBeVisible();
+
+  rerender(<ThreadList newChatDesign activeThreadId="saved" searchQuery="Agent Eight" />);
+  expect(screen.getByRole("button", { name: "Agent Eight" })).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByText("Quarterly budget")).toBeNull();
+  expect(screen.queryByText("Eight notes")).toBeNull();
+  rerender(<ThreadList newChatDesign activeThreadId="saved" searchQuery="eight" />);
+  expect(screen.getByRole("button", { name: "Agent Eight" })).toHaveAttribute("aria-expanded", "true");
+  expect(screen.getByText("Eight notes")).toBeVisible();
+  rerender(<ThreadList newChatDesign activeThreadId="saved" searchQuery="no matching history" />);
+  expect(screen.getByText("chat.threadList.noSearchResults")).toBeVisible();
+
+  for (const query of ["", "   "]) {
+    rerender(<ThreadList newChatDesign activeThreadId="saved" searchQuery={query} />);
+    expect(screen.getByRole("button", { name: "Agent Seven" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Agent Eight" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("Seven older")).toBeVisible();
+    expect(screen.queryByText("Quarterly budget")).toBeNull();
+  }
+  rerender(<ThreadList newChatDesign selectedAgentId={8} searchQuery="Agent Eight" />);
+  expect(screen.getByText("chat.threadList.noSearchResults")).toBeVisible();
+  expect(screen.queryByText("Quarterly budget")).toBeNull();
+  rerender(<ThreadList newChatDesign selectedAgentId={8} searchQuery="budget" />);
+  expect(screen.getByText("Quarterly budget")).toBeVisible();
+  expect(screen.queryByText("Eight notes")).toBeNull();
+  expect(screen.queryByText("Seven active")).toBeNull();
+  rerender(<ThreadList newChatDesign selectedAgentId={8} searchQuery="" />);
+  expect(screen.getByText("Quarterly budget")).toBeVisible();
+  expect(screen.getByText("Eight notes")).toBeVisible();
+  expect(screen.queryByText("Seven active")).toBeNull();
+  expect(fixture.rename).not.toHaveBeenCalled();
+  expect(fixture.deleteBatch).not.toHaveBeenCalled();
+});
 
 test("[CHAT-SIDEBAR-D1-001] persisted conversations remain visible and unsent drafts stay hidden", () => {
   render(<ThreadList generatedTitles={new Map([["42", "Server title"]])} />);

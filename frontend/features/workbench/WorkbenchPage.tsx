@@ -128,6 +128,7 @@ const HomeContent: FC = () => {
     isLoadingWorkbenchBootstrap,
     onWorkbenchModeChange,
     dispatchWorkbench,
+    conversationDetails,
   } = useWorkbenchSession();
   const { availableLlmModels, isLoading: isLoadingModels } = useModelList();
   const effectiveWorkbenchConfig = useMemo(
@@ -522,8 +523,8 @@ const HomeContent: FC = () => {
 
     let cancelled = false;
     dispatchWorkbench({ type: "restore-start" });
-    void conversationService
-      .getById(String(numericConversationId))
+    void conversationDetails
+      .load(String(numericConversationId))
       .then(async (conversation) => {
         if (cancelled) return;
         const restored = await resolveRestoredWorkbench(conversation);
@@ -625,6 +626,7 @@ const HomeContent: FC = () => {
     setKnowledgeScope,
     setKnowledgePreview,
     t,
+    conversationDetails,
   ]);
 
   useEffect(() => {
@@ -645,8 +647,8 @@ const HomeContent: FC = () => {
     }
 
     let cancelled = false;
-    void conversationService
-      .getById(String(numericConversationId))
+    void conversationDetails
+      .load(String(numericConversationId))
       .then((conversation) => {
         if (cancelled) return;
         setRuntimeMetadata(conversation.runtime_metadata ?? {});
@@ -666,6 +668,7 @@ const HomeContent: FC = () => {
     activeThreadId,
     setRuntimeMetadata,
     setRuntimeMetadataVersion,
+    conversationDetails,
   ]);
 
   const handleRuntimeMetadataChange = useCallback(
@@ -729,6 +732,7 @@ const HomeContent: FC = () => {
           config,
           workbenchState.configVersion
         );
+        conversationDetails.invalidate(String(conversationId));
         if (Number(activeConversationIdRef.current) !== conversationId) {
           throw new Error(t("ui.localization.conversationChanged"));
         }
@@ -743,7 +747,7 @@ const HomeContent: FC = () => {
           error instanceof ApiError &&
           error.code === "WORKBENCH_CONFIG_VERSION_CONFLICT"
         ) {
-          const current = await conversationService.getById(
+          const current = await conversationDetails.refresh(
             String(conversationId)
           );
           if (Number(activeConversationIdRef.current) !== conversationId)
@@ -768,6 +772,7 @@ const HomeContent: FC = () => {
       workbenchState.configVersion,
       setKnowledgeScope,
       setKnowledgePreview,
+      conversationDetails,
     ]
   );
 
@@ -1095,7 +1100,7 @@ const HomeContent: FC = () => {
         activeConversationIdRef.current === activeConversationId &&
         dispatchWorkbench({ type: "set-version", version }),
       onWorkbenchConfigConflict: async (query: string) => {
-        const current = await conversationService.getById(
+        const current = await conversationDetails.refresh(
           String(activeConversationId)
         );
         if (activeConversationIdRef.current !== activeConversationId) return;
@@ -1211,6 +1216,7 @@ const HomeContent: FC = () => {
     setKnowledgeScope,
     setKnowledgePreview,
     t,
+    conversationDetails,
   ]);
 
   // Restore historical plan and chat mode from the same conversation detail
@@ -1241,6 +1247,8 @@ const HomeContent: FC = () => {
     chatMode,
     resumedConversationIdsRef,
     handleGenerationStopped,
+    loadDetail: conversationDetails.load,
+    invalidateDetail: conversationDetails.invalidate,
   });
 
   // Publish the server conversation id registry to the thread-list adapter so

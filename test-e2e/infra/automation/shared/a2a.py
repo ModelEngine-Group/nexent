@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Owned A2A discovery assets and redacted, read-only Mock observations."""
 
 from __future__ import annotations
@@ -43,7 +45,10 @@ class A2AMock:
         await self.control.aclose()
 
     async def ready(self):
-        response = await self.control.get('/readyz')
+        try:
+            response = await self.control.get('/readyz')
+        except httpx.TransportError as exc:
+            raise AssetDependencyError('a2a', 'mock', detail='Configured A2A Mock control endpoint is unreachable') from exc
         if response.status_code != 200 or response.json().get('status') != 'ready':
             raise AssetDependencyError('a2a', 'mock', detail='controlled A2A stack is not READY')
         response = await self.control.get('/__test/scenario')

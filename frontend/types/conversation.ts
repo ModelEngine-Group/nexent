@@ -9,6 +9,17 @@ export interface ConversationListItem {
   last_activity_time?: number;
 }
 
+export type ConversationDetailReader = (
+  id: string
+) => Promise<ApiConversationDetail>;
+export interface ConversationDetailLoader {
+  load: ConversationDetailReader;
+  refresh: ConversationDetailReader;
+  activate: (id: string | undefined) => void;
+  invalidate: (id: string) => void;
+  clear: () => void;
+}
+
 export interface ConversationListParams {
   offset: number;
   limit: number;
