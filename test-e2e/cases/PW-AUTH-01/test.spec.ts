@@ -34,10 +34,7 @@ journey("PW-AUTH-01", async ({ page, contract, expect }) => {
   await contract.step("STEP-01", async () => {
     await auth.openProtected("/agents");
     await auth.expectLoggedOut();
-    // `智能体开发` is a section header (`isSection: true` in SideNavigation) and
-    // is therefore filtered out of the clickable menu, so it never renders.
-    // The workbench entry is the first authenticated-only nav item and is the
-    // stable proxy for "protected navigation is reachable".
+    // `智能体开发` is a section header and never renders; use the workbench entry.
     await expect(page.getByText("工作台", { exact: true })).toBeHidden();
     observed.unauthenticatedProtectedContentHidden = true;
     return "unauthenticated /agents displayed login entry without protected agent content";

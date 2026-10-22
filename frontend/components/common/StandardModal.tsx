@@ -25,13 +25,7 @@ export interface StandardModalProps {
   maxHeight?: number | string;
   bodyClassName?: string;
   footer?: ReactNode | null;
-  /**
-   * Whether ESC dismisses the dialog. Defaults to `true` per WCAG 2.1.2 /
-   * ARIA APG Dialog (Modal) Pattern, where ESC must close the dialog unless the
-   * content cannot survive an accidental dismissal. Set to `false` only for
-   * long forms that would lose significant work; document the reason at the
-   * call site so the accessibility exception is reviewable.
-   */
+  /** ESC dismisses the dialog. Opt out only for long forms (WCAG 2.1.2). */
   closeOnEscape?: boolean;
 }
 

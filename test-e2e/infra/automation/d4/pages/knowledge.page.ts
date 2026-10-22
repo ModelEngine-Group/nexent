@@ -15,10 +15,7 @@ export class KnowledgePage {
 
   async open(requireConfiguredEmbedding = true): Promise<void> {
     await this.page.goto(appPath("/knowledges"), { waitUntil: "domcontentloaded" });
-    // The knowledge base page renders no `role=heading` title, so "page ready"
-    // is asserted through the two mutually exclusive states instead: either the
-    // creation toolbar is available, or the embedding-not-configured notice is
-    // shown.
+    // No role=heading title here; assert one of the two mutually exclusive states.
     if (requireConfiguredEmbedding) {
       await expect(this.createButton()).toBeVisible();
       return;

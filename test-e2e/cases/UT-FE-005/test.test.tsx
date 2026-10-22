@@ -43,10 +43,7 @@ describe('UT-FE-005 locale behavior', () => {
     expect(document.cookie).toContain('NEXT_LOCALE=' + (language === 'zh' ? 'en' : 'zh'));
   });
   it('loads unknown locale from English and preserves translation fallback', async () => {
-    // `i18n.tsx` memoises locale requests in module-level singletons
-    // (`commonMessageRequests` / `customMessageRequest`). Earlier tests in this
-    // file already primed them, so the stubbed fetch would never be consulted.
-    // Reload the module graph to get a fresh cache for this assertion.
+    // i18n.tsx memoises requests in module singletons; reload for a fresh cache.
     vi.resetModules();
     const freshI18n = await import('@/app/[locale]/i18n');
     const request = vi.fn(async (url: string) => ({
@@ -60,8 +57,7 @@ describe('UT-FE-005 locale behavior', () => {
     expect(request.mock.calls.map(([url]) => url)).toEqual([
       '/portal/locales/en/common.json', '/portal/locales/zh/custom.json', '/portal/locales/en/custom.json',
     ]);
-    // `common` messages live on `resources`, while `resourcesCustom` only carries
-    // the `custom` overlay and replacement patterns.
+    // `common` lives on `resources`; `resourcesCustom` only holds the overlay.
     const freshDefault = freshI18n.default;
     freshDefault.addResourceBundle('en', 'common', loaded.resources.en.common ?? {}, true, true);
     await freshDefault.changeLanguage('zh');
@@ -75,9 +71,7 @@ describe('UT-FE-005 locale behavior', () => {
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline fixture')));
     await freshI18n.loadLocaleMessages('en');
-    // A failed load must not clear what i18next already holds. The returned
-    // `resources` carrier is only populated on success, so the surviving
-    // bundle has to be observed through the live instance.
+    // A failed load must not clear what i18next already holds.
     expect(freshI18n.default.hasResourceBundle('en', 'common')).toBe(true);
     await freshI18n.default.changeLanguage('en');
     expect(freshI18n.default.t('test.fallback')).toBe('English fallback');

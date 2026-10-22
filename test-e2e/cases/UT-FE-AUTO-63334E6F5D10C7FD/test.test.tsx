@@ -144,10 +144,7 @@ beforeEach(() => {
   authState.loading = false;
 });
 
-// Issue #4058 moved the account area out of TopNavbar into the SideNavigation
-// rail, so TopNavbar no longer renders any user identity. The identity rules are
-// therefore verified through AvatarDropdown (the component that both surfaces
-// mount), and TopNavbar only has to stay free of identity text.
+// #4058 moved the account area to SideNavigation, so TopNavbar renders no identity.
 describe('TopNavbar 不再承载用户区（用户区已迁至 SideNavigation）', () => {
   it.each([
     ['username 存在', { username: 'alice', email: 'alice@example.com' }],

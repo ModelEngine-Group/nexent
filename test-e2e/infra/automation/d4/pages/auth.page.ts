@@ -47,16 +47,7 @@ export class AuthPage {
     return response.status();
   }
 
-  /**
-   * Switch UI language through the real account menu.
-   *
-   * The language options are a **second-level** submenu
-   * (`avatarDropdown.tsx` renders `accountMenu.language` as a `children` list),
-   * so the entry has to be expanded before the option becomes clickable. A flat
-   * `getByText("简体中文")` click cannot reach it.
-   *
-   * @param option accessible label of the target language option
-   */
+  /** Language options sit in a second-level submenu, so expand it before clicking. */
   async switchLanguageTo(option: string): Promise<void> {
     const accountButton = this.page.getByRole("button", { name: "用户设置", exact: true }).last();
     await expect(accountButton).toBeVisible();

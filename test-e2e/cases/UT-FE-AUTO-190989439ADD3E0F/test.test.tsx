@@ -174,10 +174,7 @@ describe('UserProfileComp Account Info', () => {
   });
 
   it('场景B 本地用户标签为 Email 且取值仅用 email.trim()，不采用 username', async () => {
-    // The component passes `user?.username` down as a prop regardless of
-    // provider, and only `getUserDisplayName` decides whether to use it. Reading
-    // the field is therefore legitimate; what must hold is that a local user's
-    // rendered value never comes from it.
+    // username is passed down unconditionally; only getUserDisplayName decides.
     const localUser: any = {
       id: 'u-local-1',
       email: 'local01@example.com',

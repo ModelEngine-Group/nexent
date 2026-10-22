@@ -62,14 +62,7 @@ export class ChatPage {
     await expect(button).toHaveClass(/bg-blue-50/);
   }
 
-  /**
-   * Composer draft text.
-   *
-   * The composer is a Lexical contenteditable (`.aui-lexical-input`), so the
-   * Playwright `inputValue()` / `toHaveValue()` APIs do not apply and a
-   * `placeholder` selector is useless: `composer.tsx` renders the input with an
-   * explicit empty `placeholder=""`. Read the rendered text instead.
-   */
+  /** Composer is a Lexical contenteditable with an empty placeholder, so read innerText. */
   async composerText(): Promise<string> {
     const composer = this.page.locator("[data-workbench-composer], .aui-lexical-input").first();
     await expect(composer).toBeVisible();
@@ -365,12 +358,7 @@ export class ChatPage {
   }
 
   async uploadAttachment(payload: AttachmentPayload): Promise<void> {
-    // Composer attachment entry. `ComposerAddAttachment` renders a
-    // TooltipIconButton whose tooltip is also emitted as an `sr-only` span, so
-    // the button carries an accessible name (locale key
-    // `chat.composer.addAttachment` -> "添加附件"). The old toolbar trigger
-    // attribute `[data-composer-action-trigger]` no longer exists in the
-    // composer, so resolve the button by accessible name instead.
+    // No `[data-composer-action-trigger]` any more; the tooltip gives it a name.
     const attachButton = this.page.getByRole("button", { name: "添加附件", exact: true });
     await expect(attachButton).toBeVisible();
     const chooser = this.page.waitForEvent("filechooser");
