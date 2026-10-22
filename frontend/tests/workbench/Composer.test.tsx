@@ -1,5 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import { beforeEach as beforeEachI18n } from "vitest";
+import i18n from "i18next";
+import { initializeTestI18n } from "./i18n";
 import {
   cloneElement,
   type ComponentPropsWithoutRef,
@@ -120,7 +123,8 @@ vi.mock("@assistant-ui/react", () => {
 vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string) =>
+      key.startsWith("ui.localization.") ? i18n.t(key) : key,
     i18n: { language: "zh-CN" },
   }),
 }));
@@ -1028,4 +1032,8 @@ it("ordinary chat scopes shared parameters to the active thread and locks them w
   rerender(<Composer {...base} disabled />);
   expect(selectorProps.mock.lastCall?.[0].parameterSettingsDisabled).toBe(true);
   runtime.threads.mainThreadId = "fixture-thread";
+});
+
+beforeEachI18n(async () => {
+  await initializeTestI18n();
 });

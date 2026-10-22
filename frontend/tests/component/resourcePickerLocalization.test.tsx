@@ -7,6 +7,7 @@ import { createInstance } from "i18next";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import { describe, expect, it, vi } from "vitest";
 
+import { buildModelSlots } from "../../app/[locale]/models/components/model/ModelSlotSelect";
 import { ParamDialog } from "@/components/resource-picker/ParamDialog";
 import { SearchRow } from "@/components/resource-picker/ResourceDrawer";
 
@@ -39,6 +40,22 @@ async function locale(language: string) {
 
 describe("resource picker localization", () => {
   it.each(["zh", "en"])(
+    "resolves all ten model hints in %s",
+    async (language) => {
+      const instance = await locale(language);
+      const slots = buildModelSlots((key, options) =>
+        String(instance.t(key, options))
+      );
+      expect(slots).toHaveLength(10);
+      for (const slot of slots) {
+        expect(slot.hint.length).toBeGreaterThan(20);
+        if (language === "en") expect(slot.hint).not.toMatch(/[\u4e00-\u9fff]/);
+        const key = `modelConfig.slot.hint.${slot.option === "main" ? "llm" : slot.option === "multi_embedding" ? "multiEmbedding" : slot.option}`;
+        expect(catalogs[language][key]).toBe(slot.hint);
+      }
+    }
+  );
+  it.each(["zh", "en"])(
     "resolves affected copy in %s without fallback",
     async (language) => {
       const instance = await locale(language);
@@ -50,6 +67,12 @@ describe("resource picker localization", () => {
         "features/workbench/components/KnowledgePopoverContent.tsx",
         "features/workbench/components/SkillPopoverContent.tsx",
         "features/workbench/WorkbenchPage.tsx",
+        "features/workbench/components/AgentPicker.tsx",
+        "features/workbench/components/SkillPicker.tsx",
+        "features/workbench/components/ResourceSelectionActions.tsx",
+        "app/[locale]/newchat/assistant-ui/conversation-knowledge-scope-modal.tsx",
+        "components/resource-picker/SkillConfigModal.tsx",
+        "components/resource-picker/ToolConfigModal.tsx",
         "app/[locale]/newchat/assistant-ui/composer.tsx",
       ];
       const keys = new Set<string>();
@@ -57,7 +80,7 @@ describe("resource picker localization", () => {
         const source = readFileSync(path.resolve(file), "utf8");
         for (const match of source.matchAll(/\bt\(\s*"([^"]+)"/g)) {
           if (
-            /^(modelParams\.|resourcePicker\.|workbench\.(skills|resources)\.|chat\.composer\.(loading|emptySkills|emptyKnowledge)$|knowledgeBase\.document$)/.test(
+            /^(ui\.localization\.|chat\.knowledgeScope\.retrievalSettings$|modelParams\.|resourcePicker\.|workbench\.(skills|resources|controls)\.|chat\.composer\.(loading|emptySkills|emptyKnowledge)$|knowledgeBase\.document$)/.test(
               match[1]
             )
           ) {
@@ -68,7 +91,11 @@ describe("resource picker localization", () => {
       expect(keys.size).toBeGreaterThan(20);
       for (const key of keys) {
         expect(catalogs[language][key], key).toBeTruthy();
-        const text = instance.t(key, { count: 2, date: "2026-10-12" });
+        const text = instance.t(key, {
+          count: 2,
+          date: "2026-10-12",
+          name: "Fixture",
+        });
         expect(text, key).not.toBe(key);
         expect(text, key).not.toContain("{{");
         if (language === "en") expect(text, key).not.toMatch(/[\u4e00-\u9fff]/);

@@ -25,3 +25,15 @@ RESOURCE_ASSIGNMENT_LIMIT = 100
 
 
 NO_VALUE_TAG_NORMALIZED_VALUE = "__no_value__"
+
+
+DOCUMENT_TAG_BATCH_SIZE = 500
+PUBLIC_DOCUMENT_ASSIGNMENT_FIELDS = (
+    "definition_id",
+    "definition_key",
+    "definition_name",
+    "selection_mode",
+    "value_id",
+    "display_value",
+    "value_status",
+)

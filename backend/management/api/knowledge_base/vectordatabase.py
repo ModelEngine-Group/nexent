@@ -647,8 +647,19 @@ async def get_index_files(
         user_id, tenant_id = get_current_user_id(authorization)
         require_knowledge_base_read_permission(index_name, user_id, tenant_id)
         result = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core)
+        from management.services.tag.projection import (
+            project_authorized_document_tags,
+        )
+
+        # The read permission check above authorized this page; project tags in
+        # one batch so each row never issues its own assignment request.
+        files = project_authorized_document_tags(
+            result.get("files", []),
+            index_name=index_name,
+            tenant_id=tenant_id,
+        )
         # Transform result to match frontend expectations
-        return {"status": "success", "files": result.get("files", [])}
+        return {"status": "success", "files": files}
     except HTTPException:
         raise
     except TokenExpiredError as e:

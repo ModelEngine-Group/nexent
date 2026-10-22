@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   forwardRef,
   useEffect,
@@ -120,7 +122,10 @@ export const ModelConfigSection = forwardRef<
   });
 
   const abortControllerRef = useRef<AbortController | null>(null);
-  const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Per-row debounce timers for single-model connectivity probes, keyed by
+  // `${displayName}::${modelType}`. One shared timer made clicks on different
+  // rows cancel each other; per-row keys keep every clicked row's probe.
+  const verifyTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const scheduleAutoSave = () => {
@@ -744,31 +749,52 @@ export const ModelConfigSection = forwardRef<
   };
 
   /* ------------------ Verify single ------------------ */
+  // Cancel any pending single-row probes when the page unmounts.
+  useEffect(
+    () => () => {
+      verifyTimersRef.current.forEach((timer) => clearTimeout(timer));
+      verifyTimersRef.current.clear();
+    },
+    []
+  );
+
   const verifyOneModel = async (displayName: string, modelType: ModelType) => {
     if (!displayName) return;
+    // Flip the row to CHECKING immediately so the click is always visible,
+    // and debounce per row instead of on one shared timer: with a shared
+    // timer, clicks on different rows cancelled each other, leaving the
+    // earlier row without any feedback. A per-row timer can only be
+    // superseded by clicking that same row again — impossible through the
+    // UI while it is CHECKING (the row action disables itself), so every
+    // lit "detecting" status is guaranteed to reach a terminal one.
     updateModelStatus(displayName, modelType, MODEL_STATUS.CHECKING);
-    if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current);
-    throttleTimerRef.current = setTimeout(async () => {
-      try {
-        const isConnected = await modelService.verifyCustomModel(
-          displayName,
-          modelType
-        );
-        updateModelStatus(
-          displayName,
-          modelType,
-          isConnected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE
-        );
-      } catch (error: any) {
-        log.error(
-          t("modelConfig.error.verifyCustomModel", { model: displayName }),
-          error
-        );
-        updateModelStatus(displayName, modelType, MODEL_STATUS.UNAVAILABLE);
-      } finally {
-        throttleTimerRef.current = null;
-      }
-    }, 1000);
+    const key = `${displayName}::${modelType}`;
+    const timers = verifyTimersRef.current;
+    const pending = timers.get(key);
+    if (pending) clearTimeout(pending);
+    timers.set(
+      key,
+      setTimeout(async () => {
+        timers.delete(key);
+        try {
+          const isConnected = await modelService.verifyCustomModel(
+            displayName,
+            modelType
+          );
+          updateModelStatus(
+            displayName,
+            modelType,
+            isConnected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE
+          );
+        } catch (error: any) {
+          log.error(
+            t("modelConfig.error.verifyCustomModel", { model: displayName }),
+            error
+          );
+          updateModelStatus(displayName, modelType, MODEL_STATUS.UNAVAILABLE);
+        }
+      }, 1000)
+    );
   };
 
   /* ------------------ Apply change ------------------ */
@@ -955,7 +981,7 @@ export const ModelConfigSection = forwardRef<
   /* ==================== Render ==================== */
   return (
     <>
-      <TooltipProvider>
+      <TooltipProvider delayDuration={150}>
         {/* px-2 matches CARD_HEADER.PADDING so section titles align with the
           page header ("模型设置") above. h-full: the default-config card
           takes its natural height; the library section fills the rest and

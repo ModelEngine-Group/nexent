@@ -2,6 +2,8 @@
 
 "use client";
 
+import { t as translate } from "i18next";
+
 import { API_ENDPOINTS } from "./api";
 
 import {
@@ -459,14 +461,16 @@ export const modelService = {
 
       if (response.status !== 200) {
         throw new ModelError(
-          result.detail || result.message || "添加自定义模型失败",
+          result.detail ||
+            result.message ||
+            translate("ui.localization.addModelFailed"),
           response.status
         );
       }
       return result;
     } catch (error) {
       if (error instanceof ModelError) throw error;
-      throw new ModelError("添加自定义模型失败", 500);
+      throw new ModelError(translate("ui.localization.addModelFailed"), 500);
     }
   },
 
@@ -522,14 +526,16 @@ export const modelService = {
 
       if (response.status !== 200) {
         throw new ModelError(
-          result.detail || result.message || "添加自定义模型失败",
+          result.detail ||
+            result.message ||
+            translate("ui.localization.addModelFailed"),
           response.status
         );
       }
       return result.data || [];
     } catch (error) {
       if (error instanceof ModelError) throw error;
-      throw new ModelError("添加自定义模型失败", 500);
+      throw new ModelError(translate("ui.localization.addModelFailed"), 500);
     }
   },
 
@@ -557,14 +563,16 @@ export const modelService = {
 
       if (response.status !== 200) {
         throw new ModelError(
-          result.detail || result.message || "添加自定义模型失败",
+          result.detail ||
+            result.message ||
+            translate("ui.localization.addModelFailed"),
           response.status
         );
       }
       return response.status;
     } catch (error) {
       if (error instanceof ModelError) throw error;
-      throw new ModelError("添加自定义模型失败", 500);
+      throw new ModelError(translate("ui.localization.addModelFailed"), 500);
     }
   },
 
@@ -593,7 +601,9 @@ export const modelService = {
       log.log("getProviderSelectedModalList result", result);
       if (response.status !== 200) {
         throw new ModelError(
-          result.detail || result.message || "获取模型列表失败",
+          result.detail ||
+            result.message ||
+            translate("ui.localization.modelListFailed"),
           response.status
         );
       }
@@ -601,7 +611,7 @@ export const modelService = {
     } catch (error) {
       log.log("getProviderSelectedModalList error", error);
       if (error instanceof ModelError) throw error;
-      throw new ModelError("获取模型列表失败", 500);
+      throw new ModelError(translate("ui.localization.modelListFailed"), 500);
     }
   },
 
@@ -848,13 +858,15 @@ export const modelService = {
       const result = await response.json();
       if (response.status !== 200) {
         throw new ModelError(
-          result.detail || result.message || "删除自定义模型失败",
+          result.detail ||
+            result.message ||
+            translate("ui.localization.deleteModelFailed"),
           response.status
         );
       }
     } catch (error) {
       if (error instanceof ModelError) throw error;
-      throw new ModelError("删除自定义模型失败", 500);
+      throw new ModelError(translate("ui.localization.deleteModelFailed"), 500);
     }
   },
 
@@ -1376,6 +1388,10 @@ export const modelService = {
     temperature?: number;
     topP?: number;
     extraParams?: Record<string, unknown>;
+    // Type change: sent only when the operator re-typed the model. The
+    // backend manage/update request carries model_type through to the
+    // record (multi_embedding pairs deliberately keep their type).
+    type?: ModelType;
   }): Promise<void> => {
     try {
       const response = await authedFetch(
@@ -1393,6 +1409,7 @@ export const modelService = {
             ...(params.displayName !== undefined
               ? { display_name: params.displayName }
               : {}),
+            ...(params.type !== undefined ? { model_type: params.type } : {}),
             base_url: params.url,
             ...(params.apiKey?.trim() ? { api_key: params.apiKey } : {}),
             ...(params.maxTokens !== undefined

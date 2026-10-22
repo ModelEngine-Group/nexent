@@ -210,7 +210,12 @@ def test_deleted_or_foreign_history_rejects_title_write(probe, monkeypatch):
 
 def test_additive_title_revision_migration_preserves_rows_and_replays(probe):
     root = Path(__file__).resolve().parents[3]
-    source = (root / "deploy/sql/migrations/v2.7.1_008_conversation_title_version.sql").read_text(encoding="utf-8")
+    merged = root / "deploy/sql/migrations/v2.8.0_merged_migrations.sql"
+    text = merged.read_text(encoding="utf-8")
+    marker = "-- Source migration: v2.7.1_008_conversation_title_version.sql"
+    start = text.index(marker)
+    end = text.find("-- Source migration: ", start + len(marker))
+    source = text[start:] if end == -1 else text[start:end]
     sql = source.replace("nexent.", probe.schema + ".")
     with probe.engine.begin() as connection:
         connection.exec_driver_sql(f"ALTER TABLE {probe.schema}.conversation_record_t DROP COLUMN title_version")

@@ -1150,7 +1150,7 @@ async def test_get_index_files_success(vdb_core_mock):
 
         index_name = "test_index"
         expected_files = {
-            "files": [{"path": "file1.txt", "status": "complete"}],
+            "files": [{"path": "file1.txt", "status": "complete", "tags": []}],
             "status": "success"
         }
 
@@ -3635,6 +3635,72 @@ async def test_get_index_files_preserves_read_permission_error(vdb_core_mock, au
     assert response.status_code == 403
     assert response.json()["detail"] == "private KB"
     mock_list_files.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_index_files_projects_document_tags_in_one_batch(
+    mocker, vdb_core_mock
+):
+    from management.api.knowledge_base import vectordatabase as vdb_app
+    from management.services.tag.projection import TagManagementDB as TagDB
+    from management.services.tag.resources import _encode_document_resource_id
+
+    mocker.patch.object(
+        vdb_app, "get_current_user_id", return_value=("user-1", "tenant-1")
+    )
+    mocker.patch.object(vdb_app, "require_knowledge_base_read_permission")
+    mocker.patch.object(
+        vdb_app.ElasticSearchService,
+        "list_files",
+        new=AsyncMock(
+            return_value={
+                "files": [
+                    {"path_or_url": "knowledge_base/a.txt", "file": "a.txt"},
+                    {"file": "lifecycle-only.txt"},
+                ]
+            }
+        ),
+    )
+    mocker.patch(
+        "management.services.tag.projection.get_knowledge_record",
+        return_value={"index_name": "kb-index", "tenant_id": "tenant-1"},
+    )
+    assignment = {
+        "definition_id": 3,
+        "definition_key": "domain",
+        "definition_name": "Domain",
+        "selection_mode": "single_select",
+        "value_id": 4,
+        "display_value": "Finance",
+        "value_status": "active",
+    }
+    lookup = mocker.patch.object(
+        TagDB,
+        "list_resource_assignments_batch",
+        return_value={
+            _encode_document_resource_id(
+                "local", "kb-index", "knowledge_base/a.txt"
+            ): [assignment]
+        },
+    )
+
+    response = await vdb_app.get_index_files(
+        "kb-index", vdb_core_mock, "Bearer token"
+    )
+
+    assert response["status"] == "success"
+    assert response["files"][0]["tags"] == [assignment]
+    assert response["files"][1]["tags"] == []
+    lookup.assert_called_once_with(
+        "tenant-1",
+        "knowledge_document",
+        [
+            _encode_document_resource_id(
+                "local", "kb-index", "knowledge_base/a.txt"
+            )
+        ],
+        "knowledge_content",
+    )
 
 
 @pytest.mark.asyncio

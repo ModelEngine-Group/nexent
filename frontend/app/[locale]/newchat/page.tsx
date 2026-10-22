@@ -24,6 +24,7 @@ import {
 import { Chat } from "./assistant-ui/chat";
 import type { ChatMode } from "./assistant-ui/composer";
 import { ThreadListSidebar } from "./assistant-ui/threadlist-sidebar";
+import toolbarStyles from "@/components/common/ConversationToolbar.module.css";
 import { useRecentAgentIds } from "./assistant-ui/use-recent-agent-ids";
 import {
   cacheHistoricalChatMode,
@@ -48,7 +49,7 @@ import {
   writeLastChatViewConversation,
   type LastChatViewState,
 } from "./last-chat-view";
-import { SidebarProvider } from "@/components/ui/sidebar";
+import { ConversationSidebarProvider } from "@/components/common/ConversationSidebarProvider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
@@ -287,7 +288,6 @@ const HomeContent: FC<{
 
   // All hooks must be called before any early returns
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
-  const isLoading = useAuiState((s) => s.threads.isLoading);
   const isThreadLoading = useAuiState((s) => s.thread.isLoading);
   const isThreadRunning = useAuiState((s) => s.thread.isRunning);
   useEffect(() => {
@@ -296,8 +296,8 @@ const HomeContent: FC<{
     }
   }, [isThreadRunning, runtimeMainThreadId]);
   const threadItems = useAuiState((s) => s.threads.threadItems);
-  const ready =
-    runtimeMainThreadId !== undefined && !isLoading && !isThreadLoading;
+  // Sidebar metadata reloads must not unmount the active chat and composer.
+  const ready = runtimeMainThreadId !== undefined && !isThreadLoading;
 
   // Maintain thread ID state to pass conversation_id to the adapter reliably
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(
@@ -967,6 +967,17 @@ const HomeContent: FC<{
     setSelectedAgent,
   ]);
 
+  const handleHistoryAgentSelected = useCallback(
+    (agentId: number) => {
+      shouldRestoreAgentRef.current = true;
+      const agent = agents.find(
+        (candidate) => Number(candidate.id) === agentId
+      );
+      if (agent) setSelectedAgent(agent);
+    },
+    [agents, setSelectedAgent]
+  );
+
   const handleAgentSelectedFromLanding = useCallback(
     async (agent: Agent) => {
       shouldRestoreAgentRef.current = true;
@@ -990,10 +1001,15 @@ const HomeContent: FC<{
   );
 
   return (
-    <div className="flex w-full h-full">
+    <div
+      data-agent-chat-page
+      className={`relative flex w-full h-full [&:has([data-floating-sidebar-trigger])_[data-agent-landing-title]]:pl-10 [&:has([data-agent-landing-title])_[data-floating-sidebar-trigger]]:top-[22px] ${toolbarStyles.page}`}
+    >
       <div className="shrink-0 h-full">
-        <SidebarProvider className="w-auto h-full">
+        <ConversationSidebarProvider className="w-auto h-full">
           <ThreadListSidebar
+            onHistoryAgentSelected={handleHistoryAgentSelected}
+            collapseToFloatingButton
             newChatDesign
             activeThreadId={selectedAgent ? runtimeMainThreadId : undefined}
             generatedTitles={generatedTitles}
@@ -1004,7 +1020,7 @@ const HomeContent: FC<{
             selectedAgent={selectedAgent}
             onAgentSelected={handleAgentSwitched}
           />
-        </SidebarProvider>
+        </ConversationSidebarProvider>
       </div>
 
       <div className="flex min-h-0 flex-1 min-w-0 flex-col">

@@ -202,7 +202,7 @@ export default function AgentsPage() {
     <div className="agent-development-list flex h-full min-h-0 w-full flex-col overflow-y-auto bg-white p-6">
       <header className="flex h-12 shrink-0 items-center justify-between py-[10px]">
         <h1 className="text-[20px] font-medium leading-7 ![letter-spacing:0px] text-[#191919]">
-          {t("sidebar.agentDev")}
+          {t("sidebar.agentConfig")}
         </h1>
         <button
           type="button"
@@ -240,16 +240,16 @@ export default function AgentsPage() {
           {isGuideMounted ? <AgentConfigurationGuide /> : null}
         </div>
 
-        <div className="mt-3 flex min-h-[300px] flex-1 flex-col pb-5">
+        <div className="relative mt-3 flex min-h-[300px] flex-1 flex-col pb-5">
+          {isGuideExpanded ? (
+            <div
+              data-testid="agent-guide-divider"
+              aria-hidden="true"
+              className="absolute inset-x-0 top-0 h-px bg-[rgba(25,25,25,0.1)]"
+            />
+          ) : null}
           {isEmptyAgentList ? (
             <div className="relative flex min-h-0 flex-1 items-center justify-center">
-              {isGuideExpanded ? (
-                <div
-                  data-testid="agent-guide-divider"
-                  aria-hidden="true"
-                  className="absolute inset-x-6 top-0 h-px bg-[rgba(25,25,25,0.1)]"
-                />
-              ) : null}
               <Empty
                 image={Empty.PRESENTED_IMAGE_DEFAULT}
                 description={
@@ -268,27 +268,6 @@ export default function AgentsPage() {
             </div>
           ) : (
             <>
-              <div
-                data-testid="agent-list-tabs"
-                className="flex h-8 w-full shrink-0 items-center gap-8 border-b border-solid border-[#dfdfdf]"
-              >
-                <button
-                  type="button"
-                  className="flex h-8 shrink-0 items-center border-b-2 border-[#0067d1] text-[14px] leading-[22px] ![letter-spacing:0px] text-[#0067d1]"
-                  aria-current="page"
-                >
-                  {t("agentConfig.list.mine")}
-                </button>
-                <button
-                  type="button"
-                  disabled
-                  title={t("agentConfig.list.importedUnavailable")}
-                  className="flex h-8 shrink-0 items-center text-[14px] leading-[22px] ![letter-spacing:0px] text-[#777777] disabled:cursor-not-allowed"
-                >
-                  {t("agentConfig.list.imported")}
-                </button>
-              </div>
-
               <div className="mt-3 flex h-auto w-full shrink-0 flex-col items-start justify-between gap-3 lg:h-8 lg:flex-row lg:items-center lg:gap-4">
                 <div
                   className={`flex w-full max-w-full shrink-0 items-center gap-2 ${view === "list" ? "lg:w-[296px]" : "lg:w-[360px]"}`}

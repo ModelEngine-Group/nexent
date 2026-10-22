@@ -15,7 +15,17 @@ from shared.postgres import postgres_url
 
 pytestmark = [pytest.mark.case_id("CHAT-SIDEBAR-D5-001"), pytest.mark.stage("D5")]
 ROOT = Path(__file__).resolve().parents[3]
-MIGRATION = ROOT / "deploy/sql/migrations/v2.7.1_004_workbench_pin_timestamp.sql"
+MERGED = ROOT / "deploy/sql/migrations/v2.8.0_merged_migrations.sql"
+SECTION = "v2.7.1_004_workbench_pin_timestamp.sql"
+
+
+def migration_sql():
+    """Read this case's section out of the consolidated v2.8.0 migration bundle."""
+    text = MERGED.read_text(encoding="utf-8")
+    marker = f"-- Source migration: {SECTION}"
+    start = text.index(marker)
+    end = text.find("-- Source migration: ", start + len(marker))
+    return text[start:] if end == -1 else text[start:end]
 
 
 @pytest.fixture(params=["UTC", "Asia/Shanghai", "America/New_York"])
@@ -51,7 +61,7 @@ def schema(engine):
 
 def migrate(name, engine):
     with engine.begin() as connection:
-        sql = MIGRATION.read_text(encoding="utf-8").replace("nexent.", name + ".").replace("'nexent'", repr(name))
+        sql = migration_sql().replace("nexent.", name + ".").replace("'nexent'", repr(name))
         connection.exec_driver_sql(sql)
 
 
@@ -103,10 +113,10 @@ def test_repeat_deployment_preserves_current_pin_and_activity(schema, engine, po
 
 
 def test_catalog_does_not_create_a_separate_pin_table_or_retain_compatibility_sql():
-    migrations = MIGRATION.parent
+    migrations = MERGED.parent
     assert not (migrations / "v2.7.1_003_workbench_history_pins.sql").exists()
     assert not (migrations / "v2.7.1_009_workbench_pin_utc_timestamp.sql").exists()
-    sql = MIGRATION.read_text(encoding="utf-8").lower()
+    sql = migration_sql().lower()
     assert "alter table nexent.conversation_record_t" in sql
     assert "add column if not exists workbench_pinned_at" in sql
     assert "conversation_workbench_pin_t" not in sql

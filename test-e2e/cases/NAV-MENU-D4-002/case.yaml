@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D4
+module: NAV-MENU
+case:
+  case_id: NAV-MENU-D4-002
+  feature_id: NAV-MENU-VISIBILITY
+  requirement_ids: [NAV-MENU-REQ-008]
+  business_rule_ids: [NAV-MENU-RULE-009]
+  title: Delayed navigation shows destination skeleton and recovers
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify real route waiting feedback without blocking sidebar navigation.
+  preconditions:
+  - Frontend is reachable with deterministic speed-mode HTTP fixtures and cold route cache.
+  test_data:
+    profile: mock
+    locales: [zh, en]
+  steps:
+  - order: 1
+    action: Open agents, hold model route resources, and click Models in each locale.
+    expected: Animated placeholders include the title; the localized destination heading is screen-reader-only, body labels and controls are placeholders, and sidebar stays enabled. At 320px the skeleton does not overflow; reduced motion disables animation.
+  - order: 2
+    action: While Models is held, click Resource Management, then release route resources.
+    expected: Resource Management skeleton replaces Models and the actual Resource Management page eventually replaces all transition skeletons.
+  - order: 3
+    action: Hold the users route, open account profile, inspect default skeleton, then release.
+    expected: A default skeleton including title placeholder appears without visible text and the users page opens after release in both locales.
+  expected_results:
+  - Pending route displays a full skeleton including the title, with a screen-reader-only localized heading and running left-to-right animation, and keeps sidebar accessible in both locales; narrow layout fits and reduced motion disables animation.
+  - Latest selected destination opens after release and no transition skeleton remains.
+  - Profile navigation uses the default skeleton including title placeholder, then opens the users route in both locales.
+  forbidden_side_effects:
+  - No business writes, model execution, or changes to authentication policy.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  actor: Authorized speed-mode user
+  journey: [Open agents, Delay Models navigation, Select Resource Management, Release route resources]
+  final_business_result: [Requested Resource Management page is usable with no stale loading cover.]
+  failure_evidence: [Playwright screenshot and trace]
+  acceptance:
+  - id: AC-01
+    description: Pending feedback is animated, title-only, localized and does not block sidebar.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: New selection replaces pending target and completion reveals actual page.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Account profile uses the common transition with a default skeleton when no dedicated layout exists.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]

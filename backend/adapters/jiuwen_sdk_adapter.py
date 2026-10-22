@@ -19,7 +19,10 @@ import logging
 import os
 import sys
 import types
-from typing import Any, List, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, Any, List, Literal, Optional, Tuple
+
+if TYPE_CHECKING:
+    from openjiuwen.core.foundation.llm.schema.config import ModelClientConfig, ModelRequestConfig
 
 # ----------------------------------------------------------------------
 # MUST install bypasser + stubs before any openjiuwen import.

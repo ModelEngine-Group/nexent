@@ -10,6 +10,8 @@ acceptance_bindings:
   - CHAT-ACTIVITY-D4-001
   AC-02:
   - CHAT-ACTIVITY-D4-001
+  AC-03:
+  - CHAT-ACTIVITY-D4-001
 preparation:
   families: []
   anchors: false
