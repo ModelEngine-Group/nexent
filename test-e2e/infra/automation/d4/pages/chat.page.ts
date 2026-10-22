@@ -403,11 +403,15 @@ export class ChatPage {
   }
 
   async uploadAttachment(payload: AttachmentPayload): Promise<void> {
-    // No `[data-composer-action-trigger]` any more; the tooltip gives it a name.
-    const attachButton = this.page.getByRole("button", { name: "添加附件", exact: true });
-    await expect(attachButton).toBeVisible();
+    // The workbench composer exposes the file chooser directly through the
+    // attachment button. Older layouts used 上传附件; the current label is
+    // 添加附件. Both open the native file chooser.
+    const attach = this.page
+      .getByRole("button", { name: /上传附件|添加附件/ })
+      .first();
+    await expect(attach).toBeVisible();
     const chooser = this.page.waitForEvent("filechooser");
-    await attachButton.click();
+    await attach.click();
     await (await chooser).setFiles(payload);
     await expect(this.page.locator("[data-workbench-composer], .aui-lexical-input")).toBeVisible();
   }

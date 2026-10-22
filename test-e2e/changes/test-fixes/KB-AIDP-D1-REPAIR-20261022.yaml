@@ -1,0 +1,58 @@
+schema_version: '1.0'
+change:
+  change_id: KB-AIDP-D1-REPAIR-20261022
+  change_type: test-fix
+  title: Repair stale knowledge/AIDP cases and make the ext mock suite-owned
+  description: >-
+    Align the failing knowledge/AIDP test assets with the current product UI and
+    service contracts without changing product code. Add the missing fetchWithAuth
+    export to the AIDP D1 fixture, use the knowledge-base delete confirmation label,
+    import validateAidpFiles from its current module, update the knowledge-list tag
+    assertions for projected kb.tags and lazy tag metadata, accept the AIDP UI image
+    url while keeping it out of model text, and follow the redesigned chat attachment
+    entry and knowledge catalog heading/create button in the D4 page helpers.
+    Give the multi-step graph edit component test an explicit timeout so it is
+    not flaky when Vitest runs case files in parallel. Framework integration:
+    start the ext-knowledge mock as a suite-owned controlled
+    service on a free port for cases that declare an ext logical service, exactly
+    like test-assets/test-mcp. The attach layer then only checks health and resets
+    per-case state; machine-local ext-knowledge.yaml, identity and lock are no longer
+    required. Product behavior is unchanged.
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified:
+    - AIDP-FE-FILES-01
+    - AIDP-FE-GRAPH-01
+    - AIDP-FE-LIST-01
+    - UT-FE-027
+    - UT-FE-AUTO-BECEA5CE0869F353
+    - UT-SDK-AUTO-717BD679DD9A2E82
+    - CTR-046
+    - CTR-047
+    - PW-FILE-01
+    - PW-KB-AIDP-01
+    - PW-KB-LOCAL-01
+    retired: []
+  notes: >-
+    D1 verification: AIDP-FE-FILES-01 7/7, AIDP-FE-GRAPH-01 5/5,
+    AIDP-FE-LIST-01 7/7, UT-FE-027 1/1 and UT-FE-AUTO-BECEA5CE0869F353 7/7
+    passed together (27 tests). UT-SDK-AUTO-717BD679DD9A2E82 passed 1/1.
+    Framework verification: controlled_services started a real ext-knowledge
+    mock, ExtKnowledgeAttach attached in suite-owned mode, reset/released it and
+    stopped the process; the legacy YAML attach suite passed 22 tests plus 5
+    subtests; concurrent suite-owned instances used distinct free ports.
+    validate_execution.py and validate_test_assets.py --phase implementation
+    passed. The D4 page helpers were parsed by Playwright but not executed
+    because no complete local product stack was available; PW-FILE-01 and
+    PW-KB-LOCAL-01 need a live journey run. The framework change adds no new
+    command, argument or entry point: the existing suite worker starts and
+    stops the mock through the same controlled-services lifecycle used by
+    test-assets/test-mcp, and no machine-local YAML is read. UT-FE-027 remains
+    a narrow helper assertion and does not cover its full legacy title; that
+    pre-existing coverage gap is not expanded in this repair.

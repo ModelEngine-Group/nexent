@@ -193,18 +193,19 @@ literal localhost URL); confirm the port is free before `up`. `stop` only
 stops the registered service — no `down`, no volume deletion. Run a single
 uvicorn worker — all state lives in-process.
 
-Runner-side attach (per-case locking, identity validation and evidence
-export) is implemented in `test-e2e/infra/tools/ext_attach.py` and wired
-into the suite worker; cases declare their dependency through
-`required_mock_services` in `execution.yaml` (logical IDs:
-`knowledge-provider`, `http-fixture`, `model-provider`). The suite never
-starts or stops the Compose stack itself — deployment and teardown are
-explicit operator steps.
+Runner-side integration: cases declare `required_mock_services` in
+`execution.yaml` (logical IDs: `knowledge-provider`, `http-fixture`,
+`model-provider`). The suite starts this mock as a private controlled process
+on a free port for the case, exactly like the `test-assets` and `test-mcp`
+servers, and `test-e2e/infra/tools/ext_attach.py` validates health and resets
+per-case state over HTTP. **No machine-local YAML, identity handshake or
+cross-batch lock is required.** The Compose dispatcher above remains available
+for an optional external shared instance; only that mode uses
+`config/ext-knowledge.yaml`.
 
 Profile-selected cases were removed together with the mock/real split:
-PW-KB-AIDP-01 attaches this instance directly through its plain
-`knowledge-provider` dependency, and there is no machine-local journey file
-to create.
+PW-KB-AIDP-01 attaches through its plain `knowledge-provider` dependency, and
+there is no machine-local journey file to create.
 
 ## Deliberate quirks (do not "fix" without checking the adapters)
 
