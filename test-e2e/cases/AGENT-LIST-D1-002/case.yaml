@@ -9,6 +9,7 @@ case:
   business_rule_ids:
   - AGENT-LIST-RULE-007
   - AGENT-LIST-RULE-008
+  - AGENT-LIST-RULE-010
   title: Render measured Agent card metadata and preserve existing callbacks
   type: FE-COMP
   priority: P1
@@ -58,10 +59,11 @@ case:
       status remains truthful, missing values use existing localized fallbacks, and
       publication is disabled for read-only data.
   - order: 3
-    action: Activate card details, configure and publication controls on an editable
-      row and open its more menu.
-    expected: Each existing callback receives the correct Agent or numeric ID; a decorative
-      status dot creates no extra control and no new business request.
+    action: Activate card details, then open the more menu and use Configure and Publish
+      on an editable row.
+    expected: Each existing callback receives the correct Agent or numeric ID; Configure
+      and Publish are menu actions, a decorative status dot creates no extra control,
+      and no new business request occurs.
   expected_results:
   - Actual title, description, category, timestamp and publication status content
     render with accessible controls; typography, colors and numeric geometry are separately
@@ -93,8 +95,8 @@ case:
     timestamp placeholders.
   - Status dot is aria-hidden, has no focus/interactive role and leaves existing status
     text available.
-  - Existing details/configure/publication callbacks and read-only publication protection
-    are unchanged.
+  - Existing details/configure/publication callbacks remain available from the more menu,
+    and read-only publication protection is unchanged.
   acceptance:
   - id: AC-01
     description: Prove isolated card metadata, decorative status semantics and action
