@@ -9,14 +9,14 @@ ROOT = Path(__file__).resolve().parents[3]
 BACKEND = ROOT / "backend"
 
 
-def test_flat_service_exclusions_match_deferred_scope():
+def test_flat_service_exclusions_match_remaining_scope():
     assert {p.name for p in (BACKEND / "services").rglob("*.py")} == {
         "__init__.py", "nl2skill_service.py", "skill_repository_service.py",
         "nl2agent_service.py", "northbound_service.py", "workspace_cleanup_service.py",
     }
     assert not list((BACKEND / "utils").glob("*.py"))
-    assert not (BACKEND / "gateway").exists()
-    assert not list((BACKEND / "runtime").rglob("*.py"))
+    for service in ("gateway", "runtime"):
+        assert (BACKEND / service / "api/__init__.py").is_file()
 
 
 def test_production_imports_use_canonical_owners():
@@ -45,13 +45,22 @@ def test_production_imports_use_canonical_owners():
     assert unexpected == []
 
 
-def test_relocated_implementations_stay_below_1500_lines():
+def test_relocated_service_implementations_stay_below_1500_lines():
+    """Keep the original service/helper migration budget on its owned files."""
+    paths = []
+    for directory in ("management/services", "management/utils", "infrastructure"):
+        paths.extend((BACKEND / directory).rglob("*.py"))
+    # These shared contracts belonged to the service migration. Later API/DB
+    # relocations have separate ownership checks in test_api_db_directory_architecture.
+    paths.extend(BACKEND / "contracts" / name for name in (
+        "__init__.py", "a2a.py", "agent.py", "automation.py", "file.py",
+        "knowledge.py", "model.py", "runtime.py", "tag.py",
+    ))
     oversized = {}
-    for directory in ("management", "infrastructure", "runtime", "contracts"):
-        for path in (BACKEND / directory).rglob("*.py"):
-            count = len(path.read_text(encoding="utf-8").splitlines())
-            if count > 1500:
-                oversized[path.relative_to(ROOT).as_posix()] = count
+    for path in paths:
+        count = len(path.read_text(encoding="utf-8").splitlines())
+        if count > 1500:
+            oversized[path.relative_to(ROOT).as_posix()] = count
     assert oversized == {}
 
 
