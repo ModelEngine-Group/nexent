@@ -96,7 +96,7 @@ function rowOf(displayName: string): HTMLElement {
   return nameEl.closest("div.flex.flex-col.gap-3") as HTMLElement;
 }
 
-it("keeps a superseded row probe from sticking in the detecting state", async () => {
+it("lights up every clicked row and probes them all", async () => {
   const user = userEvent.setup();
   renderSection();
 
@@ -105,23 +105,23 @@ it("keeps a superseded row probe from sticking in the detecting state", async ()
   });
   expect(actions).toHaveLength(2);
 
-  // Two different rows within the 1s shared-debounce window: only the last
-  // click actually probes. Row A must keep its stored status instead of
-  // flashing into a never-resolving 检测中.
+  // Two different rows clicked within the 1s debounce window: each row must
+  // light up immediately (the click is never invisible) and keep its own
+  // probe — a shared timer used to drop all but the last clicked row.
   await user.click(actions[0]);
+  expect(within(rowOf("Model A")).getByText("检测中")).toBeInTheDocument();
   await user.click(actions[1]);
+  expect(within(rowOf("Model B")).getByText("检测中")).toBeInTheDocument();
 
   await waitFor(
     () => {
+      expect(within(rowOf("Model A")).getByText("可用")).toBeInTheDocument();
       expect(within(rowOf("Model B")).getByText("可用")).toBeInTheDocument();
     },
     { timeout: 3000 }
   );
-  expect(
-    within(rowOf("Model A")).queryByText("检测中")
-  ).not.toBeInTheDocument();
-  expect(within(rowOf("Model A")).getByText("可用")).toBeInTheDocument();
-  expect(verifyCustomModel).toHaveBeenCalledTimes(1);
+  expect(verifyCustomModel).toHaveBeenCalledTimes(2);
+  expect(verifyCustomModel).toHaveBeenCalledWith("Model A", "llm");
   expect(verifyCustomModel).toHaveBeenCalledWith("Model B", "embedding");
 });
 
@@ -133,6 +133,9 @@ it("collapses rapid re-clicks of the same row into a single probe", async () => 
     name: "检测连通性",
   });
   await user.click(actions[0]);
+  // The row shows feedback immediately; the disabled action (or the per-row
+  // debounce) keeps re-clicks from queueing a second probe.
+  expect(within(rowOf("Model A")).getByText("检测中")).toBeInTheDocument();
   await user.click(actions[0]);
 
   await waitFor(
