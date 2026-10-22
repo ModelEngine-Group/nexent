@@ -811,7 +811,7 @@ export default function AgentPrompt({
         <div className="relative">
           {highFidelity ? (
             <HighFidelityTextArea
-              limit={1000}
+              limit={100000}
               placeholder={t("agent.field.promptPlaceholder")}
               rows={6}
               value={editedAgent.prompt ?? ""}
@@ -904,7 +904,7 @@ export default function AgentPrompt({
           </div>
           <div className="relative">
             <HighFidelityTextArea
-              limit={1000}
+              limit={100000}
               id="agent-primary-prompt"
               value={editedAgent.prompt ?? ""}
               placeholder={t("agent.highFidelity.promptPlaceholder")}

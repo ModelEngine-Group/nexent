@@ -36,10 +36,17 @@ Historical migrations through v2.4.0 are consolidated by minor version in
 `v2.2_merged_migrations.sql`, `v2.3_merged_migrations.sql`, and
 `v2.4_merged_migrations.sql`, and migrations since v2.4.0 are consolidated in
 `v2.5.0_merged_migrations.sql`, `v2.6.0_merged_migrations.sql` (which merges
-all migrations applied after the v2.5.1 release, through v2.6.0), and
+all migrations applied after the v2.5.1 release, through v2.6.0),
 `v2.7.0_merged_migrations.sql` (which merges all migrations applied after
-the v2.6.1 release, through v2.7.0). Newer migrations remain separate until
-their minor-version history is consolidated.
+the v2.6.1 release, through v2.7.0), and `v2.8.0_merged_migrations.sql`
+(which merges every migration file still loose after the v2.7.0 release).
+Newer migrations remain separate until their minor-version history is
+consolidated.
+
+A filename prefix records the release the migration targets when it is written,
+not the develop version at that moment, so repeated prefixes and skipped
+versions do occur. Deployment order comes only from `sort -V` over the file
+names; never infer it from the authored sequence.
 
 Important: do NOT modify a `*_merged_migrations.sql` file after it has been
 deployed. Because it bundles many historical migrations, even a comment-only

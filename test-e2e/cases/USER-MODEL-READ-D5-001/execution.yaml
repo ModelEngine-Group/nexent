@@ -1,0 +1,12 @@
+schema_version: '1.0'
+case_id: USER-MODEL-READ-D5-001
+implementations:
+- framework: pytest
+  file: test_migration.py
+  selector: test_
+timeout_seconds: 180
+acceptance_bindings:
+  AC-01:
+  - test_restore_read_only_grant_preserves_rows_and_supports_rollback_and_rerun
+  AC-02:
+  - test_restore_read_only_grant_preserves_rows_and_supports_rollback_and_rerun

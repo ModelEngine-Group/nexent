@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """SAI-D3-001: real Docker execution with a deterministic model provider."""
 import argparse
 import asyncio
@@ -99,7 +101,9 @@ def run_probe(batches=1, expected_sources=None, scope_name='session'):
     if scope_name == 'system':
         # Never recover or remove the business runtime's shared sandbox.
         sandbox.SANDBOX_CONTAINER_NAME = 'nexent-sai-system-' + secrets.token_hex(6)
+    # This probe measures real kernel lifetimes from construction; TFP cases cover deferred activation.
     factory = ControlledFactory(observer, [], scope.stop_event, cancellation_scope=scope,
+        tool_fastpath_enabled=False,
         sandbox_config=SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope(scope_name),
             timeout_seconds=30, auto_sync_outputs=False))
     container = None

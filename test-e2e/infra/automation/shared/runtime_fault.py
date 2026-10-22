@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Install an owned failure model without replacing the tenant default LLM."""
 from contextlib import asynccontextmanager
 import os
@@ -40,6 +42,9 @@ async def owned_failure_model(identity, case_id):
             response = await api.post('/model/create', json={
                 'model_factory': 'OpenAI-API-Compatible', 'model_name': 'controlled-failure',
                 'model_type': 'llm', 'display_name': display, 'max_tokens': 1024,
+                # This controlled fixture intentionally fails only at inference.
+                # A not-detected catalog status would stop at preflight instead.
+                'connect_status': 'available',
                 # This nonce is a non-secret fixture token, not a provider credential.
                 'api_key': nonce, 'base_url': controlled_asset_url(f'/runtime-fault/{nonce}/v1'),
             })
@@ -53,6 +58,7 @@ async def owned_failure_model(identity, case_id):
             rows = response.json().get('data') or []
             models = [row for row in rows if row.get('display_name') == display]
             assert len(models) == 1, 'Owned failure model is not uniquely registered'
+            assert models[0]['connect_status'] == 'available', 'Fault fixture did not pass catalog preflight'
             model_id = int(models[0].get('model_id') or models[0]['id'])
         yield model_id, nonce
     finally:

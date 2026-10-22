@@ -1,12 +1,16 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Exercise clean synchronization without network or deployment."""
 from contextlib import redirect_stdout
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
 import unittest
+import subprocess
 from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts/daily-launch.py"
@@ -17,6 +21,28 @@ spec.loader.exec_module(launcher)
 
 
 class DailyLaunchTests(unittest.TestCase):
+    def test_real_local_fetch_outside_checkout_retains_streams(self):
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root).resolve()
+            origin, checkout, logs = root / "origin", root / "checkout", root / "logs"
+            subprocess.run(["git", "init", "-b", "develop", str(origin)], check=True, capture_output=True)
+            commit = ["git", "-C", str(origin), "-c", "user.name=Test Runner",
+                      "-c", "user.email=runner@example.invalid", "commit", "--allow-empty", "-m"]
+            subprocess.run([*commit, "initial"], check=True, capture_output=True)
+            subprocess.run(["git", "clone", str(origin), str(checkout)], check=True, capture_output=True)
+            subprocess.run([*commit, "next"], check=True, capture_output=True)
+            expected = subprocess.check_output(["git", "-C", str(origin), "rev-parse", "HEAD"], text=True).strip()
+            previous = Path.cwd()
+            try:
+                os.chdir(root)
+                self.assertEqual(launcher.sync_checkout(checkout, "develop", log_dir=logs), expected)
+            finally:
+                os.chdir(previous)
+            receipts = [json.loads(path.read_text()) for path in logs.glob("*.json")]
+            self.assertTrue(any(row["operation"] == "fetch" and row["exit_code"] == 0 for row in receipts))
+            self.assertTrue(any(row["operation"] == "merge" and row["exit_code"] == 0 for row in receipts))
+            self.assertTrue(all((logs / row["stderr"]).is_file() for row in receipts))
+
     def test_publication_is_explicit_and_dry_run_has_no_outputs(self):
         with tempfile.TemporaryDirectory() as root:
             for extra, expected in (([], False), (["--publish-latest"], True)):

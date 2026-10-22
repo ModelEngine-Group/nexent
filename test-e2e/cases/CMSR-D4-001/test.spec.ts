@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
@@ -36,8 +38,9 @@ journey("CMSR-D4-001", async (context) => {
   const owned: Array<{ nonce: string; conversation?: number }> = [];
   let current: { nonce: string; display: string; conversation?: number };
   const message = () => chat.assistantMessages().last();
+  const reasoning = () => message().getByRole("button", { name: /^Reasoning(?:\s*\(.*\))?$/ });
   const expand = async () => {
-    const collapsed = message().locator('.aui-reasoning-root button[data-state="closed"]');
+    const collapsed = reasoning().and(message().locator('button[data-state="closed"]'));
     while (await collapsed.count()) await collapsed.first().click();
   };
   const state = () => fixture("state", ["--nonce", current.nonce]);
@@ -51,8 +54,8 @@ journey("CMSR-D4-001", async (context) => {
     await chat.startMessage("Execute one code action and finish.");
     current.conversation = chat.currentConversationId();
     await expect.poll(async () => (await state()).paused, { timeout: 60000 }).toBe("failed");
-    await expect(message().locator(".aui-reasoning-root").first()).toContainText(/Step\s*1|步骤\s*1/);
     await expand();
+    await expect(message()).toContainText(/Step\s*1|步骤\s*1/);
     if (mode === "transport") await expect(message()).toContainText(`CMSR_FAILED_${current.nonce}`);
     await release("failed");
     await expect.poll(async () => (await state()).paused, { timeout: 60000 }).toBe("success");
@@ -69,7 +72,7 @@ journey("CMSR-D4-001", async (context) => {
     }
     await expect(message()).not.toContainText(`CMSR_FAILED_${current.nonce}`);
     await expect(message()).not.toContainText("<code></code>");
-    await expect(message().locator(".aui-reasoning-root")).toHaveCount(1);
+    await expect(reasoning()).toHaveCount(1);
     expect((await state()).completed).toBe(false);
     expect((await state()).calls).toBe(2);
   };
@@ -91,7 +94,7 @@ journey("CMSR-D4-001", async (context) => {
     await page.reload({ waitUntil: "domcontentloaded" });
     await chat.openThread(title);
     await expand();
-    await expect(message().locator(".aui-reasoning-root")).toHaveCount(1);
+    await expect(reasoning()).toHaveCount(1);
     await expect(message()).toContainText(`CMSR_OK_${current.nonce}`);
     await expect(message().getByRole("button", { name: /Executed code/ })).toHaveCount(1);
     await expect(message()).not.toContainText(`CMSR_FAILED_${current.nonce}`);
@@ -120,7 +123,7 @@ journey("CMSR-D4-001", async (context) => {
       async () => { await start("semantic"); await paused(); await complete(); return "step-one semantic repair streams and survives refresh"; },
     ],
     assertions: [
-      async () => { await expect(message().locator(".aui-reasoning-root").first()).toContainText(/Step\s*1|步骤\s*1/); return "Step 1 retained"; },
+      async () => { await expand(); await expect(message()).toContainText(/Step\s*1|步骤\s*1/); return "Step 1 retained"; },
       async () => { await expect(message()).toContainText(`CMSR_OK_${current.nonce}`); return "no terminal label-only reasoning"; },
       async () => { expect((await state()).completed).toBe(true); return "both sequences verified content before explicit provider release"; },
       async () => { expect((await fixture("history", ["--nonce", current.nonce, "--conversation", String(current.conversation)])).verified).toBe(true); return "persisted single action and committed text match the refreshed UI"; },

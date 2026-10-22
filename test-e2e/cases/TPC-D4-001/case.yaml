@@ -16,8 +16,8 @@ case:
   objective: Skill journey remains correct after browser reload
   preconditions:
   - Disposable Nexent deployment, authorized skill and controlled provider are available.
-  - Fresh test tenant has default memory enabled and no embedding model; dismiss its
-    warning without changing settings.
+  - Use the configured authorized test identity and run-owned Skill/Agent assets. If the deployment shows a missing-embedding
+    warning, dismiss it without changing memory or model settings.
   test_data:
     profile: mock
   steps:
@@ -25,8 +25,7 @@ case:
     action: Open test Agent and request a skill-based check.
     expected: Skill read and result are visible.
   - order: 2
-    action: Wait for final, reload the workbench, then reopen the saved conversation
-      from its sidebar entry.
+    action: Wait for final, reload the workbench, then reopen the saved conversation from its sidebar entry.
     expected: Final contains the result, not the unexecuted action.
   expected_results:
   - Skill check business result is visible after refresh.
@@ -49,8 +48,8 @@ case:
       - model-provider
   acceptance:
   - id: AC-01
-    description: Authenticated browser journey displays skill execution and valid
-      final, then reload preserves the single tool result and business outcome.
+    description: Authenticated browser journey displays skill execution and valid final, then reload preserves the single
+      tool result and business outcome.
     steps:
     - 1
     - 2

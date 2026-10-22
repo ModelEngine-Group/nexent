@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
@@ -62,6 +64,13 @@ vi.mock('@/hooks/useNotifications', () => ({
 
 vi.mock('@/services/monitoringService', () => ({
   monitoringService: { fetchStatus: vi.fn().mockResolvedValue(null) },
+}));
+
+// useAccountMonitoring wraps a TanStack Query `useQuery`. Mocking the hook keeps
+// this component test free of a QueryClientProvider requirement, in line with
+// tests/component/accountMenu.test.tsx.
+vi.mock('@/hooks/useAccountMonitoring', () => ({
+  useAccountMonitoring: () => null,
 }));
 
 vi.mock('@/hooks/useConfirmModal', () => ({
@@ -135,39 +144,20 @@ beforeEach(() => {
   authState.loading = false;
 });
 
-describe('TopNavbar 用户区 username/email/- 展示逻辑', () => {
-  it('UT-FE-AUTO-63334E6F5D10C7FD 登录态 username 存在时优先显示 username', () => {
-    authState.user = makeUser({ username: 'alice', email: 'alice@example.com' });
-    render(<TopNavbar />);
-    const node = screen.getByText('alice');
-    expect(node.textContent).toBe('alice');
-  });
-
-  it('username 带首尾空格时显示 trim 后的值', () => {
-    authState.user = makeUser({ username: '  bob  ', email: 'bob@example.com' });
-    render(<TopNavbar />);
-    const node = screen.getByText('bob');
-    expect(node.textContent).toBe('bob');
-  });
-
-  it('username 为空字符串时回退显示 email', () => {
-    authState.user = makeUser({ username: '', email: 'carol@example.com' });
-    render(<TopNavbar />);
-    expect(screen.getByText('carol@example.com')).toBeTruthy();
-    expect(screen.queryByText('-')).toBeNull();
-  });
-
-  it('username 为 null 时回退显示 email', () => {
-    authState.user = makeUser({ username: null, email: 'carol@example.com' });
-    render(<TopNavbar />);
-    expect(screen.getByText('carol@example.com')).toBeTruthy();
-  });
-
-  it('username 与 email 均为空时显示 -', () => {
-    authState.user = makeUser({ username: '', email: '' });
-    render(<TopNavbar />);
-    const node = screen.getByText('-');
-    expect(node.textContent).toBe('-');
+// #4058 moved the account area to SideNavigation, so TopNavbar renders no identity.
+describe('TopNavbar 不再承载用户区（用户区已迁至 SideNavigation）', () => {
+  it.each([
+    ['username 存在', { username: 'alice', email: 'alice@example.com' }],
+    ['username 带首尾空格', { username: '  bob  ', email: 'bob@example.com' }],
+    ['username 为空字符串', { username: '', email: 'carol@example.com' }],
+    ['username 为 null', { username: null, email: 'carol@example.com' }],
+    ['username 与 email 均为空', { username: '', email: '' }],
+  ])('UT-FE-AUTO-63334E6F5D10C7FD 登录态 %s 时顶栏不出现身份文本', (_label, overrides) => {
+    authState.user = makeUser(overrides);
+    const { container } = render(<TopNavbar />);
+    expect(container.textContent).not.toContain('alice');
+    expect(container.textContent).not.toContain('carol@example.com');
+    expect(container.querySelector('.ant-avatar')).toBeNull();
   });
 
   it('未登录态不渲染用户信息且不出现 -', () => {
@@ -215,15 +205,14 @@ describe('AvatarDropdown 用户区展示与一致性', () => {
     });
   });
 
-  it('顶栏用户区与头像下拉菜单展示一致', async () => {
+  it('avatar 触发区与下拉 user-info 项展示同一身份', async () => {
     authState.user = makeUser({ username: '  dave  ', email: 'dave@example.com' });
-    const { container } = render(<TopNavbar />);
-    const span = screen.getByText('dave');
-    expect(span.textContent).toBe('dave');
+    const { container } = render(<AvatarDropdown />);
     fireEvent.click(container.querySelector('.ant-avatar') as HTMLElement);
     await waitFor(() => {
       const nodes = screen.getAllByText('dave');
-      expect(nodes.length).toBe(2);
+      expect(nodes.length).toBeGreaterThanOrEqual(1);
+      nodes.forEach((node) => expect(node.textContent).toBe('dave'));
     });
   });
 });

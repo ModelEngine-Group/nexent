@@ -15,6 +15,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 
 from shared.asset_registry import AssetDependencyError, mark_asset_state, register_asset
 from shared.auth import sign_in
+from shared.case_evidence import write_case_evidence
 from shared.config import controlled_asset_url
 from shared.factories.conversation import delete_owned_conversation
 from shared.http import MODEL_TIMEOUT, assert_status, client
@@ -230,6 +231,23 @@ async def cleanup_fixture(fixture, *, identity=None):
         raise RuntimeError("Owned TFP fixture cleanup failed: " + ", ".join(errors))
 
 
+def assistant_units(messages):
+    """Normalize real persisted attachment metadata alongside message units."""
+    units = []
+    for message in messages:
+        if message.get("role") != "assistant":
+            continue
+        units.extend(unit for unit in message.get("message", []) if isinstance(unit, dict))
+        attachments = message.get("minio_files") or []
+        if attachments:
+            assert isinstance(attachments, list), "Invalid persisted attachments"
+            units.append({"type": "files", "content": {"file_uploads": [
+                {**item, "s3_url": item.get("url"), "filename": item.get("name")}
+                for item in attachments
+            ]}})
+    return units
+
+
 def history_units(body):
     assert body.get("code") == 0 and len(body.get("data", [])) == 1, "Owned history is unavailable"
     assistants = [
@@ -239,12 +257,36 @@ def history_units(body):
         if message.get("role") == "assistant"
     ]
     assert len(assistants) == 1 and assistants[0].get("status") == "completed", "Owned run did not complete"
-    return [unit for message in assistants for unit in message.get("message", []) if isinstance(unit, dict)]
+    return assistant_units(assistants)
+
+
+def final_answers(units):
+    """Join one completed SSE answer while preserving persisted answer units."""
+    answers, pending, completed = [], {}, set()
+    for unit in units:
+        if unit.get("type") != "final_answer":
+            continue
+        phase = unit.get("answer_phase")
+        if phase is None:
+            answers.append(unit.get("content"))
+            continue
+        step = unit.get("step_id")
+        assert step and step not in completed, "Duplicate or unidentified final answer"
+        if phase == "delta":
+            assert isinstance(unit.get("content"), str), "Invalid answer delta"
+            pending[step] = pending.get(step, "") + unit["content"]
+        else:
+            assert phase == "complete" and step in pending, "Final answer has no deltas"
+            assert not unit.get("content"), "Completion must not duplicate answer text"
+            answers.append(pending.pop(step))
+            completed.add(step)
+    assert not pending, "Final answer stream did not complete"
+    return answers
 
 
 def verify_result(units, cfg, nonce, promoted):
     final = f"TFP_{'PROMOTED' if promoted else 'FAST'}_{nonce}"
-    answers = [unit.get("content") for unit in units if unit.get("type") == "final_answer"]
+    answers = final_answers(units)
     assert len(answers) == 1
     if promoted:
         pattern = rf"{final}\n\[tfp-{nonce}\.txt\]\(s3://[^\s)]+/outputs/tfp-{nonce}\.txt\)"
@@ -271,7 +313,7 @@ def verify_result(units, cfg, nonce, promoted):
             continue
     assert cfg["config"] in printed, "The real official configuration differs from the fixture"
     if not promoted:
-        assert not any(unit.get("type") in {"file_artifact", "skill_artifact"} for unit in units)
+        assert not any(unit.get("type") in {"file_artifact", "skill_artifact", "files"} for unit in units)
     if promoted:
         assert "TFP_MIGRATED_" + nonce in logs, "Saved values or JSON aliases did not survive promotion"
         assert "TFP_DOCKER_" + nonce + "_True" in logs, "Local fallback cannot satisfy real Docker acceptance"
@@ -282,12 +324,13 @@ def artifact_objects(units, identity, nonce):
     found = {}
     expected = "tfp-" + nonce + ".txt"
     for unit in units:
-        if unit.get("type") != "file_artifact":
+        if unit.get("type") not in {"file_artifact", "files"}:
             continue
         content = unit.get("content")
         if isinstance(content, str):
             content = json.loads(content)
-        for artifact in (content or {}).get("artifacts", []):
+        field = "file_uploads" if unit["type"] == "files" else "artifacts"
+        for artifact in (content or {}).get(field, []):
             key = artifact.get("object_name", "")
             pattern = rf"workspace/{re.escape(identity.user_id)}/[a-f0-9]{{32}}/outputs/{re.escape(expected)}"
             if re.fullmatch(pattern, key):
@@ -306,7 +349,7 @@ async def verify_artifact(identity, units, cfg, nonce, case_id):
     objects = artifact_objects(units, identity, nonce)
     assert len(objects) == 1, "The run must publish exactly one owned report object"
     key, artifact = next(iter(objects.items()))
-    final = next(unit["content"] for unit in units if unit.get("type") == "final_answer")
+    final, = final_answers(units)
     assert artifact["s3_url"] in final, "The final download link differs from the published artifact"
     register_asset(
         "owned_tfp_objects",
@@ -359,6 +402,7 @@ async def wait_history(identity, conversation_id, *, successful=True, timeout=60
 async def cleanup_conversation(identity, conversation_id, nonce):
     errors = []
     objects = {}
+    evidence = {"conversation_id": conversation_id, "objects": []}
     try:
         async with client("runtime", token=identity.access_token) as api:
             # Stop this conversation only; do not affect sibling runs.
@@ -368,14 +412,11 @@ async def cleanup_conversation(identity, conversation_id, nonce):
         errors.append(type(error).__name__)
     try:
         history = await wait_history(identity, conversation_id, successful=False)
-        units = [
-            unit
+        units = assistant_units([
+            message
             for row in history["data"]
             for message in row.get("message", [])
-            if message.get("role") == "assistant"
-            for unit in message.get("message", [])
-            if isinstance(unit, dict)
-        ]
+        ])
         objects = artifact_objects(units, identity, nonce)
     except Exception as error:
         errors.append(type(error).__name__)
@@ -387,6 +428,8 @@ async def cleanup_conversation(identity, conversation_id, nonce):
                     response = await api.delete("/file/storage/" + path)
                     assert_status(response, (200, 404))
                     absent = await api.get("/file/download/" + path, params={"download": "stream"})
+                    evidence["objects"].append({"object_name": key, "delete_status": response.status_code,
+                                                "download_after_delete_status": absent.status_code})
                     assert_status(absent, 404)
                     mark_asset_state("owned_tfp_objects", key, "DELETED")
                 except Exception as error:
@@ -398,9 +441,13 @@ async def cleanup_conversation(identity, conversation_id, nonce):
         async with client("runtime", token=identity.access_token) as api:
             absent = await api.get(f"/conversation/{conversation_id}")
         assert absent.status_code == 404 or (absent.status_code == 200 and absent.json().get("data") == [])
+        evidence["conversation_deleted"] = True
         mark_asset_state("owned_conversations", str(conversation_id), "DELETED")
     except Exception as error:
         errors.append(type(error).__name__)
+    evidence["errors"] = errors
+    # A second cleanup attempt must not overwrite the first failing response.
+    write_case_evidence("tfp-cleanup-" + str(conversation_id) + "-" + uuid.uuid4().hex, evidence)
     if errors:
         raise RuntimeError("Owned TFP run cleanup failed: " + ", ".join(errors))
 

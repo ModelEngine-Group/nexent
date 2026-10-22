@@ -9,6 +9,9 @@ import time
 from pathlib import Path
 
 import requests
+import pytest
+
+from shared.final_answers import final_answer_text
 
 
 def session(base):
@@ -34,7 +37,7 @@ def assert_evidence(scenario, events, detail):
     answers = [event for event in events if event.get("type") == "final_answer"]
     assert not any(event.get("type") == "error" for event in events)
     expected = {"pure": "FAF-PURE-OK", "mixed": "FAF-MIXED-OK", "subagent": "FAF-PARENT-OK"}[scenario]
-    assert "".join(event.get("content", "") for event in answers if not event.get("invocation_id")) == expected
+    assert final_answer_text(events) == expected
     units = []
     for message in detail["data"][0]["message"]:
         if message["role"] != "assistant":
@@ -44,6 +47,11 @@ def assert_evidence(scenario, events, detail):
         units.extend(json.loads(content) if isinstance(content, str) else content)
     assert [unit["content"] for unit in units if unit["type"] == "final_answer" and not unit.get("invocation_id")] == [expected]
     if scenario == "pure":
+        if any(unit['type'] == 'model_output_deep_thinking' and str(unit.get('content') or '').strip() for unit in units):
+            from shared.asset_registry import AssetDependencyError
+            raise AssetDependencyError('models', 'llm', consumer_case_id='FAF-D3-001',
+                detail='Configured real provider emitted genuine deep reasoning; pure-answer fixture was not obtained. '
+                       'Preserve deep reasoning and rerun with a provider supporting the requested non-reasoning mode.')
         assert not any(unit["type"] in {"step_count", "model_output_thinking", "model_output_deep_thinking"} for unit in units)
     elif scenario == "mixed":
         assert any(unit["type"] == "step_count" for unit in units)
@@ -53,9 +61,40 @@ def assert_evidence(scenario, events, detail):
         assert len(children) == 1, "A real child invocation is required"
         child = children[0]
         assert any(event.get("type") == "subagent_end" and event.get("invocation_id") == child for event in events)
-        assert "".join(event["content"] for event in answers if event.get("invocation_id") == child) == "FAF-CHILD-OK"
+        assert final_answer_text(events, invocation_id=child) == "FAF-CHILD-OK"
         assert [unit["content"] for unit in units if unit["type"] == "final_answer" and unit.get("invocation_id") == child] == ["FAF-CHILD-OK"]
     return {"scenario": scenario, "answer": expected, "result": "PASS", "persisted_answers": len([u for u in units if u["type"] == "final_answer"])}
+
+
+@pytest.mark.case_id('FAF-D3-001')
+@pytest.mark.stage('D3')
+@pytest.mark.asyncio
+@pytest.mark.parametrize('kind', ['mixed', 'pure', 'subagent'])
+async def test_final_answer_runtime(tenant_a_admin, kind):
+    from shared.case_evidence import write_case_evidence, read_sse_with_evidence
+    from shared.faf import prepare_faf_agents, cleanup_faf_agents
+    from shared.factories.conversation import owned_conversation
+    from shared.http import MODEL_TIMEOUT, assert_status, client
+
+    fixtures = await prepare_faf_agents(tenant_a_admin, 'FAF-D3-001')
+    try:
+        fixture = fixtures[kind]
+        async with owned_conversation(tenant_a_admin, 'FAF ' + kind) as conversation_id:
+            async with client('runtime', token=tenant_a_admin.access_token, timeout=MODEL_TIMEOUT) as api:
+                async with api.stream('POST', '/agent/run', json={
+                    'query': 'Execute the final-answer acceptance task.', 'agent_id': fixture['agent_id'],
+                    'version_no': fixture['version_no'], 'conversation_id': conversation_id,
+                    'history': [], 'is_debug': False, 'generation_config': {'deep_thinking': False},
+                }) as response:
+                    assert_status(response, 200)
+                    frames = await read_sse_with_evidence(response, 'faf-' + kind)
+                history = await api.get(f'/conversation/{conversation_id}')
+                assert_status(history, 200)
+            events = [frame['data'] for frame in frames if isinstance(frame.get('data'), dict)]
+            result = assert_evidence(kind, events, history.json())
+            write_case_evidence('faf-' + kind + '-assertions', result)
+    finally:
+        await cleanup_faf_agents(tenant_a_admin, fixtures)
 
 
 def main():
