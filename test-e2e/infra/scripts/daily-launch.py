@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Synchronize a clean checkout and execute repository-owned Daily under one lock."""
 from __future__ import annotations
 
@@ -12,24 +14,27 @@ import uuid
 TOOLS = Path(__file__).resolve().parents[1] / "tools"
 sys.path.insert(0, str(TOOLS))
 from suite_runtime import BatchLock, logged, now, save
+from daily_git import run_git
 
 
-def git(repo, *args):
-    return subprocess.check_output(["git", "-C", str(repo), *args], text=True,
-                                   encoding="utf-8", stderr=subprocess.PIPE, timeout=120).strip()
+def git(repo, *args, log_dir=None):
+    return run_git(repo, args, log_dir=log_dir)
 
 
-def sync_checkout(repo, branch):
+def sync_checkout(repo, branch, *, log_dir=None):
     """Never stash, reset, switch a dirty checkout, or merge divergent history."""
-    if git(repo, "status", "--porcelain", "--untracked-files=normal"):
+    def checked(*args):
+        return git(repo, *args, log_dir=log_dir) if log_dir is not None else git(repo, *args)
+
+    if checked("status", "--porcelain", "--untracked-files=normal"):
         raise RuntimeError("Daily requires a clean checkout before synchronization")
-    if git(repo, "branch", "--show-current") != branch:
+    if checked("branch", "--show-current") != branch:
         raise RuntimeError("Checkout branch differs from requested branch; switch it explicitly first")
-    git(repo, "check-ref-format", "--branch", branch)
-    git(repo, "fetch", "origin", f"refs/heads/{branch}")
-    target = git(repo, "rev-parse", "FETCH_HEAD")
-    git(repo, "merge", "--ff-only", target)
-    if git(repo, "rev-parse", "HEAD") != target:
+    checked("check-ref-format", "--branch", branch)
+    checked("fetch", "origin", f"refs/heads/{branch}")
+    target = checked("rev-parse", "FETCH_HEAD")
+    checked("merge", "--ff-only", target)
+    if checked("rev-parse", "HEAD") != target:
         raise RuntimeError("Local commits differ from remote branch; refusing Daily")
     return target
 
@@ -63,14 +68,14 @@ def main(argv=None):
             try:
                 if (home / "state/deployment-guard/pending.json").exists():
                     raise RuntimeError("Pending deployment recovery must be resolved before synchronization")
-                state["head"] = sync_checkout(repo, args.branch)
+                state["head"] = sync_checkout(repo, args.branch, log_dir=directory / "git")
                 env = os.environ.copy()
                 # Derived output must never silently change tracked Feature navigation.
                 command = [str(runtime), str(repo / "test-e2e/infra/tools/validate_test_assets.py"),
                            "--phase", "implementation", "--generate"]
                 if logged(command, repo, env, directory / "validate.log", 180):
                     raise RuntimeError("Formal asset validation failed; inspect local launcher log")
-                if git(repo, "status", "--porcelain", "--untracked-files=normal"):
+                if git(repo, "status", "--porcelain", "--untracked-files=normal", log_dir=directory / "git"):
                     raise RuntimeError("Derived generation changed tracked assets; repair them on the product branch")
                 # Import only after checkout synchronization; use this exact revision's code.
                 import static_assets

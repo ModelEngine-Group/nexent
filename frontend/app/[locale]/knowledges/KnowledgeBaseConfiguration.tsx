@@ -277,7 +277,6 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Create mode state
   const [isCreatingMode, setIsCreatingMode] = useState(false);
   const [newKbName, setNewKbName] = useState("");
-  const [newKbDescription, setNewKbDescription] = useState("");
   const [newKbIngroupPermission, setNewKbIngroupPermission] =
     useState<string>("READ_ONLY");
   const [newKbGroupIds, setNewKbGroupIds] = useState<number[]>([]);
@@ -861,7 +860,6 @@ function DataConfig({ isActive }: DataConfigProps) {
     // Generate the default name without probing hidden tenant knowledge bases.
     const defaultName = generateVisibleKbName(kbState.knowledgeBases);
     setNewKbName(defaultName);
-    setNewKbDescription("");
     setNewKbIngroupPermission("READ_ONLY");
     setNewKbGroupIds([]);
     setNewKbPreserveSourceFile(true);
@@ -958,7 +956,7 @@ function DataConfig({ isActive }: DataConfigProps) {
 
         const newKB = await createKnowledgeBase(
           newKbName.trim(),
-          newKbDescription.trim() || t("knowledgeBase.description.default"),
+          t("knowledgeBase.description.default"),
           "elasticsearch",
           newKbIngroupPermission,
           newKbGroupIds,
@@ -1306,8 +1304,6 @@ function DataConfig({ isActive }: DataConfigProps) {
                     knowledgeBaseId=""
                     knowledgeBaseName={newKbName}
                     onNameChange={handleNameChange}
-                    knowledgeBaseDescription={newKbDescription}
-                    onDescriptionChange={setNewKbDescription}
                     selectedFiles={uploadFiles}
                     containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
                     hasDocuments={hasClickedUpload || docState.isUploading}
