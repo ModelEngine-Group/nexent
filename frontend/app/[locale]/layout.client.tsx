@@ -2,8 +2,15 @@
 
 "use client";
 
-import { useState, type CSSProperties, type ReactNode } from "react";
-import { usePathname } from "next/navigation";
+import {
+  useCallback,
+  useRef,
+  useState,
+  useTransition,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { Layout, Spin } from "antd";
 import { SideNavigation } from "@/components/navigation/SideNavigation";
 import { SIDER_CONFIG } from "@/const/layoutConstants";
@@ -13,11 +20,24 @@ import { useDeployment } from "@/components/providers/deploymentProvider";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { QuotaWarningMonitor } from "@/components/quota/QuotaWarningMonitor";
 import { MemoryEmbeddingMonitor } from "@/components/memory/MemoryEmbeddingMonitor";
+import { RouteTransitionContent } from "@/components/navigation/RouteTransitionContent";
 
 const { Sider, Content } = Layout;
 
 export function ClientLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const contentRef = useRef<HTMLDivElement>(null);
+  const [isNavigating, startNavigation] = useTransition();
+  const [targetPath, setTargetPath] = useState<string | null>(null);
+  const navigate = useCallback(
+    (path: string) => {
+      if (contentRef.current) contentRef.current.scrollTop = 0;
+      setTargetPath(path);
+      startNavigation(() => router.push(path));
+    },
+    [router]
+  );
   const { isAuthorized } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
   const [sidebarPinned, setSidebarPinned] = useState(false);
@@ -89,7 +109,11 @@ export function ClientLayout({ children }: { children: ReactNode }) {
         trigger={null}
         className="!bg-[#f0f0f0]"
       >
-        <SideNavigation onPinnedChange={setSidebarPinned} />
+        <SideNavigation
+          onPinnedChange={setSidebarPinned}
+          onNavigate={navigate}
+          isNavigating={isNavigating}
+        />
       </Sider>
 
       <Layout
@@ -99,14 +123,21 @@ export function ClientLayout({ children }: { children: ReactNode }) {
           marginLeft: `${sidebarWidth}px`,
         }}
       >
-        <Content style={contentStyle}>
-          {isHomePage || isOAuthCompletePage || isSharePage || isAuthorized ? (
-            children
-          ) : (
-            <div className="flex h-full w-full items-center justify-center">
-              <Spin />
-            </div>
-          )}
+        <Content ref={contentRef} style={contentStyle}>
+          <RouteTransitionContent
+            pendingPath={isNavigating ? targetPath : null}
+          >
+            {isHomePage ||
+            isOAuthCompletePage ||
+            isSharePage ||
+            isAuthorized ? (
+              children
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <Spin />
+              </div>
+            )}
+          </RouteTransitionContent>
         </Content>
       </Layout>
 
