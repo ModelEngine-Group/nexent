@@ -5,7 +5,7 @@
 from copy import deepcopy
 
 import pytest
-from agents.create_agent_info import create_model_config_from_record
+from management.services.model.run_bindings import create_model_config_from_record
 from management.services.model import management
 from management.services.model.run_controls import overlay_root_model
 

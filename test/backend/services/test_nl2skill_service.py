@@ -23,7 +23,7 @@ from services.nl2skill_service import (
     build_nl2skill_run_info,
     create_nl2skill_stream,
 )
-from agents.nl2skill_agent import NL2SKILL_NAME, create_nl2skill_agent_config
+from management.services.skill.creation import NL2SKILL_NAME, create_nl2skill_agent_config
 
 
 def test_create_nl2skill_agent_config_sets_ephemeral_runtime_options():

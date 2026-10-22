@@ -5,10 +5,8 @@
 import pytest
 from pydantic import ValidationError
 
-from agents.create_agent_info import (
-    _materialize_runtime_skill_snapshot,
-    apply_root_generation_overlay,
-)
+from management.services.agent.preparation.inputs import _materialize_runtime_skill_snapshot
+from management.services.agent.preparation.run import apply_root_generation_overlay
 from contracts.agent import WorkbenchGenerationConfig
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 

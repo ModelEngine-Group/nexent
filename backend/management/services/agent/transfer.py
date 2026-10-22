@@ -15,7 +15,7 @@ import zipfile
 from collections import deque
 from typing import Dict, List, Optional
 
-from agents.create_agent_info import create_tool_config_list
+from management.services.agent.preparation.tools import create_tool_config_list
 from contracts.constants.model import MODEL_CONFIG_MAPPING
 from contracts.errors.exceptions import ForbiddenError, SkillDuplicateError
 from contracts.agent import ExportAndImportAgentInfo, ExportAndImportDataFormat, MCPInfo

@@ -9,7 +9,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from backend.agents import tool_user_context
+from management.services.agent import tool_identity as tool_user_context
 
 
 def _agent_config(*, tool_sources=(), has_external_a2a=False, worker_agents=()):

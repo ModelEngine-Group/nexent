@@ -1,0 +1,58 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-RUNTIME-BOUNDARIES-20261022
+  change_type: refactor
+  title: Separate Agent preparation, SDK assembly and local execution ownership
+  description: Preserve existing execution and persistence behavior while splitting
+    backend agents into canonical Management and Runtime owners. Durable RunService
+    and deployment isolation are excluded.
+  affected_features:
+    existing:
+    - F-185
+    - F-156
+    - CMSR-005
+    - FAF-001
+    - V5-REL-AUTO-1FAFCA5A681580F5
+    - MSRF-001
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - API-AUTO-08A289290B55F524
+    - CMSR-D2-001
+    - FAF-D1-001
+    - FAF-D2-001
+    - REL-AUTO-1FAFCA5A681580F5
+    - UT-BE-AUTO-3B69B045EA9A318F
+    - UT-BE-AUTO-93D927CF4107FF6F
+    - MSRF-D1-001
+    - MSRF-D1-002
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Existing acceptance contracts and assertions remain unchanged;
+    only implementation imports and mock lookup sites are updated. Existing Cases
+    supply the required component evidence without adding duplicate Cases.
+  notes: User selected behavior-preserving responsibility refactoring. Existing formal
+    contracts remain; traditional UT strengthens factory/import/lifecycle boundaries.
+    No new formal D1 duplicates unit assertions.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve Agent configuration, overlays, export and preparation behavior
+    - Preserve streaming, memory fallback, cancellation and shared-state notifications
+    - Assert Runtime factory and local execution ownership without business database
+      imports
+    reason: Reuse existing preparation and streaming regressions; add focused architecture
+      and injected factory/lifecycle tests.
+    test_selectors:
+    - test/backend/management/test_agent_runtime_boundaries.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/backend/agents/test_agent_run_manager.py
+    - test/backend/services/test_agent_model_attempt_persistence.py
+    - test/backend/services/test_agent_run_final_answers.py
+    - test/backend/management/test_agent_persistence_boundary.py
+    - test/backend/services/test_run_model_controls.py
+    - test/backend/app/test_agent_app.py

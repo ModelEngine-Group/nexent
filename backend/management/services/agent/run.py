@@ -10,14 +10,12 @@ from typing import (
     Optional,
 )
 
-from agents.agent_run_manager import (
+from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     agent_run_manager,
 )
-from agents.create_agent_info import (
-    create_agent_run_info,
-)
-from agents.preprocess_manager import (
+from management.services.agent.preparation.run import create_agent_run_info
+from management.services.agent.preprocessing import (
     preprocess_manager,
 )
 from contracts.constants.localization import LANGUAGE
@@ -37,7 +35,7 @@ from management.services.agent.execution import (
 from management.services.agent.stream import (
     safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
 )
-from nexent.core.agents.run_agent import (
+from runtime.adapters.nexent.runner import (
     DeferredAgentRun,
 )
 from nexent.core.concurrency import (
