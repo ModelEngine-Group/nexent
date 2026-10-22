@@ -24,6 +24,7 @@ def create_openapi_service(
     user_id: str,
     description: str = None,
     headers_template: Dict[str, Any] = None,
+    ssl_verify: bool = True,
 ) -> Dict[str, Any]:
     """
     Create a new OpenAPI service record.
@@ -48,6 +49,7 @@ def create_openapi_service(
         "created_by": user_id,
         "updated_by": user_id,
         "is_available": True,
+        "ssl_verify": ssl_verify,
     }
     if description:
         service_dict["description"] = description
@@ -69,6 +71,7 @@ def upsert_openapi_service(
     user_id: str,
     description: str = None,
     headers_template: Dict[str, Any] = None,
+    ssl_verify: bool = True,
 ) -> Dict[str, Any]:
     """
     Create or update an OpenAPI service record.
@@ -92,6 +95,7 @@ def upsert_openapi_service(
         "tenant_id": tenant_id,
         "updated_by": user_id,
         "is_available": True,
+        "ssl_verify": ssl_verify,
     }
     if description:
         service_dict["description"] = description

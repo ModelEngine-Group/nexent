@@ -218,7 +218,14 @@ async def import_openapi_service_api(
     openapi_json = openapi_service_request.get("openapi_json")
     service_description = openapi_service_request.get("service_description")
     headers_template = openapi_service_request.get("headers_template")
+    ssl_verify = openapi_service_request.get("ssl_verify", True)
     force_update = openapi_service_request.get("force_update", False)
+
+    if not isinstance(ssl_verify, bool):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST,
+            detail="ssl_verify must be a boolean"
+        )
 
     if not service_name:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="service_name is required")
@@ -236,6 +243,7 @@ async def import_openapi_service_api(
             user_id=user_id,
             service_description=service_description,
             headers_template=headers_template,
+            ssl_verify=ssl_verify,
             force_update=force_update,
         )
 

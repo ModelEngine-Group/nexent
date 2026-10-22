@@ -91,6 +91,12 @@ class OuterApiService(TableBase):
     openapi_json = Column(JSONB, doc="Complete OpenAPI JSON specification")
     server_url = Column(String(500), doc="Base URL of the REST API server")
     headers_template = Column(JSONB, doc="Default headers template as JSON")
+    ssl_verify = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        doc="Whether to verify TLS certificates for the target API",
+    )
     tenant_id = Column(String(100), nullable=False,
                        doc="Tenant ID for multi-tenancy")
     is_available = Column(Boolean, default=True,

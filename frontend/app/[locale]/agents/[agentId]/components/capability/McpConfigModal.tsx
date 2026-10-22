@@ -19,6 +19,8 @@ import {
   Upload,
   Tabs,
   Tag,
+  Switch,
+  Alert,
 } from "antd";
 import {
   Trash,
@@ -88,6 +90,7 @@ export default function McpConfigModal({
   const [openApiServiceName, setOpenApiServiceName] = useState("");
   const [openApiServerUrl, setOpenApiServerUrl] = useState("");
   const [openApiHeadersTemplate, setOpenApiHeadersTemplate] = useState("");
+  const [openApiSslVerify, setOpenApiSslVerify] = useState(true);
   const [importingOpenApi, setImportingOpenApi] = useState(false);
   const [openapiServices, setOpenapiServices] = useState<any[]>([]);
   const [loadingOpenapiServices, setLoadingOpenapiServices] = useState(false);
@@ -541,6 +544,7 @@ export default function McpConfigModal({
         server_url: openApiServerUrl.trim(),
         openapi_json: parsedJson,
         headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
+        ssl_verify: openApiSslVerify,
       });
 
       message.success(t("mcpConfig.openApiToMcp.message.importSuccess"));
@@ -548,6 +552,7 @@ export default function McpConfigModal({
       setOpenApiServiceName("");
       setOpenApiServerUrl("");
       setOpenApiHeadersTemplate("");
+      setOpenApiSslVerify(true);
       await loadOpenapiServices();
       await refreshToolsAndAgents();
     } catch (error) {
@@ -1247,6 +1252,21 @@ export default function McpConfigModal({
                         rows={2}
                         disabled={actionsLocked || importingOpenApi}
                       />
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Switch
+                          checked={openApiSslVerify}
+                          onChange={setOpenApiSslVerify}
+                          disabled={actionsLocked || importingOpenApi}
+                        />
+                        <Text>{t("mcpConfig.openapiService.form.sslVerifyLabel")}</Text>
+                      </div>
+                      {!openApiSslVerify && (
+                        <Alert
+                          type="warning"
+                          showIcon
+                          message={t("mcpConfig.openapiService.form.sslVerifyWarning")}
+                        />
+                      )}
                       <Input.TextArea
                         placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
                         value={openApiJson}
