@@ -4,7 +4,7 @@ change:
   change_type: bugfix
   bug_id: USER-MODEL-READ-20261022
   title: Restore ordinary user model selection in Agent chat and Workbench
-  description: Restore the missing USER RESOURCE MODEL READ grant using fixed ID 1711 in the user-requested v2.8.0 SQL bundle; preserve existing semantic grants and reject unrelated ID collisions.
+  description: Restore the missing USER RESOURCE MODEL READ grant using fixed ID 143 in the user-requested v2.8.0 SQL bundle; preserve existing semantic grants and reject unrelated ID collisions.
   observed_behavior: USER model list requests fail with 403 and both shared model pickers receive an empty list.
   expected_behavior: USER can read tenant models without model write or management menu permissions.
   escaped_stage: production

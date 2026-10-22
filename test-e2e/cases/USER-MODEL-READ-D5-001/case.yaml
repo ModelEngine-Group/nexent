@@ -21,7 +21,7 @@ case:
     expected: No existing databases or containers are accessed or changed.
   - order: 2
     action: Inject a failure before commit, compare all rows, then run the unchanged production repair SQL.
-    expected: Failure rolls back the repair; normal execution adds the missing USER RESOURCE MODEL READ row with fixed ID 1711 or preserves an existing semantic grant. If 1711 belongs to another grant, execution fails without changing any row.
+    expected: Failure rolls back the repair; normal execution adds the missing USER RESOURCE MODEL READ row with fixed ID 143 or preserves an existing semantic grant. If 143 belongs to another grant, execution fails without changing any row.
   - order: 3
     action: Compare complete permission snapshots and rerun the repair.
     expected: Existing rows and IDs remain unchanged, repeated execution adds no duplicate, and no USER model writes or model menu are granted.
@@ -29,7 +29,7 @@ case:
     action: Remove the run-owned container in a finally block.
     expected: Cleanup succeeds after passing or failing assertions without removing any other resource.
   expected_results:
-  - Successful repair adds USER model-read with fixed ID 1711 on missing/empty installations and preserves existing semantic grants; an unrelated grant occupying 1711 causes a failure with no row changes.
+  - Successful repair adds USER model-read with fixed ID 143 on missing/empty installations and preserves existing semantic grants; an unrelated grant occupying 143 causes a failure with no row changes.
   - Existing grants and IDs are preserved; USER gains no model write or model management menu access.
   - Failure rolls back all row changes and repeated execution preserves the complete snapshot.
   - Only disposable synthetic resources are used and cleaned.

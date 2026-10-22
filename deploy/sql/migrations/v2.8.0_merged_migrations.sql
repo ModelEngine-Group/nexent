@@ -248,7 +248,7 @@ LOCK TABLE nexent.role_permission_t IN SHARE ROW EXCLUSIVE MODE;
 INSERT INTO nexent.role_permission_t (
     role_permission_id, user_role, permission_category, permission_type, permission_subtype
 )
-SELECT 1711, 'USER', 'RESOURCE', 'MODEL', 'READ'
+SELECT 143, 'USER', 'RESOURCE', 'MODEL', 'READ'
 WHERE NOT EXISTS (
     SELECT 1
     FROM nexent.role_permission_t

@@ -73,7 +73,7 @@ def test_restore_read_only_grant_preserves_rows_and_supports_rollback_and_rerun(
     if variant == "existing":
         postgres("INSERT INTO nexent.role_permission_t VALUES (42,'USER','RESOURCE','MODEL','READ');")
     if variant == "occupied":
-        postgres("INSERT INTO nexent.role_permission_t VALUES (1711,'ADMIN','RESOURCE','MODEL','UPDATE');")
+        postgres("INSERT INTO nexent.role_permission_t VALUES (143,'ADMIN','RESOURCE','MODEL','UPDATE');")
 
     snapshot = "SELECT row_to_json(t) FROM nexent.role_permission_t t ORDER BY role_permission_id;"
     before = postgres(snapshot)
@@ -97,7 +97,7 @@ def test_restore_read_only_grant_preserves_rows_and_supports_rollback_and_rerun(
         row["user_role"], row["permission_category"], row["permission_type"], row["permission_subtype"]
     ) == ("USER", "RESOURCE", "MODEL", "READ")]
     assert len(grants) == 1
-    assert grants[0]["role_permission_id"] == (42 if variant == "existing" else 1711)
+    assert grants[0]["role_permission_id"] == (42 if variant == "existing" else 143)
     assert len(actual) == len(original) + (variant != "existing")
     assert [row for row in actual if row not in original] == ([] if variant == "existing" else grants)
     assert not any(row["user_role"] == "USER" and (
