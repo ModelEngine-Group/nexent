@@ -19,7 +19,7 @@ from management.services.mcp.registration import add_mcp_service
 from management.services.tool.discovery import get_tool_from_remote_mcp_server
 from management.services.mcp.containers import MCPContainerManager
 from management.services.monitor.audit import record_security_event
-from gateway.authentication.identity import get_current_user_info
+from gateway.authentication.normal import get_current_user_info
 
 router = APIRouter(prefix="/mcp")
 logger = logging.getLogger("remote_mcp_app")

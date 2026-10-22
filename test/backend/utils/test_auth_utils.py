@@ -190,11 +190,14 @@ sys.modules['sqlalchemy'] = MagicMock()
 sys.modules['sqlalchemy.orm'] = MagicMock()
 
 # Now import the module under test
-import gateway.authentication.identity as au
+import gateway.authentication.normal as au
+import gateway.authentication.northbound as nb_auth
 
 # Ensure exceptions in module under test are real exception classes, not mocks
 au.UnauthorizedError = UnauthorizedError
 au.SignatureValidationError = SignatureValidationError
+nb_auth.SignatureValidationError = SignatureValidationError
+nb_auth.UnauthorizedError = UnauthorizedError
 
 # Ensure constants in module under test are real values, not mocks
 au.LANGUAGE = {"ZH": "zh", "EN": "en"}
@@ -220,7 +223,7 @@ def test_validate_timestamp_window(monkeypatch):
 
 
 def test_extract_aksk_headers_success():
-    access_key, ts, sig = au.extract_aksk_headers({
+    access_key, ts, sig = nb_auth.extract_aksk_headers({
         "X-Access-Key": "ak",
         "X-Timestamp": "123",
         "X-Signature": "sig",
@@ -230,27 +233,27 @@ def test_extract_aksk_headers_success():
 
 def test_extract_aksk_headers_missing():
     with pytest.raises(UnauthorizedError):
-        au.extract_aksk_headers({})
+        nb_auth.extract_aksk_headers({})
 
 
 def test_verify_aksk_signature_success(monkeypatch):
     # Arrange matching ak and computed signature
-    set_import_attribute(monkeypatch, au, "get_aksk_config", lambda tenant_id: ("ak", "sk"))
+    set_import_attribute(monkeypatch, nb_auth, "get_aksk_config", lambda tenant_id: ("ak", "sk"))
     ts = str(int(time.time()))
-    expected = au.calculate_hmac_signature("sk", "ak", ts, "body")
-    ok = au.verify_aksk_signature("ak", ts, expected, "body")
+    expected = nb_auth.calculate_hmac_signature("sk", "ak", ts, "body")
+    ok = nb_auth.verify_aksk_signature("ak", ts, expected, "body")
     assert ok is True
 
 
 def test_verify_aksk_signature_invalid(monkeypatch):
-    set_import_attribute(monkeypatch, au, "get_aksk_config", lambda tenant_id: ("ak", "sk"))
+    set_import_attribute(monkeypatch, nb_auth, "get_aksk_config", lambda tenant_id: ("ak", "sk"))
     ts = str(int(time.time()))
-    assert au.verify_aksk_signature("wrong", ts, "sig", "") is False
+    assert nb_auth.verify_aksk_signature("wrong", ts, "sig", "") is False
 
 
 def test_validate_aksk_authentication(monkeypatch):
-    set_import_attribute(monkeypatch, au, "verify_aksk_signature", lambda a, b, c, d: True)
-    ok = au.validate_aksk_authentication({
+    set_import_attribute(monkeypatch, nb_auth, "verify_aksk_signature", lambda a, b, c, d: True)
+    ok = nb_auth.validate_aksk_authentication({
         "X-Access-Key": "ak",
         "X-Timestamp": str(int(time.time())),
         "X-Signature": "sig",
@@ -259,9 +262,9 @@ def test_validate_aksk_authentication(monkeypatch):
 
 
 def test_validate_aksk_authentication_invalid(monkeypatch):
-    set_import_attribute(monkeypatch, au, "verify_aksk_signature", lambda a, b, c, d: False)
+    set_import_attribute(monkeypatch, nb_auth, "verify_aksk_signature", lambda a, b, c, d: False)
     with pytest.raises(SignatureValidationError):
-        au.validate_aksk_authentication({
+        nb_auth.validate_aksk_authentication({
             "X-Access-Key": "ak",
             "X-Timestamp": str(int(time.time())),
             "X-Signature": "sig",
@@ -747,11 +750,11 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
     def mock_verify_aksk_signature(*args):
         raise Exception("Unexpected error")
 
-    set_import_attribute(monkeypatch, au, "verify_aksk_signature",
+    set_import_attribute(monkeypatch, nb_auth, "verify_aksk_signature",
                         mock_verify_aksk_signature)
 
     with pytest.raises(UnauthorizedError, match="Authentication failed"):
-        au.validate_aksk_authentication({
+        nb_auth.validate_aksk_authentication({
             "X-Access-Key": "ak",
             "X-Timestamp": str(int(time.time())),
             "X-Signature": "sig",
@@ -813,9 +816,9 @@ class TestValidateBearerToken:
             "user_id": "user123",
             "delete_flag": "N"
         }
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
 
-        is_valid, token_info = au.validate_bearer_token("Bearer nexent-abc123")
+        is_valid, token_info = nb_auth.validate_bearer_token("Bearer nexent-abc123")
 
         assert is_valid is True
         assert token_info is not None
@@ -829,39 +832,39 @@ class TestValidateBearerToken:
             "user_id": "user123",
             "delete_flag": "N"
         }
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
 
-        is_valid, token_info = au.validate_bearer_token("nexent-abc123")
+        is_valid, token_info = nb_auth.validate_bearer_token("nexent-abc123")
 
         assert is_valid is True
         assert token_info is not None
 
     def test_validate_bearer_token_empty_authorization(self):
         """Test Bearer token validation with empty authorization header."""
-        is_valid, token_info = au.validate_bearer_token(None)
+        is_valid, token_info = nb_auth.validate_bearer_token(None)
 
         assert is_valid is False
         assert token_info is None
 
     def test_validate_bearer_token_empty_string(self):
         """Test Bearer token validation with empty string."""
-        is_valid, token_info = au.validate_bearer_token("")
+        is_valid, token_info = nb_auth.validate_bearer_token("")
 
         assert is_valid is False
         assert token_info is None
 
     def test_validate_bearer_token_empty_token(self):
         """Test Bearer token validation with 'Bearer ' only."""
-        is_valid, token_info = au.validate_bearer_token("Bearer ")
+        is_valid, token_info = nb_auth.validate_bearer_token("Bearer ")
 
         assert is_valid is False
         assert token_info is None
 
     def test_validate_bearer_token_invalid_token(self, monkeypatch):
         """Test Bearer token validation with non-existent token."""
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: None)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: None)
 
-        is_valid, token_info = au.validate_bearer_token("Bearer nexent-nonexistent")
+        is_valid, token_info = nb_auth.validate_bearer_token("Bearer nexent-nonexistent")
 
         assert is_valid is False
         assert token_info is None
@@ -874,9 +877,9 @@ class TestValidateBearerToken:
             "user_id": "user123",
             "delete_flag": "Y"
         }
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
 
-        is_valid, token_info = au.validate_bearer_token("Bearer nexent-deleted")
+        is_valid, token_info = nb_auth.validate_bearer_token("Bearer nexent-deleted")
 
         assert is_valid is False
         assert token_info is None
@@ -886,9 +889,9 @@ class TestValidateBearerToken:
         def mock_get_token_raises(key):
             raise Exception("Database error")
 
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", mock_get_token_raises)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", mock_get_token_raises)
 
-        is_valid, token_info = au.validate_bearer_token("Bearer nexent-error")
+        is_valid, token_info = nb_auth.validate_bearer_token("Bearer nexent-error")
 
         assert is_valid is False
         assert token_info is None
@@ -907,10 +910,10 @@ class TestGetUserAndTenantByAccessKey:
         }
         mock_user_tenant = {"tenant_id": "tenant456"}
 
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
-        set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
 
-        result = au.get_user_and_tenant_by_access_key("nexent-abc123")
+        result = nb_auth.get_user_and_tenant_by_access_key("nexent-abc123")
 
         assert result["user_id"] == "user123"
         assert result["tenant_id"] == "tenant456"
@@ -925,11 +928,11 @@ class TestGetUserAndTenantByAccessKey:
             "delete_flag": "N"
         }
 
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
-        set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda uid: None)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_user_tenant_by_user_id", lambda uid: None)
 
-        with pytest.raises(au.UnauthorizedError, match="No active tenant relationship"):
-            au.get_user_and_tenant_by_access_key("nexent-abc123")
+        with pytest.raises(nb_auth.UnauthorizedError, match="No active tenant relationship"):
+            nb_auth.get_user_and_tenant_by_access_key("nexent-abc123")
 
     def test_get_user_and_tenant_empty_tenant_id_raises(self, monkeypatch):
         """Test that UnauthorizedError is raised when tenant_id is empty."""
@@ -941,28 +944,28 @@ class TestGetUserAndTenantByAccessKey:
         }
         mock_user_tenant = {"tenant_id": ""}
 
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
-        set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
 
-        with pytest.raises(au.UnauthorizedError, match="No active tenant relationship"):
-            au.get_user_and_tenant_by_access_key("nexent-abc123")
+        with pytest.raises(nb_auth.UnauthorizedError, match="No active tenant relationship"):
+            nb_auth.get_user_and_tenant_by_access_key("nexent-abc123")
 
     def test_get_user_and_tenant_empty_access_key(self):
         """Test with empty access key."""
         with pytest.raises(UnauthorizedError, match="Invalid access key"):
-            au.get_user_and_tenant_by_access_key("")
+            nb_auth.get_user_and_tenant_by_access_key("")
 
     def test_get_user_and_tenant_none_access_key(self):
         """Test with None access key."""
         with pytest.raises(UnauthorizedError, match="Invalid access key"):
-            au.get_user_and_tenant_by_access_key(None)
+            nb_auth.get_user_and_tenant_by_access_key(None)
 
     def test_get_user_and_tenant_token_not_found(self, monkeypatch):
         """Test when token is not found."""
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: None)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: None)
 
         with pytest.raises(UnauthorizedError, match="Invalid or inactive access key"):
-            au.get_user_and_tenant_by_access_key("nexent-nonexistent")
+            nb_auth.get_user_and_tenant_by_access_key("nexent-nonexistent")
 
     def test_get_user_and_tenant_deleted_token(self, monkeypatch):
         """Test when token is deleted."""
@@ -972,10 +975,10 @@ class TestGetUserAndTenantByAccessKey:
             "user_id": "user123",
             "delete_flag": "Y"
         }
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
 
         with pytest.raises(UnauthorizedError, match="Invalid or inactive access key"):
-            au.get_user_and_tenant_by_access_key("nexent-deleted")
+            nb_auth.get_user_and_tenant_by_access_key("nexent-deleted")
 
     def test_get_user_and_tenant_no_user_id(self, monkeypatch):
         """Test when token has no user_id."""
@@ -985,10 +988,10 @@ class TestGetUserAndTenantByAccessKey:
             "user_id": None,
             "delete_flag": "N"
         }
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
 
         with pytest.raises(UnauthorizedError, match="No user associated with this access key"):
-            au.get_user_and_tenant_by_access_key("nexent-abc123")
+            nb_auth.get_user_and_tenant_by_access_key("nexent-abc123")
 
 
 class TestResolveTenantIdFromUserTenantRecord:
@@ -1058,12 +1061,12 @@ def test_validate_timestamp_rejects_non_numeric_value():
 
 def test_verify_aksk_signature_returns_false_when_configuration_fails(monkeypatch):
     set_import_attribute(monkeypatch,
-        au,
+        nb_auth,
         "get_aksk_config",
         lambda tenant_id: (_ for _ in ()).throw(RuntimeError("not configured")),
     )
 
-    assert au.verify_aksk_signature("ak", "1", "signature", "body") is False
+    assert nb_auth.verify_aksk_signature("ak", "1", "signature", "body") is False
 
 
 def test_extract_session_id_from_authorization_handles_valid_and_invalid_tokens():
@@ -1104,14 +1107,14 @@ def test_get_current_user_info_combines_authentication_and_language(monkeypatch)
 def test_get_aksk_config_raises_token_expired():
     """The get_aksk_config stub raises TokenExpiredError when not configured."""
     with pytest.raises(TokenExpiredError, match="not configured"):
-        au.get_aksk_config("tenant-1")
+        nb_auth.get_aksk_config("tenant-1")
 
 
 def test_validate_aksk_authentication_invalid_timestamp(monkeypatch):
     """Expired AK/SK timestamps raise TokenExpiredError."""
     old = int(time.time()) - (au.TIMESTAMP_VALIDITY_WINDOW + 10)
     with pytest.raises(TokenExpiredError, match="Invalid or expired timestamp"):
-        au.validate_aksk_authentication({
+        nb_auth.validate_aksk_authentication({
             "X-Access-Key": "ak",
             "X-Timestamp": str(old),
             "X-Signature": "sig",
@@ -1123,9 +1126,9 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    set_import_attribute(monkeypatch, au, "validate_timestamp", boom)
+    set_import_attribute(monkeypatch, nb_auth, "validate_timestamp", boom)
     with pytest.raises(TokenExpiredError, match="Authentication failed"):
-        au.validate_aksk_authentication({
+        nb_auth.validate_aksk_authentication({
             "X-Access-Key": "ak",
             "X-Timestamp": str(int(time.time())),
             "X-Signature": "sig",

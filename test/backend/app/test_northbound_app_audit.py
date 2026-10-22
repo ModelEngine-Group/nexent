@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 # Agent management is outside the HTTP boundary exercised in this module.
 with pytest.MonkeyPatch.context() as import_mocks:
     import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
-    from gateway.api.northbound.routes import router
+    from gateway.api.northbound import router
 
 from services.northbound_service import NorthboundContext
 
@@ -35,7 +35,7 @@ def _audit_messages(caplog):
 def _stub_northbound_caller(mocker):
     """Stub the AK/SK identity resolution and role lookup for a northbound caller."""
     mocker.patch(
-        "gateway.api.northbound.routes._get_northbound_context",
+        "gateway.api.northbound._get_northbound_context",
         new_callable=AsyncMock,
         return_value=NorthboundContext(
             request_id="req-1",
@@ -45,13 +45,13 @@ def _stub_northbound_caller(mocker):
             token_id=7,
         ),
     )
-    mocker.patch("gateway.api.northbound.routes.get_user_role_by_tenant", return_value="ADMIN")
+    mocker.patch("gateway.api.northbound.get_user_role_by_tenant", return_value="ADMIN")
 
 
 def test_api_users_batch_create_records_audit_entry(caplog, mocker):
     """Batch API user creation records the request intent, never the plaintext keys."""
     _stub_northbound_caller(mocker)
-    mocker.patch("gateway.api.northbound.routes.create_api_users_batch", return_value=[
+    mocker.patch("gateway.api.northbound.create_api_users_batch", return_value=[
         {"user_id": "u-1", "role": "USER", "group_id": 5, "group_name": "default",
          "api_key": "nexent-secret-1"},
         {"user_id": "u-2", "role": "USER", "group_id": 5, "group_name": "default",
@@ -82,7 +82,7 @@ def test_api_users_batch_create_records_audit_entry(caplog, mocker):
 def test_northbound_api_key_refresh_records_audit_entry(caplog, mocker):
     """Refreshing a key through the northbound API records the caller, never the new key."""
     _stub_northbound_caller(mocker)
-    mocker.patch("gateway.api.northbound.routes.refresh_user_api_key", return_value={
+    mocker.patch("gateway.api.northbound.refresh_user_api_key", return_value={
         "user_id": "user-1",
         "email": "api.user@example.com",
         "api_key": "nexent-secret-key",
@@ -109,7 +109,7 @@ def test_northbound_api_key_refresh_records_audit_entry(caplog, mocker):
 def test_northbound_api_key_revoke_records_audit_entry(caplog, mocker):
     """Revoking keys through the northbound API records the caller and the revoked count."""
     _stub_northbound_caller(mocker)
-    mocker.patch("gateway.api.northbound.routes.revoke_user_api_keys", return_value={
+    mocker.patch("gateway.api.northbound.revoke_user_api_keys", return_value={
         "user_id": "user-1",
         "email": None,
         "api_key": None,

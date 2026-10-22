@@ -9,7 +9,7 @@ boundary; assertions describe user-visible policy, not implementation calls.
 
 from __future__ import annotations
 
-import gateway.authentication.dependencies as depends_dependencies
+import gateway.authentication.normal as depends_dependencies
 from types import SimpleNamespace
 
 import pytest
@@ -29,6 +29,7 @@ def test_permission_rejects_missing_auth_and_cross_tenant(monkeypatch: pytest.Mo
     from permissions.tenant_scope import resolve_personal_target_tenant
 
     monkeypatch.setattr(depends, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", False)
     with pytest.raises(HTTPException) as unauthenticated:
         depends_dependencies.authenticate(None, None)
     assert unauthenticated.value.status_code == 401

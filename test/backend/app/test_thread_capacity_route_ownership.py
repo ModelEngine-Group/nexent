@@ -8,7 +8,7 @@ _BACKEND = Path(__file__).resolve().parents[3] / "backend"
 def test_tc_tlm_021_service_apps_own_process_local_thread_capacity_route():
     config_source = (_BACKEND / "management/api/application.py").read_text(encoding="utf-8")
     runtime_source = (_BACKEND / "runtime/api/application.py").read_text(encoding="utf-8")
-    northbound_source = (_BACKEND / "gateway/api/application.py").read_text(
+    northbound_source = (_BACKEND / "gateway/application.py").read_text(
         encoding="utf-8"
     )
 

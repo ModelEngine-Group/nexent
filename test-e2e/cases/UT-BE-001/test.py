@@ -9,7 +9,7 @@ boundary; assertions describe user-visible policy, not implementation calls.
 
 from __future__ import annotations
 
-import gateway.authentication.dependencies as depends_dependencies
+import gateway.authentication.normal as depends_dependencies
 from types import SimpleNamespace
 
 import pytest
@@ -28,7 +28,8 @@ def test_permission_core_flow(monkeypatch: pytest.MonkeyPatch) -> None:
     from permissions.tenant_scope import resolve_personal_target_tenant
 
     monkeypatch.setattr(depends, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(depends, "get_current_user_context", lambda token: ("u1", "t1", "ADMIN"))
+    monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(depends_dependencies, "get_current_user_context", lambda token: ("u1", "t1", "ADMIN"))
     user = depends_dependencies.authenticate("Bearer verified", None)
     assert user == CurrentUser("u1", "t1", "ADMIN")
 

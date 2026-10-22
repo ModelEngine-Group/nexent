@@ -50,3 +50,11 @@ MOCK_SESSION = {
     "expires_at": None,  # Will be set dynamically
     "expires_in_seconds": 315360000,  # 10 years
 }
+
+
+# ---------------------------------------------------------------------------
+# Shared test constants
+# ---------------------------------------------------------------------------
+
+# Fixed test secret used by generate_test_jwt and unit tests.
+MOCK_JWT_SECRET_KEY = "nexent-mock-jwt-secret"

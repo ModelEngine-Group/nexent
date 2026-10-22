@@ -15,7 +15,7 @@ from management.db.identity.role_permission import check_role_permission
 from fastapi import APIRouter, Header, HTTPException, Query
 from management.services.tag.library import TagManagementService
 from management.services.tag.resources import AuthenticatedCaller
-from gateway.authentication.identity import get_current_user_context
+from gateway.authentication.normal import get_current_user_context
 
 router = APIRouter(prefix="/tag-libraries", tags=["tag-libraries"])
 

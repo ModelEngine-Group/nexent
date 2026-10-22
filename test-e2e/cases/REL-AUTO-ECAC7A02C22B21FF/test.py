@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from gateway.api import application as nba
+from gateway import application as nba
 
 
 @pytest.mark.stage('D5')
@@ -32,7 +32,7 @@ async def test_northbound_startup_recovery_and_shutdown_contract():
     assert profile == 'control-io'
     assert isinstance(spec, nba.ManagedTaskSpec)
     assert spec.task_name == 'recover-northbound-tasks'
-    assert spec.owner == 'gateway.api.application'
+    assert spec.owner == 'gateway.application'
     assert fn is recover
     cleanup.assert_awaited_once_with(nba.NORTHBOUND_SERVICE_NAME)
 

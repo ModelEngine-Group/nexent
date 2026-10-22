@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from contracts.errors.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError, UnauthorizedError, tenant_resource_limit_error_payload
-from consts.const import get_all_provider_definitions
+from management.utils.oauth_providers import get_all_provider_definitions
 import logging
 
 from fastapi import APIRouter, Header, HTTPException, Request
@@ -13,11 +13,11 @@ from pydantic import ValidationError as PydanticValidationError
 from consts.const import JWT_EXPIRY_SECONDS
 from contracts.identity import OAuthCompleteRequest
 from contracts.errors.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError, UnauthorizedError, tenant_resource_limit_error_payload
-from consts.const import get_all_provider_definitions
+from management.utils.oauth_providers import get_all_provider_definitions
 from management.db.identity.oauth_account import get_oauth_account_by_provider
 from management.services.permission.identity.oauth import complete_pending_oauth_account, create_or_update_oauth_account, ensure_user_tenant_exists, exchange_code_for_provider_token, find_supabase_user_id_by_email, generate_pending_oauth_token, get_authorize_url, get_enabled_providers, get_oauth_config, get_pending_oauth_info, get_provider_user_info, list_linked_accounts, unlink_account
-from gateway.authentication.oauth import parse_state, parse_pending_oauth_token
-from gateway.authentication.identity import calculate_expires_at, generate_session_jwt, get_current_user_id, get_supabase_admin_client
+from gateway.authentication.normal import parse_state, parse_pending_oauth_token
+from gateway.authentication.normal import calculate_expires_at, generate_session_jwt, get_current_user_id, get_supabase_admin_client
 from management.services.monitor.audit import record_security_event
 
 logger = logging.getLogger(__name__)

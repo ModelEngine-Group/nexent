@@ -20,7 +20,7 @@ from services.skill_repository_service import (
     update_skill_repository_status_impl,
 )
 from starlette.responses import JSONResponse
-from gateway.authentication.identity import get_current_user_id
+from gateway.authentication.normal import get_current_user_id
 
 logger = logging.getLogger(__name__)
 skill_repository_router = APIRouter(prefix="/repository/skill")

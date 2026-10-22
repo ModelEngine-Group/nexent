@@ -19,7 +19,7 @@ from management.services.permission.identity.users import (
     delete_user_and_cleanup, get_users_for_requester, update_user_for_requester
 )
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from gateway.authentication.identity import extract_session_id_from_authorization, get_current_user_context, get_current_user_id
+from gateway.authentication.normal import extract_session_id_from_authorization, get_current_user_context, get_current_user_id
 
 logger = logging.getLogger("user_app")
 router = APIRouter(prefix="/users", tags=["users"])

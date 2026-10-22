@@ -46,6 +46,7 @@ oauth_providers_mock.get_all_provider_definitions.return_value = {
     "github": MagicMock(),
     "wechat": MagicMock(),
 }
+sys.modules["management.utils.oauth_providers"] = oauth_providers_mock
 for _provider_export in ("get_provider_definition", "is_provider_enabled", "get_all_provider_definitions"):
     setattr(consts_mock.const, _provider_export, getattr(oauth_providers_mock, _provider_export))
 
@@ -107,7 +108,7 @@ auth_utils_mock.get_jwt_expiry_seconds = MagicMock(return_value=3600)
 auth_utils_mock.calculate_expires_at = MagicMock(return_value=1735689600)
 auth_utils_mock.get_supabase_admin_client = MagicMock()
 auth_utils_mock.generate_session_jwt = MagicMock(return_value="eyJ.mock.jwt.token")
-sys.modules["gateway.authentication.identity"] = auth_utils_mock
+sys.modules["gateway.authentication.normal"] = auth_utils_mock
 
 oauth_service_mock = MagicMock()
 oauth_service_mock.parse_state = MagicMock(
@@ -132,6 +133,7 @@ oauth_service_mock.get_oauth_config = MagicMock(
     }
 )
 sys.modules["services"] = MagicMock()
+auth_utils_mock.parse_state = oauth_service_mock.parse_state
 sys.modules["management.services.permission.identity.oauth"] = oauth_service_mock
 # management.api.identity.oauth imports management.services.monitor.audit; the blanket `services` MagicMock
 # above is not a package, so the audit submodule must be pre-registered.

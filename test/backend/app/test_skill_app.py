@@ -287,10 +287,10 @@ services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=Tru
 # Mock utils
 utils_mock = types.ModuleType('utils')
 utils_mock.__path__ = []  # Empty __path__ to make it a namespace package
-utils_auth_utils_mock = types.ModuleType('gateway.authentication.identity')
+utils_auth_utils_mock = types.ModuleType('gateway.authentication.normal')
 utils_config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.identity'] = utils_auth_utils_mock
+sys.modules['gateway.authentication.normal'] = utils_auth_utils_mock
 sys.modules['management.services.configuration.tenant.settings'] = utils_config_utils_mock
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("user123", "tenant123"))
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("user123", "tenant123", "zh"))

@@ -78,7 +78,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 
 # 将模拟的utils模块添加到sys.modules中
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.identity'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
 
 # Stub management.utils.serialization to satisfy imports in management.db.agent.repository
 str_utils_mock = MagicMock()

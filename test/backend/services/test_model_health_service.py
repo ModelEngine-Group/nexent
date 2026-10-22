@@ -26,7 +26,7 @@ _MOCKED_MODULE_NAMES = (
     "management.db.client",
     "management.db.model.repository",
     "utils",
-    "gateway.authentication.identity",
+    "gateway.authentication.normal",
     "management.services.configuration.tenant.settings",
     "utils.memory_utils",
     "management.services.model.names",
@@ -62,7 +62,7 @@ from test.common.database_stubs import install_serialization_stub
 install_serialization_stub(sys.modules["management.db.client"])
 sys.modules['management.db.model.repository'] = MockModule()
 sys.modules['utils'] = MockModule()
-sys.modules['gateway.authentication.identity'] = MockModule()
+sys.modules['gateway.authentication.normal'] = MockModule()
 sys.modules['management.services.configuration.tenant.settings'] = MockModule()
 sys.modules['utils.memory_utils'] = MockModule()
 sys.modules['management.services.model.names'] = MockModule()

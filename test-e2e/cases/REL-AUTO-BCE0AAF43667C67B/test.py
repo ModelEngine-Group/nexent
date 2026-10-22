@@ -17,7 +17,7 @@ from infrastructure.concurrency import northbound_thread_manager
 @pytest.mark.case_id('REL-AUTO-BCE0AAF43667C67B')
 @pytest.mark.stage('D5')
 async def test_northbound_lifespan_start_snapshot_and_graceful_shutdown(monkeypatch):
-    from gateway.api import application as northbound_base_app
+    from gateway import application as northbound_base_app
 
     assert northbound_thread_manager.state is ManagerState.CREATED
 

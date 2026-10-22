@@ -260,6 +260,7 @@ oauth_providers_mock.is_provider_enabled = _is_provider_enabled
 oauth_providers_mock.get_all_provider_definitions = _get_all_provider_definitions
 oauth_providers_mock.GITHUB_PROVIDER = GITHUB_DEF
 oauth_providers_mock.WECHAT_PROVIDER = WECHAT_DEF
+sys.modules["management.utils.oauth_providers"] = oauth_providers_mock
 for _provider_export in (
     "OAUTH_PROVIDER_REGISTRY", "get_provider_definition", "is_provider_enabled",
     "get_all_provider_definitions", "GITHUB_PROVIDER", "WECHAT_PROVIDER",
@@ -268,7 +269,7 @@ for _provider_export in (
 
 import management.services.permission.identity.oauth as oauth_service_module
 from management.services.permission.identity.oauth import create_or_update_oauth_account, ensure_user_tenant_exists, exchange_code_for_provider_token, find_supabase_user_id_by_email, get_authorize_url, get_enabled_providers, get_oauth_config, get_provider_user_info, get_supported_providers, list_linked_accounts, unlink_account, _resolve_field, _build_ssl_context
-from gateway.authentication.oauth import parse_state
+from gateway.authentication.normal import parse_state
 
 
 class TestParseState(unittest.TestCase):

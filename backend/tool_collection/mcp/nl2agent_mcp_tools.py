@@ -13,7 +13,7 @@ from nexent.core.agents.agent_model import ToolConfig
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
 
 from contracts.errors.exceptions import UnauthorizedError
-from gateway.authentication.identity import get_current_user_id
+from gateway.authentication.normal import get_current_user_id
 
 logger = logging.getLogger(__name__)
 

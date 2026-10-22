@@ -34,7 +34,7 @@ from management.services.repository.agent.listing import (
 )
 from management.services.monitor.audit import record_security_event
 from management.services.repository.agent.sync import sync_official_agents
-from gateway.authentication.identity import get_current_user_context, get_current_user_id
+from gateway.authentication.normal import get_current_user_context, get_current_user_id
 from contracts.errors.exceptions import AgentToolImportError
 
 logger = logging.getLogger(__name__)

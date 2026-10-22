@@ -1,24 +1,55 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Gateway-owned session, API-key and provider authentication adapters."""
+"""Session, internal-token and OAuth authentication at the gateway boundary.
+
+Gateway-owned session, API-key and provider authentication adapters.
+Authorization syntax shared by every inbound authentication policy.
+Explicit credential policies returning the same authenticated identity.
+"""
 
 import hashlib
 import hmac
 import logging
 import time
+import uuid
 from datetime import datetime, timedelta
+from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 import jwt
-from contracts.constants.identity import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID, DEFAULT_USER_ID
-from consts.const import DEBUG_JWT_EXPIRE_SECONDS, IS_SPEED_MODE, JWT_EXPIRY_SECONDS, SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET, SUPABASE_KEY, SUPABASE_URL
+from consts.const import (
+    DEBUG_JWT_EXPIRE_SECONDS,
+    IS_SPEED_MODE,
+    JWT_EXPIRY_SECONDS,
+    SERVICE_ROLE_KEY,
+    SUPABASE_JWT_SECRET,
+    SUPABASE_KEY,
+    SUPABASE_URL,
+)
+from contracts.authentication import (
+    AuthenticatedIdentity,
+    CredentialKind,
+    NorthboundContext,
+    PendingOAuthIdentity,
+)
+from contracts.constants.identity import (
+    ASSET_OWNER_ROLE,
+    ASSET_OWNER_TENANT_ID,
+    DEFAULT_TENANT_ID,
+    DEFAULT_USER_ID,
+    OAUTH_PENDING_PURPOSE,
+)
 from contracts.constants.localization import LANGUAGE
-from contracts.constants.identity import OAUTH_PENDING_PURPOSE
-from contracts.errors.exceptions import LimitExceededError, TokenExpiredError, UnauthorizedError
-from fastapi import Header, Request
-from gateway.authentication.credentials import extract_bearer_token
-from gateway.authentication.internal import verify_internal_runtime_jwt
+from contracts.errors.exceptions import (
+    LimitExceededError,
+    OAuthLinkError,
+    OAuthProviderError,
+    TokenExpiredError,
+    UnauthorizedError,
+)
+from fastapi import Depends, Header, HTTPException, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from infrastructure.security.internal_tokens import (
     INTERNAL_RUNTIME_JWT_AUDIENCE,
     INTERNAL_RUNTIME_JWT_ISSUER,
@@ -31,7 +62,6 @@ from infrastructure.security.signatures import (
     calculate_hmac_signature,
     validate_timestamp,
 )
-from management.db.identity.token import get_token_by_access_key
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.permission.identity.provider import (
     delete_supabase_user,
@@ -39,181 +69,14 @@ from management.services.permission.identity.provider import (
     get_supabase_client,
 )
 from management.utils.request_context import get_user_language
+from permissions.models import CurrentUser
 from supabase import Client, create_client
 from supabase.lib.client_options import SyncClientOptions
 
 # Module logger
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Shared test constants
-# ---------------------------------------------------------------------------
-
-# Fixed test secret used by generate_test_jwt and unit tests.
-MOCK_JWT_SECRET_KEY = "nexent-mock-jwt-secret"
-
-
-# ---------------------------------------------------------------------------
-# AK/SK (Access Key / Secret Key) authentication helpers
-# ---------------------------------------------------------------------------
-
-# Validity window in seconds for X-Timestamp header.
-
-
-def extract_aksk_headers(headers: Dict[str, str]) -> Tuple[str, str, str]:
-    """Extract AK/SK headers or raise TokenExpiredError when missing."""
-    access_key = headers.get("X-Access-Key") if headers else None
-    timestamp = headers.get("X-Timestamp") if headers else None
-    signature = headers.get("X-Signature") if headers else None
-
-    if not access_key or not timestamp or not signature:
-        raise TokenExpiredError("Missing AK/SK authentication headers")
-
-    return access_key, timestamp, signature
-
-
-def get_aksk_config(tenant_id: str) -> Tuple[str, str]:
-    """
-    Get (access_key, secret_key) configuration for a tenant.
-
-    This is intentionally a thin indirection so tests can monkeypatch it.
-    """
-    raise TokenExpiredError("AK/SK authentication is not configured")
-
-
-def verify_aksk_signature(
-    access_key: str, timestamp: str, signature: str, body: str, tenant_id: str = None
-) -> bool:
-    """Verify AK/SK signature; returns False instead of raising on mismatch."""
-    tenant = tenant_id or DEFAULT_TENANT_ID
-    try:
-        expected_access_key, secret_key = get_aksk_config(tenant)
-    except Exception:
-        return False
-
-    if access_key != expected_access_key:
-        return False
-
-    expected_sig = calculate_hmac_signature(secret_key, access_key, timestamp, body)
-    return hmac.compare_digest(expected_sig, signature)
-
-
-def validate_aksk_authentication(
-    headers: Dict[str, str], body: str, tenant_id: str = None
-) -> bool:
-    """
-    Validate AK/SK authentication.
-
-    Returns True when valid, otherwise raises domain exceptions.
-    """
-    from contracts.errors.exceptions import SignatureValidationError
-
-    try:
-        access_key, ts, sig = extract_aksk_headers(headers)
-
-        if not validate_timestamp(ts):
-            raise TokenExpiredError("Invalid or expired timestamp")
-
-        # Call with positional args so tests can monkeypatch with simple lambdas.
-        if tenant_id is None:
-            ok = verify_aksk_signature(access_key, ts, sig, body)
-        else:
-            ok = verify_aksk_signature(access_key, ts, sig, body, tenant_id)
-
-        if not ok:
-            raise SignatureValidationError("Invalid signature")
-
-        return True
-    except (UnauthorizedError, SignatureValidationError):
-        raise
-    except Exception as exc:
-        logger.exception("Unexpected error during AK/SK authentication")
-        raise TokenExpiredError("Authentication failed") from exc
-
-
-# ---------------------------------------------------------------------------
-# Bearer Token (API Key) authentication
-# ---------------------------------------------------------------------------
-
-
-def validate_bearer_token(authorization: Optional[str]) -> Tuple[bool, Optional[dict]]:
-    """
-    Validate Bearer token (API Key) from Authorization header.
-
-    Args:
-        authorization: Authorization header value (e.g., "Bearer nexent-xxxxx")
-
-    Returns:
-        Tuple of (is_valid, token_info_dict)
-        - is_valid: True if token exists and is active
-        - token_info: Token information dict if valid, None otherwise
-    """
-    if not authorization:
-        logger.warning("No authorization header provided")
-        return False, None
-
-    # Extract token from "Bearer <token>" format
-    try:
-        token = extract_bearer_token(authorization)
-    except UnauthorizedError:
-        return False, None
-
-    if not token:
-        logger.warning("Empty bearer token")
-        return False, None
-
-    # Look up token in database
-    try:
-        token_info = get_token_by_access_key(token)
-        if token_info and token_info.get("delete_flag") != "Y":
-            logger.debug(
-                f"Token validated successfully for user {token_info.get('user_id')}"
-            )
-            return True, token_info
-        else:
-            logger.warning("Invalid or inactive token")
-            return False, None
-    except Exception as e:
-        logger.error(f"Error validating bearer token: {str(e)}")
-        return False, None
-
-
-def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
-    """
-    Get user_id and tenant_id from access_key by querying user_token_info_t and user_tenant_t.
-
-    Args:
-        access_key: The access key (API Key) from the Authorization header.
-
-    Returns:
-        Dict containing user_id and tenant_id.
-
-    Raises:
-        UnauthorizedError: If the access key is not found or invalid.
-    """
-    if not access_key:
-        raise TokenExpiredError("Invalid access key")
-
-    # Query token from user_token_info_t
-    token_info = get_token_by_access_key(access_key)
-    if not token_info or token_info.get("delete_flag") == "Y":
-        raise TokenExpiredError("Invalid or inactive access key")
-
-    user_id = token_info.get("user_id")
-    if not user_id:
-        raise TokenExpiredError("No user associated with this access key")
-
-    # Query tenant from user_tenant_t
-    user_tenant_record = get_user_tenant_by_user_id(user_id)
-    if not user_tenant_record or not user_tenant_record.get("tenant_id"):
-        raise TokenExpiredError("No active tenant relationship for this access key")
-    tenant_id = user_tenant_record["tenant_id"]
-
-    return {
-        "user_id": user_id,
-        "tenant_id": tenant_id,
-        "token_id": token_info.get("token_id"),
-    }
+from contracts.constants.identity import MOCK_JWT_SECRET_KEY
 
 
 def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> str:
@@ -607,7 +470,147 @@ async def get_session_by_authorization(authorization):
 
 def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
     """Compatibility tuple over the shared gateway identity contract."""
-    from gateway.authentication.policies import authenticate_identity
-
     principal = authenticate_identity(authorization)
     return principal.user_id, principal.tenant_id
+
+
+def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
+    """Accept Bearer credentials and the established single-token legacy form."""
+    if not authorization:
+        return None
+    if not isinstance(authorization, str):
+        raise TokenExpiredError("Invalid authorization header")
+    parts = authorization.strip().split()
+    if not parts:
+        return None
+    if len(parts) == 1 and parts[0].lower() != "bearer":
+        return parts[0]
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1]
+    raise TokenExpiredError("Invalid authorization header")
+
+
+def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]:
+    """Verify a northbound runtime token and return its user and tenant."""
+    if not SUPABASE_JWT_SECRET:
+        raise TokenExpiredError("JWT verification is not configured")
+    if not authorization or not authorization.strip():
+        raise TokenExpiredError("No authorization header provided")
+
+    token = extract_bearer_token(authorization)
+    try:
+        claims = jwt.decode(
+            token,
+            SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            audience=INTERNAL_RUNTIME_JWT_AUDIENCE,
+            issuer=INTERNAL_RUNTIME_JWT_ISSUER,
+            options={"verify_exp": True},
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise TokenExpiredError("Internal runtime token has expired") from exc
+    except jwt.InvalidTokenError as exc:
+        raise TokenExpiredError("Invalid internal runtime token") from exc
+
+    if claims.get("scope") != INTERNAL_RUNTIME_JWT_SCOPE:
+        raise TokenExpiredError("Invalid internal runtime token scope")
+
+    user_id = claims.get("sub")
+    tenant_id = claims.get("tenant_id")
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise TokenExpiredError("Internal runtime token is missing user identity")
+    if not isinstance(tenant_id, str) or not tenant_id.strip():
+        raise TokenExpiredError("Internal runtime token is missing tenant identity")
+    return user_id, tenant_id
+
+
+def parse_pending_oauth_token(pending_token: str) -> PendingOAuthIdentity:
+    if not pending_token:
+        raise OAuthLinkError("OAuth account completion session is missing")
+    if not SUPABASE_JWT_SECRET:
+        raise OAuthProviderError("JWT verification is not configured")
+
+    try:
+        payload = jwt.decode(
+            pending_token,
+            SUPABASE_JWT_SECRET,
+            algorithms=["HS256"],
+            options={"verify_exp": True, "verify_aud": False},
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise OAuthLinkError("OAuth account completion session has expired") from exc
+    except jwt.InvalidTokenError as exc:
+        raise OAuthLinkError("OAuth account completion session is invalid") from exc
+
+    if payload.get("purpose") != OAUTH_PENDING_PURPOSE:
+        raise OAuthLinkError("OAuth account completion session is invalid")
+    if not payload.get("provider") or not payload.get("provider_user_id"):
+        raise OAuthLinkError("OAuth account completion session is incomplete")
+
+    return {
+        "provider": str(payload.get("provider", "")),
+        "provider_user_id": str(payload.get("provider_user_id", "")),
+        "provider_email": str(payload.get("provider_email", "")),
+        "provider_username": str(payload.get("provider_username", "")),
+    }
+
+
+def parse_state(state: str) -> Dict[str, str]:
+    parts = state.split(":", 2)
+    if len(parts) >= 2:
+        return {
+            "provider": parts[0],
+            "token": parts[1],
+            "link_user_id": parts[2] if len(parts) > 2 else "",
+        }
+    return {"provider": state, "token": "", "link_user_id": ""}
+
+
+def authenticate_identity(
+    authorization: Optional[str],
+    kind: CredentialKind = CredentialKind.SESSION,
+    request=None,
+    *,
+    require_role: bool = False,
+) -> AuthenticatedIdentity:
+    """Use the route's policy; never infer a policy from unverified claims."""
+
+    if kind == CredentialKind.SESSION:
+        if require_role:
+            user_id, tenant_id, role = get_current_user_context(authorization)
+        else:
+            user_id, tenant_id = _resolve_session_user(authorization)
+            role = "SPEED" if IS_SPEED_MODE else ""
+        return AuthenticatedIdentity(
+            user_id,
+            tenant_id,
+            role=role,
+            language=get_user_language(request),
+            kind=kind,
+        )
+    if kind == CredentialKind.API_KEY:
+        from gateway.authentication.northbound import authenticate_api_key
+
+        return authenticate_api_key(authorization, request)
+    if kind == CredentialKind.INTERNAL:
+        user_id, tenant_id = verify_internal_runtime_jwt(authorization)
+        return AuthenticatedIdentity(user_id, tenant_id, kind=kind)
+    raise ValueError("Unsupported authentication policy")
+
+
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+def authenticate(
+    authorization: Optional[str] = Header(None),
+    _credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+) -> CurrentUser:
+    """Resolve the bearer token into a CurrentUser."""
+    header_token = authorization
+    if not header_token and _credentials:
+        header_token = _credentials.credentials
+    if not header_token and not IS_SPEED_MODE:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    principal = authenticate_identity(header_token, require_role=True)
+    return CurrentUser(
+        user_id=principal.user_id, tenant_id=principal.tenant_id, role=principal.role
+    )

@@ -222,7 +222,7 @@ def tmp_path():
 def install_supabase_mock():
     """Install a structured supabase package mock into ``sys.modules``.
 
-    ``gateway.authentication.identity`` imports ``from supabase.lib.client_options
+    ``gateway.authentication.normal`` imports ``from supabase.lib.client_options
     import SyncClientOptions`` at module load time. Test files that simply
     replace ``sys.modules['supabase']`` with a bare ``MagicMock`` cause that
     import to fail (the mock has no ``.lib.client_options`` attribute),
@@ -266,7 +266,7 @@ def _supabase_mock():
     Module-level ``sys.modules['supabase']`` overrides in test files
     (e.g. ``sys.modules['supabase'] = MagicMock()``) strip out the
     structured attributes (``lib``, ``lib.client_options``,
-    ``SyncClientOptions``) that ``gateway.authentication.identity`` resolves at
+    ``SyncClientOptions``) that ``gateway.authentication.normal`` resolves at
     import time. The module-level install below covers collection, but
     any test that re-mocks ``supabase`` after collection needs the
     structured attributes re-installed before its test body runs.
@@ -276,7 +276,7 @@ def _supabase_mock():
 
 
 # Install a sane supabase mock at collection time so test modules that
-# import ``gateway.authentication.identity`` (directly or transitively) succeed
+# import ``gateway.authentication.normal`` (directly or transitively) succeed
 # during pytest's collection phase, before any test fixture has had a
 # chance to run. The ``_supabase_mock`` autouse fixture above re-runs the
 # install before each test body in case individual test modules

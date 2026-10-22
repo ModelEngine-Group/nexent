@@ -15,7 +15,7 @@ from management.services.knowledge_base.providers.datamate import (
     fetch_datamate_knowledge_base_file_list,
     check_datamate_connection,
 )
-from gateway.authentication.identity import get_current_user_id
+from gateway.authentication.normal import get_current_user_id
 from contracts.errors.exceptions import DataMateConnectionError, TokenExpiredError
 
 router = APIRouter(prefix="/datamate")

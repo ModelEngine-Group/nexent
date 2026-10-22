@@ -172,7 +172,7 @@ utils_mock.context_utils.build_context_inputs = MagicMock(return_value=[])
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.identity'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
 sys.modules['management.services.agent.context'] = utils_mock.context_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even

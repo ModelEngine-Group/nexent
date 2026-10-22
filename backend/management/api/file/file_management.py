@@ -31,7 +31,7 @@ from management.services.file.service import (
     upload_files_impl,
 )
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
-from gateway.authentication.identity import get_current_user_id
+from gateway.authentication.normal import get_current_user_id
 from management.services.knowledge_base.ingestion import trigger_data_process
 from infrastructure.ingestion.errors import classify_ingestion_exception
 

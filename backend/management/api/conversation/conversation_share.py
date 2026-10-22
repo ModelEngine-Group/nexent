@@ -18,7 +18,7 @@ from management.services.conversation.sharing import (
     get_share_snapshot_service,
 )
 from management.services.file.service import get_file_stream_impl, get_preview_stream, resolve_preview_file
-from gateway.authentication.identity import get_current_user_id
+from gateway.authentication.normal import get_current_user_id
 
 from management.utils.file_http import build_content_disposition_header
 

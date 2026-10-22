@@ -130,9 +130,9 @@ sys.modules["management.services.memory.providers.service"] = ext_provider_svc_m
 sys.modules["management.services.memory.providers.configuration"] = config_svc_mod
 sys.modules["management.services.memory.providers.plugins"] = plugin_loader_mod
 
-auth_utils_mod = types.ModuleType("gateway.authentication.identity")
+auth_utils_mod = types.ModuleType("gateway.authentication.normal")
 auth_utils_mod.get_current_user_id = MagicMock(return_value=("u1", "t1"))
-sys.modules["gateway.authentication.identity"] = auth_utils_mod
+sys.modules["gateway.authentication.normal"] = auth_utils_mod
 
 from management.api.memory import memory_provider as memory_provider_app
 

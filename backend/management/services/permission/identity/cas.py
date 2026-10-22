@@ -23,7 +23,7 @@ from management.db.identity.user_tenant import get_user_tenant_by_user_id, upser
 from management.services.permission.identity.oauth import create_or_update_oauth_account, find_supabase_user_id_by_email
 from management.services.skill.transfer import init_skill_list_for_tenant
 from management.services.tool.configuration import init_tool_list_for_tenant
-from gateway.authentication.identity import calculate_expires_at, generate_session_jwt, get_supabase_admin_client
+from gateway.authentication.normal import calculate_expires_at, generate_session_jwt, get_supabase_admin_client
 
 logger = logging.getLogger(__name__)
 

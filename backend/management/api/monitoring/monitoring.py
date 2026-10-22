@@ -19,7 +19,7 @@ from consts.const import ENABLE_TELEMETRY, MONITORING_DASHBOARD_ALLOWED_ROLES, M
 from contracts.conversation import ConversationResponse
 from contracts.errors.exceptions import TokenExpiredError
 from management.db.client import get_monitoring_db_session
-from gateway.authentication.identity import get_current_user_id
+from gateway.authentication.normal import get_current_user_id
 
 logger = logging.getLogger("monitoring_app")
 

@@ -39,7 +39,7 @@ utils_mock.str_utils.convert_list_to_string = MagicMock(
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.identity'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
 sys.modules['management.utils.serialization'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even

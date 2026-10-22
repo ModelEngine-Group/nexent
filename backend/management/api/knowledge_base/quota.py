@@ -17,12 +17,12 @@ from fastapi.responses import JSONResponse
 from contracts.constants.identity import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import AppException, PlatformQuotaConflictError, TokenExpiredError
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from gateway.authentication.dependencies import authenticate
+from gateway.authentication.normal import authenticate
 from permissions.depends import require
 from permissions.models import CurrentUser
 from permissions.tenant_scope import resolve_personal_target_tenant
 from management.services.knowledge_base.quota import QuotaService
-from gateway.authentication.identity import get_current_user_id
+from gateway.authentication.normal import get_current_user_id
 from infrastructure.formatting import bytes_to_readable
 
 logger = logging.getLogger(__name__)

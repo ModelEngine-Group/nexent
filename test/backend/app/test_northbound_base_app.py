@@ -47,6 +47,17 @@ class NorthboundContext:
 # services.northbound_service - provides only NorthboundContext
 northbound_service_module = types.ModuleType("services.northbound_service")
 northbound_service_module.NorthboundContext = NorthboundContext
+northbound_service_module.get_conversation_history = MagicMock()
+northbound_service_module.list_conversations = MagicMock()
+northbound_service_module.start_streaming_chat = MagicMock()
+northbound_service_module.stop_chat = MagicMock()
+northbound_service_module.get_agent_info_list = MagicMock()
+northbound_service_module.get_agent_info_by_name_for_northbound = MagicMock()
+northbound_service_module.get_agent_knowledge_bases_for_northbound = MagicMock()
+northbound_service_module.generate_conversation_title = MagicMock()
+northbound_service_module.list_configured_models = MagicMock()
+northbound_service_module.update_conversation_title = MagicMock()
+northbound_service_module.upload_files_for_northbound = MagicMock()
 sys.modules['services.northbound_service'] = northbound_service_module
 
 # management.services.agent.a2a.service - stub with a2a_server_service object and exceptions
@@ -221,14 +232,14 @@ sys.modules["management.services.agent.run_state"] = runtime_state_module
 # ---------------------------------------------------------------------------
 # BLOCK 3: Mock remaining dependencies referenced by northbound_app
 # ---------------------------------------------------------------------------
-# Mock gateway.api.northbound.routes - provides the _get_northbound_context helper
+# Mock gateway.api.northbound - provides the _get_northbound_context helper
 northbound_app_router = APIRouter()
 
 @northbound_app_router.get("/dummy")
 async def _dummy_route():
     return {"msg": "ok"}
 
-northbound_app_module = types.ModuleType("gateway.api.northbound.routes")
+northbound_app_module = types.ModuleType("gateway.api.northbound")
 northbound_app_module.router = northbound_app_router
 
 # _get_northbound_context helper used by a2a endpoints
@@ -243,7 +254,8 @@ async def _get_northbound_context_fake(request):
     )
 
 northbound_app_module._get_northbound_context = _get_northbound_context_fake
-sys.modules['gateway.api.northbound.routes'] = northbound_app_module
+sys.modules['gateway.authentication.northbound'] = northbound_app_module
+northbound_app_module.get_northbound_context = _get_northbound_context_fake
 
 # Mock management.api.file.file_management - used by northbound_knowledge_app
 file_management_app_module = types.ModuleType("management.api.file.file_management")
@@ -319,12 +331,12 @@ database_a2a_module.PROTOCOL_HTTP_JSON = "http+json"
 database_a2a_module.PROTOCOL_JSONRPC = "jsonrpc"
 sys.modules['management.db.a2a.repository'] = database_a2a_module
 
-# Mock gateway.authentication.identity (referenced by northbound_app._get_northbound_context)
-auth_utils_module = types.ModuleType("gateway.authentication.identity")
+# Mock gateway.authentication.normal (referenced by northbound_app._get_northbound_context)
+auth_utils_module = types.ModuleType("gateway.authentication.normal")
 auth_utils_module.validate_bearer_token = MagicMock(return_value=(True, {"user_id": "test", "tenant_id": "test"}))
 auth_utils_module.generate_session_jwt = MagicMock(return_value="jwt-token")
 auth_utils_module.get_current_user_id = MagicMock(return_value=("test", "test"))
-sys.modules['gateway.authentication.identity'] = auth_utils_module
+sys.modules['gateway.authentication.normal'] = auth_utils_module
 
 # Mock management.services.knowledge_base.ingestion to avoid database/storage imports
 file_management_utils_module = types.ModuleType("management.services.knowledge_base.ingestion")
@@ -343,9 +355,16 @@ async def _async_iter(items):
 # ---------------------------------------------------------------------------
 # SAFE TO IMPORT THE TARGET MODULE
 # ---------------------------------------------------------------------------
-from gateway.api import application as northbound_base_app_module
+# Other business handlers share the router but are outside this test boundary.
+sys.modules["management.db.identity.user_tenant"] = MagicMock()
+sys.modules["management.services.permission.api_keys"] = MagicMock()
+sys.modules["management.services.monitor.audit"] = MagicMock()
+auth_utils_module.get_user_language = lambda request: "en"
+sys.modules["management.services.knowledge_base.task_state"] = MagicMock()
+
+from gateway import application as northbound_base_app_module
 from contracts.a2a import GatewayA2AServerSettings as A2AServerSettings
-from gateway.api.application import northbound_app as app
+from gateway.application import northbound_app as app
 from fastapi import HTTPException  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -417,7 +436,9 @@ class TestNorthboundBaseApp(unittest.TestCase):
     def test_router_inclusion(self):
         """The main northbound router should be included."""
         paths = app.openapi()["paths"]
-        self.assertIn("/dummy", paths)
+        self.assertIn("/nb/v1/health", paths)
+        self.assertIn("/nb/v1/knowledge/indices", paths)
+        self.assertIn("/nb/a2a/{endpoint_id}/v1", paths)
 
     def test_thread_capacity_is_process_local_and_hidden_from_openapi(self):
         response = self.client.get("/internal/thread-capacity")
@@ -460,11 +481,11 @@ class TestNorthboundBaseApp(unittest.TestCase):
     # -------------------------------------------------------------------
     # Basic sanity endpoint
     # -------------------------------------------------------------------
-    def test_dummy_endpoint_success(self):
-        """Dummy endpoint defined on the northbound_app router stub should return 200."""
-        response = self.client.get("/dummy")
+    def test_northbound_health_endpoint_success(self):
+        """The assembled gateway should expose the real northbound health endpoint."""
+        response = self.client.get("/nb/v1/health")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"msg": "ok"})
+        self.assertEqual(response.json(), {"status": "healthy", "service": "northbound-api"})
 
     # -------------------------------------------------------------------
     # A2A endpoint tests

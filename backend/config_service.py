@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Executable Management launcher retained for deployment command compatibility."""
+
 import logging
 import logging.config
 import warnings

@@ -25,7 +25,7 @@ sys.path.insert(0, backend_dir)
 # Otherwise its MagicMock remains in sys.modules when sync service tests collect.
 importlib.import_module("management.services.repository.agent.sync")
 sys.modules.setdefault("management.services.repository.agent.listing", MagicMock())
-sys.modules.setdefault("gateway.authentication.identity", MagicMock())
+sys.modules.setdefault("gateway.authentication.normal", MagicMock())
 
 consts_model = types.ModuleType("contracts.agent")
 

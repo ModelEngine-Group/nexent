@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 
 from contracts.authentication import CredentialKind
 from contracts.errors.exceptions import TokenExpiredError
-from gateway.authentication import identity, internal
-from gateway.authentication.credentials import extract_bearer_token
-from gateway.authentication.policies import authenticate_identity
+from gateway.authentication import normal as identity, normal as internal, northbound
+from gateway.authentication.normal import extract_bearer_token
+from gateway.authentication.normal import authenticate_identity
 
 
 @pytest.mark.parametrize(
@@ -108,7 +108,7 @@ def test_revoked_cas_session_is_rejected(session_policy, monkeypatch):
 
 def test_api_key_policy_uses_database_identity(monkeypatch):
     monkeypatch.setattr(
-        identity,
+        northbound,
         "get_token_by_access_key",
         lambda key: (
             {
@@ -121,7 +121,7 @@ def test_api_key_policy_uses_database_identity(monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        identity, "get_user_tenant_by_user_id", lambda _: {"tenant_id": "key-tenant"}
+        northbound, "get_user_tenant_by_user_id", lambda _: {"tenant_id": "key-tenant"}
     )
     principal = authenticate_identity("Bearer key", CredentialKind.API_KEY)
     assert (principal.user_id, principal.tenant_id, principal.token_id) == (
@@ -135,7 +135,7 @@ def test_api_key_policy_uses_database_identity(monkeypatch):
 
 def test_api_key_policy_rejects_inactive_keys(monkeypatch):
     monkeypatch.setattr(
-        identity, "get_token_by_access_key", lambda _: {"delete_flag": "Y"}
+        northbound, "get_token_by_access_key", lambda _: {"delete_flag": "Y"}
     )
     with pytest.raises(TokenExpiredError):
         authenticate_identity("Bearer revoked", CredentialKind.API_KEY)
@@ -148,10 +148,10 @@ def test_session_token_cannot_be_used_for_internal_runtime(session_policy, monke
 
 
 def test_gateway_authentication_maps_an_invalid_api_key_to_401(monkeypatch):
-    from gateway.authentication.dependencies import get_northbound_context
+    from gateway.authentication.northbound import get_northbound_context
     from fastapi import Depends
 
-    monkeypatch.setattr(identity, "get_token_by_access_key", lambda _: None)
+    monkeypatch.setattr(northbound, "get_token_by_access_key", lambda _: None)
     app = FastAPI()
 
     @app.get("/protected")
@@ -237,7 +237,7 @@ def test_pending_account_token_cannot_be_used_as_a_browser_session(session_polic
 def test_pending_oauth_identity_requires_signed_purpose_and_provider(
     session_policy, monkeypatch
 ):
-    from gateway.authentication import oauth
+    from gateway.authentication import normal as oauth
     from contracts.constants.identity import OAUTH_PENDING_PURPOSE
     from contracts.errors.exceptions import OAuthLinkError
 

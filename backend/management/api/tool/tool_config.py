@@ -27,7 +27,7 @@ from management.services.tool.configuration import (
 from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingError
 from management.db.identity.user_tenant import get_user_email_map
 from management.services.monitor.audit import record_security_event
-from gateway.authentication.identity import get_current_user_id
+from gateway.authentication.normal import get_current_user_id
 
 router = APIRouter(prefix="/tool")
 logger = logging.getLogger("tool_config_app")

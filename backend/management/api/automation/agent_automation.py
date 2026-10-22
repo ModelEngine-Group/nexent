@@ -10,7 +10,7 @@ from contracts.errors.exceptions import UnauthorizedError
 from contracts.errors.exceptions import AgentAutomationError, AutomationConversationAlreadyBoundError, AutomationNotFoundError
 from management.services.automation.service import agent_automation_facade
 from contracts.automation import AutomationProposalConfirmRequest, AutomationProposalCreateRequest, AutomationProposalPatchRequest, AutomationResponse, AutomationTaskPatchRequest
-from gateway.authentication.identity import get_current_user_id
+from gateway.authentication.normal import get_current_user_id
 
 logger = logging.getLogger("agent_automation_app")
 
