@@ -38,6 +38,9 @@ feature:
       conversation without document navigation or runtime replacement. New and
       unsaved conversations remove stale conversation parameters; unrelated query
       parameters and hashes remain. Reload restores the selected saved conversation.
+      Each Workbench saved-history activation or reload shares one detail GET across
+      restoration consumers; repeated selection of the active history issues none.
+      Re-entry obtains fresh server data; version conflicts force a fresh read.
   - rule_id: CHAT-SIDEBAR-RULE-006
     description: Assistant finalization locks its owned live conversation before
       the message. Concurrent single or batch deletion follows conversation-first
