@@ -216,6 +216,7 @@ def register_openapi_service(
     headers_template: Dict[str, str],
     mcp_server: Optional[FastMCP] = None,
     tenant_id: Optional[str] = None,
+    ssl_verify: bool = True,
 ) -> bool:
     """
     Register an OpenAPI service using FastMCP.from_openapi().
@@ -252,7 +253,12 @@ def register_openapi_service(
             openapi_spec["servers"] = [{"url": server_url}]
 
         # Create HTTP client for the underlying REST API
-        client = httpx.AsyncClient(base_url=server_url, timeout=120.0, headers=headers_template)
+        client = httpx.AsyncClient(
+            base_url=server_url,
+            timeout=120.0,
+            headers=headers_template,
+            verify=ssl_verify,
+        )
 
         # Create FastMCP instance from OpenAPI spec
         service_mcp = FastMCP.from_openapi(
@@ -357,6 +363,7 @@ def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
             openapi_json = service.get("openapi_json")
             server_url = service.get("server_url")
             headers_template = service.get("headers_template")
+            ssl_verify = service.get("ssl_verify", True)
 
             if not openapi_json:
                 logger.warning(f"Service '{service_name}' has no OpenAPI JSON, skipping")
@@ -368,6 +375,7 @@ def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
                 openapi_json,
                 server_url,
                 headers_template,
+                ssl_verify=ssl_verify,
                 mcp_server=tenant_mcp,
                 tenant_id=tenant_id,
             ):

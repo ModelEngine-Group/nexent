@@ -620,9 +620,35 @@ class TestRegisterOpenapiService:
         mock_async_client.assert_called_once_with(
             base_url="https://api.example.com",
             timeout=120.0,
-            headers=headers_template
+            headers=headers_template,
+            verify=True
         )
         mock_fastmcp.from_openapi.assert_called_once()
+
+    @patch.object(mcp_service, 'FastMCP')
+    @patch.object(mcp_service.httpx, 'AsyncClient')
+    def test_register_service_can_disable_ssl_verification(
+        self, mock_async_client, mock_fastmcp
+    ):
+        """Test registration passes the per-service SSL setting to httpx."""
+        mock_async_client.return_value = MagicMock()
+        mock_fastmcp.from_openapi.return_value = MagicMock()
+
+        result = mcp_service.register_openapi_service(
+            "self_signed_service",
+            {"openapi": "3.0.0", "info": {}, "paths": {}},
+            "https://internal.example.com",
+            self._headers_template(),
+            ssl_verify=False,
+        )
+
+        assert result is True
+        mock_async_client.assert_called_once_with(
+            base_url="https://internal.example.com",
+            timeout=120.0,
+            headers=self._headers_template(),
+            verify=False,
+        )
 
     @patch.object(mcp_service, 'FastMCP')
     def test_register_service_from_openapi_failure(self, mock_fastmcp):
@@ -832,6 +858,7 @@ class TestRefreshOpenapiServicesByTenant:
                 "Authorization": "Bearer {{token}}",
                 "X-Tenant-ID": "{{tenant_id}}"
             },
+            ssl_verify=True,
             mcp_server=mcp_service._tenant_mcp_servers["tenant1"],
             tenant_id="tenant1",
         )
@@ -980,6 +1007,7 @@ class TestRefreshSingleOpenapiService:
             {"openapi": "3.0.0", "info": {}, "paths": {}},
             "https://api.example.com",
             self._headers_template(),
+            ssl_verify=True,
             mcp_server=mcp_service._tenant_mcp_servers["tenant1"],
             tenant_id="tenant1",
         )
