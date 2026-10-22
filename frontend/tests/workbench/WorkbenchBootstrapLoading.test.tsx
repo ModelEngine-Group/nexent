@@ -16,7 +16,11 @@ vi.mock("@/features/workbench/api", () => ({
   fetchWorkbenchBootstrap: mocks.bootstrap,
 }));
 vi.mock("@/services/conversationService", () => ({ conversationService: {} }));
-vi.mock("@tanstack/react-query", () => ({ useQueryClient: () => ({}) }));
+vi.mock("@tanstack/react-query", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tanstack/react-query")>();
+  const client = new actual.QueryClient();
+  return { ...actual, useQueryClient: () => client };
+});
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({ user: undefined }),
 }));

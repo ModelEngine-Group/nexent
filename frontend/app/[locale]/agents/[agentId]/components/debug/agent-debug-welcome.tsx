@@ -77,11 +77,12 @@ export function AgentDebugSuggestions({
   onSelect,
   disabled,
 }: AgentDebugSuggestionsProps) {
-  if (!questions?.length) return null;
+  const visibleQuestions = questions?.filter((question) => question.trim());
+  if (!visibleQuestions?.length) return null;
   return (
     <section data-testid="agent-debug-suggestions">
       <TextSuggestion
-        suggestions={questions.map((question, index) => ({
+        suggestions={visibleQuestions.map((question, index) => ({
           id: String(index),
           title: question,
           prompt: question,

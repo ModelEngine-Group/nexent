@@ -419,25 +419,29 @@ export default function KnowledgeBaseConfig({
 
   if (highFidelity) {
     const selectedKnowledgeBases = state?.selectedKnowledgeBases ?? [];
+    const isAidpSearch = state?.profile.selectorType === "aidp_search";
     const content = (
       <div className="flex flex-col gap-2">
         <div className="grid grid-cols-1 gap-4 @min-[640px]/agent-config:grid-cols-2">
           {selectedKnowledgeBases.map((selectedKnowledgeBase) => {
             const knowledgeBase = selectedKnowledgeBase.knowledgeBase;
-            const metadata = knowledgeBase
-              ? [
-                  knowledgeBase.documentCount !== undefined
-                    ? t("agent.knowledgeBase.card.documents", {
-                        count: knowledgeBase.documentCount,
-                      })
-                    : undefined,
-                  knowledgeBase.chunkCount !== undefined
-                    ? t("agent.knowledgeBase.card.chunks", {
-                        count: knowledgeBase.chunkCount,
-                      })
-                    : undefined,
-                ].filter((value): value is string => Boolean(value))
-              : [];
+            // The AIDP catalog API returns no counts, so any value here is a
+            // placeholder; do not present it as real file/chunk totals.
+            const metadata =
+              knowledgeBase && !isAidpSearch
+                ? [
+                    knowledgeBase.documentCount !== undefined
+                      ? t("agent.knowledgeBase.card.documents", {
+                          count: knowledgeBase.documentCount,
+                        })
+                      : undefined,
+                    knowledgeBase.chunkCount !== undefined
+                      ? t("agent.knowledgeBase.card.chunks", {
+                          count: knowledgeBase.chunkCount,
+                        })
+                      : undefined,
+                  ].filter((value): value is string => Boolean(value))
+                : [];
 
             return (
               <div

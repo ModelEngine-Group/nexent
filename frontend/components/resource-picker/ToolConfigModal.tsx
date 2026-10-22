@@ -2,6 +2,8 @@
 
 "use client";
 
+import { useTranslation } from "react-i18next";
+
 import { useEffect, useState } from "react";
 
 import {
@@ -12,11 +14,6 @@ import {
   TestResultArea,
   TestRunLink,
 } from "./ParamDialog";
-
-const DESCRIPTION =
-  "在 Microsoft SQL Server 数据库上执行 SQL 查询。该工具为 AI 智能体提供标准化的 SQL Server 数据库操作接口，支持参数绑定和安全控制，安全限制：禁止...";
-
-const PLACEHOLDER = "请输入SQL Sever database or domain";
 
 const CONFIG_FIELDS = [
   { key: "host", label: "host", required: true },
@@ -39,7 +36,7 @@ export interface ToolConfigModalProps {
   open: boolean;
   onClose: () => void;
   onConfirm?: (values: Record<string, string>) => void;
-  /** "config" = 参数配置态, "debug" = 调试态. */
+  /** Configuration and debugging modes share the same parameter values. */
   mode?: "config" | "debug";
   toolName?: string;
 }
@@ -51,6 +48,7 @@ export function ToolConfigModal({
   mode = "config",
   toolName = "mssql_database",
 }: ToolConfigModalProps) {
+  const { t } = useTranslation();
   const [paramsExpanded, setParamsExpanded] = useState(mode === "config");
   const [testExpanded, setTestExpanded] = useState(mode === "debug");
   const [values, setValues] = useState<Record<string, string>>({});
@@ -69,7 +67,7 @@ export function ToolConfigModal({
       {TEST_FIELDS.map((field) => (
         <ParamField key={field.key} label={field.label} info size="md">
           <ParamInput
-            placeholder={PLACEHOLDER}
+            placeholder={t("ui.localization.sqlServerPlaceholder")}
             value={values[field.key] ?? ""}
             onChange={(e) => setValue(field.key, e.target.value)}
           />
@@ -83,20 +81,20 @@ export function ToolConfigModal({
   return (
     <ParamDialog
       variant="tool"
-      description={DESCRIPTION}
+      description={t("ui.localization.sqlServerDescription")}
       open={open}
-      title={`${toolName} 配置`}
+      title={t("ui.localization.resourceConfiguration", { name: toolName })}
       onClose={onClose}
       onConfirm={() => onConfirm?.(values)}
     >
       <p className="text-[12px] leading-[18px] text-[#191919]/40">
-        {DESCRIPTION}
+        {t("ui.localization.sqlServerDescription")}
       </p>
 
       {mode === "config" ? (
         <>
           <SectionHeader
-            title="参数配置"
+            title={t("ui.localization.parameterConfiguration")}
             expanded={paramsExpanded}
             onToggle={() => setParamsExpanded((v) => !v)}
           />
@@ -110,14 +108,14 @@ export function ToolConfigModal({
                 size="md"
               >
                 <ParamInput
-                  placeholder={PLACEHOLDER}
+                  placeholder={t("ui.localization.sqlServerPlaceholder")}
                   value={values[field.key] ?? ""}
                   onChange={(e) => setValue(field.key, e.target.value)}
                 />
               </ParamField>
             ))}
           <SectionHeader
-            title="工具测试"
+            title={t("ui.localization.toolTest")}
             expanded={testExpanded}
             onToggle={() => setTestExpanded((v) => !v)}
           />
@@ -125,9 +123,9 @@ export function ToolConfigModal({
         </>
       ) : (
         <>
-          <ParamInput placeholder={PLACEHOLDER} />
+          <ParamInput placeholder={t("ui.localization.sqlServerPlaceholder")} />
           <SectionHeader
-            title="工具测试"
+            title={t("ui.localization.toolTest")}
             expanded={testExpanded}
             onToggle={() => setTestExpanded((v) => !v)}
           />

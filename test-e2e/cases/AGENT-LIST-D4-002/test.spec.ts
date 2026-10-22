@@ -184,6 +184,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   const fixture = await mockList(page);
   await page.goto(`${baseUrl}/zh/agents`);
   await expect(page.locator("article")).toHaveCount(8);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("智能体配置");
   const header = page.locator("header");
   const headerBox = await bounds(header);
   pixel(headerBox.width, 1808, "header width");
@@ -381,9 +382,13 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   const statusBox = await bounds(status);
   pixel(statusBox.width, 48, "status width");
   pixel(statusBox.height, 18, "status height");
-  pixel(statusBox.x - bodyBox.x, 197, "left-aligned status position");
-  const dateBox = await bounds(footer.locator(":scope > span").first());
-  pixel(statusBox.x - dateBox.x - dateBox.width, 78, "date/status gap");
+  const dateBox = await bounds(first.getByTestId("agent-card-date"));
+  pixel(dateBox.x - footerBox.x, 0, "date left alignment");
+  pixel(
+    footerBox.x + footerBox.width - statusBox.x - statusBox.width,
+    0,
+    "status right alignment",
+  );
   await expect(status).toHaveText("已上线");
   const dot = first.getByTestId("agent-card-status-dot");
   const dotBox = await bounds(dot);
@@ -414,36 +419,75 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
     "more glyph right",
   );
   await expect(moreGlyph).toHaveCSS("color", "rgb(25, 25, 25)");
+  await expect(page.getByTestId("agent-list-tabs")).toHaveCount(0);
+  await expect(page.getByTestId("agent-guide-divider")).toBeVisible();
+
+  await first.hover();
+  await expect(status).toBeVisible();
   await expect(
-    page.getByRole("button", {
-      name: label("zh", "agentConfig.list.imported"),
+    first.getByRole("button", { name: "配置", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    first.getByRole("button", { name: "发布", exact: true }),
+  ).toHaveCount(0);
+  await more.click();
+  await expect(page.getByRole("menu")).toBeVisible();
+  const configure = page.getByRole("menuitem", {
+    name: label("zh", "agentConfig.list.configure"),
+    exact: true,
+  });
+  const publish = page.getByRole("menuitem", {
+    name: label("zh", "agentConfig.list.publish"),
+    exact: true,
+  });
+  await expect(configure).toBeVisible();
+  await expect(publish).toBeEnabled();
+  await configure.click();
+  await expect(page).toHaveURL(/\/zh\/agents\/1$/);
+  noPresentationMutation(fixture);
+  await page.goto(`${baseUrl}/zh/agents`);
+  await expect(cards).toHaveCount(8);
+  await more.click();
+  await expect(
+    page.getByRole("menuitem", {
+      name: label("zh", "agentConfig.list.publish"),
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("menuitem", {
+      name: label("zh", "agentConfig.list.publish"),
+      exact: true,
+    })
+    .click();
+  await expect(page).toHaveURL(/\/zh\/agents\/1\?publish=1$/);
+  noPresentationMutation(fixture);
+  await page.goto(`${baseUrl}/zh/agents`);
+  await expect(cards).toHaveCount(8);
+  await header.getByRole("heading").click();
+  await more.focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("menuitem", {
+      name: label("zh", "agentConfig.list.configure"),
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await cards.nth(1).hover();
+  await cards
+    .nth(1)
+    .getByRole("button", {
+      name: label("zh", "agentRepository.mine.menu.more"),
+    })
+    .click();
+  await expect(
+    page.getByRole("menuitem", {
+      name: label("zh", "agentConfig.list.publish"),
       exact: true,
     }),
   ).toBeDisabled();
-  await expect(page.getByTestId("agent-guide-divider")).toHaveCount(0);
-
-  await first.hover();
-  await expect(
-    first.getByRole("button", { name: "配置", exact: true }),
-  ).toBeVisible();
-  await expect(
-    first.getByRole("button", { name: "发布", exact: true }),
-  ).toBeVisible();
-  await expect(status).toBeHidden();
-  await more.click();
-  await expect(page.getByRole("menu")).toBeVisible();
-  await header.getByRole("heading").click();
-  await body.focus();
-  await expect(
-    first.getByRole("button", { name: "配置", exact: true }),
-  ).toBeVisible();
-  await expect(
-    first.getByRole("button", { name: "发布", exact: true }),
-  ).toBeVisible();
-  await cards.nth(1).hover();
-  await expect(
-    cards.nth(1).getByRole("button", { name: "发布", exact: true }),
-  ).toBeDisabled();
+  await page.keyboard.press("Escape");
 
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -452,10 +496,12 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   await expect
     .poll(async () => (await guide.boundingBox())?.height ?? 0)
     .toBe(0);
+  await expect(page.getByTestId("agent-guide-divider")).toHaveCount(0);
   await expect(cards).toHaveCount(8);
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect.poll(async () => (await guide.boundingBox())?.height).toBe(378);
+  await expect(page.getByTestId("agent-guide-divider")).toBeVisible();
 
   const search = page.getByPlaceholder(
     label("zh", "agentSelector.searchPlaceholder"),
@@ -541,7 +587,7 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
     378,
     "restored populated guide height",
   );
-  await expect(page.getByTestId("agent-guide-divider")).toHaveCount(0);
+  await expect(page.getByTestId("agent-guide-divider")).toBeVisible();
   await page.setViewportSize({ width: 768, height: 900 });
   const narrowCreate = page.getByRole("button", {
     name: label("zh", "agentConfig.list.new"),
@@ -565,12 +611,6 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
   const narrowFirstCard = page.locator("article").first();
   await narrowFirstCard.scrollIntoViewIfNeeded();
   await narrowFirstCard.hover();
-  const narrowConfigure = narrowFirstCard.getByRole("button", {
-    name: label("zh", "agentConfig.list.configure"),
-    exact: true,
-  });
-  await expect(narrowConfigure).toBeInViewport();
-  await narrowConfigure.click({ trial: true });
   const narrowMore = narrowFirstCard.getByRole("button", {
     name: label("zh", "agentRepository.mine.menu.more"),
     exact: true,
@@ -578,6 +618,13 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
   await expect(narrowMore).toBeInViewport();
   await narrowMore.click();
   await expect(page.getByRole("menu")).toBeVisible();
+  const narrowConfigure = page.getByRole("menuitem", {
+    name: label("zh", "agentConfig.list.configure"),
+    exact: true,
+  });
+  await expect(narrowConfigure).toBeVisible();
+  await expect(narrowConfigure).toBeInViewport();
+  await narrowConfigure.click({ trial: true });
   await page.keyboard.press("Escape");
   const narrowLastBody = page
     .locator("article")
@@ -617,9 +664,20 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
     }),
   ).toBeVisible();
   await cards.first().hover();
-  await expect(
-    cards.first().getByRole("button", { name: "配置", exact: true }),
-  ).toBeVisible();
+  await cards
+    .first()
+    .getByRole("button", {
+      name: label("zh", "agentRepository.mine.menu.more"),
+      exact: true,
+    })
+    .click();
+  const narrowCardConfigure = page.getByRole("menuitem", {
+    name: label("zh", "agentConfig.list.configure"),
+    exact: true,
+  });
+  await expect(narrowCardConfigure).toBeVisible();
+  await expect(narrowCardConfigure).toBeInViewport();
+  await page.keyboard.press("Escape");
   noPresentationMutation(fixture);
   await narrowCreate.click();
   await expect(
@@ -643,6 +701,9 @@ scenario("[AGENT-LIST-D4-002] English step growth and 1280px hover/focus actions
   const fixture = await mockList(page, rows);
   await page.goto(`${baseUrl}/en/agents`);
   await expect(page.locator("article")).toHaveCount(8);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Agent Configuration",
+  );
   const steps = page.getByTestId("agent-guide-step");
   for (const step of await steps.all()) {
     expect((await bounds(step)).height).toBeGreaterThanOrEqual(156);
@@ -682,40 +743,19 @@ scenario("[AGENT-LIST-D4-002] English step growth and 1280px hover/focus actions
     .toBe(0);
   const first = page.locator("article").first();
   await first.hover();
-  const configure = first.getByRole("button", {
+  const more = first.getByRole("button", {
+    name: label("en", "agentRepository.mine.menu.more"),
+    exact: true,
+  });
+  await more.click();
+  const configure = page.getByRole("menuitem", {
     name: label("en", "agentConfig.list.configure"),
     exact: true,
   });
-  const publish = first.getByRole("button", {
+  const publish = page.getByRole("menuitem", {
     name: label("en", "agentConfig.list.publish"),
     exact: true,
   });
-  const cardBox = await bounds(first);
-  const configureBox = await bounds(configure);
-  const publishBox = await bounds(publish);
-  expect(configureBox.x + configureBox.width).toBeLessThanOrEqual(publishBox.x);
-  expect(publishBox.x + publishBox.width).toBeLessThanOrEqual(
-    cardBox.x + cardBox.width - 23,
-  );
-  const visibleTextBottom = await first
-    .getByTestId("agent-card-body")
-    .locator("p")
-    .evaluate((element) => {
-      const box = element.getBoundingClientRect();
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      const lineHeight = Number.parseFloat(
-        getComputedStyle(element).lineHeight,
-      );
-      return Math.max(
-        ...Array.from(range.getClientRects())
-          .filter((rect) => rect.y < box.y + lineHeight * 2)
-          .map((rect) => rect.bottom),
-      );
-    });
-  expect(configureBox.y).toBeGreaterThanOrEqual(visibleTextBottom);
-  await page.locator("header h1").click();
-  await first.getByTestId("agent-card-body").focus();
   await expect(configure).toBeVisible();
   await expect(publish).toBeVisible();
   noPresentationMutation(fixture);

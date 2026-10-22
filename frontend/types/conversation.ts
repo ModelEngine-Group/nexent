@@ -6,12 +6,25 @@ export interface ConversationListItem {
   agent_id?: number | null;
   create_time: number;
   update_time: number;
+  last_activity_time?: number;
+}
+
+export type ConversationDetailReader = (
+  id: string
+) => Promise<ApiConversationDetail>;
+export interface ConversationDetailLoader {
+  load: ConversationDetailReader;
+  refresh: ConversationDetailReader;
+  activate: (id: string | undefined) => void;
+  invalidate: (id: string) => void;
+  clear: () => void;
 }
 
 export interface ConversationListParams {
   offset: number;
   limit: number;
   conversationType?: "agent_chat" | "workbench";
+  cursor?: string;
 }
 
 export interface WorkbenchPinItem extends ConversationListItem {
@@ -39,6 +52,7 @@ export interface ConversationListMetadata {
 export interface ConversationListPage {
   items: ConversationListItem[];
   metadata: ConversationListMetadata;
+  next_cursor?: string | null;
 }
 
 export interface ApiMessageItem {

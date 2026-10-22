@@ -208,7 +208,6 @@ export function useAuthorization(): AuthorizationContextType {
   const hasAccess =
     isSharePage ||
     accessibleRoutes.includes(cleanPath) ||
-    (cleanPath === "/workbench" && accessibleRoutes.includes("/chat")) ||
     isWithinAccessiblePrefix;
 
   // Route guard
@@ -300,7 +299,8 @@ export function useAuthorization(): AuthorizationContextType {
     accessibleRoutes,
     isLoading,
     error: error as Error | null,
-    isAuthorized: !isLoading && !!user && hasAccess,
+    // Background permission refreshes retain the established route access.
+    isAuthorized: !!user && hasAccess,
     isAuthzReady,
     refetch: fetchAuthzData,
     hasPermission,

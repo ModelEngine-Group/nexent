@@ -8,6 +8,7 @@ import {
   UI_ACTION_TYPES,
   NOTIFICATION_TYPES,
 } from "@/const/knowledgeBase";
+import type { TagAssignmentValue } from "@/types/tagManagement";
 
 // Knowledge base basic type
 export interface KnowledgeBase {
@@ -80,6 +81,9 @@ export interface Document {
   // Optional ingestion progress metrics
   processed_chunk_num?: number | null;
   total_chunk_num?: number | null;
+  // Tag assignments projected by the authorized file-list endpoint. An absent
+  // field simply means the backend did not project tags for this document.
+  tags?: TagAssignmentValue[];
 }
 
 // Document state interface

@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-SIDEBAR-COLLAPSE-20261020
+  change_type: requirement
+  requirement_id: CHAT-SIDEBAR-COLLAPSE-20261020
+  title: Responsive conversation sidebars on Workbench and Agent chat
+  description: Responsive floating controls preserve the conversation layout and existing navigation callbacks.
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-SIDEBAR]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [CHAT-SIDEBAR-D4-002]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Dispatch expand and new conversation independently and exactly once.
+    - Hide floating controls when expanded; honor mobile drawer state.
+    - Agent discovery collapse renders one expand control. Selected-Agent collapse retains independently dispatched compose and back actions in a transparent responsive toolbar.
+    - Both pages reset to expanded after leaving and returning, while Workbench loading retains same-page visibility.
+    - Discovery hides current-Agent selection and new-conversation actions; selecting an Agent restores them.
+    reason: Frontend-only interaction change; Python UT is irrelevant. Component callbacks, docking and visibility are unit proof; the manual D4 case owns the runtime layout journey.
+    test_selectors: [frontend/tests/component/threadSidebarFloating.test.tsx, frontend/tests/component/workbenchConversationLayout.test.tsx, frontend/tests/component/conversationSidebarMemory.test.tsx]
+  notes: Updated on 2026-10-21 for the final responsive floating controls, sidebar presentation and nonpersistent cross-page visibility. Workbench has no conversation header. Titles truncate with overflow-only tooltips before hiding; controls hide as whole items and the final expand button docks on the right side of the menu border. Manual D4 visual acceptance is separate from component UT; complete mobile journey acceptance remains pending.

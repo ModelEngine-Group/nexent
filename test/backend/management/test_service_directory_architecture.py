@@ -94,6 +94,7 @@ MIGRATED_MODULES = {
     'knowledge_base/providers/ragflow.py',
     'knowledge_base/quota.py',
     'knowledge_base/quota_common.py',
+    'knowledge_base/recommendation.py',
     'knowledge_base/scheduler.py',
     'knowledge_base/scope.py',
     'knowledge_base/service.py',

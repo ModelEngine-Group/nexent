@@ -478,6 +478,9 @@ async def run_agent_background(
     if not agent_request.conversation_id:
         raise ValueError("conversation_id is required for background agent runs")
 
+    # Background automation provenance is server-owned, including run-now.
+    agent_request._message_source = "AUTOMATION"
+
     if not agent_request.is_debug and not skip_user_save:
         save_messages(
             agent_request,

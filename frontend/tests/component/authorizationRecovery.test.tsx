@@ -16,6 +16,7 @@ import {
 } from "@/components/providers/AuthorizationProvider";
 import type { AuthInfoResponse } from "@/types/auth";
 import { USER_ROLES } from "@/const/auth";
+import { authEventUtils } from "@/lib/authEvents";
 
 const state = vi.hoisted(() => ({
   request: vi.fn<() => Promise<AuthInfoResponse | null>>(),
@@ -24,10 +25,11 @@ const state = vi.hoisted(() => ({
   speed: false,
   authenticated: true,
   hideHome: true,
+  pathname: "/zh",
 }));
 vi.mock("next/navigation", () => {
   const router = { replace: state.replace, push: state.push };
-  return { useRouter: () => router, usePathname: () => "/zh" };
+  return { useRouter: () => router, usePathname: () => state.pathname };
 });
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -62,14 +64,27 @@ vi.mock("@/hooks/group/useGroupList", () => ({
 
 const clients: QueryClient[] = [];
 function PermissionsProbe() {
-  const { permissions, isAuthzReady } = useAuthorizationContext();
+  const {
+    permissions,
+    isAuthzReady,
+    isAuthorized,
+    isLoading,
+    canAccessRoute,
+    refetch,
+  } = useAuthorizationContext();
   return (
-    <output data-testid="permissions">
+    <output
+      data-testid="permissions"
+      data-authorized={isAuthorized}
+      data-workbench={canAccessRoute("/workbench")}
+      data-loading={isLoading}
+    >
       {isAuthzReady ? permissions.join(",") : "pending"}
+      <button onClick={() => void refetch()}>refresh permissions</button>
     </output>
   );
 }
-function renderHome() {
+function renderHome(showHome = true) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Infinity } },
   });
@@ -77,7 +92,7 @@ function renderHome() {
   render(
     <QueryClientProvider client={client}>
       <AuthorizationProvider>
-        <Homepage />
+        {showHome && <Homepage />}
         <PermissionsProbe />
       </AuthorizationProvider>
     </QueryClientProvider>
@@ -113,6 +128,7 @@ beforeEach(() => {
   state.speed = false;
   state.authenticated = true;
   state.hideHome = true;
+  state.pathname = "/zh";
 });
 afterEach(() => {
   for (const client of clients.splice(0)) client.clear();
@@ -218,4 +234,96 @@ test("guest entry ignores an unrelated authorization request error", async () =>
   await waitFor(() => expect(state.request).toHaveBeenCalled());
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(state.replace).toHaveBeenCalledWith("/workbench");
+});
+
+test.each([
+  { routes: ["/chat"], allowed: false },
+  { routes: ["/chat", "/newchat"], allowed: false },
+  { routes: ["/newchat"], allowed: false },
+  { routes: ["/workbench"], allowed: true },
+  { routes: ["/chat", "/workbench"], allowed: true },
+])(
+  "Workbench requires an explicit grant: $routes",
+  async ({ routes, allowed }) => {
+    state.pathname = "/zh/workbench";
+    state.request.mockResolvedValueOnce(response(routes));
+    renderHome(false);
+    await waitFor(() =>
+      expect(screen.getByTestId("permissions")).toHaveTextContent(
+        "resource:manage"
+      )
+    );
+    expect(screen.getByTestId("permissions")).toHaveAttribute(
+      "data-workbench",
+      String(allowed)
+    );
+    expect(screen.getByTestId("permissions")).toHaveAttribute(
+      "data-authorized",
+      String(allowed)
+    );
+    if (allowed) {
+      expect(state.replace).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(state.replace).toHaveBeenCalledWith("/"));
+    }
+  }
+);
+
+test.each([
+  { pathname: "/en/evaluation/run-1", routes: ["/evaluation"] },
+  { pathname: "/zh/share/shared-1", routes: ["/newchat"] },
+])("preserves authorization for $pathname", async ({ pathname, routes }) => {
+  state.pathname = pathname;
+  state.request.mockResolvedValueOnce(response(routes));
+  renderHome(false);
+  await waitFor(() =>
+    expect(screen.getByTestId("permissions")).toHaveAttribute(
+      "data-authorized",
+      "true"
+    )
+  );
+  expect(state.replace).not.toHaveBeenCalled();
+});
+
+test.each(["success", "failure"])(
+  "retains established route access during a background refresh (%s)",
+  async (outcome) => {
+    state.pathname = "/zh/resource-manage";
+    const refresh = pendingRequest();
+    state.request
+      .mockResolvedValueOnce(response())
+      .mockReturnValueOnce(refresh.promise);
+    renderHome(false);
+    const probe = screen.getByTestId("permissions");
+    await waitFor(() =>
+      expect(probe).toHaveAttribute("data-authorized", "true")
+    );
+    fireEvent.click(screen.getByText("refresh permissions"));
+    await waitFor(() => expect(state.request).toHaveBeenCalledTimes(2));
+    expect(probe).toHaveAttribute("data-authorized", "true");
+    await act(async () => {
+      if (outcome === "success") refresh.resolve(response());
+      else refresh.reject(new Error("Background request failed"));
+    });
+    expect(probe).toHaveAttribute("data-authorized", "true");
+  }
+);
+
+test("initial load, grant revocation and logout never retain route access", async () => {
+  state.pathname = "/zh/resource-manage";
+  const initial = pendingRequest();
+  state.request
+    .mockReturnValueOnce(initial.promise)
+    .mockResolvedValueOnce(response(["/newchat"]));
+  renderHome(false);
+  const probe = screen.getByTestId("permissions");
+  expect(probe).toHaveAttribute("data-authorized", "false");
+  await act(async () => initial.resolve(response()));
+  await waitFor(() => expect(probe).toHaveAttribute("data-authorized", "true"));
+  fireEvent.click(screen.getByText("refresh permissions"));
+  await waitFor(() => expect(probe).toHaveAttribute("data-loading", "false"));
+  expect(probe).toHaveAttribute("data-authorized", "false");
+  act(() => authEventUtils.emitLogout());
+  expect(probe).toHaveTextContent("pending");
+  expect(probe).toHaveAttribute("data-authorized", "false");
 });

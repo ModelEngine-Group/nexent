@@ -43,6 +43,42 @@ it("composes the welcome and all legacy questions together with callback-only se
   expect(agent.example_questions).toHaveLength(6);
 });
 
+it("skips blank preset questions when rendering suggestion buttons", () => {
+  const onSelectQuestion = vi.fn();
+  render(
+    <AgentDebugWelcome
+      agent={{
+        ...agent,
+        example_questions: ["Real question", "", "   ", "Another real one"],
+      }}
+      onSelectQuestion={onSelectQuestion}
+    />
+  );
+  const welcome = within(screen.getByTestId("agent-debug-welcome"));
+  expect(welcome.getAllByRole("button")).toHaveLength(2);
+  expect(
+    welcome.getByRole("button", { name: "Real question" })
+  ).toBeInTheDocument();
+  expect(
+    welcome.getByRole("button", { name: "Another real one" })
+  ).toBeInTheDocument();
+  fireEvent.click(welcome.getByRole("button", { name: "Real question" }));
+  expect(onSelectQuestion).toHaveBeenCalledExactlyOnceWith("Real question");
+});
+
+it("renders no suggestion section when every preset question is blank", () => {
+  render(
+    <AgentDebugWelcome
+      agent={{ ...agent, example_questions: ["", "   "] }}
+      onSelectQuestion={vi.fn()}
+    />
+  );
+  expect(
+    screen.queryByTestId("agent-debug-suggestions")
+  ).not.toBeInTheDocument();
+  expect(screen.queryByRole("button")).not.toBeInTheDocument();
+});
+
 it("blocks selection during a run and restores it without replacing welcome content", () => {
   const onSelectQuestion = vi.fn();
   const view = render(

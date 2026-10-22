@@ -2,7 +2,7 @@
 
 "use client";
 
-import type { FC } from "react";
+import { createElement, type FC } from "react";
 import { useMemo } from "react";
 import { Dropdown, Tooltip } from "antd";
 import type { MenuProps } from "antd";
@@ -78,6 +78,7 @@ export const AgentSelectorDropdown: FC<AgentSelectorDropdownProps> = ({
     selectedAgent?.name ||
     lastUsedAgent.display_name ||
     lastUsedAgent.name;
+  const AgentIcon = getAgentIcon(selectedAgent ?? lastUsedAgent);
 
   return (
     <Dropdown
@@ -86,8 +87,14 @@ export const AgentSelectorDropdown: FC<AgentSelectorDropdownProps> = ({
     >
       <button
         type="button"
-        className="flex w-full cursor-pointer items-center gap-1.5 rounded-[4px] py-1 pl-0.5 pr-2 text-[16px] leading-[24px] text-[#191919] hover:bg-accent"
+        className="flex w-full cursor-pointer items-center gap-1.5 rounded-[4px] py-1 pl-0.5 pr-2 text-[14px] font-medium leading-5 text-[#191919] hover:bg-accent"
       >
+        <span className="grid size-6 shrink-0 place-items-center rounded-md border border-[#d9d9d9] bg-white">
+          {createElement(AgentIcon, {
+            className: "size-3.5 text-primary",
+            "aria-hidden": true,
+          })}
+        </span>
         <Tooltip title={agentName}>
           <span className="min-w-0 flex-1 truncate text-left">{agentName}</span>
         </Tooltip>

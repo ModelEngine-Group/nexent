@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
 
@@ -25,7 +25,7 @@ import {
   CONVERSATION_PAGE_SIZE,
   conversationService,
 } from "@/services/conversationService";
-import type { WorkbenchPins } from "@/types/conversation";
+import type { ConversationListPage, WorkbenchPins } from "@/types/conversation";
 import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import { toMessageCreatedAt } from "@/lib/messageDate";
 import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
@@ -203,8 +203,12 @@ const toToolSearchItem = (value: unknown) => {
         sourceType:
           typeof item.source_type === "string" ? item.source_type : undefined,
         filename: filename || undefined,
-        publishedDate: typeof item.published_date === "string" ? item.published_date : undefined,
-        downloadUrl: typeof item.download_url === "string" ? item.download_url : undefined,
+        publishedDate:
+          typeof item.published_date === "string"
+            ? item.published_date
+            : undefined,
+        downloadUrl:
+          typeof item.download_url === "string" ? item.download_url : undefined,
         sourceFile: sourceFile || imageMetadata?.source_file || undefined,
         objectName:
           typeof item.object_name === "string" ? item.object_name : undefined,
@@ -212,7 +216,7 @@ const toToolSearchItem = (value: unknown) => {
         toolSign,
         isImage: Boolean(imageMetadata),
         retrievalHighlightTerms: getRetrievalHighlightTerms(item.score_details),
-                ...getSourceAttributes(item.search_type, item.score_details),
+        ...getSourceAttributes(item.search_type, item.score_details),
       }
     : null;
 };
@@ -1479,7 +1483,7 @@ const toRemoteThreadMetadata = (
   // so the thread list can always group by recency. The timestamp is passed
   // through the `custom` slot because the installed @assistant-ui/react
   // (0.14.15) does not yet thread `lastMessageAt` through the runtime state.
-  const timestamp = item.update_time || item.create_time;
+  const timestamp = item.last_activity_time ?? item.create_time;
   return {
     remoteId: String(item.conversation_id),
     status: "regular",
@@ -1510,7 +1514,9 @@ const parseConversationListOffset = (after: string | undefined): number => {
     : 0;
 };
 
-const createHistoryProvider = (): FC<PropsWithChildren> => {
+const createHistoryProvider = (
+  loadDetail?: import("@/types/conversation").ConversationDetailReader
+): FC<PropsWithChildren> => {
   const Provider: FC<PropsWithChildren> = ({ children }) => {
     const aui = useAui();
 
@@ -1518,7 +1524,13 @@ const createHistoryProvider = (): FC<PropsWithChildren> => {
       () =>
         new RemoteConversationHistoryAdapter(
           () => aui.threadListItem.getState().remoteId,
-          () => aui.threadListItem.initialize()
+          () => aui.threadListItem.initialize(),
+          loadDetail
+            ? () => {
+                const id = aui.threadListItem.getState().remoteId;
+                return id ? loadDetail(id) : Promise.resolve(undefined);
+              }
+            : undefined
         ),
       [aui]
     );
@@ -1717,35 +1729,68 @@ export const createConversationThreadListAdapter = (
   pinStorageKey?: string,
   loadPins: () => Promise<WorkbenchPins> = () =>
     conversationService.getWorkbenchPins(),
-  onDeleted?: (conversationId: number) => Promise<void>
+  onDeleted?: (conversationId: number) => Promise<void>,
+  detailLoader?: import("@/types/conversation").ConversationDetailLoader
 ): RemoteThreadListAdapter => {
   const prefetchedConversationIds = new Set<string>();
+  let loadedCount = INITIAL_CONVERSATION_PAGE_SIZE;
+  let generation = 0;
   return {
-    unstable_Provider: createHistoryProvider(),
+    unstable_Provider: createHistoryProvider(detailLoader?.load),
 
     async list({ after } = {}): Promise<RemoteThreadListResponse> {
+      const currentGeneration = after === undefined ? ++generation : generation;
       const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
-      const offset = parseConversationListOffset(after);
-      const limit =
-        offset === 0 ? INITIAL_CONVERSATION_PAGE_SIZE : CONVERSATION_PAGE_SIZE;
-      const data = await conversationService.getList({
-        offset,
-        limit,
-        todayStartMs,
-        weekStartMs,
-        conversationType,
-      });
-      const nextOffset = offset + data.items.length;
+      const keyset = after?.startsWith("activity:")
+        ? after.slice(9)
+        : undefined;
+      let offset = keyset ? 0 : parseConversationListOffset(after);
+      let cursor = keyset;
+      let remaining =
+        after === undefined
+          ? Math.max(INITIAL_CONVERSATION_PAGE_SIZE, loadedCount)
+          : CONVERSATION_PAGE_SIZE;
+      let data: ConversationListPage | undefined;
+      const items: ConversationListItem[] = [];
+      let nextCursor: string | undefined;
+      while (remaining > 0) {
+        const limit = Math.min(100, remaining);
+        data = await conversationService.getList({
+          offset,
+          limit,
+          todayStartMs,
+          weekStartMs,
+          conversationType,
+          ...(cursor ? { cursor } : {}),
+        });
+        if (currentGeneration !== generation) return { threads: [] };
+        items.push(...data.items);
+        offset += data.items.length;
+        nextCursor = data.next_cursor
+          ? `activity:${data.next_cursor}`
+          : data.next_cursor === undefined && offset < data.metadata.total
+            ? String(offset)
+            : undefined;
+        remaining -= limit;
+        if (!nextCursor || !data.items.length) break;
+        cursor = nextCursor.startsWith("activity:")
+          ? nextCursor.slice(9)
+          : undefined;
+        if (cursor) offset = 0;
+      }
+      if (after === undefined) loadedCount = items.length;
+      else loadedCount += items.length;
 
       let pinnedMetadata: RemoteThreadMetadata[] = [];
-      if (offset === 0) {
+      if (after === undefined) {
         prefetchedConversationIds.clear();
         if (conversationType === "workbench" && pinStorageKey) {
           const loadedIds = new Set(
-            data.items.map((item) => String(item.conversation_id))
+            items.map((item) => String(item.conversation_id))
           );
           try {
             const pins = await loadPins();
+            if (currentGeneration !== generation) return { threads: [] };
             pinnedMetadata = pins.items
               .filter((item) => !loadedIds.has(String(item.conversation_id)))
               .map(toRemoteThreadMetadata);
@@ -1760,7 +1805,14 @@ export const createConversationThreadListAdapter = (
 
       return {
         threads: [
-          ...data.items
+          ...items
+            .filter(
+              (item, index) =>
+                items.findIndex(
+                  (candidate) =>
+                    candidate.conversation_id === item.conversation_id
+                ) === index
+            )
             .filter(
               (item) =>
                 !prefetchedConversationIds.has(String(item.conversation_id))
@@ -1768,8 +1820,7 @@ export const createConversationThreadListAdapter = (
             .map(toRemoteThreadMetadata),
           ...pinnedMetadata,
         ],
-        nextCursor:
-          nextOffset < data.metadata.total ? String(nextOffset) : undefined,
+        nextCursor,
       };
     },
 
@@ -1821,6 +1872,7 @@ export const createConversationThreadListAdapter = (
         );
       }
       await conversationService.rename(conversationId, newTitle);
+      detailLoader?.invalidate(String(conversationId));
     },
 
     // The backend currently has no archive/unarchive endpoints, so these are
@@ -1855,7 +1907,9 @@ export const createConversationThreadListAdapter = (
     },
 
     async fetch(threadId: string): Promise<RemoteThreadMetadata> {
-      const detail = await conversationService.getById(threadId);
+      const detail = await (detailLoader?.load ?? conversationService.getById)(
+        threadId
+      );
 
       return toRemoteThreadMetadata({
         conversation_id: Number(detail.conversation_id),

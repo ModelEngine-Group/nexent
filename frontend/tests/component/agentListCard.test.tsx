@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 
 import AgentListCard, {
@@ -31,8 +32,46 @@ vi.mock("@/app/[locale]/agents/components/agent-avatar", () => ({
   default: () => <div data-testid="agent-avatar" />,
 }));
 
-vi.mock("@/app/[locale]/agents/components/agent-config-actions", () => ({
-  default: () => <button type="button">更多</button>,
+vi.mock("../../app/[locale]/agents/components/agent-config-actions", () => ({
+  default: function MockAgentConfigActions({
+    agentId,
+    readOnly,
+    onConfigure,
+    onPublish,
+    onManageVersions,
+  }: {
+    agentId: number;
+    readOnly: boolean;
+    onConfigure: (agentId: number) => void;
+    onPublish: (agentId: number) => void;
+    onManageVersions: (agentId: number) => void;
+  }) {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          更多
+        </button>
+        {open && (
+          <>
+            <button type="button" onClick={() => onConfigure(agentId)}>
+              配置
+            </button>
+            <button
+              type="button"
+              disabled={readOnly}
+              onClick={() => onPublish(agentId)}
+            >
+              发布
+            </button>
+            <button type="button" onClick={() => onManageVersions(agentId)}>
+              版本管理
+            </button>
+          </>
+        )}
+      </>
+    );
+  },
 }));
 
 const agent = {
@@ -77,6 +116,12 @@ describe("AgentListCard", () => {
     );
     expect(screen.getByText("创建于2026-01-23")).toBeInTheDocument();
     expect(screen.getByText("未上线")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-card-footer")).toHaveClass(
+      "w-full",
+      "justify-between"
+    );
+    expect(screen.getByTestId("agent-card-date")).toHaveClass("flex-1");
+    expect(screen.getByTestId("agent-card-status")).toHaveClass("shrink-0");
   });
 
   it.each([
@@ -105,22 +150,45 @@ describe("AgentListCard", () => {
     const onOpen = vi.fn();
     const onConfigure = vi.fn();
     const onPublish = vi.fn();
+    const onManageVersions = vi.fn();
     render(
       <AgentListCard
         agent={agent}
         onOpen={onOpen}
         onConfigure={onConfigure}
         onPublish={onPublish}
-        onManageVersions={vi.fn()}
+        onManageVersions={onManageVersions}
       />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "健康小助手" }));
+    fireEvent.click(screen.getByRole("button", { name: "更多" }));
     fireEvent.click(screen.getByRole("button", { name: "配置" }));
     fireEvent.click(screen.getByRole("button", { name: "发布" }));
+    fireEvent.click(screen.getByRole("button", { name: "版本管理" }));
     expect(onOpen).toHaveBeenCalledWith(agent);
     expect(onConfigure).toHaveBeenCalledWith(42);
     expect(onPublish).toHaveBeenCalledWith(42);
+    expect(onManageVersions).toHaveBeenCalledWith(42);
+  });
+
+  it("keeps publishing disabled for a read-only Agent in the more menu", () => {
+    const onPublish = vi.fn();
+    render(
+      <AgentListCard
+        agent={{ ...agent, permission: "READ_ONLY" } as Agent}
+        onOpen={vi.fn()}
+        onConfigure={vi.fn()}
+        onPublish={onPublish}
+        onManageVersions={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "更多" }));
+    const publish = screen.getByRole("button", { name: "发布" });
+    expect(publish).toBeDisabled();
+    fireEvent.click(publish);
+    expect(onPublish).not.toHaveBeenCalled();
   });
 
   it("prefers an update timestamp without inventing one", () => {

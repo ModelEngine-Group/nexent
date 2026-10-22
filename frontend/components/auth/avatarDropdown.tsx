@@ -35,6 +35,7 @@ interface AvatarDropdownProps {
   rail?: boolean;
   expanded?: boolean;
   onOpenChange?: (open: boolean) => void;
+  onNavigate?: (path: string) => void;
 }
 
 const MENU_POPUP_CLASS =
@@ -64,6 +65,7 @@ export function AvatarDropdown({
   rail = false,
   expanded = false,
   onOpenChange,
+  onNavigate,
 }: AvatarDropdownProps) {
   const { user } = useAuthorizationContext();
   const displayName = useUserDisplayName();
@@ -143,7 +145,25 @@ export function AvatarDropdown({
           key: "profile",
           icon: <UserRound size={20} />,
           label: (
-            <Link href={`/${profileLocale}/users`} prefetch={false}>
+            <Link
+              href={`/${profileLocale}/users`}
+              prefetch={false}
+              onClick={(event) => {
+                if (
+                  !onNavigate ||
+                  event.defaultPrevented ||
+                  event.button !== 0 ||
+                  event.metaKey ||
+                  event.ctrlKey ||
+                  event.shiftKey ||
+                  event.altKey
+                )
+                  return;
+                event.preventDefault();
+                changeOpen(false);
+                onNavigate(`/${profileLocale}/users`);
+              }}
+            >
               {t("profile.title")}
             </Link>
           ),

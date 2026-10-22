@@ -198,9 +198,15 @@ function isRouteAccessible(
 
 interface SideNavigationProps {
   onPinnedChange?: (pinned: boolean) => void;
+  onNavigate?: (path: string) => void;
+  isNavigating?: boolean;
 }
 
-export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
+export function SideNavigation({
+  onPinnedChange,
+  onNavigate,
+  isNavigating = false,
+}: SideNavigationProps = {}) {
   const { t } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
@@ -293,24 +299,25 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
   }, [optimisticSelectedKey, selectedKey]);
 
   useEffect(() => {
-    if (!optimisticSelectedKey) return;
+    if (!optimisticSelectedKey || isNavigating) return;
 
     const timeout = setTimeout(() => setOptimisticSelectedKey(null), 10000);
     return () => clearTimeout(timeout);
-  }, [optimisticSelectedKey]);
+  }, [optimisticSelectedKey, isNavigating]);
 
   useEffect(() => {
     const handleLoginSuccess = () => {
       if (pendingNavigationPath && isAuthenticated) {
         setTimeout(() => {
-          router.push(pendingNavigationPath);
+          if (onNavigate) onNavigate(pendingNavigationPath);
+          else router.push(pendingNavigationPath);
           setPendingNavigationPath(null);
         }, 200);
       }
     };
 
     return authEvents.on(AUTH_EVENTS.LOGIN_SUCCESS, handleLoginSuccess);
-  }, [isAuthenticated, pendingNavigationPath, router]);
+  }, [isAuthenticated, pendingNavigationPath, router, onNavigate]);
 
   const accessibleMenuItems = useMemo(() => {
     if (!accessibleRoutes || accessibleRoutes.length === 0) {
@@ -366,7 +373,8 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
     }
 
     setOptimisticSelectedKey(route.path);
-    router.push(navigationPath);
+    if (onNavigate) onNavigate(navigationPath);
+    else router.push(navigationPath);
   };
 
   const notificationAction = isSpeedMode ? null : isAuthenticated ? (
@@ -510,6 +518,7 @@ export function SideNavigation({ onPinnedChange }: SideNavigationProps = {}) {
         {notificationAction}
         <AvatarDropdown
           rail
+          onNavigate={onNavigate}
           expanded={expanded}
           onOpenChange={(open) => handlePopupChange("account", open)}
         />

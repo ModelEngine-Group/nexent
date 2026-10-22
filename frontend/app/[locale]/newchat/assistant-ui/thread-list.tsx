@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
+import { HistoryThreadTrigger } from "./history-thread-trigger";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Tooltip,
@@ -139,11 +140,13 @@ export const BatchSelectionProvider: FC<{
   onNewConversation?: () => void | Promise<void>;
   serverConversationIds?: ReadonlyMap<string, string>;
   conversationType?: "agent_chat" | "workbench";
+  selectedAgentId?: number;
 }> = ({
   children,
   onNewConversation,
   serverConversationIds,
   conversationType = "workbench",
+  selectedAgentId,
 }) => {
   const { t } = useTranslation();
   const aui = useAui();
@@ -152,6 +155,7 @@ export const BatchSelectionProvider: FC<{
   const threadIds = useAuiState((s) => s.threads.threadIds);
   const threadItems = useAuiState((s) => s.threads.threadItems);
   const mainThreadId = useAuiState((s) => s.threads.mainThreadId);
+  const threadAgentOverrides = useThreadAgentOverrides();
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [agentConversationIds, setAgentConversationIds] = useState<
@@ -164,9 +168,13 @@ export const BatchSelectionProvider: FC<{
   const itemsById = useMemo(
     () =>
       new Map(
-        (threadItems as ReadonlyArray<{ id: string; remoteId?: string }>).map(
-          (item) => [item.id, item]
-        )
+        (
+          threadItems as ReadonlyArray<{
+            id: string;
+            remoteId?: string;
+            custom?: { agentId?: number | string };
+          }>
+        ).map((item) => [item.id, item])
       ),
     [threadItems]
   );
@@ -181,12 +189,34 @@ export const BatchSelectionProvider: FC<{
     },
     [itemsById, serverConversationIds]
   );
+  const scopedVisibleThreadIds = useMemo(() => {
+    const ids = getVisibleThreadIds(
+      threadIds,
+      threadItems,
+      serverConversationIds
+    );
+    if (selectedAgentId === undefined) return ids;
+    return ids.filter(
+      (id) =>
+        resolveThreadAgentId(
+          itemsById.get(id)?.custom?.agentId,
+          threadAgentOverrides[id]
+        ) === selectedAgentId
+    );
+  }, [
+    itemsById,
+    selectedAgentId,
+    serverConversationIds,
+    threadAgentOverrides,
+    threadIds,
+    threadItems,
+  ]);
   const visibleConversationIds = useMemo(
     () =>
-      getVisibleThreadIds(threadIds, threadItems, serverConversationIds)
+      scopedVisibleThreadIds
         .map(resolveRemoteId)
         .filter((id): id is string => Boolean(id)),
-    [threadIds, threadItems, serverConversationIds, resolveRemoteId]
+    [scopedVisibleThreadIds, resolveRemoteId]
   );
 
   const toggle = useCallback(
@@ -200,7 +230,7 @@ export const BatchSelectionProvider: FC<{
         return next;
       });
     },
-    [resolveRemoteId]
+    [resolveRemoteId, setSelectedIds]
   );
 
   const isSelected = useCallback(
@@ -218,7 +248,7 @@ export const BatchSelectionProvider: FC<{
         visibleConversationIds.every((id) => current.has(id));
       return allSelected ? new Set() : new Set(visibleConversationIds);
     });
-  }, [visibleConversationIds]);
+  }, [setSelectedIds, visibleConversationIds]);
 
   const getAgentGroupSelection = useCallback(
     (agentId: number, visibleIds: readonly string[]) => {
@@ -293,20 +323,27 @@ export const BatchSelectionProvider: FC<{
         });
       }
     },
-    [agentConversationIds, conversationType, resolveRemoteId, selectedIds, t]
+    [
+      agentConversationIds,
+      conversationType,
+      resolveRemoteId,
+      selectedIds,
+      setSelectedIds,
+      t,
+    ]
   );
 
-  const clear = useCallback(() => setSelectedIds(new Set()), []);
+  const clear = useCallback(() => setSelectedIds(new Set()), [setSelectedIds]);
 
   const enter = useCallback(() => {
     setSelectedIds(new Set());
     setBatchMode(true);
-  }, []);
+  }, [setSelectedIds]);
 
   const exit = useCallback(() => {
     setBatchMode(false);
     setSelectedIds(new Set());
-  }, []);
+  }, [setSelectedIds]);
 
   const deleteSelected = useCallback(() => {
     const conversationIds: number[] = [];
@@ -368,9 +405,7 @@ export const BatchSelectionProvider: FC<{
     });
   }, [
     selectedIds,
-    threadItems,
     mainThreadId,
-    serverConversationIds,
     resolveRemoteId,
     confirm,
     t,
@@ -378,6 +413,7 @@ export const BatchSelectionProvider: FC<{
     onNewConversation,
     queryClient,
     conversationType,
+    setSelectedIds,
   ]);
 
   const value = useMemo<BatchSelectionValue>(
@@ -423,7 +459,9 @@ export const BatchSelectionProvider: FC<{
   );
 };
 
-const BatchManageButton: FC = () => {
+const BatchManageButton: FC<{ newChatDesign: boolean }> = ({
+  newChatDesign,
+}) => {
   const { t } = useTranslation();
   const batchSelection = useBatchSelection();
 
@@ -433,11 +471,16 @@ const BatchManageButton: FC = () => {
     return (
       <button
         type="button"
-        className="flex h-8 items-center gap-1 rounded-md px-2 text-sm text-[#808080] hover:bg-white/70 hover:text-[#191919]"
+        className={cn(
+          "flex h-8 items-center gap-1 text-[#595959]",
+          newChatDesign
+            ? "px-0 text-xs hover:bg-transparent hover:text-[#191919]"
+            : "px-1 text-sm hover:text-[#191919]"
+        )}
         onClick={batchSelection.exit}
       >
         <XIcon className="size-3.5 shrink-0" aria-hidden />
-        <span>{t("chat.threadList.cancel")}</span>
+        <span>{t("common.done")}</span>
       </button>
     );
   }
@@ -445,7 +488,12 @@ const BatchManageButton: FC = () => {
   return (
     <button
       type="button"
-      className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm text-[#808080] hover:bg-white/70 hover:text-[#191919]"
+      className={cn(
+        "flex h-8 items-center gap-1.5 text-[#808080]",
+        newChatDesign
+          ? "px-0 text-xs hover:bg-transparent hover:text-[#1677ff]"
+          : "px-1 text-sm hover:text-[#191919]"
+      )}
       onClick={batchSelection.enter}
     >
       <ListChecks className="size-4 shrink-0" aria-hidden />
@@ -469,11 +517,11 @@ export const BatchSidebarFooter: FC = () => {
   if (!batchMode) return null;
 
   return (
-    <div className="flex h-10 items-center justify-between gap-2 border-t border-[#d9d9d9]/60 bg-transparent pl-2 pr-4">
-      <div className="relative top-2.5 flex w-full items-center justify-between gap-2">
+    <div className="flex h-11 items-center justify-between gap-2 border-t border-[#d9d9d9] bg-[#f0f0f0] px-3">
+      <div className="flex w-full items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <Checkbox
-            className="!m-0 text-sm text-[#243447]"
+            className="!m-0 text-xs text-[#243447]"
             checked={allVisibleSelected}
             indeterminate={someVisibleSelected && !allVisibleSelected}
             onChange={selectAllVisible}
@@ -486,7 +534,7 @@ export const BatchSidebarFooter: FC = () => {
         </div>
         <button
           type="button"
-          className="flex h-8 shrink-0 items-center gap-1 rounded-md border border-[#ffccc7] px-2 text-sm text-[#ff4d4f] hover:bg-[#fff2f0] disabled:cursor-not-allowed disabled:border-[#ffd6d6] disabled:text-[#ffb3b3]"
+          className="flex h-8 shrink-0 items-center gap-1 rounded-md border border-[#ffccc7] bg-[#fffafa] px-2 text-xs text-[#ff4d4f] hover:bg-[#fff2f0] disabled:cursor-not-allowed disabled:border-[#ffd6d6] disabled:text-[#ffb3b3]"
           disabled={selectedIds.size === 0}
           onClick={deleteSelected}
         >
@@ -508,18 +556,22 @@ interface ThreadListProps {
   serverConversationIds?: ReadonlyMap<string, string>;
   activeThreadId?: string;
   generatedTitles?: ReadonlyMap<string, string>;
+  onHistoryAgentSelected?: (agentId: number) => void;
   onRenameSuccess?: RenameSuccessHandler;
   searchQuery?: string;
   newChatDesign?: boolean;
+  selectedAgentId?: number;
 }
 
 export const ThreadList: FC<ThreadListProps> = ({
   activeThreadId,
   generatedTitles,
   serverConversationIds,
+  onHistoryAgentSelected,
   onRenameSuccess,
   searchQuery = "",
   newChatDesign = false,
+  selectedAgentId,
 }) => {
   const { t } = useTranslation();
   const [completedConversations, setCompletedConversations] = useState(
@@ -569,11 +621,25 @@ export const ThreadList: FC<ThreadListProps> = ({
 
   return (
     <div className="flex flex-col p-2">
-      <div className="mb-1 flex h-8 items-center justify-between px-3 pt-1">
-        <p className="text-sm text-muted-foreground">
-          {t("chat.threadList.recentConversations")}
+      <div
+        className={cn(
+          "mb-1 flex h-8 items-center justify-between py-1",
+          newChatDesign ? "px-1" : "px-3"
+        )}
+      >
+        <p
+          className={cn(
+            "text-muted-foreground",
+            newChatDesign ? "text-xs" : "text-sm"
+          )}
+        >
+          {t(
+            newChatDesign && selectedAgentId === undefined
+              ? "chat.threadList.recentlyUsed"
+              : "chat.threadList.recentConversations"
+          )}
         </p>
-        <BatchManageButton />
+        <BatchManageButton newChatDesign={newChatDesign} />
       </div>
       <AuiIf condition={(s) => s.threads.isLoading}>
         <ThreadListSkeleton />
@@ -591,9 +657,11 @@ export const ThreadList: FC<ThreadListProps> = ({
           visibleThreadIds={visibleThreadIds}
           completedConversations={completedConversations}
           generatedTitles={generatedTitles}
+          onHistoryAgentSelected={onHistoryAgentSelected}
           onRenameSuccess={onRenameSuccess}
           searchQuery={searchQuery}
           newChatDesign={newChatDesign}
+          selectedAgentId={selectedAgentId}
           expandedAgentKeys={expandedAgentKeys}
           onToggleAgentExpanded={toggleAgentExpanded}
         />
@@ -632,21 +700,70 @@ interface ThreadListItemsProps {
   activeThreadId?: string;
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  onHistoryAgentSelected?: (agentId: number) => void;
   onRenameSuccess?: RenameSuccessHandler;
   searchQuery?: string;
   newChatDesign: boolean;
+  selectedAgentId?: number;
   expandedAgentKeys: ReadonlySet<string>;
   onToggleAgentExpanded: (key: string) => void;
 }
+
+const OverflowTooltipText: FC<{
+  children: ReactNode;
+  className: string;
+}> = ({ children, className }) => {
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  const [isTooltipOpen, setIsTooltipOpen] = useState(false);
+
+  useEffect(() => {
+    const textElement = textRef.current;
+    if (!textElement) return;
+
+    const updateOverflow = () => {
+      const nextIsOverflowing =
+        textElement.scrollWidth > textElement.clientWidth;
+      setIsOverflowing(nextIsOverflowing);
+      if (!nextIsOverflowing) setIsTooltipOpen(false);
+    };
+
+    updateOverflow();
+    if (typeof ResizeObserver === "undefined") return;
+    const resizeObserver = new ResizeObserver(updateOverflow);
+    resizeObserver.observe(textElement);
+    return () => resizeObserver.disconnect();
+  }, [children]);
+
+  return (
+    <Tooltip
+      open={isOverflowing && isTooltipOpen}
+      onOpenChange={(open) => {
+        if (isOverflowing) setIsTooltipOpen(open);
+      }}
+    >
+      <TooltipTrigger asChild>
+        <span ref={textRef} className={className}>
+          {children}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" className="max-w-80 break-words">
+        {children}
+      </TooltipContent>
+    </Tooltip>
+  );
+};
 
 const ThreadListItems: FC<ThreadListItemsProps> = ({
   activeThreadId,
   visibleThreadIds,
   completedConversations,
   generatedTitles,
+  onHistoryAgentSelected,
   onRenameSuccess,
   searchQuery = "",
   newChatDesign,
+  selectedAgentId,
   expandedAgentKeys,
   onToggleAgentExpanded,
 }) => {
@@ -665,6 +782,12 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
   );
   const pinned = usePinnedThreads();
   const batch = useBatchSelection();
+  const visibleAgentGroups = useMemo(() => {
+    if (agentGroups === null) return null;
+    return selectedAgentId === undefined
+      ? agentGroups
+      : agentGroups.filter((group) => group.agentId === selectedAgentId);
+  }, [agentGroups, selectedAgentId]);
 
   const GroupedThreadListItem = useMemo<FC>(
     () =>
@@ -673,12 +796,19 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
           <ThreadListItem
             completedConversations={completedConversations}
             generatedTitles={generatedTitles}
+            onHistoryAgentSelected={onHistoryAgentSelected}
             onRenameSuccess={onRenameSuccess}
             newChatDesign={newChatDesign}
           />
         );
       },
-    [completedConversations, generatedTitles, newChatDesign, onRenameSuccess]
+    [
+      completedConversations,
+      generatedTitles,
+      newChatDesign,
+      onRenameSuccess,
+      onHistoryAgentSelected,
+    ]
   );
 
   const TimeGroupThreadListItem = useMemo<FC>(
@@ -688,12 +818,18 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
           <ThreadListItem
             completedConversations={completedConversations}
             generatedTitles={generatedTitles}
+            onHistoryAgentSelected={onHistoryAgentSelected}
             onRenameSuccess={onRenameSuccess}
             variant="time"
           />
         );
       },
-    [completedConversations, generatedTitles, newChatDesign, onRenameSuccess]
+    [
+      completedConversations,
+      generatedTitles,
+      onRenameSuccess,
+      onHistoryAgentSelected,
+    ]
   );
 
   // Workbench (and legacy) sidebar: recency buckets (Today / Last 7 Days /
@@ -706,6 +842,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
             <ThreadListItem
               completedConversations={completedConversations}
               generatedTitles={generatedTitles}
+              onHistoryAgentSelected={onHistoryAgentSelected}
               onRenameSuccess={onRenameSuccess}
             />
           )}
@@ -726,7 +863,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
             {group.label !== "chat.threadList.recentConversations" && (
               <div
                 data-slot="aui_thread-list-group-label"
-                className="px-3 pt-3 pb-1 text-sm text-muted-foreground"
+                className="px-3 pt-3 pb-1 text-xs text-[#808080]"
               >
                 {t(group.label)}
               </div>
@@ -751,25 +888,60 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
     );
   }
 
-  if (!agentGroups) {
+  if (!visibleAgentGroups) {
     return (
-      <ThreadListPrimitive.Items>
-        {() => (
-          <ThreadListItem
-            completedConversations={completedConversations}
-            generatedTitles={generatedTitles}
-            onRenameSuccess={onRenameSuccess}
-            newChatDesign
-          />
-        )}
-      </ThreadListPrimitive.Items>
+      <div className="flex flex-col">
+        <ThreadListPrimitive.Items>
+          {() => (
+            <ThreadListItem
+              completedConversations={completedConversations}
+              generatedTitles={generatedTitles}
+              onHistoryAgentSelected={onHistoryAgentSelected}
+              onRenameSuccess={onRenameSuccess}
+              newChatDesign
+            />
+          )}
+        </ThreadListPrimitive.Items>
+      </div>
     );
   }
 
-  if (agentGroups.length === 0) {
+  if (visibleAgentGroups.length === 0) {
     return (
       <div className="flex items-center px-3 py-4 text-sm text-muted-foreground">
-        {t("chat.threadList.noSearchResults")}
+        {selectedAgentId !== undefined && !searchQuery.trim()
+          ? t("chat.threadList.noHistory")
+          : t("chat.threadList.noSearchResults")}
+      </div>
+    );
+  }
+
+  if (selectedAgentId !== undefined) {
+    const entries = visibleAgentGroups.flatMap((group) => group.entries);
+    const orderedEntries = pinned
+      ? hoistPinnedThreads([{ label: "", entries }], (entry) =>
+          pinned.isPinned({ id: entry.id })
+        ).flatMap((group) => group.entries)
+      : entries;
+
+    return (
+      <div className="flex flex-col">
+        {orderedEntries.map(({ id, index }, entryIndex) => (
+          <Fragment key={id}>
+            {entryIndex > 0 &&
+              pinned?.isPinned({ id: orderedEntries[entryIndex - 1].id }) &&
+              !pinned.isPinned({ id }) && (
+                <div
+                  role="separator"
+                  className="ml-8 mr-3 my-2 border-t border-dashed border-gray-400/60 dark:border-gray-500/70"
+                />
+              )}
+            <ThreadListPrimitive.ItemByIndex
+              index={index}
+              components={{ ThreadListItem: GroupedThreadListItem }}
+            />
+          </Fragment>
+        ))}
       </div>
     );
   }
@@ -780,7 +952,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
   // every conversation. Expanding a group reveals all of its conversations.
   return (
     <div className="flex flex-col">
-      {agentGroups.map((group) => {
+      {visibleAgentGroups.map((group) => {
         const agentId = group.agentId;
         const groupKey = String(group.agentId ?? "none");
         const entries = pinned
@@ -810,7 +982,9 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
               className="size-5 shrink-0 text-[#191919]"
               aria-hidden
             />
-            <span className="min-w-0 truncate">{group.agentName}</span>
+            <OverflowTooltipText className="min-w-0 truncate">
+              {group.agentName}
+            </OverflowTooltipText>
             <ChevronRight
               className={`h-3.5 w-0 shrink-0 overflow-hidden text-[#808080] opacity-0 transition-all duration-200 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:w-3.5 group-focus-visible:opacity-100${isExpanded ? " rotate-90" : ""}`}
               aria-hidden
@@ -819,9 +993,9 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
         );
 
         return (
-          <Fragment key={groupKey}>
+          <div key={groupKey} className="flex flex-col">
             {groupSelection && agentId !== null ? (
-              <div className="flex h-10 items-center gap-1 rounded-lg px-1 hover:bg-white/70">
+              <div className="flex h-10 items-center gap-1 rounded-lg px-1 hover:bg-[#e5e7eb]">
                 <Checkbox
                   aria-label={t("chat.threadList.selectAgentConversations", {
                     agent: group.agentName,
@@ -862,7 +1036,10 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
               <button
                 type="button"
                 data-slot="aui_thread-list-group-label"
-                className="group flex h-10 items-center gap-3 rounded-lg px-3 text-left text-[14px] text-[#191919] hover:bg-white/70"
+                className={cn(
+                  "group flex h-10 items-center rounded-lg text-left text-[14px] text-[#191919] hover:bg-[#e5e7eb]",
+                  newChatDesign ? "gap-5 px-1" : "gap-3 px-3"
+                )}
                 onClick={() => onToggleAgentExpanded(groupKey)}
                 aria-expanded={isExpanded}
               >
@@ -885,7 +1062,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
                 />
               </Fragment>
             ))}
-          </Fragment>
+          </div>
         );
       })}
     </div>
@@ -906,8 +1083,8 @@ type AgentThreadGroup = {
 };
 
 // Group the current thread list by agent (conversation history), ordered by
-// initial conversation recency, preserving agent order thereafter. Threads without an agent fall into a
-// trailing generic bucket. When searchQuery is set, only conversations whose
+// most recent conversation. Threads without an agent fall into a trailing
+// generic bucket. When searchQuery is set, only conversations whose
 // title matches (or agents whose name matches) are kept.
 const useThreadListAgentGroups = (
   searchQuery: string,
@@ -924,8 +1101,6 @@ const useThreadListAgentGroups = (
   // Brand-new conversations bind their agent via this registry until the
   // backend conversation list carries the agent_id after the first run.
   const threadAgentOverrides = useThreadAgentOverrides();
-  const agentOrderRef = useRef(new Map<number | null, number>());
-
   const groups = useMemo<AgentThreadGroup[] | null>(() => {
     const itemsById = new Map(
       (
@@ -938,9 +1113,10 @@ const useThreadListAgentGroups = (
         }>
       ).map((item) => [item.id, item])
     );
-    const dates: (Date | undefined)[] = threadIds.map((id) => {
+    const timestamps: (number | undefined)[] = threadIds.map((id) => {
       const raw = itemsById.get(id)?.custom?.lastMessageAt;
-      return raw ? new Date(raw) : undefined;
+      const timestamp = raw ? new Date(raw).getTime() : NaN;
+      return Number.isFinite(timestamp) ? timestamp : undefined;
     });
     const agentNameById = new Map<number, string>();
     for (const agent of availableMainAgents) {
@@ -951,12 +1127,16 @@ const useThreadListAgentGroups = (
       );
     }
 
-    const time = (index: number) =>
-      dates[index]?.getTime() ?? Number.MAX_SAFE_INTEGER;
     const indices = threadIds
       .map((_, index) => index)
       .filter((index) => visibleThreadIds.includes(threadIds[index]))
-      .sort((a, b) => time(b) - time(a));
+      .sort((left, right) => {
+        const leftTime = timestamps[left];
+        const rightTime = timestamps[right];
+        if (leftTime === undefined) return rightTime === undefined ? 0 : 1;
+        if (rightTime === undefined) return -1;
+        return rightTime - leftTime;
+      });
 
     const query = searchQuery.trim().toLowerCase();
     const groups: AgentThreadGroup[] = [];
@@ -997,23 +1177,14 @@ const useThreadListAgentGroups = (
         isRunning: item?.isRunning === true,
       });
     }
-    for (const group of groups) {
-      if (!agentOrderRef.current.has(group.agentId)) {
-        agentOrderRef.current.set(group.agentId, agentOrderRef.current.size);
-      }
-    }
-    groups.sort((a, b) => {
-      if (a.agentId === null) return b.agentId === null ? 0 : 1;
-      if (b.agentId === null) return -1;
-      return (
-        agentOrderRef.current.get(a.agentId)! -
-        agentOrderRef.current.get(b.agentId)!
-      );
-    });
+    const orderedGroups = [
+      ...groups.filter((group) => group.agentId !== null),
+      ...groups.filter((group) => group.agentId === null),
+    ];
     if (query) {
-      return groups.filter((group) => group.entries.length > 0);
+      return orderedGroups.filter((group) => group.entries.length > 0);
     }
-    return groups;
+    return orderedGroups;
   }, [
     threadIds,
     threadItems,
@@ -1022,7 +1193,6 @@ const useThreadListAgentGroups = (
     generatedTitles,
     t,
     searchQuery,
-    newChatDesign,
     visibleThreadIds,
   ]);
   return newChatDesign ? groups : null;
@@ -1160,14 +1330,14 @@ const ThreadListSkeleton: FC = () => {
   const { t } = useTranslation();
 
   return (
-    <div className="flex flex-col gap-0.5">
+    <div className="flex flex-col">
       {Array.from({ length: 5 }, (_, i) => (
         <div
           key={i}
           role="status"
           aria-label={t("chat.threadList.loading")}
           data-slot="aui_thread-list-skeleton-wrapper"
-          className="flex h-8 items-center px-2.5"
+          className="flex h-10 items-center px-2.5"
         >
           <Skeleton
             data-slot="aui_thread-list-skeleton"
@@ -1182,6 +1352,7 @@ const ThreadListSkeleton: FC = () => {
 interface ThreadListItemProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  onHistoryAgentSelected?: (agentId: number) => void;
   onRenameSuccess?: RenameSuccessHandler;
   newChatDesign?: boolean;
 }
@@ -1192,7 +1363,9 @@ const formatRelativeTime = (
   t: (key: string, options?: Record<string, unknown>) => string
 ): string => {
   if (!lastMessageAt) return "";
-  const elapsedMs = Date.now() - new Date(lastMessageAt).getTime();
+  const timestamp = new Date(lastMessageAt).getTime();
+  if (!Number.isFinite(timestamp)) return "";
+  const elapsedMs = Date.now() - timestamp;
   if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return "";
   const minutes = Math.floor(elapsedMs / 60_000);
   if (minutes < 1) return t("chat.threadList.justNow");
@@ -1208,6 +1381,7 @@ const ThreadListItem: FC<
 > = ({
   completedConversations,
   generatedTitles,
+  onHistoryAgentSelected,
   onRenameSuccess,
   newChatDesign = false,
   variant = "agent",
@@ -1221,13 +1395,16 @@ const ThreadListItem: FC<
       data-pinned={isPinned || undefined}
       className={
         variant === "time"
-          ? "group/item flex h-10 items-center gap-2 rounded-lg px-2 py-2 hover:bg-white data-[active=true]:bg-white"
-          : "group/item flex h-10 items-center rounded-lg hover:bg-white/70 data-[active=true]:bg-white"
+          ? "group/item relative flex h-10 items-center rounded-lg px-3 hover:bg-[#e5e7eb] data-[active=true]:bg-[#e5e7eb]"
+          : cn(
+              "group/item flex h-10 items-center rounded-lg hover:bg-[#e5e7eb] data-[active=true]:bg-[#e5e7eb]"
+            )
       }
     >
       <ThreadListItemContent
         completedConversations={completedConversations}
         generatedTitles={generatedTitles}
+        onHistoryAgentSelected={onHistoryAgentSelected}
         onRenameSuccess={onRenameSuccess}
         variant={variant}
         newChatDesign={newChatDesign}
@@ -1239,6 +1416,7 @@ const ThreadListItem: FC<
 interface ThreadListItemContentProps {
   completedConversations: Set<string>;
   generatedTitles?: ReadonlyMap<string, string>;
+  onHistoryAgentSelected?: (agentId: number) => void;
   onRenameSuccess?: RenameSuccessHandler;
   variant?: "agent" | "time";
   newChatDesign: boolean;
@@ -1247,6 +1425,7 @@ interface ThreadListItemContentProps {
 const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
   completedConversations,
   generatedTitles,
+  onHistoryAgentSelected,
   onRenameSuccess,
   variant = "agent",
   newChatDesign,
@@ -1267,6 +1446,8 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
     (thread.remoteId ? generatedTitles?.get(thread.remoteId) : undefined) ??
     thread.title ??
     t("chat.thread.newChat");
+  const lastMessageAt = (thread as { custom?: { lastMessageAt?: string } })
+    .custom?.lastMessageAt;
 
   const pinned = usePinnedThreads();
   const isPinned = pinned?.isPinned(thread) ?? false;
@@ -1347,40 +1528,47 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
       return (
         <button
           type="button"
-          className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-3 text-left text-sm transition-colors hover:bg-muted ${
+          className={`flex h-full min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-sm transition-colors hover:bg-muted ${
             isSelected?.(thread.id) ? "bg-accent" : ""
           }`}
           onClick={() => toggle?.(thread.id)}
         >
-          <Checkbox checked={isSelected?.(thread.id) ?? false} />
+          <Checkbox
+            className="!m-0 shrink-0"
+            checked={isSelected?.(thread.id) ?? false}
+          />
           <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+          <span className="shrink-0 whitespace-nowrap text-xs text-[#8c8c8c]">
+            {formatRelativeTime(lastMessageAt, t)}
+          </span>
         </button>
       );
     }
     return (
-      <ThreadListItemPrimitive.Trigger
+      <HistoryThreadTrigger
+        onAgentSelected={onHistoryAgentSelected}
         className={cn(
           variant === "time"
-            ? "flex h-10 min-w-0 flex-1 items-center gap-2 text-left text-base leading-6 text-[#191919]"
-            : "flex h-10 min-w-0 flex-1 items-center gap-3 pl-8 pr-3 text-left text-[14px] text-[#595959]",
+            ? "flex h-full min-w-0 flex-1 items-center gap-2 text-left text-sm leading-[22px] text-[#595959] group-hover/item:text-[#191919] group-focus-within/item:text-[#191919] group-data-[active=true]/item:text-[#191919]"
+            : cn(
+                "flex h-10 min-w-0 flex-1 items-center gap-3 pl-8 pr-3 text-left text-[14px] text-[#595959]"
+              ),
           isPinned && variant === "agent" && "gap-2 pl-3"
         )}
       >
         {isPinned && (
           <PinIcon
-            className="size-3 shrink-0 text-blue-500"
+            className={cn(
+              "size-3 shrink-0",
+              variant === "time" ? "text-[#808080]" : "text-blue-500"
+            )}
             aria-label={t("chat.threadList.pinned")}
           />
         )}
         <div className="flex min-w-0 flex-1 items-center text-left">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="min-w-0 flex-1 truncate text-left">{title}</span>
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-80 break-words">
-              {title}
-            </TooltipContent>
-          </Tooltip>
+          <OverflowTooltipText className="min-w-0 flex-1 truncate text-left">
+            {title}
+          </OverflowTooltipText>
           {!newChatDesign &&
             (variant === "time" ? (
               <ThreadRowEndStatus
@@ -1406,14 +1594,10 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
                 : "shrink-0 text-[14px] leading-[22px] text-[#808080]"
             }
           >
-            {formatRelativeTime(
-              (thread as { custom?: { lastMessageAt?: string } }).custom
-                ?.lastMessageAt,
-              t
-            )}
+            {formatRelativeTime(lastMessageAt, t)}
           </span>
         )}
-      </ThreadListItemPrimitive.Trigger>
+      </HistoryThreadTrigger>
     );
   };
 
@@ -1424,7 +1608,10 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
         <ThreadListItemMorePrimitive.Root>
           <ThreadListItemMorePrimitive.Trigger
             aria-label={t("chat.threadList.moreActions", { title })}
-            className="size-7 shrink-0 rounded-md opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100"
+            className={cn(
+              "size-7 shrink-0 rounded-md opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100 focus-visible:opacity-100",
+              variant === "time" && "absolute right-2 top-1/2 -translate-y-1/2"
+            )}
           >
             <MoreHorizontalIcon className="size-4" />
           </ThreadListItemMorePrimitive.Trigger>

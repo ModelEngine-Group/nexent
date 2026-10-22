@@ -10,6 +10,14 @@ feature:
   business_rules:
   - rule_id: F-045-RULE-01
     description: 变量名自动生成与校验、需求澄清对话、意图驱动最小流程（字段修改/资源管理/对话优化）、资源搜索与绑定、Prompt生成
+  - rule_id: F-045-RULE-02
+    description: One pending/bound card uses Local/MCP/Skill source tags plus Knowledge;
+      recommendations start selected without recommendation tags; knowledge requires
+      concrete selection. Concrete knowledge suggestions match names/descriptions/summaries
+      within visible catalogs minus direct draft bindings; pending rows show recommended
+      names or empty, bound rows show actual associations. Generic knowledge search prefers
+      the deployment-selected managed tool through scoring; DataMate remains eligible
+      and explicit resource names take precedence.
   required_test_stages:
   - D1
   - D3

@@ -68,6 +68,14 @@ class ConversationRecord(TableBase):
     conversation_id = Column(Integer, Sequence(
         "conversation_record_t_conversation_id_seq", schema=SCHEMA), primary_key=True, nullable=False)
     conversation_title = Column(String(100), doc="Conversation title")
+    title_version = Column(
+        Integer, nullable=False, server_default=text("0"),
+        comment="Monotonic title revision; every stored rename advances it independently of activity",
+    )
+    last_activity_time = Column(
+        TIMESTAMP(timezone=False), nullable=True,
+        comment="Last committed visible message activity as a UTC timestamp; NULL falls back to conversation creation",
+    )
     agent_id = Column(Integer, doc="Agent ID used by the latest run in this conversation")
     chat_mode = Column(
         String(16),
@@ -98,8 +106,8 @@ class ConversationRecord(TableBase):
         doc="Canonical schema-v3 Workbench conversation declaration",
     )
     workbench_pinned_at = Column(
-        TIMESTAMP(timezone=True), nullable=True,
-        comment="Personal Workbench pin time; NULL means unpinned; independent of conversation activity",
+        TIMESTAMP(timezone=False), nullable=True,
+        comment="Personal Workbench pin time as a UTC timestamp; NULL means unpinned; independent of conversation activity",
     )
     workbench_config_version = Column(
         Integer,
@@ -124,6 +132,10 @@ class ConversationMessage(TableBase):
         Integer, doc="Sequence number for frontend display sorting")
     message_role = Column(
         String(30), doc="The role sending the message, such as system, assistant, user")
+    message_source = Column(
+        String(16), nullable=False, server_default=text("'CHAT'"),
+        comment="Trusted message origin: CHAT consumes the ordinary user-turn quota; AUTOMATION is exempt",
+    )
     message_content = Column(String, doc="The complete content of the message")
     minio_files = Column(
         String, doc="Images or documents uploaded by the user on the chat page, stored as a list")

@@ -375,6 +375,18 @@ def get_knowledge_records_for_tag_read(tenant_id: str, index_names: list[str]) -
         return [as_dict(record) for record in records]
 
 
+def get_knowledge_metadata_by_index_names(index_names: List[str]) -> List[Dict[str, Any]]:
+    """Read active metadata in bulk after the caller has authorized the indices."""
+    if not index_names:
+        return []
+    with get_db_session() as session:
+        records = session.query(KnowledgeRecord).filter(
+            KnowledgeRecord.delete_flag != 'Y',
+            KnowledgeRecord.index_name.in_(index_names),
+        ).all()
+        return [as_dict(record) for record in records]
+
+
 def get_knowledge_record(query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Get a knowledge base record

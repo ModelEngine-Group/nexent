@@ -30,7 +30,7 @@ const runtimeMock = {
 
 let runtimeState = {
   threads: {
-    mainThreadId: "main-thread",
+    mainThreadId: "main-thread" as string | undefined,
     isLoading: false,
     threadItems: [] as Array<{ id: string; remoteId?: string }>,
   },
@@ -101,6 +101,7 @@ vi.mock("../../app/[locale]/newchat/assistant-ui/chat", () => ({
         {selectedAgent ? (
           <div>
             <div>Agent chat: {selectedAgent.display_name}</div>
+            <input aria-label="chat draft" defaultValue="Keep this draft" />
             <button onClick={onBack}>back to list</button>
           </div>
         ) : (
@@ -146,6 +147,38 @@ const CONVERSATION_KEY = "nexent_last_chat_conversation_id";
 const AGENT_KEY = "nexent_last_chat_agent_id";
 
 describe("newchat refresh restore wiring", () => {
+  it.each([true, false])(
+    "keeps the mounted chat through list refresh while running=%s",
+    async (isRunning) => {
+      const page = render(<Home />);
+      await userEvent.click(await screen.findByText("select agent"));
+      const draft = screen.getByRole("textbox", { name: "chat draft" });
+      runtimeState.thread.isRunning = isRunning;
+      runtimeState.threads.isLoading = true;
+      page.rerender(<Home />);
+      expect(screen.getByRole("textbox", { name: "chat draft" })).toBe(draft);
+      expect(draft).toHaveValue("Keep this draft");
+      runtimeState.threads.isLoading = false;
+      page.rerender(<Home />);
+      expect(screen.getByRole("textbox", { name: "chat draft" })).toBe(draft);
+    }
+  );
+
+  it("still gates chat on missing identity and active history loading", async () => {
+    runtimeState.threads.mainThreadId = undefined;
+    const page = render(<Home />);
+    expect(screen.queryByText("Agent list")).toBeNull();
+    runtimeState.threads.mainThreadId = "main-thread";
+    page.rerender(<Home />);
+    await userEvent.click(await screen.findByText("select agent"));
+    runtimeState.thread.isLoading = true;
+    page.rerender(<Home />);
+    expect(screen.queryByRole("textbox", { name: "chat draft" })).toBeNull();
+    runtimeState.thread.isLoading = false;
+    page.rerender(<Home />);
+    expect(screen.getByRole("textbox", { name: "chat draft" })).toBeVisible();
+  });
+
   beforeEach(() => {
     switchToNewThread.mockClear().mockResolvedValue(undefined);
     reloadThreads.mockClear().mockResolvedValue(undefined);
