@@ -469,6 +469,10 @@ WORKER_CONCURRENCY = int(
 # Voice Service Configuration
 APPID = os.getenv("APPID", "")
 TOKEN = os.getenv("TOKEN", "")
+# Token used by backend services to call MCP management endpoints. Keep a
+# compatibility fallback because the MCP runtime already uses TOKEN for its
+# internal service-to-service header.
+MCP_INTERNAL_TOKEN = os.getenv("MCP_INTERNAL_TOKEN") or TOKEN
 CLUSTER = os.getenv("CLUSTER", "volcano_tts")
 VOICE_TYPE = os.getenv("VOICE_TYPE", "zh_male_jieshuonansheng_mars_bigtts")
 SPEED_RATIO = float(os.getenv("SPEED_RATIO", "1.3"))

@@ -4,7 +4,7 @@ import time
 from typing import Any, Dict, List
 
 import requests
-from consts.const import MCP_MANAGEMENT_API
+from consts.const import MCP_INTERNAL_TOKEN, MCP_MANAGEMENT_API
 from database.outer_api_tool_db import (
     delete_openapi_service as db_delete_openapi_service,
 )
@@ -115,7 +115,10 @@ def _refresh_openapi_services_in_mcp(tenant_id: str) -> Dict[str, Any]:
     for attempt in range(max_retries):
         try:
             response = requests.post(
-                refresh_url, params={"tenant_id": tenant_id}, timeout=30
+                refresh_url,
+                params={"tenant_id": tenant_id},
+                headers={"Authorization": f"Bearer {MCP_INTERNAL_TOKEN}"},
+                timeout=30,
             )
             response.raise_for_status()
             result = response.json()
@@ -137,3 +140,24 @@ def _refresh_openapi_services_in_mcp(tenant_id: str) -> Dict[str, Any]:
         except Exception as e:
             logger.warning(f"Failed to refresh OpenAPI services in MCP: {e}")
             return {"error": str(e)}
+
+
+def get_openapi_service_tool_map(tenant_id: str) -> Dict[str, int]:
+    """Load the authenticated internal mapping used by the tool catalog sync."""
+    map_url = f"{MCP_MANAGEMENT_API}/internal/tools/openapi-service-map"
+    try:
+        response = requests.get(
+            map_url,
+            params={"tenant_id": tenant_id},
+            headers={"Authorization": f"Bearer {MCP_INTERNAL_TOKEN}"},
+            timeout=30,
+        )
+        response.raise_for_status()
+        return {
+            item["name"]: int(item["service_id"])
+            for item in response.json().get("data", [])
+            if item.get("name") and item.get("service_id") is not None
+        }
+    except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
+        logger.warning("Failed to load OpenAPI service tool map: %s", exc)
+        return {}

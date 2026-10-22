@@ -396,6 +396,18 @@ async def update_tool_list(tenant_id: str, user_id: str):
 
     try:
         mcp_tools = await get_all_mcp_tools(tenant_id)
+        from management.services.mcp.openapi import get_openapi_service_tool_map
+
+        service_ids = (
+            get_openapi_service_tool_map(tenant_id)
+            if not (refresh_result or {}).get("error")
+            else {}
+        )
+        for tool in mcp_tools:
+            if tool.usage == "outer-apis":
+                tool.outer_api_service_id = service_ids.get(
+                    tool.origin_name or tool.name
+                )
     except Exception as e:
         logger.error(f"failed to get all mcp tools, detail: {e}")
         # Don't block local/langchain tool update when MCP is unavailable.

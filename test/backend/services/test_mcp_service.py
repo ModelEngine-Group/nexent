@@ -241,6 +241,7 @@ def reset_global_state():
     mcp_service._tenant_mcp_servers = {}
     mcp_service._tenant_mcp_apps = {}
     mcp_service._mcp_management_app = None
+    mcp_service.MCP_INTERNAL_TOKEN = "test-mcp-token"
 
     # Reset mocks
     if hasattr(mcp_service, 'query_available_openapi_services'):
@@ -1095,7 +1096,8 @@ class AsyncTestClient:
         transport = httpx.ASGITransport(app=self.app)
         self._async_client = httpx.AsyncClient(
             transport=transport,
-            base_url="http://test"
+            base_url="http://test",
+            headers={"Authorization": "Bearer test-mcp-token"},
         )
         return self
 

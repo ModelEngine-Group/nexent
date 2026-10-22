@@ -432,6 +432,7 @@ async def get_tool_from_remote_mcp_server(
     tenant_id: Optional[str] = None,
     authorization_token: Optional[str] = None,
     custom_headers: Optional[Dict[str, Any]] = None,
+    outer_api_service_id: Optional[int] = None,
 ):
     """
     Get the tool information from the remote MCP server, avoid blocking the event loop
@@ -510,6 +511,7 @@ async def get_tool_from_remote_mcp_server(
                     output_type="object",
                     class_name=sanitized_tool_name,
                     usage=mcp_server_name,
+                    outer_api_service_id=outer_api_service_id,
                     origin_name=tool.name,
                     category=None,
                     is_user_selectable=True,

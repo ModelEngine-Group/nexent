@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
+import hmac
 import logging
 import re
 from copy import deepcopy
@@ -14,7 +15,7 @@ from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
 from database.outer_api_tool_db import query_available_openapi_services
-from consts.const import TOKEN
+from consts.const import MCP_INTERNAL_TOKEN, TOKEN
 from mcp.types import Tool as MCPTool
 from nexent.core.concurrency import (
     ManagedThreadSpec,
@@ -103,6 +104,17 @@ _tenant_mcp_lock = RLock()
 _mcp_management_app = None
 
 
+def _require_management_authorization(authorization: Optional[str]) -> None:
+    """Require the backend-to-MCP service token for management APIs."""
+    if not MCP_INTERNAL_TOKEN:
+        raise HTTPException(status_code=503, detail="MCP internal authentication is not configured")
+    scheme, _, supplied_token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(
+        supplied_token, MCP_INTERNAL_TOKEN
+    ):
+        raise HTTPException(status_code=401, detail="Invalid MCP management authorization")
+
+
 def get_mcp_management_app():
     """Get or create FastAPI app for MCP management endpoints."""
     global _mcp_management_app
@@ -120,6 +132,7 @@ def get_mcp_management_app():
             This endpoint is called by other services (like nexent-config)
             to notify the MCP server to reload outer API tools.
             """
+            _require_management_authorization(authorization)
             try:
                 result = refresh_openapi_services_by_tenant(tenant_id)
                 return {
@@ -141,6 +154,7 @@ def get_mcp_management_app():
             This endpoint uses FastMCP.from_openapi() to batch-load all tools
             from each OpenAPI service, replacing individual tool registration.
             """
+            _require_management_authorization(authorization)
             try:
                 result = refresh_openapi_services_by_tenant(tenant_id)
                 return {
@@ -157,6 +171,7 @@ def get_mcp_management_app():
             authorization: Optional[str] = Header(None)
         ):
             """List all registered OpenAPI service names and their tool counts."""
+            _require_management_authorization(authorization)
             return {
                 "status": "success",
                 "data": get_registered_openapi_services(tenant_id)
@@ -173,6 +188,7 @@ def get_mcp_management_app():
 
             This allows dynamic updates without reloading all services.
             """
+            _require_management_authorization(authorization)
             try:
                 result = refresh_single_openapi_service(service_name, tenant_id)
                 return {
@@ -188,10 +204,34 @@ def get_mcp_management_app():
             authorization: Optional[str] = Header(None)
         ):
             """List all registered outer API tool names (legacy endpoint, now returns OpenAPI services)."""
+            _require_management_authorization(authorization)
             return {
                 "status": "success",
                 "data": get_registered_openapi_services()
             }
+
+        @_mcp_management_app.get("/internal/tools/openapi-service-map")
+        async def list_openapi_service_tool_map_endpoint(
+            tenant_id: str = Query(..., description="Tenant ID"),
+            authorization: Optional[str] = Header(None),
+        ):
+            """Return the internal tool-to-service map to the authenticated backend."""
+            _require_management_authorization(authorization)
+            server = _tenant_mcp_servers.get(tenant_id)
+            registry = getattr(server, "_nexent_openapi_services", {})
+            data = []
+            for service_name, service_mcp in registry.items():
+                service_id = getattr(service_mcp, "_nexent_service_id", None)
+                if service_id is None:
+                    continue
+                get_tools = getattr(service_mcp, "get_tools", None)
+                if get_tools is None:
+                    continue
+                for tool in await get_tools():
+                    tool_name = getattr(tool, "name", None)
+                    if tool_name:
+                        data.append({"name": tool_name, "service_id": service_id})
+            return {"status": "success", "data": data}
 
     return _mcp_management_app
 
@@ -371,6 +411,9 @@ def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
                 mcp_server=tenant_mcp,
                 tenant_id=tenant_id,
             ):
+                registered_service = tenant_registry.get(service_name)
+                if registered_service is not None:
+                    setattr(registered_service, "_nexent_service_id", service.get("id"))
                 registered_count += 1
             else:
                 skipped_count += 1

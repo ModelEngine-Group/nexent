@@ -1502,6 +1502,7 @@ class ToolInfo(BaseModel):
     output_type: str
     class_name: str
     usage: Optional[str]
+    outer_api_service_id: Optional[int] = None
     origin_name: Optional[str] = None
     category: Optional[str] = None
     labels: Optional[List[str]] = None
