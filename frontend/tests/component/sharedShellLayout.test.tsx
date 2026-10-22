@@ -10,7 +10,18 @@ const state = vi.hoisted(() => ({
   authorized: true,
   speed: false,
 }));
-vi.mock("next/navigation", () => ({ usePathname: () => state.pathname }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => state.pathname,
+  // ClientLayout calls useRouter() for its navigation transition wrapper.
+  useRouter: () => ({
+    push: () => undefined,
+    replace: () => undefined,
+    prefetch: () => undefined,
+    back: () => undefined,
+    forward: () => undefined,
+    refresh: () => undefined,
+  }),
+}));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({ isAuthorized: state.authorized }),
 }));

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import uuid
@@ -97,14 +99,26 @@ async def test_api_auto_dde7582ffe405d54(tenant_a_admin, tenant_b_admin):
         async with client('config', token=tenant_a_admin.access_token) as api:
             agent_a = await _create_agent(api, dup_name, tenant_a_admin, dup_display)
             created_a.append(agent_a)
+            # Create is guarded by generate_unique_agent_value, so the second
+            # agent lands on dup_name_<n> and only one keeps the original name.
             agent_b = await _create_agent(api, dup_name, tenant_a_admin, dup_display)
             created_a.append(agent_b)
+
+            existing_names, _ = await _existing_values(api)
+            assert dup_name in existing_names
+            assert any(
+                name == dup_name or name.startswith(f'{dup_name}_')
+                for name in existing_names
+            ), existing_names
+            assert any(name.startswith(f'{dup_name}_') for name in existing_names), existing_names
 
             result = await _check_name(api, [{'name': dup_name, 'display_name': dup_display}])
             assert isinstance(result, list) and len(result) == 1
             assert result[0]['name_conflict'] is True
             assert result[0]['display_name_conflict'] is True
-            assert len(result[0]['conflict_agents']) >= 2
+            # Exactly one live agent still owns the original name; the second
+            # one was renamed on create.
+            assert len(result[0]['conflict_agents']) == 1
             for entry in result[0]['conflict_agents']:
                 assert 'name' in entry and 'display_name' in entry
 

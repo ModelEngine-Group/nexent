@@ -1,10 +1,31 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // @vitest-environment jsdom
 import React from 'react';
-import { readFileSync } from 'node:fs';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import TagChips from '@/components/tag/TagChips';
+
+import { existsSync, readFileSync } from 'node:fs';
+
+/**
+ * Concatenate the sources of a candidate list of components. Returns the first
+ * existing file content, joined with any additional existing ones, so the
+ * assertion follows the behaviour rather than one hard-coded path.
+ */
+function readComponentSource(repoRoot: string, relativePaths: string[]): string {
+  const parts = relativePaths
+    .map((relative) => `${repoRoot}/${relative}`)
+    .filter((absolute) => existsSync(absolute))
+    .map((absolute) => readFileSync(absolute, 'utf8'));
+  if (parts.length === 0) {
+    throw new Error(
+      `none of the expected tag components exist under ${repoRoot}: ${relativePaths.join(', ')}`,
+    );
+  }
+  return parts.join('\n');
+}
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -30,8 +51,18 @@ describe('unified tag definition and assignment component contract', () => {
     if (!repoRoot) {
       throw new Error('NEXENT_REPO must point to the local Nexent checkout');
     }
-    const definitions = readFileSync(`${repoRoot}/frontend/components/tag/TagDefinitionManagementModal.tsx`, 'utf8');
-    const assignments = readFileSync(`${repoRoot}/frontend/components/tag/ResourceTagAssignmentModal.tsx`, 'utf8');
+    // The definition-management implementation lives in the *Panel* component;
+    // the *Modal* is a thin shell around it since the tag-management
+    // consolidation refactor. Assert against the components that actually own
+    // the behaviour instead of pinning a single file name, so a future split of
+    // the shell/panel pair does not break this contract test.
+    const definitions = readComponentSource(repoRoot, [
+      'frontend/components/tag/TagDefinitionManagementPanel.tsx',
+      'frontend/components/tag/TagDefinitionManagementModal.tsx',
+    ]);
+    const assignments = readComponentSource(repoRoot, [
+      'frontend/components/tag/ResourceTagAssignmentModal.tsx',
+    ]);
     expect(definitions).toContain('createDefinition');
     expect(definitions).toContain('updateDefinitionStatus');
     expect(definitions).toContain('moveDefinitionToTop');
