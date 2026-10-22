@@ -10,9 +10,10 @@ from typing import Any, Literal
 
 from fastmcp.server.dependencies import get_http_request
 from nexent.core.agents.agent_model import ToolConfig
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator, model_validator
 
 from consts.exceptions import UnauthorizedError
+from consts.model import AgentInfoRequest
 from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -393,12 +394,7 @@ class AgentDraftFields(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    name: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=30,
-        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*_assistant$",
-    )
+    name: str | None = None
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = None
     enable_protocol_repair_retry: StrictBool | None = None
@@ -407,6 +403,12 @@ class AgentDraftFields(BaseModel):
     example_questions: list[str] | None = Field(
         default=None, max_length=6, description="Array of suggested question strings; not a newline-delimited string."
     )
+
+    @field_validator("name", mode="plain", json_schema_input_type=str | None)
+    @classmethod
+    def validate_name_as_agent_edit_request(cls, value: Any) -> str | None:
+        """Reuse backend name validation without the creator's string trimming."""
+        return AgentInfoRequest(name=value).name
 
     @model_validator(mode="before")
     @classmethod

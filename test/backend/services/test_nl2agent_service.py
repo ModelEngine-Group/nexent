@@ -514,9 +514,9 @@ def test_agent_draft_fields_reject_empty_null_and_extra_patches(fields):
 
 @pytest.mark.parametrize(
     "name",
-    ["9invalid_assistant", "invalid-name_assistant", "中文助手", "researcher"],
+    [123, True, [], {}],
 )
-def test_agent_draft_fields_reject_invalid_generated_name(name):
+def test_agent_draft_fields_reject_non_string_name(name):
     with pytest.raises(ValidationError):
         AgentDraftFields(name=name)
 
