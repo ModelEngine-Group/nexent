@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import {
   forwardRef,
   useEffect,
@@ -746,9 +747,14 @@ export const ModelConfigSection = forwardRef<
   /* ------------------ Verify single ------------------ */
   const verifyOneModel = async (displayName: string, modelType: ModelType) => {
     if (!displayName) return;
-    updateModelStatus(displayName, modelType, MODEL_STATUS.CHECKING);
+    // Shared-timer debounce: only the last clicked row actually probes. Flip
+    // the row to CHECKING inside the callback — a superseded click never sent
+    // its request, so it must not leave a stuck "detecting" status behind
+    // (the row action disables while detecting, leaving the operator no way
+    // to recover without a full reload).
     if (throttleTimerRef.current) clearTimeout(throttleTimerRef.current);
     throttleTimerRef.current = setTimeout(async () => {
+      updateModelStatus(displayName, modelType, MODEL_STATUS.CHECKING);
       try {
         const isConnected = await modelService.verifyCustomModel(
           displayName,
