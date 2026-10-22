@@ -42,6 +42,7 @@ import { AgentWelcome } from "@/components/agent/agent-welcome";
 import { TextSuggestion } from "@/components/agent/agent-suggestion";
 import type { AgentSuggestionItem } from "@/types/agentSuggestion";
 import { NewChatWelcomeBackdrop } from "./newchat-welcome-backdrop";
+import { deriveWelcomeSuggestions } from "./welcome-suggestions";
 import newChatStyles from "./newchat-design.module.css";
 import { Button } from "@/components/ui/button";
 import {
@@ -779,16 +780,10 @@ const ThreadView: FC<ThreadViewProps> = ({
     workbenchPresentation && !hasMessages && !isShareMode
   );
   const aui = useAui();
-  const suggestions = welcomeSuggestions?.length
-    ? welcomeSuggestions.slice(0, 4)
-    : (agent.example_questions || [])
-        .filter((question) => question.trim())
-        .slice(0, 4)
-        .map((question, index) => ({
-          id: `question-${index}`,
-          title: question,
-          prompt: question,
-        }));
+  const suggestions = deriveWelcomeSuggestions(
+    welcomeSuggestions,
+    agent.example_questions
+  );
 
   return (
     <ThreadPrimitive.Root
