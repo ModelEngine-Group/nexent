@@ -20,23 +20,23 @@
     ],
     "test_data": {
       "methods": "vector, full text, graph, all pairs and hybrid",
-      "legacy": "top_k=7, reranking_enable=false, multi_modal=false, candidates missing/null/fixed"
+      "legacy": "Migrated fixed tool values, explicit false/zero and inert legacy conversation retrieval_config; no new conversation policy editor."
     },
     "steps": [
       {
         "order": 1,
-        "action": "Continue an old conversation without opening/saving retrieval settings or refreshing its old tool catalog; run actual mount/Agent construction to the provider HTTP fixture.",
-        "expected": "Missing/null/empty/partial policies resolve applicable defaults on each execution with existing false/zero and manual candidates retained; no configuration writes or implicit scope enablement."
+        "action": "Continue upgraded conversations and run Workbench with a stored legacy retrieval_config; observe actual Agent construction and provider requests.",
+        "expected": "Legacy conversation policy is ignored; instance fixed values/defaults and selected knowledge permissions govern execution with no configuration writes."
       },
       {
         "order": 2,
-        "action": "Run managed and independent tools with separate scopes/connections and observers, explicit/following candidates and image callbacks, using the configured real model for decision evidence.",
-        "expected": "Provider request, observer/history provenance, images and citation indices agree with selected instances; separate sessions and independent connection remain isolated with sanitized trace."
+        "action": "Run managed northbound overrides against the actual root/child/version and compare independent tools with distinct connections.",
+        "expected": "Valid managed overrides affect only that run; invalid raw overrides fail before provider HTTP; independent instances, provenance, images and citations remain isolated."
       }
     ],
     "expected_results": [
-      "Missing/null/empty/partial policies resolve applicable defaults on each execution with existing false/zero and manual candidates retained; no configuration writes or implicit scope enablement.",
-      "Provider request, observer/history provenance, images and citation indices agree with selected instances; separate sessions and independent connection remain isolated with sanitized trace."
+      "Legacy conversation policy is ignored; instance fixed values/defaults and selected knowledge permissions govern execution with no configuration writes.",
+      "Valid managed overrides affect only that run; invalid raw overrides fail before provider HTTP; independent instances, provenance, images and citations remain isolated."
     ],
     "forbidden_side_effects": [
       "Do not mutate other configurations, expand managed scope, expose credentials or issue HTTP for invalid settings."
@@ -44,7 +44,7 @@
     "acceptance": [
       {
         "id": "AC-01",
-        "description": "Missing/null/empty/partial policies resolve applicable defaults on each execution with existing false/zero and manual candidates retained; no configuration writes or implicit scope enablement.; Provider request, observer/history provenance, images and citation indices agree with selected instances; separate sessions and independent connection remain isolated with sanitized trace.",
+        "description": "Legacy conversation policy is ignored; instance fixed values/defaults and selected knowledge permissions govern execution with no configuration writes.; Valid managed overrides affect only that run; invalid raw overrides fail before provider HTTP; independent instances, provenance, images and citations remain isolated.",
         "steps": [
           1,
           2
@@ -62,8 +62,8 @@
       "Actual Nexent mount, Agent construction and provider HTTP runtime; real configured model for decision trace"
     ],
     "observations": [
-      "Missing/null/empty/partial policies resolve applicable defaults on each execution with existing false/zero and manual candidates retained; no configuration writes or implicit scope enablement.",
-      "Provider request, observer/history provenance, images and citation indices agree with selected instances; separate sessions and independent connection remain isolated with sanitized trace."
+      "Legacy conversation policy is ignored; instance fixed values/defaults and selected knowledge permissions govern execution with no configuration writes.",
+      "Valid managed overrides affect only that run; invalid raw overrides fail before provider HTTP; independent instances, provenance, images and citations remain isolated."
     ],
     "cleanup": [
       "Remove only run-owned resources."

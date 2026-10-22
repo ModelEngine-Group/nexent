@@ -6242,7 +6242,6 @@
   "aidpRetrieval.toolParams.api_key": "AIDP API 密钥",
   "aidpRetrieval.toolParams.tenant_id": "租户 ID",
   "aidpRetrieval.toolParams.kds_list": "知识库",
-  "aidpRetrieval.scope.conversation": "用于当前会话选择的所有知识库。修改后，各知识库使用相同的检索设置。",
   "aidpRetrieval.scope.agent": "用于当前智能体选择的所有知识库。修改后，各知识库使用相同的检索设置。",
   "aidpRetrieval.scope.tool": "用于此工具选择的所有知识库。修改后，各知识库使用相同的检索设置。",
   "aidpRetrieval.channelShort.vector_search": "向量",

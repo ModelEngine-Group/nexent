@@ -942,7 +942,6 @@ it("forwards knowledge drafts and previews, keeps failed saves open, and closes 
     schema_version: 1 as const,
     local: { mode: "override" as const, knowledge_ids: ["1"] },
     aidp: { mode: "disabled" as const, kds_ids: [] },
-    retrieval_config: { top_k: 6 },
   };
   const save = vi
     .fn()
@@ -954,7 +953,7 @@ it("forwards knowledge drafts and previews, keeps failed saves open, and closes 
   await userEvent.click(
     screen.getByRole("button", { name: "chat.composer.knowledgeBase" })
   );
-  const next = { ...scope, retrieval_config: { top_k: 8 } },
+  const next = { ...scope },
     preview = { local: { knowledge_ids: ["1"], display_names: ["Alpha"] } };
   await act(async () => {
     await expect(
@@ -964,7 +963,6 @@ it("forwards knowledge drafts and previews, keeps failed saves open, and closes 
   expect(
     screen.getByRole("dialog", { name: "knowledge drawer" })
   ).toBeInTheDocument();
-  expect(scope.retrieval_config).toEqual({ top_k: 6 });
   await act(async () => {
     await drawerProps.knowledge.mock.lastCall?.[0].onConfirm(next, preview);
   });

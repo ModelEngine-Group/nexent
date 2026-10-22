@@ -39,7 +39,7 @@ const THRESHOLD_KEYS = {
   graph_score_threshold: "graph_search",
 } as const;
 
-type Scope = "conversation" | "agent" | "tool";
+type Scope = "agent" | "tool";
 
 /** Structured, sectioned help popover matching the approved prototype. */
 function HelpTip({ helpKey, label }: { helpKey: string; label: string }) {

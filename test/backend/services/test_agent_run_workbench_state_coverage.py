@@ -167,12 +167,12 @@ async def test_submitted_tool_policy_is_rejected_at_request_boundary(monkeypatch
         "workbench_config": canonical.model_dump(mode="json"), "workbench_config_version": 2,
     })
     validate = MagicMock(side_effect=ValidationError("top_k: expected integer 1-100"))
-    monkeypatch.setattr(agent_run, "prepare_retrieval_request", validate)
+    monkeypatch.setattr(agent_run, "prepare_tool_retrieval_overrides", validate)
     with pytest.raises(ValidationError, match="top_k"):
         await agent_run.run_agent_stream(
             request, Request(scope={"type": "http", "headers": []}), "Bearer token",
         )
     validate.assert_called_once_with(
-        "tenant-a", scope=None, tool_params=request.tool_params, agent_id=99, version_no=5, is_debug=False, stored_scope=None,
+        "tenant-a", tool_params=request.tool_params, agent_id=99, version_no=5, is_debug=False,
     )
     agent_run.agent_run_manager.reserve_agent_capacity.assert_not_called()

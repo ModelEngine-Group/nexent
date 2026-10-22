@@ -1,14 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { beforeEach, expect, it, vi } from "vitest";
-import {
-  act,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ConversationKnowledgeScopeModal } from "@/app/newchat/assistant-ui/conversation-knowledge-scope-modal";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
@@ -95,90 +88,6 @@ const selection: ConversationKnowledgeScope = {
   aidp: { mode: "disabled", kds_ids: [] },
 };
 
-it("AIDP conversation draft saves fixed linked candidates and cancels without mutation", async () => {
-  fixtures.deployment.enableAidpKnowledge = true;
-  const confirm = vi.fn();
-  const saved: ConversationKnowledgeScope = {
-    schema_version: 1,
-    local: { mode: "disabled", knowledge_ids: [] },
-    aidp: { mode: "inherit", kds_ids: [] },
-    retrieval_config: { top_k: 7 },
-  };
-  const inherited = {
-    ...capabilities,
-    sources: {
-      ...capabilities.sources,
-      aidp: {
-        ...capabilities.sources.aidp,
-        enabled: true,
-        default_retrieval_config: { top_k: 10, vector_candidates: 30 },
-      },
-    },
-  };
-  render(
-    <ConversationKnowledgeScopeModal
-      open
-      presentation="drawer"
-      value={saved}
-      capabilities={inherited}
-      onCancel={vi.fn()}
-      onConfirm={confirm}
-    />
-  );
-  await screen.findByRole("option", { name: /AIDP Catalog/ });
-  await userEvent.click(
-    screen.getByRole("button", {
-      name: "chat.knowledgeScope.retrievalSettings",
-    })
-  );
-  const settings = within(
-    (await screen.findByText("aidpRetrieval.title")).closest<HTMLElement>(
-      '[role="dialog"]'
-    )!
-  );
-  expect(
-    settings.getByRole("spinbutton", { name: "aidpRetrieval.fields.top_k" })
-  ).toHaveValue(7);
-  await userEvent.click(settings.getByText("aidpRetrieval.details"));
-  const vectorGroup = within(
-    settings.getByRole("region", {
-      name: "aidpRetrieval.groups.vector_search",
-    })
-  );
-  expect(
-    vectorGroup.getByRole("spinbutton", {
-      name: "aidpRetrieval.fields.initialCandidates",
-    })
-  ).toHaveValue(30);
-  fireEvent.change(
-    vectorGroup.getByRole("spinbutton", {
-      name: "aidpRetrieval.fields.initialCandidates",
-    }),
-    { target: { value: "7" } }
-  );
-  fireEvent.change(
-    settings.getByRole("spinbutton", { name: "aidpRetrieval.fields.top_k" }),
-    { target: { value: "9" } }
-  );
-  expect(
-    vectorGroup.getByRole("spinbutton", {
-      name: "aidpRetrieval.fields.initialCandidates",
-    })
-  ).toHaveValue(9);
-  expect(confirm).not.toHaveBeenCalled();
-  await userEvent.click(
-    settings.getByRole("button", { name: "common.confirm" })
-  );
-  expect(confirm).not.toHaveBeenCalled();
-  await userEvent.click(
-    screen.getByRole("button", { name: "workbench.controls.confirm" })
-  );
-  expect(confirm.mock.calls[0][0].retrieval_config).toEqual({
-    top_k: 9,
-    vector_candidates: 9,
-  });
-  expect(saved.retrieval_config).toEqual({ top_k: 7 });
-});
 beforeEach(() => {
   vi.clearAllMocks();
   fixtures.deployment.enableAidpKnowledge = false;
@@ -302,66 +211,8 @@ it("waits for deployment settings and uses local catalog without an agent", asyn
   expect(knowledgeBaseService.getAidpKnowledgeBasesAll).not.toHaveBeenCalled();
 });
 
-it.each(["modal", "drawer"] as const)(
-  "%s knowledge selection preserves retrieval configuration on confirmation",
-  async (presentation) => {
-    const confirm = vi.fn();
-    const configuredSelection = {
-      ...selection,
-      retrieval_config: { top_k: 8 },
-    };
-    render(
-      <ConversationKnowledgeScopeModal
-        open
-        presentation={presentation}
-        value={configuredSelection}
-        capabilities={capabilities}
-        onCancel={vi.fn()}
-        onConfirm={confirm}
-      />
-    );
-    await screen.findByRole("option", { name: /Alpha/ });
-    await userEvent.click(screen.getByRole("option", { name: /Alpha/ }));
-    if (presentation === "modal") {
-      await userEvent.click(
-        screen.getByRole("button", {
-          name: "chat.knowledgeScope.retrievalSettings",
-        })
-      );
-      const dialog = (
-        await screen.findByText("agent.knowledge.configModal.title")
-      ).closest<HTMLElement>('[role="dialog"]')!;
-      const input = within(dialog).getByRole("spinbutton");
-      await userEvent.tripleClick(input);
-      await userEvent.keyboard("8");
-      await userEvent.click(
-        within(dialog).getByRole("button", { name: "common.confirm" })
-      );
-    } else {
-      expect(
-        screen.queryByRole("button", {
-          name: "chat.knowledgeScope.retrievalSettings",
-        })
-      ).not.toBeInTheDocument();
-    }
-    expect(confirm).not.toHaveBeenCalled();
-    await userEvent.click(
-      screen.getByRole("button", {
-        name:
-          presentation === "drawer"
-            ? "resourcePicker.confirm"
-            : "chat.knowledgeScope.confirm",
-      })
-    );
-    expect(confirm.mock.calls[0][0].retrieval_config).toEqual({ top_k: 8 });
-    expect(confirm.mock.calls[0][0].local.knowledge_ids).toEqual(["2"]);
-    expect(configuredSelection.local.knowledge_ids).toEqual(["1", "2"]);
-    expect(configuredSelection.retrieval_config).toEqual({ top_k: 8 });
-  }
-);
-
-it("closing the drawer discards knowledge edits and preserves saved retrieval on reopening", async () => {
-  const configuredSelection = { ...selection, retrieval_config: { top_k: 6 } };
+it("closing the drawer discards knowledge edits on reopening", async () => {
+  const configuredSelection = selection;
   const confirm = vi.fn(),
     cancel = vi.fn();
   const props = {
@@ -392,12 +243,10 @@ it("closing the drawer discards knowledge edits and preserves saved retrieval on
     screen.getByRole("button", { name: "resourcePicker.confirm" })
   );
   await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
-  expect(confirm.mock.calls[0][0].retrieval_config).toEqual({ top_k: 6 });
-  expect(configuredSelection.retrieval_config).toEqual({ top_k: 6 });
 }, 30000);
 
-it("retains retrieval and knowledge drafts after a failed drawer save and permits retry", async () => {
-  const configuredSelection = { ...selection, retrieval_config: { top_k: 6 } };
+it("retains knowledge drafts after a failed drawer save and permits retry", async () => {
+  const configuredSelection = selection;
   const confirm = vi
     .fn()
     .mockRejectedValueOnce(new Error("save unavailable"))
@@ -428,9 +277,7 @@ it("retains retrieval and knowledge drafts after a failed drawer save and permit
     screen.getByRole("button", { name: "resourcePicker.confirm" })
   );
   await waitFor(() => expect(confirm).toHaveBeenCalledTimes(2));
-  expect(confirm.mock.calls[1][0].retrieval_config).toEqual({ top_k: 6 });
   expect(confirm.mock.calls[1][0].local.knowledge_ids).toEqual(["2"]);
-  expect(configuredSelection.retrieval_config).toEqual({ top_k: 6 });
 }, 30000);
 
 it("UT-FE-WB-025 uses one authorized catalog and disables incompatible embeddings", async () => {
@@ -769,13 +616,13 @@ it.each([false, true])(
   }
 );
 
-it("Workbench knowledge footer has only shared Close/Confirm and preserves existing retrieval configuration", async () => {
+it("Workbench knowledge footer has only shared Close/Confirm", async () => {
   const confirm = vi.fn();
   render(
     <ConversationKnowledgeScopeModal
       open
       presentation="drawer"
-      value={{ ...selection, retrieval_config: { top_k: 6 } }}
+      value={selection}
       capabilities={capabilities}
       onCancel={vi.fn()}
       onConfirm={confirm}
@@ -802,5 +649,4 @@ it("Workbench knowledge footer has only shared Close/Confirm and preserves exist
     within(footer).getByRole("button", { name: "resourcePicker.confirm" })
   );
   await waitFor(() => expect(confirm).toHaveBeenCalledOnce());
-  expect(confirm.mock.calls[0][0].retrieval_config).toEqual({ top_k: 6 });
 });

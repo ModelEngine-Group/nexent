@@ -6242,7 +6242,6 @@
   "aidpRetrieval.toolParams.api_key": "AIDP API key",
   "aidpRetrieval.toolParams.tenant_id": "Tenant ID",
   "aidpRetrieval.toolParams.kds_list": "Knowledge bases",
-  "aidpRetrieval.scope.conversation": "Applies to all knowledge bases selected in this conversation. Every knowledge base uses the same retrieval settings.",
   "aidpRetrieval.scope.agent": "Applies to all knowledge bases selected for this agent. Every knowledge base uses the same retrieval settings.",
   "aidpRetrieval.scope.tool": "Applies to all knowledge bases selected for this tool. Every knowledge base uses the same retrieval settings.",
   "aidpRetrieval.groups.vector_search": "Vector retrieval",

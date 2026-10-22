@@ -35,7 +35,7 @@ def test_mount_is_request_local_and_replaces_other_source(mocker, aidp, existing
     assert records == before
     assert catalog[0]["params"][0]["default"] == 5
     assert [t["class_name"] for t in mounted] == ["OtherTool", kind]
-    assert mounted[-1]["params"][0]["default"] == 8
+    assert mounted[-1]["params"][0]["default"] == 5
     assert query.call_count == int(not existing)
     second = service.mount_knowledge_records(records, scope("aidp" if aidp else "local"), "tenant")
     assert second[-1]["params"][0]["default"] == 5
@@ -47,13 +47,6 @@ def test_no_selection_never_creates_unrestricted_tool(mocker, mode):
     query = mocker.patch.object(service, "query_all_tools")
     assert service.mount_knowledge_records([], scope(mode=mode), "tenant") == []
     query.assert_not_called()
-
-
-@pytest.mark.parametrize("params", [{"api_key": "secret"}, {"index_names": ["other"]}, {"top_k": "8"}])
-def test_rejects_connection_range_and_invalid_parameters(mocker, params):
-    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", False)
-    with pytest.raises(service.ValidationError):
-        service.mount_knowledge_records([tool()], scope(params=params), "tenant")
 
 
 def test_selected_range_replaces_defaults_before_tool_construction(mocker):
@@ -77,54 +70,26 @@ def test_selected_range_replaces_defaults_before_tool_construction(mocker):
         runtime_agent_tree=[{"agent_name": "root", "tools": mounted}],
     )
     assert resolved.tool_params.agents["root"].tools["knowledge_base_search"]["index_names"] == ["new-index"]
-    assert mounted[0]["params"][0]["default"] == 8
+    assert mounted[0]["params"][0]["default"] == 5
     assert original["params"][0]["default"] == 5
     assert original["params"][1]["default"] == ["old-index"]
 
 
-def test_connection_credentials_cannot_be_saved_as_session_parameters():
-    from consts.model import ConversationKnowledgeScopeRequest
-
-    with pytest.raises(ValueError):
-        ConversationKnowledgeScopeRequest.model_validate({"retrieval_config": {"api_key": "secret"}})
-
-
-@pytest.mark.parametrize("override,expected", [({"top_k":7},30), ({"top_k":7,"vector_candidates":30},30)])
-def test_aidp_overrides_preserve_fixed_values_without_mutation(mocker, override, expected):
-    from nexent.core.ext_components.aidp.retrieval_config import (
-        build_payload,
-        resolve_config,
-    )
-    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
-    original = tool("AidpSearchTool")
-    original["params"] += [{"name":"vector_candidates","default":30}, {"name":"reranking_enable","default":False}]
+@pytest.mark.parametrize("aidp", [False, True])
+@pytest.mark.parametrize("legacy", [
+    {"top_k": 99}, {"api_key": "unused"}, {"index_names": ["other"]},
+    {"search_method": "graph_search", "reranking_mode": "jargon_coverage"},
+])
+def test_mount_ignores_retired_policy_and_preserves_instance_parameters(mocker, aidp, legacy):
+    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", aidp)
+    original = tool("AidpSearchTool" if aidp else "KnowledgeBaseSearchTool")
+    original["params"] += [{"name": "vector_candidates", "default": 30},
+                           {"name": "reranking_enable", "default": False}]
     before = deepcopy(original)
-    mounted = service.mount_knowledge_records([original],scope("aidp",params=override),"tenant")
-    config = {p["name"]:p.get("default") for p in mounted[0]["params"]}
-    payload = build_payload(resolve_config(config),"q",["kb"])
-    assert payload["hybrid_search_config"]["vector_candidates"] == expected
-    assert payload["hybrid_search_config"]["full_text_candidates"] == 10
-    assert payload["graph_search_config"]["graph_reranking_enable"] is False
+    mounted = service.mount_knowledge_records(
+        [original], scope("aidp" if aidp else "local", params=legacy), "tenant",
+    )
+    assert mounted == [before]
+    assert mounted[0] is not original
     assert original == before
-    assert service.mount_knowledge_records([original],None,"tenant") == [before]
-
-
-def test_aidp_mount_does_not_repeat_input_validation(mocker):
-    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
-    check = mocker.patch("nexent.core.ext_components.aidp.retrieval_config.validate_config")
-    mounted = service.mount_knowledge_records([tool("AidpSearchTool")], scope("aidp", params={"top_k": 7}), "tenant")
-    assert mounted[0]["params"][0]["default"] == 7
-    check.assert_not_called()
-
-
-def test_prepared_aidp_methods_are_applied_without_old_enum_checks(mocker):
-    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", True)
-    original = tool("AidpSearchTool")
-    original["params"] += [{"name": "search_method", "default": "hybrid_search"},
-                           {"name": "reranking_mode", "default": "performance"}]
-    mounted = service.mount_knowledge_records([original], scope("aidp", params={
-        "search_method": "vector_search|graph_search", "reranking_mode": "jargon_coverage",
-    }), "tenant")
-    values = {p["name"]: p["default"] for p in mounted[0]["params"]}
-    assert values["search_method"] == "vector_search|graph_search"
-    assert values["reranking_mode"] == "jargon_coverage"
+    assert service.mount_knowledge_records([original], None, "tenant") == [before]

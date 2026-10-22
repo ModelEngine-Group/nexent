@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0",
+  "change": {
+    "change_id": "AIDP-RET-RETIRE-SCOPE",
+    "change_type": "requirement",
+    "requirement_id": "AIDP-RET",
+    "title": "Retire conversation retrieval policies while preserving Agent and northbound configuration",
+    "description": "User-approved continuation: remove conversation/Workbench retrieval_config end to end; retain resource scopes, fixed Agent parameters and existing northbound overrides.",
+    "affected_features": {
+      "existing": [
+        "AIDP-RETRIEVAL"
+      ],
+      "added": [],
+      "modified": [
+        "AIDP-RETRIEVAL"
+      ],
+      "retired": []
+    },
+    "affected_cases": {
+      "existing": [
+        "AIDP-RET-PROTOCOL"
+      ],
+      "added": [],
+      "modified": [
+        "AIDP-RET-CONFIG-API",
+        "AIDP-RET-JOURNEY",
+        "AIDP-RET-RUNTIME"
+      ],
+      "retired": []
+    },
+    "traditional_ut": {
+      "decision": "strengthen",
+      "behaviors": [
+        "Ignore retired retrieval_config on ordinary and Workbench scope parsing and canonical persistence.",
+        "Keep mounted tool configuration unchanged while resolving authorized knowledge ranges.",
+        "Validate raw northbound tool overrides against actual root/child/draft/published defaults; no saved conversation policy inheritance.",
+        "Preserve fixed tool save, import, independent isolation and shared protocol behavior."
+      ],
+      "reason": "Existing UT asserts the retired overlay behavior; replace those assertions with inactive legacy fields and retain active API regression coverage.",
+      "test_selectors": [
+        "test/sdk/test_aidp_retrieval_config.py",
+        "test/sdk/test_ind_aidp_search_tool.py",
+        "test/ext_components/aidp/test_aidp_search_tool.py",
+        "test/backend/services/test_runtime_knowledge_mount.py",
+        "test/backend/database/test_tool_db.py",
+        "test/backend/services/test_tool_configuration_service.py",
+        "test/backend/services/test_agent_transfer_utils.py",
+        "test/backend/agents/test_create_agent_info.py::TestMergeToolParams",
+        "test/backend/services/test_knowledge_scope_service.py",
+        "test/backend/services/test_conversation_knowledge_scope_update_service.py",
+        "test/backend/services/test_conversation_workbench_service_coverage.py",
+        "test/backend/app/test_conversation_workbench_coverage.py",
+        "test/backend/services/test_agent_run_workbench_coverage.py",
+        "test/backend/services/test_agent_run_workbench_state_coverage.py",
+        "test/backend/services/test_knowledge_scope_retrieval_input.py",
+        "test/sdk/test_aidp_retrieval_client.py"
+      ]
+    },
+    "notes": "No new D1 or frontend UT. Reuse unchanged D2 protocol execution; API/runtime/UI manual contracts remain blocked pending an isolated environment, never counted as passed. Existing D1 contracts and SQL already merged into develop are preserved."
+  }
+}

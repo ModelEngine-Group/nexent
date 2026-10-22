@@ -466,9 +466,6 @@ export const Composer: FC<ComposerProps> = ({
     }
     const scope: ConversationKnowledgeScope = {
       schema_version: 1,
-      ...(knowledgeScope?.retrieval_config
-        ? { retrieval_config: knowledgeScope.retrieval_config }
-        : {}),
       local: {
         mode: !enableAidpKnowledge && ids.length ? "override" : "disabled",
         knowledge_ids: enableAidpKnowledge ? [] : ids,

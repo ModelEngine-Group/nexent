@@ -20,23 +20,23 @@
     ],
     "test_data": {
       "methods": "vector, full text, graph, all pairs and hybrid",
-      "legacy": "top_k=7, reranking_enable=false, multi_modal=false, candidates missing/null/fixed"
+      "legacy": "Migrated fixed tool values, explicit false/zero and inert legacy conversation retrieval_config; no new conversation policy editor."
     },
     "steps": [
       {
         "order": 1,
-        "action": "Save and read managed/independent and conversation settings through authenticated product APIs, including null candidates and explicit false/zero.",
-        "expected": "Valid settings retain following and explicit values, catalog metadata exposes new fields, and tool test uses the saved effective policy."
+        "action": "Save/read managed and independent Agent tool settings; submit a valid northbound tool_params override and run the Agent.",
+        "expected": "Saved fixed settings and explicit false/zero survive readback; managed northbound overrides apply only to that run; independent instances retain their own configuration."
       },
       {
         "order": 2,
-        "action": "Submit invalid quota, dependency, unknown/reserved conversation fields and exercise import/export and tool test.",
-        "expected": "Invalid settings use existing 4xx contracts without persistence, provider HTTP, scope expansion or credential injection."
+        "action": "Submit invalid policy values through tool save, import and northbound input. Send legacy retrieval_config alongside a valid conversation/Workbench knowledge selection.",
+        "expected": "Invalid active policy inputs are rejected before persistence/provider calls; legacy conversation policy is ignored, excluded from canonical scope output and does not replace instance values."
       }
     ],
     "expected_results": [
-      "Valid settings retain following and explicit values, catalog metadata exposes new fields, and tool test uses the saved effective policy.",
-      "Invalid settings use existing 4xx contracts without persistence, provider HTTP, scope expansion or credential injection."
+      "Saved fixed settings and explicit false/zero survive readback; managed northbound overrides apply only to that run; independent instances retain their own configuration.",
+      "Invalid active policy inputs are rejected before persistence/provider calls; legacy conversation policy is ignored, excluded from canonical scope output and does not replace instance values."
     ],
     "forbidden_side_effects": [
       "Do not mutate other configurations, expand managed scope, expose credentials or issue HTTP for invalid settings."
@@ -44,7 +44,7 @@
     "acceptance": [
       {
         "id": "AC-01",
-        "description": "Valid settings retain following and explicit values, catalog metadata exposes new fields, and tool test uses the saved effective policy.; Invalid settings use existing 4xx contracts without persistence, provider HTTP, scope expansion or credential injection.",
+        "description": "Saved fixed settings and explicit false/zero survive readback; managed northbound overrides apply only to that run; independent instances retain their own configuration.; Invalid active policy inputs are rejected before persistence/provider calls; legacy conversation policy is ignored, excluded from canonical scope output and does not replace instance values.",
         "steps": [
           1,
           2
@@ -61,12 +61,12 @@
     "contract": {
       "protocol": "Authenticated Nexent HTTP APIs",
       "request_expectations": [
-        "Save and read managed/independent and conversation settings through authenticated product APIs, including null candidates and explicit false/zero.",
-        "Submit invalid quota, dependency, unknown/reserved conversation fields and exercise import/export and tool test."
+        "Save/read managed and independent Agent tool settings; submit a valid northbound tool_params override and run the Agent.",
+        "Submit invalid policy values through tool save, import and northbound input. Send legacy retrieval_config alongside a valid conversation/Workbench knowledge selection."
       ],
       "response_expectations": [
-        "Valid settings retain following and explicit values, catalog metadata exposes new fields, and tool test uses the saved effective policy.",
-        "Invalid settings use existing 4xx contracts without persistence, provider HTTP, scope expansion or credential injection."
+        "Saved fixed settings and explicit false/zero survive readback; managed northbound overrides apply only to that run; independent instances retain their own configuration.",
+        "Invalid active policy inputs are rejected before persistence/provider calls; legacy conversation policy is ignored, excluded from canonical scope output and does not replace instance values."
       ]
     }
   }

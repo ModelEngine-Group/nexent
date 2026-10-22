@@ -106,7 +106,7 @@ from management.services.conversation.service import (
 )
 from management.services.knowledge_base.scope import (
     build_runtime_knowledge_resources,
-    prepare_retrieval_request,
+    prepare_tool_retrieval_overrides,
     resolve_knowledge_scope,
 )
 from management.services.agent.run_state import (
@@ -345,19 +345,16 @@ async def run_agent_stream(
     else:
         request_scope = None
     if not resume:
-        retrieval_scope = canonical_workbench.knowledge_scope if canonical_workbench is not None else request_scope
-        root = resolved_tree.root.identity if canonical_workbench is not None else agent_request
-        prepare_retrieval_request(
-            resolved_tenant_id, scope=retrieval_scope,
-            stored_scope=(conversation or {}).get("knowledge_scope"),
-            tool_params=agent_request.tool_params, agent_id=root.agent_id,
-            version_no=root.version_no, is_debug=bool(agent_request.is_debug),
-        )
         if canonical_workbench is not None:
             apply_workbench_runtime_plan(
                 agent_request, canonical_workbench, resolved_tree, resolved_tenant_id,
             )
             request_scope = canonical_workbench.knowledge_scope
+        prepare_tool_retrieval_overrides(
+            resolved_tenant_id, tool_params=agent_request.tool_params,
+            agent_id=agent_request.agent_id, version_no=agent_request.version_no,
+            is_debug=bool(agent_request.is_debug),
+        )
 
     if not resume:
         run_controls.preflight_agent_turn_controls(

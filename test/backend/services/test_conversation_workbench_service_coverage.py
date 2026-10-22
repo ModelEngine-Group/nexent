@@ -88,8 +88,7 @@ def test_update_workbench_and_metadata_validates_and_forwards(monkeypatch):
 
 
 @pytest.mark.parametrize("joint", [False, True])
-def test_internal_workbench_save_does_not_revalidate_policy(monkeypatch, joint):
-    monkeypatch.setattr(sys.modules["consts.model"], "WorkbenchSessionConfig", _ValidatedConfig)
+def test_internal_workbench_save_discards_retired_policy(monkeypatch, joint):
     replace_config, replace_joint = MagicMock(), MagicMock()
     monkeypatch.setattr(service, "replace_conversation_workbench_config", replace_config)
     monkeypatch.setattr(service, "replace_conversation_workbench_and_metadata", replace_joint)
@@ -100,7 +99,10 @@ def test_internal_workbench_save_does_not_revalidate_policy(monkeypatch, joint):
     if joint:
         service.update_conversation_workbench_and_metadata_service(**kwargs, expected_config_version=1, metadata={}, expected_metadata_version=1)
         replace_joint.assert_called_once()
+        persisted = replace_joint.call_args.kwargs["config"]
     else:
         service.update_conversation_workbench_config_service(**kwargs, expected_version=1)
         replace_config.assert_called_once()
+        persisted = replace_config.call_args.kwargs["config"]
+    assert "retrieval_config" not in persisted["knowledge_scope"]
     check.assert_not_called()

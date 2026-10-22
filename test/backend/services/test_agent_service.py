@@ -211,7 +211,7 @@ memory_models_module.MemoryIngestUnit = MagicMock
 sys.modules["nexent.memory.models"] = memory_models_module
 knowledge_scope_service_module = types.ModuleType("management.services.knowledge_base.scope")
 knowledge_scope_service_module.build_runtime_knowledge_resources = MagicMock
-knowledge_scope_service_module.prepare_retrieval_request = MagicMock(return_value=None)
+knowledge_scope_service_module.prepare_tool_retrieval_overrides = MagicMock(return_value=None)
 knowledge_scope_service_module.resolve_knowledge_scope = MagicMock
 sys.modules["management.services.knowledge_base.scope"] = knowledge_scope_service_module
 fa_memory_extractor_module = types.ModuleType("management.services.memory.extraction")

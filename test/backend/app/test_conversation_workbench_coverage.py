@@ -13,13 +13,6 @@ conversation_app = __import__(
 )
 
 
-@pytest.fixture(autouse=True)
-def preparation(monkeypatch):
-    prepare = MagicMock()
-    monkeypatch.setattr(conversation_app, "prepare_conversation_retrieval_request", prepare)
-    return prepare
-
-
 def _request():
     return conversation_app.WorkbenchConfigUpdateRequest.model_validate(
         {
@@ -57,6 +50,35 @@ async def test_update_workbench_config_returns_new_state(monkeypatch):
         expected_version=2,
         user_id="user-a",
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("workbench", [False, True])
+async def test_scope_endpoints_discard_retired_parameters_before_persistence(monkeypatch, workbench):
+    monkeypatch.setattr(conversation_app, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setattr(conversation_app, "get_current_user_id", lambda _: ("user-a", "tenant-a"))
+    update = MagicMock(return_value={})
+    raw_scope = {
+        "local": {"mode": "override", "knowledge_ids": ["12"]},
+        "aidp": {"mode": "disabled"},
+        "retrieval_config": {"top_k": 99, "api_key": "unused"},
+    }
+    if workbench:
+        monkeypatch.setattr(conversation_app, "update_conversation_workbench_config_service", update)
+        request = conversation_app.WorkbenchConfigUpdateRequest.model_validate({
+            "expected_version": 2,
+            "config": {"mode": "generic_chat", "knowledge_scope": raw_scope},
+        })
+        await conversation_app.update_conversation_workbench_config_endpoint(42, request, "Bearer token")
+        persisted_scope = update.call_args.kwargs["config"]["knowledge_scope"]
+    else:
+        monkeypatch.setattr(conversation_app, "update_conversation_knowledge_scope_service", update)
+        request = conversation_app.ConversationKnowledgeScopeUpdateRequest.model_validate({"scope": raw_scope})
+        await conversation_app.update_conversation_knowledge_scope_endpoint(42, request, "Bearer token")
+        persisted_scope = update.call_args.kwargs["knowledge_scope"]
+    assert "retrieval_config" not in persisted_scope
+    assert persisted_scope["local"]["knowledge_ids"] == ["12"]
+    update.assert_called_once()
 
 
 @pytest.mark.asyncio

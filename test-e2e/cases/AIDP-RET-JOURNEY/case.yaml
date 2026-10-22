@@ -8,35 +8,35 @@
     "business_rule_ids": [
       "AIDP-RETRIEVAL-RULE-01"
     ],
-    "title": "Three-entry retrieval settings persistence journey",
+    "title": "Agent retrieval settings and retired conversation editor journey",
     "type": "E2E",
     "priority": "P1",
     "status": "blocked",
     "automation": "manual",
-    "objective": "Three-entry retrieval settings persistence journey",
+    "objective": "Agent retrieval settings and retired conversation editor journey",
     "preconditions": [
       "SDK/frontend dependencies available; use isolated run-owned resources.",
       "Real provider and browser journeys require an authorized matching source environment."
     ],
     "test_data": {
       "methods": "vector, full text, graph, all pairs and hybrid",
-      "legacy": "top_k=7, reranking_enable=false, multi_modal=false, candidates missing/null/fixed"
+      "legacy": "Migrated fixed tool values, explicit false/zero and inert legacy conversation retrieval_config; no new conversation policy editor."
     },
     "steps": [
       {
         "order": 1,
-        "action": "Open conversation, agent and independent tool settings, inspect collapsed groups and select all seven methods.",
-        "expected": "Saved values and candidate following survive refresh with no other scope mutation."
+        "action": "Open Agent knowledge settings and independent tool settings; configure all seven methods, fixed candidates and reranking; save and reopen.",
+        "expected": "Saved instance values survive refresh; invalid combinations disable confirmation and cancel discards drafts."
       },
       {
         "order": 2,
-        "action": "Edit total/candidate/follow values, toggle reranking, test, save, refresh and reopen; edit and cancel defaults.",
-        "expected": "Invalid combinations disable confirmation; cancel discards draft; all three groups reopen collapsed."
+        "action": "Open ordinary chat and Workbench knowledge selection, change/cancel/confirm ranges and run the configured Agents.",
+        "expected": "Neither page displays retrieval parameter editing; knowledge selection remains usable and actual executing Agent/version parameters are preserved."
       }
     ],
     "expected_results": [
-      "Saved values and candidate following survive refresh with no other scope mutation.",
-      "Invalid combinations disable confirmation; cancel discards draft; all three groups reopen collapsed."
+      "Saved instance values survive refresh; invalid combinations disable confirmation and cancel discards drafts.",
+      "Neither page displays retrieval parameter editing; knowledge selection remains usable and actual executing Agent/version parameters are preserved."
     ],
     "forbidden_side_effects": [
       "Do not mutate other configurations, expand managed scope, expose credentials or issue HTTP for invalid settings."
@@ -44,7 +44,7 @@
     "acceptance": [
       {
         "id": "AC-01",
-        "description": "Saved values and candidate following survive refresh with no other scope mutation.; Invalid combinations disable confirmation; cancel discards draft; all three groups reopen collapsed.",
+        "description": "Saved instance values survive refresh; invalid combinations disable confirmation and cancel discards drafts.; Neither page displays retrieval parameter editing; knowledge selection remains usable and actual executing Agent/version parameters are preserved.",
         "steps": [
           1,
           2
@@ -60,12 +60,12 @@
     ],
     "actor": "Nexent user",
     "journey": [
-      "Open conversation, agent and independent tool settings, inspect collapsed groups and select all seven methods.",
-      "Edit total/candidate/follow values, toggle reranking, test, save, refresh and reopen; edit and cancel defaults."
+      "Open Agent knowledge settings and independent tool settings; configure all seven methods, fixed candidates and reranking; save and reopen.",
+      "Open ordinary chat and Workbench knowledge selection, change/cancel/confirm ranges and run the configured Agents."
     ],
     "final_business_result": [
-      "Saved values and candidate following survive refresh with no other scope mutation.",
-      "Invalid combinations disable confirmation; cancel discards draft; all three groups reopen collapsed."
+      "Saved instance values survive refresh; invalid combinations disable confirmation and cancel discards drafts.",
+      "Neither page displays retrieval parameter editing; knowledge selection remains usable and actual executing Agent/version parameters are preserved."
     ],
     "failure_evidence": [
       "Sanitized network and assertion evidence; no retained original screenshots."
