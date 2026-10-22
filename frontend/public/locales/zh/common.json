@@ -6014,7 +6014,7 @@
   "knowledgeBase.document": "篇文档",
   "modelParams.title": "模型配置参数",
   "modelParams.thinking": "深度思考",
-  "modelParams.temperature": "输出内容温度",
+  "modelParams.temperature": "温度",
   "modelParams.temperatureInfo": "控制生成内容的随机性，取值范围为 0–2。值越低，输出通常越稳定；值越高，输出通常越多样。具体支持范围以模型服务为准。",
   "modelParams.topP": "Top P",
   "modelParams.topPInfo": "核采样概率阈值，取值范围为 0–1。模型从累积概率达到该阈值的候选词中采样；值越低，候选范围越小。通常建议只调整温度或 Top P 中的一个参数。",

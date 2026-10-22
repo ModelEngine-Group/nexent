@@ -393,7 +393,7 @@ export function ModelParamsModal({
 
       {/* Temperature slider */}
       <ParamField
-        label={t("modelParams.temperature", { defaultValue: "输出内容温度" })}
+        label={t("modelParams.temperature", { defaultValue: "温度" })}
         icon={
           <Tooltip
             title={t("modelParams.temperatureInfo")}
