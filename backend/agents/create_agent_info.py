@@ -1124,8 +1124,7 @@ def _get_skill_script_tools(
                     params={
                         "local_skills_dir": skill_snapshot_root or CONTAINER_SKILLS_PATH,
                         "isolated_skills_root": bool(skill_snapshot_root),
-                        **({"authorized_skill_names": sorted(skill_config_values)}
-                           if runtime_skill_snapshot is not None else {}),
+                        "authorized_skill_names": sorted(skill_config_values),
                     },
                     source="builtin",
                     usage="builtin",
@@ -1141,8 +1140,7 @@ def _get_skill_script_tools(
                     params={
                         "local_skills_dir": skill_snapshot_root or CONTAINER_SKILLS_PATH,
                         "config_overrides": skill_config_values,
-                        **({"authorized_skill_names": sorted(skill_config_values)}
-                           if runtime_skill_snapshot is not None else {}),
+                        "authorized_skill_names": sorted(skill_config_values),
                     },
                     source="builtin",
                     usage="builtin",

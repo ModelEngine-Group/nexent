@@ -34,7 +34,9 @@ case:
       workers are reclaimed.
   expected_results:
   - Native and text protocols execute authorized local/MCP/Skills once, inject hidden
-    caller identity and return actual observations.
+    caller identity and return actual observations. Native Docker mode also creates
+    a real workspace file through the reserved controlled Python tool. Registered
+    normalized MCP class names resolve to the original hyphenated wire tool name.
   - Follow-up does not replay effects; owned tools, sessions and managed workers are
     reclaimed.
   forbidden_side_effects:

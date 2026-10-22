@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Isolated mapping, completion, stream and lifecycle contracts for Jiuwen's model bridge."""
 
 import uuid
@@ -462,3 +464,27 @@ async def test_persistent_bad_code_stops_after_one_correction(saved_profile):
     with pytest.raises(ModelServiceError, match="JIUWEN_NESTED_EXECUTION_BLOCK"):
         await model.invoke(MESSAGES)
     assert service.ainvoke.await_count == 2 and model.argument_corrections == 1
+
+
+@pytest.mark.parametrize("name,args,allowed", [
+    ("nexent_execute_python", {"code": "print(1)"}, True),
+    ("nexent_execute_python", {"code": 1}, False),
+    ("nexent_execute_python", {"code": "print(1)", "shell": True}, False),
+    ("nexent_execute_block", {"code": "print(1)"}, False),
+    ("unregistered", {"code": "print(1)"}, False),
+])
+async def test_native_file_call_requires_registered_tool_and_complete_schema(saved_profile, name, args, allowed):
+    import json
+    tools = [{"name": "nexent_execute_python", "parameters": {
+        "type": "object", "properties": {"code": {"type": "string"}},
+        "required": ["code"], "additionalProperties": False}}]
+    result = AssistantMessage(content_parts=[], finish_reason="tool_calls", tool_calls=[ToolCall(
+        provider_call_id="file-call", index=0, name=name, raw_arguments=json.dumps(args), parsed_arguments=args)])
+    model = JiuwenServiceModel(SimpleNamespace(ainvoke=AsyncMock(return_value=result)),
+                              saved_profile, RunCancellationScope())
+    if allowed:
+        response = await model.invoke(MESSAGES, tools=tools)
+        assert response.tool_calls[0].name == name
+    else:
+        with pytest.raises(ModelServiceError):
+            await model.invoke(MESSAGES, tools=tools)

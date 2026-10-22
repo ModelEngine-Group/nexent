@@ -11,7 +11,9 @@ feature:
   business_rules:
   - rule_id: JIUWEN-RESOURCES-RULE-001
     description: Native and text calls share authorized tool/MCP/Skills execution,
-      identity, observations and cleanup.
+      identity, observations and cleanup. Saved and transient agents pass explicit
+      per-agent Skill snapshots; native controlled Python uses the configured sandbox
+      to generate files without guessed Skill downloads.
   - rule_id: JIUWEN-RESOURCES-RULE-002
     description: Core selection preserves saved policies and resource bindings; unsupported
       capabilities fail explicitly.
@@ -25,7 +27,9 @@ feature:
   required_test_stages:
   - D3
   - D5
+  - D4
   source:
     requirement_ids:
     - JIUWEN-M3-20261015
+    - JIUWEN-SAVED-SKILLS-20261021
     spec_path: ../nexent-doc/docs/Developing/runtime-agent-core-factory/design.md

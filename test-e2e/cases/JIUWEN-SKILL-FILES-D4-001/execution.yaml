@@ -1,0 +1,19 @@
+schema_version: '1.0'
+case_id: JIUWEN-SKILL-FILES-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: JIUWEN-SKILL-FILES-D4-001
+  profiles:
+  - real_smoke
+timeout_seconds: 1500
+acceptance_bindings:
+  AC-01:
+  - JIUWEN-SKILL-FILES-D4-001
+  AC-02:
+  - JIUWEN-SKILL-FILES-D4-001
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

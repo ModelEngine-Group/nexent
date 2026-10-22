@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Local deterministic OpenAI-compatible model and native MCP fixture."""
 
 import asyncio
@@ -24,7 +26,7 @@ state = {"requests": [], "script_calls": 0, "model_calls": 0, "mcp_calls": 0, "s
 mcp = FastMCP("jiuwen-local-fixture")
 
 
-@mcp.tool
+@mcp.tool(name="multiply-values")
 async def multiply(a: int, b: int, user_id: str | None = None) -> int:
     state["mcp_calls"] += 1
     state["user_id"] = user_id
@@ -63,6 +65,12 @@ async def completions(request: Request):
         ("read_skill_md", {"skill_name": "fixture_skill"}),
         ("run_skill_script", {"skill_name": "fixture_skill", "script_path": "scripts/hello.py"}),
     ]
+    if "NATIVE_FILE_MARKER" in json.dumps(messages):
+        chain.append(("nexent_execute_python", {"code": (
+            "from pathlib import Path\n"
+            "Path('native-created.txt').write_text('NATIVE_SANDBOX_FILE_MARKER')\n"
+            "print('NATIVE_SANDBOX_FILE_MARKER')"
+        )}))
     text_mode = not body.get("tools")
     if "BLOCK_MCP_MARKER" in json.dumps(messages):
         chain = [("multiply", {"a": 999, "b": 4})]

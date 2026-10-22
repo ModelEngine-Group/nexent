@@ -1,0 +1,28 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-RESOURCE-ACCEPTANCE-20261021
+  change_type: test-fix
+  title: Verify deployed Skills external MCP knowledge and mixed Core delegation
+  description: Add real deployed configuration/resource boundary evidence; reuse controlled
+    resource and collaboration cases.
+  affected_features:
+    existing:
+    - JIUWEN-RESOURCES
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-RESOURCES-D3-001
+    - JIUWEN-RESOURCES-D3-002
+    modified: []
+    added:
+    - JIUWEN-RESOURCES-D3-003
+    retired: []
+  notes: runtime-agent-core-factory design.md 2026-10-21 four-resource test-backfill.
+    Existing UT owns unit boundaries and existing D3 uses controlled endpoints; missing
+    proof is deployed real configured resources. No new D1 or UI change. If actual
+    product defect is reproduced, route a separate bug Change and preserve these acceptance
+    assertions. Stronger verification found lightweight sandbox lacks Node; final
+    acceptance requires full sandbox and actual successful workspace JS Skill execution,
+    not Python fallback. No product sandbox restriction is weakened.

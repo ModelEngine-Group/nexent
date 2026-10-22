@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Real Jiuwen resources through canonical model transport."""
 import asyncio
 import json
@@ -26,7 +28,8 @@ def test_resource_protocol_roundtrip(monkeypatch, tmp_path, protocol, scenario):
     assert calls == [(2,3)] and state["mcp_calls"] == 1
     assert state["user_id"] == "captured-user"
     assert effects == ("" if scenario == "parallel" else "x")
-    assert state["model_calls"] == (2 if scenario == "parallel" else 5)
+    assert state["model_calls"] == (2 if scenario == "parallel" else
+                                    6 if scenario == "docker" and protocol == "native" else 5)
     assert state["saw_skill"]
     assert all(bool(body.get("tools")) == (protocol == "native") for body in state["requests"])
     body = json.dumps(state["requests"])

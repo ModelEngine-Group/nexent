@@ -135,9 +135,10 @@ class JiuwenAdapter(AgentCoreAdapter):
         registry = {tool.name or tool.class_name: tool for tool in self.tool_configs}
         if len(registry) != len(self.tool_configs):
             raise ValueError("Duplicate tool names in agent configuration")
-        from .jiuwen_protocol import EXECUTION_TOOL
+        from .jiuwen_protocol import EXECUTION_TOOL, NATIVE_EXECUTION_TOOL
 
-        if EXECUTION_TOOL in registry:
+        reserved = {EXECUTION_TOOL, NATIVE_EXECUTION_TOOL}
+        if reserved.intersection(registry):
             raise UnsupportedAgentCoreConfig("Reserved Jiuwen execution tool name")
         self.visible_tool_names = set(registry)
         if config.prompt_tool_policy_snapshot is not None:
@@ -152,7 +153,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         collaborator_names = [child.invocation_name or child.name for child in config.worker_agents]
         collaborator_names.extend(child.name for child in config.external_a2a_agents)
         all_names = [*registry, *collaborator_names]
-        if len(all_names) != len(set(all_names)) or EXECUTION_TOOL in collaborator_names:
+        if len(all_names) != len(set(all_names)) or reserved.intersection(collaborator_names):
             raise UnsupportedAgentCoreConfig("Duplicate or reserved collaboration tool name")
         self.visible_tool_names.update(collaborator_names)
         if any(tool.source == "mcp" for tool in self.tool_configs) and not self.run_info.mcp_host:
@@ -277,8 +278,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         if any(config.class_name == "ParallelExecutorTool" and
                (config.name or "parallel_executor") in self.visible_tool_names for config in self.tool_configs):
             self._bind_parallel_tool()
-        if self.text_protocol:
-            self._bind_text_executor()
+        self._bind_text_executor()
 
     def _business_handler(self, name, forward, *, lane="model-tool-io"):
         async def execute(**arguments):
@@ -358,7 +358,24 @@ class JiuwenAdapter(AgentCoreAdapter):
             " Never copy internal history or attachment envelopes into your response. "
             "Return only the user-facing answer as ordinary Markdown, without final_answer protocol tags."
         )
-        return prompt + "\n\n" + current_task_guidance
+        resource_guidance = (
+            "Skills are authorized local resources, not S3 objects. Read a listed skill with read_skill_md "
+            "and its configuration with read_skill_config. Run only a script actually listed in that skill "
+            "using run_skill_script; never invent skill names, script paths or S3 paths. "
+            "download_from_s3 is only for actual authorized uploaded/generated file references, never for "
+            "skills or missing inputs. Do not retry a denied or missing file using guessed path variants. "
+            "For a new file request no download is needed. Follow the authorized skill instructions, then "
+            "create the requested file with controlled Python in the current outputs directory. "
+            "Use Python libraries and shell-free pip argv only when the configured sandbox permits it. "
+            "Upload the actual generated file with upload_to_s3 and use the returned file link. "
+            "Never claim a file exists or was uploaded without successful tool observations."
+        )
+        if not self.text_protocol:
+            resource_guidance += (
+                " Call nexent_execute_python with a complete Python code string to create files. "
+                "Code in ordinary prose or code tags is not executed in native mode."
+            )
+        return prompt + "\n\n" + current_task_guidance + "\n\n" + resource_guidance
 
     def _create_model(self):
         from ...model_service.registry import AuthenticationRegistry
@@ -417,7 +434,7 @@ class JiuwenAdapter(AgentCoreAdapter):
         from openjiuwen.core.foundation.tool import LocalFunction, ToolCard
 
         from ..sandbox import SandboxConfig, _execute_with_tool_context, build_python_executor
-        from .jiuwen_protocol import EXECUTION_TOOL
+        from .jiuwen_protocol import EXECUTION_TOOL, NATIVE_EXECUTION_TOOL
 
         executor = self.resources.agent.python_executor
         if executor is None:
@@ -434,11 +451,15 @@ class JiuwenAdapter(AgentCoreAdapter):
             return json.dumps({"output": str(output.output), "logs": output.logs,
                                "is_final_answer": output.is_final_answer}, ensure_ascii=False)
 
-        card = ToolCard(name=EXECUTION_TOOL, description="Execute a validated controlled text block",
+        name = EXECUTION_TOOL if self.text_protocol else NATIVE_EXECUTION_TOOL
+        card = ToolCard(name=name, description=(
+            "Execute complete Python in the configured Nexent sandbox and current outputs directory. "
+            "Use this to create files following an authorized Skill. Only authorized Nexent tools are bound; "
+            "sandbox import, filesystem, network and shell restrictions apply. Return actual output and logs."),
                         input_params={"type": "object", "properties": {"code": {"type": "string"}},
                                       "required": ["code"], "additionalProperties": False})
         self.native_agent.ability_manager.add_ability(
-            card, LocalFunction(card, self._business_handler(EXECUTION_TOOL, execute, lane="sandbox")),
+            card, LocalFunction(card, self._business_handler(name, execute, lane="sandbox")),
         )
 
     def _skill_rails(self):

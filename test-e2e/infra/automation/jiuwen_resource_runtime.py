@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Real native/text resource flows through managed workers and local protocol servers."""
 
 import asyncio
@@ -25,6 +27,29 @@ from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
 from nexent.core.agents.run_agent import agent_run
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.core.utils.observer import MessageObserver
+
+
+def read_workspace_evidence(path):
+    """Inspect real outputs through Docker when Windows denies Linux-created file ACLs."""
+    if not path.exists():
+        return ""
+    try:
+        return path.read_text()
+    except PermissionError:
+        if sys.platform != "win32":
+            raise
+        import docker
+
+        client = docker.from_env()
+        try:
+            return client.containers.run(
+                "nexent/nexent-sandbox-full:latest",
+                ["-c", "from pathlib import Path; print(Path('/evidence/" + path.name + "').read_text(), end='')"],
+                entrypoint="python", user="0", network_disabled=True, remove=True,
+                volumes={str(path.parent): {"bind": "/evidence", "mode": "ro"}},
+            ).decode()
+        finally:
+            client.close()
 
 
 @contextmanager
@@ -101,7 +126,8 @@ async def run_resources(monkeypatch, tmp_path, url, protocol, scenario="normal",
     (skill / "scripts/hello.py").write_text(
         f"from pathlib import Path\nimport os\np=Path(os.environ.get('NEXENT_OUTPUT_DIR', {str(effect.parent)!r}))/"
         "'script-effects.txt'\n"
-        "p.write_text(p.read_text()+'x' if p.exists() else 'x')\nprint('SCRIPT_RESULT_MARKER')\n", encoding="utf-8",
+        "p.write_text(p.read_text()+'x' if p.exists() else 'x')\nprint('SCRIPT_RESULT_MARKER')\n",
+        encoding="utf-8",
     )
     hidden = skill.parent / "forbidden_skill"
     hidden.mkdir(exist_ok=True)
@@ -117,7 +143,7 @@ async def run_resources(monkeypatch, tmp_path, url, protocol, scenario="normal",
             network_disabled=False, timeout_seconds=30, workspace_mode="bind", container_workspace_root="/work",
             failure_policy="error", extra_kwargs={"workspace_root": str(tmp_path)})
     tools = [ToolConfig(name="add", class_name="ResourceAddTool", source="local", params={}),
-             ToolConfig(name="multiply", class_name="multiply", source="mcp", params={"b": 4}),
+             ToolConfig(name="multiply", class_name="multiply_values", source="mcp", params={"b": 4}),
              ToolConfig(name="read_skill_md", class_name="ReadSkillMdTool", source="builtin", params=parameters),
              ToolConfig(name="run_skill_script", class_name="RunSkillScriptTool", source="builtin", params=parameters)]
     if scenario == "parallel":
@@ -130,7 +156,8 @@ async def run_resources(monkeypatch, tmp_path, url, protocol, scenario="normal",
     profile = profile_for(url, protocol)
     info = AgentRunInfo(
         query="Run the authorized resource chain" + (" BLOCK_MCP_MARKER" if scenario in {"timeout", "cancel"}
-                                                     else " PARALLEL_MARKER" if scenario == "parallel" else ""),
+                                                     else " PARALLEL_MARKER" if scenario == "parallel" else "")
+              + (" NATIVE_FILE_MARKER" if docker_sandbox and protocol == "native" else ""),
         observer=MessageObserver(lang="en"), stop_event=threading.Event(), thread_manager=manager,
         tenant_id="spike-tenant", user_context={"user_id": "captured-user"},
         sandbox_config=sandbox, workspace_path=str(tmp_path / "run") if docker_sandbox else None,
@@ -165,7 +192,10 @@ async def run_resources(monkeypatch, tmp_path, url, protocol, scenario="normal",
             state = (await client.get(url + "/state")).json()
         if scenario in {"normal", "parallel"}:
             assert info.attempt_outcome == "completed", output[-1:]
-            previous = (len(calls), state["mcp_calls"], effect.read_text() if effect.exists() else "")
+            if docker_sandbox and protocol == "native":
+                artifact = tmp_path / "run/outputs/native-created.txt"
+                assert read_workspace_evidence(artifact) == "NATIVE_SANDBOX_FILE_MARKER"
+            previous = (len(calls), state["mcp_calls"], read_workspace_evidence(effect))
             follow_up = info.model_copy(update={
                 "query": "What can you do? CURRENT_TASK_ONLY_MARKER", "observer": MessageObserver(lang="en"),
                 "stop_event": threading.Event(), "cancellation_scope": None,
@@ -177,8 +207,8 @@ async def run_resources(monkeypatch, tmp_path, url, protocol, scenario="normal",
             assert any("CURRENT_RESPONSE_MARKER" in str(event) for event in second)
             async with httpx.AsyncClient(trust_env=False) as client:
                 later = (await client.get(url + "/state")).json()
-            assert previous == (len(calls), later["mcp_calls"], effect.read_text() if effect.exists() else "")
-        return info, state, output, calls, effect.read_text() if effect.exists() else "", elapsed
+            assert previous == (len(calls), later["mcp_calls"], read_workspace_evidence(effect))
+        return info, state, output, calls, read_workspace_evidence(effect), elapsed
     finally:
         if canceller and not canceller.done():
             canceller.cancel()

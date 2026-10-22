@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Strict recognition of the existing, explicitly executable text protocol."""
 
 import ast
@@ -6,6 +8,7 @@ from dataclasses import dataclass
 
 
 EXECUTION_TOOL = "nexent_execute_block"
+NATIVE_EXECUTION_TOOL = "nexent_execute_python"
 PROTOCOL_INSTRUCTION = (
     "This outlet uses the controlled text execution protocol, not native function calls. "
     "Only complete <code>...</code> blocks request Python execution with the listed authorized tools. "

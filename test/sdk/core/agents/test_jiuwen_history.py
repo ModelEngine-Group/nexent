@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Regression coverage for history replay at the native model boundary."""
 
 import sys
@@ -137,6 +139,8 @@ def test_native_prompt_and_retry_configuration(monkeypatch, saved_profile):
     adapter = adapter_with_history([AgentHistory(role="user", content="Analyze an old image")], saved_profile)
     adapter.run_info.thread_manager = SimpleNamespace()
     monkeypatch.setattr(adapter, "_skill_rails", list)
+    bind_executor = Mock()
+    monkeypatch.setattr(adapter, "_bind_text_executor", bind_executor)
     monkeypatch.setattr(jiuwen, "NexentAgent", lambda **kwargs: SimpleNamespace(
         _prepare_file_workspace=lambda query: query,
     ))
@@ -150,6 +154,7 @@ def test_native_prompt_and_retry_configuration(monkeypatch, saved_profile):
     retry_module.ModelAnomalyDetectionRail = retry_factory
     monkeypatch.setitem(sys.modules, retry_module.__name__, retry_module)
     adapter.prepare()
+    bind_executor.assert_called_once_with()
     options = factory.call_args.kwargs
     assert "only the latest user request" in options["system_prompt"]
     assert "not pending tasks" in options["system_prompt"]

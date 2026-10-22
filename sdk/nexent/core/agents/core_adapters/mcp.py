@@ -1,7 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Jiuwen native MCP tools with Nexent managed session ownership."""
 
 import asyncio
+import keyword
 import logging
+import re
 from contextlib import AsyncExitStack, nullcontext
 from copy import deepcopy
 from types import SimpleNamespace
@@ -16,6 +20,16 @@ from ..tool_user_context import USER_CONTEXT_FIELDS
 
 
 logger = logging.getLogger(__name__)
+
+
+def _registered_tool_name(name):
+    """Match the naming contract used by Nexent's MCP registration adapter."""
+    normalized = re.sub(r"[^\w_]", "", name.replace("-", "_"))
+    if normalized and normalized[0].isdigit():
+        normalized = "_" + normalized
+    if keyword.iskeyword(normalized):
+        normalized += "_"
+    return normalized
 
 
 class JiuwenMCPCollection(ManagedMCPToolCollection):
@@ -49,10 +63,9 @@ class JiuwenMCPCollection(ManagedMCPToolCollection):
                 if not await client.connect(timeout=self.connect_timeout_seconds):
                     raise MCPConnectionTimeoutError("Jiuwen MCP connection failed")
                 for card in await client.list_tools(timeout=self.connect_timeout_seconds):
-                    if card.name in available:
-                        available[card.name] = None
-                    else:
-                        available[card.name] = (client, card)
+                    # The public saved name may be normalized; the proxy keeps the raw wire name.
+                    for name in {card.name, _registered_tool_name(card.name)} - {""}:
+                        available[name] = None if name in available else (client, card)
 
             tools = []
             for tool_config in self.authorized_tools:

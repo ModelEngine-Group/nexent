@@ -877,6 +877,9 @@ class TestGetSkillScriptTools:
         assert "write_skill_file" not in child_names
         run_skill_call = mock_tool_config.call_args_list[0]
         assert run_skill_call.kwargs["params"]["authorized_skill_names"] == ["analysis"]
+        for call in mock_tool_config.call_args_list[:3]:
+            assert call.kwargs["params"]["authorized_skill_names"] == ["analysis"]
+            assert call.kwargs["metadata"] == {"agent_id": 2, "tenant_id": "tenant_1", "version_no": 0}
         from nexent.core.prompts import load_prompt
 
         assert run_skill_call.kwargs["description"] == load_prompt(
@@ -1029,6 +1032,24 @@ class TestGetSkillScriptTools:
         for call in calls[3:]:
             assert call[1]["metadata"] == file_context
             assert call[1]["params"]["workspace_path"] == file_context["workspace_path"]
+
+    @pytest.mark.parametrize("snapshot", [None, [{"name": "test_skill", "config_values": {}}]])
+    def test_all_skill_tools_receive_detached_authorization_with_empty_configuration(self, snapshot):
+        mock_tool_config.reset_mock()
+        _get_skill_script_tools(42, "tenant", version_no=13, runtime_skill_snapshot=snapshot)
+        calls = mock_tool_config.call_args_list[:3]
+        for call in calls:
+            assert call.kwargs["params"]["authorized_skill_names"] == ["test_skill"]
+            assert call.kwargs["metadata"] == {"agent_id": 42, "tenant_id": "tenant", "version_no": 13}
+        calls[0].kwargs["params"]["authorized_skill_names"].append("not_authorized")
+        assert calls[1].kwargs["params"]["authorized_skill_names"] == ["test_skill"]
+        assert calls[2].kwargs["params"]["authorized_skill_names"] == ["test_skill"]
+
+    def test_explicit_empty_snapshot_does_not_use_saved_skill_bindings(self):
+        mock_tool_config.reset_mock()
+        _get_skill_script_tools(42, "tenant", runtime_skill_snapshot=[])
+        assert [call.kwargs["name"] for call in mock_tool_config.call_args_list] == [
+            "download_from_s3", "upload_to_s3"]
 
 
 class TestDiscoverLangchainTools:
