@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D3 real Agent SSE, tool, planning, nesting, metadata and attachment scenarios."""
 
 from __future__ import annotations
@@ -17,6 +19,9 @@ from shared.http import MODEL_TIMEOUT, assert_status, client
 from shared.sse import assert_terminal_event, read_sse
 from shared.runtime_fault import owned_failure_model, fault_control
 from shared.auth import sign_in
+from shared.case_evidence import read_sse_with_evidence, write_case_evidence
+from shared.final_answers import final_answer_text
+from shared.factories.conversation import owned_conversation
 
 
 RUNTIME_CASES = ['AGT-013', 'AGT-014', 'AGT-015', 'AGT-016', 'AGT-017', 'AGT-018', 'AGT-019', 'AGT-020', 'AGT-021', 'AGT-022', 'AGT-023', 'AGT-024', 'AGT-025', 'AGT-026', 'AGT-027', 'AGT-029', 'AGT-030', 'AGT-031', 'AGT-032', 'AGT-033', 'AGT-034', 'AGT-035', 'AGT-036', 'AGT-037', 'AGT-038', 'AGT-039']
@@ -33,7 +38,7 @@ def _event_text(events: list[dict]) -> str:
 
 async def _run(identity, agent_id: int, query: str, *, conversation_id: int | None = None,
                resume: bool = False, expected: int | tuple[int, ...] = 200,
-               **overrides) -> list[dict]:
+               evidence_name: str | None = None, **overrides) -> list[dict]:
     payload = {
         "query": query,
         "agent_id": agent_id,
@@ -44,10 +49,13 @@ async def _run(identity, agent_id: int, query: str, *, conversation_id: int | No
     }
     async with client("runtime", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
         async with api.stream("POST", "/agent/run", params={"resume": resume}, json=payload) as response:
+            if response.status_code != 200:
+                await response.aread()
             assert_status(response, expected)
             if expected != 200:
                 return []
-            events = await read_sse(response, limit=2000)
+            events = (await read_sse_with_evidence(response, evidence_name, limit=2000)
+                      if evidence_name else await read_sse(response, limit=2000))
     return events
 
 
@@ -403,11 +411,33 @@ async def _metadata(identity, mode: str) -> None:
     marker = "D3-META-314159"
     metadata = {"project": marker, "nested": {"scope": "runtime"}}
     if mode == "core":
-        events = await _run(
-            identity, _agent_asset("metadata_id"), "Return the runtime metadata project marker.",
-            metadata=metadata,
-        )
-        assert marker.lower() in _event_text(events)
+        agent_id = _agent_asset("metadata_id")
+        async with client('config', token=identity.access_token) as api:
+            published = await api.post(f'/agent/{agent_id}/publish', json={'version_name': 'metadata-isolation'})
+            assert_status(published, 200)
+        async with owned_conversation(identity, 'Runtime metadata isolation') as conversation_id:
+            events = await _run(
+                identity, agent_id, "Return the runtime metadata project marker.",
+                conversation_id=conversation_id, metadata=metadata,
+                is_debug=False, version_no=published.json()['version_no'],
+                evidence_name='AGT-032-metadata-stream',
+            )
+            answer = final_answer_text(events)
+            assert marker.lower() in answer.lower(), 'Completed root answer omitted the metadata marker'
+            async with client('runtime', token=identity.access_token) as api:
+                response = await api.get(f'/conversation/{conversation_id}')
+                assert_status(response, 200)
+            rows = response.json()['data']
+            assert len(rows) == 1, 'Owned conversation history is missing or ambiguous'
+            persisted = rows[0]
+            write_case_evidence('AGT-032-metadata-isolation', {
+                'answer': answer, 'runtime_metadata': persisted.get('runtime_metadata'),
+                'runtime_metadata_version': persisted.get('runtime_metadata_version'),
+                'meta_data': persisted.get('meta_data'),
+            })
+            assert persisted.get('runtime_metadata') == metadata
+            assert persisted.get('runtime_metadata_version', 0) >= 1
+            assert marker not in json.dumps(persisted.get('meta_data'), ensure_ascii=False)
     elif mode == "boundary":
         await _run(
             identity, _agent_asset("metadata_id"), "Do not confuse audit fields with runtime metadata.",

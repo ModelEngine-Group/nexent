@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Agent Card factories shared by the SDK server and Nacos registration."""
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ def card_dict(base_url: str, agent_key: str, name: str | None = None) -> dict[st
     schemes, requirements = security_contract(profile)
     endpoint = f"{base_url}/{agent_key}"
     card: dict[str, Any] = {
-        "name": name or ("nexent_a2a_mock_basic" if agent_key == "basic" else f"Nexent A2A Mock ({agent_key})"),
+        "name": name or f"nexent_a2a_mock_{agent_key}",
         "description": "Deterministic A2A test agent for Nexent integration tests.",
         "version": "1.0.0",
         "protocolVersion": "1.0.0",

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Real Planning execution observes an owned deterministic MCP failure."""
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ from shared.case_evidence import read_sse_with_evidence, write_case_evidence
 from shared.factories.agent import _draft_agent
 from shared.http import MODEL_TIMEOUT, assert_status, client
 from shared.sse import assert_terminal_event
+from shared.final_answers import final_answer_text
 
 CASE_ID = 'AGT-025'
 
@@ -51,10 +54,11 @@ def assert_failed_plan(events, receipts, marker):
                for update in updates), 'Failed dependency was not explicitly skipped'
     assert_terminal_event(events, allow_error=True)
     assert marker in json.dumps(payloads, ensure_ascii=False), 'Controlled failure is absent from product events'
-    final = [payload for payload in payloads if payload.get('type') in {'final_answer', 'error'}]
-    assert final and final[-1].get('content'), 'Failure handling did not produce a bounded terminal result'
-    if final[-1]['type'] == 'final_answer':
-        assert marker in final[-1]['content'], 'Final result concealed the actual failed dependency'
+    root = [payload for payload in payloads if not payload.get('invocation_id') and payload.get('depth', 0) == 0]
+    if root and root[-1].get('type') == 'error':
+        assert str(root[-1].get('content') or '').strip(), 'Empty root error terminal'
+    else:
+        assert marker in final_answer_text(events), 'Final result concealed the actual failed dependency'
 
 
 async def clean_generated_files(identity, events):

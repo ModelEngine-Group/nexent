@@ -7,3 +7,8 @@ implementations:
 timeout_seconds: 180
 acceptance_bindings:
   AC-01: [WB-PIN-DELETE-D4-001]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

@@ -499,13 +499,13 @@ export class AgentPage {
       throw new Error(`Cannot open Debug: Agent form validation failed: ${validationErrors.join("; ")}`);
     }
     await expect(this.debugPanel()).toBeVisible({ timeout: 30000 });
-    await expect(this.debugPanel().locator("textarea[placeholder='输入\"/\"快速引用技能及指令']:visible, textarea[placeholder*=\"输入测试问题\"]:visible")).toBeVisible({ timeout: 120000 });
+    await expect(this.debugPanel().getByRole("textbox", { name: "对话输入", exact: true })).toBeVisible({ timeout: 120000 });
   }
 
   async sendDebug(prompt: string, expectedMarker?: string): Promise<string> {
     const debugPanel = this.debugPanel();
     await expect(debugPanel).toBeVisible();
-    const input = debugPanel.locator("textarea[placeholder='输入\"/\"快速引用技能及指令']:visible, textarea[placeholder*=\"输入测试问题\"]:visible");
+    const input = debugPanel.getByRole("textbox", { name: "对话输入", exact: true });
     // Empty completed replies can have zero layout height. Count their DOM
     // unit too; visibility must not turn an empty answer into a five-minute wait.
     // Compare and normal histories stay mounted together. Exclude hidden
