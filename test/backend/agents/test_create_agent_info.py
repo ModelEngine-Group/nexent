@@ -2237,9 +2237,7 @@ class TestCreateAgentConfig:
                 "name": "test_agent",
                 "display_name": "知识助手",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": False,
@@ -2286,7 +2284,7 @@ class TestCreateAgentConfig:
         )
 
         mocks["build_components"].assert_called_once()
-        assert mocks["build_components"].call_args.kwargs["duty_prompt"] == "test duty"
+        assert mocks["build_components"].call_args.kwargs["prompt"] == "test duty"
         assert "constraint" not in mocks["build_components"].call_args.kwargs
         assert "few_shots" not in mocks["build_components"].call_args.kwargs
         mocks["prepare_templates"].assert_not_awaited()
@@ -2465,7 +2463,7 @@ class TestCreateAgentConfig:
         )
 
         mocks["build_components"].assert_called_once()
-        assert mocks["build_components"].call_args.kwargs["duty_prompt"] == "test duty"
+        assert mocks["build_components"].call_args.kwargs["prompt"] == "test duty"
         assert "constraint" not in mocks["build_components"].call_args.kwargs
         assert "few_shots" not in mocks["build_components"].call_args.kwargs
         mocks["prepare_templates"].assert_not_called()
@@ -2498,9 +2496,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True,
@@ -2579,9 +2575,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True
@@ -2720,9 +2714,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True,
@@ -2798,9 +2790,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True
@@ -2877,9 +2867,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True,
@@ -2943,9 +2931,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": None,  # Test None case
                 "provide_run_summary": True
@@ -3062,9 +3048,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True,
@@ -3177,9 +3161,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True,
@@ -3289,9 +3271,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True,
@@ -3400,9 +3380,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True,
@@ -3495,9 +3473,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True,
@@ -3720,9 +3696,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True,
@@ -3832,9 +3806,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True,
@@ -3918,9 +3890,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True,
@@ -3972,9 +3942,7 @@ class TestCreateAgentConfig:
             mock_search_agent.return_value = {
                 "name": "test_agent",
                 "description": "test description",
-                "duty_prompt": "test duty",
-                "constraint_prompt": "test constraint",
-                "few_shots_prompt": "test few shots",
+                "prompt": "test duty",
                 "max_steps": 5,
                 "model_ids": [123],
                 "provide_run_summary": True
@@ -4021,8 +3989,7 @@ class TestCreateAgentConfig:
                     patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]):
                 mock_search.return_value = {
                     "name": "test_agent", "description": "desc",
-                    "duty_prompt": "d", "constraint_prompt": "c",
-                    "few_shots_prompt": "f", "max_steps": 5,
+                    "prompt": "d", "max_steps": 5,
                     "model_ids": [123], "provide_run_summary": False,
                 }
                 mock_get_template.return_value = {"system_prompt": "{{duty}}"}
@@ -7902,8 +7869,7 @@ class TestCreateAgentConfigMemoryBuildFailure:
              }):
             mock_search_agent.return_value = {
                 "name": "test_agent", "description": "desc",
-                "duty_prompt": "", "constraint_prompt": "",
-                "few_shots_prompt": "", "max_steps": 5,
+                "prompt": "", "max_steps": 5,
                 "model_ids": [1], "provide_run_summary": False,
                 "enable_context_manager": False,
             }
@@ -7966,8 +7932,7 @@ class TestCreateAgentConfigMemoryContextServiceFailure:
              }):
             mock_search_agent.return_value = {
                 "name": "test_agent", "description": "desc",
-                "duty_prompt": "", "constraint_prompt": "",
-                "few_shots_prompt": "", "max_steps": 5,
+                "prompt": "", "max_steps": 5,
                 "model_ids": [1], "provide_run_summary": False,
                 "enable_context_manager": False,
             }
@@ -8043,8 +8008,8 @@ class TestCreateAgentConfigMemoryProviderResults:
                  "management.services.memory.provider": memory_backend_adapter_mod,
              }):
             mock_search_agent.return_value = {
-                "name": "test_agent", "description": "desc", "duty_prompt": "",
-                "constraint_prompt": "", "few_shots_prompt": "", "max_steps": 5,
+                "name": "test_agent", "description": "desc", "prompt": "",
+                "max_steps": 5,
                 "model_ids": [1], "provide_run_summary": False,
                 "enable_context_manager": False,
             }
@@ -8095,8 +8060,8 @@ class TestCreateAgentConfigMemoryProviderResults:
                  "management.services.memory.provider": memory_backend_adapter_mod,
              }):
             mock_search_agent.return_value = {
-                "name": "test_agent", "description": "desc", "duty_prompt": "",
-                "constraint_prompt": "", "few_shots_prompt": "", "max_steps": 5,
+                "name": "test_agent", "description": "desc", "prompt": "",
+                "max_steps": 5,
                 "model_ids": [1], "provide_run_summary": False,
                 "enable_context_manager": False,
             }

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """UT-SDK-FPS-037: prompt assembly code has one functional home."""
 
 import ast
@@ -16,7 +18,7 @@ def test_ut_sdk_fps_037_resource_package_has_no_assembly_modules():
 def test_ut_sdk_fps_037_assembly_functions_are_grouped_by_purpose():
     expected = {
         "auxiliary.py": {"compose_auxiliary_prompt", "render_auxiliary_field"},
-        "meta.py": {"compose_agent_generation_user", "compose_nl2skill"},
+        "meta.py": {"compose_agent_optimization", "compose_nl2skill"},
         "evaluation.py": {"compose_evaluation_set_cases", "format_agent_profile_context"},
         "document.py": {"compose_document_cluster_summary"},
         "memory.py": {"compose_memory_prompt"},

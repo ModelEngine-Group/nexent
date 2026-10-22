@@ -31,9 +31,7 @@ _NL2AGENT_DRAFT_SYNC_FIELDS = frozenset(
         "display_name",
         "description",
         "enable_protocol_repair_retry",
-        "duty_prompt",
-        "constraint_prompt",
-        "few_shots_prompt",
+        "prompt",
         "greeting_message",
         "example_questions",
     }
@@ -630,9 +628,7 @@ class MessageObserver:
                     isinstance(field_name, str)
                     and field_name
                     in {
-                        "duty_prompt",
-                        "constraint_prompt",
-                        "few_shots_prompt",
+                        "prompt",
                         "greeting_message",
                         "example_questions",
                     }

@@ -6,11 +6,14 @@ import json
 import logging
 import re
 import unicodedata
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastmcp.server.dependencies import get_http_request
 from nexent.core.agents.agent_model import ToolConfig
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel, ConfigDict, Field, StrictBool, StringConstraints,
+    ValidationError, field_validator, model_validator,
+)
 
 from consts.exceptions import UnauthorizedError
 from consts.model import AgentInfoRequest
@@ -99,12 +102,13 @@ NL2A_WRAPPER_DESCRIPTION = (
 SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
     "Partially update the current tenant's existing ordinary agent draft. "
     "Always pass the current agent_id and only whitelisted fields, never null. "
-    "Allowed fields: name, display_name, description, duty_prompt, greeting_message, example_questions, "
+    "Allowed fields: name, display_name, description, prompt, greeting_message, example_questions, "
     "enable_protocol_repair_retry. "
     "enable_protocol_repair_retry must be a boolean: explicit true enables strict output validation and silent "
     "protocol repair for the target Agent, false disables it; omit it unless requested. "
     "It does not control model-service retries or the NL2Agent creator itself. "
-    "duty_prompt is the only business prompt and contains responsibilities, constraints and examples. "
+    "prompt contains complete responsibilities, constraints, tool-use rules, output requirements and necessary few-shot. "
+    "For partial edits, read draft_fields.prompt, preserve unrelated instructions, and save the full merged prompt. "
     "greeting_message and example_questions are separate conversation settings; "
     "example_questions must be a list of strings, never a newline-delimited string. "
     "Only submit the fields determined by the current action. "
@@ -118,7 +122,7 @@ MAX_BINDING_CANDIDATES = 12
 MAX_REQUIREMENT_CLARIFICATION_QUESTIONS = 5
 _NL2AGENT_PROMPT_FIELDS = frozenset(
     {
-        "duty_prompt",
+        "prompt",
         "greeting_message",
         "example_questions",
     }
@@ -398,7 +402,10 @@ class AgentDraftFields(BaseModel):
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = None
     enable_protocol_repair_retry: StrictBool | None = None
-    duty_prompt: str | None = Field(default=None, description="Complete business prompt including constraints and examples.")
+    prompt: Annotated[str, StringConstraints(strip_whitespace=False)] | None = Field(
+        default=None,
+        description="Complete Agent instructions: responsibilities, constraints, tool-use rules and necessary few-shot.",
+    )
     greeting_message: str | None = None
     example_questions: list[str] | None = Field(
         default=None, max_length=6, description="Array of suggested question strings; not a newline-delimited string."
@@ -693,7 +700,7 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
                             "name": "str",
                             "description": "str",
                             "enable_protocol_repair_retry": "bool",
-                            "duty_prompt": "str",
+                            "prompt": "str",
                             "greeting_message": "str",
                             "example_questions": "list[str]",
                         }.items()
@@ -1115,7 +1122,7 @@ def _serialize_agent_draft_save_result(
             else {
                 "event": "agent_draft_fields_saved",
                 "agent_id": result.agent_id,
-                "updated_fields": result.updated_fields,
+                "updated_fields": payload["updated_fields"],
             }
         )
         state = json.dumps(
@@ -1126,7 +1133,8 @@ def _serialize_agent_draft_save_result(
         return f"{serialized}\n<nl2a_state>{state}</nl2a_state>"
 
     prompt_fields = sorted(
-        set(failed_fields or attempted_fields or []) & _NL2AGENT_PROMPT_FIELDS
+        set(failed_fields or attempted_fields or [])
+        & _NL2AGENT_PROMPT_FIELDS
     )
     if (
         isinstance(result, SaveAgentDraftFieldsError)

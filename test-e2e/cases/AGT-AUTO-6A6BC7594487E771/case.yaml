@@ -18,7 +18,7 @@ case:
   - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
   - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/models.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/documents/
   - models.yaml 中本用例所需真实 Provider 已配置，secrets.env 中凭据有效，预检连通性通过。
-  - 通过实际 Agent API 准备本用例独占的完整草稿，回读校验 name、description、duty_prompt、greeting_message、example_questions；未绑定资源时 constraint_prompt、few_shots_prompt 可为空。完整性以已保存字段为准，不要求前置另跑一次完整 NL2Agent 生成或伪造完成事件。
+  - 通过实际 Agent API 准备本用例独占的完整草稿，回读校验 name、description、prompt、greeting_message、example_questions；提示词保存为一个完整的 prompt。完整性以已保存字段为准，不要求前置另跑一次完整 NL2Agent 生成或伪造完成事件。
   test_data:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
 

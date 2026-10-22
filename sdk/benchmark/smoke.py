@@ -1,5 +1,6 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+# -*- coding: utf-8 -*-
 
 """Minimal smoke test for benchmark-on-refactor integration.
 
@@ -45,7 +46,7 @@ async def main():
     agent_run_info = build_agent_run_info(
         query=query,
         history=[],
-        duty_prompt="你是一个简明扼要的助手。\n\n只回答用户问题，不要展开。",
+        prompt="你是一个简明扼要的助手。\n\n只回答用户问题，不要展开。",
         max_steps=3,
         temperature=0.0,
         agent_name="smoke_agent",

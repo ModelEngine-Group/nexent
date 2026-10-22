@@ -65,7 +65,7 @@ import HighFidelityPromptEditModal from "./HighFidelityPromptEditModal";
 
 const { TextArea } = Input;
 
-type PromptTab = "duty";
+type PromptField = "prompt";
 
 type SortableModelItemProps = {
   disabled: boolean;
@@ -382,7 +382,7 @@ export default function AgentPrompt({
   const defaultLlmConfig = useAgentStore((state) => state.defaultLlmConfig);
   const { configFocusRequest } = useNl2AgentFlow();
 
-  const [expandedPrompt, setExpandedPrompt] = useState<PromptTab | null>(null);
+  const [expandedPrompt, setExpandedPrompt] = useState<PromptField | null>(null);
   const [isModelPriorityOpen, setIsModelPriorityOpen] = useState(false);
   const [isModelSelectionOpen, setIsModelSelectionOpen] = useState(false);
   useEffect(() => {
@@ -649,14 +649,14 @@ export default function AgentPrompt({
   );
 
   const expandedPromptConfig = {
-    duty: {
-      title: t("agent.field.dutyPrompt"),
-      content: editedAgent.duty_prompt ?? "",
-      save: (content: string) => updateDraft({ duty_prompt: content }),
+    prompt: {
+      title: t("agent.field.prompt"),
+      content: editedAgent.prompt ?? "",
+      save: (content: string) => updateDraft({ prompt: content }),
     },
   };
 
-  const renderExpandButton = (prompt: PromptTab) => (
+  const renderExpandButton = (prompt: PromptField) => (
     <Tooltip title={t("systemPrompt.button.expand")}>
       <Button
         type="text"
@@ -812,9 +812,9 @@ export default function AgentPrompt({
           {highFidelity ? (
             <HighFidelityTextArea
               limit={1000}
-              placeholder={t("agent.field.dutyPromptPlaceholder")}
+              placeholder={t("agent.field.promptPlaceholder")}
               rows={6}
-              value={editedAgent.duty_prompt ?? ""}
+              value={editedAgent.prompt ?? ""}
               disabled={isReadOnly}
               classNames={{
                 textarea: "!py-2 !pl-3 !pr-5",
@@ -822,15 +822,15 @@ export default function AgentPrompt({
                   "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
               }}
               onChange={(event) =>
-                updateDraft({ duty_prompt: event.target.value })
+                updateDraft({ prompt: event.target.value })
               }
             />
           ) : (
             <TextArea
-              placeholder={t("agent.field.dutyPromptPlaceholder")}
+              placeholder={t("agent.field.promptPlaceholder")}
               disabled={isReadOnly}
               rows={6}
-              value={editedAgent.duty_prompt}
+              value={editedAgent.prompt}
               style={{
                 paddingTop: 8,
                 paddingBottom: 8,
@@ -838,12 +838,12 @@ export default function AgentPrompt({
                 paddingRight: 20,
               }}
               onChange={(event) =>
-                updateDraft({ duty_prompt: event.target.value })
+                updateDraft({ prompt: event.target.value })
               }
             />
           )}
           <div className="absolute right-1 top-2 z-10">
-            {renderExpandButton("duty")}
+            {renderExpandButton("prompt")}
           </div>
         </div>
       </Form.Item>
@@ -906,7 +906,7 @@ export default function AgentPrompt({
             <HighFidelityTextArea
               limit={1000}
               id="agent-primary-prompt"
-              value={editedAgent.duty_prompt ?? ""}
+              value={editedAgent.prompt ?? ""}
               placeholder={t("agent.highFidelity.promptPlaceholder")}
               disabled={isReadOnly}
               classNames={{
@@ -916,7 +916,7 @@ export default function AgentPrompt({
                   "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
               }}
               onChange={(event) =>
-                updateDraft({ duty_prompt: event.target.value })
+                updateDraft({ prompt: event.target.value })
               }
             />
           </div>
@@ -941,7 +941,7 @@ export default function AgentPrompt({
       )}
 
       {expandedPrompt &&
-        (highFidelity && expandedPrompt === "duty" ? (
+        (highFidelity && expandedPrompt === "prompt" ? (
           <HighFidelityPromptEditModal
             key={`${agentId}-${expandedPrompt}`}
             title={expandedPromptConfig[expandedPrompt].title}

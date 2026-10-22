@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Build the ephemeral NL2Agent configuration."""
 
 import json
@@ -73,6 +74,7 @@ def create_nl2agent_agent_config(language: str) -> AgentConfig:
         max_steps=8,
         model_name="main_model",
         provide_run_summary=False,
+        enable_protocol_repair_retry=True,
         context_items=[
             ContextItemInput(
                 id="system:nl2agent_prompt",

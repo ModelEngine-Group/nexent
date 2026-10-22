@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, beforeAll, afterEach } from 'vitest';
 import { render, screen, act, cleanup } from '@testing-library/react';
@@ -151,9 +153,7 @@ function setAgent(opts: { model_ids?: number[]; defaultLlmConfigId?: number | nu
     model_ids: modelIds,
     model: nameById(modelIds[0]),
     model_names: modelIds.map((id) => nameById(id)),
-    duty_prompt: '',
-    constraint_prompt: '',
-    few_shots_prompt: '',
+    prompt: '',
   };
   if (opts.defaultLlmConfigId === null) {
     store.state.defaultLlmConfig = { id: null, name: '', displayName: '' };

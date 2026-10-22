@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Exercise actual Provider failure and timeout, not a nonexistent model ID."""
 import os
 import time
@@ -69,8 +71,8 @@ async def fault_model(identity, mode):
 def snapshot(body):
     body = body.get('data') or body
     assert body.get('agent_id') or body.get('id'), 'Draft read-back must contain the owned Agent identity'
-    fields = ('name', 'display_name', 'description', 'duty_prompt', 'constraint_prompt',
-              'few_shots_prompt', 'greeting_message', 'example_questions', 'model_ids',
+    fields = ('name', 'display_name', 'description', 'prompt',
+              'greeting_message', 'example_questions', 'model_ids',
               'tools', 'skills', 'related_agent_ids')
     return {field: body.get(field) for field in fields}
 

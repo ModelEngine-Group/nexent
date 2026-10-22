@@ -44,7 +44,7 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
     Object.fromEntries(
       [
         "description",
-        "duty_prompt",
+        "prompt",
         "greeting_message",
         "example_questions",
         "tools",
@@ -215,7 +215,7 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
     }
     expect(stream).toContain("agent_generation_completed");
     const draft = await read(id);
-    expect(draft.duty_prompt.trim().length).toBeGreaterThan(0);
+    expect(draft.prompt.trim().length).toBeGreaterThan(0);
     expect(draft.enable_protocol_repair_retry).toBe(true);
     generatedIds.push(id);
   };
@@ -275,7 +275,7 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
         );
         const initialDraft = await read(id);
         expect(initialDraft.description ?? "").toBe("");
-        expect(initialDraft.duty_prompt ?? "").toBe("");
+        expect(initialDraft.prompt ?? "").toBe("");
         expect(initialDraft.greeting_message ?? "").toBe("");
         expect(initialDraft.example_questions ?? []).toEqual([]);
         const before = stable(initialDraft);

@@ -154,7 +154,7 @@ def format_agent_profile_context(
     lines = [render_evaluation_section(language, "profile_agent", {"value": profile["name"]})]
     for source, field in (
         ("description", "profile_description"),
-        ("duty_prompt", "profile_duty"),
+        ("prompt", "profile_duty"),
         ("business_description", "profile_business"),
     ):
         if profile[source]:

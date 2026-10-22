@@ -107,7 +107,7 @@ journey("PW-PROMPT-01", async (context) => {
       },
       async () => {
         finalDuty = `${generatedDuty}\nD4_PROMPT_EXPANDED_${token}`;
-        await agents.expandDutyPrompt(finalDuty);
+        await agents.expandPrompt(finalDuty);
         await assertUnrelatedPrompts();
         return "manually refined the generated role Prompt in the current expanded editor and observed autosave";
       },

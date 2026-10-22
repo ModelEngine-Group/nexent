@@ -441,7 +441,7 @@ export class AgentPage {
     const primary = this.page.locator("#agent-primary-prompt");
     if ((await primary.count()) && values.duty !== undefined) {
       await primary.fill(values.duty);
-      const saved = this.page.waitForResponse(r => r.url().includes("/api/agent/update") && r.request().method() === "POST" && r.request().postDataJSON()?.duty_prompt === values.duty);
+      const saved = this.page.waitForResponse(r => r.url().includes("/api/agent/update") && r.request().method() === "POST" && r.request().postDataJSON()?.prompt === values.duty);
       await primary.blur();
       expect((await saved).ok()).toBeTruthy();
       if (values.constraint === undefined && values.fewShots === undefined) return;
@@ -462,7 +462,7 @@ export class AgentPage {
     }
   }
 
-  async expandDutyPrompt(content: string): Promise<void> {
+  async expandPrompt(content: string): Promise<void> {
     await this.openSection("模型与提示词");
     await this.page.getByRole("tab", { name: "智能体角色", exact: true }).click();
     await this.page.getByRole("button", { name: "放大查看", exact: true }).click();

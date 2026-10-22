@@ -1066,9 +1066,7 @@ def test_search_agent_info_api_masks_asset_owner_prompts(mocker, mock_auth_heade
     mock_get_agent_info.return_value = {
         "agent_id": 1,
         "tenant_id": ASSET_OWNER_TENANT_ID,
-        "duty_prompt": "secret duty",
-        "constraint_prompt": "secret constraint",
-        "few_shots_prompt": "secret few",
+        "prompt": "Responsibilities and secret constraints/examples",
     }
 
     response = config_client.post(
@@ -1079,9 +1077,9 @@ def test_search_agent_info_api_masks_asset_owner_prompts(mocker, mock_auth_heade
 
     assert response.status_code == 200
     body = response.json()
-    assert body["duty_prompt"] is None
-    assert body["constraint_prompt"] is None
-    assert body["few_shots_prompt"] is None
+    assert body["prompt"] is None
+    assert "constraint_prompt" not in body
+    assert "few_shots_prompt" not in body
     assert body[AGENT_PROMPTS_HIDDEN_FLAG] is True
 
 
@@ -3207,7 +3205,7 @@ def test_update_agent_info_api_emits_audit_entry(mocker, mock_auth_header, caplo
         response = config_client.post(
             "/agent/update",
             json={"agent_id": 123, "display_name": "Bot",
-                  "duty_prompt": "secret prompt text"},
+                  "prompt": "secret prompt text"},
             headers=mock_auth_header,
         )
 
@@ -3219,7 +3217,7 @@ def test_update_agent_info_api_emits_audit_entry(mocker, mock_auth_header, caplo
     assert "result=success" in messages[0]
     assert "user_id=test_user" in messages[0]
     assert '"agent_id":123' in messages[0]
-    assert '"patch_keys":["agent_id","display_name","duty_prompt"]' in messages[0]
+    assert '"patch_keys":["agent_id","display_name","prompt"]' in messages[0]
     assert "secret prompt text" not in messages[0]
 
 

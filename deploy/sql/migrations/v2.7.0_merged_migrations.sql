@@ -1,3 +1,5 @@
+-- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 -- Nexent merged SQL migrations: v2.7.0
 -- Previous release tag: v2.6.1
 -- Source bodies are embedded byte-for-byte in deployment order.
@@ -135,3 +137,200 @@ COMMENT ON COLUMN nexent.conversation_record_t.workbench_config IS
 COMMENT ON COLUMN nexent.conversation_record_t.workbench_config_version IS
     'Monotonic optimistic-lock version for workbench_config';
 
+-- Source migration: v2.7.1_005_unify_agent_prompts.sql
+-- Source SHA-256: 745d2947a26ca63bd3144d7dacfb711535a076ba4656f329a7bbcd06a12604ca
+
+-- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+BEGIN;
+
+-- Keep schema inspection, consolidation and removal atomic with concurrent writers.
+LOCK TABLE nexent.ag_tenant_agent_t IN ACCESS EXCLUSIVE MODE;
+
+DO $migration$
+DECLARE
+    legacy_column_count integer;
+BEGIN
+    SELECT count(*) INTO legacy_column_count
+    FROM information_schema.columns
+    WHERE table_schema = 'nexent'
+      AND table_name = 'ag_tenant_agent_t'
+      AND column_name IN ('constraint_prompt', 'few_shots_prompt');
+
+    -- A completed migration is safe to execute again after both columns are gone.
+    IF legacy_column_count = 0 THEN
+        RETURN;
+    END IF;
+    IF legacy_column_count <> 2 THEN
+        RAISE EXCEPTION 'Expected both legacy Agent prompt columns before consolidation';
+    END IF;
+
+    -- Migrate every tenant and version before deploying the single-source runtime.
+    -- Preserve literal contents, including code indentation and Unicode characters.
+    UPDATE nexent.ag_tenant_agent_t
+    SET duty_prompt = CASE
+            WHEN btrim(COALESCE(constraint_prompt, ''), E' \t\n\r') <> ''
+              OR btrim(COALESCE(few_shots_prompt, ''), E' \t\n\r') <> ''
+            THEN concat_ws(E'\n\n',
+                CASE WHEN btrim(COALESCE(duty_prompt, ''), E' \t\n\r') <> ''
+                     THEN E'# Responsibilities\n' || duty_prompt END,
+                CASE WHEN btrim(COALESCE(constraint_prompt, ''), E' \t\n\r') <> ''
+                     THEN E'# Constraints\n' || constraint_prompt END,
+                CASE WHEN btrim(COALESCE(few_shots_prompt, ''), E' \t\n\r') <> ''
+                     THEN E'# Examples\n' || few_shots_prompt END)
+            ELSE duty_prompt
+        END
+    WHERE constraint_prompt IS DISTINCT FROM ''
+       OR few_shots_prompt IS DISTINCT FROM '';
+
+    ALTER TABLE nexent.ag_tenant_agent_t
+        DROP COLUMN constraint_prompt,
+        DROP COLUMN few_shots_prompt;
+END;
+$migration$;
+
+COMMIT;
+
+-- End source migration: v2.7.1_005_unify_agent_prompts.sql
+
+-- Source migration: v2.7.1_006_unify_marketplace_agent_prompts.sql
+-- Source SHA-256: 1ef6418005e4fdbb9afda4defdfbb7903e82b2980ede3a2fe161b68438321be8
+
+-- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+-- Preserve published instructions from each frozen snapshot, never from live drafts.
+BEGIN;
+LOCK TABLE nexent.ag_agent_repository_t IN ACCESS EXCLUSIVE MODE;
+
+CREATE FUNCTION pg_temp.unify_marketplace_prompt(fields JSONB) RETURNS JSONB
+LANGUAGE plpgsql AS $function$
+DECLARE
+    field_name TEXT;
+    alias_pair TEXT[];
+    base_prompt TEXT;
+    constraint_text TEXT;
+    example_text TEXT;
+    merged TEXT;
+BEGIN
+    IF jsonb_typeof(fields) IS DISTINCT FROM 'object' THEN
+        RAISE EXCEPTION 'Marketplace agent entries must be JSON objects';
+    END IF;
+    FOREACH field_name IN ARRAY ARRAY[
+        'prompt', 'duty_prompt', 'constraint_prompt', 'constraints_prompt',
+        'few_shots_prompt', 'few_shot_prompts'
+    ] LOOP
+        IF fields ? field_name AND jsonb_typeof(fields -> field_name) NOT IN ('string', 'null') THEN
+            RAISE EXCEPTION 'Marketplace prompt field % must be a string or null', field_name;
+        END IF;
+    END LOOP;
+    FOREACH alias_pair SLICE 1 IN ARRAY ARRAY[
+        ['prompt', 'duty_prompt'],
+        ['constraint_prompt', 'constraints_prompt'],
+        ['few_shots_prompt', 'few_shot_prompts']
+    ] LOOP
+        IF fields ? alias_pair[2] THEN
+            IF fields ? alias_pair[1] AND fields -> alias_pair[1] IS DISTINCT FROM fields -> alias_pair[2] THEN
+                RAISE EXCEPTION 'Conflicting marketplace prompt aliases: % and %', alias_pair[1], alias_pair[2];
+            END IF;
+            IF NOT fields ? alias_pair[1] THEN
+                fields := fields || jsonb_build_object(alias_pair[1], fields -> alias_pair[2]);
+            END IF;
+            fields := fields - alias_pair[2];
+        END IF;
+    END LOOP;
+
+    base_prompt := fields ->> 'prompt';
+    constraint_text := fields ->> 'constraint_prompt';
+    example_text := fields ->> 'few_shots_prompt';
+    IF btrim(COALESCE(constraint_text, ''), E' \t\n\r') <> ''
+       OR btrim(COALESCE(example_text, ''), E' \t\n\r') <> '' THEN
+        merged := concat_ws(E'\n\n',
+            CASE WHEN btrim(COALESCE(base_prompt, ''), E' \t\n\r') <> ''
+                 THEN E'# Responsibilities\n' || base_prompt END,
+            CASE WHEN btrim(COALESCE(constraint_text, ''), E' \t\n\r') <> ''
+                 THEN E'# Constraints\n' || constraint_text END,
+            CASE WHEN btrim(COALESCE(example_text, ''), E' \t\n\r') <> ''
+                 THEN E'# Examples\n' || example_text END);
+        fields := fields || jsonb_build_object('prompt', merged);
+    END IF;
+    RETURN fields - 'constraint_prompt' - 'few_shots_prompt';
+END;
+$function$;
+
+DO $migration$
+DECLARE
+    listing RECORD;
+    agent_entry RECORD;
+    normalized_agents JSONB;
+BEGIN
+    -- Include historical and deleted listings so every later reader sees one format.
+    FOR listing IN SELECT agent_repository_id, agent_info_json FROM nexent.ag_agent_repository_t LOOP
+        IF jsonb_typeof(listing.agent_info_json) IS DISTINCT FROM 'object'
+           OR jsonb_typeof(listing.agent_info_json -> 'agent_info') IS DISTINCT FROM 'object' THEN
+            RAISE EXCEPTION 'Invalid agent_info in marketplace listing %', listing.agent_repository_id;
+        END IF;
+        normalized_agents := '{}'::JSONB;
+        FOR agent_entry IN SELECT key, value FROM jsonb_each(listing.agent_info_json -> 'agent_info') LOOP
+            normalized_agents := normalized_agents || jsonb_build_object(
+                agent_entry.key, pg_temp.unify_marketplace_prompt(agent_entry.value));
+        END LOOP;
+        IF normalized_agents IS DISTINCT FROM listing.agent_info_json -> 'agent_info' THEN
+            -- Keep publication identity, version, audit metadata and all other JSON unchanged.
+            UPDATE nexent.ag_agent_repository_t
+            SET agent_info_json = jsonb_set(agent_info_json, '{agent_info}', normalized_agents)
+            WHERE agent_repository_id = listing.agent_repository_id;
+        END IF;
+    END LOOP;
+END;
+$migration$;
+
+DROP FUNCTION pg_temp.unify_marketplace_prompt(JSONB);
+COMMIT;
+
+-- End source migration: v2.7.1_006_unify_marketplace_agent_prompts.sql
+
+-- Source migration: v2.7.1_009_rename_agent_prompt_column.sql
+-- Source SHA-256: 9fe0ed28d22fe224107997e63febc4a604be876c7e42513104e41ad94f4aadaa
+
+-- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+-- Run after prompt section consolidation; rename metadata without rewriting values.
+BEGIN;
+LOCK TABLE nexent.ag_tenant_agent_t IN ACCESS EXCLUSIVE MODE;
+
+DO $migration$
+DECLARE
+    has_legacy BOOLEAN;
+    has_prompt BOOLEAN;
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t'
+          AND column_name IN ('constraint_prompt', 'few_shots_prompt')
+    ) THEN
+        RAISE EXCEPTION 'Consolidate legacy Agent prompt sections before renaming the prompt column';
+    END IF;
+
+    SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'duty_prompt'
+    ), EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name = 'prompt'
+    ) INTO has_legacy, has_prompt;
+
+    IF has_legacy AND has_prompt THEN
+        RAISE EXCEPTION 'Both duty_prompt and prompt columns exist; resolve the ambiguous Agent schema first';
+    ELSIF has_legacy THEN
+        ALTER TABLE nexent.ag_tenant_agent_t RENAME COLUMN duty_prompt TO prompt;
+    ELSIF NOT has_prompt THEN
+        RAISE EXCEPTION 'Neither duty_prompt nor prompt exists in the Agent table';
+    END IF;
+END;
+$migration$;
+
+COMMENT ON COLUMN nexent.ag_tenant_agent_t.prompt
+    IS 'Complete Agent instructions including responsibilities, constraints and examples';
+COMMIT;
+
+-- End source migration: v2.7.1_009_rename_agent_prompt_column.sql
