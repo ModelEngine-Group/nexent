@@ -850,6 +850,7 @@ _PROVIDER_URL_HINTS: Iterable[tuple[str, str]] = (
     ("xai", "api.x.ai"),
     ("openai", "api.openai.com"),
     ("modelengine", "modelengine"),
+    ("atlascloud", "atlascloud"),
 )
 
 

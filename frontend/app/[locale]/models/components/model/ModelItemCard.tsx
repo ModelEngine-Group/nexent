@@ -218,6 +218,13 @@ const getSourceMeta = (source: ModelSource) => {
         text: "text-neutral-700",
         icon: <span className="text-sm leading-none">𝕏</span>,
       };
+    case MODEL_SOURCES.ATLASCLOUD:
+      return {
+        label: "Atlas Cloud",
+        bg: "bg-violet-50",
+        text: "text-violet-600",
+        icon: <span className="text-sm leading-none">☁️</span>,
+      };
     default:
       return {
         label: "Unknown",
