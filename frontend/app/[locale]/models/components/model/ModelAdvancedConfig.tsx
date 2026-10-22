@@ -194,6 +194,7 @@ export function ModelAdvancedConfig({
                     typeof value[key] === "number" ? value[key] : undefined
                   }
                   fallback={1}
+                  showFallbackValue={false}
                   min={0}
                   max={key === "temperature" ? 2 : 1}
                   step={0.1}

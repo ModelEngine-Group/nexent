@@ -23,6 +23,7 @@ interface SliderStepperProps {
   step: number;
   disabled?: boolean;
   compact?: boolean;
+  showFallbackValue?: boolean;
   onChange: (next: number | undefined) => void;
 }
 
@@ -38,9 +39,11 @@ export function SliderStepper({
   step,
   disabled = false,
   compact = false,
+  showFallbackValue = true,
   onChange,
 }: SliderStepperProps) {
   const display = value ?? fallback;
+  const hasDisplayValue = value !== undefined || showFallbackValue;
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -84,7 +87,7 @@ export function SliderStepper({
             {TICK_POSITIONS.map((pos) => (
               <span
                 key={pos}
-                className="absolute top-0 h-[6px] w-[2px] -translate-x-1/2 rounded-full bg-[#0067D1] opacity-60"
+                className={`absolute top-0 h-[6px] w-[2px] -translate-x-1/2 rounded-full opacity-60 ${hasDisplayValue ? "bg-[#0067D1]" : "bg-[#E0E0E0]"}`}
                 style={{ left: `${pos}%` }}
               />
             ))}
@@ -96,7 +99,7 @@ export function SliderStepper({
             aria-label={label}
             aria-valuemin={min}
             aria-valuemax={max}
-            aria-valuenow={display}
+            aria-valuenow={hasDisplayValue ? display : undefined}
             aria-disabled={disabled}
             tabIndex={disabled ? -1 : 0}
             onKeyDown={(event) => {
@@ -120,16 +123,20 @@ export function SliderStepper({
             onPointerCancel={handlePointerUp}
             onLostPointerCapture={handlePointerUp}
           >
-            <div
-              className="absolute left-0 top-0 h-full rounded-full bg-[#0067D1]"
-              style={{ width: `${pct}%` }}
-            />
-            <div
-              className="absolute top-1/2 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center"
-              style={{ left: `clamp(12px, ${pct}%, calc(100% - 12px))` }}
-            >
-              <span className="h-4 w-4 rounded-full border border-[#E0E0E0] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.15)]" />
-            </div>
+            {hasDisplayValue && (
+              <>
+                <div
+                  className="absolute left-0 top-0 h-full rounded-full bg-[#0067D1]"
+                  style={{ width: `${pct}%` }}
+                />
+                <div
+                  className="absolute top-1/2 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center"
+                  style={{ left: `clamp(12px, ${pct}%, calc(100% - 12px))` }}
+                >
+                  <span className="h-4 w-4 rounded-full border border-[#E0E0E0] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.15)]" />
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -146,7 +153,7 @@ export function SliderStepper({
           min={min}
           max={max}
           step={step}
-          value={display}
+          value={value ?? (showFallbackValue ? fallback : "")}
           disabled={disabled}
           onChange={(e) => {
             const raw = e.target.value;
