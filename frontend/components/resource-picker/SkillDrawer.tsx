@@ -11,8 +11,8 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button } from "antd";
-import { Pencil, Settings, Tag } from "lucide-react";
+import { Alert } from "antd";
+import { Pencil, Settings } from "lucide-react";
 
 import { ResourceDrawer } from "./ResourceDrawer";
 import { useSkillList } from "@/hooks/agent/useSkillList";
@@ -27,7 +27,6 @@ import { ResourceTagFilterControl } from "./ResourceTagFilterControl";
 import { ResourceAssignedTags } from "./ResourceAssignedTags";
 import { AuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useResourceTagAssignments } from "@/hooks/useResourceTagAssignments";
-import { ResourceTagManagementModal } from "./ResourceTagManagementModal";
 
 import styles from "./ResourcePickerDrawer.module.css";
 
@@ -88,9 +87,6 @@ export interface SkillDrawerProps {
   onConfirm: (skills: Skill[]) => void | Promise<void>;
   groups?: SkillGroup[];
   onRefresh?: () => void;
-  onOpenManageTags?: () => void;
-  enableTagManagement?: boolean;
-  onOpenTagManagement?: () => void;
   onEditSkill?: (skill: Skill) => void;
   currentAgentId?: number;
   isReadOnly?: boolean;
@@ -116,20 +112,11 @@ export function SkillDrawer({
   onConfirm,
   groups,
   onRefresh,
-  onOpenManageTags,
-  enableTagManagement = false,
-  onOpenTagManagement,
   onEditSkill,
   currentAgentId,
   isReadOnly,
 }: SkillDrawerProps) {
   const { t } = useTranslation("common");
-  const [tagManagementOpen, setTagManagementOpen] = useState(false);
-  const [previousOpen, setPreviousOpen] = useState(open);
-  if (previousOpen !== open) {
-    setPreviousOpen(open);
-    if (!open) setTagManagementOpen(false);
-  }
   const catalog = useSkillList({ enabled: open && groups === undefined });
   const groupedSkills = groups ?? catalog.groupedSkills;
   const availableSkills = useMemo(
@@ -222,11 +209,6 @@ export function SkillDrawer({
         selectedSkillIds.has(Number(skill.skill_id))
       ),
     [selectableSkillsInActiveGroup, selectedSkillIds]
-  );
-
-  const skillMetadataModifiable = useMemo(
-    () => availableSkills.some((skill: Skill) => skill.permission === "EDIT"),
-    [availableSkills]
   );
 
   const selectedChips = useMemo(() => {
@@ -475,27 +457,6 @@ export function SkillDrawer({
       }
       selected={selectedChips}
       listTitle={t("resourcePicker.list.skill")}
-      tagManagement={
-        onOpenManageTags || enableTagManagement
-          ? {
-              onClick: onOpenManageTags ?? (() => setTagManagementOpen(true)),
-              disabled: isReadOnly || !skillMetadataModifiable,
-            }
-          : undefined
-      }
-      listHeaderExtra={
-        onOpenTagManagement ? (
-          <Button
-            type="text"
-            size="small"
-            icon={<Tag size={14} />}
-            disabled={isReadOnly || !skillMetadataModifiable}
-            onClick={onOpenTagManagement}
-          >
-            {t("tagManagement.title.definitionManagement")}
-          </Button>
-        ) : undefined
-      }
       tabs={tabItems}
       activeTab={activeTab}
       total={total}
@@ -604,23 +565,6 @@ export function SkillDrawer({
         <div className="flex flex-1 items-center justify-center text-sm text-gray-400">
           {t("skillPool.noSearchResults")}
         </div>
-      )}
-
-      {tagManagementOpen && (
-        <ResourceTagManagementModal
-          resourceType="skill"
-          resources={availableSkills.map((skill) => ({
-            id: String(skill.skill_id),
-            name: skill.name,
-            canEdit: !isReadOnly && skill.permission === "EDIT",
-          }))}
-          definitions={resourceTags.definitions}
-          onClose={() => {
-            setTagManagementOpen(false);
-            resourceTags.retry();
-          }}
-          onSaved={() => resourceTags.retry()}
-        />
       )}
 
       {configSkill ? (

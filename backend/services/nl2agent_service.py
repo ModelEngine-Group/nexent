@@ -20,6 +20,7 @@ from nexent.core.agents.context import (
     ContextManagerConfig,
 )
 from nexent.core.agents.run_agent import agent_run
+from nexent.core.concurrency import run_blocking
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from rapidfuzz import fuzz
 
@@ -53,7 +54,9 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
     INSTALLED_RESOURCE_SOURCES,
     InstalledMcpToolRecommendation,
+    KnowledgeBaseRecommendation,
     NL2AGENT_AGENT_ID_HEADER,
+    NL2AGENT_POLICY_CLARIFICATION_HEADER,
     NL2A_MCP_LEGACY_TOOL_NAMES,
     NL2A_MCP_TOOL_NAMES,
     RecommendResourcesOutput,
@@ -71,6 +74,10 @@ from management.services.agent.context import (
     build_authorized_context_input,
 )
 from infrastructure.http.client import create_httpx_client
+
+from management.services.knowledge_base.recommendation import (
+    MANAGED_KNOWLEDGE_NAMES, load_visible_knowledge, merge_selection, rank_knowledge, selection_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +106,7 @@ AGENT_DRAFT_FIELD_ORDER = (
     "name",
     "display_name",
     "description",
+    "enable_protocol_repair_retry",
     "duty_prompt",
     "greeting_message",
     "example_questions",
@@ -605,6 +613,9 @@ def _score_resource_requirement(
             + installed_bonus
             + quality_bonus
         )
+    # Explicit resource hints retain the existing name-matching precedence.
+    if not requirement.resource_name_hint and MANAGED_KNOWLEDGE_NAMES.intersection(resource["names"]):
+        score += 0.02
     return min(1.0, score)
 
 
@@ -651,6 +662,10 @@ def _rank_resource_catalog(
             description=resource["description"],
             requirement_ids=matched_ids,
             score=round(candidate_score, 4),
+            knowledge_queries=list(dict.fromkeys(
+                text for requirement in requirements if requirement.requirement_id in matched_ids
+                for text in [requirement.query, requirement.resource_name_hint, *requirement.search_terms] if text
+            ))[:32] if MANAGED_KNOWLEDGE_NAMES.intersection(resource.get("names", [])) else [],
         )
         scored.append({
             "candidate": candidate,
@@ -1025,6 +1040,7 @@ def _verified_resource_candidate(
         description=actual["description"],
         requirement_ids=supplied.requirement_ids,
         score=supplied.score,
+        knowledge_queries=supplied.knowledge_queries,
     )
 
 
@@ -1097,27 +1113,114 @@ async def recommend_installed_resources_impl(
         user_id=user_id,
     )
     by_ref = {item["candidate_ref"]: item for item in catalog}
+    bound_instances = query_all_enabled_tool_instances(
+        agent_id=agent_id, tenant_id=tenant_id, version_no=0
+    )
     bound_tool_refs = {
         f"tool:{instance['tool_id']}"
-        for instance in query_all_enabled_tool_instances(
-            agent_id=agent_id,
-            tenant_id=tenant_id,
-            version_no=0,
-        )
+        for instance in bound_instances
         if isinstance(instance.get("tool_id"), int)
     }
+    knowledge_catalogs: dict[str, list[dict]] = {}
     recommended = set(recommended_refs)
     resources: list[RecommendedResource] = []
     for supplied in candidates:
         actual = by_ref.get(supplied.candidate_ref)
         if actual is None:
             raise Nl2AgentResourceError("resource_not_visible")
-        resources.append(_recommended_resource(
+        resource = _recommended_resource(
             actual=actual,
             supplied=supplied,
             recommended_refs=recommended,
             is_bound=supplied.candidate_ref in bound_tool_refs,
-        ))
+        )
+        tool_name = next(
+            (
+                name
+                for name in actual.get("names", [actual["name"]])
+                if name in MANAGED_KNOWLEDGE_NAMES
+            ),
+            None,
+        )
+        if actual["resource_type"] == "tool" and tool_name:
+            try:
+                if tool_name not in knowledge_catalogs:
+                    knowledge_catalogs[tool_name] = await run_blocking(
+                        "nl2agent-visible-knowledge",
+                        load_visible_knowledge,
+                        tool_name,
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                        lane="control-io",
+                        owner="services.nl2agent_service",
+                    )
+                range_name = "kds_list" if tool_name == "aidp_search" else "index_names"
+                current_params = {}
+                bound_values = []
+                for instance in bound_instances:
+                    bound_actual = by_ref.get(f"tool:{instance.get('tool_id')}", {})
+                    if tool_name not in bound_actual.get(
+                        "names", [bound_actual.get("name")]
+                    ):
+                        continue
+                    params = (
+                        instance.get("params")
+                        if isinstance(instance.get("params"), dict)
+                        else {}
+                    )
+                    current_params.update(params)
+                    bound_values.extend(selection_values(params.get(range_name)))
+                bound_values = list(dict.fromkeys(bound_values))
+                resource.knowledge_bound_values = bound_values
+                queries = supplied.knowledge_queries
+                if not queries:
+                    draft = require_agent_draft_edit(
+                        agent_id=agent_id, tenant_id=tenant_id, user_id=user_id
+                    )
+                    queries = [str(draft.get("description") or "")]
+                suggestions = rank_knowledge(
+                    knowledge_catalogs[tool_name],
+                    queries,
+                    bound_values,
+                    tool_name=tool_name,
+                    multimodal=current_params.get("multimodal"),
+                )
+                resource.knowledge_recommendations = [
+                    KnowledgeBaseRecommendation(**item) for item in suggestions
+                ]
+                base_config = [
+                    {
+                        **param,
+                        **(
+                            {"value": current_params[param["name"]]}
+                            if param["name"] in current_params
+                            else {}
+                        ),
+                    }
+                    for param in resource.config
+                ]
+                resource.config = merge_selection(
+                    base_config,
+                    tool_name,
+                    list(
+                        dict.fromkeys(
+                            [
+                                *bound_values,
+                                *(item["binding_value"] for item in suggestions),
+                            ]
+                        )
+                    ),
+                )
+                if suggestions or not bound_values:
+                    resource.is_bound = False
+            except Exception as exc:
+                logger.warning(
+                    "NL2Agent knowledge recommendation failed: %s", type(exc).__name__
+                )
+                raise Nl2AgentResourceError(
+                    "knowledge_search_failed", retryable=True
+                ) from exc
+        resources.append(resource)
     return RecommendResourcesOutput(resources=resources)
 
 
@@ -1163,6 +1266,22 @@ def _parse_nl2agent_card_action_agent_id(query: str) -> int | None:
     if not isinstance(agent_id, int) or isinstance(agent_id, bool) or agent_id <= 0:
         raise Nl2AgentDraftSaveError("agent_context_mismatch")
     return agent_id
+
+
+def _requires_policy_clarification(query: str) -> bool:
+    """Prevent an unspecified retry request from authorizing a policy write."""
+    try:
+        action = json.loads(query)
+    except (TypeError, json.JSONDecodeError):
+        action = None
+    if isinstance(action, dict) and action.get("type") == "nl2agent_card_action":
+        return False
+    normalized = unicodedata.normalize("NFKC", query).casefold()
+    mentions_retry = "重试" in normalized or "retry" in normalized or "retries" in normalized
+    names_policy = any(term in normalized for term in (
+        "协议", "protocol", "静默修复", "silent repair", "enable_protocol_repair_retry",
+    ))
+    return mentions_retry and not names_policy
 
 
 async def _load_verified_nl2agent_state(
@@ -1244,9 +1363,13 @@ async def _build_verified_bound_resources_context(
         "agent_id": agent_id,
         "draft_fields": (
             {
-                field_name: draft.get(field_name)
+                field_name: (
+                    draft.get(field_name) is True
+                    if field_name == "enable_protocol_repair_retry"
+                    else draft.get(field_name)
+                )
                 for field_name in AGENT_DRAFT_FIELD_ORDER
-                if draft.get(field_name) is not None
+                if field_name == "enable_protocol_repair_retry" or draft.get(field_name) is not None
             }
             if isinstance(draft, dict)
             else {}
@@ -1409,6 +1532,9 @@ async def build_nl2agent_run_info(
     if authorization:
         mcp_headers["Authorization"] = authorization
     mcp_headers[NL2AGENT_AGENT_ID_HEADER] = str(request.agent_id)
+    mcp_headers[NL2AGENT_POLICY_CLARIFICATION_HEADER] = (
+        "true" if _requires_policy_clarification(request.query) else "false"
+    )
     mcp_headers["X-Tenant-ID"] = str(tenant_id)
     mcp_headers["X-Nexent-Internal-Token"] = TOKEN
     if mcp_headers:

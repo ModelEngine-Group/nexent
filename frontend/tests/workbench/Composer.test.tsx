@@ -1,5 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import { beforeEach as beforeEachI18n } from "vitest";
+import i18n from "i18next";
+import { initializeTestI18n } from "./i18n";
 import {
   cloneElement,
   type ComponentPropsWithoutRef,
@@ -120,7 +123,8 @@ vi.mock("@assistant-ui/react", () => {
 vi.mock("react-i18next", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-i18next")>()),
   useTranslation: () => ({
-    t: (key: string) => key,
+    t: (key: string) =>
+      key.startsWith("ui.localization.") ? i18n.t(key) : key,
     i18n: { language: "zh-CN" },
   }),
 }));
@@ -186,6 +190,40 @@ it("forwards every known effort through Composer without fabricating a default",
   props.onEffortChange("provider-invalid");
   expect(changed).toHaveBeenCalledTimes(count);
 });
+
+it("caps the workbench model selector width so long names truncate on one row", () => {
+  render(
+    <Composer
+      models={[{ id: "1", name: "model" }]}
+      selectedModelId="1"
+      chatMode="execution"
+      onChatModeChange={vi.fn()}
+    />
+  );
+  const props = selectorProps.mock.lastCall?.[0] as { className?: string };
+  expect(props.className).toContain("max-w-[280px]");
+  expect(props.className).not.toContain("max-w-[180px]");
+});
+
+it("keeps the model controls on the toolbar row instead of wrapping to a second line", () => {
+  const { container } = render(
+    <Composer
+      models={[{ id: "1", name: "model" }]}
+      selectedModelId="1"
+      chatMode="execution"
+      onChatModeChange={vi.fn()}
+    />
+  );
+  const group = screen.getByRole("button", { name: "模型" }).closest("div");
+  expect(group).not.toBeNull();
+  // flex-1 gives the group a zero hypothetical main size so the outer
+  // flex-wrap never breaks it onto its own line; justify-end keeps the
+  // controls right-aligned while the selector truncates under pressure.
+  expect(group?.className).toContain("flex-1");
+  expect(group?.className).toContain("justify-end");
+  expect(group?.className).not.toContain("ml-auto");
+});
+
 vi.mock("@/app/newchat/ui/attachment", () => ({
   ComposerAttachments: () => null,
   ComposerAddAttachment: ({
@@ -699,7 +737,10 @@ it.each(["skill_create", "agent_create"] as const)(
     );
     const input = container.querySelector("fieldset");
     const examples = screen.getByRole("region", {
-      name: mode === "skill_create" ? "Skill 创建示例" : "Agent创建示例",
+      name:
+        mode === "skill_create"
+          ? "workbench.creationExamples.skillSectionLabel"
+          : "workbench.creationExamples.agentSectionLabel",
     });
     expect(input).not.toBeNull();
     expect(
@@ -989,4 +1030,8 @@ it("ordinary chat scopes shared parameters to the active thread and locks them w
   rerender(<Composer {...base} disabled />);
   expect(selectorProps.mock.lastCall?.[0].parameterSettingsDisabled).toBe(true);
   runtime.threads.mainThreadId = "fixture-thread";
+});
+
+beforeEachI18n(async () => {
+  await initializeTestI18n();
 });

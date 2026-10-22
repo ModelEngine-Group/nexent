@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: CARD-SUGGESTION-STYLE-20261020
+  change_type: requirement
+  requirement_id: CARD-SUGGESTION-STYLE-20261020
+  title: Unify shared card suggestions with workbench style
+  description: Use workbench list styling in CardSuggestion and reuse it in workbench creation.
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/workbench/AgentSuggestion.test.tsx
+      - frontend/tests/workbench/CreationExamples.test.tsx
+      - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+    behaviors:
+      - Preserve localized short copy, complete prompt filling, focus and visibility.
+      - Preserve keyboard activation, disabled and empty states, explicit and stable fallback icons.
+      - Retain NL2Agent description-based modes and fill-only behavior.
+    reason: Isolated frontend presentation and interaction change. No Python or protocol behavior change; no duplicate formal D1 required.
+  notes: Baseline ../nexent-doc/docs/Developing/chat-agent-suggestion. No formal Cases changed. Verification passed for 24 frontend tests, type-check, focused lint, formatting, copyright and formal-asset consistency. No deployed browser result claimed.

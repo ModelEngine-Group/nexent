@@ -813,7 +813,7 @@ export const Composer: FC<ComposerProps> = ({
                   />
                 )}
               </div>
-              <div className="ml-auto flex min-w-0 items-center gap-1">
+              <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
                 {showModelSelector && (
                   <ModelSelector
                     models={models}
@@ -835,7 +835,7 @@ export const Composer: FC<ComposerProps> = ({
                     }}
                     variant="ghost"
                     size="sm"
-                    className="min-w-0 text-sm font-normal leading-5 text-muted-foreground [&_[data-slot=model-selector-value]]:text-sm [&_[data-slot=model-selector-value]]:leading-5 [&_[data-slot=model-selector-value]]:text-muted-foreground [&_[data-slot=model-selector-value]_span]:font-normal"
+                    className="min-w-0 max-w-[280px] text-sm font-normal leading-5 text-muted-foreground [&_[data-slot=model-selector-value]]:text-sm [&_[data-slot=model-selector-value]]:leading-5 [&_[data-slot=model-selector-value]]:text-muted-foreground [&_[data-slot=model-selector-value]_span]:font-normal"
                   />
                 )}
                 {children}

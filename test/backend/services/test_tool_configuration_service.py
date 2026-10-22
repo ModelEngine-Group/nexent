@@ -5385,8 +5385,10 @@ class TestUpdateToolInfoImplAidpPermission:
     def test_preserves_hidden_existing_and_replaces_visible_selection(
         self, mock_snapshot, mock_existing, mock_create_update
     ):
+        # kb3 exists remotely but is inaccessible: it must survive the merge.
         mock_snapshot.return_value = types.SimpleNamespace(
-            accessible_id_set={"kb1", "kb2", "kb4"}
+            accessible_id_set={"kb1", "kb2", "kb4"},
+            remote_ids={"kb1", "kb2", "kb3", "kb4"},
         )
         mock_existing.return_value = {"params": {"kds_list": ["kb1", "kb2", "kb3"]}}
         mock_create_update.return_value = {"id": 1}
@@ -5406,7 +5408,10 @@ class TestUpdateToolInfoImplAidpPermission:
     ):
         from consts.exceptions import ValidationError
 
-        mock_snapshot.return_value = types.SimpleNamespace(accessible_id_set={"kb1"})
+        mock_snapshot.return_value = types.SimpleNamespace(
+            accessible_id_set={"kb1"},
+            remote_ids={"kb1"},
+        )
         mock_existing.return_value = {"params": {"kds_list": ["kb-old"]}}
         tool_info = self._request(["kb1", "kb-forged"])
 
@@ -5421,7 +5426,10 @@ class TestUpdateToolInfoImplAidpPermission:
     def test_existing_hidden_id_from_legacy_client_is_not_rejected(
         self, mock_snapshot, mock_existing, mock_create_update
     ):
-        mock_snapshot.return_value = types.SimpleNamespace(accessible_id_set={"kb1"})
+        mock_snapshot.return_value = types.SimpleNamespace(
+            accessible_id_set={"kb1"},
+            remote_ids={"kb-hidden", "kb1"},
+        )
         mock_existing.return_value = {"params": {"kds_list": ["kb-hidden"]}}
         mock_create_update.return_value = {"id": 2}
         tool_info = self._request('["kb-hidden", "kb1"]')
@@ -5430,6 +5438,27 @@ class TestUpdateToolInfoImplAidpPermission:
         update_tool_info_impl(tool_info, "tenant1", "user1")
 
         assert tool_info.params["kds_list"] == ["kb-hidden", "kb1"]
+
+    @patch_import_context("management.services.tool.configuration.create_or_update_tool_by_tool_info")
+    @patch_import_context("management.services.tool.configuration.query_tool_instances_by_id")
+    @patch_import_context("management.services.tool.configuration._resolve_aidp_snapshot")
+    def test_drops_existing_id_deleted_from_aidp_catalog(
+        self, mock_snapshot, mock_existing, mock_create_update
+    ):
+        # kb-deleted is gone from AIDP: it must not be merged back into the scope.
+        mock_snapshot.return_value = types.SimpleNamespace(
+            accessible_id_set={"kb1"},
+            remote_ids={"kb1"},
+        )
+        mock_existing.return_value = {"params": {"kds_list": ["kb1", "kb-deleted"]}}
+        mock_create_update.return_value = {"id": 4}
+        tool_info = self._request(["kb1"])
+
+        from management.services.tool.configuration import update_tool_info_impl
+        update_tool_info_impl(tool_info, "tenant1", "user1")
+
+        assert tool_info.params["kds_list"] == ["kb1"]
+        mock_create_update.assert_called_once()
 
     @patch_import_context("management.services.tool.configuration.create_or_update_tool_by_tool_info")
     @patch_import_context("management.services.tool.configuration.query_tool_instances_by_id")

@@ -130,6 +130,30 @@ it.each(["zh", "en"])(
   }
 );
 
+const skillKeys = ["invoiceExtraction", "contractReview", "meetingNotes"];
+
+it.each(["zh", "en"])(
+  "%s skill cards show localized titles and section labels",
+  (locale) => {
+    state.locale = locale;
+    const copy = (locale === "zh" ? zh : en) as unknown as Record<
+      string,
+      string
+    >;
+    render(<CreationExamples mode="skill_create" />);
+    expect(
+      screen.getByRole("region", {
+        name: copy["workbench.creationExamples.skillSectionLabel"],
+      })
+    ).toBeInTheDocument();
+    for (const key of skillKeys) {
+      const title = copy[`workbench.creationExamples.skill.${key}.title`];
+      expect(title).toBeTruthy();
+      expect(screen.getByText(title)).toBeInTheDocument();
+    }
+  }
+);
+
 it.each(["skill_create", "agent_create"] as const)(
   "%s recommendations stay hidden for drafts or existing messages",
   (mode) => {

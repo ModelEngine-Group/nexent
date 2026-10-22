@@ -4,7 +4,7 @@
 
 import { Fragment, useId, useMemo, useRef, type ReactNode } from "react";
 import { Drawer, Input, Select } from "antd";
-import { Check, ChevronDown, RefreshCw, Search, Tag } from "lucide-react";
+import { Check, ChevronDown, RefreshCw, Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { StandardCloseButton } from "@/components/common/StandardCloseButton";
@@ -516,11 +516,6 @@ export interface ResourceDrawerProps {
   showListHeader?: boolean;
   /** Extra action rendered to the left of the refresh button in the list header. */
   listHeaderExtra?: ReactNode;
-  /** Omit to hide tag management in consumers such as Workbench. */
-  tagManagement?: {
-    onClick: () => void;
-    disabled?: boolean;
-  };
   showPagination?: boolean;
 }
 
@@ -580,7 +575,6 @@ export function ResourceDrawer({
   showSelection = selected !== undefined,
   showListHeader = listTitle !== undefined,
   listHeaderExtra,
-  tagManagement,
   showPagination = total !== undefined && onPageChange !== undefined,
 }: ResourceDrawerProps) {
   const { t } = useTranslation("common");
@@ -673,24 +667,7 @@ export function ResourceDrawer({
               refreshDisabled={refreshDisabled}
               onRefresh={onRefresh}
               refreshLoading={refreshLoading}
-              extra={
-                <>
-                  {tagManagement && (
-                    <button
-                      type="button"
-                      onClick={tagManagement.onClick}
-                      disabled={
-                        tagManagement.disabled || disabled || confirmLoading
-                      }
-                      className="flex cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-[#2673E5] disabled:cursor-not-allowed disabled:text-[#B3B3B3]"
-                    >
-                      <Tag size={14} />
-                      {t("resourcePicker.manageTags", "管理标签")}
-                    </button>
-                  )}
-                  {listHeaderExtra}
-                </>
-              }
+              extra={listHeaderExtra}
             />
           )}
 
@@ -746,7 +723,7 @@ export function ResourceDrawer({
           type="button"
           onClick={handleClose}
           disabled={confirmLoading}
-          className="h-8 w-[89px] cursor-pointer rounded-[2px] border border-[#C9C9C9] bg-white text-[14px] leading-[22px] text-[#191919]"
+          className="h-8 min-w-[89px] shrink-0 cursor-pointer whitespace-nowrap rounded-[2px] border border-[#C9C9C9] bg-white px-4 text-[14px] leading-[22px] text-[#191919]"
         >
           {closeText ?? t("resourcePicker.close", "关闭")}
         </button>
@@ -756,7 +733,7 @@ export function ResourceDrawer({
             onClick={onConfirm}
             disabled={disabled || confirmDisabled || confirmLoading}
             aria-busy={confirmLoading}
-            className="inline-flex h-8 w-[89px] cursor-pointer items-center justify-center gap-2 rounded-[2px] border-0 bg-[#1476FF] text-[14px] leading-[22px] text-white"
+            className="inline-flex h-8 min-w-[89px] shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-[2px] border-0 bg-[#1476FF] px-4 text-[14px] leading-[22px] text-white"
           >
             {confirmLoading && (
               <RefreshCw aria-hidden size={14} className="animate-spin" />

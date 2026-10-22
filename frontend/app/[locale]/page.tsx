@@ -53,21 +53,11 @@ export default function Homepage() {
     ? enableAgentWorkbench
       ? "/workbench"
       : "/newchat"
-    : enableAgentWorkbench &&
-        (canAccessRoute("/workbench") || canAccessRoute("/chat"))
+    : enableAgentWorkbench && canAccessRoute("/workbench")
       ? "/workbench"
       : canAccessRoute("/newchat")
         ? "/newchat"
-        : accessibleRoutes.find(
-            (route) =>
-              ![
-                "/",
-                "/chat",
-                "/workbench",
-                "/agent-dev",
-                "/resource-space",
-              ].includes(route)
-          );
+        : accessibleRoutes.find((route) => route !== "/");
 
   useEffect(() => {
     if (isEntryReady && hideHomePage && defaultEntry) {

@@ -1,0 +1,26 @@
+schema_version: '1.0'
+module:
+  id: RESOURCE-MANAGE
+  name: Resource management
+  description: Tenant resource configuration and metadata management.
+feature:
+  feature_id: RESOURCE-TAG-MANAGEMENT
+  name: Centralized tag management entry
+  status: active
+  description: Resource management presents the existing tenant tag definition and value operations inline in the Tags tab; resource selection and filtering remain in their original workflows.
+  business_rules:
+  - rule_id: RESOURCE-TAG-MANAGEMENT-RULE-001
+    description: Agent configuration knowledge, skill and tool selection dialogs, the knowledge catalog synchronization toolbar and the My MCP filter toolbar do not offer tag management buttons.
+  - rule_id: RESOURCE-TAG-MANAGEMENT-RULE-002
+    description: The localized Tags tab displays the current tenant's libraries and definition tables with search, pagination, expanded values and existing create, edit, status, ordering and delete operations.
+  - rule_id: RESOURCE-TAG-MANAGEMENT-RULE-003
+    description: Readonly users cannot mutate definitions or values. Selecting a different tenant never displays or mutates the signed-in tenant's library under that tenant; current APIs remain scoped to authentication.
+  - rule_id: RESOURCE-TAG-MANAGEMENT-RULE-004
+    description: Loading, empty data and failed requests remain distinguishable. Metadata requests can be retried and successful mutations refresh the list. Other callers of the shared management modal retain its behavior.
+  - rule_id: RESOURCE-TAG-MANAGEMENT-RULE-005
+    description: Tag and value creation, editing and deletion dialogs use the shared localized Cancel and Confirm labels in both the inline list and management modal.
+  required_test_stages: []
+  source:
+    requirement_ids:
+    - RESOURCE-TAG-TAB-20261020
+    notes: Frontend component UT owns composition, search, scoped loading, mutation refresh and readonly assertions. Existing APIs and runtime contracts are unchanged. No new formal D1 duplicates UT; browser appearance is checked separately without claiming a formal D4 pass.

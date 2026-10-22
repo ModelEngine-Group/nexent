@@ -11886,6 +11886,7 @@ async def test_run_agent_background_consumes_stream_and_returns_assistant_messag
         "assistant_message_id": 123,
         "chunks": 2,
     }
+    assert request._message_source == "AUTOMATION"
     mock_save_messages.assert_not_called()
 
 

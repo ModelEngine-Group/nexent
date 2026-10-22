@@ -20,6 +20,7 @@ from consts.const import NORTHBOUND_EXTERNAL_URL
 from consts.exceptions import RuntimeUpstreamError
 from consts.model import AgentRequest
 from management.services.agent.a2a.adapter import A2AAgentAdapter, A2AExecutionContext
+from management.services.agent.a2a.validation import validate_a2a_agent_name
 from management.services.agent.runtime_client import forward_agent_run
 
 logger = logging.getLogger(__name__)
@@ -105,6 +106,9 @@ class A2AServerService:
         Returns:
             Server agent registration info.
         """
+        validate_a2a_agent_name(name)
+        if card_overrides and "name" in card_overrides:
+            validate_a2a_agent_name(card_overrides["name"])
         return a2a_agent_db.create_server_agent(
             agent_id=agent_id,
             user_id=user_id,
@@ -196,6 +200,10 @@ class A2AServerService:
         Raises:
             EndpointNotFoundError: If registration not found.
         """
+        if name is not None:
+            validate_a2a_agent_name(name)
+        if card_overrides and "name" in card_overrides:
+            validate_a2a_agent_name(card_overrides["name"])
         result = a2a_agent_db.enable_server_agent(
             agent_id=agent_id,
             tenant_id=tenant_id,
@@ -260,6 +268,8 @@ class A2AServerService:
         Raises:
             EndpointNotFoundError: If registration not found.
         """
+        if card_overrides and "name" in card_overrides:
+            validate_a2a_agent_name(card_overrides["name"])
         current = a2a_agent_db.get_server_agent_by_agent_id(agent_id, tenant_id)
         if not current:
             raise EndpointNotFoundError(f"No registration found for agent {agent_id}")

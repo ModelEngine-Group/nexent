@@ -143,28 +143,56 @@ it.each(["list", "card"] as const)(
   }
 );
 
-it("opens configurable tag management without committing knowledge selection", () => {
+it("retains filtering and draft selection without a tag management entry", () => {
   const confirm = vi.fn();
   render(
     <KnowledgeDrawer
       open
       onClose={vi.fn()}
       onConfirm={confirm}
-      enableTagManagement
-      knowledgeBases={[{ ...knowledgeBases[0], permission: "READ_ONLY" }]}
+      knowledgeBases={knowledgeBases}
     />
   );
-  fireEvent.click(screen.getByRole("button", { name: "管理标签" }));
-  expect(screen.getAllByRole("dialog")).toHaveLength(2);
-  expect(document.querySelector(".ant-modal-title")).toHaveTextContent(
-    "管理标签"
-  );
   expect(
-    screen
-      .getAllByRole("button", { name: "管理标签" })
-      .some((button) => button.hasAttribute("disabled"))
-  ).toBe(true);
+    screen.queryByRole("button", { name: /管理标签|标签管理/ })
+  ).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "repository.tagFilter.button" })
+  ).toBeInTheDocument();
+  const option = screen.getByRole("option", { name: "Handbook" });
+  fireEvent.click(option);
+  expect(option).toHaveAttribute("aria-selected", "true");
+  expect(screen.getAllByRole("dialog")).toHaveLength(1);
   expect(confirm).not.toHaveBeenCalled();
+});
+
+it("reseeds selection and clears search on reopen without saving the cancelled draft", () => {
+  const confirm = vi.fn();
+  const props = {
+    onClose: vi.fn(),
+    onConfirm: confirm,
+    knowledgeBases,
+    selectedIds: [knowledgeBases[0].id],
+  };
+  const view = render(<KnowledgeDrawer {...props} open />);
+  const option = screen.getByRole("option", { name: "Handbook" });
+  expect(option).toHaveAttribute("aria-selected", "true");
+  fireEvent.click(option);
+  expect(option).toHaveAttribute("aria-selected", "false");
+  fireEvent.change(screen.getByPlaceholderText("搜索知识库名称及描述"), {
+    target: { value: "Missing knowledge" },
+  });
+  view.rerender(<KnowledgeDrawer {...props} open={false} />);
+  view.rerender(<KnowledgeDrawer {...props} open />);
+  expect(screen.getByPlaceholderText("搜索知识库名称及描述")).toHaveValue("");
+  expect(screen.getByRole("option", { name: "Handbook" })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+  expect(confirm).not.toHaveBeenCalled();
+  expect(
+    screen.queryByRole("button", { name: /管理标签|标签管理/ })
+  ).toBeNull();
 });
 
 it("hides the fixed Elasticsearch description while retaining the source badge", () => {

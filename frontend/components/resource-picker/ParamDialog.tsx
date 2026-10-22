@@ -413,9 +413,9 @@ export function SectionHeader({
   );
 }
 
-/** "点击测试" run-test link with circular arrow. */
+/** Run-test link with a circular arrow. */
 export function TestRunLink({
-  label = "点击测试",
+  label,
   onClick,
   disabled = false,
 }: {
@@ -423,6 +423,7 @@ export function TestRunLink({
   onClick?: () => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation("common");
   return (
     <button
       type="button"
@@ -432,7 +433,7 @@ export function TestRunLink({
       className="flex h-[22px] cursor-pointer items-center gap-1 border-0 bg-transparent p-0 text-[14px] leading-[22px] text-[#2673E5] disabled:cursor-not-allowed disabled:opacity-50"
     >
       <RotateCw size={16} />
-      {label}
+      {label ?? t("ui.localization.runTest")}
     </button>
   );
 }
