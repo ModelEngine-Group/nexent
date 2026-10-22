@@ -7,6 +7,7 @@
 - D4 [CHAT-ACTIVITY-D4-001](../../cases/CHAT-ACTIVITY-D4-001/case.yaml) · active
 - D4 [CHAT-ROUTE-D4-001](../../cases/CHAT-ROUTE-D4-001/case.yaml) · active
 - D4 [CHAT-SIDEBAR-D4-001](../../cases/CHAT-SIDEBAR-D4-001/case.yaml) · active
+- D4 [CHAT-SIDEBAR-D4-002](../../cases/CHAT-SIDEBAR-D4-002/case.yaml) · active
 - D4 [WB-PIN-DELETE-D4-001](../../cases/WB-PIN-DELETE-D4-001/case.yaml) · active
 - D5 [CHAT-ACTIVITY-D5-001](../../cases/CHAT-ACTIVITY-D5-001/case.yaml) · active
 - D5 [CHAT-PERSIST-D5-001](../../cases/CHAT-PERSIST-D5-001/case.yaml) · active

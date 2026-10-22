@@ -23,7 +23,6 @@ import {
 import {
   DOCUMENT_ACTION_TYPES,
   KNOWLEDGE_BASE_ACTION_TYPES,
-  KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
 } from "@/const/knowledgeBase";
 import { ErrorCode } from "@/const/errorCode";
 import { getKnowledgeResourceLimitMessage } from "@/const/errorMessageI18n";
@@ -32,7 +31,6 @@ import log from "@/lib/logger";
 import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
-import { isKnowledgeBaseFileSizeValid } from "@/services/uploadService";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -224,9 +222,6 @@ function DataConfig({ isActive }: DataConfigProps) {
       );
   }, [loadQuotaUsage]);
 
-  // Get available embedding models for knowledge base creation
-  const { models } = useModelList({ enabled: true });
-
   // Clear cache when component initializes
   useEffect(() => {
     localStorage.removeItem("preloaded_kb_data");
@@ -307,6 +302,11 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
   const [showAutoDeselectModal, setShowAutoDeselectModal] = useState(false);
   const [newlyCreatedKbId, setNewlyCreatedKbId] = useState<string | null>(null); // Track newly created KB waiting for documents
+
+  // Embedding models are only needed once the create dialog is open.
+  const { models, isSuccess: modelsLoaded } = useModelList({
+    enabled: isCreatingMode,
+  });
 
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState("");
@@ -390,6 +390,49 @@ function DataConfig({ isActive }: DataConfigProps) {
       return false;
     });
   }, [models]);
+
+  // Select the default embedding model only while creating and only when the
+  // user has not picked one, so closing the dialog never rewrites a draft.
+  useEffect(() => {
+    if (!isCreatingMode || !modelsLoaded || newKbEmbeddingModel) return;
+
+    const configEmbeddingModel =
+      modelConfig?.embedding?.displayName?.trim() || "";
+    const configMultiEmbeddingModel =
+      modelConfig?.multiEmbedding?.displayName?.trim() || "";
+    const preferredModel = [
+      { modelName: configEmbeddingModel, type: "embedding" },
+      { modelName: configMultiEmbeddingModel, type: "multi_embedding" },
+    ].find(
+      ({ modelName, type }) =>
+        !!modelName &&
+        availableEmbeddingModels.some(
+          (model) => model.displayName === modelName && model.type === type
+        )
+    );
+    const defaultModel =
+      (preferredModel &&
+        toEmbeddingModelOptionValue(
+          preferredModel.modelName,
+          preferredModel.type
+        )) ||
+      (availableEmbeddingModels[0]
+        ? toEmbeddingModelOptionValue(
+            availableEmbeddingModels[0].displayName,
+            availableEmbeddingModels[0].type
+          )
+        : "");
+    if (defaultModel) {
+      setNewKbEmbeddingModel(defaultModel);
+    }
+  }, [
+    isCreatingMode,
+    modelsLoaded,
+    newKbEmbeddingModel,
+    availableEmbeddingModels,
+    modelConfig?.embedding?.displayName,
+    modelConfig?.multiEmbedding?.displayName,
+  ]);
 
   const resolveEmbeddingModelId = useCallback(
     ({
@@ -565,7 +608,8 @@ function DataConfig({ isActive }: DataConfigProps) {
     e.preventDefault();
     setDragging(false);
 
-    // If in creation mode or has active knowledge base, process files
+    // Only the upload drop zone accepts files. A drop anywhere else keeps the
+    // browser from navigating, but never queues an upload.
     // Do not allow uploads when active KB source is datamate
     if (
       kbState.activeKnowledgeBase &&
@@ -573,27 +617,6 @@ function DataConfig({ isActive }: DataConfigProps) {
       !isCreatingMode
     ) {
       message.warning(t("document.message.uploadDisabledForDataMate"));
-      return;
-    }
-
-    if (isCreatingMode || kbState.activeKnowledgeBase) {
-      const files = Array.from(e.dataTransfer.files);
-      const validFiles = files.filter(isKnowledgeBaseFileSizeValid);
-      if (validFiles.length !== files.length) {
-        message.error(
-          t("knowledgeBase.upload.fileTooLarge", {
-            limit: KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
-          })
-        );
-      }
-      if (validFiles.length > 0) {
-        setUploadFiles(validFiles);
-        if (!isCreatingMode) {
-          void handleFileUpload(validFiles);
-        }
-      }
-    } else {
-      message.warning(t("knowledgeBase.message.selectFirst"));
     }
   };
 
@@ -619,7 +642,9 @@ function DataConfig({ isActive }: DataConfigProps) {
 
     // Normal delete confirmation for local knowledge bases
     confirm({
-      title: t("knowledgeBase.modal.deleteConfirm.title", { name: kb?.name ?? id }),
+      title: t("knowledgeBase.modal.deleteConfirm.title", {
+        name: kb?.name ?? id,
+      }),
       content: (
         <div>
           <div>{t("knowledgeBase.modal.deleteConfirm.content")}</div>
@@ -801,6 +826,32 @@ function DataConfig({ isActive }: DataConfigProps) {
     }
   };
 
+  // Reuse the page-level quota snapshot for upload blocking; the document
+  // view must not issue a second quota request.
+  const uploadStorageBlocked = quotaUsage?.tenant_warning_level === "blocked";
+  const uploadStorageBlockedMessage = uploadStorageBlocked
+    ? `Storage full — ${quotaUsage?.total_readable || "0"} / ${quotaUsage?.hard_limit_readable || "?"}. Uploads are blocked.`
+    : undefined;
+
+  // Refresh the catalog page after card tags change, keeping the current
+  // keyword, filters and page.
+  const refreshKnowledgeBaseCatalog = useCallback(() => {
+    void fetchKnowledgeBases(false, true, false, {
+      keyword: searchQuery,
+      sources: sourceFilter,
+      models: modelFilter,
+      offset: (listPage - 1) * listPageSize,
+      limit: listPageSize,
+    });
+  }, [
+    fetchKnowledgeBases,
+    listPage,
+    listPageSize,
+    modelFilter,
+    searchQuery,
+    sourceFilter,
+  ]);
+
   // Handle new knowledge base creation
   const handleCreateNew = () => {
     // Clear active knowledge base selection when entering create mode
@@ -814,36 +865,9 @@ function DataConfig({ isActive }: DataConfigProps) {
     setNewKbIngroupPermission("READ_ONLY");
     setNewKbGroupIds([]);
     setNewKbPreserveSourceFile(true);
-    // Set default embedding model:
-    // 1) configured embedding model, 2) configured multimodal model, 3) first available option.
-    // Use displayName to match availableEmbeddingModels and KB embeddingModel.
-    const configEmbeddingModel =
-      modelConfig?.embedding?.displayName?.trim() || "";
-    const configMultiEmbeddingModel =
-      modelConfig?.multiEmbedding?.displayName?.trim() || "";
-    const preferredModel = [
-      { modelName: configEmbeddingModel, type: "embedding" },
-      { modelName: configMultiEmbeddingModel, type: "multi_embedding" },
-    ].find(
-      ({ modelName, type }) =>
-        !!modelName &&
-        availableEmbeddingModels.some(
-          (model) => model.displayName === modelName && model.type === type
-        )
-    );
-    const defaultModel =
-      (preferredModel &&
-        toEmbeddingModelOptionValue(
-          preferredModel.modelName,
-          preferredModel.type
-        )) ||
-      (availableEmbeddingModels[0]
-        ? toEmbeddingModelOptionValue(
-            availableEmbeddingModels[0].displayName,
-            availableEmbeddingModels[0].type
-          )
-        : "");
-    setNewKbEmbeddingModel(defaultModel);
+    // Clear the previous choice; the load effect picks the default once the
+    // embedding models have actually arrived.
+    setNewKbEmbeddingModel("");
     // v2.6.0: reset embedding model params override when entering create mode
     setNewKbEmbeddingParamsOverride({});
     setIsCreatingMode(true);
@@ -1192,6 +1216,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                 getModelDisplayName={(modelId) => modelId}
                 containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
                 onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
+                onCatalogRefresh={refreshKnowledgeBaseCatalog}
                 onKnowledgeBaseUpdate={(updatedKnowledgeBase) => {
                   // Update knowledge base in list and active knowledge base
                   updateKnowledgeBase(updatedKnowledgeBase);
@@ -1312,6 +1337,8 @@ function DataConfig({ isActive }: DataConfigProps) {
                     onFileSelect={handleFileSelect}
                     onUpload={handleFileUpload}
                     isUploading={docState.isUploading}
+                    uploadStorageBlocked={uploadStorageBlocked}
+                    uploadStorageBlockedMessage={uploadStorageBlockedMessage}
                   />
                 </div>
               </Modal>
@@ -1398,6 +1425,8 @@ function DataConfig({ isActive }: DataConfigProps) {
                   onFileSelect={handleFileSelect}
                   onUpload={handleFileUpload}
                   isUploading={docState.isUploading}
+                  uploadStorageBlocked={uploadStorageBlocked}
+                  uploadStorageBlockedMessage={uploadStorageBlockedMessage}
                 />
               </div>
             </div>

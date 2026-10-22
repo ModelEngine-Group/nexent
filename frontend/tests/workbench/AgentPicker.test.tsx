@@ -1,5 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import i18n from "i18next";
+import { initReactI18next } from "react-i18next";
 import { beforeEach, expect, it, vi } from "vitest";
 import {
   fireEvent,
@@ -609,4 +611,14 @@ it("repository page_size follows the shared 10/20/50 selector", async () => {
       )
     );
   }
+});
+
+beforeEach(async () => {
+  await i18n.use(initReactI18next).init({
+    lng: "zh",
+    defaultNS: "common",
+    keySeparator: false,
+    resources: { zh: { common: zh } },
+    interpolation: { escapeValue: false },
+  });
 });

@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { tagManagementApi } from "@/services/tagManagementService";
 import type {
@@ -18,43 +20,71 @@ interface TagQueryState<T> {
   refresh: () => Promise<void>;
 }
 
-function useTagQuery<T>(loader: () => Promise<T>): TagQueryState<T> {
+interface TagQueryOptions {
+  /**
+   * Callers that open a tag UI on demand can defer the first read. Defaults to
+   * true so existing eager callers keep their behavior.
+   */
+  enabled?: boolean;
+}
+
+function useTagQuery<T>(
+  loader: () => Promise<T>,
+  enabled = true
+): TagQueryState<T> {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestIdRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    // Ignore a stale response after the loader context changed.
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
     setLoading(true);
     setError(null);
     try {
       const result = await loader();
+      if (requestIdRef.current !== requestId) return;
       setData(result);
     } catch (caught) {
+      if (requestIdRef.current !== requestId) return;
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
-      setLoading(false);
+      if (requestIdRef.current === requestId) setLoading(false);
     }
   }, [loader]);
 
   useEffect(() => {
+    if (!enabled) return;
     void refresh();
-  }, [refresh]);
+  }, [refresh, enabled]);
 
   return { data, loading, error, refresh };
 }
 
-export function useTagLibraries(): TagQueryState<TagLibrary[]> {
-  return useTagQuery(useCallback(() => tagManagementApi.listLibraries(), []));
+export function useTagLibraries(
+  options?: TagQueryOptions
+): TagQueryState<TagLibrary[]> {
+  return useTagQuery(
+    useCallback(() => tagManagementApi.listLibraries(), []),
+    options?.enabled ?? true
+  );
 }
 
 export function useTagDefinitions(
-  bucketId: number | null
+  bucketId: number | null,
+  options?: TagQueryOptions
 ): TagQueryState<TagDefinition[]> {
+  const hasBucket = typeof bucketId === "number" && bucketId > 0;
   return useTagQuery(
     useCallback(() => {
-      if (bucketId === null) return Promise.resolve([] as TagDefinition[]);
+      if (!hasBucket || bucketId === null) {
+        return Promise.resolve([] as TagDefinition[]);
+      }
       return tagManagementApi.listDefinitions(bucketId);
-    }, [bucketId])
+    }, [bucketId, hasBucket]),
+    (options?.enabled ?? true) && hasBucket
   );
 }
 
