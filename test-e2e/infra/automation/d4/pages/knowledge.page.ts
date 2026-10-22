@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, Locator, Page } from "playwright/test";
 import { appPath } from "../runner/runtime-config";
 import { knowledgeRetrievalFailure } from "../runner/knowledge-diagnostics";

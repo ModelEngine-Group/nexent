@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, Page } from "playwright/test";
 import type { TestUser } from "../runner/runtime-config";
 import { appPath } from "../runner/runtime-config";

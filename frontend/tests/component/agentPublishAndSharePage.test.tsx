@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { App } from "antd";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
