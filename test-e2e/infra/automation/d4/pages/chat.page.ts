@@ -11,6 +11,7 @@ type AttachmentPayload = string | Parameters<FileChooser["setFiles"]>[0];
 export class ChatPage {
   private lastServerConversationId?: number;
   private stoppedConversationId?: number;
+  private lastRunResponse?: Response;
 
   constructor(readonly page: Page) {}
 
@@ -135,6 +136,7 @@ export class ChatPage {
       error.name = "ProductFailure";
       throw error;
     }
+    this.lastRunResponse = response;
     const headers = await response.allHeaders();
     let rawConversationId = headers["conversation_id"];
     if (!rawConversationId) {
@@ -182,9 +184,19 @@ export class ChatPage {
   }
 
   async waitForCompletion(timeout = 300_000): Promise<void> {
+    // Wait for the SSE response body to end, not just for an early completion
+    // badge: a new conversation can expose the stop-less placeholder before
+    // the final answer has rendered.
+    const run = this.lastRunResponse;
+    if (run) {
+      const failure = await run.finished();
+      if (failure) throw new Error(`agent run stream failed: ${failure.message}`);
+    }
     const last = this.assistantMessages().last();
     await expect(last).toContainText(/已完成|Completed|失败|Error/i, { timeout });
     await expect(this.page.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout });
+    await expect.poll(async () => (await last.innerText()).trim(), { timeout })
+      .not.toMatch(/Thinking\.\.\.|思考中/);
   }
 
   async sendAndWait(prompt: string, timeout = 300_000): Promise<Locator> {
@@ -401,6 +413,7 @@ export class ChatPage {
     await dialog.getByRole("button", { name: "关闭", exact: true }).last().click();
     await expect(dialog).toBeHidden();
   }
+
 
   async uploadAttachment(payload: AttachmentPayload): Promise<void> {
     // The workbench composer exposes the file chooser directly through the

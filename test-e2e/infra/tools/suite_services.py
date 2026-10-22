@@ -52,11 +52,22 @@ def controlled_services(repo, directory, env, enabled, required_mock_services=()
         (directory / "runtime").mkdir(parents=True, exist_ok=True)
         if ext_required:
             # The ext-knowledge mock is a suite-owned process, exactly like
-            # the controlled test-assets/test-mcp servers below. It binds a
-            # free port and is stopped with this case; no machine-local
-            # attach YAML, identity or cross-batch lock is involved.
+            # the controlled test-assets/test-mcp servers below. It binds the
+            # conventional 30090 port (the same default the product's
+            # AIDP_SERVER_URL uses) and is stopped with this case; no
+            # machine-local attach YAML, identity or cross-batch lock is
+            # involved.
             host = env.get("NEXENT_TEST_ASSETS_CONTAINER_HOST", "").strip() or "127.0.0.1"
-            port = free_port()
+            port = int(env.get("NEXENT_EXT_KNOWLEDGE_MOCK_PORT") or "30090")
+            probe = socket.socket()
+            probe.settimeout(0.2)
+            in_use = probe.connect_ex(("127.0.0.1", port)) == 0
+            probe.close()
+            if in_use:
+                raise RuntimeError(
+                    f"ext-knowledge mock port {port} is already in use; "
+                    "stop the external mock before running suite-owned ext cases"
+                )
             log_path = directory / "logs" / "ext-knowledge.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             output = log_path.open("w", encoding="utf-8")
