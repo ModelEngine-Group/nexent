@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState } from "react";
@@ -51,7 +53,7 @@ export default function HighFidelityPromptEditModal({
       }
     >
       <HighFidelityTextArea
-        limit={1000}
+        limit={100000}
         value={editContent}
         onChange={(event) => setEditContent(event.target.value)}
         disabled={readOnly}
