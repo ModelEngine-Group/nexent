@@ -166,7 +166,12 @@ journey("TFP-D4-001", async (context) => {
         const result = await inspect(current.conversation, true);
         await visible(true);
         await download(result.artifact);
-        return "refreshed history and authenticated browser download retain exact migrated report bytes";
+        const objectPath = result.artifact.object_name.split("/").map(encodeURIComponent).join("/");
+        const deleted = await page.request.delete(`/api/file/storage/${objectPath}`);
+        expect(deleted.status()).toBe(200);
+        const missing = await page.request.get(`/api/file/download/${objectPath}?download=stream`);
+        expect(missing.status()).toBe(404);
+        return "refreshed report bytes verified; browser deletion succeeds and subsequent download is 404";
       },
     ],
   });
