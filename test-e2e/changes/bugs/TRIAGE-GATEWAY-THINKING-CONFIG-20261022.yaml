@@ -1,0 +1,25 @@
+schema_version: '1.0'
+change:
+  change_id: TRIAGE-GATEWAY-THINKING-CONFIG-20261022
+  change_type: bugfix
+  bug_id: TRIAGE-GATEWAY-THINKING-CONFIG-20261022
+  title: Configure the verified gateway reasoning toggle transport
+  description: Record a deployed gateway configuration gap found while clearing the FAF prerequisites. No product-code defect or deployed repair is claimed.
+  observed_behavior: Explicit deep_thinking=false sends enable_thinking=false for the deployed compatible-gateway DeepSeek and GLM models, which still return genuine reasoning. The same gateway disables reasoning with thinking.type=disabled.
+  expected_behavior: Explicit off reaches the verified gateway in its required wire format through an exact endpoint/model profile; unrelated models and global defaults remain unchanged.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing controlled-provider model-control tests and SDK profile tests cover declared translations, but do not verify this deployed gateway's required transport and installed profile. FAF correctly preserved genuine reasoning and exposed the invalid pure-answer prerequisite.
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-MODEL-CONTROLS, FAF-001]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [CHAT-MODEL-CONTROLS-D3-001, FAF-D3-001, FAF-D4-001]
+    added: []
+    modified: []
+    retired: []
+  notes: Record only. The current resolver and SDK already support exact operator-verified toggle_wire_format profiles, but model_reasoning_wire_profiles.json is absent in both deployed config and runtime containers. Native existing-model runs, a transparent scoped relay with unchanged capability resolution, direct gateway comparisons and isolated candidate-profile translation establish the configuration cause. The candidate is retained outside Git and has not been mounted or applied; services were not restarted. The established SPEC is ../nexent-doc/nexent/agent-workbench/specs/model-controls/spec.md R-003; no behavior change is proposed. Existing UT inspected include test_explicit_toggle_wire_overrides_models_dev_without_changing_effort and backend catalog profile tests; their controlled proof does not certify deployed configuration. Future operational repair must rerun the actual gateway off/on comparison and downstream FAF regression with the repaired models. See docs/handoffs/2026-10-22-pyh-faf-thinking-followup.md for evidence, boundaries and verification requirements.

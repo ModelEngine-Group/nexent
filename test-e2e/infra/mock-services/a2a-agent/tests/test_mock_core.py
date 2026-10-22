@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import tempfile
@@ -56,6 +58,12 @@ class EvidenceTests(unittest.TestCase):
 
 
 class ContractTests(unittest.TestCase):
+    def test_all_security_profiles_have_valid_agent_variable_names(self) -> None:
+        for key in AUTH_PROFILES:
+            with self.subTest(profile=key):
+                name = card_dict("http://mock:8888", key)["name"]
+                self.assertRegex(name, r"^[A-Za-z_][A-Za-z0-9_]*$")
+
     def test_both_card_uses_or_requirements(self) -> None:
         card = card_dict("http://mock:8888", "both")
         self.assertEqual(2, len(card["securityRequirements"]))

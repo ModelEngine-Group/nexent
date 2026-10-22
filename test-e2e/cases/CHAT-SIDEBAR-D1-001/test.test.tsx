@@ -2,9 +2,26 @@
 
 vi.mock("@/app/i18n", () => ({ default: { t: (key: string) => key, language: "zh" } }));
 import React from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, expect, test, vi } from "vitest";
+import { act, cleanup, fireEvent, render as renderComponent, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ThreadList, BatchSelectionProvider, BatchSidebarFooter } from "@/app/newchat/assistant-ui/thread-list";
+const queryClients: QueryClient[] = [];
+const render = (ui: React.ReactNode) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClients.push(client);
+  return renderComponent(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+};
+afterEach(async () => {
+  await act(async () => {
+    cleanup();
+    for (const client of queryClients) {
+      await client.cancelQueries();
+      client.clear();
+    }
+    queryClients.length = 0;
+  });
+});
 const fixture = vi.hoisted(() => ({
   items: [{ id: "saved", remoteId: "42", title: "Saved conversation", custom: { agentId: 7 } }, { id: "draft", title: "Unsent draft", custom: { agentId: 7 } }],
   availableAgents: [{ agent_id: 7, display_name: "Agent Seven", name: "Agent Seven" }],
