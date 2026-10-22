@@ -58,9 +58,12 @@ describe('UT-FE-005 locale behavior', () => {
     expect(request.mock.calls.map(([url]) => url)).toEqual([
       '/portal/locales/en/common.json', '/portal/locales/zh/custom.json', '/portal/locales/en/custom.json',
     ]);
+    // `common` messages live on `resources`, while `resourcesCustom` only carries
+    // the `custom` overlay and replacement patterns.
     const freshDefault = freshI18n.default;
-    freshDefault.addResourceBundle('en', 'common', loaded.resourcesCustom.en.common ?? {}, true, true);
+    freshDefault.addResourceBundle('en', 'common', loaded.resources.en.common ?? {}, true, true);
     await freshDefault.changeLanguage('zh');
+    expect(freshDefault.t('test.fallback')).toBe('English fallback');
     expect(freshDefault.t('test.notDefined', { defaultValue: 'Safe default' })).toBe('Safe default');
   });
   it('locale load failure preserves already-loaded messages', async () => {
@@ -69,7 +72,12 @@ describe('UT-FE-005 locale behavior', () => {
     freshI18n.default.addResourceBundle('en', 'common', { 'test.fallback': 'English fallback' }, true, true);
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline fixture')));
-    const result = await freshI18n.loadLocaleMessages('en');
-    expect(result.resources.en.common).toHaveProperty('test.fallback', 'English fallback');
+    await freshI18n.loadLocaleMessages('en');
+    // A failed load must not clear what i18next already holds. The returned
+    // `resources` carrier is only populated on success, so the surviving
+    // bundle has to be observed through the live instance.
+    expect(freshI18n.default.hasResourceBundle('en', 'common')).toBe(true);
+    await freshI18n.default.changeLanguage('en');
+    expect(freshI18n.default.t('test.fallback')).toBe('English fallback');
   });
 });

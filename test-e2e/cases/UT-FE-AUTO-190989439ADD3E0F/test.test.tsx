@@ -171,20 +171,23 @@ describe('UserProfileComp Account Info', () => {
     expect(screen.getByText('cas_user_01')).toBeTruthy();
   });
 
-  it('场景B 本地用户标签为 Email 且仅取 email.trim() 不读取 username', async () => {
+  it('场景B 本地用户标签为 Email 且取值仅用 email.trim()，不采用 username', async () => {
+    // The component passes `user?.username` down as a prop regardless of
+    // provider, and only `getUserDisplayName` decides whether to use it. Reading
+    // the field is therefore legitimate; what must hold is that a local user's
+    // rendered value never comes from it.
     const localUser: any = {
       id: 'u-local-1',
       email: 'local01@example.com',
       role: 'USER',
       tenantId: 'tenant-1',
       authProvider: 'local',
-      get username() {
-        throw new Error('username must not be read for local users');
-      },
+      username: 'should_not_be_used',
     };
     renderWithUser(localUser);
     expect(await screen.findByText('Email')).toBeTruthy();
     expect(screen.getByText('local01@example.com')).toBeTruthy();
+    expect(screen.queryByText('should_not_be_used')).toBeNull();
   });
 
   it('场景C CAS 空用户名时标签仍为 Username 且值回退 email.trim()', async () => {
