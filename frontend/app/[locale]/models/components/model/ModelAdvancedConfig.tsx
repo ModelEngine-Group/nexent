@@ -1,8 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2 } from "lucide-react";
 
+import { SliderStepper } from "@/components/common/SliderStepper";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -172,20 +175,33 @@ export function ModelAdvancedConfig({
             value={value.default_output_reserve_tokens?.toString() ?? ""}
             onChange={(v) => setNumberField("default_output_reserve_tokens", v)}
           />
-          <AdvField
-            label={t("modelConfig.advancedConfig.temperature", {
-              defaultValue: "温度",
-            })}
-            value={value.temperature?.toString() ?? ""}
-            onChange={(v) => setNumberField("temperature", v)}
-          />
-          <AdvField
-            label={t("modelConfig.advancedConfig.topP", {
-              defaultValue: "Top P",
-            })}
-            value={value.top_p?.toString() ?? ""}
-            onChange={(v) => setNumberField("top_p", v)}
-          />
+          {(["temperature", "top_p"] as const).map((key) => {
+            const label =
+              key === "temperature"
+                ? t("modelConfig.advancedConfig.temperature", {
+                    defaultValue: "温度",
+                  })
+                : t("modelConfig.advancedConfig.topP", {
+                    defaultValue: "Top P",
+                  });
+            return (
+              <div key={key} className="min-w-0 space-y-1.5">
+                <Label className="text-sm">{label}</Label>
+                <SliderStepper
+                  compact
+                  label={label}
+                  value={
+                    typeof value[key] === "number" ? value[key] : undefined
+                  }
+                  fallback={1}
+                  min={0}
+                  max={key === "temperature" ? 2 : 1}
+                  step={0.1}
+                  onChange={(next) => onChange({ ...value, [key]: next })}
+                />
+              </div>
+            );
+          })}
         </div>
       )}
 

@@ -112,8 +112,6 @@ interface DocumentListProps {
   knowledgeBaseSource?: string;
   // User-facing knowledge base name (display name)
   knowledgeBaseName?: string;
-  knowledgeBaseDescription?: string;
-  onDescriptionChange?: (description: string) => void;
   // Internal knowledge base ID / Elasticsearch index name
   knowledgeBaseId?: string;
   modelMismatch?: boolean;
@@ -196,8 +194,6 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       knowledgeBaseSource = "",
       knowledgeBaseId = "",
       knowledgeBaseName = "",
-      knowledgeBaseDescription = "",
-      onDescriptionChange,
       modelMismatch = false,
       currentModel = "",
       knowledgeBaseModel = "",
@@ -1310,25 +1306,6 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                         </span>
                       </div>
                     )}
-                  </div>
-
-                  <div>
-                    <label className="mb-2 block text-sm font-medium text-gray-900">
-                      {t("knowledgeBase.create.field.description")}{" "}
-                      <span className="font-normal text-gray-500">
-                        {t("knowledgeBase.create.optional")}
-                      </span>
-                    </label>
-                    <TextArea
-                      value={knowledgeBaseDescription}
-                      onChange={(e) => onDescriptionChange?.(e.target.value)}
-                      placeholder={t(
-                        "knowledgeBase.create.descriptionPlaceholder",
-                        "简要说明这个知识库包含什么内容"
-                      )}
-                      autoSize={{ minRows: 2, maxRows: 3 }}
-                      className="!rounded-xl"
-                    />
                   </div>
 
                   <div className="shrink-0">
