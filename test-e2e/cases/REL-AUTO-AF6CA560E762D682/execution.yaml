@@ -4,7 +4,33 @@ implementations:
 - framework: pytest
   file: test.py
   selector: REL-AUTO-AF6CA560E762D682
-notes: V5 source binding migrated; runtime parity is not yet certified.
+notes: >-
+  Real lifespan, manager and health routes. Startup failures use isolated Uvicorn
+  processes with real evaluation-maintenance threads and controlled persistence.
+  Explicitly allow terminating the failed process and verify a separate healthy
+  replacement; distinguish forced recovery from automatic recovery in evidence.
+  Keep strict resource-release assertions for normal and body-error shutdown.
+timeout_seconds: 600
+acceptance_bindings:
+  AC-01:
+  - test_startup_order_and_conditional_backfill
+  AC-02:
+  - test_external_configuration_validation
+  AC-03:
+  - test_readiness_created_running_stuck_and_closed
+  AC-04:
+  - test_startup_failure_recovers_after_process_restart
+  AC-05:
+  - test_shutdown_order_and_body_error_propagation
+  AC-06:
+  - test_shutdown_error_still_clears_default
+  AC-07:
+  - test_startup_order_and_conditional_backfill
+  - test_external_configuration_validation
+  - test_readiness_created_running_stuck_and_closed
+  - test_startup_failure_recovers_after_process_restart
+  - test_shutdown_order_and_body_error_propagation
+  - test_shutdown_error_still_clears_default
 preparation:
   families: []
   anchors: false

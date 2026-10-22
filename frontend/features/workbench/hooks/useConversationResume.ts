@@ -1,9 +1,12 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useRef, type RefObject } from "react";
 import type { AssistantRuntime } from "@assistant-ui/react";
 import type { Agent } from "@/types/agentConfig";
 import { conversationService } from "@/services/conversationService";
+import type { ConversationDetailReader } from "@/types/conversation";
 import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import log from "@/lib/logger";
 
@@ -17,6 +20,8 @@ export function useConversationResume({
   chatMode,
   resumedConversationIdsRef,
   handleGenerationStopped,
+  loadDetail = conversationService.getById,
+  invalidateDetail,
 }: {
   runtime: AssistantRuntime;
   activeConversationId: string | undefined;
@@ -27,6 +32,8 @@ export function useConversationResume({
   chatMode: "planning" | "execution";
   resumedConversationIdsRef: RefObject<Set<number>>;
   handleGenerationStopped: (id: number) => void;
+  loadDetail?: ConversationDetailReader;
+  invalidateDetail?: (id: string) => void;
 }) {
   const pendingResumes = useRef(new Set<number>());
   // A route change tears down the local stream, while the backend keeps the
@@ -37,6 +44,8 @@ export function useConversationResume({
     const numericConversationId = Number(activeConversationId);
     if (isThreadRunning) {
       resumedConversationIdsRef.current?.delete(numericConversationId);
+      if (numericConversationId > 0)
+        invalidateDetail?.(String(numericConversationId));
       return;
     }
     if (
@@ -52,8 +61,7 @@ export function useConversationResume({
     }
 
     let cancelled = false;
-    void conversationService
-      .getById(String(numericConversationId))
+    void loadDetail(String(numericConversationId))
       .then((conversation) => {
         if (
           cancelled ||
@@ -115,5 +123,7 @@ export function useConversationResume({
     selectedAgent,
     handleGenerationStopped,
     resumedConversationIdsRef,
+    loadDetail,
+    invalidateDetail,
   ]);
 }

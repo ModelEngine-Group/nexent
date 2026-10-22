@@ -203,8 +203,12 @@ const toToolSearchItem = (value: unknown) => {
         sourceType:
           typeof item.source_type === "string" ? item.source_type : undefined,
         filename: filename || undefined,
-        publishedDate: typeof item.published_date === "string" ? item.published_date : undefined,
-        downloadUrl: typeof item.download_url === "string" ? item.download_url : undefined,
+        publishedDate:
+          typeof item.published_date === "string"
+            ? item.published_date
+            : undefined,
+        downloadUrl:
+          typeof item.download_url === "string" ? item.download_url : undefined,
         sourceFile: sourceFile || imageMetadata?.source_file || undefined,
         objectName:
           typeof item.object_name === "string" ? item.object_name : undefined,
@@ -212,7 +216,7 @@ const toToolSearchItem = (value: unknown) => {
         toolSign,
         isImage: Boolean(imageMetadata),
         retrievalHighlightTerms: getRetrievalHighlightTerms(item.score_details),
-                ...getSourceAttributes(item.search_type, item.score_details),
+        ...getSourceAttributes(item.search_type, item.score_details),
       }
     : null;
 };
@@ -1510,7 +1514,9 @@ const parseConversationListOffset = (after: string | undefined): number => {
     : 0;
 };
 
-const createHistoryProvider = (): FC<PropsWithChildren> => {
+const createHistoryProvider = (
+  loadDetail?: import("@/types/conversation").ConversationDetailReader
+): FC<PropsWithChildren> => {
   const Provider: FC<PropsWithChildren> = ({ children }) => {
     const aui = useAui();
 
@@ -1518,7 +1524,13 @@ const createHistoryProvider = (): FC<PropsWithChildren> => {
       () =>
         new RemoteConversationHistoryAdapter(
           () => aui.threadListItem.getState().remoteId,
-          () => aui.threadListItem.initialize()
+          () => aui.threadListItem.initialize(),
+          loadDetail
+            ? () => {
+                const id = aui.threadListItem.getState().remoteId;
+                return id ? loadDetail(id) : Promise.resolve(undefined);
+              }
+            : undefined
         ),
       [aui]
     );
@@ -1717,13 +1729,14 @@ export const createConversationThreadListAdapter = (
   pinStorageKey?: string,
   loadPins: () => Promise<WorkbenchPins> = () =>
     conversationService.getWorkbenchPins(),
-  onDeleted?: (conversationId: number) => Promise<void>
+  onDeleted?: (conversationId: number) => Promise<void>,
+  detailLoader?: import("@/types/conversation").ConversationDetailLoader
 ): RemoteThreadListAdapter => {
   const prefetchedConversationIds = new Set<string>();
   let loadedCount = INITIAL_CONVERSATION_PAGE_SIZE;
   let generation = 0;
   return {
-    unstable_Provider: createHistoryProvider(),
+    unstable_Provider: createHistoryProvider(detailLoader?.load),
 
     async list({ after } = {}): Promise<RemoteThreadListResponse> {
       const currentGeneration = after === undefined ? ++generation : generation;
@@ -1859,6 +1872,7 @@ export const createConversationThreadListAdapter = (
         );
       }
       await conversationService.rename(conversationId, newTitle);
+      detailLoader?.invalidate(String(conversationId));
     },
 
     // The backend currently has no archive/unarchive endpoints, so these are
@@ -1893,7 +1907,9 @@ export const createConversationThreadListAdapter = (
     },
 
     async fetch(threadId: string): Promise<RemoteThreadMetadata> {
-      const detail = await conversationService.getById(threadId);
+      const detail = await (detailLoader?.load ?? conversationService.getById)(
+        threadId
+      );
 
       return toRemoteThreadMetadata({
         conversation_id: Number(detail.conversation_id),

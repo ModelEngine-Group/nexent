@@ -1,14 +1,18 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { conversationService } from "@/services/conversationService";
+import type { ConversationDetailReader } from "@/types/conversation";
 import { withBasePath } from "@/lib/basePath";
 import log from "@/lib/logger";
 
 /** Keep ordinary Agent and Workbench history links on their owning page. */
 export function useConversationRouteGuard(
-  expected: "agent_chat" | "workbench"
+  expected: "agent_chat" | "workbench",
+  loadDetail: ConversationDetailReader = conversationService.getById
 ) {
   const router = useRouter();
   const { locale } = useParams<{ locale: string }>();
@@ -21,8 +25,7 @@ export function useConversationRouteGuard(
       return;
 
     let cancelled = false;
-    void conversationService
-      .getById(String(conversationId))
+    void loadDetail(String(conversationId))
       .then((conversation) => {
         if (cancelled) return;
         const actual = conversation.workbench_config
@@ -42,5 +45,5 @@ export function useConversationRouteGuard(
     return () => {
       cancelled = true;
     };
-  }, [expected, locale, router]);
+  }, [expected, locale, router, loadDetail]);
 }

@@ -28,7 +28,7 @@ export function WorkbenchLoadingBoundary({
   ) {
     return (
       <div
-        className="flex h-full items-center justify-center"
+        className="flex h-full min-w-0 flex-1 items-center justify-center"
         role="status"
         aria-busy="true"
         aria-label={t("common.loading")}
