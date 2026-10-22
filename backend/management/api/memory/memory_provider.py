@@ -31,7 +31,7 @@ from fastapi import APIRouter, Header, HTTPException, Path
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from consts.const import MEMORY_PROVIDER_PLUGINS_DIR
+from contracts.constants.environment import MEMORY_PROVIDER_PLUGINS_DIR
 from management.db.memory import provider_config as memory_provider_config_db
 from management.db.memory import provider_config_param as memory_provider_config_param_db
 from nexent.memory.models import (
@@ -48,7 +48,7 @@ from nexent.memory.providers.retry import (
 from management.services.memory.providers.service import MemoryExternalProviderService
 from management.services.memory.providers.configuration import MemoryProviderConfigService
 from management.services.memory.providers.plugins import PluginLoader
-from gateway.authentication.normal import get_current_user_id
+from gateway.authentication.auth import get_current_user_id
 
 
 logger = logging.getLogger("memory_provider_app")

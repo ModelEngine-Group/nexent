@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.constants.identity import OAUTH_PENDING_EXPIRE_SECONDS, OAUTH_PENDING_PURPOSE
+from contracts.constants.constants import OAUTH_PENDING_EXPIRE_SECONDS, OAUTH_PENDING_PURPOSE
 from contracts.authentication import PendingOAuthIdentity
 import json
 import logging
@@ -14,8 +14,9 @@ from urllib.parse import urlencode, quote
 import jwt
 from pydantic import EmailStr, TypeAdapter, ValidationError as PydanticValidationError
 
-from contracts.constants.identity import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
-from consts.const import OAUTH_CALLBACK_BASE_URL, OAUTH_LOGIN_MODE, OAUTH_SSL_VERIFY, OAUTH_CA_BUNDLE, SUPABASE_JWT_SECRET, JWT_EXPIRY_SECONDS
+from contracts.constants.constants import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+from contracts.constants.environment import OAUTH_CALLBACK_BASE_URL, OAUTH_LOGIN_MODE, OAUTH_SSL_VERIFY, OAUTH_CA_BUNDLE, SUPABASE_JWT_SECRET, JWT_EXPIRY_SECONDS
+from contracts.constants.environment import GET_OAUTH_SETTING as get_oauth_setting
 from contracts.errors.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError
 from management.services.permission.asset_owner import require_asset_owner_enabled
 from management.utils.oauth_providers import get_all_provider_definitions, get_provider_definition, is_provider_enabled
@@ -124,7 +125,7 @@ def get_authorize_url(provider: str, link_user_id: str = "") -> str:
     else:
         state = f"{provider}:{random_token}"
 
-    client_id = os.getenv(definition.client_id_env, "")
+    client_id = get_oauth_setting(definition.client_id_env, "")
     redirect_uri = (
         quote(callback_url, safe="") if definition.encode_redirect_uri else callback_url
     )
@@ -163,8 +164,8 @@ def exchange_code_for_provider_token(provider: str, code: str) -> Dict[str, Any]
     except KeyError:
         raise OAuthProviderError(f"Unsupported provider: {provider}")
 
-    client_id = os.getenv(definition.client_id_env, "")
-    client_secret = os.getenv(definition.client_secret_env, "")
+    client_id = get_oauth_setting(definition.client_id_env, "")
+    client_secret = get_oauth_setting(definition.client_secret_env, "")
     callback_url = (
         f"{OAUTH_CALLBACK_BASE_URL}/api/user/oauth/callback?provider={provider}"
     )
@@ -355,7 +356,7 @@ async def complete_pending_oauth_account(
         use_invitation_code,
     )
     from management.services.tool.configuration import init_tool_list_for_tenant
-    from gateway.authentication.normal import calculate_expires_at, generate_session_jwt
+    from gateway.authentication.auth import calculate_expires_at, generate_session_jwt
 
     pending = pending_identity
     provider = pending["provider"]
@@ -381,7 +382,7 @@ async def complete_pending_oauth_account(
 
     admin_client = None
     try:
-        from gateway.authentication.normal import get_supabase_admin_client
+        from gateway.authentication.auth import get_supabase_admin_client
 
         admin_client = get_supabase_admin_client()
     except Exception:
@@ -424,7 +425,7 @@ async def complete_pending_oauth_account(
         )
     except TenantResourceLimitError:
         # The Supabase identity was created before the local tenant-limit check.
-        from gateway.authentication.normal import delete_supabase_user
+        from gateway.authentication.auth import delete_supabase_user
 
         delete_supabase_user(supabase_user_id)
         raise

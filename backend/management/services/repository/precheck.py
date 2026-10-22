@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from contracts.constants.model import ModelConnectStatusEnum
+from contracts.model import ModelConnectStatusEnum
 from contracts.agent import RepositoryImportPrecheckResponse, RepositoryImportRequirementItem
 from contracts.tool import ToolSourceEnum
 from management.services.model.resolver import is_model_available

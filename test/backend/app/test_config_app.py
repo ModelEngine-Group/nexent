@@ -51,8 +51,8 @@ class TestConfigAppIntegration:
     """Test class for config_app module integration with app_factory."""
 
     def test_config_app_can_import_consts(self):
-        """Test that we can import from consts.const."""
-        from consts.const import IS_SPEED_MODE
+        """Test that we can import from contracts.constants.environment."""
+        from contracts.constants.environment import IS_SPEED_MODE
         assert isinstance(IS_SPEED_MODE, bool)
 
     def test_config_app_can_import_app_factory(self):
@@ -189,14 +189,14 @@ class TestConfigAppRouterConfiguration:
         retired_module.router = retired_router
         monkeypatch.setitem(sys.modules, "management.api.prompt.prompt_template", retired_module)
 
-        const_module = types.ModuleType("consts.const")
+        const_module = types.ModuleType("contracts.constants.environment")
         const_module.AIDP_API_KEY = ""
         const_module.AIDP_SERVER_URL = ""
         const_module.ENABLE_AIDP_KNOWLEDGE = False
         const_module.ENABLE_AGENT_WORKBENCH = False
         const_module.IS_SPEED_MODE = False
         const_module.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS = 1
-        monkeypatch.setitem(sys.modules, "consts.const", const_module)
+        monkeypatch.setitem(sys.modules, "contracts.constants.environment", const_module)
         manager_state = types.SimpleNamespace(CREATED="created")
 
         class ManagedTaskSpec:
@@ -440,12 +440,12 @@ class TestConfigAppSpeedMode:
 
     def test_is_speed_mode_import(self):
         """Test that IS_SPEED_MODE can be imported."""
-        from consts.const import IS_SPEED_MODE
+        from contracts.constants.environment import IS_SPEED_MODE
         assert isinstance(IS_SPEED_MODE, bool)
 
     def test_speed_mode_conditional(self):
         """Test speed mode conditional logic."""
-        from consts.const import IS_SPEED_MODE
+        from contracts.constants.environment import IS_SPEED_MODE
         from management.utils.app_factory import create_app
 
         # App should work regardless of speed mode

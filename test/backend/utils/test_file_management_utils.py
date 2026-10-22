@@ -23,11 +23,11 @@ class _ProcessParams:
 
 @pytest.fixture(autouse=True)
 def stub_project_modules(monkeypatch, tmp_path):
-    # consts.const
-    const_mod = types.ModuleType("consts.const")
+    # contracts.constants.environment
+    const_mod = types.ModuleType("contracts.constants.environment")
     setattr(const_mod, "DATA_PROCESS_SERVICE", "http://data-process")
     setattr(const_mod, "LIBREOFFICE_PROFILE_DIR", str(tmp_path / "lo-profile"))
-    sys.modules["consts.const"] = const_mod
+    sys.modules["contracts.constants.environment"] = const_mod
     install_business_constant_stubs(const_mod)
 
     # contracts.agent
@@ -57,10 +57,10 @@ def stub_project_modules(monkeypatch, tmp_path):
     setattr(sys.modules["database"], "attachment_db", attach_mod)
     setattr(sys.modules["database"], "knowledge_db", knowledge_mod)
 
-    # gateway.authentication.normal
-    auth_mod = types.ModuleType("gateway.authentication.normal")
+    # gateway.authentication.auth
+    auth_mod = types.ModuleType("gateway.authentication.auth")
     setattr(auth_mod, "get_current_user_id", lambda authorization: ("user-1", "tenant-1"))
-    sys.modules["gateway.authentication.normal"] = auth_mod
+    sys.modules["gateway.authentication.auth"] = auth_mod
 
     # management.services.configuration.tenant.settings
     cfg_mod = types.ModuleType("management.services.configuration.tenant.settings")

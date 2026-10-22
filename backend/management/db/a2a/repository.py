@@ -18,7 +18,7 @@ from management.utils.a2a import (
     _get_protocol_binding_mapping,
     _make_default_interfaces,
 )
-from contracts.constants.a2a import DEFAULT_CACHE_TTL_HOURS, PROTOCOL_GRPC, PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
+from contracts.constants.constants import DEFAULT_CACHE_TTL_HOURS, PROTOCOL_GRPC, PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 import json
 import logging
 from datetime import datetime, timedelta, timezone

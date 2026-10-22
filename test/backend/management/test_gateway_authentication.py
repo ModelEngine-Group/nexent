@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 
 from contracts.authentication import CredentialKind
 from contracts.errors.exceptions import TokenExpiredError
-from gateway.authentication import normal as identity, normal as internal, northbound
-from gateway.authentication.normal import extract_bearer_token
-from gateway.authentication.normal import authenticate_identity
+from gateway.authentication import auth as identity, auth as internal, northbound_auth as northbound
+from gateway.authentication.auth import extract_bearer_token
+from gateway.authentication.auth import authenticate_identity
 
 
 @pytest.mark.parametrize(
@@ -148,7 +148,7 @@ def test_session_token_cannot_be_used_for_internal_runtime(session_policy, monke
 
 
 def test_gateway_authentication_maps_an_invalid_api_key_to_401(monkeypatch):
-    from gateway.authentication.northbound import get_northbound_context
+    from gateway.authentication.northbound_auth import get_northbound_context
     from fastapi import Depends
 
     monkeypatch.setattr(northbound, "get_token_by_access_key", lambda _: None)
@@ -228,7 +228,7 @@ def test_internal_runtime_token_cannot_be_used_as_a_browser_session(session_poli
 
 
 def test_pending_account_token_cannot_be_used_as_a_browser_session(session_policy):
-    from contracts.constants.identity import OAUTH_PENDING_PURPOSE
+    from contracts.constants.constants import OAUTH_PENDING_PURPOSE
 
     with pytest.raises(TokenExpiredError, match="credential policy"):
         authenticate_identity(signed_session(purpose=OAUTH_PENDING_PURPOSE))
@@ -237,8 +237,8 @@ def test_pending_account_token_cannot_be_used_as_a_browser_session(session_polic
 def test_pending_oauth_identity_requires_signed_purpose_and_provider(
     session_policy, monkeypatch
 ):
-    from gateway.authentication import normal as oauth
-    from contracts.constants.identity import OAUTH_PENDING_PURPOSE
+    from gateway.authentication import auth as oauth
+    from contracts.constants.constants import OAUTH_PENDING_PURPOSE
     from contracts.errors.exceptions import OAuthLinkError
 
     monkeypatch.setattr(oauth, "SUPABASE_JWT_SECRET", identity.SUPABASE_JWT_SECRET)

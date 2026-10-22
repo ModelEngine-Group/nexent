@@ -8,7 +8,7 @@ from contextlib import contextmanager
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
-# Set up required constants in consts.const
+# Set up required constants in contracts.constants.environment
 consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
 consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
 consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
@@ -23,7 +23,7 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 # Mock utils module
@@ -33,7 +33,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -79,7 +79,7 @@ sys.modules['management.db.models'] = db_models_mock
 # Now we can safely import the module being tested
 from management.db.agent import version as agent_version_db_module
 from management.db.agent.version import search_version_by_version_no, search_version_by_id, query_version_list, query_current_version_no, query_agent_snapshot, query_agent_draft, insert_version, update_version_status, update_version, update_agent_current_version, insert_agent_snapshot, insert_tool_snapshot, insert_relation_snapshot, update_agent_snapshot, delete_agent_snapshot, delete_tool_snapshot, delete_relation_snapshot, delete_skill_snapshot, query_skill_instances_snapshot, insert_skill_snapshot, get_next_version_no, delete_version, batch_search_version_names, batch_query_current_version_nos
-from contracts.constants.agent import SOURCE_TYPE_NORMAL, SOURCE_TYPE_ROLLBACK, STATUS_RELEASED, STATUS_DISABLED, STATUS_ARCHIVED
+from contracts.constants.constants import SOURCE_TYPE_NORMAL, SOURCE_TYPE_ROLLBACK, STATUS_RELEASED, STATUS_DISABLED, STATUS_ARCHIVED
 
 
 class MockAgentVersion:

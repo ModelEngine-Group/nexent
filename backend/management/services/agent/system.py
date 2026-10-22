@@ -5,8 +5,8 @@
 import logging
 from typing import Any
 
-from consts.const import APP_VERSION, ENABLE_AIDP_KNOWLEDGE
-from contracts.constants.localization import LANGUAGE
+from contracts.constants.environment import APP_VERSION, ENABLE_AIDP_KNOWLEDGE
+from contracts.constants.constants import LANGUAGE
 from contracts.errors.exceptions import WorkbenchAgentError
 from contracts.agent import AgentInfoRequest
 from contracts.tool import ToolInstanceInfoRequest

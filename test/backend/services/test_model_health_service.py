@@ -26,14 +26,14 @@ _MOCKED_MODULE_NAMES = (
     "management.db.client",
     "management.db.model.repository",
     "utils",
-    "gateway.authentication.normal",
+    "gateway.authentication.auth",
     "management.services.configuration.tenant.settings",
     "utils.memory_utils",
     "management.services.model.names",
     "consts",
-    "consts.const",
+    "contracts.constants.environment",
     "contracts.agent",
-    "contracts.constants.model",
+    "contracts.constants.constants",
     "nexent",
     "nexent.core",
     "nexent.core.agents",
@@ -62,7 +62,7 @@ from test.common.database_stubs import install_serialization_stub
 install_serialization_stub(sys.modules["management.db.client"])
 sys.modules['management.db.model.repository'] = MockModule()
 sys.modules['utils'] = MockModule()
-sys.modules['gateway.authentication.normal'] = MockModule()
+sys.modules['gateway.authentication.auth'] = MockModule()
 sys.modules['management.services.configuration.tenant.settings'] = MockModule()
 sys.modules['utils.memory_utils'] = MockModule()
 sys.modules['management.services.model.names'] = MockModule()
@@ -71,7 +71,7 @@ consts_const_module = MockModule()
 consts_const_module.LOCALHOST_IP = "127.0.0.1"
 consts_const_module.LOCALHOST_NAME = "localhost"
 consts_const_module.DOCKER_INTERNAL_HOST = "host.docker.internal"
-sys.modules['consts.const'] = consts_const_module
+sys.modules['contracts.constants.environment'] = consts_const_module
 install_business_constant_stubs(consts_const_module)
 install_business_contract_stubs(MockModule())
 install_shared_contract_stub(MockModule(), 'provider')

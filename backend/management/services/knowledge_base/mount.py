@@ -3,7 +3,7 @@
 from copy import deepcopy
 from math import isfinite
 
-from consts.const import ENABLE_AIDP_KNOWLEDGE
+from contracts.constants.environment import ENABLE_AIDP_KNOWLEDGE
 from contracts.errors.exceptions import ValidationError
 from management.db.tool.repository import query_all_tools
 

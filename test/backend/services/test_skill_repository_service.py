@@ -37,8 +37,8 @@ _consts_package = sys.modules.get("consts")
 if _consts_package is not None and not hasattr(_consts_package, "__path__"):
     _consts_package.__path__ = []
 
-if "contracts.constants.agent" not in sys.modules:
-    consts_agent_repository_mock = types.ModuleType("contracts.constants.agent")
+if "contracts.constants.constants" not in sys.modules:
+    consts_agent_repository_mock = types.ModuleType("contracts.constants.constants")
     consts_agent_repository_mock.OWNERSHIP_ALL = "all"
     consts_agent_repository_mock.OWNERSHIP_CREATED = "created"
     consts_agent_repository_mock.OWNERSHIP_OTHERS = "others"
@@ -59,7 +59,7 @@ if "contracts.constants.agent" not in sys.modules:
     }
     install_shared_contract_stub(consts_agent_repository_mock, 'agent_repository')
 
-consts_const_module = sys.modules.get("consts.const")
+consts_const_module = sys.modules.get("contracts.constants.environment")
 if consts_const_module is not None:
     if not hasattr(consts_const_module, "CAN_EDIT_ALL_USER_ROLES"):
         consts_const_module.CAN_EDIT_ALL_USER_ROLES = {"ADMIN"}
@@ -216,7 +216,7 @@ if not _has_duplicate_names:
 
 from services import skill_repository_service as srs
 
-from contracts.constants.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_SKILL_REPOSITORY
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_SKILL_REPOSITORY
 
 
 @pytest.fixture(autouse=True)

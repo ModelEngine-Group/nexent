@@ -115,7 +115,7 @@ sys.modules["nexent"] = nexent_pkg
 # Stub project modules that ``memory_index_service`` imports
 # ---------------------------------------------------------------------------
 consts_pkg = types.ModuleType("consts")
-consts_const = types.ModuleType("consts.const")
+consts_const = types.ModuleType("contracts.constants.environment")
 
 
 class _VectorDatabaseType:
@@ -125,7 +125,7 @@ class _VectorDatabaseType:
 consts_const.VectorDatabaseType = _VectorDatabaseType
 consts_pkg.const = consts_const
 sys.modules["consts"] = consts_pkg
-sys.modules["consts.const"] = consts_const
+sys.modules["contracts.constants.environment"] = consts_const
 install_business_constant_stubs(consts_const)
 
 vdb_service = types.ModuleType("management.services.knowledge_base.service")

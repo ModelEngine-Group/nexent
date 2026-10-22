@@ -37,7 +37,7 @@ def test_business_api_modules_are_importable_packages(service):
 
 
 def test_contracts_do_not_depend_on_backend_implementations():
-    forbidden = ("services", "database", "management", "runtime", "gateway", "consts.const", "sqlalchemy")
+    forbidden = ("services", "database", "management", "runtime", "gateway", "contracts.constants.environment", "sqlalchemy")
     for path in (BACKEND / "contracts").rglob("*.py"):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             modules = []

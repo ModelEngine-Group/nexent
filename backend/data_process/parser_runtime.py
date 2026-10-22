@@ -13,8 +13,8 @@ from collections.abc import Iterable
 from io import BytesIO
 from typing import Any
 
-from contracts.constants.knowledge import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
-from consts.const import DP_PARSE_THREADS_PER_PROCESS, DP_PRELOAD_MODELS, TABLE_TRANSFORMER_MODEL_PATH, UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH
+from contracts.constants.constants import DEFAULT_EXPECTED_CHUNK_SIZE, DEFAULT_MAXIMUM_CHUNK_SIZE
+from contracts.constants.environment import DP_PARSE_THREADS_PER_PROCESS, DP_PRELOAD_MODELS, TABLE_TRANSFORMER_MODEL_PATH, UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH
 
 
 logger = logging.getLogger("data_process.parser_runtime")

@@ -161,7 +161,7 @@ sys.modules['sqlalchemy.sql'] = MagicMock()
 
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
-from consts.const import ENABLE_JIUWEN_SDK
+from contracts.constants.environment import ENABLE_JIUWEN_SDK
 
 # Mock boto3 and minio client before importing the module under test
 import sys
@@ -2289,7 +2289,7 @@ class TestPromptOptimizationService(unittest.TestCase):
     @patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', True)
     def test_is_jiuwen_mode_available_env_disabled(self):
         """开关关闭时 Jiuwen SDK 不可用"""
-        from consts.const import ENABLE_JIUWEN_SDK
+        from contracts.constants.environment import ENABLE_JIUWEN_SDK
 
         # Patch ENABLE_JIUWEN_SDK to False
         with patch('management.services.agent.prompt_generation.ENABLE_JIUWEN_SDK', False):

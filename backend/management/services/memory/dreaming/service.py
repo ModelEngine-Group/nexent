@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from consts.const import DREAMING_SUMMARIZATION_BACKOFF_BASE_SECONDS, DREAMING_SUMMARIZATION_MAX_ATTEMPTS, DREAMING_LONG_TERM_MAX_CHARS, DREAMING_MAX_AGE_DAYS, DREAMING_SOURCE_LIMIT, LIGHT_SLEEP_WINDOW_DAYS, MIN_PROMOTION_SCORE, MIN_RECALL_COUNT, MIN_UNIQUE_QUERIES, RECENCY_HALF_LIFE_DAYS
+from contracts.constants.environment import DREAMING_SUMMARIZATION_BACKOFF_BASE_SECONDS, DREAMING_SUMMARIZATION_MAX_ATTEMPTS, DREAMING_LONG_TERM_MAX_CHARS, DREAMING_MAX_AGE_DAYS, DREAMING_SOURCE_LIMIT, LIGHT_SLEEP_WINDOW_DAYS, MIN_PROMOTION_SCORE, MIN_RECALL_COUNT, MIN_UNIQUE_QUERIES, RECENCY_HALF_LIFE_DAYS
 from management.db.memory import dreaming as memory_dreaming_db
 from management.db.memory import long_term as memory_long_term_db
 from management.db.memory import record as memory_record_db

@@ -4,7 +4,7 @@
 
 from typing import Dict
 from contracts.identity import OAuthProviderDefinition
-from consts.const import get_oauth_setting
+from contracts.constants.environment import GET_OAUTH_SETTING as get_oauth_setting
 
 GITHUB_PROVIDER = OAuthProviderDefinition(
     name="github",

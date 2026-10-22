@@ -27,7 +27,7 @@ consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_mock.const.POSTGRES_DB = "test_db"
 consts_mock.const.POSTGRES_PORT = 5432
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 # Mock management.db.client

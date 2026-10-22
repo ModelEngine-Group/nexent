@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+from enum import Enum
 
 if TYPE_CHECKING:
     from contracts.tool import ToolParamsRequest
@@ -300,3 +301,9 @@ class IndependentAidpKnowledgeBaseListRequest(BaseModel):
     tenant_id: str = Field(default="aidp", description="AIDP tenant identifier")
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=100, ge=1, le=100)
+
+
+# Vector database providers
+class VectorDatabaseType(str, Enum):
+    ELASTICSEARCH = "elasticsearch"
+    DATAMATE = "datamate"

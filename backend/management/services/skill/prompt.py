@@ -4,7 +4,7 @@
 
 from typing import Any, Dict, List, Optional
 
-from contracts.constants.localization import LANGUAGE
+from contracts.constants.constants import LANGUAGE
 from nexent.core.agents.prompt.meta import compose_nl2skill
 
 

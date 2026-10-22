@@ -32,8 +32,8 @@ from agents.create_agent_info import (
     join_minio_file_description_to_query,
 )
 from agents.nl2agent_agent import create_nl2agent_agent_config
-from consts.const import TOKEN, ENABLE_AIDP_KNOWLEDGE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS
-from contracts.constants.model import MODEL_CONFIG_MAPPING
+from contracts.constants.environment import TOKEN, ENABLE_AIDP_KNOWLEDGE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.services.mcp.addressing import get_tenant_local_mcp_server
 from contracts.conversation import HistoryItem
 from contracts.agent import NL2AgentRunRequest

@@ -20,7 +20,7 @@ from typing import Any
 from celery import Task, chord, group, states
 from celery.exceptions import Ignore
 
-from consts.const import DP_FILE_SPLIT_SIZE_MB, DP_PART_PROCESSOR_COUNT, DP_REDIS_CHUNKS_WAIT_TIMEOUT_S, REDIS_BACKEND_URL
+from contracts.constants.environment import DP_FILE_SPLIT_SIZE_MB, DP_PART_PROCESSOR_COUNT, DP_REDIS_CHUNKS_WAIT_TIMEOUT_S, REDIS_BACKEND_URL
 from infrastructure.ingestion.errors import (
     ClassifiedIngestionException,
     classify_ingestion_exception,

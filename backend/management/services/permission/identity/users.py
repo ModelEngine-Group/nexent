@@ -12,9 +12,9 @@ from management.db.memory.config import soft_delete_all_configs_by_user_id
 from management.db.conversation.repository import soft_delete_all_conversations_by_user
 from management.db.knowledge_base.repository import get_private_knowledge_info_by_creator
 from management.db.identity.oauth_account import soft_delete_all_oauth_accounts_by_user_id
-from consts.const import IS_SPEED_MODE
+from contracts.constants.environment import IS_SPEED_MODE
 from contracts.errors.exceptions import ForbiddenError, NotFoundException
-from gateway.authentication.normal import get_supabase_admin_client
+from gateway.authentication.auth import get_supabase_admin_client
 from management.services.permission.identity.display import enrich_cas_usernames
 
 logger = logging.getLogger(__name__)

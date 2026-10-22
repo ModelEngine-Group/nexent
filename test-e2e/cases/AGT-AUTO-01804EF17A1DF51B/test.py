@@ -63,7 +63,7 @@ def _make_context_budget_snapshot(**overrides):
 
 def _patch_dependencies(monkeypatch, *, input_budget, capacity_monitoring, resolved_capacity_snapshot, context_budget_snapshot):
     from services import nl2agent_service as nl2agent_service
-    import consts.const as const
+    import contracts.constants.environment as const
     monkeypatch.setattr(nl2agent_service, 'LOCAL_MCP_SERVER', 'http://localhost:9999')
     monkeypatch.setattr(const, 'LOCAL_MCP_SERVER', 'http://localhost:9999')
     monkeypatch.setattr(nl2agent_service, 'build_authorized_context_input', lambda run_info: None)

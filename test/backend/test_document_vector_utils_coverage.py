@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 # Mock consts module before patching management.db.client to avoid ImportError
-# management.db.client imports from consts.const, so we need to mock it first
+# management.db.client imports from contracts.constants.environment, so we need to mock it first
 consts_mock = MagicMock()
 consts_const_mock = MagicMock()
 # Set required constants that management.db.client might use
@@ -39,7 +39,7 @@ consts_error_code_mock.ErrorCode = MagicMock()
 consts_exceptions_mock = MagicMock()
 consts_exceptions_mock.AppException = Exception
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_const_mock
+sys.modules['contracts.constants.environment'] = consts_const_mock
 install_business_constant_stubs(consts_const_mock)
 install_shared_contract_stub(consts_error_code_mock, 'error_code')
 install_shared_contract_stub(consts_exceptions_mock, 'exceptions')

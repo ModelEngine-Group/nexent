@@ -5,7 +5,7 @@ import logging
 import pytest
 
 from management.services.model import resolver as resolver
-from contracts.constants.model import ModelConnectStatusEnum
+from contracts.model import ModelConnectStatusEnum
 
 
 class _FakeTenantConfigManager:

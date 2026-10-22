@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Hashable
 
-from consts.const import AGENT_AUTOMATION_ENABLED, AGENT_AUTOMATION_LEASE_SECONDS, AGENT_AUTOMATION_MAX_CONCURRENT_RUNS, AGENT_AUTOMATION_POLL_INTERVAL_SECONDS, AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS
+from contracts.constants.environment import AGENT_AUTOMATION_ENABLED, AGENT_AUTOMATION_LEASE_SECONDS, AGENT_AUTOMATION_MAX_CONCURRENT_RUNS, AGENT_AUTOMATION_POLL_INTERVAL_SECONDS, AGENT_AUTOMATION_SHUTDOWN_GRACE_SECONDS
 from management.db.automation import repository as agent_automation_db
 from nexent.scheduler import ClaimedJob, ExecutionLease, LeaseScheduler, SchedulerConfig
 from nexent.core.concurrency import run_blocking

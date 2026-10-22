@@ -52,7 +52,7 @@ def _inspect_deployment(container):
 def configured_product_elasticsearch():
     """Use the deployed ES from pytest's host without copying a key to disk."""
     from elasticsearch import Elasticsearch
-    import consts.const as product_constants
+    import contracts.constants.environment as product_constants
     from management.services.knowledge_base import common
 
     host = os.environ.get('NEXENT_TEST_ELASTICSEARCH_URL', '').strip()

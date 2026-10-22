@@ -608,7 +608,7 @@ class TestPlatformQuota:
         assert raised.value.error == "PlatformCapacityBelowAllocation"
 
     def test_allocation_state_excludes_virtual_tenants(self):
-        from contracts.constants.identity import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+        from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
         with patch(
             "management.db.configuration.tenant.get_all_tenant_ids",

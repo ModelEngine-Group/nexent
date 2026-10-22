@@ -19,7 +19,7 @@ consts_mock.const = MagicMock()
 consts_mock.const.CAN_EDIT_ALL_USER_ROLES = frozenset({"admin"})
 consts_mock.const.PERMISSION_EDIT = "edit"
 sys.modules["consts"] = consts_mock
-sys.modules["consts.const"] = consts_mock.const
+sys.modules["contracts.constants.environment"] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 agent_repository_consts = MagicMock()

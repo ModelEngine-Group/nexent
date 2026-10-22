@@ -2,7 +2,7 @@
 
 
 from typing import Optional
-from consts.const import SUPABASE_JWT_SECRET
+from contracts.constants.environment import SUPABASE_JWT_SECRET
 from contracts.errors.exceptions import TokenExpiredError
 import jwt
 import time

@@ -12,7 +12,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from contracts.constants.identity import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
 
 PROMPTS_HIDDEN_FLAG = "prompts_hidden"
 from contracts.errors.exceptions import ValidationError

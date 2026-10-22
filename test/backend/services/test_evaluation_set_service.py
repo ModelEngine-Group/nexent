@@ -137,14 +137,14 @@ _consts_error_code_module.ErrorCode = _ErrorCode
 install_shared_contract_stub(_consts_error_code_module, 'error_code')
 _consts_pkg.error_code = _consts_error_code_module
 
-# ── contracts.constants.evaluation stub ──
-_consts_limits_module = types.ModuleType("contracts.constants.evaluation")
+# ── contracts.constants.constants stub ──
+_consts_limits_module = types.ModuleType("contracts.constants.constants")
 _consts_limits_module.MAX_CASES_PER_SET = 10000
 install_shared_contract_stub(_consts_limits_module, 'evaluation_limits')
 _consts_pkg.evaluation_limits = _consts_limits_module
 
-# ── contracts.constants.evaluation stub ──
-_consts_status_module = types.ModuleType("contracts.constants.evaluation")
+# ── contracts.constants.constants stub ──
+_consts_status_module = types.ModuleType("contracts.constants.constants")
 
 
 class _EvalRunStatus:
@@ -174,13 +174,13 @@ _consts_exceptions_module.AppException = _AppException
 install_shared_contract_stub(_consts_exceptions_module, 'exceptions')
 _consts_pkg.exceptions = _consts_exceptions_module
 
-# ── consts.const stub (env switches + AIDP credentials) ──
-_consts_const_module = types.ModuleType("consts.const")
+# ── contracts.constants.environment stub (env switches + AIDP credentials) ──
+_consts_const_module = types.ModuleType("contracts.constants.environment")
 _consts_const_module.ENABLE_AIDP_KNOWLEDGE = False
 _consts_const_module.AIDP_SERVER_URL = "http://aidp.example"
 _consts_const_module.AIDP_API_KEY = "test-key"
 _consts_const_module.AIDP_TENANT_ID = "aidp"
-sys.modules["consts.const"] = _consts_const_module
+sys.modules["contracts.constants.environment"] = _consts_const_module
 install_business_constant_stubs(_consts_const_module)
 _consts_pkg.const = _consts_const_module
 

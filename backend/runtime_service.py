@@ -5,7 +5,7 @@ import warnings
 
 import uvicorn
 
-from consts.const import APP_VERSION
+from contracts.constants.environment import APP_VERSION
 
 
 warnings.filterwarnings("ignore", category=UserWarning)

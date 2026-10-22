@@ -39,7 +39,7 @@ def _valid_payload() -> dict:
 def test_post_tasks_chain_enqueue_contract(monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
-    import consts.const as const
+    import contracts.constants.environment as const
 
     # This route contract stubs enqueue; it must never require a live broker.
     # Patch canonical configuration before importing the Celery task package.

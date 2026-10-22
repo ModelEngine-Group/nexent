@@ -81,7 +81,7 @@ def _cache_key(server_url: str, aidp_tenant_id: str) -> tuple[str, str]:
     """Build the in-process cache key for one AIDP deployment.
 
     ``api_key`` is intentionally excluded: credentials are process-constant
-    (read once from ``consts.const`` at startup and never rewritten at
+    (read once from ``contracts.constants.environment`` at startup and never rewritten at
     runtime), so the same ``(server_url, aidp_tenant_id)`` always maps to the
     same remote catalog. Including the key would only force a hashing step
     over sensitive data for zero distinguishing power.

@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from runtime.api.evaluation import execution as runtime_app
 from contracts.evaluation import EvaluationRunRequest, RuntimeEvaluationTrialRunRequest as TrialRunRequest
 from runtime.api.evaluation.execution import dispatch_evaluation_run_api, trial_run_evaluation_api
-from contracts.constants.evaluation import EvalRunStatus
+from contracts.evaluation import EvalRunStatus
 from contracts.errors.exceptions import AppException
 
 

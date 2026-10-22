@@ -16,11 +16,11 @@ sys.modules["database"] = database_pkg
 sys.modules["management.db.memory.provider_config"] = config_db_mod
 
 consts_pkg = types.ModuleType("consts")
-consts_mod = types.ModuleType("consts.const")
+consts_mod = types.ModuleType("contracts.constants.environment")
 consts_mod.MEMORY_PROVIDER_PLUGINS_DIR = "/tmp/test-memory-provider-plugins"
 consts_pkg.const = consts_mod
 sys.modules["consts"] = consts_pkg
-sys.modules["consts.const"] = consts_mod
+sys.modules["contracts.constants.environment"] = consts_mod
 install_business_constant_stubs(consts_mod)
 
 nexent_pkg = types.ModuleType("nexent")
@@ -241,7 +241,7 @@ def test_build_provider_missing_plugin_name(service):
 
 def test_ac_009_runtime_factory_loads_builtin_and_external_plugins(monkeypatch):
     monkeypatch.setattr(
-        sys.modules["consts.const"],
+        sys.modules["contracts.constants.environment"],
         "MEMORY_PROVIDER_PLUGINS_DIR",
         "/tmp/test-memory-provider-plugins",
         raising=False,

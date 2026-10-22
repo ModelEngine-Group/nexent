@@ -10,7 +10,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, List, Literal, Optional, Protocol
 
-from contracts.constants.tag import DEFAULT_RESOURCE_LIBRARY_CODE
+from contracts.constants.constants import DEFAULT_RESOURCE_LIBRARY_CODE
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 

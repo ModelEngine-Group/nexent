@@ -20,8 +20,8 @@ from agents.create_agent_info import (
 from agents.preprocess_manager import (
     preprocess_manager,
 )
-from contracts.constants.localization import LANGUAGE
-from contracts.constants.conversation import MESSAGE_ROLE
+from contracts.constants.constants import LANGUAGE
+from contracts.constants.constants import MESSAGE_ROLE
 from contracts.errors.exceptions import MemoryPreparationException
 from contracts.agent import AgentRequest
 from management.services.agent.context import (

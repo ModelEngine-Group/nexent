@@ -16,8 +16,8 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID, PERMISSION_PRIVATE
-from consts.const import IS_SPEED_MODE
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_PRIVATE
+from contracts.constants.environment import IS_SPEED_MODE
 from contracts.errors.exceptions import AppException, DuplicateError
 from management.db.agent.repository import query_knowledge_binding_agents
 from management.db.file.attachment import get_file_stream

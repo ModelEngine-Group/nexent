@@ -161,10 +161,10 @@ consts_exceptions_mod.DuplicateError = DuplicateError
 consts_exceptions_mod.ValidationError = ValidationError
 consts_exceptions_mod.TenantResourceLimitError = TenantResourceLimitError
 
-# Use real consts.const/scheduler (env vars are configured in test/conftest.py)
+# Use real contracts.constants.environment/scheduler (env vars are configured in test/conftest.py)
 consts_pkg = importlib.import_module("consts")
-consts_const_mod = importlib.import_module("consts.const")
-consts_scheduler_mod = importlib.import_module("contracts.constants.knowledge")
+consts_const_mod = importlib.import_module("contracts.constants.environment")
+consts_scheduler_mod = importlib.import_module("contracts.constants.constants")
 
 # The shared test bootstrap can load a reduced consts stub before this module.
 # Supply the knowledge-base service constants required by the refactored module.
@@ -182,13 +182,13 @@ if not hasattr(consts_const_mod, "VectorDatabaseType"):
     consts_const_mod.VectorDatabaseType = VectorDatabaseType
 
 sys.modules["consts"] = consts_pkg
-sys.modules["consts.const"] = consts_const_mod
+sys.modules["contracts.constants.environment"] = consts_const_mod
 install_business_constant_stubs(consts_const_mod)
 install_shared_contract_stub(consts_exceptions_mod, 'exceptions')
 install_business_contract_stubs(MagicMock())
 install_shared_contract_stub(consts_scheduler_mod, 'scheduler')
 install_shared_contract_stub(MagicMock(), 'error_code')
-identity_constants = importlib.import_module('contracts.constants.identity')
+identity_constants = importlib.import_module('contracts.constants.constants')
 
 
 class _VectorDatabaseCore:
@@ -5292,8 +5292,8 @@ class TestRethrowOrPlain(unittest.TestCase):
     def test_get_vector_db_core_datamate_type(self, mock_datamate_core, mock_tenant_config_manager):
         """get_vector_db_core returns DataMateCore for DATAMATE type."""
         from management.services.knowledge_base.service import get_vector_db_core
-        from contracts.constants.knowledge import VectorDatabaseType
-        from contracts.constants.configuration import DATAMATE_URL
+        from contracts.knowledge import VectorDatabaseType
+        from contracts.constants.constants import DATAMATE_URL
 
         # Setup mocks
         mock_tenant_config_manager.get_app_config.return_value = DATAMATE_URL
@@ -5312,8 +5312,8 @@ class TestRethrowOrPlain(unittest.TestCase):
     def test_get_vector_db_core_datamate_success(self, mock_datamate_core, mock_tenant_config_manager):
         """get_vector_db_core returns DataMateCore when DATAMATE type with valid tenant_id and configured URL."""
         from management.services.knowledge_base.service import get_vector_db_core
-        from contracts.constants.knowledge import VectorDatabaseType
-        from contracts.constants.configuration import DATAMATE_URL
+        from contracts.knowledge import VectorDatabaseType
+        from contracts.constants.constants import DATAMATE_URL
 
         # Setup mocks
         mock_tenant_config_manager.get_app_config.return_value = "https://datamate.example.com"
@@ -5335,7 +5335,7 @@ class TestRethrowOrPlain(unittest.TestCase):
     def test_get_vector_db_core_datamate_no_url_configured(self, mock_tenant_config_manager):
         """get_vector_db_core raises ValueError when DATAMATE type with tenant_id but no URL configured."""
         from management.services.knowledge_base.service import get_vector_db_core
-        from contracts.constants.knowledge import VectorDatabaseType
+        from contracts.knowledge import VectorDatabaseType
 
         # Setup mock to return None (no URL configured)
         mock_tenant_config_manager.get_app_config.return_value = None
@@ -5352,7 +5352,7 @@ class TestRethrowOrPlain(unittest.TestCase):
     def test_get_vector_db_core_datamate_no_tenant_id(self):
         """get_vector_db_core raises ValueError when DATAMATE type without tenant_id."""
         from management.services.knowledge_base.service import get_vector_db_core
-        from contracts.constants.knowledge import VectorDatabaseType
+        from contracts.knowledge import VectorDatabaseType
 
         # Execute and Assert
         with self.assertRaises(ValueError) as exc:

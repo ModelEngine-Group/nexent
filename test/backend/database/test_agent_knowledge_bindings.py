@@ -9,7 +9,7 @@ from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, 
 from sqlalchemy.orm import Session
 
 from management.db.agent import repository as agent_db
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 
 
 @pytest.fixture

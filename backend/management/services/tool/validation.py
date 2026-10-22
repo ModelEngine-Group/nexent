@@ -7,7 +7,7 @@ from contextlib import AsyncExitStack
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
-from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, TOKEN
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, TOKEN
 from contracts.errors.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 from contracts.tool import ToolSourceEnum, ToolValidateRequest
 from management.db.client import minio_client
@@ -336,7 +336,7 @@ def _validate_local_tool(
                 if not filtered_params.get("kds_list") and legacy_index_names:
                     filtered_params["kds_list"] = legacy_index_names
             if tool_name == "aidp_search":
-                # AIDP credentials are sourced from ``consts.const`` (i.e. the
+                # AIDP credentials are sourced from ``contracts.constants.environment`` (i.e. the
                 # process environment). Inject them here exactly as
                 # ``create_agent_info`` does at runtime, so validation builds
                 # the same tool instance shape. Never trust client-submitted

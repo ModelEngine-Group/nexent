@@ -6,7 +6,7 @@ from http import HTTPStatus
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
-from consts.const import APP_VERSION, DEPLOYMENT_VERSION, ENABLE_AIDP_KNOWLEDGE, ENABLE_AGENT_WORKBENCH, HIDE_HOME_PAGE
+from contracts.constants.environment import APP_VERSION, DEPLOYMENT_VERSION, ENABLE_AIDP_KNOWLEDGE, ENABLE_AGENT_WORKBENCH, HIDE_HOME_PAGE
 
 logger = logging.getLogger("tenant_config_app")
 router = APIRouter(prefix="/tenant_config")

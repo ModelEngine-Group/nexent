@@ -2,7 +2,7 @@
 
 """Tenant-scoped persistence operations for unified tag management."""
 
-from contracts.constants.tag import ACTIVE_DELETE_FLAG, ACTIVE_STATUS, DELETED_DELETE_FLAG, NO_VALUE_TAG_NORMALIZED_VALUE, RESOURCE_ASSIGNMENT_LIMIT, SYSTEM_BUCKET_KEYS
+from contracts.constants.constants import ACTIVE_DELETE_FLAG, ACTIVE_STATUS, DELETED_DELETE_FLAG, NO_VALUE_TAG_NORMALIZED_VALUE, RESOURCE_ASSIGNMENT_LIMIT, SYSTEM_BUCKET_KEYS
 import base64
 import json
 from collections import defaultdict

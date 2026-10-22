@@ -9,8 +9,8 @@ Assemble Gateway routers and manage the process-local thread lifecycle.
 import logging
 from contextlib import asynccontextmanager
 
-from consts.const import NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS
-from contracts.constants.runtime import NORTHBOUND_SERVICE_NAME
+from contracts.constants.environment import NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS
+from contracts.constants.constants import NORTHBOUND_SERVICE_NAME
 from gateway.api.northbound import a2a_router
 from gateway.api.northbound import router as northbound_router
 from infrastructure.concurrency import northbound_thread_manager

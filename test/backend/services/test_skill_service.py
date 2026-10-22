@@ -171,7 +171,7 @@ sys.modules['nexent.core.utils.observer'] = nexent_core_utils_observer_mock
 # Set up consts mocks
 consts_mock = types.ModuleType('consts')
 consts_mock.__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend/consts"))]
-consts_const_mock = types.ModuleType('consts.const')
+consts_const_mock = types.ModuleType('contracts.constants.environment')
 TEST_LOCAL_SKILLS_DIR = os.path.abspath(os.path.join(os.getcwd(), ".pytest-tmp", "skills"))
 consts_const_mock.CONTAINER_SKILLS_PATH = os.path.abspath(os.sep)
 consts_const_mock.OFFICIAL_SKILLS_ZIP_PATH = "/tmp/official-skills.zip"
@@ -200,7 +200,7 @@ consts_exceptions_mock.AppException = AppException
 consts_exceptions_mock.SkillDuplicateError = type('SkillDuplicateError', (Exception,), {})
 
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_const_mock
+sys.modules['contracts.constants.environment'] = consts_const_mock
 install_business_constant_stubs(consts_const_mock)
 install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 

@@ -6,7 +6,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from contracts.constants.localization import LANGUAGE
+from contracts.constants.constants import LANGUAGE
 from nexent.scheduler import ScheduleMode, ScheduleRuleType
 from pydantic import BaseModel, Field, field_validator, model_validator
 

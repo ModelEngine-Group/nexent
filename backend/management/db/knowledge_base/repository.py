@@ -3,7 +3,7 @@
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.errors.exceptions import DuplicateError
-from contracts.constants.knowledge import VALID_SUMMARY_FREQUENCIES
+from contracts.constants.constants import VALID_SUMMARY_FREQUENCIES
 from management.utils.orm import as_dict
 import logging
 import uuid
@@ -12,11 +12,11 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import func, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from consts.const import MAX_KNOWLEDGE_BASES_PER_TENANT, MAX_KNOWLEDGE_BASES_PER_USER, MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER
+from contracts.constants.environment import MAX_KNOWLEDGE_BASES_PER_TENANT, MAX_KNOWLEDGE_BASES_PER_USER, MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from contracts.errors.exceptions import DuplicateError
-from contracts.constants.knowledge import VALID_SUMMARY_FREQUENCIES
+from contracts.constants.constants import VALID_SUMMARY_FREQUENCIES
 from management.utils.orm import as_dict
 from management.db.client import get_db_session
 from management.db.models import KnowledgeRecord

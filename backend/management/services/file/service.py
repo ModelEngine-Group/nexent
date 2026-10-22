@@ -16,10 +16,10 @@ from nexent.core.concurrency import run_blocking
 from nexent.core.models import OpenAILongContextModel
 from nexent.multi_modal.utils import parse_s3_url
 
-from contracts.constants.identity import ASSET_OWNER_ATTACHMENTS_PREFIX, ASSET_OWNER_TENANT_ID
-from consts.const import DATA_PROCESS_SERVICE, MAX_KNOWLEDGE_FILE_SIZE_BYTES, UPLOAD_FOLDER
-from contracts.constants.file import FILE_PREVIEW_SIZE_LIMIT, MAX_CONCURRENT_UPLOADS, OFFICE_MIME_TYPES
-from contracts.constants.model import MODEL_CONFIG_MAPPING
+from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX, ASSET_OWNER_TENANT_ID
+from contracts.constants.environment import DATA_PROCESS_SERVICE, MAX_KNOWLEDGE_FILE_SIZE_BYTES, UPLOAD_FOLDER
+from contracts.constants.constants import FILE_PREVIEW_SIZE_LIMIT, MAX_CONCURRENT_UPLOADS, OFFICE_MIME_TYPES
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, OfficeConversionException, UnsupportedFileTypeException
 from management.db.file.attachment import copy_file, delete_file, file_exists, generate_object_name, get_content_type, get_file_range, get_file_size_from_minio, get_file_stream, get_file_stream_raw, get_file_url, list_files, upload_fileobj

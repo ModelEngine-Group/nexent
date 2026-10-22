@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from contracts.constants.conversation import MESSAGE_ROLE
+from contracts.constants.constants import MESSAGE_ROLE
 from contracts.agent import AgentRunContext
 from nexent.core.agents.context import ContextItemInput
 from nexent.core.agents.context_input import ContextInput

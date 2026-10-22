@@ -15,7 +15,7 @@ def _configure_celery_environment(monkeypatch):
     backend_url = "redis://localhost:6379/1"
     monkeypatch.setenv("REDIS_URL", broker_url)
     monkeypatch.setenv("REDIS_BACKEND_URL", backend_url)
-    import consts.const as constants
+    import contracts.constants.environment as constants
 
     monkeypatch.setattr(constants, "REDIS_URL", broker_url)
     monkeypatch.setattr(constants, "REDIS_BACKEND_URL", backend_url)

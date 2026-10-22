@@ -13,8 +13,8 @@ from fastapi.responses import StreamingResponse
 from nexent.core.concurrency import ManagedTaskSpec
 
 
-from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS, NORTHBOUND_RATE_LIMIT_ENABLED, NORTHBOUND_RATE_LIMIT_PER_MINUTE
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS, NORTHBOUND_RATE_LIMIT_ENABLED, NORTHBOUND_RATE_LIMIT_PER_MINUTE
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import AppException, RuntimeMetadataValidationError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ConversationNotFoundError
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
 from contracts.agent import AgentRequest

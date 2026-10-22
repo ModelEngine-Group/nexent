@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from contracts.constants.identity import PERMISSION_READ
+from contracts.constants.constants import PERMISSION_READ
 from management.services.knowledge_base.listing import (
     _merge_ordered_info,
     _sort_key,

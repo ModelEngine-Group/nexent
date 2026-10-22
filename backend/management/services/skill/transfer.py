@@ -8,7 +8,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import aiofiles
-from consts.const import OFFICIAL_SKILLS_ZIP_PATH
+from contracts.constants.environment import OFFICIAL_SKILLS_ZIP_PATH
 from contracts.errors.exceptions import AppException
 from management.db.skill import repository as skill_db
 from management.services.skill.files import (

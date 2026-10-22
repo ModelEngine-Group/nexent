@@ -183,7 +183,7 @@ consts_model_module.ProcessParams = type(
 consts_model_module.HybridSearchRequest = HybridSearchRequest
 install_business_contract_stubs(consts_model_module)
 
-consts_const_module = types.ModuleType("consts.const")
+consts_const_module = types.ModuleType("contracts.constants.environment")
 consts_const_module.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
 
 
@@ -192,13 +192,13 @@ class VectorDatabaseType:
 
 
 consts_const_module.VectorDatabaseType = VectorDatabaseType
-sys.modules["consts.const"] = consts_const_module
+sys.modules["contracts.constants.environment"] = consts_const_module
 install_business_constant_stubs(consts_const_module)
 
-utils_auth_module = types.ModuleType("gateway.authentication.normal")
+utils_auth_module = types.ModuleType("gateway.authentication.auth")
 utils_auth_module.get_user_language = lambda request: "en"
 utils_auth_module.generate_session_jwt = MagicMock(return_value="jwt-token")
-sys.modules["gateway.authentication.normal"] = utils_auth_module
+sys.modules["gateway.authentication.auth"] = utils_auth_module
 
 utils_fm_module = types.ModuleType("management.services.knowledge_base.ingestion")
 utils_fm_module.trigger_data_process = AsyncMock(return_value={"status": "ok"})
@@ -206,7 +206,7 @@ sys.modules["management.services.knowledge_base.ingestion"] = utils_fm_module
 
 northbound_app_module = types.ModuleType("gateway.api.northbound")
 northbound_app_module._get_northbound_context = AsyncMock()
-sys.modules["gateway.authentication.northbound"] = northbound_app_module
+sys.modules["gateway.authentication.northbound_auth"] = northbound_app_module
 northbound_app_module.get_northbound_context = northbound_app_module._get_northbound_context
 
 file_management_app_module = types.ModuleType("management.utils.file_http")
@@ -223,7 +223,7 @@ sys.modules["management.services.agent.a2a.service"] = MagicMock()
 sys.modules["management.db.a2a.repository"] = MagicMock()
 
 from gateway.api.northbound import router
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import AppException, LimitExceededError, UnauthorizedError
 
 ASSET_CTX = NorthboundContext(

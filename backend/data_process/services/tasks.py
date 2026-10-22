@@ -17,8 +17,8 @@ import redis
 from celery import states
 from PIL import Image
 
-from consts.const import CLIP_MODEL_PATH, IMAGE_FILTER, REDIS_BACKEND_URL, REDIS_URL
-from contracts.constants.file import MAX_CONCURRENT_CONVERSIONS
+from contracts.constants.environment import CLIP_MODEL_PATH, IMAGE_FILTER, REDIS_BACKEND_URL, REDIS_URL
+from contracts.constants.constants import MAX_CONCURRENT_CONVERSIONS
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, OfficeConversionException
 from contracts.knowledge import BatchTaskRequest

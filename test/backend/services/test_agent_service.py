@@ -431,7 +431,7 @@ utils_module.__path__ = [
     os.path.join(os.path.dirname(__file__), "../../../backend/utils")
 ]
 sys.modules["utils"] = utils_module
-sys.modules["gateway.authentication.normal"] = MagicMock()
+sys.modules["gateway.authentication.auth"] = MagicMock()
 sys.modules["utils.thread_utils"] = MagicMock()
 sys.modules["infrastructure.observability.knowledge"] = MagicMock()
 
@@ -3117,7 +3117,7 @@ async def test_list_agent_page_keeps_duplicate_warning_when_original_is_off_page
 
 @pytest.mark.asyncio
 async def test_list_agent_page_filters_visibility_before_count_and_enrichment(monkeypatch):
-    from contracts.constants.identity import PERMISSION_PRIVATE
+    from contracts.constants.constants import PERMISSION_PRIVATE
 
     candidates = [
         {"agent_id": 1, "name": "Mine", "created_by": "alice", "group_ids": "2"},
@@ -7315,7 +7315,7 @@ async def test_main_model_fallback_to_quick_config(
     )
 
     # Verify: Quick config model was requested
-    from contracts.constants.model import MODEL_CONFIG_MAPPING
+    from contracts.constants.constants import MODEL_CONFIG_MAPPING
 
     mock_tenant_config_manager.get_model_config.assert_called_with(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=mock_tenant_id
@@ -7384,7 +7384,7 @@ async def test_business_logic_model_fallback_to_quick_config(
     )
 
     # Verify: Quick config model was requested for business logic model
-    from contracts.constants.model import MODEL_CONFIG_MAPPING
+    from contracts.constants.constants import MODEL_CONFIG_MAPPING
 
     mock_tenant_config_manager.get_model_config.assert_called_with(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=mock_tenant_id
@@ -7519,7 +7519,7 @@ async def test_no_quick_config_model_available(
     )
 
     # Verify: Quick config was attempted
-    from contracts.constants.model import MODEL_CONFIG_MAPPING
+    from contracts.constants.constants import MODEL_CONFIG_MAPPING
 
     mock_tenant_config_manager.get_model_config.assert_called_with(
         key=MODEL_CONFIG_MAPPING["llm"], tenant_id=mock_tenant_id
@@ -9564,7 +9564,7 @@ async def test_clear_agent_new_mark_impl_with_special_characters():
 @pytest.mark.asyncio
 async def test_update_agent_info_impl_create_agent_with_ingroup_permission(mock_get_user_group_ids, mock_convert_list_to_string, mock_create_agent, mock_query_all_tools, mock_query_tool_instances_by_id, mock_create_or_update_tool):
     """Test creating agent with ingroup_permission set."""
-    from contracts.constants.identity import PERMISSION_READ, PERMISSION_EDIT, PERMISSION_PRIVATE
+    from contracts.constants.constants import PERMISSION_READ, PERMISSION_EDIT, PERMISSION_PRIVATE
     mock_get_user_group_ids.return_value = '1,2,3'
     mock_convert_list_to_string.return_value = '1,2'
     mock_create_agent.return_value = {'agent_id': 123}
@@ -9652,7 +9652,7 @@ async def test_list_all_agent_info_impl_creator_with_private_permission_no_group
     mock_get_model,
 ):
     """Test that creators cannot see their own agents if no group overlap, even with PRIVATE permission."""
-    from contracts.constants.identity import PERMISSION_PRIVATE
+    from contracts.constants.constants import PERMISSION_PRIVATE
 
     mock_agents = [
         {
@@ -9714,7 +9714,7 @@ async def test_list_all_agent_info_impl_creator_with_private_permission_with_gro
     mock_get_model,
 ):
     """Test that creators can see their own agents with PRIVATE permission if there is group overlap."""
-    from contracts.constants.identity import PERMISSION_PRIVATE
+    from contracts.constants.constants import PERMISSION_PRIVATE
 
     mock_agents = [
         {
@@ -9775,7 +9775,7 @@ async def test_list_all_agent_info_impl_non_creator_with_private_permission_hidd
     mock_get_model,
 ):
     """Test that non-creators cannot see agents with PRIVATE permission even with group overlap."""
-    from contracts.constants.identity import PERMISSION_PRIVATE
+    from contracts.constants.constants import PERMISSION_PRIVATE
 
     mock_agents = [
         {
@@ -9835,7 +9835,7 @@ async def test_list_all_agent_info_impl_permission_assignment_creator_gets_edit(
     mock_get_model,
 ):
     """Test that creators get PERMISSION_EDIT regardless of ingroup_permission."""
-    from contracts.constants.identity import PERMISSION_READ, PERMISSION_EDIT
+    from contracts.constants.constants import PERMISSION_READ, PERMISSION_EDIT
 
     mock_agents = [
         {
@@ -9895,7 +9895,7 @@ async def test_list_all_agent_info_impl_permission_assignment_non_creator_uses_i
     mock_get_model,
 ):
     """Test that non-creators use ingroup_permission when set."""
-    from contracts.constants.identity import PERMISSION_READ, PERMISSION_EDIT
+    from contracts.constants.constants import PERMISSION_READ, PERMISSION_EDIT
 
     mock_agents = [
         {
@@ -9982,7 +9982,7 @@ async def test_list_all_agent_info_impl_admin_gets_edit_permission(
     mock_get_model,
 ):
     """Test that admin users (can_edit_all) get PERMISSION_EDIT regardless of ingroup_permission."""
-    from contracts.constants.identity import PERMISSION_READ, PERMISSION_EDIT
+    from contracts.constants.constants import PERMISSION_READ, PERMISSION_EDIT
 
     mock_agents = [
         {
@@ -10042,7 +10042,7 @@ async def test_list_all_agent_info_impl_asset_owner_agent_read_only_for_admin(
     mock_get_model,
 ):
     """ASSET_OWNER-scoped agents are READ_ONLY for non-ASSET_OWNER roles even when admin."""
-    from contracts.constants.identity import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+    from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
 
     mock_agents = [
         {
@@ -10123,7 +10123,7 @@ async def test_get_agent_info_impl_asset_owner_agent_read_only_for_admin(
     mock_skill_service,
 ):
     """ASSET_OWNER-scoped agent detail is READ_ONLY for ADMIN viewers."""
-    from contracts.constants.identity import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+    from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
 
     agent_info = {
         "agent_id": 99,
@@ -10172,7 +10172,7 @@ async def test_get_agent_info_impl_asset_owner_agent_read_only_for_dev(
     mock_skill_service,
 ):
     """ASSET_OWNER-scoped agent detail is READ_ONLY for DEV even with ingroup EDIT."""
-    from contracts.constants.identity import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+    from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
 
     agent_info = {
         "agent_id": 99,
@@ -10221,7 +10221,7 @@ async def test_get_agent_info_impl_asset_owner_role_gets_edit(
     mock_skill_service,
 ):
     """ASSET_OWNER role creator retains EDIT on ASSET_OWNER-scoped agent detail."""
-    from contracts.constants.identity import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+    from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
 
     agent_info = {
         "agent_id": 99,
@@ -11481,7 +11481,7 @@ async def test_import_agent_by_agent_id_publish_version_error(
 def test_save_messages_user_with_messages_error():
     """Test save_messages raises error when messages provided for user."""
     from management.services.agent.service import save_messages
-    from contracts.constants.conversation import MESSAGE_ROLE
+    from contracts.constants.constants import MESSAGE_ROLE
 
     agent_request = MagicMock()
 
@@ -11494,7 +11494,7 @@ def test_save_messages_user_with_messages_error():
 def test_save_messages_assistant_without_messages_error():
     """Test save_messages raises error when messages missing for assistant."""
     from management.services.agent.service import save_messages
-    from contracts.constants.conversation import MESSAGE_ROLE
+    from contracts.constants.constants import MESSAGE_ROLE
 
     agent_request = MagicMock()
 
@@ -16442,7 +16442,7 @@ async def test_get_agent_info_impl_all_models_deleted(
 class TestBuildSandboxPolicy:
     """Tests for build_sandbox_policy function.
 
-    Note: The function imports consts.const inside the function body,
+    Note: The function imports contracts.constants.environment inside the function body,
     so we test the function signature and basic existence here.
     Integration tests would require mocking at the consts module level.
     """
@@ -16465,7 +16465,7 @@ class TestBuildSandboxPolicy:
         assert "agent_type" in params
 
     def test_build_sandbox_policy_includes_configurable_host_tool_timeout(self):
-        from consts import const as const_module
+        from contracts.constants import environment as const_module
         from management.services.agent.service import build_sandbox_policy
 
         with (

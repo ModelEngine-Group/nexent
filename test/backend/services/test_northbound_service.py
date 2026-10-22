@@ -88,8 +88,8 @@ consts_error_code_mod.RuntimeMetadataValidationCode = RuntimeMetadataValidationC
 install_shared_contract_stub(consts_error_code_mod, 'error_code')
 install_shared_contract_stub(consts_error_code_mod, 'error_code')
 
-# Mock consts.const
-consts_const_mod = types.ModuleType("consts.const")
+# Mock contracts.constants.environment
+consts_const_mod = types.ModuleType("contracts.constants.environment")
 consts_const_mod.AIDP_API_KEY = "test-aidp-api-key"
 consts_const_mod.AIDP_SERVER_URL = "https://aidp.example"
 consts_const_mod.ASSET_OWNER_TENANT_ID = "asset-owner-tenant"
@@ -102,7 +102,7 @@ consts_const_mod.RUNTIME_COMPLETED_TTL_SECONDS = 300
 consts_const_mod.NORTHBOUND_IDEMPOTENCY_TTL_SECONDS = 600
 consts_const_mod.NORTHBOUND_RATE_LIMIT_ENABLED = True
 consts_const_mod.NORTHBOUND_RATE_LIMIT_PER_MINUTE = 120
-sys.modules["consts.const"] = consts_const_mod
+sys.modules["contracts.constants.environment"] = consts_const_mod
 install_business_constant_stubs(consts_const_mod)
 
 # Mock consts package

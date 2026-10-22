@@ -21,10 +21,10 @@ import tempfile
 import zipfile
 from typing import Dict, List, Optional
 
-from consts.const import OFFICIAL_AGENTS_PATH
+from contracts.constants.environment import OFFICIAL_AGENTS_PATH
 from contracts.knowledge import KnowledgeBaseResolution
 from contracts.agent import KnowledgeBaseSeedDoc, OfficialAgentAgentInfo, OfficialAgentBundle, OfficialAgentInstallItem, OfficialAgentInstallStep, OfficialAgentListItem, OfficialAgentMcpPreview
-from contracts.constants.model import ModelConnectStatusEnum
+from contracts.model import ModelConnectStatusEnum
 from contracts.skill import SkillResolution, SkillZipEntry
 from management.services.agent.naming import (
     check_agent_value_duplicate,

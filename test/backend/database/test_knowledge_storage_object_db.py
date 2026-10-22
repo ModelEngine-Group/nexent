@@ -23,7 +23,7 @@ from test.common.database_stubs import install_serialization_stub
 install_serialization_stub(sys.modules["management.db.client"])
 
 from management.db.knowledge_base import storage_object as storage_db
-from contracts.constants import knowledge as storage_db_knowledge_base_storage_object
+from contracts.constants import constants as storage_db_knowledge_base_storage_object
 
 if previous_client_module is None:
     sys.modules.pop("management.db.client", None)

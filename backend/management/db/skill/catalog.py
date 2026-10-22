@@ -5,7 +5,7 @@ from typing import Any, Collection, Dict, List, Optional
 
 from sqlalchemy import func, or_, update
 
-from contracts.constants.agent import STATUS_NOT_SHARED
+from contracts.constants.constants import STATUS_NOT_SHARED
 from management.utils.orm import as_dict, filter_property
 from management.db.client import get_db_session
 from management.db.models import SkillRepository

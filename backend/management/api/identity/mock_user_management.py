@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import JSONResponse
 from http import HTTPStatus
 
-from contracts.constants.identity import MOCK_USER, MOCK_SESSION
+from contracts.constants.constants import MOCK_USER, MOCK_SESSION
 from contracts.errors.exceptions import UnauthorizedError
 from contracts.identity import UserSignInRequest, UserSignUpRequest
 from management.services.permission.identity.authentication import get_user_info

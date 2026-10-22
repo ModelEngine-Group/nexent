@@ -12,11 +12,11 @@ from contracts.errors.exceptions import RuntimeMetadataValidationError
 from contracts.errors.codes import RuntimeMetadataValidationCode
 
 
-from contracts.constants.runtime import MAX_RUNTIME_METADATA_BYTES
-from contracts.constants.runtime import MAX_RUNTIME_METADATA_DEPTH
-from contracts.constants.runtime import MAX_RUNTIME_METADATA_KEYS
-from contracts.constants.runtime import MAX_RUNTIME_METADATA_ARRAY_ITEMS
-from contracts.constants.runtime import MAX_RUNTIME_METADATA_KEY_LENGTH
+from contracts.constants.constants import MAX_RUNTIME_METADATA_BYTES
+from contracts.constants.constants import MAX_RUNTIME_METADATA_DEPTH
+from contracts.constants.constants import MAX_RUNTIME_METADATA_KEYS
+from contracts.constants.constants import MAX_RUNTIME_METADATA_ARRAY_ITEMS
+from contracts.constants.constants import MAX_RUNTIME_METADATA_KEY_LENGTH
 
 
 

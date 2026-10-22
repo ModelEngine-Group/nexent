@@ -42,7 +42,7 @@ _STUB_SYMBOLS = {
         "update_evaluation_set_case_impl",
     ),
     "management.db.evaluation.runs": ("update_annotation_schema_ids",),
-    "gateway.authentication.normal": ("get_current_user_id", "get_current_user_info", "generate_internal_runtime_jwt"),
+    "gateway.authentication.auth": ("get_current_user_id", "get_current_user_info", "generate_internal_runtime_jwt"),
     "management.services.evaluation.spreadsheet": (
         "build_evaluation_set_excel_template_bytes", "parse_evaluation_cases_from_excel",
     ),
@@ -75,7 +75,7 @@ for _module_name, _symbols in _STUB_SYMBOLS.items():
 _PATCH_TARGETS = [
     "management.services.evaluation.runs.delete_agent_evaluation_run_impl",
     "management.services.evaluation.sets.delete_evaluation_set_impl",
-    "gateway.authentication.normal.get_current_user_id",
+    "gateway.authentication.auth.get_current_user_id",
     "management.services.evaluation.runs.create_agent_evaluation_run_impl",
     "management.services.evaluation.reporting.report.generate_agent_evaluation_report_impl",
     "management.services.evaluation.runs.get_agent_evaluation_run_impl",
@@ -86,7 +86,7 @@ _PATCH_TARGETS = [
     "management.services.evaluation.sets.get_evaluation_set_impl",
     "management.services.evaluation.sets.list_evaluation_set_cases_impl",
     "management.services.evaluation.sets.list_evaluation_sets_impl",
-    "gateway.authentication.normal.get_current_user_info",
+    "gateway.authentication.auth.get_current_user_info",
 ]
 
 

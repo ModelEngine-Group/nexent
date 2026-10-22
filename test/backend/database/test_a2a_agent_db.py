@@ -23,7 +23,7 @@ from contracts.errors.exceptions import AgentNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 

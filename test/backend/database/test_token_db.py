@@ -26,7 +26,7 @@ consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 # Mock database client

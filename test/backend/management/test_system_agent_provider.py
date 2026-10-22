@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from contracts.agent import AgentInfoRequest
-from contracts.constants.agent import WORKBENCH_OFFICIAL_SKILL_NAMES
+from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
 
 from management.services.agent.system import (
     WORKBENCH_MAIN_SYSTEM_KEY,

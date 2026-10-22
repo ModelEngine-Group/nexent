@@ -325,7 +325,7 @@ _consts_error_code_module.ErrorCode = _ErrorCode
 install_shared_contract_stub(_consts_error_code_module, 'error_code')
 _consts_pkg.error_code = _consts_error_code_module
 
-_consts_limits_module = types.ModuleType("contracts.constants.evaluation")
+_consts_limits_module = types.ModuleType("contracts.constants.constants")
 _consts_limits_module.DEFAULT_PASS_THRESHOLD = 0.8
 _consts_limits_module.MAX_CONCURRENT_RUNS = 10
 _consts_limits_module.MAX_EVALUATORS_PER_RUN = 3
@@ -335,7 +335,7 @@ _consts_limits_module.MAX_CASES_PER_SET = 10000
 install_shared_contract_stub(_consts_limits_module, 'evaluation_limits')
 _consts_pkg.evaluation_limits = _consts_limits_module
 
-_consts_status_module = types.ModuleType("contracts.constants.evaluation")
+_consts_status_module = types.ModuleType("contracts.constants.constants")
 _consts_status_module.MAX_FAILURE_EXAMPLES = 5
 _consts_status_module.EvalCaseStatus = type(
     "EvalCaseStatus",
@@ -401,7 +401,7 @@ _adapters_pkg.jiuwen_sdk_adapter = _jiuwen_module
 
 # Make sure pre-existing real utils package is in sys.modules so
 # the app test (and any sibling tests) can resolve doted paths like
-# ``gateway.authentication.normal`` without hitting a stubbed package.
+# ``gateway.authentication.auth`` without hitting a stubbed package.
 _existing_utils = sys.modules.get("utils")
 if _existing_utils is None or not hasattr(_existing_utils, "__path__"):
     _utils_pkg = _register_package("utils")
@@ -496,8 +496,8 @@ _agent_service_module.list_model_providers_impl = MagicMock(return_value=[])
 # an attribute on the ``utils`` package, so doted ``patch`` resolution in
 # sibling tests can find it.
 try:
-    importlib.import_module("gateway.authentication.normal")
-    _utils_pkg.auth_utils = sys.modules["gateway.authentication.normal"]
+    importlib.import_module("gateway.authentication.auth")
+    _utils_pkg.auth_utils = sys.modules["gateway.authentication.auth"]
 except Exception:  # noqa: BLE001
     pass
 

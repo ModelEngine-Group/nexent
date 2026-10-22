@@ -2,9 +2,9 @@
 import logging
 from typing import Optional, Any
 
-from contracts.constants.configuration import AVATAR_URI, CUSTOM_ICON_URL, DATAMATE_URL, DEFAULT_GROUP_ID, ICON_TYPE, ICON_KEY, TENANT_NAME
-from contracts.constants.model import MODEL_CONFIG_MAPPING
-from consts.const import MODEL_ENGINE_ENABLED
+from contracts.constants.constants import AVATAR_URI, CUSTOM_ICON_URL, DATAMATE_URL, DEFAULT_GROUP_ID, ICON_TYPE, ICON_KEY, TENANT_NAME
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
+from contracts.constants.environment import MODEL_ENGINE_ENABLED
 from management.db.model.repository import get_model_id_by_display_name, get_model_records
 from management.services.configuration.tenant.settings import get_env_key, safe_value, tenant_config_manager
 from management.services.model.names import get_model_name_from_config

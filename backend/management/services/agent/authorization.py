@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT
 from management.db.agent.repository import query_agent_records_for_nl2agent
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.services.permission.asset_owner import resolve_agent_list_permission

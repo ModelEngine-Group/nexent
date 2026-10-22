@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from contracts.constants.knowledge import COMMITTED_STATUS, DELETED_STATUS
+from contracts.constants.constants import COMMITTED_STATUS, DELETED_STATUS
 from contracts.errors.exceptions import StorageObjectConflictError
 from typing import Any, Dict, List, Optional, Sequence
 

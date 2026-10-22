@@ -31,7 +31,7 @@ def service_module(monkeypatch):
     logging_utils = types.ModuleType("infrastructure.logging")
     logging_utils.configure_logging = MagicMock()
     logging_utils.get_uvicorn_logging_config = MagicMock(return_value={})
-    constants = types.ModuleType("consts.const")
+    constants = types.ModuleType("contracts.constants.environment")
     constants.REDIS_URL = "redis://test:6379/0"
     constants.REDIS_BACKEND_URL = "redis://test:6379/1"
     constants.REDIS_PORT = 6379
@@ -50,7 +50,7 @@ def service_module(monkeypatch):
         "dotenv": dotenv,
         "fastapi": fastapi,
         "infrastructure.logging": logging_utils,
-        "consts.const": constants,
+        "contracts.constants.environment": constants,
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
 

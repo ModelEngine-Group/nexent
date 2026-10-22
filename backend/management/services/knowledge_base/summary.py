@@ -7,7 +7,7 @@ import random
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from contracts.constants.localization import LANGUAGE
+from contracts.constants.constants import LANGUAGE
 from management.db.model.repository import get_model_by_model_id
 from management.services.knowledge_base.clustering import (
     analyze_cluster_coherence,

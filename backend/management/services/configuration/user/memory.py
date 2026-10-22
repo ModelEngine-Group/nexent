@@ -2,7 +2,7 @@
 import logging
 from typing import Dict, List, Union
 
-from contracts.constants.memory import MEMORY_SWITCH_KEY, DREAMING_SWITCH_KEY, MEMORY_AGENT_SHARE_KEY, DISABLE_AGENT_ID_KEY, DISABLE_USERAGENT_ID_KEY, EXTERNAL_PROVIDER_TOP_K_KEY, DEFAULT_MEMORY_SWITCH_KEY, DEFAULT_DREAMING_SWITCH_KEY, DEFAULT_MEMORY_AGENT_SHARE_KEY, DEFAULT_EXTERNAL_PROVIDER_TOP_K
+from contracts.constants.constants import MEMORY_SWITCH_KEY, DREAMING_SWITCH_KEY, MEMORY_AGENT_SHARE_KEY, DISABLE_AGENT_ID_KEY, DISABLE_USERAGENT_ID_KEY, EXTERNAL_PROVIDER_TOP_K_KEY, DEFAULT_MEMORY_SWITCH_KEY, DEFAULT_DREAMING_SWITCH_KEY, DEFAULT_MEMORY_AGENT_SHARE_KEY, DEFAULT_EXTERNAL_PROVIDER_TOP_K
 from contracts.memory import MemoryAgentShareMode
 from management.db.memory.config import get_all_configs_by_user_id, get_memory_config_info, insert_config, delete_config_by_config_id, update_config_by_id
 from nexent.core.agents.agent_model import MemoryContext, MemoryUserConfig

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from contracts.errors.exceptions import TagManagementConflictError, TagManagementNotFoundError
 from management.db.models import ResourceTagAssignment, TagDefinition
-from contracts.constants.tag import NO_VALUE_TAG_NORMALIZED_VALUE
+from contracts.constants.constants import NO_VALUE_TAG_NORMALIZED_VALUE
 from management.db.tag.repository import TagManagementDB
 
 

@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from contracts.constants.localization import LANGUAGE
+from contracts.constants.constants import LANGUAGE
 from contracts.knowledge import ChunkCreateRequest, ChunkUpdateRequest
 from management.db.knowledge_base.repository import get_knowledge_record, update_knowledge_record, update_last_summary_time
 from fastapi import Body, Depends, Path, Query

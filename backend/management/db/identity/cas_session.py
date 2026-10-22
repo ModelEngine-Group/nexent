@@ -4,7 +4,7 @@
 Database operations for CAS-backed web sessions.
 """
 
-from contracts.constants.identity import CAS_SESSION_ACTIVE, CAS_SESSION_REVOKED
+from contracts.constants.constants import CAS_SESSION_ACTIVE, CAS_SESSION_REVOKED
 from datetime import datetime
 from typing import Any, Dict, Optional
 

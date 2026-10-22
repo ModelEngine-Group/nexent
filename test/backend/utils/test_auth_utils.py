@@ -108,7 +108,7 @@ sys.modules['management.db.identity.user_tenant'] = MagicMock(
 sys.modules['management.db.identity.token'] = MagicMock(
     get_token_by_access_key=MagicMock(return_value=None))
 
-# Mock consts.const but provide real LANGUAGE values for tests.
+# Mock contracts.constants.environment but provide real LANGUAGE values for tests.
 # We must keep the real ``UnauthorizedError``/``SignatureValidationError``/
 # ``LimitExceededError`` classes on the mock so tests that catch them can
 # still match; we also expose ``AppException`` and other exception classes
@@ -121,7 +121,7 @@ consts_const_mock.LANGUAGE = {"ZH": "zh", "EN": "en"}
 consts_const_mock.DEFAULT_USER_ID = "user_id"
 consts_const_mock.DEFAULT_TENANT_ID = "tenant_id"
 consts_const_mock.IS_SPEED_MODE = False
-sys.modules['consts.const'] = consts_const_mock
+sys.modules['contracts.constants.environment'] = consts_const_mock
 install_business_constant_stubs(consts_const_mock)
 
 # Mock exceptions module with real exception classes. All known exception
@@ -190,8 +190,8 @@ sys.modules['sqlalchemy'] = MagicMock()
 sys.modules['sqlalchemy.orm'] = MagicMock()
 
 # Now import the module under test
-import gateway.authentication.normal as au
-import gateway.authentication.northbound as nb_auth
+import gateway.authentication.auth as au
+import gateway.authentication.northbound_auth as nb_auth
 
 # Ensure exceptions in module under test are real exception classes, not mocks
 au.UnauthorizedError = UnauthorizedError

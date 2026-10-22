@@ -10,9 +10,9 @@ from supabase import Client
 from pydantic import EmailStr
 
 from management.services.permission.identity.provider import get_supabase_client, get_supabase_admin_client, delete_supabase_user
-from gateway.authentication.normal import calculate_expires_at, get_jwt_expiry_seconds, ensure_cas_session_active_from_authorization, resolve_tenant_id_from_user_tenant_record
-from consts.const import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
+from gateway.authentication.auth import calculate_expires_at, get_jwt_expiry_seconds, ensure_cas_session_active_from_authorization, resolve_tenant_id_from_user_tenant_record
+from contracts.constants.environment import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
 
 from management.services.permission.asset_owner import (
     filter_accessible_routes_for_asset_owner_feature,
@@ -264,7 +264,7 @@ async def parse_supabase_response(is_admin, response, user_role, auto_login: boo
 async def verify_invite_code(invite_code):
     logging.info(
         "detect admin registration request, start verifying invite code")
-    logging.info(f"The INVITE_CODE obtained from consts.const: {INVITE_CODE}")
+    logging.info(f"The INVITE_CODE obtained from contracts.constants.environment: {INVITE_CODE}")
     if not INVITE_CODE:
         logging.error("please check the INVITE_CODE environment variable")
         raise NoInviteCodeException(

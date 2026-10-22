@@ -18,29 +18,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 import jwt
-from consts.const import (
-    DEBUG_JWT_EXPIRE_SECONDS,
-    IS_SPEED_MODE,
-    JWT_EXPIRY_SECONDS,
-    SERVICE_ROLE_KEY,
-    SUPABASE_JWT_SECRET,
-    SUPABASE_KEY,
-    SUPABASE_URL,
-)
+from contracts.constants.environment import DEBUG_JWT_EXPIRE_SECONDS, IS_SPEED_MODE, JWT_EXPIRY_SECONDS, SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET, SUPABASE_KEY, SUPABASE_URL
 from contracts.authentication import (
     AuthenticatedIdentity,
     CredentialKind,
     NorthboundContext,
     PendingOAuthIdentity,
 )
-from contracts.constants.identity import (
-    ASSET_OWNER_ROLE,
-    ASSET_OWNER_TENANT_ID,
-    DEFAULT_TENANT_ID,
-    DEFAULT_USER_ID,
-    OAUTH_PENDING_PURPOSE,
-)
-from contracts.constants.localization import LANGUAGE
+from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID, DEFAULT_USER_ID, OAUTH_PENDING_PURPOSE
+from contracts.constants.constants import LANGUAGE
 from contracts.errors.exceptions import (
     LimitExceededError,
     OAuthLinkError,
@@ -76,7 +62,7 @@ from supabase.lib.client_options import SyncClientOptions
 # Module logger
 logger = logging.getLogger(__name__)
 
-from contracts.constants.identity import MOCK_JWT_SECRET_KEY
+from contracts.constants.constants import MOCK_JWT_SECRET_KEY
 
 
 def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> str:
@@ -589,7 +575,7 @@ def authenticate_identity(
             kind=kind,
         )
     if kind == CredentialKind.API_KEY:
-        from gateway.authentication.northbound import authenticate_api_key
+        from gateway.authentication.northbound_auth import authenticate_api_key
 
         return authenticate_api_key(authorization, request)
     if kind == CredentialKind.INTERNAL:

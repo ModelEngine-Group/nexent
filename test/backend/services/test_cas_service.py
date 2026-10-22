@@ -13,14 +13,14 @@ sys.path.insert(0, backend_dir)
 
 _MODULES_TO_RESTORE = [
     "consts",
-    "consts.const",
+    "contracts.constants.environment",
     "management.db.identity.cas_session",
     "management.db.identity.oauth_account",
     "management.db.identity.user_tenant",
     "management.services.permission.identity.oauth",
     "management.services.skill.transfer",
     "management.services.tool.configuration",
-    "gateway.authentication.normal",
+    "gateway.authentication.auth",
 ]
 _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in _MODULES_TO_RESTORE}
 
@@ -52,7 +52,7 @@ consts_mock.const.CAS_VALIDATE_PATH = "/p3/serviceValidate"
 consts_mock.const.DEFAULT_TENANT_ID = "tenant_id"
 consts_mock.const.LOCAL_SESSION_MAX_AGE_SECONDS = 3600
 sys.modules["consts"] = consts_mock
-sys.modules["consts.const"] = consts_mock.const
+sys.modules["contracts.constants.environment"] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 sys.modules["management.db.identity.cas_session"] = MagicMock()
@@ -61,7 +61,7 @@ sys.modules["management.db.identity.user_tenant"] = MagicMock()
 sys.modules["management.services.permission.identity.oauth"] = MagicMock()
 sys.modules["management.services.skill.transfer"] = MagicMock()
 sys.modules["management.services.tool.configuration"] = MagicMock()
-sys.modules["gateway.authentication.normal"] = MagicMock()
+sys.modules["gateway.authentication.auth"] = MagicMock()
 
 from management.services.permission.identity.cas import (  # noqa: E402
     CasAuthenticationError,

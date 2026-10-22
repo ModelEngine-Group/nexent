@@ -2,7 +2,7 @@
 
 from contracts.errors.exceptions import AppException, ForbiddenError, SkillException, UnauthorizedError
 from contracts.skill import SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
-from contracts.constants.skill import ASSET_OWNER_SKILL_VIEW_DENIED, _NOT_FOUND_TEXT
+from contracts.constants.constants import ASSET_OWNER_SKILL_VIEW_DENIED, _NOT_FOUND_TEXT
 from contracts.skill import InstallSkillsRequest
 import logging
 from http import HTTPStatus
@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
 from contracts.errors.exceptions import AppException, ForbiddenError, SkillException, UnauthorizedError
-from consts.const import ENABLE_AGENT_WORKBENCH
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import NL2SkillRunRequest
 from contracts.skill import SkillCreateRequest, SkillInstanceInfoRequest, SkillUpdateRequest
 from permissions.depends import require
@@ -30,7 +30,7 @@ from management.services.conversation.creation_history import (
 )
 from management.services.skill.service import SkillService, UnsupportedSkillFilePreview
 from management.services.skill.transfer import get_official_skills_with_status, install_skills_from_zip_for_tenant, update_skill_list
-from gateway.authentication.normal import get_current_user_id, get_current_user_info
+from gateway.authentication.auth import get_current_user_id, get_current_user_info
 
 
 logger = logging.getLogger(__name__)

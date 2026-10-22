@@ -8,12 +8,12 @@ from management.db.client import get_db_session
 from management.utils.orm import as_dict
 from management.db.models import AgentInfo, ToolInstance, AgentRelation
 from management.db.agent.version import search_version_by_version_no, query_version_list, query_current_version_no, query_agent_snapshot, query_agent_draft, insert_version, update_version_status, update_version, update_agent_current_version, insert_agent_snapshot, insert_tool_snapshot, insert_relation_snapshot, insert_skill_snapshot, delete_agent_snapshot, delete_tool_snapshot, delete_relation_snapshot, delete_skill_snapshot, restore_agent_draft, get_next_version_no, delete_version
-from contracts.constants.agent import SOURCE_TYPE_NORMAL, SOURCE_TYPE_ROLLBACK, STATUS_RELEASED, STATUS_DISABLED, STATUS_ARCHIVED
+from contracts.constants.constants import SOURCE_TYPE_NORMAL, SOURCE_TYPE_ROLLBACK, STATUS_RELEASED, STATUS_DISABLED, STATUS_ARCHIVED
 from management.db.model.repository import get_model_by_model_id, get_valid_model_ids
 from management.db.agent.repository import is_system_agent
 from management.services.permission.identity.display import enrich_cas_usernames
 from management.utils.serialization import convert_string_to_list
-from contracts.constants.agent import AgentUnavailableReason
+from contracts.agent import AgentUnavailableReason
 from management.services.agent.a2a.validation import validate_a2a_agent_name
 
 logger = logging.getLogger("agent_version_service")
@@ -836,7 +836,7 @@ async def list_published_agents_impl(
     """
     try:
         from management.db.agent.repository import query_all_agent_info_by_tenant_id
-        from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES
+        from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
         from management.db.identity.user_tenant import get_user_tenant_by_user_id
         from management.db.identity.group import query_group_ids_by_user
         from management.db.model.repository import get_model_by_model_id

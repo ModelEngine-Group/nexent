@@ -10,7 +10,7 @@ from management.db.identity.group import query_groups, query_groups_by_tenant, a
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.db.configuration.tenant import get_single_config_info, insert_config, update_config_by_tenant_config_id
 from contracts.errors.exceptions import NotFoundException, UnauthorizedError, ValidationError
-from contracts.constants.configuration import DEFAULT_GROUP_ID
+from contracts.constants.constants import DEFAULT_GROUP_ID
 from management.services.permission.identity.tenants import get_tenant_info
 from management.services.permission.identity.display import enrich_cas_usernames
 

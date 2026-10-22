@@ -29,7 +29,7 @@ class TestModelCatalogLoaderSmoke:
     """Minimal smoke-level tests that don't require a full venv sync."""
 
     def test_json_file_exists_and_is_readable(self):
-        from consts.const import MODEL_CATALOG_JSON_PATH
+        from contracts.constants.environment import MODEL_CATALOG_JSON_PATH
 
         path = Path(MODEL_CATALOG_JSON_PATH)
         assert path.exists(), (
@@ -50,7 +50,7 @@ class TestModelCatalogLoaderSmoke:
             "infer_provider_from_base_url",
             "MODEL_CATALOG_JSON_PATH",
         ):
-            # Note: MODEL_CATALOG_JSON_PATH lives in consts.const; the loader
+            # Note: MODEL_CATALOG_JSON_PATH lives in contracts.constants.environment; the loader
             # re-exports it from the consts module so tests/mocks can patch it.
             assert hasattr(model_catalog_loader, name), f"Missing symbol: {name}"
 

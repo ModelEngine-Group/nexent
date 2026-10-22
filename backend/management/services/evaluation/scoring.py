@@ -7,7 +7,7 @@ from math import isfinite
 from typing import Any
 
 from contracts.errors.codes import ErrorCode
-from contracts.constants.evaluation import DEFAULT_PASS_THRESHOLD
+from contracts.constants.constants import DEFAULT_PASS_THRESHOLD
 from contracts.errors.exceptions import AppException
 from infrastructure.concurrency import runtime_thread_manager
 from management.services.evaluation.common import (

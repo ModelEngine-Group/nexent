@@ -56,13 +56,13 @@ tenant_service_module.update_tenant_info = MagicMock()
 tenant_service_module.delete_tenant = AsyncMock(return_value=True)
 services_module.tenant_service = tenant_service_module
 
-auth_utils_module = types.ModuleType("gateway.authentication.normal")
+auth_utils_module = types.ModuleType("gateway.authentication.auth")
 auth_utils_module.get_current_user_id = MagicMock()
 auth_utils_module.get_current_user_context = MagicMock()
 
 sys.modules["services"] = services_module
 sys.modules["management.services.permission.identity.tenants"] = tenant_service_module
-sys.modules["gateway.authentication.normal"] = auth_utils_module
+sys.modules["gateway.authentication.auth"] = auth_utils_module
 
 # The `services` stub above is not a package, so the audit submodule is loaded from
 # its file: without it collection fails, and the audit assertions further down would
@@ -397,7 +397,7 @@ class TestTenantAuth:
 
     def test_get_current_user_id_is_called(self):
         """Test that get_current_user_id is used for authorization."""
-        from gateway.authentication.normal import get_current_user_id
+        from gateway.authentication.auth import get_current_user_id
 
         self.mock_utils.get_current_user_id.return_value = ("user-456", "tenant-123")
 
@@ -409,7 +409,7 @@ class TestTenantAuth:
 
     def test_get_current_user_id_raises_unauthorized(self):
         """Test that get_current_user_id raises UnauthorizedError for invalid tokens."""
-        from gateway.authentication.normal import get_current_user_id
+        from gateway.authentication.auth import get_current_user_id
 
         self.mock_utils.get_current_user_id.side_effect = UnauthorizedError("Invalid token")
 

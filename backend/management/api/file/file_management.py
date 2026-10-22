@@ -2,7 +2,7 @@
 
 from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, QuotaExceededError, UnauthorizedError, UnsupportedFileTypeException
 from contracts.knowledge import ProcessParams
-from contracts.constants.runtime import CONFIG_SERVICE_NAME
+from contracts.constants.constants import CONFIG_SERVICE_NAME
 from management.utils.file_http import _build_datamate_url_from_parts, _build_object_etag, _normalize_datamate_download_url, _parse_range_header, build_content_disposition_header
 import base64
 import logging
@@ -19,7 +19,7 @@ from starlette.background import BackgroundTask
 from management.utils.knowledge_permission import require_knowledge_base_edit_permission
 from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, QuotaExceededError, UnauthorizedError, UnsupportedFileTypeException
 from contracts.knowledge import ProcessParams
-from contracts.constants.runtime import CONFIG_SERVICE_NAME
+from contracts.constants.constants import CONFIG_SERVICE_NAME
 from management.services.file.service import (
     check_file_access,
     delete_file_impl,
@@ -31,7 +31,7 @@ from management.services.file.service import (
     upload_files_impl,
 )
 from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
-from gateway.authentication.normal import get_current_user_id
+from gateway.authentication.auth import get_current_user_id
 from management.services.knowledge_base.ingestion import trigger_data_process
 from infrastructure.ingestion.errors import classify_ingestion_exception
 

@@ -4,7 +4,7 @@ import time
 from typing import Any, Dict, List
 
 import requests
-from consts.const import MCP_MANAGEMENT_API
+from contracts.constants.environment import MCP_MANAGEMENT_API
 from management.db.tool.outer_api import delete_openapi_service as db_delete_openapi_service
 from management.db.tool.outer_api import query_openapi_services_by_tenant, upsert_openapi_service
 from management.services.tool.common import (

@@ -9,8 +9,8 @@ import tempfile
 from contextlib import AsyncExitStack
 from typing import Awaitable, Callable
 
-from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
-from consts.const import MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_DOCKER_IMAGE
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT, PERMISSION_READ
+from contracts.constants.environment import MCP_REQUEST_TIMEOUT_SECONDS, NEXENT_MCP_DOCKER_IMAGE
 from contracts.errors.exceptions import MCPConnectionError, MCPContainerError, McpNameConflictError, MCPNameIllegal, McpNotFoundError, McpPortConflictError, McpValidationError
 from contracts.tool import MCPConfigRequest
 from management.db.identity.group import query_group_ids_by_user

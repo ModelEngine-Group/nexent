@@ -3,6 +3,7 @@
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
+from contracts.constants.constants import _REPORT_LABELS
 
 
 class CreateEvaluationRequest(BaseModel):
@@ -138,3 +139,28 @@ class RuntimeEvaluationTrialRunRequest(BaseModel):
     judge_model_id: int
     evaluator_ids: list[int] | None = None
     language: str = "zh"
+
+
+def get_report_labels(language: str = "zh") -> dict:
+    """Return the label dict for the given language. Falls back to 'zh'."""
+    return _REPORT_LABELS.get(language, _REPORT_LABELS["zh"])
+
+
+# Evaluation status constants.
+class EvalRunStatus:
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class EvalCaseStatus:
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class EvalPassStatus:
+    PASS = "pass"
+    FAIL = "fail"

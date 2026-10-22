@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from consts.const import MAX_KNOWLEDGE_BASES_PER_TENANT, MAX_KNOWLEDGE_BASES_PER_USER, MAX_KNOWLEDGE_FILE_SIZE_MB, MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_AGENT_THREAD_MAX_WORKERS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS
+from contracts.constants.environment import MAX_KNOWLEDGE_BASES_PER_TENANT, MAX_KNOWLEDGE_BASES_PER_USER, MAX_KNOWLEDGE_FILE_SIZE_MB, MAX_PRIVILEGED_KNOWLEDGE_BASES_PER_USER, RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS, RUNTIME_AGENT_THREAD_MAX_WORKERS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS
 
 
 def test_knowledge_resource_defaults_match_deployment_example():
@@ -45,7 +45,7 @@ def test_knowledge_resource_env_overrides_defaults(variable, value):
         [
             sys.executable,
             "-c",
-            f"import backend.consts.const as c; print(c.{variable})",
+            f"import backend.contracts.constants.environment as c; print(c.{variable})",
         ],
         cwd=Path(__file__).resolve().parents[3],
         env=environment,
@@ -87,7 +87,7 @@ def test_ut_be_tlm_034_positive_runtime_config_overrides_default(variable, value
         [
             sys.executable,
             "-c",
-            f"import backend.consts.const as c; print(c.{variable})",
+            f"import backend.contracts.constants.environment as c; print(c.{variable})",
         ],
         cwd=Path(__file__).resolve().parents[3],
         env=environment,
@@ -113,7 +113,7 @@ def test_ut_be_tlm_034_invalid_runtime_capacity_fails_import(variable, value):
     environment = os.environ.copy()
     environment[variable] = value
     result = subprocess.run(
-        [sys.executable, "-c", "import backend.consts.const"],
+        [sys.executable, "-c", "import backend.contracts.constants.environment"],
         cwd=Path(__file__).resolve().parents[3],
         env=environment,
         capture_output=True,

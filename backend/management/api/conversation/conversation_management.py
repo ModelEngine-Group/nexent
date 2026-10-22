@@ -8,7 +8,7 @@ from http import HTTPStatus
 from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
-from consts.const import ENABLE_AGENT_WORKBENCH
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 
 from contracts.conversation import BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
 from contracts.knowledge import ConversationKnowledgeScopeUpdateRequest
@@ -28,7 +28,7 @@ from management.services.conversation.service import (
     update_message_opinion_service,
     get_message_id_by_index_impl,
 )
-from gateway.authentication.normal import get_current_user_id, get_current_user_info
+from gateway.authentication.auth import get_current_user_id, get_current_user_info
 
 router = APIRouter(prefix="/conversation")
 

@@ -5,7 +5,7 @@
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from management.utils.skill_params import strip_params_comments_for_db
-from contracts.constants.skill import SKILL_DESCRIPTION_MAX_LENGTH
+from contracts.constants.constants import SKILL_DESCRIPTION_MAX_LENGTH
 import json
 import logging
 from datetime import datetime
@@ -16,7 +16,7 @@ from sqlalchemy import or_, update as sa_update
 from management.db.client import get_db_session
 from management.utils.orm import filter_property, as_dict
 from management.db.models import SkillInfo, SkillToolRelation, SkillInstance, ToolInfo
-from consts.const import MAX_SKILLS_PER_TENANT
+from contracts.constants.environment import MAX_SKILLS_PER_TENANT
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from management.utils.skill_params import strip_params_comments_for_db

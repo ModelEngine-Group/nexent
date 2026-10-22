@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+import contracts.model as _relocated_contracts_model
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from contracts import conversation as model_consts_conversation
 from contracts import identity as model_consts_identity
@@ -8,7 +10,7 @@ from contracts import model as model_consts_model
 from contracts import skill as model_consts_skill
 from contracts import tool as model_consts_tool
 from contracts import voice as model_consts_voice
-from contracts.constants import model as model_consts_model_constants
+from contracts.constants import constants as model_consts_model_constants
 import pytest
 from pydantic import ValidationError
 
@@ -16,10 +18,10 @@ from contracts import agent as model_consts
 
 
 def test_model_connect_status_enum_defaults_and_get_value():
-    assert model_consts_model_constants.ModelConnectStatusEnum.get_default() == "not_detected"
-    assert model_consts_model_constants.ModelConnectStatusEnum.get_value("") == "not_detected"
-    assert model_consts_model_constants.ModelConnectStatusEnum.get_value(None) == "not_detected"
-    assert model_consts_model_constants.ModelConnectStatusEnum.get_value("available") == "available"
+    assert _relocated_contracts_model.ModelConnectStatusEnum.get_default() == "not_detected"
+    assert _relocated_contracts_model.ModelConnectStatusEnum.get_value("") == "not_detected"
+    assert _relocated_contracts_model.ModelConnectStatusEnum.get_value(None) == "not_detected"
+    assert _relocated_contracts_model.ModelConnectStatusEnum.get_value("available") == "available"
 
 
 def test_model_request_and_validation():

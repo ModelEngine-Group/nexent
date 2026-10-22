@@ -10,9 +10,9 @@ import pytest
 
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
-consts_const = types.ModuleType("consts.const")
+consts_const = types.ModuleType("contracts.constants.environment")
 consts_const.MEMORY_PROVIDER_PLUGINS_DIR = ""
-sys.modules["consts.const"] = consts_const
+sys.modules["contracts.constants.environment"] = consts_const
 install_business_constant_stubs(consts_const)
 sys.modules["consts"] = types.ModuleType("consts")
 

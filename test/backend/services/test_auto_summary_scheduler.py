@@ -306,7 +306,7 @@ from management.services.knowledge_base.scheduler import (
     CHECK_INTERVAL_SECONDS,
 )
 from management.db.knowledge_base.repository import get_knowledge_bases_for_auto_summary
-from contracts.constants.knowledge import SCHEDULER_CHECK_INTERVAL_SECONDS
+from contracts.constants.constants import SCHEDULER_CHECK_INTERVAL_SECONDS
 
 
 class TestParseLastSummaryTime:

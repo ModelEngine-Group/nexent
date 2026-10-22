@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from management.utils.app_factory import create_app
-from contracts.constants.runtime import CONFIG_SERVICE_NAME
+from contracts.constants.constants import CONFIG_SERVICE_NAME
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -52,14 +52,14 @@ from management.api.memory.memory_dreaming import router as memory_dreaming_rout
 from management.api.memory.memory_provider import router as memory_provider_router
 from management.api.tag.tag_management import router as tag_management_router
 from management.api.knowledge_base.quota import tenant_quota_router, platform_quota_router, personal_quota_router
-from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, ENABLE_AIDP_KNOWLEDGE, ENABLE_AGENT_WORKBENCH, IS_SPEED_MODE, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, ENABLE_AIDP_KNOWLEDGE, ENABLE_AGENT_WORKBENCH, IS_SPEED_MODE, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagerState,
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from contracts.constants.runtime import CONFIG_SERVICE_NAME
+from contracts.constants.constants import CONFIG_SERVICE_NAME
 from infrastructure.concurrency import config_thread_manager
 
 logger = logging.getLogger("base_app")

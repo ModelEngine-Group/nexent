@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from contracts.constants.runtime import CONFIG_SERVICE_NAME
+from contracts.constants.constants import CONFIG_SERVICE_NAME
 
 
 @pytest.mark.case_id('REL-AUTO-4045B602F3B5254D')

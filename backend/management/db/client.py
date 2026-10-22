@@ -8,7 +8,7 @@ import psycopg2
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from consts.const import MINIO_ACCESS_KEY, MINIO_DEFAULT_BUCKET, MINIO_ENDPOINT, MINIO_REGION, MINIO_SECRET_KEY, NEXENT_POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER
+from contracts.constants.environment import MINIO_ACCESS_KEY, MINIO_DEFAULT_BUCKET, MINIO_ENDPOINT, MINIO_REGION, MINIO_SECRET_KEY, NEXENT_POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT, POSTGRES_USER
 from management.db.models import TableBase
 from nexent.storage.storage_client_factory import create_storage_client_from_config, MinIOStorageConfig
 

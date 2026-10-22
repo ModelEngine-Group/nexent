@@ -13,14 +13,14 @@ from contracts.authentication import (
     CredentialKind,
     NorthboundContext,
 )
-from contracts.constants.identity import DEFAULT_TENANT_ID
+from contracts.constants.constants import DEFAULT_TENANT_ID
 from contracts.errors.exceptions import (
     LimitExceededError,
     TokenExpiredError,
     UnauthorizedError,
 )
 from fastapi import HTTPException, Request
-from gateway.authentication.normal import extract_bearer_token
+from gateway.authentication.auth import extract_bearer_token
 from infrastructure.security.signatures import (
     calculate_hmac_signature,
     validate_timestamp,

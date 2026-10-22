@@ -3,7 +3,7 @@
 
 from urllib.parse import quote, urljoin
 
-import consts.const as const
+import contracts.constants.environment as const
 
 
 def get_tenant_local_mcp_server(tenant_id: str) -> str:

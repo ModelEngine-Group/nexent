@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.constants.a2a import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC, PROTOCOL_GRPC
+from contracts.constants.constants import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC, PROTOCOL_GRPC
 
 from sqlalchemy import (
     JSON,

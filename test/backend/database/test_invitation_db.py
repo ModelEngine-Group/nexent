@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
-# Set required constants in consts.const
+# Set required constants in contracts.constants.environment
 consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
 consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
 consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
@@ -23,7 +23,7 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 # Mock utils module
@@ -35,7 +35,7 @@ utils_mock.str_utils.convert_list_to_string = MagicMock(side_effect=lambda x: ",
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 sys.modules['management.utils.serialization'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even

@@ -12,7 +12,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 import aiohttp
 
 from management.db.a2a import repository as a2a_agent_db
-from contracts.constants.a2a import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
+from contracts.constants.constants import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 from infrastructure.http.a2a import A2AHttpClient, A2AHttpStatusError, build_a2a_headers
 from management.services.agent.a2a.validation import validate_a2a_agent_name
 

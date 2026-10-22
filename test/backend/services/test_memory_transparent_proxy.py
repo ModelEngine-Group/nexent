@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
-consts_const = types.ModuleType("consts.const")
+consts_const = types.ModuleType("contracts.constants.environment")
 consts_const.AGENT_SHORT_TERM_HALF_LIFE_DAYS = 7.0
 consts_const.MMR_CANDIDATE_TOP_K = 10
 consts_const.MMR_DUPLICATE_THRESHOLD = 0.92
@@ -18,7 +18,7 @@ consts_const.MEMORY_TOKEN_BUDGET = 2000
 consts_const.W_AGENT_SHORT_TERM = 0.6
 consts_const.W_EXTERNAL = 0.4
 consts_const.VectorDatabaseType = MagicMock()
-sys.modules["consts.const"] = consts_const
+sys.modules["contracts.constants.environment"] = consts_const
 install_business_constant_stubs(consts_const)
 sys.modules["consts"] = types.ModuleType("consts")
 

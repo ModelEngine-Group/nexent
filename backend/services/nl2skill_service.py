@@ -23,8 +23,8 @@ from agents.create_agent_info import (
 )
 from agents.nl2skill_agent import create_nl2skill_agent_config
 from management.services.agent.context import build_authorized_context_input
-from contracts.constants.localization import LANGUAGE
-from contracts.constants.model import MODEL_CONFIG_MAPPING
+from contracts.constants.constants import LANGUAGE
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.conversation import HistoryItem
 from contracts.agent import NL2SkillRunRequest
 from management.db.model.repository import get_model_by_model_id

@@ -19,7 +19,7 @@ from unittest.mock import MagicMock
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
-# Set constants needed in consts.const
+# Set constants needed in contracts.constants.environment
 consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
 consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
 consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
@@ -34,7 +34,7 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 # Mock utils
@@ -42,7 +42,7 @@ utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 
 # Mock boto3
 boto3_mock = MagicMock()

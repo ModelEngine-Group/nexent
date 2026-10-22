@@ -14,7 +14,7 @@ import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, PlatformQuotaConflictError, QuotaExceededError
 from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id, get_private_knowledge_info_by_creator, get_private_knowledge_info_by_tenant_id, update_knowledge_record

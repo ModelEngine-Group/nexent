@@ -22,8 +22,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
-from contracts.constants.agent import AGENT_PROMPTS_HIDDEN_FLAG
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.constants.constants import AGENT_PROMPTS_HIDDEN_FLAG
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ForbiddenError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
 from contracts.agent import NL2AgentRunRequest
@@ -133,8 +133,8 @@ install_serialization_stub(sys.modules["management.db.client"])
 sys.modules['management.db.agent.repository'] = MagicMock()
 sys.modules['agents.create_agent_info'] = MagicMock()
 sys.modules['nexent.core.agents.run_agent'] = MagicMock()
-sys.modules['gateway.authentication.normal'] = MagicMock()
-sys.modules['gateway.authentication.normal'].get_current_user_id.return_value = ('test_user', 'test_tenant')
+sys.modules['gateway.authentication.auth'] = MagicMock()
+sys.modules['gateway.authentication.auth'].get_current_user_id.return_value = ('test_user', 'test_tenant')
 sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
 sys.modules['infrastructure.observability.bootstrap'] = MagicMock()

@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from contracts.constants.knowledge import ACTIVE_STATUSES, HIDDEN_STATUSES
+from contracts.constants.constants import ACTIVE_STATUSES, HIDDEN_STATUSES
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional
 from uuid import uuid4

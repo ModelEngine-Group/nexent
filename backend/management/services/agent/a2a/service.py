@@ -13,10 +13,10 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from uuid import uuid4
 
 from management.db.a2a import repository as a2a_agent_db
-from contracts.constants.a2a import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
+from contracts.constants.constants import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 from management.db.client import get_db_session
 from contracts.a2a import A2AAgentCard, A2AAgentCapabilities, A2AAgentProvider
-from consts.const import NORTHBOUND_EXTERNAL_URL
+from contracts.constants.environment import NORTHBOUND_EXTERNAL_URL
 from contracts.errors.exceptions import RuntimeUpstreamError
 from contracts.agent import AgentRequest
 from management.services.agent.a2a.adapter import A2AAgentAdapter, A2AExecutionContext

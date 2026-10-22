@@ -4,8 +4,8 @@ from typing import Any, Collection, Dict, List, Optional
 
 from sqlalchemy import and_, case, false, func, or_, true, update
 
-from contracts.constants.agent import OWNERSHIP_ALL, OWNERSHIP_CREATED, OWNERSHIP_OTHERS, STATUS_NOT_SHARED
-from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT
+from contracts.constants.constants import OWNERSHIP_ALL, OWNERSHIP_CREATED, OWNERSHIP_OTHERS, STATUS_NOT_SHARED
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_EDIT
 from management.utils.orm import as_dict, filter_property
 from management.db.client import get_db_session
 from management.db.models import AgentInfo, AgentRepository, AgentVersion

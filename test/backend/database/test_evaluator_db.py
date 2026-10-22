@@ -35,6 +35,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from test.common.contract_stubs import install_shared_contract_stub
 
 # ---------------------------------------------------------------------------
 # 1. Path setup + idempotent package registration (mirrors
@@ -115,7 +116,8 @@ def _install_stubs():
     _ec_mod = mk_mod("contracts.errors.codes", ErrorCode=_Err)
     _consts_pkg.error_code = _ec_mod
     _ERS = type("ERS", (), {"PENDING": "PENDING", "RUNNING": "RUNNING"})
-    _es_mod = mk_mod("contracts.constants.evaluation", EvalRunStatus=_ERS)
+    _es_mod = types.SimpleNamespace(EvalRunStatus=_ERS)
+    install_shared_contract_stub(_es_mod, {"contracts.evaluation": {"EvalRunStatus": "EvalRunStatus"}})
     _consts_pkg.evaluation_status = _es_mod
 
     class _AppException(Exception):

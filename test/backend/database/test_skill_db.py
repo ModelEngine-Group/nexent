@@ -43,7 +43,7 @@ consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 consts_mock.const.MAX_SKILLS_PER_TENANT = 1000
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 install_business_contract_stubs(MagicMock())
 
@@ -97,7 +97,7 @@ utils_str_utils_mock.convert_string_to_list = (
     lambda items: [] if not items else [int(item.strip()) for item in items.split(",") if item.strip().isdigit()]
 )
 sys.modules['utils'] = MagicMock()
-sys.modules['gateway.authentication.normal'] = MagicMock()
+sys.modules['gateway.authentication.auth'] = MagicMock()
 sys.modules['management.services.skill.params'] = utils_skill_params_mock
 sys.modules['management.utils.serialization'] = utils_str_utils_mock
 sys.modules['backend.utils'] = MagicMock()

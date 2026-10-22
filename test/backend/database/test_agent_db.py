@@ -34,7 +34,7 @@ consts_mock.const.MAX_AGENTS_PER_TENANT = 1000
 
 # 将模拟的consts模块添加到sys.modules中
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 
@@ -78,7 +78,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 
 # 将模拟的utils模块添加到sys.modules中
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 
 # Stub management.utils.serialization to satisfy imports in management.db.agent.repository
 str_utils_mock = MagicMock()

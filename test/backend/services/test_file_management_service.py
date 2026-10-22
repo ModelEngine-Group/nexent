@@ -1410,7 +1410,7 @@ class TestCheckFileAccess:
 
     def test_check_file_access_asset_owner_write_uses_storage_resolver(self):
         from management.services.file.service import check_file_access
-        from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+        from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 
         knowledge_storage_stub.resolve_storage_object_access.return_value = True
 
@@ -1429,7 +1429,7 @@ class TestCheckFileAccess:
 
     def test_check_file_access_denies_asset_owner_write_for_wrong_tenant(self):
         from management.services.file.service import check_file_access
-        from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+        from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 
         assert check_file_access(
             "attachments/asset_owner/user1/doc.pdf",
@@ -1529,7 +1529,7 @@ class TestCheckFileAccess:
     def test_check_file_access_asset_owner_prefix_requires_asset_owner_tenant(self):
         """Asset-owner attachment paths are restricted to the asset-owner tenant."""
         from management.services.file.service import check_file_access
-        from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+        from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 
         path = "attachments/asset_owner/user1/doc.pdf"
         assert check_file_access(path, "user1", ASSET_OWNER_TENANT_ID) is True
@@ -1541,7 +1541,7 @@ class TestResolveMinioUploadFolder:
 
     def test_asset_owner_tenant_uses_dedicated_prefix(self):
         from management.services.file.service import resolve_minio_upload_folder
-        from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+        from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 
         result = resolve_minio_upload_folder(
             folder="attachments",

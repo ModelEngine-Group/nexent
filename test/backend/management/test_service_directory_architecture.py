@@ -129,6 +129,7 @@ MIGRATED_MODULES = {
     'memory/retrieval.py',
     'model/adapter.py',
     'model/capacity.py',
+    'model/catalog.py',
     'model/health.py',
     'model/invocation.py',
     'model/management.py',

@@ -21,7 +21,7 @@ from management.services.permission.identity.tenants import (
     update_tenant_info,
     delete_tenant,
 )
-from gateway.authentication.normal import get_current_user_context, get_current_user_id
+from gateway.authentication.auth import get_current_user_context, get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/tenants", tags=["tenants"])

@@ -7,7 +7,7 @@ import logging
 import time
 from concurrent.futures import as_completed
 
-from contracts.constants.model import MODEL_CONFIG_MAPPING
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from nexent.core.concurrency import ManagedTaskSpec
 from nexent.core.models import OpenAIModel
 from nexent.core.agents.prompt.memory import compose_memory_prompt, format_dreaming_source, load_memory_template

@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from contracts.evaluation import CreateEvaluationRequest, AgentEvaluationTrialRunRequest as TrialRunRequest
-from contracts.constants.evaluation import _AUTH_REQUIRED_MSG, _UNKNOWN_ID
+from contracts.constants.constants import _AUTH_REQUIRED_MSG, _UNKNOWN_ID
 import logging
 from http import HTTPStatus
 from typing import Any
@@ -25,7 +25,7 @@ from management.services.evaluation.runs import (
 )
 from management.services.evaluation.reporting.report import generate_agent_evaluation_report_impl
 from management.services.agent.runtime_client import forward_agent_evaluation_trial_run
-from gateway.authentication.normal import get_current_user_id, get_current_user_info
+from gateway.authentication.auth import get_current_user_id, get_current_user_info
 
 
 logger = logging.getLogger("agent_evaluation_app")
@@ -593,7 +593,7 @@ def _safe_extract_language(request: Request | None) -> str:
     if request is None:
         return "zh"
     try:
-        from gateway.authentication.normal import parse_language_from_request
+        from gateway.authentication.auth import parse_language_from_request
 
         return str(parse_language_from_request(request) or "zh")
     except Exception:

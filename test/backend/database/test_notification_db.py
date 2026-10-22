@@ -65,7 +65,7 @@ sys.modules["management.db.models"] = db_models_mod
 sys.modules["management.db.models"] = db_models_mod
 
 from management.db.notification import repository as db
-from contracts.constants.notification import EVENT_TYPE_REPOSITORY_REVIEW_APPROVED, EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY, SCOPE_SU, SCOPE_TENANT, SCOPE_TENANT_ADMIN, SCOPE_TENANT_USER, SCOPE_USER
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_APPROVED, EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY, SCOPE_SU, SCOPE_TENANT, SCOPE_TENANT_ADMIN, SCOPE_TENANT_USER, SCOPE_USER
 
 
 @pytest.fixture

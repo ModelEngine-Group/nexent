@@ -8,10 +8,10 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, ENABLE_AIDP_KNOWLEDGE
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, ENABLE_AIDP_KNOWLEDGE
 from contracts.errors.codes import ErrorCode
-from contracts.constants.evaluation import MAX_CASES_PER_SET
-from contracts.constants.evaluation import EvalRunStatus
+from contracts.constants.constants import MAX_CASES_PER_SET
+from contracts.evaluation import EvalRunStatus
 from contracts.errors.exceptions import AppException
 from management.db.agent.version import query_version_list
 from management.db.client import get_db_session

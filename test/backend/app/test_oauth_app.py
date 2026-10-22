@@ -25,7 +25,7 @@ consts_mock.const.SUPABASE_URL = "http://supabase.test"
 consts_mock.const.DEFAULT_TENANT_ID = "default"
 consts_mock.const.JWT_EXPIRY_SECONDS = 7200
 sys.modules["consts"] = consts_mock
-sys.modules["consts.const"] = consts_mock.const
+sys.modules["contracts.constants.environment"] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 consts_model_mock = MagicMock()
@@ -108,7 +108,7 @@ auth_utils_mock.get_jwt_expiry_seconds = MagicMock(return_value=3600)
 auth_utils_mock.calculate_expires_at = MagicMock(return_value=1735689600)
 auth_utils_mock.get_supabase_admin_client = MagicMock()
 auth_utils_mock.generate_session_jwt = MagicMock(return_value="eyJ.mock.jwt.token")
-sys.modules["gateway.authentication.normal"] = auth_utils_mock
+sys.modules["gateway.authentication.auth"] = auth_utils_mock
 
 oauth_service_mock = MagicMock()
 oauth_service_mock.parse_state = MagicMock(

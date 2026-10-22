@@ -166,7 +166,7 @@ class TestBuildSupportedInterfaces:
     def test_builds_interfaces_with_prefix(self):
         """Test building supported interfaces with prefix."""
         from management.services.agent.a2a.service import A2AServerService
-        from contracts.constants.a2a import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 
         service = A2AServerService()
 
@@ -490,7 +490,7 @@ class TestBuildSupportedInterfacesEdgeCases:
     def test_protocol_bindings_are_correct(self):
         """Test built interfaces have correct protocol bindings."""
         from management.services.agent.a2a.service import A2AServerService
-        from contracts.constants.a2a import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 
         service = A2AServerService()
 

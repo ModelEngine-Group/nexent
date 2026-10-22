@@ -12,7 +12,7 @@ from pydantic import StrictBool
 
 from contracts.errors.exceptions import ConversationNotFoundError, TokenExpiredError, UnauthorizedError, ValidationError
 from management.services.conversation.pins import get_workbench_pins, update_workbench_pin
-from gateway.authentication.normal import get_current_user_id
+from gateway.authentication.auth import get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversation")

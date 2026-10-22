@@ -12,12 +12,12 @@ from urllib.parse import urljoin
 
 import jsonref
 import requests
-from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API, MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, TOKEN
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API, MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, TOKEN
 from contracts.errors.messages import ErrorMessage
 from contracts.errors.exceptions import AgentDraftEditError, MCPConnectionError, NotFoundException, ResourceBindingError, ToolExecutionException, ValidationError
 from contracts.tool import ToolInfo, ToolInstanceInfoRequest, ToolSourceEnum, ToolValidateRequest
-from contracts.constants.tool import SYSTEM_MANAGED_TOOL_NAMES
-from contracts.constants.tool import TOOL_PARAM_CONSTRAINT_KEYS, TOOL_PARAM_CONSTRAINT_RULES
+from contracts.constants.constants import SYSTEM_MANAGED_TOOL_NAMES
+from contracts.constants.constants import TOOL_PARAM_CONSTRAINT_KEYS, TOOL_PARAM_CONSTRAINT_RULES
 from management.db.client import minio_client
 from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names
 from management.db.tool.outer_api import delete_openapi_service as db_delete_openapi_service

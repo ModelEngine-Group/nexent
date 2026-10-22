@@ -21,9 +21,9 @@ from management.db.agent.repository import query_all_agent_info_by_tenant_id, de
 from management.db.mcp.remote import get_mcp_records_by_tenant, delete_mcp_record_by_name_and_url
 from management.db.identity.invitation import query_invitations_by_tenant, remove_invitation
 from management.db.tool.repository import delete_tools_by_agent_id
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
-from consts.const import CONTAINER_SKILLS_PATH, IS_SPEED_MODE, ENABLE_AGENT_WORKBENCH
-from contracts.constants.configuration import DEFAULT_GROUP_ID, TENANT_ID, TENANT_NAME
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+from contracts.constants.environment import CONTAINER_SKILLS_PATH, IS_SPEED_MODE, ENABLE_AGENT_WORKBENCH
+from contracts.constants.constants import DEFAULT_GROUP_ID, TENANT_ID, TENANT_NAME
 from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, UserRegistrationException, ValidationError
 from management.services.skill.transfer import install_skills_from_zip_for_tenant
 from management.services.agent.system import (

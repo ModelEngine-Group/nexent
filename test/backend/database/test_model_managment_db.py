@@ -9,7 +9,7 @@ from types import SimpleNamespace
 # Mock consts module first to avoid ModuleNotFoundError during module import
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
-# Set required constants on consts.const for tests
+# Set required constants on contracts.constants.environment for tests
 consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
 consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
 consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
@@ -26,7 +26,7 @@ consts_mock.const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 
 # Register mocked consts module in sys.modules
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 install_business_contract_stubs(consts_mock.model)
 
@@ -37,7 +37,7 @@ utils_mock.auth_utils.get_current_user_id = MagicMock(return_value=("test_user_i
 
 # Register mocked utils module in sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.

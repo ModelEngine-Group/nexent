@@ -17,7 +17,7 @@ from nexent.core.models.capacity_budget import (
 from nexent.core.utils.observer import ProcessType
 from pydantic import ValidationError
 
-from consts.const import TOKEN
+from contracts.constants.environment import TOKEN
 from contracts.conversation import HistoryItem
 from contracts.agent import NL2AgentRunRequest
 from services.nl2agent_service import (

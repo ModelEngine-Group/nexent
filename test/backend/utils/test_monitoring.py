@@ -11,7 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-fake_consts = types.ModuleType("consts.const")
+fake_consts = types.ModuleType("contracts.constants.environment")
 for name, value in {
     "ENABLE_TELEMETRY": False,
     "MONITORING_PROVIDER": "",
@@ -39,7 +39,7 @@ for name, value in {
 fake_consts_package = types.ModuleType("consts")
 fake_consts_package.const = fake_consts
 sys.modules.setdefault("consts", fake_consts_package)
-sys.modules.setdefault("consts.const", fake_consts)
+sys.modules.setdefault("contracts.constants.environment", fake_consts)
 
 from infrastructure.observability.bootstrap import monitoring_manager
 
@@ -255,7 +255,7 @@ class TestMonitoringUtilsModule:
         import importlib
         from infrastructure.observability import bootstrap as monitoring_module
 
-        backend_consts = types.ModuleType("backend.consts.const")
+        backend_consts = types.ModuleType("backend.contracts.constants.environment")
         for name, value in {
             "ENABLE_TELEMETRY": False,
             "MONITORING_PROVIDER": "",
@@ -281,9 +281,9 @@ class TestMonitoringUtilsModule:
             setattr(backend_consts, name, value)
 
         monkeypatch.delitem(sys.modules, "consts", raising=False)
-        monkeypatch.delitem(sys.modules, "consts.const", raising=False)
+        monkeypatch.delitem(sys.modules, "contracts.constants.environment", raising=False)
         monkeypatch.setitem(sys.modules, "consts", types.ModuleType("consts"))
-        monkeypatch.setitem(sys.modules, "backend.consts.const", backend_consts)
+        monkeypatch.setitem(sys.modules, "backend.contracts.constants.environment", backend_consts)
 
         reloaded_module = importlib.reload(monitoring_module)
 

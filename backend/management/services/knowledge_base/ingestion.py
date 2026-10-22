@@ -6,7 +6,7 @@ import logging
 from typing import List
 
 import httpx
-from consts.const import DATA_PROCESS_SERVICE
+from contracts.constants.environment import DATA_PROCESS_SERVICE
 from contracts.knowledge import ProcessParams
 from management.db.knowledge_base.repository import get_knowledge_record
 from infrastructure.ingestion.errors import classify_ingestion_exception

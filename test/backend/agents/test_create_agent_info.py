@@ -82,7 +82,7 @@ consts_model_module.HistoryItem = HistoryItem
 consts_model_module.AgentToolParamsRequest = MockAgentToolParamsRequest
 consts_model_module.ToolParamsRequest = MockToolParamsRequest
 install_business_contract_stubs(consts_model_module)
-_catalog_stub = types.ModuleType("contracts.constants.model")
+_catalog_stub = types.ModuleType("contracts.constants.constants")
 _catalog_stub.CATALOG = {}
 install_shared_contract_stub(_catalog_stub, 'model_catalog')
 
@@ -101,7 +101,7 @@ consts_exceptions_module.NotFoundException = NotFoundException
 consts_exceptions_module.ToolExecutionException = ToolExecutionException
 install_shared_contract_stub(consts_exceptions_module, 'exceptions')
 
-consts_tool_labels_module = types.ModuleType("contracts.constants.tool")
+consts_tool_labels_module = types.ModuleType("contracts.constants.constants")
 consts_tool_labels_module.SYSTEM_MANAGED_TOOL_NAMES = frozenset({
     "store_memory",
     "search_memory",
@@ -120,7 +120,7 @@ if consts_module:
     setattr(
         consts_module,
         "capability_profiles",
-        sys.modules["contracts.constants.model"],
+        sys.modules["contracts.constants.constants"],
     )
 
 # Also add model to consts module attributes (with AgentToolParamsRequest and ToolParamsRequest)
@@ -172,7 +172,7 @@ utils_mock.context_utils.build_context_inputs = MagicMock(return_value=[])
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 sys.modules['management.services.agent.context'] = utils_mock.context_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
@@ -681,7 +681,7 @@ ValidationError = sys.modules["contracts.errors.exceptions"].ValidationError
 ToolParamsRequest = sys.modules["contracts.tool"].ToolParamsRequest
 
 # Import constants for testing
-from contracts.constants.model import MODEL_CONFIG_MAPPING
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
 
 
 class TestResolveInputBudget:
@@ -893,7 +893,7 @@ class TestGetSkillScriptTools:
     def test_get_skill_script_tools_success(self):
         """UT-BE-WMA-019: standard runtime injects upload/download helpers."""
         mock_tool_config.reset_mock()
-        with patch('consts.const.CONTAINER_SKILLS_PATH', "/container/skills"):
+        with patch('contracts.constants.environment.CONTAINER_SKILLS_PATH', "/container/skills"):
             result = _get_skill_script_tools(
                 agent_id=1,
                 tenant_id="tenant_1",
@@ -928,7 +928,7 @@ class TestGetSkillScriptTools:
     def test_get_skill_script_tools_metadata_context(self):
         """Test that skill context metadata is correctly set for all tools"""
         mock_tool_config.reset_mock()
-        with patch('consts.const.CONTAINER_SKILLS_PATH', "/skills"):
+        with patch('contracts.constants.environment.CONTAINER_SKILLS_PATH', "/skills"):
             result = _get_skill_script_tools(
                 agent_id=123,
                 tenant_id="test_tenant",
@@ -950,7 +950,7 @@ class TestGetSkillScriptTools:
     def test_get_skill_script_tools_input_schemas(self):
         """Test that input schemas are correctly defined for all tools"""
         mock_tool_config.reset_mock()
-        with patch('consts.const.CONTAINER_SKILLS_PATH', "/skills"):
+        with patch('contracts.constants.environment.CONTAINER_SKILLS_PATH', "/skills"):
             result = _get_skill_script_tools(
                 agent_id=1,
                 tenant_id="tenant_1",
@@ -974,7 +974,7 @@ class TestGetSkillScriptTools:
     def test_get_skill_script_tools_output_types(self):
         """Test that output types are correctly set for all tools"""
         mock_tool_config.reset_mock()
-        with patch('consts.const.CONTAINER_SKILLS_PATH', "/skills"):
+        with patch('contracts.constants.environment.CONTAINER_SKILLS_PATH', "/skills"):
             result = _get_skill_script_tools(
                 agent_id=1,
                 tenant_id="tenant_1",
@@ -988,7 +988,7 @@ class TestGetSkillScriptTools:
     def test_get_skill_script_tools_source_and_usage(self):
         """Test that source and usage are correctly set for all tools"""
         mock_tool_config.reset_mock()
-        with patch('consts.const.CONTAINER_SKILLS_PATH', "/skills"):
+        with patch('contracts.constants.environment.CONTAINER_SKILLS_PATH', "/skills"):
             result = _get_skill_script_tools(
                 agent_id=1,
                 tenant_id="tenant_1",
@@ -1003,7 +1003,7 @@ class TestGetSkillScriptTools:
     def test_get_skill_script_tools_tool_descriptions(self):
         """Test that tool descriptions are meaningful"""
         mock_tool_config.reset_mock()
-        with patch('consts.const.CONTAINER_SKILLS_PATH', "/skills"):
+        with patch('contracts.constants.environment.CONTAINER_SKILLS_PATH', "/skills"):
             result = _get_skill_script_tools(
                 agent_id=1,
                 tenant_id="tenant_1",

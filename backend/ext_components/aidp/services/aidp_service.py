@@ -14,7 +14,7 @@ from urllib.parse import quote, urljoin
 import httpx
 from nexent.utils.http_client_manager import http_client_manager
 
-from consts.const import AIDP_TENANT_ID
+from contracts.constants.environment import AIDP_TENANT_ID
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from management.db.agent.repository import query_knowledge_binding_agents

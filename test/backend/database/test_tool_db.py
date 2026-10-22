@@ -23,7 +23,7 @@ def _default_to_ordinary_agent(monkeypatch, _isolated_imports):
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
-# Set up required constants in consts.const
+# Set up required constants in contracts.constants.environment
 consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
 consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
 consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
@@ -58,18 +58,18 @@ class MockModelModule:
 
 consts_mock.model = MockModelModule()
 
-# Mock contracts.constants.tool with BUILTIN_LABEL_MAP
+# Mock contracts.constants.constants with BUILTIN_LABEL_MAP
 tool_labels_mock = MagicMock()
 tool_labels_mock.BUILTIN_LABEL_MAP = {}
 consts_mock.tool_labels = tool_labels_mock
 
 # consts_mock must have __path__ to be recognized as a package
-# so that `from contracts.constants.tool import ...` works
+# so that `from contracts.constants.constants import ...` works
 consts_mock.__path__ = []
 
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 install_business_contract_stubs(consts_mock.model)
 install_shared_contract_stub(tool_labels_mock, 'tool_labels')
@@ -82,7 +82,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -133,7 +133,7 @@ utils_mock.tool_utils = tool_utils_mock
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 sys.modules['management.services.tool.catalog'] = tool_utils_mock
 
 # Now we can safely import the module being tested

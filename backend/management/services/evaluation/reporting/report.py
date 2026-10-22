@@ -22,7 +22,7 @@ from reportlab.platypus import (
     TableStyle,
 )
 
-from contracts.constants.evaluation import get_report_labels
+from contracts.evaluation import get_report_labels
 from management.db.evaluation.runs import get_agent_evaluation
 from management.db.evaluation.annotation import list_annotation_schemas, list_annotations_by_evaluation_id
 from management.db.evaluation.evaluator import get_evaluator

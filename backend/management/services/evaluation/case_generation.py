@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from contracts.errors.codes import ErrorCode
-from contracts.constants.evaluation import MAX_TURNS_PER_SESSION
+from contracts.constants.constants import MAX_TURNS_PER_SESSION
 from contracts.errors.exceptions import AppException
 from management.services.evaluation.common import (
     _QUERY_FORMAT_ERR_MSG,

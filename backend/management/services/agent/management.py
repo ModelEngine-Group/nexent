@@ -11,9 +11,9 @@ from typing import (
     Optional,
 )
 
-from contracts.constants.agent import STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED
-from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
-from contracts.constants.tool import TOOL_TYPE_MAPPING
+from contracts.constants.constants import STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
+from contracts.constants.constants import TOOL_TYPE_MAPPING
 from contracts.errors.exceptions import ForbiddenError
 from contracts.tool import ToolSourceEnum
 from management.db.skill import repository as skill_db

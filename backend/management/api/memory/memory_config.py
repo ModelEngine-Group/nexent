@@ -28,7 +28,7 @@ from http import HTTPStatus
 from fastapi import APIRouter, Body, Header, Path, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from contracts.constants.memory import MEMORY_AGENT_SHARE_KEY, MEMORY_SWITCH_KEY, DREAMING_SWITCH_KEY, EXTERNAL_PROVIDER_TOP_K_KEY, BOOLEAN_TRUE_VALUES
+from contracts.constants.constants import MEMORY_AGENT_SHARE_KEY, MEMORY_SWITCH_KEY, DREAMING_SWITCH_KEY, EXTERNAL_PROVIDER_TOP_K_KEY, BOOLEAN_TRUE_VALUES
 from contracts.memory import MemoryAgentShareMode
 from contracts.errors.exceptions import UnauthorizedError
 from management.services.configuration.user.memory import (
@@ -48,7 +48,7 @@ from management.services.memory.records import (
     is_tenant_embedding_configured,
 )
 from management.services.monitor.audit import record_security_event
-from gateway.authentication.normal import get_current_user_id
+from gateway.authentication.auth import get_current_user_id
 
 logger = logging.getLogger("memory_config_app")
 logger.setLevel(logging.INFO)

@@ -4,9 +4,9 @@ import inspect
 import json
 from typing import Any, Dict, List, Optional
 
-from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
 from contracts.tool import ToolInfo, ToolSourceEnum
-from contracts.constants.tool import TOOL_PARAM_CONSTRAINT_KEYS
+from contracts.constants.constants import TOOL_PARAM_CONSTRAINT_KEYS
 from management.db.mcp.remote import get_mcp_records_by_tenant
 from management.db.tool.repository import query_tool_instances_by_id, query_tools_by_ids
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
@@ -410,7 +410,7 @@ from contextlib import AsyncExitStack
 from typing import Any, Dict, Optional
 
 import jsonref
-from consts.const import MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, TOKEN
+from contracts.constants.environment import MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, TOKEN
 from contracts.errors.exceptions import MCPConnectionError
 from contracts.tool import ToolInfo, ToolSourceEnum
 from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url

@@ -375,7 +375,7 @@ class PlatformCapacityPolicy:
                 usage_pct = round(actual_bytes / hard_limit_bytes * 100, 2)
 
             # Try to get tenant name from config
-            from contracts.constants.configuration import TENANT_NAME
+            from contracts.constants.constants import TENANT_NAME
             from management.db.configuration.tenant import get_single_config_info as gsci
 
             name_record = gsci(tid, TENANT_NAME)

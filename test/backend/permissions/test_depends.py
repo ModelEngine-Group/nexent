@@ -2,7 +2,7 @@
 
 """Tests for FastAPI authentication and permission dependencies."""
 
-import gateway.authentication.normal as depends_dependencies
+import gateway.authentication.auth as depends_dependencies
 import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
@@ -12,7 +12,7 @@ import permissions.depends as depends
 def test_authenticate_uses_authorization_header(mocker, monkeypatch):
     monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", False)
     mocker.patch(
-        "gateway.authentication.normal.get_current_user_context",
+        "gateway.authentication.auth.get_current_user_context",
         return_value=("user-1", "tenant-1", "USER"),
     )
 
@@ -26,7 +26,7 @@ def test_authenticate_uses_authorization_header(mocker, monkeypatch):
 def test_authenticate_uses_bearer_credentials_when_header_is_missing(mocker, monkeypatch):
     monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", False)
     get_context = mocker.patch(
-        "gateway.authentication.normal.get_current_user_context",
+        "gateway.authentication.auth.get_current_user_context",
         return_value=("user-1", "tenant-1", "DEV"),
     )
     credentials = HTTPAuthorizationCredentials(
@@ -51,7 +51,7 @@ def test_authenticate_rejects_missing_token_outside_speed_mode(monkeypatch):
 def test_authenticate_allows_missing_token_in_speed_mode(mocker, monkeypatch):
     monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", True)
     get_context = mocker.patch(
-        "gateway.authentication.normal.get_current_user_context",
+        "gateway.authentication.auth.get_current_user_context",
         return_value=("speed-user", "tenant-1", "SPEED"),
     )
 

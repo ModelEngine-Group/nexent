@@ -8,7 +8,7 @@ decision matrix stays easy to unit test.
 
 from typing import List, Optional
 
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_PRIVATE, PERMISSION_READ
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_PRIVATE, PERMISSION_READ
 from permissions.models import Resource, ResourceAccess
 
 

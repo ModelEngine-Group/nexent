@@ -17,7 +17,7 @@ from management.api.conversation.workbench_pins import router as workbench_pins_
 from management.api.conversation.conversation_share import router as conversation_share_router
 from runtime.api.file.upload import file_management_runtime_router as file_management_router
 from runtime.api.skill.creation import skill_creator_router
-from consts.const import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+from contracts.constants.environment import RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from middleware.exception_handler import ExceptionHandlerMiddleware
 from nexent.core.concurrency import (
     ManagedTaskSpec,

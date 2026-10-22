@@ -21,7 +21,7 @@ from management.services.permission.identity.invitations import (
     get_invitations_list, delete_invitation_code
 )
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from gateway.authentication.normal import get_current_user_id
+from gateway.authentication.auth import get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/invitations", tags=["invitations"])

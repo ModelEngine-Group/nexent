@@ -20,8 +20,8 @@ class MemoryAgentShareMode(str, Enum):
 consts_model.MemoryAgentShareMode = MemoryAgentShareMode
 install_business_contract_stubs(consts_model)
 
-# Stub consts.const values used by service
-consts_const = types.ModuleType("consts.const")
+# Stub contracts.constants.environment values used by service
+consts_const = types.ModuleType("contracts.constants.environment")
 consts_const.MEMORY_SWITCH_KEY = "MEMORY_SWITCH"
 consts_const.DREAMING_SWITCH_KEY = "DREAMING_SWITCH"
 consts_const.MEMORY_AGENT_SHARE_KEY = "MEMORY_AGENT_SHARE"
@@ -32,7 +32,7 @@ consts_const.DEFAULT_DREAMING_SWITCH_KEY = "Y"
 consts_const.DEFAULT_MEMORY_AGENT_SHARE_KEY = MemoryAgentShareMode.NEVER.value
 consts_const.EXTERNAL_PROVIDER_TOP_K_KEY = "EXTERNAL_PROVIDER_TOP_K"
 consts_const.DEFAULT_EXTERNAL_PROVIDER_TOP_K = 5
-sys.modules["consts.const"] = consts_const
+sys.modules["contracts.constants.environment"] = consts_const
 install_business_constant_stubs(consts_const)
 
 # Stub nexent.core.agents.agent_model for MemoryContext and MemoryUserConfig

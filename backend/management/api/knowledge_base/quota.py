@@ -5,8 +5,8 @@ Quota management API endpoints.
 Provides tenant-level and platform-level quota configuration and usage tracking.
 """
 
-from contracts.constants.knowledge import PERSONAL_KB_CAPACITY_MANAGE_PERMISSION, PERSONAL_KB_CAPACITY_READ_PERMISSION, QUOTA_PAYLOAD_DESCRIPTION, TARGET_TENANT_ID_DESCRIPTION
-from contracts.constants.knowledge import PERSONAL_KB_CAPACITY_MANAGE_PERMISSION, PERSONAL_KB_CAPACITY_READ_PERMISSION, QUOTA_PAYLOAD_DESCRIPTION, TARGET_TENANT_ID_DESCRIPTION
+from contracts.constants.constants import PERSONAL_KB_CAPACITY_MANAGE_PERMISSION, PERSONAL_KB_CAPACITY_READ_PERMISSION, QUOTA_PAYLOAD_DESCRIPTION, TARGET_TENANT_ID_DESCRIPTION
+from contracts.constants.constants import PERSONAL_KB_CAPACITY_MANAGE_PERMISSION, PERSONAL_KB_CAPACITY_READ_PERMISSION, QUOTA_PAYLOAD_DESCRIPTION, TARGET_TENANT_ID_DESCRIPTION
 import logging
 from http import HTTPStatus
 from typing import Any, Dict, Optional
@@ -14,15 +14,15 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
 
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import AppException, PlatformQuotaConflictError, TokenExpiredError
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from gateway.authentication.normal import authenticate
+from gateway.authentication.auth import authenticate
 from permissions.depends import require
 from permissions.models import CurrentUser
 from permissions.tenant_scope import resolve_personal_target_tenant
 from management.services.knowledge_base.quota import QuotaService
-from gateway.authentication.normal import get_current_user_id
+from gateway.authentication.auth import get_current_user_id
 from infrastructure.formatting import bytes_to_readable
 
 logger = logging.getLogger(__name__)

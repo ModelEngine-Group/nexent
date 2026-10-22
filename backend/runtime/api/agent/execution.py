@@ -6,7 +6,7 @@ from http import HTTPStatus
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from starlette.responses import JSONResponse, StreamingResponse
-from consts.const import ENABLE_AGENT_WORKBENCH
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import AgentRequest, NL2AgentRunRequest
 from contracts.errors.exceptions import ForbiddenError, AppException, UnauthorizedError, ValidationError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, WorkbenchConfigVersionConflict, WorkbenchError
 from permissions.depends import require
@@ -16,8 +16,8 @@ from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from contracts.errors.exceptions import RunModelControlsError
 from management.services.conversation.creation_history import prepare_creation_history, persist_creation_stream
-from gateway.authentication.normal import get_current_user_info, get_current_user_id
-from gateway.authentication.normal import verify_internal_runtime_jwt
+from gateway.authentication.auth import get_current_user_info, get_current_user_id
+from gateway.authentication.auth import verify_internal_runtime_jwt
 
 agent_runtime_router = APIRouter(prefix="/agent")
 

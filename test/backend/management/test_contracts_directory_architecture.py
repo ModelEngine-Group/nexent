@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Business ownership and import boundaries of shared backend contracts."""
+import management.services.model.catalog as _relocated_management_services_model_catalog
 
 import ast
 import os
@@ -27,12 +28,9 @@ def test_a2a_settings_keep_distinct_public_validation_rules():
 def test_constant_modules_import_without_loading_deployment_or_database_clients():
     program = """
 import importlib
-import pkgutil
 import sys
-from contracts import constants
-for module in pkgutil.iter_modules(constants.__path__):
-    importlib.import_module('contracts.constants.' + module.name)
-assert 'consts.const' not in sys.modules
+importlib.import_module('contracts.constants.constants')
+assert 'contracts.constants.environment' not in sys.modules
 assert 'management.db.client' not in sys.modules
 assert 'nexent.core.models.capacity_resolver' not in sys.modules
 """
@@ -53,11 +51,11 @@ assert 'nexent.core.models.capacity_resolver' not in sys.modules
 
 
 def test_typed_catalog_keeps_one_shared_sdk_profile_mapping():
-    from contracts.constants import model
+    from contracts.constants import constants as model
     from nexent.core.models.capacity_resolver import CapabilityProfile
 
-    catalog = model.CATALOG
-    assert catalog is model.CATALOG
+    catalog = _relocated_management_services_model_catalog.CATALOG
+    assert catalog is _relocated_management_services_model_catalog.CATALOG
     assert catalog
     assert all(isinstance(profile, CapabilityProfile) for profile in catalog.values())
 
@@ -74,6 +72,7 @@ def test_contracts_use_business_files_and_two_shared_subdirectories():
         "agent",
         "authentication",
         "automation",
+        "configuration",
         "conversation",
         "evaluation",
         "file",
@@ -97,7 +96,32 @@ def test_constants_have_no_environment_or_implementation_dependencies():
                     ("consts", "management", "infrastructure", "gateway")
                 ), path
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                assert node.func.attr not in {"getenv", "load_dotenv"}, path
+                if node.func.attr in {"getenv", "load_dotenv"}:
+                    assert path.name == "environment.py", path
+
+
+def test_two_constant_files_use_one_assignment_per_physical_line():
+    directory = CONTRACTS / "constants"
+    assert {path.name for path in directory.glob("*.py")} == {
+        "__init__.py", "constants.py", "environment.py"
+    }
+    for filename in ("constants.py", "environment.py"):
+        path = directory / filename
+        source = path.read_text(encoding="utf-8")
+        statements = ast.parse(source).body
+        assignment_lines = []
+        for node in statements:
+            assert isinstance(node, (ast.Import, ast.ImportFrom, ast.Assign, ast.AnnAssign)), (filename, node.lineno)
+            assert node.lineno == node.end_lineno, (filename, node.lineno)
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                assignment_lines.append(node.lineno)
+        assert len(assignment_lines) == len(set(assignment_lines))
+        lines = source.splitlines()
+        for position, line in enumerate(lines):
+            if line.strip():
+                continue
+            following = next((item for item in lines[position + 1:] if item.strip()), None)
+            assert following is None or following.startswith("#"), (filename, position + 1)
 
 
 def test_error_definitions_have_one_canonical_directory():

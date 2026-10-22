@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.exc import IntegrityError
 
-from consts.const import AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS, AGENT_AUTOMATION_MIN_INTERVAL_SECONDS
+from contracts.constants.environment import AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS, AGENT_AUTOMATION_MIN_INTERVAL_SECONDS
 from management.db.automation import repository as agent_automation_db
 from management.db.conversation.repository import get_conversation
 from management.services.conversation.service import (

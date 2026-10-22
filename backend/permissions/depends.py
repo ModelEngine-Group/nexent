@@ -3,11 +3,11 @@
 
 from typing import Callable
 
-from consts.const import IS_SPEED_MODE
+from contracts.constants.environment import IS_SPEED_MODE
 from fastapi import Depends, HTTPException
 from permissions.models import CurrentUser
 from permissions.rbac import has_permission
-from gateway.authentication.normal import authenticate
+from gateway.authentication.auth import authenticate
 
 
 

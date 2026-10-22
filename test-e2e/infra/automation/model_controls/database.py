@@ -11,7 +11,7 @@ from sqlalchemy import event
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 from agents import create_agent_info
-from contracts.constants.model import MODEL_CONFIG_MAPPING
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.db import client as client
 from management.db import models as db_models
 from model_controls.api import CAPABILITY, BUDGET

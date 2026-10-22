@@ -21,6 +21,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+from test.common.contract_stubs import install_shared_contract_stub
 from reportlab.lib.colors import HexColor
 from reportlab.platypus import HRFlowable, Image, PageBreak, Paragraph, Spacer, Table
 
@@ -36,7 +37,7 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "backend")):
 MODULE_UNDER_TEST = "management.services.evaluation.reporting.report"
 
 _STUB_SLOTS = [
-    ("contracts.constants.evaluation", "get_report_labels"),
+    ("contracts.evaluation", "get_report_labels"),
     ("management.db.evaluation.runs", "get_agent_evaluation"),
     ("management.db.evaluation.annotation", "list_annotation_schemas"),
     ("management.db.evaluation.annotation", "list_annotations_by_evaluation_id"),
@@ -74,10 +75,8 @@ def _mk_mod(name: str, **attrs) -> types.ModuleType:
 
 def _install_stubs():
     _consts = _register_package("consts")
-    _consts.evaluation_report_labels = _mk_mod(
-        "contracts.constants.evaluation",
-        get_report_labels=MagicMock(name="get_report_labels"),
-    )
+    _consts.evaluation_report_labels = types.SimpleNamespace(get_report_labels=MagicMock(name="get_report_labels"))
+    install_shared_contract_stub(_consts.evaluation_report_labels, {"contracts.evaluation": {"get_report_labels": "get_report_labels"}})
     _db = _register_package("database")
     _db.agent_evaluation_db = _mk_mod(
         "management.db.evaluation.runs",

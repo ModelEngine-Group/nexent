@@ -78,10 +78,10 @@ consts_mock.const.POSTGRES_DB = 'test_db'
 consts_mock.const.POSTGRES_PORT = '5432'
 consts_mock.const.DEFAULT_TENANT_ID = 'default_tenant'
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
-# Mock contracts.constants.knowledge module
+# Mock contracts.constants.constants module
 consts_scheduler_mock = MagicMock()
 consts_scheduler_mock.VALID_SUMMARY_FREQUENCIES = ["1h", "3h", "6h", "1d", "1w", None]
 install_shared_contract_stub(consts_scheduler_mock, 'scheduler')
@@ -109,7 +109,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 utils_mock.str_utils = MagicMock()
 utils_mock.str_utils.convert_list_to_string = MagicMock(side_effect=lambda x: ",".join(str(i) for i in x) if x else "")
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 sys.modules['management.utils.serialization'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even

@@ -7,7 +7,7 @@ import socket
 import tempfile
 from typing import Awaitable, Callable
 
-from consts.const import NEXENT_MCP_DOCKER_IMAGE
+from contracts.constants.environment import NEXENT_MCP_DOCKER_IMAGE
 from contracts.errors.exceptions import MCPConnectionError, McpNameConflictError, MCPNameIllegal, McpPortConflictError, McpValidationError
 from contracts.tool import MCPConfigRequest
 from management.db.mcp.remote import check_mcp_name_exists

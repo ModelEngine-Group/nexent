@@ -172,9 +172,9 @@ sys.modules["management.services.agent.service"] = _agent_service_mock
 _notification_service_mock = MagicMock()
 sys.modules["management.services.notification.service"] = _notification_service_mock
 
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import UnauthorizedError
-from contracts.constants.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 
 from management.services.repository.agent import listing as ars
 
@@ -1802,7 +1802,7 @@ def test_delete_official_agent_removes_bundle_sources_and_listing(tmp_path):
         "agent_info_json": {"agent_info": {"10": {}, "child": {}, "11": {}}},
     }
 
-    with patch("consts.const.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch_import_object_context(
+    with patch("contracts.constants.environment.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch_import_object_context(
         ars, "get_agent_repository_by_id", return_value=record
     ), patch_import_object_context(ars, "delete_agent_by_id") as mock_delete_agent, patch_import_object_context(
         ars, "soft_delete_agent_repository_record", return_value=1
@@ -1855,7 +1855,7 @@ def test_delete_official_agent_rejects_already_deleted_listing(tmp_path):
         "name": "medical-assistant",
     }
 
-    with patch("consts.const.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch_import_object_context(
+    with patch("contracts.constants.environment.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch_import_object_context(
         ars, "get_agent_repository_by_id", return_value=record
     ), patch_import_object_context(
         ars, "soft_delete_agent_repository_record", return_value=0

@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol, TypeVar
 
-from contracts.constants.identity import PERMISSION_EDIT, PERMISSION_READ
+from contracts.constants.constants import PERMISSION_EDIT, PERMISSION_READ
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.agent.catalog import get_agent_repository_by_id
 from management.db.knowledge_base.repository import get_knowledge_record
@@ -185,7 +185,7 @@ async def _resolve_provider_document(
         return None
 
     if normalized_provider == AIDP_DOCUMENT_PROVIDER:
-        from consts.const import AIDP_API_KEY, AIDP_SERVER_URL
+        from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL
         from ext_components.aidp.services.aidp_service import list_aidp_docs_impl
 
         page = 1

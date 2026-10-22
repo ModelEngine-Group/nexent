@@ -3,7 +3,7 @@
 
 Directly invoke each async endpoint function with the FastAPI
 ``Query/Header/Body`` defaults replaced by explicit values, patching the
-13 ``management.services.evaluation.evaluators`` impls and ``gateway.authentication.normal`` identity
+13 ``management.services.evaluation.evaluators`` impls and ``gateway.authentication.auth`` identity
 resolution.  The heavy ``management.services.evaluation.evaluators`` module is stubbed at
 ``sys.modules`` level (idempotent ``_register_package`` registration) so the
 app module can be loaded with ``spec_from_file_location`` without pulling in
@@ -104,9 +104,9 @@ def _install_stubs():
     _ev_mod = mk_mod("management.services.evaluation.evaluators", **{n: MagicMock(name=n) for n in _IMPL_NAMES})
     _svc_pkg.evaluator_service = _ev_mod
 
-    # ---- gateway.authentication.normal ------------------------------------------------
+    # ---- gateway.authentication.auth ------------------------------------------------
     _utils_pkg = _register_package("utils")
-    _au_mod = mk_mod("gateway.authentication.normal", get_current_user_id=MagicMock(name="get_current_user_id"))
+    _au_mod = mk_mod("gateway.authentication.auth", get_current_user_id=MagicMock(name="get_current_user_id"))
     _utils_pkg.auth_utils = _au_mod
     return _ErrorCode, _AppException, _UnauthorizedError
 
@@ -130,7 +130,7 @@ def bundle():
     _svc_mod = sys.modules["management.services.evaluation.evaluators"]
     for n, m in impls.items():
         setattr(_svc_mod, n, m)
-    _au_mod = sys.modules["gateway.authentication.normal"]
+    _au_mod = sys.modules["gateway.authentication.auth"]
     _au_mod.get_current_user_id = auth
 
     if MODULE_UNDER_TEST in sys.modules:

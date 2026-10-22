@@ -188,11 +188,11 @@ sys.modules["services"] = services_pkg
 # Stub consts
 # ---------------------------------------------------------------------------
 consts_pkg = types.ModuleType("consts")
-consts_mod = types.ModuleType("consts.const")
+consts_mod = types.ModuleType("contracts.constants.environment")
 consts_mod.ES_API_KEY = ""
 consts_mod.ES_HOST = ""
 sys.modules["consts"] = consts_pkg
-sys.modules["consts.const"] = consts_mod
+sys.modules["contracts.constants.environment"] = consts_mod
 install_business_constant_stubs(consts_mod)
 
 

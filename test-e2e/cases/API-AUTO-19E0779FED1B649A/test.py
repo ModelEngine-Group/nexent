@@ -14,7 +14,7 @@ _ORDINARY_LOCAL_TOOL = 'read_file'
 @pytest.mark.stage('D2')
 def test_tool_list_is_user_selectable_deployment_control(monkeypatch):
     from management.services.tool import configuration as svc
-    import consts.const as const
+    import contracts.constants.environment as const
 
     selectable = svc._get_user_selectability
 

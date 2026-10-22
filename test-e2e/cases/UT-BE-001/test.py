@@ -9,7 +9,7 @@ boundary; assertions describe user-visible policy, not implementation calls.
 
 from __future__ import annotations
 
-import gateway.authentication.normal as depends_dependencies
+import gateway.authentication.auth as depends_dependencies
 from types import SimpleNamespace
 
 import pytest

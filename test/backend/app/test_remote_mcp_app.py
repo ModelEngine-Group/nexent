@@ -52,7 +52,7 @@ patch('management.db.client.MinioClient', return_value=minio_mock).start()
 patch('management.db.client.MinioClient', return_value=minio_mock).start()
 patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
-patch('consts.const.ENABLE_UPLOAD_IMAGE', True).start()
+patch('contracts.constants.environment.ENABLE_UPLOAD_IMAGE', True).start()
 patch('management.services.mcp.containers.create_container_client_from_config').start()
 patch('management.services.mcp.containers.DockerContainerConfig').start()
 

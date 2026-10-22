@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from contracts.constants.evaluation import EvalCaseStatus, EvalRunStatus
+from contracts.evaluation import EvalCaseStatus, EvalRunStatus
 from management.db.evaluation.runs import fail_interrupted_no_set_runs_on_startup, list_dispatchable_pending_runs
 from management.db.client import get_db_session
 from management.db.models import AgentEvaluation, AgentEvaluationCase

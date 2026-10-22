@@ -25,7 +25,7 @@ consts_mock.const.S3_URL_PREFIX = "s3://"
 # Environment variables are now configured in conftest.py
 
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 # Mock boto3

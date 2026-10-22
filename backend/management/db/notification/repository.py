@@ -10,7 +10,7 @@ and one row per resolved receiver is written to notification_receiver_t.
 import logging
 from typing import Any, Dict, List, Optional
 
-from contracts.constants.notification import VALID_EVENT_TYPES, VALID_RESOURCE_TYPES, VALID_NOTIFICATION_SCOPES, TENANT_REQUIRED_SCOPES, SCOPE_SU, SCOPE_TENANT, SCOPE_TENANT_ADMIN, SCOPE_TENANT_USER, SCOPE_USER, SU_ROLES, TENANT_ADMIN_ROLES, TENANT_USER_ROLES
+from contracts.constants.constants import VALID_EVENT_TYPES, VALID_RESOURCE_TYPES, VALID_NOTIFICATION_SCOPES, TENANT_REQUIRED_SCOPES, SCOPE_SU, SCOPE_TENANT, SCOPE_TENANT_ADMIN, SCOPE_TENANT_USER, SCOPE_USER, SU_ROLES, TENANT_ADMIN_ROLES, TENANT_USER_ROLES
 from management.db.client import get_db_session
 from management.db.models import Notification, NotificationReceiver, UserTenant
 

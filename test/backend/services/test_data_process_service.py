@@ -45,14 +45,14 @@ sys.modules['nexent.data_process'] = MagicMock()
 sys.modules['nexent.data_process.core'] = MagicMock()
 sys.modules['nexent.data_process.core'].DataProcessCore = MagicMock()
 
-# Mock constants from consts.const
+# Mock constants from contracts.constants.environment
 mock_const = MagicMock()
 mock_const.CLIP_MODEL_PATH = "mock_clip_path"
 mock_const.IMAGE_FILTER = True
 mock_const.REDIS_BACKEND_URL = "redis://mock:6379/0"
 mock_const.REDIS_URL = "redis://mock:6379/0"
 mock_const.MAX_CONCURRENT_CONVERSIONS = 3
-sys.modules['consts.const'] = mock_const
+sys.modules['contracts.constants.environment'] = mock_const
 install_business_constant_stubs(mock_const)
 
 # Stub torch (data_process_service.py imports it unconditionally).

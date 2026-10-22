@@ -114,14 +114,14 @@ nexent_skills_mock.SkillManager = MockSkillManager
 consts_mock = types.ModuleType('consts')
 consts_exceptions_mock = types.ModuleType('contracts.errors.exceptions')
 consts_model_mock = types.ModuleType('contracts.agent')
-consts_const_mock = types.ModuleType('consts.const')
-consts_agent_mock = types.ModuleType('contracts.constants.agent')
+consts_const_mock = types.ModuleType('contracts.constants.environment')
+consts_agent_mock = types.ModuleType('contracts.constants.constants')
 consts_agent_mock.SAFE_AGENT_STREAM_ERROR_MESSAGE = "Agent execution failed. Please try again later."
 sys.modules['consts'] = consts_mock
 install_shared_contract_stub(consts_agent_mock, 'agent_constants')
 install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 install_business_contract_stubs(consts_model_mock)
-sys.modules['consts.const'] = consts_const_mock
+sys.modules['contracts.constants.environment'] = consts_const_mock
 install_business_constant_stubs(consts_const_mock)
 consts_const_mock.MODEL_CONFIG_MAPPING = {"llm": "llm_model"}
 consts_const_mock.APP_VERSION = "v2.0.2"
@@ -287,10 +287,10 @@ services_asset_owner_visibility_mock.can_view_skill = MagicMock(return_value=Tru
 # Mock utils
 utils_mock = types.ModuleType('utils')
 utils_mock.__path__ = []  # Empty __path__ to make it a namespace package
-utils_auth_utils_mock = types.ModuleType('gateway.authentication.normal')
+utils_auth_utils_mock = types.ModuleType('gateway.authentication.auth')
 utils_config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.normal'] = utils_auth_utils_mock
+sys.modules['gateway.authentication.auth'] = utils_auth_utils_mock
 sys.modules['management.services.configuration.tenant.settings'] = utils_config_utils_mock
 utils_auth_utils_mock.get_current_user_id = MagicMock(return_value=("user123", "tenant123"))
 utils_auth_utils_mock.get_current_user_info = MagicMock(return_value=("user123", "tenant123", "zh"))
@@ -338,7 +338,7 @@ nexent_storage_minio_config_mock.MinIOStorageConfig = MockMinIOStorageConfig
 
 # Now import the app module
 from management.api.skill import skill as skill_app
-from contracts.constants import skill as skill_app_management_skill_skill
+from contracts.constants import constants as skill_app_management_skill_skill
 from runtime.api.skill import creation as skill_app_creation
 
 

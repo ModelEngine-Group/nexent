@@ -84,7 +84,7 @@ def test_ac002_preview_key_matches_existing_contract(monkeypatch):
 
 @pytest.fixture
 def naming(monkeypatch):
-    dependency(monkeypatch, "consts.const", LANGUAGE={"ZH": "zh", "EN": "en"})
+    dependency(monkeypatch, "contracts.constants.environment", LANGUAGE={"ZH": "zh", "EN": "en"})
     dependency(monkeypatch, "management.db.agent.repository", query_all_agent_info_by_tenant_id=lambda tenant: [])
     dependency(monkeypatch, "management.services.model.invocation", call_llm_for_system_prompt=lambda **kw: "fresh")
     dependency(
@@ -226,7 +226,7 @@ def model_resolver(monkeypatch):
     status = types.SimpleNamespace(
         AVAILABLE=types.SimpleNamespace(value="available"), get_value=lambda value: value or "not_detected"
     )
-    dependency(monkeypatch, "contracts.constants.model", ModelConnectStatusEnum=status)
+    dependency(monkeypatch, "contracts.constants.constants", ModelConnectStatusEnum=status)
     dependency(
         monkeypatch, "management.db.model.repository",
         get_model_by_model_id=lambda *args: None, get_model_records=lambda *args: [],
@@ -291,7 +291,7 @@ def agent_reader(monkeypatch, model_resolver):
         monkeypatch, "management.db.tool.repository", search_tools_for_sub_agent=lambda **kwargs: [],
         check_tool_is_available=lambda ids: [True] * len(ids),
     )
-    load_source(monkeypatch, "backend/contracts/constants/agent.py", "contracts.constants.agent")
+    load_source(monkeypatch, "backend/contracts/constants/constants.py", "contracts.constants.constants")
     return load_source(monkeypatch, "backend/management/services/agent/read.py", "slimming_agent_reader")
 
 
@@ -342,7 +342,7 @@ def test_ac010_deleted_model_reason_is_added_once(agent_reader):
 
 
 def test_ac012_knowledge_list_merge_uses_one_compatible_executor(monkeypatch):
-    dependency(monkeypatch, "consts.const", PERMISSION_READ="READ_ONLY")
+    dependency(monkeypatch, "contracts.constants.environment", PERMISSION_READ="READ_ONLY")
     module = load_source(
         monkeypatch,
         "backend/management/services/knowledge_base/listing.py",
@@ -375,7 +375,7 @@ def test_ac012_knowledge_list_merge_uses_one_compatible_executor(monkeypatch):
 def test_ac012_permission_requirements_share_resolver(monkeypatch):
     dependency(
         monkeypatch,
-        "consts.const",
+        "contracts.constants.environment",
         ASSET_OWNER_TENANT_ID="asset",
         IS_SPEED_MODE=False,
         PERMISSION_EDIT="EDIT",

@@ -11,7 +11,7 @@ import asyncio
 from typing import Dict, List, Optional, AsyncGenerator
 
 from contracts.errors.exceptions import MCPConnectionError, MCPContainerError
-from consts.const import IS_DEPLOYED_BY_KUBERNETES, KUBERNETES_NAMESPACE
+from contracts.constants.environment import IS_DEPLOYED_BY_KUBERNETES, KUBERNETES_NAMESPACE
 from nexent.container import (
     DockerContainerConfig,
     KubernetesContainerConfig,

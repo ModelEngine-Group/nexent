@@ -165,7 +165,7 @@ def preflight_turn_controls(request, tenant_id: str, agent_record: dict | None =
         if configured:
             model_id = configured[0]
         else:
-            from contracts.constants.model import MODEL_CONFIG_MAPPING
+            from contracts.constants.constants import MODEL_CONFIG_MAPPING
             from management.services.configuration.tenant.settings import tenant_config_manager
             default_record = tenant_config_manager.get_model_config(MODEL_CONFIG_MAPPING["llm"], tenant_id)
             model_id = (default_record or {}).get("model_id")

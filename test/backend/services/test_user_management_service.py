@@ -41,7 +41,7 @@ from management.services.permission import asset_owner as asset_owner_visibility
 
 from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException, TenantResourceLimitError, ValidationError
 from contracts.errors.codes import ErrorCode
-from contracts.constants.identity import ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_TENANT_ID
+from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_TENANT_ID
 
 ASSET_OWNER_RESOURCES_ROUTE = "/asset-owner-resources"
 
@@ -70,7 +70,7 @@ sys.modules["management.db.identity.group"] = MagicMock()
 sys.modules["management.db.models"] = MagicMock()
 
 with patch('management.db.client.MinioClient', return_value=minio_client_mock):
-    from gateway.authentication.normal import set_auth_token_to_client, get_authorized_client, get_current_user_from_client, validate_token, get_session_by_authorization
+    from gateway.authentication.auth import set_auth_token_to_client, get_authorized_client, get_current_user_from_client, validate_token, get_session_by_authorization
     from management.services.permission.identity.authentication import extend_session, check_auth_service_health, signup_user_with_invitation, parse_supabase_response, verify_invite_code, signin_user, refresh_user_token, get_user_info, format_role_permissions, get_provider_username
 
 
@@ -148,8 +148,8 @@ class TestSetAuthTokenToClient(unittest.TestCase):
 class TestGetAuthorizedClient(unittest.TestCase):
     """Test get_authorized_client"""
 
-    @patch('gateway.authentication.normal.get_supabase_client')
-    @patch('gateway.authentication.normal.set_auth_token_to_client')
+    @patch('gateway.authentication.auth.get_supabase_client')
+    @patch('gateway.authentication.auth.set_auth_token_to_client')
     def test_get_client_with_authorization(self, mock_set_token, mock_get_client):
         """Test getting client with authorization header"""
         mock_client = MagicMock()
@@ -160,8 +160,8 @@ class TestGetAuthorizedClient(unittest.TestCase):
         self.assertEqual(result, mock_client)
         mock_set_token.assert_called_once_with(mock_client, "test-token")
 
-    @patch('gateway.authentication.normal.get_supabase_client')
-    @patch('gateway.authentication.normal.set_auth_token_to_client')
+    @patch('gateway.authentication.auth.get_supabase_client')
+    @patch('gateway.authentication.auth.set_auth_token_to_client')
     def test_get_client_without_authorization(self, mock_set_token, mock_get_client):
         """Test getting client without authorization header"""
         mock_client = MagicMock()
@@ -234,9 +234,9 @@ class TestGetCurrentUserFromClient(unittest.TestCase):
 class TestValidateToken(unittest.TestCase):
     """Test validate_token"""
 
-    @patch('gateway.authentication.normal.get_current_user_from_client')
-    @patch('gateway.authentication.normal.set_auth_token_to_client')
-    @patch('gateway.authentication.normal.get_supabase_client')
+    @patch('gateway.authentication.auth.get_current_user_from_client')
+    @patch('gateway.authentication.auth.set_auth_token_to_client')
+    @patch('gateway.authentication.auth.get_supabase_client')
     def test_validate_token_success(self, mock_get_client, mock_set_token, mock_get_user):
         """Test successful token validation"""
         mock_client = MagicMock()
@@ -250,9 +250,9 @@ class TestValidateToken(unittest.TestCase):
         self.assertEqual(user, mock_user)
         mock_set_token.assert_called_once_with(mock_client, "test-token")
 
-    @patch('gateway.authentication.normal.get_current_user_from_client')
-    @patch('gateway.authentication.normal.set_auth_token_to_client')
-    @patch('gateway.authentication.normal.get_supabase_client')
+    @patch('gateway.authentication.auth.get_current_user_from_client')
+    @patch('gateway.authentication.auth.set_auth_token_to_client')
+    @patch('gateway.authentication.auth.get_supabase_client')
     def test_validate_token_no_user(self, mock_get_client, mock_set_token, mock_get_user):
         """Test token validation with no user"""
         mock_client = MagicMock()
@@ -264,9 +264,9 @@ class TestValidateToken(unittest.TestCase):
         self.assertFalse(is_valid)
         self.assertIsNone(user)
 
-    @patch('gateway.authentication.normal.get_current_user_from_client')
-    @patch('gateway.authentication.normal.set_auth_token_to_client')
-    @patch('gateway.authentication.normal.get_supabase_client')
+    @patch('gateway.authentication.auth.get_current_user_from_client')
+    @patch('gateway.authentication.auth.set_auth_token_to_client')
+    @patch('gateway.authentication.auth.get_supabase_client')
     def test_validate_token_exception(self, mock_get_client, mock_set_token, mock_get_user):
         """Test token validation exception"""
         mock_client = MagicMock()
@@ -1416,7 +1416,7 @@ class TestRefreshUserToken(unittest.IsolatedAsyncioTestCase):
 class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
     """Test get_session_by_authorization"""
 
-    @patch('gateway.authentication.normal.validate_token')
+    @patch('gateway.authentication.auth.validate_token')
     async def test_get_session_success(self, mock_validate_token):
         """Test successful session retrieval"""
         mock_user = MagicMock()
@@ -1436,7 +1436,7 @@ class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(result, expected)
 
-    @patch('gateway.authentication.normal.validate_token')
+    @patch('gateway.authentication.auth.validate_token')
     async def test_get_session_default_role(self, mock_validate_token):
         """Test session retrieval with default role"""
         mock_user = MagicMock()
@@ -1449,7 +1449,7 @@ class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["user"]["role"], "user")
 
-    @patch('gateway.authentication.normal.validate_token')
+    @patch('gateway.authentication.auth.validate_token')
     async def test_get_session_invalid_token(self, mock_validate_token):
         """Test session retrieval with invalid token"""
         mock_validate_token.return_value = (False, None)
@@ -2053,10 +2053,10 @@ class TestAdditionalUserManagementCoverage(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(validate_password_strength("Abcdefgh"))
         self.assertTrue(validate_password_strength("Abcdefg1"))
 
-    @patch("gateway.authentication.normal.get_current_user_from_client")
-    @patch("gateway.authentication.normal.set_auth_token_to_client")
-    @patch("gateway.authentication.normal.get_supabase_client")
-    @patch("gateway.authentication.normal.ensure_cas_session_active_from_authorization")
+    @patch("gateway.authentication.auth.get_current_user_from_client")
+    @patch("gateway.authentication.auth.set_auth_token_to_client")
+    @patch("gateway.authentication.auth.get_supabase_client")
+    @patch("gateway.authentication.auth.ensure_cas_session_active_from_authorization")
     def test_validate_token_checks_cas_session(self, mock_cas, mock_get_client, mock_set_token, mock_get_user):
         user = MagicMock()
         mock_get_client.return_value = MagicMock()

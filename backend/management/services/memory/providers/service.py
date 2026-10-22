@@ -15,7 +15,7 @@ from contextlib import nullcontext
 from typing import Any, Dict, List, Optional, Union
 
 from management.db.memory import provider_config as memory_provider_config_db
-import consts.const as consts
+import contracts.constants.environment as consts
 from nexent.memory.models import (
     MemoryIngestRequest,
     MemoryIngestResult,

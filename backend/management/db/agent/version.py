@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.constants.agent import SOURCE_TYPE_NORMAL, SOURCE_TYPE_ROLLBACK, STATUS_ARCHIVED, STATUS_DISABLED, STATUS_RELEASED
+from contracts.constants.constants import SOURCE_TYPE_NORMAL, SOURCE_TYPE_ROLLBACK, STATUS_ARCHIVED, STATUS_DISABLED, STATUS_RELEASED
 import logging
 from typing import List, Optional, Tuple
 from sqlalchemy import or_, select, insert, update, delete, func
@@ -8,7 +8,7 @@ from sqlalchemy import or_, select, insert, update, delete, func
 from management.db.client import get_db_session
 from management.utils.orm import as_dict
 from management.db.models import AgentInfo, ToolInstance, AgentRelation, AgentVersion, SkillInstance
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 
 logger = logging.getLogger("agent_version_db")
 

@@ -157,8 +157,8 @@ install_business_contract_stubs(consts_model_mod)
 if "consts" not in sys.modules:
     sys.modules["consts"] = types.ModuleType("consts")
 
-# Stub consts.const required by service
-consts_const_mod = types.ModuleType("consts.const")
+# Stub contracts.constants.environment required by service
+consts_const_mod = types.ModuleType("contracts.constants.environment")
 consts_const_mod.LOCALHOST_IP = "127.0.0.1"
 consts_const_mod.LOCALHOST_NAME = "localhost"
 consts_const_mod.DOCKER_INTERNAL_HOST = "host.docker.internal"
@@ -192,7 +192,7 @@ consts_const_mod.ES_HOST = "http://localhost:9200"
 consts_const_mod.ES_API_KEY = ""
 consts_const_mod.ES_USERNAME = ""
 consts_const_mod.ES_PASSWORD = ""
-sys.modules["consts.const"] = consts_const_mod
+sys.modules["contracts.constants.environment"] = consts_const_mod
 install_business_constant_stubs(consts_const_mod)
 
 # Stub sqlalchemy.sql.func used by management.services.configuration.tenant.settings
@@ -206,8 +206,8 @@ class _Func:
 sqlalchemy_sql_mod.func = _Func()
 sys.modules["sqlalchemy.sql"] = sqlalchemy_sql_mod
 
-# Stub contracts.constants.model used by service
-consts_provider_mod = types.ModuleType("contracts.constants.model")
+# Stub contracts.constants.constants used by service
+consts_provider_mod = types.ModuleType("contracts.constants.constants")
 
 
 class _ProviderEnum:

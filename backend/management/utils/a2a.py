@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-from contracts.constants.a2a import PROTOCOL_GRPC, PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
+from contracts.constants.constants import PROTOCOL_GRPC, PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 

@@ -15,13 +15,8 @@ from management.services.tag.resources import (
 
 logger = logging.getLogger(__name__)
 
-from contracts.constants.tag import (
-    DOCUMENT_TAG_BATCH_SIZE,
-    KNOWLEDGE_DOCUMENT_TYPE,
-)
-from contracts.constants.tag import (
-    PUBLIC_DOCUMENT_ASSIGNMENT_FIELDS as _PUBLIC_ASSIGNMENT_FIELDS,
-)
+from contracts.constants.constants import DOCUMENT_TAG_BATCH_SIZE, KNOWLEDGE_DOCUMENT_TYPE
+from contracts.constants.constants import PUBLIC_DOCUMENT_ASSIGNMENT_FIELDS as _PUBLIC_ASSIGNMENT_FIELDS
 
 
 def project_authorized_resource_tags(

@@ -10,7 +10,7 @@ import aiofiles
 import requests
 from fastapi import UploadFile
 from nexent.core.concurrency import run_blocking
-from consts.const import LIBREOFFICE_PROFILE_DIR
+from contracts.constants.environment import LIBREOFFICE_PROFILE_DIR
 from management.db.file.attachment import get_file_size_from_minio
 
 logger = logging.getLogger("file_management_utils")

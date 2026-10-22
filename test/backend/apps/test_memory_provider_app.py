@@ -11,9 +11,9 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
-consts_const = types.ModuleType("consts.const")
+consts_const = types.ModuleType("contracts.constants.environment")
 consts_const.MEMORY_PROVIDER_PLUGINS_DIR = "/tmp/test-plugins"
-sys.modules["consts.const"] = consts_const
+sys.modules["contracts.constants.environment"] = consts_const
 install_business_constant_stubs(consts_const)
 sys.modules["consts"] = types.ModuleType("consts")
 
@@ -130,9 +130,9 @@ sys.modules["management.services.memory.providers.service"] = ext_provider_svc_m
 sys.modules["management.services.memory.providers.configuration"] = config_svc_mod
 sys.modules["management.services.memory.providers.plugins"] = plugin_loader_mod
 
-auth_utils_mod = types.ModuleType("gateway.authentication.normal")
+auth_utils_mod = types.ModuleType("gateway.authentication.auth")
 auth_utils_mod.get_current_user_id = MagicMock(return_value=("u1", "t1"))
-sys.modules["gateway.authentication.normal"] = auth_utils_mod
+sys.modules["gateway.authentication.auth"] = auth_utils_mod
 
 from management.api.memory import memory_provider as memory_provider_app
 

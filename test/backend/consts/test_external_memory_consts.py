@@ -2,8 +2,8 @@
 
 """Contract tests for external-memory runtime configuration."""
 
-from contracts.constants import memory as const_memory
-from consts import const
+from contracts.constants import constants as const_memory
+from contracts.constants import environment as const
 
 
 def test_ac_p3_36_ingest_has_no_deployment_master_switch():

@@ -233,7 +233,7 @@ def _install_sys_modules_stubs() -> None:
 
     def _mk_mod(name: str, **attrs) -> types.ModuleType:
         m = types.ModuleType(name)
-        if name == "contracts.constants.evaluation" and name in sys.modules:
+        if name == "contracts.constants.constants" and name in sys.modules:
             # Limits and status doubles now share their business module.
             m.__dict__.update(vars(sys.modules[name]))
         for k, v in attrs.items():
@@ -290,7 +290,7 @@ def _install_sys_modules_stubs() -> None:
     )
     _consts_pkg.error_code = _ec_mod
     _el_mod = _mk_mod(
-        "contracts.constants.evaluation",
+        "contracts.constants.constants",
         DEFAULT_PASS_THRESHOLD=0.5,
         MAX_CONCURRENT_RUNS=5,
         MAX_EVALUATORS_PER_RUN=5,
@@ -299,7 +299,7 @@ def _install_sys_modules_stubs() -> None:
     )
     _consts_pkg.evaluation_limits = _el_mod
     _es_mod = _mk_mod(
-        "contracts.constants.evaluation",
+        "contracts.constants.constants",
         EvalCaseStatus=type("ECS", (), {}),
         EvalPassStatus=type("EPS", (), {}),
         EvalRunStatus=type("ERS", (), {}),

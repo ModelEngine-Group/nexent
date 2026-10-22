@@ -14,7 +14,7 @@ from management.services.agent.prompt_generation import (
     PromptOptimizationService,
 )
 from adapters.exception import NexentCapabilityError
-from gateway.authentication.normal import get_current_user_info
+from gateway.authentication.auth import get_current_user_info
 
 router = APIRouter(prefix="/prompt")
 logger = logging.getLogger("prompt_app")

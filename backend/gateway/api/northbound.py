@@ -15,9 +15,10 @@ import httpx
 from contracts.a2a import JSONRPCRequest
 from contracts.agent import reject_legacy_agent_fields
 from contracts.authentication import NorthboundContext
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID
-from contracts.constants.knowledge import RATE_LIMIT_EXCEEDED_DETAIL, VectorDatabaseType
-from contracts.constants.runtime import NORTHBOUND_SERVICE_NAME
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from contracts.constants.constants import RATE_LIMIT_EXCEEDED_DETAIL
+from contracts.knowledge import VectorDatabaseType
+from contracts.constants.constants import NORTHBOUND_SERVICE_NAME
 from contracts.conversation import GenerateTitleRequest
 from contracts.errors.exceptions import (
     AppException,
@@ -55,10 +56,8 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
-from gateway.authentication.normal import generate_session_jwt, get_user_language
-from gateway.authentication.northbound import (
-    get_northbound_context as _get_northbound_context,
-)
+from gateway.authentication.auth import generate_session_jwt, get_user_language
+from gateway.authentication.northbound_auth import get_northbound_context as _get_northbound_context
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.db.knowledge_base.repository import get_index_name_by_knowledge_name
 from management.services.agent.a2a.service import (

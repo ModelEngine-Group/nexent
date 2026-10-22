@@ -131,7 +131,7 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
 from contracts.errors.exceptions import MCPConnectionError, MCPNameIllegal, MCPContainerError, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError
-from contracts.constants.identity import PERMISSION_READ, PERMISSION_EDIT
+from contracts.constants.constants import PERMISSION_READ, PERMISSION_EDIT
 from contracts.tool import MCPConfigRequest
 
 # Functions to test

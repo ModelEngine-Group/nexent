@@ -8,6 +8,7 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
+from enum import Enum
 
 
 ProfileKey = tuple[str, str]
@@ -1116,3 +1117,34 @@ def _infer_model_type_from_name(model_name: str) -> str:
     # LLM prefixes and the fallback both resolve to "llm" — unmatched names
     # default to llm so the user can manually correct the type in the UI.
     return "llm"
+
+
+class ModelConnectStatusEnum(Enum):
+    """Enum class for model connection status"""
+
+    NOT_DETECTED = "not_detected"
+    DETECTING = "detecting"
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+
+    @classmethod
+    def get_default(cls) -> str:
+        """Get default value"""
+        return cls.NOT_DETECTED.value
+
+    @classmethod
+    def get_value(cls, status: Optional[str]) -> str:
+        """Get value based on status, return default value if empty"""
+        if not status or status == "":
+            return cls.NOT_DETECTED.value
+        return status
+
+
+class ProviderEnum(str, Enum):
+    """Supported model providers"""
+
+    SILICON = "silicon"
+    OPENAI = "openai"
+    MODELENGINE = "modelengine"
+    DASHSCOPE = "dashscope"
+    TOKENPONY = "tokenpony"

@@ -4,7 +4,7 @@
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from contracts.constants.runtime import DOCKER_INTERNAL_HOST, LOCALHOST_IP, LOCALHOST_NAME
+from contracts.constants.constants import DOCKER_INTERNAL_HOST, LOCALHOST_IP, LOCALHOST_NAME
 from management.services.model.adapter import build_adapter_fresh
 from management.services.model.names import get_model_name_from_config
 

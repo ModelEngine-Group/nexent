@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 from typing import Optional as Opt
 
-from contracts.constants.agent import WORKBENCH_OFFICIAL_SKILL_NAMES
+from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
 from contracts.conversation import HistoryItem
 from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
 from contracts.skill import SkillResolution, SkillZipEntry
@@ -1021,3 +1021,48 @@ class CurrentVersionResponse(BaseModel):
     release_note: Optional[str] = Field(None, description="Release notes")
     created_by: str = Field(..., description="User who published this version")
     create_time: Optional[str] = Field(None, description="Publish timestamp")
+
+
+# Agent Unavailable Reason Constants
+#
+# Centralized definition of all possible reasons why an agent may be unavailable.
+# These values are returned to the frontend via the 'unavailable_reasons' field.
+class AgentUnavailableReason:
+    """Reason codes for agent unavailability."""
+
+    # Identity conflicts
+    DUPLICATE_NAME = "duplicate_name"
+    DUPLICATE_DISPLAY_NAME = "duplicate_display_name"
+
+    # Model issues
+    MODEL_NOT_CONFIGURED = "model_not_configured"
+    MODEL_UNAVAILABLE = "model_unavailable"
+    MODEL_DELETED = "model_deleted"
+
+    # Tool issues
+    TOOL_UNAVAILABLE = "tool_unavailable"
+    ALL_TOOLS_DISABLED = "all_tools_disabled"
+    MCP_MODEL_UNAVAILABLE = "mcp_model_unavailable"
+
+    # Agent issues
+    AGENT_NOT_FOUND = "agent_not_found"
+
+    @classmethod
+    def all_reasons(cls) -> list[str]:
+        """Return all defined unavailable reason codes."""
+        return [
+            cls.DUPLICATE_NAME,
+            cls.DUPLICATE_DISPLAY_NAME,
+            cls.MODEL_NOT_CONFIGURED,
+            cls.MODEL_UNAVAILABLE,
+            cls.MODEL_DELETED,
+            cls.TOOL_UNAVAILABLE,
+            cls.ALL_TOOLS_DISABLED,
+            cls.AGENT_NOT_FOUND,
+            cls.MCP_MODEL_UNAVAILABLE,
+        ]
+
+    @classmethod
+    def is_valid_reason(cls, reason: str) -> bool:
+        """Check if a reason string is a valid reason code."""
+        return reason in cls.all_reasons()

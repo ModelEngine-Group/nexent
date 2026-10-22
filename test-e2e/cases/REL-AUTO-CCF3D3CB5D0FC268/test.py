@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from contracts.constants.evaluation import EvalRunStatus
+from contracts.evaluation import EvalRunStatus
 from management.db.evaluation.runs import claim_agent_evaluation_run, list_dispatchable_pending_runs
 from management.db.client import get_db_session
 from management.db.models import AgentEvaluation

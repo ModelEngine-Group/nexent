@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from management.services.knowledge_base.providers.dify import fetch_dify_datasets_impl
-from gateway.authentication.normal import get_current_user_id
+from gateway.authentication.auth import get_current_user_id
 
 router = APIRouter(prefix="/dify")
 logger = logging.getLogger("dify_app")

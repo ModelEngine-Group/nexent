@@ -12,8 +12,8 @@ from management.utils.orm import as_dict, filter_property
 from management.db.models import AgentInfo, ToolInstance, AgentRelation, AgentVersion
 from management.db.agent.version import query_current_version_no
 from management.db.tool.repository import query_tool_knowledge_references
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID
-from consts.const import MAX_AGENTS_PER_TENANT
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from contracts.constants.environment import MAX_AGENTS_PER_TENANT
 from contracts.errors.exceptions import AgentNotFoundError, TenantResourceLimitError
 from management.utils.serialization import convert_list_to_string
 

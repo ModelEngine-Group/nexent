@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from contracts.constants.identity import ASSET_OWNER_ATTACHMENTS_PREFIX
+from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from management.db.file.attachment import delete_file, file_exists

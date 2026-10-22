@@ -132,7 +132,7 @@ class TestGetTenantInfo:
 
     def test_get_tenant_info_ignores_virtual_default_tenant(self, service_mocks):
         """Virtual default tenant should not be materialized as a managed tenant."""
-        from contracts.constants.identity import DEFAULT_TENANT_ID
+        from contracts.constants.constants import DEFAULT_TENANT_ID
 
         result = get_tenant_info(DEFAULT_TENANT_ID)
 
@@ -258,7 +258,7 @@ class TestGetTenantsPaginated:
 
     def test_get_tenants_paginated_excludes_virtual_tenants(self, service_mocks):
         """Virtual/system tenants must not appear in admin tenant listings."""
-        from contracts.constants.identity import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+        from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
         tenant_ids = ["tenant1", ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID, "", "tenant2"]
         tenant_infos = [
@@ -515,7 +515,7 @@ class TestWorkbenchMainBackfill:
 
     def test_backfill_filters_virtual_tenants_and_isolates_failures(self):
         """UT-BE-SAL-006: one tenant failure does not block the batch."""
-        from contracts.constants.identity import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+        from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
         tenant_ids = [
             "tenant-a",

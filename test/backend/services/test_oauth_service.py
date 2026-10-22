@@ -12,6 +12,7 @@ sys.path.insert(0, backend_dir)
 
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
+consts_mock.const.GET_OAUTH_SETTING = os.getenv
 consts_mock.const.DEFAULT_TENANT_ID = "default-tenant-id"
 consts_mock.const.OAUTH_CALLBACK_BASE_URL = "http://localhost:3000"
 consts_mock.const.OAUTH_SSL_VERIFY = True
@@ -19,7 +20,7 @@ consts_mock.const.OAUTH_CA_BUNDLE = ""
 consts_mock.const.OAUTH_LOGIN_MODE = "button"
 consts_mock.const.JWT_EXPIRY_SECONDS = 7200
 sys.modules["consts"] = consts_mock
-sys.modules["consts.const"] = consts_mock.const
+sys.modules["contracts.constants.environment"] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 
@@ -269,7 +270,7 @@ for _provider_export in (
 
 import management.services.permission.identity.oauth as oauth_service_module
 from management.services.permission.identity.oauth import create_or_update_oauth_account, ensure_user_tenant_exists, exchange_code_for_provider_token, find_supabase_user_id_by_email, get_authorize_url, get_enabled_providers, get_oauth_config, get_provider_user_info, get_supported_providers, list_linked_accounts, unlink_account, _resolve_field, _build_ssl_context
-from gateway.authentication.normal import parse_state
+from gateway.authentication.auth import parse_state
 
 
 class TestParseState(unittest.TestCase):

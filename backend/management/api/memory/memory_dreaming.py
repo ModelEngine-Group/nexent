@@ -2,9 +2,9 @@
 """Manual Dreaming run and audit endpoints."""
 
 from contracts.memory import DreamingRunRequest, DreamingScheduleRequest
-from contracts.constants.memory import USER_DREAMING_SCOPE
+from contracts.constants.constants import USER_DREAMING_SCOPE
 from contracts.memory import DreamingRunRequest, DreamingScheduleRequest
-from contracts.constants.memory import USER_DREAMING_SCOPE
+from contracts.constants.constants import USER_DREAMING_SCOPE
 from http import HTTPStatus
 from datetime import datetime, timezone
 from typing import Annotated, Literal, Optional
@@ -20,7 +20,7 @@ from management.services.automation.scheduler import (
     is_valid_cron_expression,
 )
 
-from consts.const import DREAMING_SUMMARIZATION_MAX_ATTEMPTS, DREAMING_LONG_TERM_MAX_CHARS, DREAMING_SOURCE_LIMIT
+from contracts.constants.environment import DREAMING_SUMMARIZATION_MAX_ATTEMPTS, DREAMING_LONG_TERM_MAX_CHARS, DREAMING_SOURCE_LIMIT
 from management.db.memory import dreaming as memory_dreaming_db
 from management.db.identity.role_permission import check_role_permission
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
@@ -29,7 +29,7 @@ from management.services.memory.dreaming.service import (
     DreamingRunError,
     get_memory_dreaming_service,
 )
-from gateway.authentication.normal import get_current_user_id
+from gateway.authentication.auth import get_current_user_id
 
 router = APIRouter(prefix="/memory/dreaming", tags=["memory-dreaming"])
 

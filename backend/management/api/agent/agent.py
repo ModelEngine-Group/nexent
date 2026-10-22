@@ -14,8 +14,8 @@ from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking
 from starlette.responses import JSONResponse, Response
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID
-from consts.const import ENABLE_AGENT_WORKBENCH
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import AgentInfoRequest, AgentIDRequest, AgentImportRequest, SkillConflictCheckRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest, WorkbenchCapabilityPreviewRequest
 from contracts.conversation import ConversationResponse
 from contracts.tag import TagAssignmentFilter
@@ -72,7 +72,7 @@ from management.services.agent.versions import (
     compare_versions_impl,
     list_published_agents_impl,
 )
-from gateway.authentication.normal import get_current_user_info, get_current_user_id, verify_internal_runtime_jwt
+from gateway.authentication.auth import get_current_user_info, get_current_user_id, verify_internal_runtime_jwt
 
 agent_config_router = APIRouter(prefix="/agent")
 

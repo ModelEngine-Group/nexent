@@ -10,7 +10,7 @@ from fastapi import APIRouter, Header, HTTPException, UploadFile, File, Form, Qu
 from fastapi.responses import JSONResponse, StreamingResponse
 from http import HTTPStatus
 
-from consts.const import ENABLE_UPLOAD_IMAGE
+from contracts.constants.environment import ENABLE_UPLOAD_IMAGE
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, MCPConnectionError, MCPNameIllegal, MCPContainerError, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError, UnauthorizedError, TenantResourceLimitError
 from contracts.tool import MCPConfigRequest, AddMcpServiceRequest, AddContainerMcpServiceRequest, UpdateMcpServiceRequest, EnableMcpServiceRequest, DisableMcpServiceRequest, HealthcheckMcpServiceRequest, TestMcpConnectionRequest, ListMcpServicesQuery
@@ -19,7 +19,7 @@ from management.services.mcp.registration import add_mcp_service
 from management.services.tool.discovery import get_tool_from_remote_mcp_server
 from management.services.mcp.containers import MCPContainerManager
 from management.services.monitor.audit import record_security_event
-from gateway.authentication.normal import get_current_user_info
+from gateway.authentication.auth import get_current_user_info
 
 router = APIRouter(prefix="/mcp")
 logger = logging.getLogger("remote_mcp_app")

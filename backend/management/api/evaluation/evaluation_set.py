@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from contracts.evaluation import BatchDeleteRequest, GenerateCasesRequest, UpdateCaseRequest
-from contracts.constants.evaluation import CASE_ANSWER_MAX_LEN, CASE_QUERY_MAX_LEN, MAX_EVALUATION_SETS, SET_NAME_MAX_LEN, SET_NAME_MIN_LEN
+from contracts.constants.constants import CASE_ANSWER_MAX_LEN, CASE_QUERY_MAX_LEN, MAX_EVALUATION_SETS, SET_NAME_MAX_LEN, SET_NAME_MIN_LEN
 from contracts.errors.exceptions import AppException, UnauthorizedError
 import io
 import logging
@@ -13,9 +13,9 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from nexent.core.concurrency import ManagedTaskSpec
 from pydantic import BaseModel, Field
 
-from consts.const import MAX_EVALUATION_SET_FILE_SIZE_BYTES, MAX_EVALUATION_SET_FILE_SIZE_MB
+from contracts.constants.environment import MAX_EVALUATION_SET_FILE_SIZE_BYTES, MAX_EVALUATION_SET_FILE_SIZE_MB
 from contracts.errors.codes import ErrorCode
-from contracts.constants.evaluation import CASE_ANSWER_MAX_LEN, CASE_QUERY_MAX_LEN, MAX_EVALUATION_SETS, SET_NAME_MAX_LEN, SET_NAME_MIN_LEN
+from contracts.constants.constants import CASE_ANSWER_MAX_LEN, CASE_QUERY_MAX_LEN, MAX_EVALUATION_SETS, SET_NAME_MAX_LEN, SET_NAME_MIN_LEN
 from contracts.errors.exceptions import AppException, UnauthorizedError
 from management.services.evaluation.sets import (
     _generate_cases_async,
@@ -35,7 +35,7 @@ from management.services.evaluation.sets import (
     update_evaluation_set_case_impl,
 )
 from infrastructure.concurrency import config_thread_manager
-from gateway.authentication.normal import get_current_user_id
+from gateway.authentication.auth import get_current_user_id
 from management.services.evaluation.spreadsheet import (
     build_evaluation_set_excel_template_bytes,
     parse_evaluation_cases_from_excel,

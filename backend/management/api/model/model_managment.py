@@ -16,16 +16,16 @@ caller's own. Identity is resolved from the bearer token into a
 ``CurrentUser`` and propagated as ``user_id`` / ``tenant_id`` to services.
 """
 
-from contracts.constants.model import MODEL_CREATE_PERMISSION, MODEL_DELETE_PERMISSION, MODEL_READ_PERMISSION, MODEL_UPDATE_PERMISSION, _AUDIT_SAFE_MODEL_KEYS, _CATALOG_UNAVAILABLE_MESSAGE, _MANAGE_ALLOWED_ROLES
+from contracts.constants.constants import MODEL_CREATE_PERMISSION, MODEL_DELETE_PERMISSION, MODEL_READ_PERMISSION, MODEL_UPDATE_PERMISSION, _AUDIT_SAFE_MODEL_KEYS, _CATALOG_UNAVAILABLE_MESSAGE, _MANAGE_ALLOWED_ROLES
 from contracts.model import BatchCreateModelsRequest, BackfillDefaultsRequest, CapacitySuggestionRequestFields as CapacitySuggestionFields, ModelRequest, ModelProbeRequest, ModelCapacitySuggestionRequest, ModelCapacitySuggestionResponse, ProviderModelRequest, ManageTenantModelListRequest, ManageTenantModelListResponse, ManageTenantModelCreateRequest, ManageTenantModelUpdateRequest, ManageTenantModelDeleteRequest, ManageTenantModelHealthcheckRequest, ManageBatchCreateModelsRequest, ManageProviderModelListRequest, ManageProviderModelCreateRequest, FIXED_INFERENCE_FIELDS_BY_TYPE
 from contracts.errors.exceptions import TokenExpiredError, ModelProviderError
-from contracts.constants.model import MODEL_CREATE_PERMISSION, MODEL_DELETE_PERMISSION, MODEL_READ_PERMISSION, MODEL_UPDATE_PERMISSION, _AUDIT_SAFE_MODEL_KEYS, _CATALOG_UNAVAILABLE_MESSAGE, _MANAGE_ALLOWED_ROLES
+from contracts.constants.constants import MODEL_CREATE_PERMISSION, MODEL_DELETE_PERMISSION, MODEL_READ_PERMISSION, MODEL_UPDATE_PERMISSION, _AUDIT_SAFE_MODEL_KEYS, _CATALOG_UNAVAILABLE_MESSAGE, _MANAGE_ALLOWED_ROLES
 import asyncio
 import logging
 import re
 
 from contracts.model import BatchCreateModelsRequest, BackfillDefaultsRequest, CapacitySuggestionRequestFields as CapacitySuggestionFields, ModelRequest, ModelProbeRequest, ModelCapacitySuggestionRequest, ModelCapacitySuggestionResponse, ProviderModelRequest, ManageTenantModelListRequest, ManageTenantModelListResponse, ManageTenantModelCreateRequest, ManageTenantModelUpdateRequest, ManageTenantModelDeleteRequest, ManageTenantModelHealthcheckRequest, ManageBatchCreateModelsRequest, ManageProviderModelListRequest, ManageProviderModelCreateRequest, FIXED_INFERENCE_FIELDS_BY_TYPE
-from consts.const import CAPACITY_SUGGESTION_ENABLED
+from contracts.constants.environment import CAPACITY_SUGGESTION_ENABLED
 
 from fastapi import APIRouter, Depends, Header, Query, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -60,10 +60,10 @@ from management.services.model.capacity import (
 from management.services.model.reasoning import (
     get_model_reasoning_capability,
 )
-from gateway.authentication.normal import authenticate
+from gateway.authentication.auth import authenticate
 from permissions.depends import require
 from permissions.models import CurrentUser
-from gateway.authentication.normal import get_current_user_id
+from gateway.authentication.auth import get_current_user_id
 from contracts.errors.exceptions import TokenExpiredError, ModelProviderError
 from nexent.core.concurrency import run_blocking
 from management.db.model.repository import get_model_by_model_id

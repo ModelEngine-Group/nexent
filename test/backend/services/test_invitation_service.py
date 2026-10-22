@@ -80,7 +80,7 @@ sys.modules["management.services.permission.asset_owner"] = _asset_owner_visibil
 setattr(_services_pkg, "asset_owner_visibility", _asset_owner_visibility_stub)
 setattr(_services_pkg, "group_service", sys.modules["management.services.permission.identity.groups"])
 
-from contracts.constants.identity import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_TENANT_ID
+from contracts.constants.constants import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import NotFoundException, UnauthorizedError, DuplicateError
 from management.services.permission.identity.invitations import (
     create_invitation_code,

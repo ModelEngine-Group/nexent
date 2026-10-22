@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 import pytest
 from sqlalchemy import inspect as schema_inspect
 
-from contracts.constants.runtime import CONFIG_SERVICE_NAME, NORTHBOUND_SERVICE_NAME
+from contracts.constants.constants import CONFIG_SERVICE_NAME, NORTHBOUND_SERVICE_NAME
 from management.db.client import db_client, get_db_session, minio_client
 from management.db.models import KnowledgeFileLifecycle
 from management.db.knowledge_base.file_lifecycle import create_file_record, delete_file_record, get_file_record, list_uploading_files_created_before

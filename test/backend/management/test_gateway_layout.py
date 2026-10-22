@@ -6,7 +6,7 @@ import ast
 import json
 from pathlib import Path
 
-from contracts.constants.voice import TEST_PCM_PATH, TEST_VOICE_PATH
+from contracts.constants.constants import TEST_PCM_PATH, TEST_VOICE_PATH
 from management.utils import oauth_providers
 
 
@@ -34,7 +34,7 @@ def test_gateway_routes_keep_all_original_paths_methods_and_handlers():
 
 def test_gateway_owns_two_authentication_implementations_and_one_route_file():
     assert {p.name for p in (BACKEND / "gateway/authentication").glob("*.py")} == {
-        "__init__.py", "normal.py", "northbound.py"
+        "__init__.py", "auth.py", "northbound_auth.py"
     }
     assert {p.name for p in (BACKEND / "gateway/api").glob("*.py")} == {"__init__.py", "northbound.py"}
     assert not (BACKEND / "gateway/api/northbound").exists()

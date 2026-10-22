@@ -2,8 +2,8 @@
 
 from typing import Any, Dict, List, Optional
 
-from contracts.constants.agent import STATUS_SHARED
-from contracts.constants.identity import SYSTEM_TENANT_ID
+from contracts.constants.constants import STATUS_SHARED
+from contracts.constants.constants import SYSTEM_TENANT_ID
 from contracts.agent import AgentRepositorySnapshot
 from contracts.knowledge import KnowledgeBaseResolution
 from contracts.skill import SkillResolution
@@ -213,7 +213,7 @@ def delete_official_agent_impl(
     import os
     import shutil
 
-    from consts.const import OFFICIAL_AGENTS_PATH
+    from contracts.constants.environment import OFFICIAL_AGENTS_PATH
 
     record = get_agent_repository_by_id(agent_repository_id, SYSTEM_TENANT_ID)
     if not record:

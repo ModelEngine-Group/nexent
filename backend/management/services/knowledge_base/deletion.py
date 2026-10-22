@@ -17,7 +17,7 @@ import json
 import time
 from typing import Any, Dict, Optional
 
-from consts.const import DOCUMENT_DELETE_DRAIN_TIMEOUT_S, DOCUMENT_DELETE_RETRY_INTERVAL_S
+from contracts.constants.environment import DOCUMENT_DELETE_DRAIN_TIMEOUT_S, DOCUMENT_DELETE_RETRY_INTERVAL_S
 from management.db.file.attachment import delete_file
 from management.db.knowledge_base.repository import get_knowledge_record, update_last_doc_update_time
 from management.db.knowledge_base.file_lifecycle import create_delete_tombstone, delete_file_record, get_file_record, transition_file_record

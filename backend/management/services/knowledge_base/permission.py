@@ -5,8 +5,8 @@
 import logging
 from typing import List, Optional
 
-from contracts.constants.identity import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT
-from consts.const import IS_SPEED_MODE
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, PERMISSION_EDIT
+from contracts.constants.environment import IS_SPEED_MODE
 from management.db.identity.group import query_group_ids_by_user
 from management.db.knowledge_base.repository import get_knowledge_record
 from management.db.identity.user_tenant import get_user_tenant_by_user_id

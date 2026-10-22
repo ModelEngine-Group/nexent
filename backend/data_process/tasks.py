@@ -18,7 +18,7 @@ from celery import Task, chain, chord, group, states
 from celery.exceptions import Retry
 from celery.result import allow_join_result
 
-from consts.const import ELASTICSEARCH_SERVICE, FORWARD_REDIS_RETRY_DELAY_S, FORWARD_REDIS_RETRY_MAX, REDIS_BACKEND_URL
+from contracts.constants.environment import ELASTICSEARCH_SERVICE, FORWARD_REDIS_RETRY_DELAY_S, FORWARD_REDIS_RETRY_MAX, REDIS_BACKEND_URL
 from contracts.errors.codes import ErrorCode
 from management.db.knowledge_base.repository import get_knowledge_record
 from management.services.knowledge_base.task_state import get_redis_service

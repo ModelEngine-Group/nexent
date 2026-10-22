@@ -5,8 +5,8 @@ import random
 import time
 from typing import Callable, List, Optional
 
-from contracts.constants.conversation import MESSAGE_ROLE
-from contracts.constants.agent import THINK_END_PATTERN, THINK_START_PATTERN
+from contracts.constants.constants import MESSAGE_ROLE
+from contracts.constants.constants import THINK_END_PATTERN, THINK_START_PATTERN
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException
 from management.db.model.repository import get_model_by_model_id

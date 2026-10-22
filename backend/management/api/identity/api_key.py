@@ -18,7 +18,7 @@ from management.services.permission.api_keys import (
     revoke_user_api_keys,
 )
 from management.services.monitor.audit import record_security_event
-from gateway.authentication.normal import get_current_user_context
+from gateway.authentication.auth import get_current_user_context
 
 logger = logging.getLogger("api_key_app")
 router = APIRouter(prefix="/api-keys", tags=["api-keys"])

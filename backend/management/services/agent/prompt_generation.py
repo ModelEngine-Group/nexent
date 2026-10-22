@@ -17,9 +17,9 @@ from nexent.core.agents.prompt.meta import (
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
 from nexent.core.concurrency import ManagedExecution, ManagedTaskSpec
 
-from contracts.constants.localization import LANGUAGE
-from consts.const import ENABLE_JIUWEN_SDK
-from contracts.constants.tool import PARALLEL_EXECUTOR_TOOL_NAME
+from contracts.constants.constants import LANGUAGE
+from contracts.constants.environment import ENABLE_JIUWEN_SDK
+from contracts.constants.constants import PARALLEL_EXECUTOR_TOOL_NAME
 from contracts.errors.codes import ErrorCode
 from contracts.errors.messages import ErrorMessage
 from contracts.errors.exceptions import AppException
@@ -985,7 +985,7 @@ def get_aidp_kb_display_names(tool_info_list: List[dict], user_id: str, tenant_i
         return None
 
     try:
-        from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
+        from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
         from ext_components.aidp.services.aidp_access_service import (
             resolve_current_aidp_access,
         )

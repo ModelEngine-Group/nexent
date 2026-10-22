@@ -7,10 +7,10 @@ import math
 import re
 from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
-from contracts.constants.agent import OWNERSHIP_ALL, OWNERSHIP_CREATED, OWNERSHIP_OTHERS, STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_OWNERSHIP_FILTERS, VALID_REPOSITORY_STATUSES
-from contracts.constants.identity import PERMISSION_PRIVATE, PERMISSION_READ
+from contracts.constants.constants import OWNERSHIP_ALL, OWNERSHIP_CREATED, OWNERSHIP_OTHERS, STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_OWNERSHIP_FILTERS, VALID_REPOSITORY_STATUSES
+from contracts.constants.constants import PERMISSION_PRIVATE, PERMISSION_READ
 from contracts.errors.exceptions import ForbiddenError, SkillDuplicateError, SkillException
-from contracts.constants.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_SKILL_REPOSITORY
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_SKILL_REPOSITORY
 from management.db.skill.catalog import get_skill_repository_by_id_and_publisher, get_skill_repository_by_skill_id, increment_skill_repository_downloads, insert_skill_repository_record, list_skill_repository_by_skill_ids, list_skill_repository_tag_stats, list_skill_repository_summaries, reset_skill_repository_status, update_skill_repository_by_id, update_skill_repository_status_by_id
 from management.db.skill.repository import get_skill_by_name
 from management.db.identity.user_tenant import get_user_tenant_by_user_id

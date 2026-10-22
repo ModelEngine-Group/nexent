@@ -113,7 +113,7 @@ def postgres_url(*, database: str | None = None) -> str:
 def apply_product_postgres_env() -> PostgresTarget:
     """Populate the environment consumed by Nexent's database modules.
 
-    Call this before importing ``consts.const`` or ``management.db.client`` because
+    Call this before importing ``contracts.constants.environment`` or ``management.db.client`` because
     those product modules resolve their connection constants at import time.
     """
     target = postgres_target()

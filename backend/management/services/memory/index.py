@@ -30,7 +30,7 @@ from nexent.memory.models import MemoryLayer
 from nexent.vector_database.base import VectorDatabaseCore
 
 from management.services.knowledge_base.service import get_vector_db_core
-from contracts.constants.knowledge import VectorDatabaseType
+from contracts.knowledge import VectorDatabaseType
 
 
 logger = logging.getLogger("memory_index_service")

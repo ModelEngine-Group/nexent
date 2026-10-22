@@ -22,7 +22,7 @@ consts_mock.const = MagicMock()
 # Environment variables are now configured in conftest.py
 
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 # Mock boto3

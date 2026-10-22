@@ -81,7 +81,7 @@ sys.modules['management.db.configuration.tenant'] = tenant_config_db_mock
 sys.modules['management.db.model.repository'] = model_management_db_mock
 sys.modules['nexent.vector_database.datamate_core'] = datamate_core_mock
 sys.modules['nexent.core.concurrency'] = concurrency_mock
-sys.modules['consts.const'] = consts_mock
+sys.modules['contracts.constants.environment'] = consts_mock
 install_business_constant_stubs(consts_mock)
 install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 sys.modules['sqlalchemy'] = sqlalchemy_mock

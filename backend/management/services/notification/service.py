@@ -4,9 +4,9 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from contracts.constants.agent import STATUS_REJECTED, STATUS_SHARED
+from contracts.constants.constants import STATUS_REJECTED, STATUS_SHARED
 from contracts.errors.exceptions import NotFoundException
-from contracts.constants.notification import EVENT_TYPE_REPOSITORY_REVIEW_APPROVED, EVENT_TYPE_REPOSITORY_REVIEW_PENDING, EVENT_TYPE_REPOSITORY_REVIEW_REJECTED, SCOPE_TENANT_ADMIN, SCOPE_USER
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_APPROVED, EVENT_TYPE_REPOSITORY_REVIEW_PENDING, EVENT_TYPE_REPOSITORY_REVIEW_REJECTED, SCOPE_TENANT_ADMIN, SCOPE_USER
 from management.db.notification.repository import create_notification, deactivate_notifications as deactivate_notifications_db, list_notifications_by_user, mark_notifications_read as mark_notifications_read_db
 
 logger = logging.getLogger(__name__)

@@ -39,15 +39,15 @@ def test_environment_reaches_sdk_configuration(
     monkeypatch.setenv("ENABLE_TELEMETRY", "false")
     for key, value in values.items():
         monkeypatch.setenv(key, value)
-    spec = importlib.util.spec_from_file_location("_exclusion_consts", ROOT / "backend/consts/const.py")
+    spec = importlib.util.spec_from_file_location("contracts.constants._exclusion_environment", ROOT / "backend/contracts/constants/environment.py")
     constants = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(constants)
     for key in (ES_KEY, NAMES_KEY):
         if key in values:
             assert getattr(constants, key) == values[key]
 
-    monkeypatch.setitem(sys.modules, "consts.const", None if fallback else constants)
-    monkeypatch.setitem(sys.modules, "backend.consts.const", constants)
+    monkeypatch.setitem(sys.modules, "contracts.constants.environment", None if fallback else constants)
+    monkeypatch.setitem(sys.modules, "backend.contracts.constants.environment", constants)
     get_manager = mocker.patch("nexent.monitor.get_monitoring_manager")
     runpy.run_path(str(ROOT / "backend/infrastructure/observability/bootstrap.py"))
     get_manager.return_value.configure.assert_called_once()

@@ -3,7 +3,7 @@
 import logging
 
 import httpx
-from consts.const import SERVICE_ROLE_KEY, SUPABASE_KEY, SUPABASE_URL
+from contracts.constants.environment import SERVICE_ROLE_KEY, SUPABASE_KEY, SUPABASE_URL
 from supabase import create_client
 from supabase.lib.client_options import SyncClientOptions
 

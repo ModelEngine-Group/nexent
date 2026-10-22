@@ -1399,9 +1399,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_path_tenant_must_match_authenticated_tenant(self, monkeypatch):
-        auth_module = types.ModuleType("gateway.authentication.normal")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = lambda authorization: ("user1", "tenant2")
-        monkeypatch.setitem(sys.modules, "gateway.authentication.normal", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         sent = []
 
         async def send(message):
@@ -1439,9 +1439,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_invalid_authorization_returns_forbidden(self, monkeypatch):
-        auth_module = types.ModuleType("gateway.authentication.normal")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = MagicMock(side_effect=ValueError("invalid token"))
-        monkeypatch.setitem(sys.modules, "gateway.authentication.normal", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         sent = []
 
         async def send(message):
@@ -1461,9 +1461,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_lazy_initialization_delegates_to_tenant_app(self, monkeypatch):
-        auth_module = types.ModuleType("gateway.authentication.normal")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = lambda authorization: ("user1", "tenant1")
-        monkeypatch.setitem(sys.modules, "gateway.authentication.normal", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         delegated = []
 
         async def tenant_app(scope, receive, send):
@@ -1496,9 +1496,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_lazy_initialization_failure_returns_not_found(self, monkeypatch):
-        auth_module = types.ModuleType("gateway.authentication.normal")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = lambda authorization: ("user1", "tenant1")
-        monkeypatch.setitem(sys.modules, "gateway.authentication.normal", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         sent = []
 
         async def send(message):
@@ -1523,9 +1523,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_lazy_initialization_without_app_returns_not_found(self, monkeypatch):
-        auth_module = types.ModuleType("gateway.authentication.normal")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = lambda authorization: ("user1", "tenant1")
-        monkeypatch.setitem(sys.modules, "gateway.authentication.normal", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         sent = []
 
         async def send(message):

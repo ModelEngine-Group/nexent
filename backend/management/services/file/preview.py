@@ -15,11 +15,11 @@ def build_preview_pdf_object_key(object_name: str, *, temporary: bool = False) -
     extension = "pdf.tmp" if temporary else "pdf"
     return f"preview/{directory}/{stem}_{suffix}.{extension}"
 
-from consts.const import DATA_PROCESS_SERVICE
-from contracts.constants.file import FILE_PREVIEW_SIZE_LIMIT
+from contracts.constants.environment import DATA_PROCESS_SERVICE
+from contracts.constants.constants import FILE_PREVIEW_SIZE_LIMIT
 from contracts.errors.exceptions import FileTooLargeException
 from contracts.errors.exceptions import NotFoundException
-from contracts.constants.file import OFFICE_MIME_TYPES
+from contracts.constants.constants import OFFICE_MIME_TYPES
 from contracts.errors.exceptions import OfficeConversionException
 from typing import Optional
 from typing import Tuple

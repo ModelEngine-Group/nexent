@@ -31,7 +31,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Iterable, Sequence
 
-from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
 from management.db.identity import group as group_db_module
 from management.db.identity import user_tenant as user_tenant_db_module
 from ext_components.aidp.consts.aidp_exceptions import (

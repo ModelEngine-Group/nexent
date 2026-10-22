@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from contracts.evaluation import CreateEvaluatorRequest, EvaluatorFields, ExportEvaluatorsRequest, GenerateEvaluatorRequest, UpdateEvaluatorRequest
-from contracts.constants.evaluation import _UNAUTHORIZED_MESSAGE
+from contracts.constants.constants import _UNAUTHORIZED_MESSAGE
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, UnauthorizedError
 import io
@@ -28,7 +28,7 @@ from management.services.evaluation.evaluators import (
     restore_evaluator_version_impl,
     update_evaluator_impl,
 )
-from gateway.authentication.normal import get_current_user_id
+from gateway.authentication.auth import get_current_user_id
 
 
 logger = logging.getLogger("evaluator_app")

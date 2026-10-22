@@ -91,7 +91,7 @@ def _filter_accessible_aidp_ids(
 
 def _resolve_aidp_access_snapshot(user_id: str, tenant_id: str):
     """Resolve AIDP access lazily so deployments without the extension still import."""
-    from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
+    from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
     from ext_components.aidp.services.aidp_access_service import (
         resolve_current_aidp_access,
     )

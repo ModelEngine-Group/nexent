@@ -19,7 +19,7 @@ from types import ModuleType
 consts_mock = ModuleType("consts")
 consts_mock.__path__ = []
 consts_mock.const = MagicMock()
-# Set required constants in consts.const
+# Set required constants in contracts.constants.environment
 consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
 consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
 consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
@@ -45,7 +45,7 @@ consts_exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
 
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 
@@ -66,7 +66,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 
 # Mock the entire client module
 client_mock = MagicMock()

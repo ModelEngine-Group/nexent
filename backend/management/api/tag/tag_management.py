@@ -8,14 +8,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
-from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
 from contracts.errors.exceptions import TagManagementConflictError, TagManagementNotFoundError, ValidationError
 from contracts.tag import SkillTagAssignmentBatchRequest, KnowledgeTagAssignmentBatchRequest, AgentTagAssignmentBatchRequest, TagAssignmentBulkOutcome, TagAssignmentBulkReplaceRequest, TagAssignmentReplaceRequest, TagAssignmentResponse, TagDefinitionCreateRequest, TagDefinitionResponse, TagDefinitionUpdateRequest, TagDefinitionUsageResponse, TagDeleteResponse, TagDocumentBatchStatusRequest, TagDocumentBatchStatusResponse, TagDocumentProjectionStatusResponse, TagLegacyFlatTagsProjectionResponse, TagLibraryResponse, TagOrderUpdateRequest, TagResourceFilterRequest, TagResourceFilterResponse, TagStatusUpdateRequest, TagValueCreateRequest, TagValueResponse, TagValueUpdateRequest, TagValueUsageResponse, ToolTagAssignmentBatchRequest
 from management.db.identity.role_permission import check_role_permission
 from fastapi import APIRouter, Header, HTTPException, Query
 from management.services.tag.library import TagManagementService
 from management.services.tag.resources import AuthenticatedCaller
-from gateway.authentication.normal import get_current_user_context
+from gateway.authentication.auth import get_current_user_context
 
 router = APIRouter(prefix="/tag-libraries", tags=["tag-libraries"])
 

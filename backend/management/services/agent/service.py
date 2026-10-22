@@ -5,10 +5,10 @@ from collections import deque
 from typing import Optional
 from uuid import uuid4
 
-from contracts.constants.agent import AgentUnavailableReason
-from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES
-from contracts.constants.localization import LANGUAGE
-from contracts.constants.model import MODEL_CONFIG_MAPPING
+from contracts.agent import AgentUnavailableReason
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
+from contracts.constants.constants import LANGUAGE
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AgentNotFoundError, AgentRelationValidationError, AppException, ForbiddenError, TenantResourceLimitError
 from contracts.agent import AgentInfoRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest

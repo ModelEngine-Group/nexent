@@ -33,7 +33,7 @@ sys.modules['management.services.configuration.tenant.settings'] = MockModule()
 sys.modules['consts'] = MockModule()
 consts_const_module = MockModule()
 consts_const_module.MODEL_CONFIG_MAPPING = {"vlm": "vlm_config_key", "vlm3": "vlm3_config_key", "llm": "llm_config_key", "embedding": "embedding_config_key"}
-sys.modules['consts.const'] = consts_const_module
+sys.modules['contracts.constants.environment'] = consts_const_module
 install_business_constant_stubs(consts_const_module)
 
 from nexent import MessageObserver

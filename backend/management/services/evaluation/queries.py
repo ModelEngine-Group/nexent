@@ -4,9 +4,9 @@ from collections import defaultdict
 from math import isfinite
 from typing import Any
 
-from contracts.constants.identity import CAN_EDIT_ALL_USER_ROLES
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
 from contracts.errors.codes import ErrorCode
-from contracts.constants.evaluation import EvalPassStatus
+from contracts.evaluation import EvalPassStatus
 from contracts.errors.exceptions import AppException
 from management.db.evaluation.runs import get_agent_evaluation, get_evaluation_case_scores, hard_delete_agent_evaluation, list_agent_evaluation_cases, list_agent_evaluations_by_agent
 from management.db.identity.user_tenant import get_user_tenant_by_user_id

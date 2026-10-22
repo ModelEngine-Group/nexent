@@ -5,14 +5,14 @@ from http import HTTPStatus
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException
 from starlette.responses import StreamingResponse
-from consts.const import ENABLE_AGENT_WORKBENCH
+from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import NL2SkillRunRequest
 from permissions.depends import require
 from permissions.models import CurrentUser
 from contracts.errors.exceptions import RunModelControlsError
 from services.nl2skill_service import create_nl2skill_stream
 from management.services.conversation.creation_history import prepare_creation_history, persist_creation_stream
-from gateway.authentication.normal import get_current_user_id, get_current_user_info
+from gateway.authentication.auth import get_current_user_id, get_current_user_info
 
 logger = logging.getLogger(__name__)
 

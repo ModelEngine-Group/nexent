@@ -9,8 +9,8 @@ from typing import Any, List, Dict, Optional
 
 from sqlalchemy import exists, func, or_, text
 
-from contracts.constants.identity import DEFAULT_TENANT_ID
-from consts.const import MAX_ADMINS_PER_TENANT, MAX_SUPER_ADMIN_COUNT, MAX_USERS_PER_TENANT
+from contracts.constants.constants import DEFAULT_TENANT_ID
+from contracts.constants.environment import MAX_ADMINS_PER_TENANT, MAX_SUPER_ADMIN_COUNT, MAX_USERS_PER_TENANT
 from management.utils.orm import as_dict
 from management.db.client import get_db_session
 from management.db.models import TenantGroupInfo, TenantGroupUser, UserOAuthAccount, UserTenant

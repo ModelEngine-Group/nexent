@@ -32,7 +32,7 @@ consts_mock.const.PERMISSION_EDIT = "EDIT"
 consts_mock.const.PERMISSION_READ = "READ_ONLY"
 
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
 install_business_constant_stubs(consts_mock.const)
 
 consts_exceptions_mod = types.ModuleType("contracts.errors.exceptions")
@@ -45,7 +45,7 @@ class ValidationError(Exception):
 consts_exceptions_mod.ValidationError = ValidationError
 install_shared_contract_stub(consts_exceptions_mod, 'exceptions')
 
-# Mock contracts.constants.agent
+# Mock contracts.constants.constants
 agent_unavailable_reasons_mock = MagicMock()
 agent_unavailable_reasons_mock.AgentUnavailableReason = type('AgentUnavailableReason', (), {
     'DUPLICATE_NAME': 'duplicate_name',
@@ -80,7 +80,7 @@ utils_mock.skill_params_utils.strip_params_comments_for_db = MagicMock(
 )
 
 sys.modules['utils'] = utils_mock
-sys.modules['gateway.authentication.normal'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 sys.modules['management.utils.serialization'] = utils_mock.str_utils
 sys.modules['management.services.skill.params'] = utils_mock.skill_params_utils
 

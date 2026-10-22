@@ -48,7 +48,7 @@ def bootstrap_test_env() -> Dict[str, Any]:
 
     mock_const = MagicMock()
     consts_module = _create_module("consts", const=mock_const)
-    sys.modules["consts.const"] = mock_const
+    sys.modules["contracts.constants.environment"] = mock_const
     install_business_constant_stubs(mock_const)
 
     boto3_mock = MagicMock()
@@ -130,7 +130,7 @@ def setup_common_mocks():
     }
 
     sys.modules['consts'] = consts_mock
-    sys.modules['consts.const'] = consts_mock.const
+    sys.modules['contracts.constants.environment'] = consts_mock.const
     install_business_constant_stubs(consts_mock.const)
 
     # Mock boto3

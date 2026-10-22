@@ -8,7 +8,7 @@ import os
 import zipfile
 from typing import Any, Dict, List, Optional, Union
 
-from consts.const import MAX_SKILL_UPLOAD_SIZE_BYTES, MAX_SKILL_UPLOAD_SIZE_MB, ROOT_DIR
+from contracts.constants.environment import MAX_SKILL_UPLOAD_SIZE_BYTES, MAX_SKILL_UPLOAD_SIZE_MB, ROOT_DIR
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, ForbiddenError, SkillException
 from management.db.skill import repository as skill_db

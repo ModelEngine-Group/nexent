@@ -45,11 +45,9 @@ def install_business_constant_stubs(source):
 
 # Preserve the unaffected exports of other merged business modules as well.
 for _module in [
-    "contracts.constants.agent",
-    "contracts.constants.evaluation",
-    "contracts.constants.knowledge",
-    "contracts.constants.model",
-    "contracts.constants.tool",
+    "contracts.constants.constants",
+    "management.services.model.catalog",
+    "contracts.evaluation",
     "contracts.errors.codes",
     "contracts.errors.exceptions",
 ]:

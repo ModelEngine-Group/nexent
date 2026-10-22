@@ -12,7 +12,7 @@ from management.db.client import get_db_session
 from management.db.models import TenantGroupInfo, TenantGroupUser
 from management.utils.serialization import convert_string_to_list
 from contracts.errors.exceptions import TenantResourceLimitError
-from consts.const import MAX_GROUPS_PER_TENANT
+from contracts.constants.environment import MAX_GROUPS_PER_TENANT
 from sqlalchemy import text
 
 _GROUP_LIMIT = MAX_GROUPS_PER_TENANT if isinstance(MAX_GROUPS_PER_TENANT, int) else 1_000
