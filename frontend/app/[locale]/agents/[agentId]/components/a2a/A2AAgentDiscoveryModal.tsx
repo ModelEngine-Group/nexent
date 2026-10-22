@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -385,6 +387,7 @@ export default function A2AAgentDiscoveryModal({
 
   // Discover from URL
   const handleDiscoverFromUrl = async () => {
+    if (loading) return;
     if (!url.trim()) {
       messageApi.error(t("a2a.discovery.urlRequired"));
       return;
@@ -418,21 +421,27 @@ export default function A2AAgentDiscoveryModal({
     }
 
     setLoading(true);
-    const result = await a2aClientService.discoverFromUrl({
-      url: url.trim(),
-      custom_headers: parsedCustomHeaders,
-    });
-    setLoading(false);
+    try {
+      const result = await a2aClientService.discoverFromUrl({
+        url: url.trim(),
+        custom_headers: parsedCustomHeaders,
+      });
 
-    if (result.success && result.data) {
-      setSelectedAgent(result.data);
-      setDiscoveredAgents([result.data]);
-      if (onDiscoverSuccess) {
-        onDiscoverSuccess();
+      if (result.success && result.data) {
+        setSelectedAgent(result.data);
+        setDiscoveredAgents([result.data]);
+        if (onDiscoverSuccess) {
+          onDiscoverSuccess();
+        }
+        messageApi.success(t("a2a.discovery.success"));
+      } else {
+        messageApi.error(result.message || t("a2a.discovery.failed"));
       }
-      messageApi.success(t("a2a.discovery.success"));
-    } else {
-      messageApi.error(result.message || t("a2a.discovery.failed"));
+    } catch (error) {
+      log.error("Agent discovery failed:", error);
+      messageApi.error(t("a2a.discovery.failed"));
+    } finally {
+      setLoading(false);
     }
   };
 

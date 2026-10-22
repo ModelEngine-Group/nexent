@@ -4223,6 +4223,7 @@
   "a2a.server.localDevHint": "For local development: prepend the base URL to the paths above. Use localhost:5013/api for a local start, nexent-northbound:5013/api for a local container start, or localhost:30013/api for k8s.",
   "a2a.server.productionHint": "For production: replace localhost:5013 (Docker) or localhost:30013 (k8s) with your server domain or public IP (keeping the port).",
   "a2a.server.urlHint": "Append the base URL to access. For local dev: localhost:5013/api (Docker) or localhost:30013/api (k8s).",
+  "a2a.service.discoveryTimeout": "Agent discovery timed out. Check the Agent address, Nacos configuration and network connection, then retry.",
   "a2a.service.discoverFailed": "Failed to discover agent",
   "a2a.service.nameWhitespace": "This system does not support spaces or other whitespace in A2A Agent names. Rename the target Agent and try again.",
   "a2a.service.listFailed": "Failed to get list",

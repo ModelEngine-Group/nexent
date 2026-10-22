@@ -13,7 +13,7 @@ import aiohttp
 
 from database import a2a_agent_db
 from database.a2a_agent_db import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
-from infrastructure.http.a2a import A2AHttpClient, A2AHttpStatusError, build_a2a_headers
+from infrastructure.http.a2a import AGENT_CARD_TIMEOUT, A2AHttpClient, A2AHttpStatusError, build_a2a_headers
 from management.services.agent.a2a.validation import validate_a2a_agent_name
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ class A2AClientService:
         try:
             # custom_headers=None means preserve existing stored headers (don't pass anything to DB).
             # custom_headers={} means explicitly clear stored headers.
-            async with A2AHttpClient() as client:
+            async with A2AHttpClient(timeout=AGENT_CARD_TIMEOUT, max_retries=1) as client:
                 headers = build_a2a_headers()
                 if custom_headers:
                     headers.update(custom_headers)
@@ -135,6 +135,8 @@ class A2AClientService:
             logger.info(f"Discovered A2A agent {agent_id} from URL: {url}")
             return result
 
+        except asyncio.TimeoutError:
+            raise
         except Exception as e:
             import traceback
             error_type = type(e).__name__
@@ -281,7 +283,7 @@ class A2AClientService:
 
             for card_url in card_urls:
                 try:
-                    async with A2AHttpClient() as http_client:
+                    async with A2AHttpClient(timeout=AGENT_CARD_TIMEOUT, max_retries=1) as http_client:
                         card = await http_client.get_json(card_url, headers=build_a2a_headers())
 
                     if card and (card.get("name") or card.get("agent_id")):

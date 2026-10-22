@@ -23,7 +23,7 @@ case:
     expected: 配置使用声明的机器级地址，不写固定资源 ID
   - order: 2
     action: 注入 40 秒下行延迟，通过 Nexent 发起发现
-    expected: 产品自身约 30 秒超时，返回 400，而不是测试客户端先超时
+    expected: 产品发现总时限约 10 秒，返回明确的 504 超时提示，而不是测试客户端先超时
   - order: 3
     action: 恢复网络并检查 Agent 列表
     expected: 超时没有新增半成品 Agent；本用例 toxic 已删除
@@ -35,7 +35,7 @@ case:
     expected: 均返回 404，清理失败独立报告
   expected_results:
   - 配置使用声明的机器级地址，不写固定资源 ID
-  - 产品自身约 30 秒超时，返回 400，而不是测试客户端先超时
+  - 产品发现总时限约 10 秒，返回明确的 504 超时提示，而不是测试客户端先超时
   - 超时没有新增半成品 Agent；本用例 toxic 已删除
   - 返回 200，发现一条真实注册记录
   - 均返回 404，清理失败独立报告
@@ -46,7 +46,6 @@ case:
     legacy_sheet: 02_测试用例基线
     legacy_row: 178
   contract:
-  contract:
     protocol: Nexent Nacos management API and real Nacos A2A discovery
     request_expectations:
     - 创建使用受控 Nacos 网络代理的独立配置
@@ -56,7 +55,18 @@ case:
     - 删除独立 Agent 与配置并回读
     response_expectations:
     - 配置使用声明的机器级地址，不写固定资源 ID
-    - 产品自身约 30 秒超时，返回 400，而不是测试客户端先超时
+    - 产品发现总时限约 10 秒，返回明确的 504 超时提示，而不是测试客户端先超时
     - 超时没有新增半成品 Agent；本用例 toxic 已删除
     - 返回 200，发现一条真实注册记录
     - 均返回 404，清理失败独立报告
+  acceptance:
+  - id: AC-01
+    description: An owned proxy configuration reaches the 10-second product discovery deadline with an actionable 504.
+    steps: [1, 2]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Fault removal leaves no partial Agent, discovery recovers and owned resources are cleaned up.
+    steps: [3, 4, 5]
+    expected_results: [3, 4, 5]
+    forbidden_side_effects: [1]

@@ -10,12 +10,31 @@ const t = (key: string, options?: any): string => {
 
 function discoveryErrorMessage(error: unknown, fallbackKey: string): string {
   if (error instanceof ApiError && error.message) {
+    if (Number(error.code) === 504) {
+      return t('a2a.service.discoveryTimeout');
+    }
     if (error.message.includes('A2A Agent name must not contain spaces or other whitespace')) {
       return t('a2a.service.nameWhitespace');
     }
     return error.message;
   }
   return t(fallbackKey);
+}
+
+async function fetchDiscovery<T>(url: string, request: unknown): Promise<{
+  success: boolean;
+  data?: T;
+  message?: string;
+}> {
+  const response = await fetchWithErrorHandling(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  const data = await response.json();
+  return data.status === 'success'
+    ? { success: true, data: data.data as T }
+    : { success: false, message: data.detail || t('a2a.service.discoverFailed') };
 }
 
 // =============================================================================
@@ -135,18 +154,7 @@ export const a2aClientService = {
     message?: string;
   }> {
     try {
-      const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.discoverUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-      const data = await response.json();
-
-      if (response.ok && data.status === 'success') {
-        return { success: true, data: data.data };
-      }
-
-      return { success: false, message: data.detail || t('a2a.service.discoverFailed') };
+      return await fetchDiscovery<A2AExternalAgent>(API_ENDPOINTS.a2a.discoverUrl, request);
     } catch (error) {
       log.error('Failed to discover from URL:', error);
       return { success: false, message: discoveryErrorMessage(error, 'a2a.service.discoverFailed') };
@@ -162,18 +170,7 @@ export const a2aClientService = {
     message?: string;
   }> {
     try {
-      const response = await fetchWithErrorHandling(API_ENDPOINTS.a2a.discoverNacos, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(request),
-      });
-      const data = await response.json();
-
-      if (response.ok && data.status === 'success') {
-        return { success: true, data: data.data };
-      }
-
-      return { success: false, message: data.detail || t('a2a.service.discoverFailed') };
+      return await fetchDiscovery<A2AExternalAgent[]>(API_ENDPOINTS.a2a.discoverNacos, request);
     } catch (error) {
       log.error('Failed to discover from Nacos:', error);
       return { success: false, message: discoveryErrorMessage(error, 'a2a.service.discoverFailed') };
