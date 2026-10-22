@@ -13,13 +13,19 @@ export class KnowledgePage {
 
   async open(requireConfiguredEmbedding = true): Promise<void> {
     await this.page.goto(appPath("/knowledges"), { waitUntil: "domcontentloaded" });
+    // The knowledge base page renders no `role=heading` title, so "page ready"
+    // is asserted through the two mutually exclusive states instead: either the
+    // creation toolbar is available, or the embedding-not-configured notice is
+    // shown.
     if (requireConfiguredEmbedding) {
-      await expect(this.page.getByRole("heading", { name: "知识库", exact: true })).toBeVisible();
       await expect(this.createButton()).toBeVisible();
       return;
     }
-    await expect(this.page.getByRole("heading", { name: "知识库", exact: true })
-      .or(this.page.getByText(/尚未配置向量模型|需要配置向量化模型/)).first()).toBeVisible();
+    await expect(
+      this.createButton()
+        .or(this.page.getByText(/尚未配置向量模型|需要配置向量化模型/))
+        .first()
+    ).toBeVisible();
   }
 
   async beginCreate(name: string, embeddingDisplayName: string): Promise<void> {

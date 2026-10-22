@@ -62,6 +62,25 @@ export class ChatPage {
     await expect(button).toHaveClass(/bg-blue-50/);
   }
 
+  /**
+   * Composer draft text.
+   *
+   * The composer is a Lexical contenteditable (`.aui-lexical-input`), so the
+   * Playwright `inputValue()` / `toHaveValue()` APIs do not apply and a
+   * `placeholder` selector is useless: `composer.tsx` renders the input with an
+   * explicit empty `placeholder=""`. Read the rendered text instead.
+   */
+  async composerText(): Promise<string> {
+    const composer = this.page.locator("[data-workbench-composer], .aui-lexical-input").first();
+    await expect(composer).toBeVisible();
+    const text = await composer.innerText();
+    return text.replace(/\u200b/g, "").trim();
+  }
+
+  async expectComposerText(pattern: string | RegExp, timeout = 30_000): Promise<void> {
+    await expect.poll(async () => this.composerText(), { timeout }).toMatch(pattern);
+  }
+
   async startMessage(prompt: string): Promise<Locator> {
     const before = await this.assistantMessages().count();
     const composer = this.page.locator("[data-workbench-composer], .aui-lexical-input");
@@ -346,27 +365,17 @@ export class ChatPage {
   }
 
   async uploadAttachment(payload: AttachmentPayload): Promise<void> {
-    // Older composer layouts expose a direct 添加附件 button; the new-chat
-    // design moved the entry behind the toolbar ＋ panel (添加 -> 上传文件,
-    // the file-chooser trigger).
-    const legacy = this.page.getByRole("button", { name: "添加附件", exact: true });
-    if (await legacy.isVisible().catch(() => false)) {
-      const chooser = this.page.waitForEvent("filechooser");
-      await legacy.click();
-      await (await chooser).setFiles(payload);
-      return;
-    }
-    await this.page.locator("[data-composer-action-trigger]").last().click();
+    // Composer attachment entry. `ComposerAddAttachment` renders a
+    // TooltipIconButton whose tooltip is also emitted as an `sr-only` span, so
+    // the button carries an accessible name (locale key
+    // `chat.composer.addAttachment` -> "添加附件"). The old toolbar trigger
+    // attribute `[data-composer-action-trigger]` no longer exists in the
+    // composer, so resolve the button by accessible name instead.
+    const attachButton = this.page.getByRole("button", { name: "添加附件", exact: true });
+    await expect(attachButton).toBeVisible();
     const chooser = this.page.waitForEvent("filechooser");
-    await this.page.getByRole("button", { name: "上传文件", exact: true }).click();
+    await attachButton.click();
     await (await chooser).setFiles(payload);
-    // The panel's 上传文件 row does not close the panel itself. An open panel
-    // overlays the composer and intercepts later clicks (the panel closes on
-    // any pointerdown outside it or its trigger), so dismiss it explicitly.
-    const panel = this.page.locator("[data-composer-action-panel]");
-    if (await panel.isVisible().catch(() => false)) {
-      await this.page.mouse.click(8, 8);
-      await expect(panel).toBeHidden();
-    }
+    await expect(this.page.locator("[data-workbench-composer], .aui-lexical-input")).toBeVisible();
   }
 }

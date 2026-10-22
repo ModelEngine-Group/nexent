@@ -44,4 +44,28 @@ export class AuthPage {
     await this.expectLoggedOut();
     return response.status();
   }
+
+  /**
+   * Switch UI language through the real account menu.
+   *
+   * The language options are a **second-level** submenu
+   * (`avatarDropdown.tsx` renders `accountMenu.language` as a `children` list),
+   * so the entry has to be expanded before the option becomes clickable. A flat
+   * `getByText("简体中文")` click cannot reach it.
+   *
+   * @param option accessible label of the target language option
+   */
+  async switchLanguageTo(option: string): Promise<void> {
+    const accountButton = this.page.getByRole("button", { name: "用户设置", exact: true }).last();
+    await expect(accountButton).toBeVisible();
+    await accountButton.click();
+
+    const languageEntry = this.page.getByRole("menuitem", { name: /语言设置|Language/ }).last();
+    await expect(languageEntry).toBeVisible();
+    await languageEntry.hover();
+
+    const target = this.page.getByRole("menuitem", { name: new RegExp(`^${option}$`) }).last();
+    await expect(target).toBeVisible();
+    await target.click();
+  }
 }
