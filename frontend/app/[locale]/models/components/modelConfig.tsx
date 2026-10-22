@@ -1,4 +1,5 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   forwardRef,
   useEffect,
@@ -961,7 +962,7 @@ export const ModelConfigSection = forwardRef<
   /* ==================== Render ==================== */
   return (
     <>
-      <TooltipProvider>
+      <TooltipProvider delayDuration={150}>
         {/* px-2 matches CARD_HEADER.PADDING so section titles align with the
           page header ("模型设置") above. h-full: the default-config card
           takes its natural height; the library section fills the rest and

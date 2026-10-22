@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -912,6 +914,7 @@ export default function AgentTasksPage() {
         dataSource={tasks}
         onChange={handleTableChange}
         expandable={{
+          showExpandColumn: false,
           expandedRowKeys: expandedTaskIds,
           onExpandedRowsChange: (keys) =>
             setExpandedTaskIds(keys.map((key) => Number(key))),

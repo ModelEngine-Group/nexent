@@ -313,10 +313,13 @@ def update_tool_info_impl(
                     raise ValidationError(
                         "aidp_search kds_list contains a knowledge base the user cannot configure"
                     )
+                # Only KBs that still exist in the AIDP catalog can be hidden
+                # by permission; IDs deleted remotely must not be resurrected.
                 hidden_existing = [
                     kds_id
                     for kds_id in existing_ids
-                    if kds_id not in snapshot.accessible_id_set
+                    if kds_id in snapshot.remote_ids
+                    and kds_id not in snapshot.accessible_id_set
                 ]
                 visible_submitted = [
                     kds_id

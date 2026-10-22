@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -217,8 +219,7 @@ export function AgentRepositoryCopyDialog({
       ? skillConflictItems.map((item) => ({
           skill_name: item.name,
           action: (skillResolutionActions[item.name] ?? "rename") as
-            | "rename"
-            | "use_existing",
+            "rename" | "use_existing",
           ...(skillResolutionActions[item.name] !== "use_existing"
             ? { new_name: item.suggested_new_name || `${item.name} 副本` }
             : {}),
@@ -241,8 +242,8 @@ export function AgentRepositoryCopyDialog({
     ) {
       message.error(
         officialEmbeddingModelMissing
-          ? "当前租户未配置可用向量模型，请先配置后再复制官方智能体"
-          : "请先选择语言模型和向量模型"
+          ? t("ui.localization.embeddingRequiredToCopy")
+          : t("ui.localization.chooseRequiredModels")
       );
       return;
     }
@@ -480,10 +481,10 @@ export function AgentRepositoryCopyDialog({
           {isOfficialListing && officialKnowledgeConflictItems.length > 0 ? (
             <section className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-500/10">
               <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                检测到同名知识库，请选择处理方式
+                {t("ui.localization.knowledgeConflictTitle")}
               </p>
               <p className="text-xs text-amber-700 dark:text-amber-300">
-                请选择每个同名知识库的处理方式：
+                {t("ui.localization.knowledgeConflictHelp")}
               </p>
               <div className="space-y-3">
                 {officialKnowledgeConflictItems.map((item) => (
@@ -504,11 +505,14 @@ export function AgentRepositoryCopyDialog({
                       }}
                     >
                       <Space direction="vertical" size={8}>
-                        <Radio value="reuse">复用已有知识库</Radio>
+                        <Radio value="reuse">
+                          {t("ui.localization.reuseKnowledge")}
+                        </Radio>
                         <Radio value="create_new">
-                          创建新的知识库
+                          {t("ui.localization.createKnowledge")}
                           <span className="ml-2 text-xs text-slate-600 dark:text-slate-400">
-                            新名称：{item.name} 副本
+                            {t("ui.localization.newName")}
+                            {item.name} {t("ui.localization.copySuffix")}
                           </span>
                         </Radio>
                       </Space>
@@ -522,15 +526,15 @@ export function AgentRepositoryCopyDialog({
           {isOfficialListing ? (
             <section className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
               <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                选择本次安装使用的模型
+                {t("ui.localization.installationModels")}
               </p>
               <div className="space-y-2">
                 <label className="block text-xs text-slate-600 dark:text-slate-300">
-                  语言模型
+                  {t("ui.localization.languageModel")}
                 </label>
                 <Select
                   className="w-full"
-                  placeholder="请选择语言模型"
+                  placeholder={t("ui.localization.chooseLanguageModel")}
                   value={selectedModelId}
                   onChange={setSelectedModelId}
                   options={availableLlmModels.map((model) => ({
@@ -542,11 +546,11 @@ export function AgentRepositoryCopyDialog({
               {hasOfficialKnowledge && hasOfficialKnowledgeToCreate ? (
                 <div className="space-y-2">
                   <label className="block text-xs text-slate-600 dark:text-slate-300">
-                    向量模型
+                    {t("ui.localization.embeddingModel")}
                   </label>
                   <Select
                     className="w-full"
-                    placeholder="请选择向量模型"
+                    placeholder={t("ui.localization.chooseEmbeddingModel")}
                     value={selectedEmbeddingModelId}
                     onChange={setSelectedEmbeddingModelId}
                     options={availableEmbeddingModels.map((model) => ({
@@ -558,7 +562,7 @@ export function AgentRepositoryCopyDialog({
               ) : null}
               {officialEmbeddingModelMissing ? (
                 <p className="text-xs text-red-600 dark:text-red-400">
-                  当前租户未配置可用向量模型，请先配置后再复制官方智能体。
+                  {t("ui.localization.embeddingUnavailable")}
                 </p>
               ) : null}
             </section>
@@ -663,14 +667,17 @@ function RequirementTypeGroup({
     (type === "skill" &&
       items.some((item) => item.reason_code === "skill_duplicate"));
   const reasonLabel =
-    (hasNameConflict && type === "knowledge_base"
+    hasNameConflict && type === "knowledge_base"
       ? t(
           "agentRepository.copy.reason.kb_duplicate",
           "Knowledge base name conflict"
         )
       : hasNameConflict && type === "skill"
-        ? t("agentRepository.copy.reason.skill_duplicate", "Skill name conflict")
-        : getRepositoryRequirementReasonLabel(items[0]?.reason_code, t));
+        ? t(
+            "agentRepository.copy.reason.skill_duplicate",
+            "Skill name conflict"
+          )
+        : getRepositoryRequirementReasonLabel(items[0]?.reason_code, t);
 
   return (
     <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-700">

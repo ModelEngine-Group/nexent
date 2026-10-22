@@ -33,13 +33,18 @@ export default function TagDefinitionManagementModal({
       centered
       destroyOnHidden
     >
-      {open && (
-        <TagDefinitionManagementPanel
-          key={bucketId}
-          bucketId={bucketId}
-          canManage={canManage}
-        />
-      )}
+      {open &&
+        (bucketId > 0 ? (
+          <TagDefinitionManagementPanel
+            key={bucketId}
+            bucketId={bucketId}
+            canManage={canManage}
+          />
+        ) : (
+          <div className="py-10 text-center text-sm text-gray-500">
+            {t("common.loading")}
+          </div>
+        ))}
     </Modal>
   );
 }

@@ -192,7 +192,9 @@ export function SkillPicker({
         if (!cancelled) {
           setListError(true);
           message.error(
-            error instanceof Error ? error.message : "Skill 加载失败"
+            error instanceof Error
+              ? error.message
+              : t("workbench.controls.skillLoadFailed")
           );
         }
       })
@@ -202,7 +204,7 @@ export function SkillPicker({
     return () => {
       cancelled = true;
     };
-  }, [open, mineRequest]);
+  }, [open, mineRequest, t]);
 
   useEffect(() => {
     if (!open || tab !== "repository") return;
@@ -241,7 +243,7 @@ export function SkillPicker({
       );
       if (operation !== installOperationRef.current) return;
       if (!result.skill_id)
-        throw new Error("安装响应缺少 Skill ID，请刷新后检查安装结果");
+        throw new Error(t("workbench.controls.skillInstallMissingId"));
       const items = await fetchSkillsList();
       if (operation !== installOperationRef.current) return;
       setSkills(items);
@@ -260,7 +262,12 @@ export function SkillPicker({
       if ((error as { status?: number }).status === 409) {
         setConflict(item);
         setTargetName(`${item.name}-copy`);
-      } else message.error(error instanceof Error ? error.message : "安装失败");
+      } else
+        message.error(
+          error instanceof Error
+            ? error.message
+            : t("workbench.controls.installFailed")
+        );
     } finally {
       if (operation === installOperationRef.current) setInstalling(null);
     }
@@ -293,7 +300,7 @@ export function SkillPicker({
       else next.add(id);
     });
     if (next.size > 20) {
-      message.warning("最多选择 20 个 Skills，请缩小搜索范围后重试");
+      message.warning(t("workbench.controls.skillLimitSearch"));
       return;
     }
     if (!allSelected) {
@@ -320,14 +327,14 @@ export function SkillPicker({
     if (disabled || loading || saving || installing !== null || listError)
       return;
     if (selectedIds.size > 20) {
-      message.warning("最多选择 20 个 Skills");
+      message.warning(t("workbench.controls.skillLimit"));
       return;
     }
     const selectedSkills = skills.filter((skill) =>
       selectedIds.has(Number(skill.skill_id))
     );
     if (selectedSkills.length !== selectedIds.size) {
-      message.warning("部分已选 Skill 不可用，请重新选择");
+      message.warning(t("workbench.controls.skillsUnavailable"));
       return;
     }
     if (
@@ -335,7 +342,7 @@ export function SkillPicker({
         missingRequiredConfig(skill, configs[Number(skill.skill_id)])
       )
     ) {
-      message.warning("请先补全所选 Skill 的必填配置");
+      message.warning(t("workbench.controls.completeSkillConfig"));
       return;
     }
     const mounts = selectedSkills.map((skill) => {
@@ -350,7 +357,9 @@ export function SkillPicker({
       await onConfirm(mounts, selectedSkills);
     } catch (error) {
       message.error(
-        error instanceof Error ? error.message : "资源配置保存失败"
+        error instanceof Error
+          ? error.message
+          : t("workbench.controls.saveConfigFailed")
       );
     } finally {
       setSaving(false);
@@ -389,8 +398,8 @@ export function SkillPicker({
                           onClick={() => void install(item)}
                         >
                           {installing === item.skill_repository_id
-                            ? "安装中"
-                            : "安装并选择"}
+                            ? t("workbench.controls.installing")
+                            : t("workbench.controls.installAndSelect")}
                         </Button>
                       }
                       onClick={() => void install(item)}
@@ -399,7 +408,7 @@ export function SkillPicker({
                 </ResourceSelectionGrid>
               </Spin>
               <Modal
-                title="Skill 名称已存在"
+                title={t("workbench.controls.skillNameExists")}
                 open={!!conflict}
                 onCancel={() => {
                   installOperationRef.current += 1;
@@ -409,13 +418,13 @@ export function SkillPicker({
                 onOk={() =>
                   conflict && void install(conflict, targetName.trim())
                 }
-                okText="重命名安装"
+                okText={t("workbench.controls.renameInstall")}
                 okButtonProps={{ disabled: !targetName.trim() }}
               >
                 <Input
                   value={targetName}
                   onChange={(event) => setTargetName(event.target.value)}
-                  aria-label="新 Skill 名称"
+                  aria-label={t("workbench.controls.newSkillName")}
                 />
                 {skills.some((skill) => skill.name === conflict?.name) && (
                   <button
@@ -442,7 +451,7 @@ export function SkillPicker({
                       setTab("mine");
                     }}
                   >
-                    使用已有 Skill
+                    {t("workbench.controls.useExistingSkill")}
                   </button>
                 )}
               </Modal>
@@ -513,20 +522,24 @@ export function SkillPicker({
                               );
                           }}
                           disabledReason={
-                            invalid ? "需要填写必填配置" : undefined
+                            invalid
+                              ? t("workbench.controls.requiredConfig")
+                              : undefined
                           }
                         />
                       )}
                       {editingId === skillId && (
                         <Modal
-                          title={`配置 ${skill.name}`}
+                          title={t("workbench.controls.configureSkill", {
+                            name: skill.name,
+                          })}
                           open
                           onCancel={() => {
                             setEditingId(null);
                             setConfigQueue([]);
                           }}
-                          okText="保存配置"
-                          cancelText="取消"
+                          okText={t("workbench.controls.saveConfig")}
+                          cancelText={t("common.cancel")}
                           onOk={() => {
                             if (
                               missingRequiredConfig(
@@ -534,7 +547,9 @@ export function SkillPicker({
                                 draftConfigs[skillId]
                               )
                             ) {
-                              message.warning("请先补全所选 Skill 的必填配置");
+                              message.warning(
+                                t("workbench.controls.completeSkillConfig")
+                              );
                               return;
                             }
                             if (
