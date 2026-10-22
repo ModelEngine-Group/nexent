@@ -32,11 +32,23 @@
         "order": 2,
         "action": "Open ordinary chat and Workbench knowledge selection, change/cancel/confirm ranges and run the configured Agents.",
         "expected": "Neither page displays retrieval parameter editing; knowledge selection remains usable and actual executing Agent/version parameters are preserved."
+      },
+      {
+        "order": 3,
+        "action": "In managed and independent retrieval forms, clear top_k=10 and retype 20 with candidates initially 10/10; repeat with one candidate separately set to 50 and with the other candidate manually cleared while the total is empty. Repair the draft, then cancel and reopen.",
+        "expected": "Linked candidates become 20 while the separately set 50 remains fixed. A manually cleared candidate stays editable and invalid until repaired. Empty totals block confirmation; cancellation preserves stored values."
+      },
+      {
+        "order": 4,
+        "action": "With three channels, unified graph reranking and hybrid_top_k=6 / graph_top_k=4, clear hybrid_top_k, retype 6, and try negative and excessive limits. Switch to English and inspect channel summaries and combination labels.",
+        "expected": "The invalid hybrid limit input stays visible and editable; invalid values block confirmation and repairing to 6 restores a valid draft. English channel labels render Vector, Full text and Graph without raw translation keys."
       }
     ],
     "expected_results": [
       "Saved instance values survive refresh; invalid combinations disable confirmation and cancel discards drafts.",
-      "Neither page displays retrieval parameter editing; knowledge selection remains usable and actual executing Agent/version parameters are preserved."
+      "Neither page displays retrieval parameter editing; knowledge selection remains usable and actual executing Agent/version parameters are preserved.",
+      "Temporary empty limits remain repairable, linked candidates recover while fixed candidates remain unchanged, and cancel preserves stored values.",
+      "English channel labels resolve and invalid hybrid limits remain editable until corrected."
     ],
     "forbidden_side_effects": [
       "Do not mutate other configurations, expand managed scope, expose credentials or issue HTTP for invalid settings."
@@ -56,16 +68,27 @@
         "forbidden_side_effects": [
           1
         ]
+      },
+      {
+        "id": "AC-02",
+        "description": "Numeric draft recovery preserves linkage, repairability and cancellation without writing invalid or canceled settings; English channel summaries are translated.",
+        "steps": [3, 4],
+        "expected_results": [3, 4],
+        "forbidden_side_effects": [1]
       }
     ],
     "actor": "Nexent user",
     "journey": [
       "Open Agent knowledge settings and independent tool settings; configure all seven methods, fixed candidates and reranking; save and reopen.",
-      "Open ordinary chat and Workbench knowledge selection, change/cancel/confirm ranges and run the configured Agents."
+      "Open ordinary chat and Workbench knowledge selection, change/cancel/confirm ranges and run the configured Agents.",
+      "Clear and repair numeric drafts; verify linked and separately configured candidates, invalid hybrid limits, confirmation and cancellation.",
+      "Switch to English and inspect the channel summaries and combination labels."
     ],
     "final_business_result": [
       "Saved instance values survive refresh; invalid combinations disable confirmation and cancel discards drafts.",
-      "Neither page displays retrieval parameter editing; knowledge selection remains usable and actual executing Agent/version parameters are preserved."
+      "Neither page displays retrieval parameter editing; knowledge selection remains usable and actual executing Agent/version parameters are preserved.",
+      "Temporary invalid numeric drafts remain repairable and do not erase candidate linkage or alter stored settings on cancellation.",
+      "English channel labels are translated."
     ],
     "failure_evidence": [
       "Sanitized network and assertion evidence; no retained original screenshots."

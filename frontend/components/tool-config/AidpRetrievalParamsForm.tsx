@@ -337,6 +337,22 @@ export function AidpRetrievalParamsForm({
   const [combinationOpen, setCombinationOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [enhancementOpen, setEnhancementOpen] = useState(false);
+  const topKBeforeClear = useRef(c.top_k);
+
+  const changeTopK = (value: number) => {
+    if (Number.isFinite(Number(c.top_k))) topKBeforeClear.current = c.top_k;
+    // Empty drafts must not erase fixed candidates or their equality baseline.
+    const previousTopK = topKBeforeClear.current;
+    onChange({
+      top_k: value,
+      ...(Number.isFinite(value) && c.vector_candidates === previousTopK
+        ? { vector_candidates: value }
+        : {}),
+      ...(Number.isFinite(value) && c.full_text_candidates === previousTopK
+        ? { full_text_candidates: value }
+        : {}),
+    });
+  };
 
   const hKey =
     vector && text
@@ -346,7 +362,9 @@ export function AidpRetrievalParamsForm({
         : "full_text_top_k";
   const showHybridTopK =
     (vector || text) &&
-    ((graph && !c.graph_reranking_enable) || Number(c.hybrid_top_k) > 0);
+    ((graph && !c.graph_reranking_enable) ||
+      Number(c.hybrid_top_k) > 0 ||
+      Boolean(errors.hybrid_top_k));
   const enhancementCount = ENHANCEMENT_KEYS.filter((key) =>
     Boolean(c[key])
   ).length;
@@ -519,17 +537,7 @@ export function AidpRetrievalParamsForm({
           max={100}
           disabled={disabled}
           invalid={Boolean(errors.top_k)}
-          onChange={(value) =>
-            onChange({
-              top_k: value,
-              ...(c.vector_candidates === c.top_k
-                ? { vector_candidates: value }
-                : {}),
-              ...(c.full_text_candidates === c.top_k
-                ? { full_text_candidates: value }
-                : {}),
-            })
-          }
+          onChange={changeTopK}
         />
         <NumberControl
           label={t("aidpRetrieval.fields.score_threshold")}
