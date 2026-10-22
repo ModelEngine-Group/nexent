@@ -723,7 +723,7 @@ export function ResourceDrawer({
           type="button"
           onClick={handleClose}
           disabled={confirmLoading}
-          className="h-8 w-[89px] cursor-pointer rounded-[2px] border border-[#C9C9C9] bg-white text-[14px] leading-[22px] text-[#191919]"
+          className="h-8 min-w-[89px] shrink-0 cursor-pointer whitespace-nowrap rounded-[2px] border border-[#C9C9C9] bg-white px-4 text-[14px] leading-[22px] text-[#191919]"
         >
           {closeText ?? t("resourcePicker.close", "关闭")}
         </button>
@@ -733,7 +733,7 @@ export function ResourceDrawer({
             onClick={onConfirm}
             disabled={disabled || confirmDisabled || confirmLoading}
             aria-busy={confirmLoading}
-            className="inline-flex h-8 w-[89px] cursor-pointer items-center justify-center gap-2 rounded-[2px] border-0 bg-[#1476FF] text-[14px] leading-[22px] text-white"
+            className="inline-flex h-8 min-w-[89px] shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-[2px] border-0 bg-[#1476FF] px-4 text-[14px] leading-[22px] text-white"
           >
             {confirmLoading && (
               <RefreshCw aria-hidden size={14} className="animate-spin" />
