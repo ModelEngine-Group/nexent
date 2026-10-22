@@ -1,6 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import {
   useCallback,
   useReducer,
@@ -36,6 +36,10 @@ const view = vi.hoisted(() => ({
   bootstrap: null as {
     generic_agent: { agent_id: number; version_no: number };
   } | null,
+  listLoading: false,
+  threadLoading: false,
+  running: false,
+  initialConfigVersion: 7,
 }));
 const runtime = {
   thread: {
@@ -75,10 +79,10 @@ vi.mock("@assistant-ui/react", () => ({
     select({
       threads: {
         mainThreadId: view.threadId,
-        isLoading: false,
+        isLoading: view.listLoading,
         threadItems: view.items,
       },
-      thread: { isLoading: false, isRunning: false },
+      thread: { isLoading: view.threadLoading, isRunning: view.running },
     }),
 }));
 vi.mock("@/features/workbench/providers/WorkbenchSessionProvider", () => ({
@@ -87,7 +91,7 @@ vi.mock("@/features/workbench/providers/WorkbenchSessionProvider", () => ({
     const [state, dispatch] = useReducer(workbenchReducer, {
       ...initialWorkbenchState,
       config,
-      configVersion: 7,
+      configVersion: view.initialConfigVersion,
     });
     const changeMode = useCallback(
       (mode: "agent_create" | "skill_create" | "generic_chat") =>
@@ -112,7 +116,7 @@ vi.mock("@/features/workbench/providers/WorkbenchSessionProvider", () => ({
 vi.mock("@/app/newchat/assistant-ui/chat", () => ({
   Chat: (props: ComponentProps<typeof Chat>) => {
     view.props = props;
-    return null;
+    return <input aria-label="workbench draft" defaultValue="Keep my draft" />;
   },
 }));
 vi.mock("@/app/newchat/assistant-ui/composer-tools", () => ({
@@ -244,11 +248,116 @@ beforeEach(() => {
     { id: "b", remoteId: "202" },
   ];
   view.bootstrap = null;
+  view.listLoading = false;
+  view.threadLoading = false;
+  view.running = false;
+  view.initialConfigVersion = 7;
   view.nextThread = 0;
   vi.mocked(conversationService.getById).mockImplementation(async (id) =>
     detail(Number(id))
   );
 });
+
+it.each([true, false])(
+  "preserves the mounted chat during metadata reload while running=%s",
+  async (running) => {
+    const page = render(<WorkbenchPage />);
+    const draft = await screen.findByRole("textbox", {
+      name: "workbench draft",
+    });
+    view.running = running;
+    view.listLoading = true;
+    page.rerender(<WorkbenchPage />);
+    expect(screen.getByRole("textbox", { name: "workbench draft" })).toBe(
+      draft
+    );
+    expect(draft).toHaveValue("Keep my draft");
+    view.listLoading = false;
+    page.rerender(<WorkbenchPage />);
+    expect(screen.getByRole("textbox", { name: "workbench draft" })).toBe(
+      draft
+    );
+  }
+);
+
+it("still gates missing active identity and history loading", async () => {
+  view.threadId = undefined;
+  const page = render(<WorkbenchPage />);
+  expect(screen.queryByRole("textbox", { name: "workbench draft" })).toBeNull();
+  view.threadId = "a";
+  view.threadLoading = true;
+  page.rerender(<WorkbenchPage />);
+  expect(screen.queryByRole("textbox", { name: "workbench draft" })).toBeNull();
+  view.threadLoading = false;
+  page.rerender(<WorkbenchPage />);
+  expect(
+    await screen.findByRole("textbox", { name: "workbench draft" })
+  ).toBeVisible();
+});
+
+it.each(["pending", "unavailable"])(
+  "promotes an executing local thread without rehydrating or remounting its chat when history is %s",
+  async (history) => {
+    view.threadId = "local-new";
+    view.items = [];
+    view.initialConfigVersion = 0;
+    view.running = true;
+    const page = render(<WorkbenchPage />);
+    const draft = await screen.findByRole("textbox", {
+      name: "workbench draft",
+    });
+    act(() => view.props!.onRuntimeMetadataChange!({ owner: "live run" }));
+    await act(async () => view.props!.onKnowledgeScopeChange!(scope(77)));
+    const before = runConfig();
+    const pending = deferred<ApiConversationDetail>();
+    if (history === "pending") {
+      vi.mocked(conversationService.getById).mockReturnValue(pending.promise);
+    } else {
+      vi.mocked(conversationService.getById).mockRejectedValue(
+        new Error("History unavailable")
+      );
+    }
+    act(() => before.onServerConversationId("303"));
+    expect(screen.getByRole("textbox", { name: "workbench draft" })).toBe(
+      draft
+    );
+    expect(conversationService.getById).not.toHaveBeenCalled();
+    expect(view.props?.knowledgeScope).toEqual(scope(77));
+    expect(view.props?.runtimeMetadata).toEqual({ owner: "live run" });
+    expect(runConfig()).toMatchObject({
+      threadId: "303",
+      runtimeMetadata: { owner: "live run" },
+      workbenchConfig: before.workbenchConfig,
+      workbenchConfigVersion: 1,
+    });
+    view.running = false;
+    view.listLoading = true;
+    page.rerender(<WorkbenchPage />);
+    view.listLoading = false;
+    page.rerender(<WorkbenchPage />);
+    expect(screen.getByRole("textbox", { name: "workbench draft" })).toBe(
+      draft
+    );
+    expect(conversationService.getById).not.toHaveBeenCalled();
+
+    vi.mocked(conversationService.getById).mockImplementation(async (id) =>
+      detail(Number(id))
+    );
+    view.threadId = "b";
+    view.items = [{ id: "b", remoteId: "202" }];
+    page.rerender(<WorkbenchPage />);
+    await waitFor(() =>
+      expect(view.props?.runtimeMetadata).toEqual({ owner: "202" })
+    );
+    view.threadId = "local-new";
+    page.rerender(<WorkbenchPage />);
+    await waitFor(() =>
+      expect(view.props?.runtimeMetadata).toEqual({ owner: "303" })
+    );
+    expect(conversationService.getById).toHaveBeenCalledWith("303");
+    expect(view.props?.knowledgeScope).toEqual(scope(303));
+  }
+);
 
 it("never publishes the previous conversation's knowledge or dirty metadata when switching", async () => {
   const page = render(<WorkbenchPage />);
@@ -338,7 +447,9 @@ it("uses the server-issued ID first and preserves exact model config and version
   expect(runConfig().workbenchConfig.generation_config).toEqual(
     config.generation_config
   );
-  expect(runConfig().workbenchConfigVersion).toBe(303);
+  expect(runConfig().workbenchConfigVersion).toBe(7);
+  act(() => runConfig().onWorkbenchConfigVersion(8));
+  expect(runConfig().workbenchConfigVersion).toBe(8);
   expect(view.props?.conversationId).toBe(303);
   expect(view.props?.thinkingEffort).toBe("xhigh");
 });

@@ -216,12 +216,11 @@ const HomeContent: FC = () => {
 
   // All hooks must be called before any early returns
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
-  const isLoading = useAuiState((s) => s.threads.isLoading);
   const isThreadLoading = useAuiState((s) => s.thread.isLoading);
   const isThreadRunning = useAuiState((s) => s.thread.isRunning);
   const threadItems = useAuiState((s) => s.threads.threadItems);
-  const ready =
-    runtimeMainThreadId !== undefined && !isLoading && !isThreadLoading;
+  // Sidebar metadata reloads must not unmount the active chat and composer.
+  const ready = runtimeMainThreadId !== undefined && !isThreadLoading;
 
   const activeThreadId = runtimeMainThreadId;
 
@@ -350,9 +349,20 @@ const HomeContent: FC = () => {
   const activeConversationId =
     rawConversationId == null ? undefined : String(rawConversationId);
   const activeConversationIdRef = useRef(activeConversationId);
+  const historyRestoreOwnerRef = useRef({
+    threadId: undefined as string | undefined,
+    startedLocal: false,
+  });
   useLayoutEffect(() => {
     activeConversationIdRef.current = activeConversationId;
-  }, [activeConversationId]);
+    if (historyRestoreOwnerRef.current.threadId !== activeThreadId) {
+      const id = Number(activeConversationId);
+      historyRestoreOwnerRef.current = {
+        threadId: activeThreadId,
+        startedLocal: !Number.isInteger(id) || id <= 0,
+      };
+    }
+  }, [activeConversationId, activeThreadId]);
 
   const numericConversationId = Number(activeConversationId);
   const isPersistedConversation =
@@ -364,7 +374,8 @@ const HomeContent: FC = () => {
   const cachedKnowledge = activeThreadId
     ? knowledgeCache.get(activeThreadId)
     : undefined;
-  const scopeKey = JSON.stringify([activeThreadId, activeConversationId]);
+  // A live thread keeps its UI state when the backend first assigns its ID.
+  const scopeKey = activeThreadId ?? "";
   const [knowledgeScope, setKnowledgeScope] =
     useConversationScopedState<ConversationKnowledgeScope | null>(
       scopeKey,
@@ -381,11 +392,11 @@ const HomeContent: FC = () => {
     );
   const [runtimeMetadata, setRuntimeMetadata] = useConversationScopedState<
     Record<string, unknown>
-  >(activeConversationId ?? "", {});
+  >(scopeKey, {});
   const [runtimeMetadataVersion, setRuntimeMetadataVersion] =
-    useConversationScopedState(activeConversationId ?? "", 0);
+    useConversationScopedState(scopeKey, 0);
   const [runtimeMetadataDirty, setRuntimeMetadataDirty] =
-    useConversationScopedState(activeConversationId ?? "", false);
+    useConversationScopedState(scopeKey, false);
   const genericAgentId = workbenchBootstrap?.generic_agent?.agent_id;
   const genericAgentVersion = workbenchBootstrap?.generic_agent?.version_no;
   const [knowledgeCapabilities, setKnowledgeCapabilities] =
@@ -475,9 +486,19 @@ const HomeContent: FC = () => {
   }, [genericAgentId, genericAgentVersion, setKnowledgeCapabilities]);
 
   useEffect(() => {
+    const numericConversationId = Number(activeConversationId);
     if (!activeThreadId) return;
 
-    const numericConversationId = Number(activeConversationId);
+    // First persistence updates the current live session; only a real thread
+    // switch should reload its saved configuration and enter restore loading.
+    if (
+      historyRestoreOwnerRef.current.startedLocal &&
+      serverConversationIdsRef.current.get(activeThreadId) ===
+        activeConversationId
+    ) {
+      return;
+    }
+
     if (
       !Number.isInteger(numericConversationId) ||
       numericConversationId <= 0
@@ -609,6 +630,14 @@ const HomeContent: FC = () => {
   useEffect(() => {
     const numericConversationId = Number(activeConversationId);
     if (
+      activeThreadId &&
+      historyRestoreOwnerRef.current.startedLocal &&
+      serverConversationIdsRef.current.get(activeThreadId) ===
+        activeConversationId
+    ) {
+      return;
+    }
+    if (
       !Number.isInteger(numericConversationId) ||
       numericConversationId <= 0
     ) {
@@ -632,7 +661,12 @@ const HomeContent: FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [activeConversationId, setRuntimeMetadata, setRuntimeMetadataVersion]);
+  }, [
+    activeConversationId,
+    activeThreadId,
+    setRuntimeMetadata,
+    setRuntimeMetadataVersion,
+  ]);
 
   const handleRuntimeMetadataChange = useCallback(
     (value: Record<string, unknown>) => {
