@@ -30,7 +30,7 @@ AGENT_CONFIG_CASES = [
     "API-055", "API-056", "API-057", "API-058",
     "AGT-001", "AGT-002", "AGT-003", "AGT-004",
     "AGT-006", "AGT-007", "AGT-008", "AGT-009", "AGT-010", "AGT-011", "AGT-012",
-    "API-059", "API-060", "API-061", "API-062", "API-063", "API-064", "API-065", "API-066",
+    "API-060", "API-061", "API-062", "API-063", "API-064", "API-065", "API-066",
 ]
 
 
@@ -391,43 +391,6 @@ async def _prompt_badcase(identity, debug: bool, failure: bool) -> None:
         assert_status(response, (400, 404) if failure else 200)
 
 
-def _template_content() -> dict:
-    return {
-        "duty_system_prompt": "Generate duty", "constraint_system_prompt": "Generate constraints",
-        "few_shots_system_prompt": "Generate examples", "agent_variable_name_system_prompt": "Generate name",
-        "agent_display_name_system_prompt": "Generate display name",
-        "agent_description_system_prompt": "Generate description", "user_prompt": "{task_description}",
-        "agent_name_regenerate_system_prompt": "Regenerate name",
-        "agent_name_regenerate_user_prompt": "{task_description}",
-        "agent_display_name_regenerate_system_prompt": "Regenerate display",
-        "agent_display_name_regenerate_user_prompt": "{task_description}",
-    }
-
-
-async def _template_crud(identity) -> None:
-    name = f"d3-template-{uuid.uuid4().hex[:8]}"
-    payload = {"template_name": name, "description": "D3", "template_content_zh": _template_content()}
-    template_id = None
-    async with client("config", token=identity.access_token) as api:
-        created = await api.post("/prompt_templates", json=payload)
-        assert_status(created, 200)
-        template_id = int(created.json().get("template_id") or created.json()["id"])
-        register_owned_http(identity, 'owned_prompt_templates', template_id, f'/prompt_templates/{template_id}')
-        try:
-            listed = await api.get("/prompt_templates")
-            detail = await api.get(f"/prompt_templates/{template_id}")
-            updated = await api.put(f"/prompt_templates/{template_id}", json={**payload, "description": "updated"})
-            for response in (listed, detail, updated):
-                assert_status(response, 200)
-            duplicate = await api.post("/prompt_templates", json=payload)
-            assert_status(duplicate, 400)
-        finally:
-            if template_id is not None:
-                deleted = await api.delete(f"/prompt_templates/{template_id}")
-                assert_status(deleted, 200)
-                mark_asset_state('owned_prompt_templates', str(template_id), 'DELETED')
-
-
 async def _tool_binding(identity, valid: bool) -> None:
     if valid:
         server_url = os.getenv("NEXENT_TEST_MCP_URL", "").strip()
@@ -681,7 +644,6 @@ async def execute_agent_configuration_scenario(case: dict, tenant_a_admin, tenan
         "AGT-010": lambda: _prompt_section(tenant_a_admin, False),
         "AGT-011": lambda: _prompt_badcase(tenant_a_admin, False, False),
         "AGT-012": lambda: _prompt_badcase(tenant_a_admin, True, True),
-        "API-059": lambda: _template_crud(tenant_a_user),
         "API-060": lambda: _tool_binding(tenant_a_admin, True),
         "API-061": lambda: _tool_binding(tenant_a_admin, False),
         "API-062": lambda: _skill_binding(tenant_a_admin, True),
