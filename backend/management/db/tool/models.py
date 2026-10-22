@@ -34,6 +34,12 @@ class ToolInfo(TableBase):
     source = Column(String(100), doc="Source")
     author = Column(String(100), doc="Tool author")
     usage = Column(String(100), doc="Usage")
+    outer_api_service_id = Column(
+        BigInteger,
+        nullable=True,
+        index=True,
+        doc="Source API-to-MCP service ID; NULL for non-OpenAPI tools",
+    )
     params = Column(JSON, doc="Tool parameter information (json)")
     inputs = Column(String(2048), doc="Prompt tool inputs description")
     output_type = Column(String(100), doc="Prompt tool output description")

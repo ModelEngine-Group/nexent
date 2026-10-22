@@ -316,8 +316,11 @@ def update_tool_table_from_scan_tool_list(
         # Build existing_tool_dict with different keys for MCP vs non-MCP tools
         existing_tool_dict = {}
         for tool in existing_tools:
-            if tool.source == ToolSourceEnum.MCP.value:
-                # For MCP tools, use name + source + usage (MCP server name) as unique key
+            outer_api_service_id = getattr(tool, "outer_api_service_id", None)
+            if tool.source == ToolSourceEnum.MCP.value and outer_api_service_id:
+                key = f"{tool.origin_name or tool.name}&{tool.source}&outer-api:{outer_api_service_id}"
+            elif tool.source == ToolSourceEnum.MCP.value:
+                # Legacy/non-OpenAPI MCP tools remain keyed by server name.
                 key = f"{tool.name}&{tool.source}&{tool.usage or ''}"
             else:
                 # For other tools, use name + source as unique key
@@ -339,7 +342,10 @@ def update_tool_table_from_scan_tool_list(
             is_available = True if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", tool.name) is not None else False
 
             # Build key for lookup - same logic as existing_tool_dict
-            if tool.source == ToolSourceEnum.MCP.value:
+            service_id = getattr(tool, "outer_api_service_id", None)
+            if tool.source == ToolSourceEnum.MCP.value and service_id:
+                key = f"{tool.origin_name or tool.name}&{tool.source}&outer-api:{service_id}"
+            elif tool.source == ToolSourceEnum.MCP.value:
                 key = f"{tool.name}&{tool.source}&{tool.usage or ''}"
             else:
                 key = f"{tool.name}&{tool.source}"
