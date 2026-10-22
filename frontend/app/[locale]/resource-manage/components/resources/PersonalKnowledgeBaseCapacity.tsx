@@ -27,7 +27,7 @@ import {
 } from "antd";
 import { Search, Settings2 } from "lucide-react";
 import { ColumnsType, TableProps } from "antd/es/table";
-import { useAuthorization } from "@/hooks/auth/useAuthorization";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import { USER_ROLES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
@@ -467,7 +467,8 @@ export default function PersonalKnowledgeBaseCapacity({
   tenantId: string | null;
 }) {
   const { t } = useTranslation("common");
-  const { user, hasPermission } = useAuthorization();
+  // Use the shared context; calling useAuthorization() here remounts the Tabs.
+  const { user, hasPermission } = useAuthorizationContext();
   const displayName = useUserDisplayName();
   const userRole = user?.role ?? "";
   const isSuperAdmin =
