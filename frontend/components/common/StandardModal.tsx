@@ -23,6 +23,14 @@ export interface StandardModalProps {
   maxHeight?: number | string;
   bodyClassName?: string;
   footer?: ReactNode | null;
+  /**
+   * Whether ESC dismisses the dialog. Defaults to `true` per WCAG 2.1.2 /
+   * ARIA APG Dialog (Modal) Pattern, where ESC must close the dialog unless the
+   * content cannot survive an accidental dismissal. Set to `false` only for
+   * long forms that would lose significant work; document the reason at the
+   * call site so the accessibility exception is reviewable.
+   */
+  closeOnEscape?: boolean;
 }
 
 export function StandardModal({
@@ -41,6 +49,7 @@ export function StandardModal({
   maxHeight,
   bodyClassName,
   footer,
+  closeOnEscape = true,
 }: StandardModalProps) {
   const hasHeightConstraint = height !== undefined || maxHeight !== undefined;
 
@@ -77,7 +86,7 @@ export function StandardModal({
       centered
       closable={false}
       mask={{ closable: false }}
-      keyboard={false}
+      keyboard={closeOnEscape}
       footer={footer === undefined ? defaultFooter : footer}
       onCancel={() => requestClose(onClose)}
       title={
