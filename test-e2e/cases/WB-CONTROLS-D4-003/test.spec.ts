@@ -396,4 +396,99 @@ journey("WB-CONTROLS-D4-003", async ({ page, contract }) => {
       expect(writes).toHaveLength(beforeWrites);
     });
   });
+  await contract.step(contract.expectedIds("steps")[4], async () => {
+    await contract.assertion(contract.expectedIds("assertions")[2], async () => {
+      await page.setViewportSize({ width: 1441, height: 1244 });
+      await page.unroute("**/api/model/list");
+      const histories = [901, 902].map((id) => ({
+        conversation_id: id, agent_id: 7,
+        conversation_title: `Model history ${id}`,
+        create_time: Date.now(), update_time: Date.now(),
+      }));
+      await page.route("**/api/conversation/list**", route => route.fulfill({
+        json: { code: 0, data: { items: histories, metadata: { total: 2 } } },
+      }));
+      let releaseHistory!: () => void;
+      const pending = new Promise<void>(resolve => { releaseHistory = resolve; });
+      await page.route(/\/api\/conversation\/90[12]$/, async route => {
+        const id = Number(route.request().url().split("/").at(-1));
+        if (id === 902) await pending;
+        await route.fulfill({ json: { code: 0, data: [{
+          ...histories.find(row => row.conversation_id === id),
+          workbench_config: null, chat_mode: "execution",
+          message: [{ role: "user", message: `Saved input ${id}`, message_id: id, create_time: Date.now() }],
+        }] } });
+      });
+      await page.goto(`${process.env.NEXENT_BASE_URL}/zh/newchat?conversation_id=901`);
+      await expect(trigger).toContainText("Fixture Model");
+      const input = page.getByRole("textbox", { name: "对话输入", exact: true });
+      const explicitSend = async (text: string) => {
+        const index = requests.length;
+        await input.fill(text);
+        await page.getByRole("button", { name: "发送", exact: true }).click();
+        await expect.poll(() => requests.length).toBe(index + 1);
+        await expect(page.getByRole("button", { name: "发送", exact: true })).toBeVisible();
+        return requests[index];
+      };
+      const defaultRun = await explicitSend("Default history model");
+      expect(defaultRun.model_id).toBe(1);
+      await open();
+      await settings.getByText("Automatic Model", { exact: true }).click();
+      await setThinking(true);
+      await choose("低");
+      await settings.getByRole("button", { name: "高级设置", exact: true }).hover();
+      const panel = page.getByRole("region", { name: "高级设置", exact: true });
+      for (const [name, value] of [["温度", "0"], ["Top P", "0.37"]]) {
+        await panel.getByRole("spinbutton", { name, exact: true }).fill(value);
+        await panel.getByRole("spinbutton", { name, exact: true }).press("Enter");
+      }
+      await page.keyboard.press("Escape");
+      if (await settings.isVisible()) await trigger.click();
+      const selectedRun = await explicitSend("Selected history model");
+      const frozenRequests = JSON.stringify([defaultRun, selectedRun]);
+      expect(selectedRun.model_id).toBe(3);
+      expect(selectedRun.reasoning_effort).toBe("low");
+      const expectedGeneration = { deep_thinking: true, thinking_effort: "low", temperature: 0, top_p: 0.37 };
+      expect(selectedRun.generation_config).toEqual(expectedGeneration);
+      const beforeRequests = requests.length;
+      const beforeWrites = writes.length;
+      const composerNode = await input.elementHandle();
+      await page.locator("button[data-radix-collection-item]").filter({ hasText: "Model history 902" }).click();
+      try {
+        await expect(page.locator('[data-agent-chat-page] [aria-busy="true"]')).toBeVisible();
+        await expect(page.getByRole("status").filter({ hasText: "正在加载对话" })).toBeVisible();
+        expect(await composerNode!.evaluate(element => element.isConnected && Boolean(element.closest("[inert]")))).toBe(true);
+        expect(requests).toHaveLength(beforeRequests);
+        expect(writes).toHaveLength(beforeWrites);
+      } finally {
+        releaseHistory();
+      }
+      await expect(trigger).toContainText("Fixture Model");
+      await open();
+      await settings.getByRole("button", { name: "高级设置", exact: true }).hover();
+      await expect(panel.getByRole("spinbutton", { name: "温度", exact: true })).toHaveValue("");
+      await page.keyboard.press("Escape");
+      if (await settings.isVisible()) await trigger.click();
+      await page.locator("button[data-radix-collection-item]").filter({ hasText: "Model history 901" }).click();
+      await expect(trigger).toContainText("Automatic Model");
+      await open();
+      await expect(settings.getByRole("switch")).toHaveAttribute("aria-checked", "true");
+      await expect(settings.getByRole("combobox")).toHaveText("低");
+      await settings.getByRole("button", { name: "高级设置", exact: true }).hover();
+      await expect(panel.getByRole("spinbutton", { name: "温度", exact: true })).toHaveValue("0");
+      await expect(panel.getByRole("spinbutton", { name: "Top P", exact: true })).toHaveValue("0.37");
+      await page.keyboard.press("Escape");
+      if (await settings.isVisible()) await trigger.click();
+      expect(requests).toHaveLength(beforeRequests);
+      expect(writes).toHaveLength(beforeWrites);
+      expect(JSON.stringify([defaultRun, selectedRun])).toBe(frozenRequests);
+      const restoredRun = await explicitSend("Restored history model");
+      expect(restoredRun.model_id).toBe(3);
+      expect(restoredRun.reasoning_effort).toBe("low");
+      expect(restoredRun.generation_config).toEqual(expectedGeneration);
+      expect(restoredRun).not.toHaveProperty("temperature");
+      expect(restoredRun).not.toHaveProperty("top_p");
+      expect(JSON.stringify([defaultRun, selectedRun])).toBe(frozenRequests);
+    });
+  });
 });
