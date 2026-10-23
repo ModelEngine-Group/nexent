@@ -131,7 +131,9 @@ install_serialization_stub(sys.modules["management.db.client"])
 from test.common.database_stubs import install_serialization_stub
 install_serialization_stub(sys.modules["management.db.client"])
 sys.modules['management.db.agent.repository'] = MagicMock()
-sys.modules['agents.create_agent_info'] = MagicMock()
+sys.modules["management.services.agent.preparation.run"] = MagicMock()
+sys.modules["management.services.agent.preparation.tools"] = MagicMock()
+
 sys.modules['nexent.core.agents.run_agent'] = MagicMock()
 sys.modules['gateway.authentication.auth'] = MagicMock()
 sys.modules['gateway.authentication.auth'].get_current_user_id.return_value = ('test_user', 'test_tenant')
@@ -141,7 +143,7 @@ sys.modules['infrastructure.observability.bootstrap'] = MagicMock()
 sys.modules['infrastructure.observability.bootstrap'].monitoring_manager = monitoring_manager_mock
 sys.modules['infrastructure.observability.bootstrap'].setup_fastapi_app = MagicMock(
     return_value=True)
-sys.modules['agents.agent_run_manager'] = MagicMock()
+sys.modules['management.services.agent.lifecycle'] = MagicMock()
 sys.modules['management.services.agent.service'] = MagicMock()
 sys.modules['management.services.skill.service'] = MagicMock()
 sys.modules['management.services.conversation.service'] = MagicMock()

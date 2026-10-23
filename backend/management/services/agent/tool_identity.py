@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 
 def agent_tree_needs_user_context(agent_config: AgentConfig) -> bool:
     """Return whether an agent tree can forward caller identity externally."""
-    if not all(hasattr(agent_config, field) for field in ("tools", "external_a2a_agents", "worker_agents")):
+    if not all(
+        hasattr(agent_config, field)
+        for field in ("tools", "external_a2a_agents", "worker_agents")
+    ):
         return False
     return (
         any(tool.source == "mcp" for tool in agent_config.tools)
@@ -27,8 +30,8 @@ def agent_tree_needs_user_context(agent_config: AgentConfig) -> bool:
 
 def build_tool_user_context(user_id: str, tenant_id: str) -> dict[str, Any]:
     """Build a tenant-scoped identity snapshot without blocking a run on lookup errors."""
-    from management.db.identity.group import query_groups_by_user
     from management.db.configuration.tenant import get_single_config_info
+    from management.db.identity.group import query_groups_by_user
     from management.db.identity.user_tenant import get_user_tenant_in_tenant
 
     user_context: dict[str, Any] = {
@@ -42,7 +45,9 @@ def build_tool_user_context(user_id: str, tenant_id: str) -> dict[str, Any]:
 
     try:
         tenant_record = get_single_config_info(tenant_id, TENANT_NAME)
-        user_context["tenant_name"] = str((tenant_record or {}).get("config_value") or "")
+        user_context["tenant_name"] = str(
+            (tenant_record or {}).get("config_value") or ""
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("tool user context: tenant name lookup failed: %s", exc)
 

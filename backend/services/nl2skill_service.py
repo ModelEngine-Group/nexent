@@ -12,16 +12,14 @@ from typing import Any
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import ContextManagerConfig
-from nexent.core.agents.run_agent import agent_run
+from runtime.adapters.nexent.runner import agent_run
 from nexent.core.utils.observer import MessageObserver
 
-from agents.create_agent_info import (
-    _resolve_input_budget,
-    _resolve_context_budget,
-    create_model_config_list,
-    join_minio_file_description_to_query,
-)
-from agents.nl2skill_agent import create_nl2skill_agent_config
+from management.services.model.run_budget import _resolve_input_budget
+from management.services.model.run_budget import _resolve_context_budget
+from management.services.model.run_bindings import create_model_config_list
+from management.services.agent.preparation.inputs import join_minio_file_description_to_query
+from management.services.skill.creation import create_nl2skill_agent_config
 from management.services.agent.context import build_authorized_context_input
 from contracts.constants.constants import LANGUAGE
 from contracts.constants.constants import MODEL_CONFIG_MAPPING

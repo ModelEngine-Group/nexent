@@ -18,7 +18,7 @@ from typing import (
     Dict,
 )
 
-from agents.agent_run_manager import (
+from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     AgentRunConcurrencyExceededError,
     agent_run_manager,
@@ -57,7 +57,7 @@ from management.services.agent.run import (
 from management.services.agent.stream import (
     safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
 )
-from nexent.core.agents.run_agent import (
+from runtime.adapters.nexent.runner import (
     DeferredAgentRun,
 )
 from nexent.core.concurrency import (

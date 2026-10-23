@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from nexent.core.agents.agent_model import AgentConfig
 
-from agents.create_agent_info import _resolve_runtime_tool_records
+from management.services.agent.resource_resolver import _resolve_runtime_tool_records
 from contracts.errors.exceptions import ValidationError
 from contracts.knowledge import ConversationKnowledgeScopeRequest
 from contracts.tool import ToolParamsRequest

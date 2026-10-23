@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import event
 from sqlalchemy.schema import CreateSchema, DropSchema
 
-from agents import create_agent_info
+from management.services.model import run_bindings
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.db import client as client
 from management.db import models as db_models
@@ -54,10 +54,10 @@ def database_fixture(monkeypatch, provider):
     import importlib
     importlib.import_module("management.db.identity.user_tenant")
     for name, module in list(sys.modules.items()):
-        if name.startswith("database.") and getattr(module, "get_db_session", None) is original_session:
+        if name.startswith("management.db.") and getattr(module, "get_db_session", None) is original_session:
             monkeypatch.setattr(module, "get_db_session", sessions)
     monkeypatch.setattr(client, "get_db_session", sessions)
-    monkeypatch.setattr(create_agent_info, "_resolve_reasoning_capability",
+    monkeypatch.setattr(run_bindings, "_resolve_reasoning_capability",
                         lambda model_name, **kwargs: BUDGET if "budget" in model_name else CAPABILITY)
 
     models = {}

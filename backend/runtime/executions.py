@@ -1,11 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 import threading
 import uuid
 from typing import Dict, Union
 
 from nexent.core.agents.agent_model import AgentRunInfo
-from management.services.agent.run_state import runtime_state_service
 
 logger = logging.getLogger("agent_run_manager")
 
@@ -18,15 +19,15 @@ class AgentRunConcurrencyExceededError(RuntimeError):
     """Raised when one agent id has reached its admitted run limit."""
 
 
-class AgentRunManager:
+class LocalExecutionRegistry:
     _instance = None
     _lock = threading.Lock()
 
     def __new__(cls):
-        if cls._instance is None:
+        if cls.__dict__.get("_instance") is None:
             with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super(AgentRunManager, cls).__new__(cls)
+                if cls.__dict__.get("_instance") is None:
+                    cls._instance = super(LocalExecutionRegistry, cls).__new__(cls)
                     cls._instance._initialized = False
         return cls._instance
 
@@ -135,9 +136,6 @@ class AgentRunManager:
             logger.info(
                 f"register agent run instance, user_id: {user_id}, conversation_id: {conversation_id}"
             )
-        runtime_state_service.register_run(
-            user_id=user_id, conversation_id=conversation_id
-        )
 
     def unregister_agent_run(
         self,
@@ -170,10 +168,6 @@ class AgentRunManager:
                 logger.info(
                     f"no agent run instance found for user_id: {user_id}, conversation_id: {conversation_id}"
                 )
-        if removed:
-            runtime_state_service.mark_run_finished(
-                user_id=user_id, conversation_id=conversation_id, status=status
-            )
         return removed
 
     def get_agent_run_info(self, conversation_id: Union[int, str], user_id: str):
@@ -188,10 +182,6 @@ class AgentRunManager:
 
     def stop_agent_run(self, conversation_id: Union[int, str], user_id: str) -> bool:
         """stop agent run for specified conversation_id and user_id"""
-        remote_signal_set = runtime_state_service.set_cancel_signal(
-            user_id=user_id,
-            conversation_id=conversation_id,
-        )
         agent_run_info = self.get_agent_run_info(conversation_id, user_id)
         if agent_run_info is not None:
             agent_run_info.stop_event.set()
@@ -211,8 +201,4 @@ class AgentRunManager:
                 f"agent run stopped, user_id: {user_id}, conversation_id: {conversation_id}"
             )
             return True
-        return remote_signal_set
-
-
-# create singleton instance
-agent_run_manager = AgentRunManager()
+        return False

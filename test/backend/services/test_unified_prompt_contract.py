@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-from agents.nl2agent_agent import build_nl2agent_system_prompt
+from management.services.agent.creation import build_nl2agent_system_prompt
 from contracts.agent import AgentImportRequest, AgentInfoRequest, ExportAndImportAgentInfo
 from management.utils.orm import as_dict, filter_property
 from management.db.agent.models import AgentInfo

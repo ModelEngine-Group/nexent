@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Build the ephemeral NL2Agent configuration."""
 
 import json
@@ -32,9 +34,7 @@ def build_nl2agent_system_prompt(
 ) -> str:
     """Load and render the localized NL2Agent system prompt."""
 
-    template_language = (
-        LANGUAGE["EN"] if language == LANGUAGE["EN"] else LANGUAGE["ZH"]
-    )
+    template_language = LANGUAGE["EN"] if language == LANGUAGE["EN"] else LANGUAGE["ZH"]
     return compose_nl2agent_system(
         template_language,
         {

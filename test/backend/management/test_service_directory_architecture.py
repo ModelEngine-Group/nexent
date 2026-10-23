@@ -12,6 +12,21 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 MANAGEMENT_SERVICES = BACKEND_ROOT / "management" / "services"
 
 MIGRATED_MODULES = {
+    'agent/creation.py',
+    'agent/lifecycle.py',
+    'agent/persistence.py',
+    'agent/preparation/compiler.py',
+    'agent/preparation/inputs.py',
+    'agent/preparation/resources.py',
+    'agent/preparation/run.py',
+    'agent/preparation/tools.py',
+    'agent/preprocessing.py',
+    'agent/resource_resolver.py',
+    'agent/tool_identity.py',
+    'model/run_bindings.py',
+    'model/run_budget.py',
+    'skill/creation.py',
+
     'agent/a2a/adapter.py',
     'agent/a2a/catalog.py',
     'agent/a2a/service.py',

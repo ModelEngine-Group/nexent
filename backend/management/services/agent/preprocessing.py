@@ -1,8 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import asyncio
 import logging
 import threading
-import asyncio
-from typing import Dict, Set
 from threading import Event
+from typing import Dict, Set
 
 logger = logging.getLogger("preprocess_manager")
 
@@ -36,7 +38,9 @@ class PreprocessManager:
             self.conversation_tasks: Dict[int, Set[str]] = {}
             self._initialized = True
 
-    def register_preprocess_task(self, task_id: str, conversation_id: int, task: asyncio.Task):
+    def register_preprocess_task(
+        self, task_id: str, conversation_id: int, task: asyncio.Task
+    ):
         """Register a preprocess task"""
         with self._lock:
             preprocess_task = PreprocessTask(task_id, conversation_id)
@@ -48,7 +52,8 @@ class PreprocessManager:
             self.conversation_tasks[conversation_id].add(task_id)
 
             logger.info(
-                f"Registered preprocess task {task_id} for conversation {conversation_id}")
+                f"Registered preprocess task {task_id} for conversation {conversation_id}"
+            )
 
     def unregister_preprocess_task(self, task_id: str):
         """Unregister a preprocess task"""
@@ -90,7 +95,8 @@ class PreprocessManager:
 
                         stopped_count += 1
                         logger.info(
-                            f"Stopped preprocess task {task_id} for conversation {conversation_id}")
+                            f"Stopped preprocess task {task_id} for conversation {conversation_id}"
+                        )
 
             return stopped_count > 0
 
@@ -118,16 +124,18 @@ class PreprocessManager:
             for task_id in self.conversation_tasks[conversation_id]:
                 if task_id in self.preprocess_tasks:
                     task = self.preprocess_tasks[task_id]
-                    running_tasks.append({
-                        "task_id": task_id,
-                        "is_running": task.is_running,
-                        "stopped": task.stop_event.is_set()
-                    })
+                    running_tasks.append(
+                        {
+                            "task_id": task_id,
+                            "is_running": task.is_running,
+                            "stopped": task.stop_event.is_set(),
+                        }
+                    )
 
             return {
                 "running": any(task["is_running"] for task in running_tasks),
                 "task_count": len(running_tasks),
-                "tasks": running_tasks
+                "tasks": running_tasks,
             }
 
 

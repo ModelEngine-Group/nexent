@@ -395,10 +395,11 @@ _asset_owner_spec.loader.exec_module(_asset_owner_mod)
 sys.modules["management.services.permission.asset_owner"] = _asset_owner_mod
 setattr(services_module, "asset_owner_visibility", _asset_owner_mod)
 
-# Mock agents submodules
-sys.modules["agents"] = MagicMock()
-sys.modules["agents.create_agent_info"] = MagicMock()
-agent_run_manager_module = types.ModuleType("agents.agent_run_manager")
+# Mock canonical preparation modules
+sys.modules["management.services.agent.preparation.run"] = MagicMock()
+sys.modules["management.services.agent.preparation.tools"] = MagicMock()
+
+agent_run_manager_module = types.ModuleType("management.services.agent.lifecycle")
 
 
 class _AgentRunAlreadyActiveError(RuntimeError):
@@ -417,13 +418,13 @@ agent_run_manager_module.agent_run_manager = MagicMock()
 agent_run_manager_module.agent_run_manager.reserve_agent_capacity.return_value = (
     "agent-capacity-test"
 )
-sys.modules["agents.agent_run_manager"] = agent_run_manager_module
-sys.modules["agents.preprocess_manager"] = MagicMock()
+sys.modules["management.services.agent.lifecycle"] = agent_run_manager_module
+sys.modules["management.services.agent.preprocessing"] = MagicMock()
 
 # Need to set up create_tool_config_list as an async mock
 mock_create_agent_info = MagicMock()
 mock_create_agent_info.create_tool_config_list = AsyncMock(return_value=[])
-sys.modules["agents.create_agent_info"].create_agent_info = mock_create_agent_info
+sys.modules["management.services.agent.preparation.tools"].create_tool_config_list = mock_create_agent_info.create_tool_config_list
 
 # Mock utils submodules
 utils_module = types.ModuleType("utils")
@@ -12135,8 +12136,8 @@ async def test_process_skill_file_uploads_uses_content_type(
 def test_stop_agent_tasks():
     """stop_agent_tasks should call preprocess_manager.stop_preprocess_tasks."""
     from management.services.agent.service import stop_agent_tasks
-    from agents.preprocess_manager import preprocess_manager
-    from agents.agent_run_manager import agent_run_manager
+    from management.services.agent.preprocessing import preprocess_manager
+    from management.services.agent.lifecycle import agent_run_manager
 
     with patch.object(
         preprocess_manager, "stop_preprocess_tasks", return_value=False
@@ -12261,8 +12262,8 @@ def test_resolve_model_ids_with_fallback_model_not_found_in_catalog(mock_get_mod
 def test_stop_agent_tasks_both_stopped():
     """stop_agent_tasks should return success when both agent and preprocess stop."""
     from management.services.agent.service import stop_agent_tasks
-    from agents.preprocess_manager import preprocess_manager
-    from agents.agent_run_manager import agent_run_manager
+    from management.services.agent.preprocessing import preprocess_manager
+    from management.services.agent.lifecycle import agent_run_manager
 
     with patch.object(
         preprocess_manager, "stop_preprocess_tasks", return_value=True
@@ -12277,8 +12278,8 @@ def test_stop_agent_tasks_both_stopped():
 def test_stop_agent_tasks_agent_only():
     """stop_agent_tasks should return success when only agent stops."""
     from management.services.agent.service import stop_agent_tasks
-    from agents.preprocess_manager import preprocess_manager
-    from agents.agent_run_manager import agent_run_manager
+    from management.services.agent.preprocessing import preprocess_manager
+    from management.services.agent.lifecycle import agent_run_manager
 
     with patch.object(
         preprocess_manager, "stop_preprocess_tasks", return_value=False
@@ -12293,8 +12294,8 @@ def test_stop_agent_tasks_agent_only():
 def test_stop_agent_tasks_preprocess_only():
     """stop_agent_tasks should return success when only preprocess stops."""
     from management.services.agent.service import stop_agent_tasks
-    from agents.preprocess_manager import preprocess_manager
-    from agents.agent_run_manager import agent_run_manager
+    from management.services.agent.preprocessing import preprocess_manager
+    from management.services.agent.lifecycle import agent_run_manager
 
     with patch.object(
         preprocess_manager, "stop_preprocess_tasks", return_value=True
@@ -12309,8 +12310,8 @@ def test_stop_agent_tasks_preprocess_only():
 def test_stop_agent_tasks_none_stopped():
     """stop_agent_tasks should return already_stopped when nothing stops."""
     from management.services.agent.service import stop_agent_tasks
-    from agents.preprocess_manager import preprocess_manager
-    from agents.agent_run_manager import agent_run_manager
+    from management.services.agent.preprocessing import preprocess_manager
+    from management.services.agent.lifecycle import agent_run_manager
 
     with patch.object(
         preprocess_manager, "stop_preprocess_tasks", return_value=False
@@ -12753,8 +12754,8 @@ def test_check_agent_value_duplicate_mismatched_case():
 def test_stop_agent_tasks_logs_messages():
     """stop_agent_tasks should log appropriate messages."""
     from management.services.agent.service import stop_agent_tasks
-    from agents.preprocess_manager import preprocess_manager
-    from agents.agent_run_manager import agent_run_manager
+    from management.services.agent.preprocessing import preprocess_manager
+    from management.services.agent.lifecycle import agent_run_manager
 
     with patch.object(preprocess_manager, "stop_preprocess_tasks", return_value=True):
         with patch.object(agent_run_manager, "stop_agent_run", return_value=True):

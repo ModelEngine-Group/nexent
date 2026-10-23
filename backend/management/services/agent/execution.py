@@ -3,6 +3,7 @@
 """Agent execution, message persistence and process-local task ownership."""
 
 import asyncio
+from management.services.agent.persistence import finalize_assistant_projection
 import json
 import logging
 import os
@@ -12,7 +13,7 @@ from typing import (
     Optional,
 )
 
-from agents.agent_run_manager import (
+from management.services.agent.lifecycle import (
     agent_run_manager,
 )
 from contracts.constants.constants import MESSAGE_ROLE
@@ -56,7 +57,7 @@ from management.services.agent.stream import (
 from management.services.model.names import (
     get_model_name_from_config,
 )
-from nexent.core.agents.run_agent import (
+from runtime.adapters.nexent.runner import (
     DeferredAgentRun,
     agent_run,
 )
@@ -871,71 +872,24 @@ async def _stream_agent_chunks(
                 _transform_skill_files_to_standard_format(uploaded_files)
             )
 
-        persistence_failed = False
-        if streaming_message_id is not None:
-            try:
-                remove_answer_only_steps(buffered_units)
-                persistence_bytes = _finalize_buffered_unit_fragments(buffered_units)
-                final_answer_content = next(
-                    (
-                        unit["content"]
-                        for unit in reversed(buffered_units)
-                        if unit["type"] == "final_answer"
-                        and not unit.get("invocation_id")
-                    ),
-                    "",
-                )
-                logger.info(
-                    "Finalizing assistant persistence conversation=%s units=%s bytes=%s",
-                    agent_request.conversation_id,
-                    len(buffered_units),
-                    persistence_bytes,
-                )
-                await runtime_thread_manager.run(
-                    "control-io",
-                    ManagedTaskSpec(
-                        task_name="persist-assistant-run-batch",
-                        owner="management.services.agent.run",
-                    ),
-                    persist_assistant_run_batch,
-                    message_id=streaming_message_id,
-                    conversation_id=agent_request.conversation_id,
-                    message_content=final_answer_content,
-                    terminal_status=terminal_status,
-                    message_units=buffered_units,
-                    search_records=buffered_search_records,
-                    image_urls=buffered_image_urls,
-                    skill_files=frontend_skill_files,
-                    automation_proposals=buffered_automation_proposals,
-                    user_id=user_id,
-                    tenant_id=tenant_id,
-                )
-            except Exception:
-                persistence_failed = True
-                terminal_status = "failed"
-                agent_run_info.attempt_outcome = "failed"
-                logger.exception(
-                    "Failed to persist assistant stream batch conversation=%s message=%s",
-                    agent_request.conversation_id,
-                    streaming_message_id,
-                )
-                try:
-                    await runtime_thread_manager.run(
-                        "control-io",
-                        ManagedTaskSpec(
-                            task_name="mark-assistant-message-failed",
-                            owner="management.services.agent.run",
-                        ),
-                        update_message_status,
-                        streaming_message_id,
-                        "failed",
-                        user_id,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to mark assistant message as failed after batch rollback"
-                    )
-
+        terminal_status, persistence_failed, final_answer_content = await finalize_assistant_projection(
+            thread_manager=runtime_thread_manager,
+            message_id=streaming_message_id,
+            conversation_id=agent_request.conversation_id,
+            terminal_status=terminal_status,
+            buffered_units=buffered_units,
+            buffered_search_records=buffered_search_records,
+            buffered_image_urls=buffered_image_urls,
+            frontend_skill_files=frontend_skill_files,
+            buffered_automation_proposals=buffered_automation_proposals,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            final_answer_content=final_answer_content,
+            run_outcome=agent_run_info,
+            persist_batch=persist_assistant_run_batch,
+            mark_failed=update_message_status,
+            logger=logger,
+        )
         if persistence_failed and channel is not None:
             persistence_error_chunk = _safe_agent_stream_error_chunk()
             await channel.publish(persistence_error_chunk)

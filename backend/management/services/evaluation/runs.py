@@ -57,7 +57,7 @@ from nexent.core.agents.prompt.evaluation import (
     render_analysis_stats,
     render_evaluation_section,
 )
-from nexent.core.agents.run_agent import agent_run
+from runtime.adapters.nexent.runner import agent_run
 from nexent.core.agents.sandbox import _scan_shell_calls
 from nexent.core.concurrency import ManagedTaskSpec
 

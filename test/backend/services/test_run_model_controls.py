@@ -115,7 +115,7 @@ def test_creator_alias_preserves_independent_models_and_real_record(mocker):
               "model_repo": "", "model_name": "provider-B", "base_url": base.url,
               "temperature": 0.43, "top_p": 0.78, "max_input_tokens": 7000,
               "extra_params": {"enable_thinking": True, "reasoning_effort": "medium"}}
-    from agents import create_agent_info
+    from management.services.model import run_bindings as create_agent_info
     mocker.patch.object(create_agent_info, "_resolve_reasoning_capability", return_value=base.reasoning_capability)
     mocker.patch.object(run_controls, "get_model_by_model_id", return_value=record)
     models = [base, independent]
@@ -194,7 +194,7 @@ def test_preflight_preserves_each_explicit_intent_and_entrypoint_defaults(mocker
 @pytest.fixture
 def preflight_models(mocker):
     """Keep catalog/conversion external while executing the actual overlay policy."""
-    from agents import create_agent_info
+    from management.services.model import run_bindings as create_agent_info
 
     catalog = mocker.patch.object(run_controls, "get_model_by_model_id", return_value={"model_id": 9})
     converted = []

@@ -572,67 +572,51 @@ _langchain_utils_mod.discover_langchain_modules = MagicMock(return_value=[])
 sys.modules["management.services.tool.langchain"] = _langchain_utils_mod
 setattr(_utils_pkg, "langchain_utils", _langchain_utils_mod)
 
-# Ensure real backend.agents.create_agent_info is available and uses our stubs
-backend_pkg = sys.modules.get("backend")
-if backend_pkg is None:
-    backend_pkg = types.ModuleType("backend")
-    backend_pkg.__path__ = [str((TEST_ROOT.parent) / "backend")]
-    sys.modules["backend"] = backend_pkg
+# Import the canonical preparation owners using the isolated collaborators above.
+import management.services.agent.preparation.compiler as preparation_compiler
+import management.services.agent.preparation.inputs as input_preparation
+import management.services.agent.preparation.resources as resource_preparation
+import management.services.agent.preparation.run as run_preparation
+import management.services.agent.preparation.tools as tool_preparation
+import management.services.model.run_budget as model_budget
+import management.services.model.run_bindings as model_bindings
 
-agents_pkg = sys.modules.get("backend.agents")
-if agents_pkg is None:
-    agents_pkg = types.ModuleType("backend.agents")
-    agents_pkg.__path__ = [str((TEST_ROOT.parent) / "backend" / "agents")]
-    sys.modules["backend.agents"] = agents_pkg
-    setattr(backend_pkg, "agents", agents_pkg)
-
-create_agent_info_path = (TEST_ROOT.parent / "backend" / "agents" / "create_agent_info.py")
-spec = importlib.util.spec_from_file_location(
-    "backend.agents.create_agent_info", create_agent_info_path
-)
-create_agent_info_module = importlib.util.module_from_spec(spec)
-sys.modules["backend.agents.create_agent_info"] = create_agent_info_module
-assert spec.loader is not None
-spec.loader.exec_module(create_agent_info_module)
-# Keep older patch targets available while those tests are migrated to the loader.
-create_agent_info_module.get_agent_prompt_template = MagicMock()
-setattr(agents_pkg, "create_agent_info", create_agent_info_module)
+preparation_compiler.get_agent_prompt_template = MagicMock()
+run_preparation.urljoin = MagicMock()
 
 # Now import the symbols under test
-from backend.agents.create_agent_info import (
-    discover_langchain_tools,
-    create_tool_config_list,
-    create_agent_config,
-    create_model_config_list,
-    filter_mcp_servers_and_tools,
-    create_agent_run_info,
-    join_minio_file_description_to_query,
-    prepare_prompt_templates,
-    _get_skills_for_template,
-    _get_skill_script_tools,
-    _extract_url_from_card,
-    _build_external_agent_config,
-    _build_security_headers,
-    _resolve_scheme_field,
-    _build_auth_header_for_scheme,
-    _get_external_a2a_agents,
-    _build_internal_s3_url,
-    _format_minio_files_for_content,
-    _convert_history_with_minio_files,
-    _normalize_tool_params_request,
-    _get_agent_tool_overrides,
-    _merge_tool_params,
-    _resolve_runtime_tool_records,
-    _resolve_input_budget,
-    _resolve_context_budget,
-    _get_external_provider_service_for_search,
-)
+from management.services.agent.preparation.tools import discover_langchain_tools
+from management.services.agent.preparation.tools import create_tool_config_list
+from management.services.agent.preparation.compiler import create_agent_config
+from management.services.model.run_bindings import create_model_config_list
+from management.services.agent.preparation.tools import filter_mcp_servers_and_tools
+from management.services.agent.preparation.run import create_agent_run_info
+from management.services.agent.preparation.inputs import join_minio_file_description_to_query
+from management.services.agent.preparation.inputs import prepare_prompt_templates
+from management.services.agent.resource_resolver import _get_skills_for_template
+from management.services.agent.preparation.tools import _get_skill_script_tools
+from management.services.agent.preparation.resources import _extract_url_from_card
+from management.services.agent.preparation.resources import _build_external_agent_config
+from management.services.agent.preparation.resources import _build_security_headers
+from management.services.agent.preparation.resources import _resolve_scheme_field
+from management.services.agent.preparation.resources import _build_auth_header_for_scheme
+from management.services.agent.preparation.resources import _get_external_a2a_agents
+from management.services.agent.preparation.inputs import _build_internal_s3_url
+from management.services.agent.preparation.inputs import _format_minio_files_for_content
+from management.services.agent.preparation.inputs import _convert_history_with_minio_files
+from management.services.agent.preparation.tools import _normalize_tool_params_request
+from management.services.agent.preparation.tools import _get_agent_tool_overrides
+from management.services.agent.preparation.tools import _merge_tool_params
+from management.services.agent.resource_resolver import _resolve_runtime_tool_records
+from management.services.model.run_budget import _resolve_input_budget
+from management.services.model.run_budget import _resolve_context_budget
+from management.services.agent.preparation.compiler import _get_external_provider_service_for_search
 
 
 def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch):
     service = object()
     factory = MagicMock(return_value=service)
-    monkeypatch.setattr(create_agent_info_module, "get_memory_external_provider_service", factory)
+    monkeypatch.setattr(preparation_compiler, "get_memory_external_provider_service", factory)
 
     assert _get_external_provider_service_for_search() is service
     factory.assert_called_once_with()
@@ -640,12 +624,12 @@ def test_ac_ext_001_external_search_always_resolves_provider_service(monkeypatch
 
 def test_build_run_workspace_uses_user_and_run_only(monkeypatch, tmp_path):
     monkeypatch.setattr(
-        create_agent_info_module,
+        input_preparation,
         "AGENT_WORKSPACE_ROOT",
         str(tmp_path),
     )
 
-    workspace = create_agent_info_module._build_run_workspace("user-1", "run-1")
+    workspace = input_preparation._build_run_workspace("user-1", "run-1")
 
     assert Path(workspace) == tmp_path.resolve() / "user-1" / "run-1"
 
@@ -659,12 +643,12 @@ def test_ut_be_dpr_007_prompt_runtime_flags_follow_backend_configuration(
 ):
     """UT-BE-DPR-007: Backend resolves sandbox and verification prompt gates."""
     monkeypatch.setattr(
-        create_agent_info_module,
+        preparation_compiler,
         "NEXENT_SANDBOX_DEFAULT_LEVEL",
         sandbox_level,
     )
 
-    verification, is_local = create_agent_info_module._resolve_prompt_runtime_flags(
+    verification, is_local = preparation_compiler._resolve_prompt_runtime_flags(
         {"verification_config": {"enabled": verification_enabled}}
     )
 
@@ -787,7 +771,7 @@ class TestGetSkillsForTemplate:
             mock_skill_service = sys.modules['management.services.skill.service'].SkillService
             mock_skill_service.side_effect = Exception("Service unavailable")
 
-            with patch('backend.agents.create_agent_info.logger') as mock_logger:
+            with patch('management.services.agent.resource_resolver.logger') as mock_logger:
                 result = _get_skills_for_template(
                     agent_id=1,
                     tenant_id="tenant_1",
@@ -1057,7 +1041,7 @@ class TestDiscoverLangchainTools:
             (mock_tool2, "tool2.py")
         ])
 
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
+        with patch('management.services.agent.preparation.tools.logger') as mock_logger:
             # Mock the import by patching the globals within the function scope
             with patch.dict('sys.modules', {
                 'management.services.tool.langchain': Mock(discover_langchain_modules=mock_discover_func)
@@ -1097,7 +1081,7 @@ class TestDiscoverLangchainTools:
         """Test case for when discover_langchain_modules throws an exception"""
         mock_discover_func = Mock(side_effect=Exception("模块发现错误"))
 
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
+        with patch('management.services.agent.preparation.tools.logger') as mock_logger:
             with patch.dict('sys.modules', {
                 'management.services.tool.langchain': Mock(discover_langchain_modules=mock_discover_func)
             }):
@@ -1124,7 +1108,7 @@ class TestDiscoverLangchainTools:
             (mock_error_tool, "error_tool.py")
         ])
 
-        with patch('backend.agents.create_agent_info.logger') as mock_logger:
+        with patch('management.services.agent.preparation.tools.logger') as mock_logger:
             with patch.dict('sys.modules', {
                 'management.services.tool.langchain': Mock(discover_langchain_modules=mock_discover_func)
             }):
@@ -1146,20 +1130,20 @@ class TestCreateToolConfigList:
     @pytest.fixture(autouse=True)
     def mock_filter_accessible_indices(self):
         """Pass-through mock for filter_accessible_indices for all tests in this class."""
-        with patch('backend.agents.create_agent_info.ElasticSearchService.filter_accessible_indices',
+        with patch('management.services.agent.preparation.tools.ElasticSearchService.filter_accessible_indices',
                    side_effect=lambda index_names, **kwargs: index_names):
             yield
 
     def test_resolve_runtime_tools_adds_skill_dependencies_with_saved_config(self):
         """An enabled skill makes its declared tool available without explicit selection."""
         with patch(
-            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            'management.services.agent.resource_resolver.search_tools_for_sub_agent',
             return_value=[],
         ), patch(
-            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            'management.services.agent.resource_resolver.skill_db.search_skills_for_agent',
             return_value=[{"skill_id": 10, "config_values": {"api_key": "saved-key"}}],
         ), patch(
-            "backend.agents.create_agent_info.skill_db.get_skill_by_id",
+            'management.services.agent.resource_resolver.skill_db.get_skill_by_id',
             return_value={
                 "skill_id": 10,
                 "name": "search-web-linkup",
@@ -1167,7 +1151,7 @@ class TestCreateToolConfigList:
                 "config_values": {"depth": "standard"},
             },
         ), patch(
-            "backend.agents.create_agent_info.query_tools_by_ids",
+            'management.services.agent.resource_resolver.query_tools_by_ids',
             return_value=[{
                 "tool_id": 20,
                 "name": "linkup_search",
@@ -1190,15 +1174,15 @@ class TestCreateToolConfigList:
         """Explicit tool configuration remains authoritative for a skill dependency."""
         explicit_tool = {"tool_id": 20, "name": "linkup_search", "params": []}
         with patch(
-            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            'management.services.agent.resource_resolver.search_tools_for_sub_agent',
             return_value=[explicit_tool],
         ), patch(
-            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            'management.services.agent.resource_resolver.skill_db.search_skills_for_agent',
             return_value=[{"skill_id": 10, "config_values": {"api_key": "skill-key"}}],
         ), patch(
-            "backend.agents.create_agent_info.skill_db.get_skill_by_id",
+            'management.services.agent.resource_resolver.skill_db.get_skill_by_id',
             return_value={"skill_id": 10, "name": "search-web-linkup", "tool_ids": [20]},
-        ), patch("backend.agents.create_agent_info.query_tools_by_ids") as mock_query:
+        ), patch('management.services.agent.resource_resolver.query_tools_by_ids') as mock_query:
             result = _resolve_runtime_tool_records(1, "tenant-1")
 
         assert result == [explicit_tool]
@@ -1215,13 +1199,13 @@ class TestCreateToolConfigList:
             11: {"skill_id": 11, "name": "second-skill", "tool_ids": [20]},
         }
         with patch(
-            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            'management.services.agent.resource_resolver.search_tools_for_sub_agent',
             return_value=[],
         ), patch(
-            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            'management.services.agent.resource_resolver.skill_db.search_skills_for_agent',
             return_value=skill_instances,
         ), patch(
-            "backend.agents.create_agent_info.skill_db.get_skill_by_id",
+            'management.services.agent.resource_resolver.skill_db.get_skill_by_id',
             side_effect=lambda skill_id, tenant_id: skills[skill_id],
         ):
             with pytest.raises(ValidationError, match="different values"):
@@ -1230,9 +1214,9 @@ class TestCreateToolConfigList:
     @pytest.mark.asyncio
     async def test_create_tool_config_list_basic(self):
         """Test case for basic tool configuration list creation"""
-        with patch('backend.agents.create_agent_info.discover_langchain_tools') as mock_discover, \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config:
+        with patch('management.services.agent.preparation.tools.discover_langchain_tools') as mock_discover, \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config:
 
             # Set mock return values
             mock_discover.return_value = []
@@ -1269,21 +1253,21 @@ class TestCreateToolConfigList:
     async def test_create_tool_config_list_ignores_legacy_system_managed_bindings(self):
         """Legacy S3 bindings are replaced by the run-scoped built-in tools."""
         with patch(
-            "backend.agents.create_agent_info.discover_langchain_tools",
+            'management.services.agent.preparation.tools.discover_langchain_tools',
             return_value=[],
         ), patch(
-            "backend.agents.create_agent_info.search_tools_for_sub_agent",
+            'management.services.agent.resource_resolver.search_tools_for_sub_agent',
             return_value=[
                 {"tool_id": 1, "class_name": "DownloadFromS3Tool", "name": "download_from_s3"},
                 {"tool_id": 2, "class_name": "UploadToS3Tool", "name": "upload_to_s3"},
             ],
         ), patch(
-            "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+            'management.services.agent.resource_resolver.skill_db.search_skills_for_agent',
             return_value=[],
         ), patch(
-            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            'management.services.agent.preparation.tools.search_agent_info_by_agent_id',
             return_value={"name": "legacy-agent"},
-        ), patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+        ), patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config:
             result = await create_tool_config_list("agent_1", "tenant_1", "user_1")
 
         assert result == []
@@ -1292,12 +1276,12 @@ class TestCreateToolConfigList:
     @pytest.mark.asyncio
     async def test_create_tool_config_list_with_knowledge_base_tool(self):
         """Test case including the knowledge base search tool"""
-        with patch('backend.agents.create_agent_info.discover_langchain_tools') as mock_discover, \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+        with patch('management.services.agent.preparation.tools.discover_langchain_tools') as mock_discover, \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_embedding, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank:
 
             mock_discover.return_value = []
             mock_search_tools.return_value = [
@@ -1340,13 +1324,13 @@ class TestCreateToolConfigList:
             "rerank": False,
         }
 
-        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding_by_index, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
-                patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config:
+        with patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_embedding_by_index, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
+                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
+                patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -1384,10 +1368,10 @@ class TestCreateToolConfigList:
         mock_tool_instance.class_name = "AnalyzeImageTool"
         mock_tool_config.return_value = mock_tool_instance
 
-        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vlm_adapter') as mock_get_vlm_model, \
-                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock) as mock_minio_client:
+        with patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vlm_adapter') as mock_get_vlm_model, \
+                patch('management.services.agent.preparation.tools.minio_client', new_callable=MagicMock) as mock_minio_client:
 
             mock_search_tools.return_value = [
                 {
@@ -1428,10 +1412,10 @@ class TestCreateToolConfigList:
         mock_tool_instance.class_name = class_name
         mock_tool_config.return_value = mock_tool_instance
 
-        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vlm_adapter') as mock_get_video_model, \
-                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock):
+        with patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vlm_adapter') as mock_get_video_model, \
+                patch('management.services.agent.preparation.tools.minio_client', new_callable=MagicMock):
 
             mock_search_tools.return_value = [
                 {
@@ -1464,10 +1448,10 @@ class TestCreateToolConfigList:
         mock_tool_instance.class_name = "AnalyzeTextFileTool"
         mock_tool_config.return_value = mock_tool_instance
 
-        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_adapter') as mock_get_llm_model, \
-                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock) as mock_minio_client:
+        with patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_llm_adapter') as mock_get_llm_model, \
+                patch('management.services.agent.preparation.tools.minio_client', new_callable=MagicMock) as mock_minio_client:
 
             mock_search_tools.return_value = [
                 {
@@ -1509,13 +1493,13 @@ class TestCreateToolConfigList:
             "rerank_model_name": "gte-rerank-v2",
         }
 
-        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
-                patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config:
+        with patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_embedding, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
+                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
+                patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -1582,12 +1566,12 @@ class TestCreateToolConfigList:
         mock_tool_other = MagicMock()
         mock_tool_other.class_name = "OtherTool"
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_embedding, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank:
 
             mock_tool_config.side_effect = [mock_tool_kb, mock_tool_other]
 
@@ -1645,12 +1629,12 @@ class TestCreateToolConfigList:
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_embedding, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -1691,9 +1675,9 @@ class TestCreateToolConfigList:
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "DataMateTool"
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -1723,8 +1707,8 @@ class TestCreateToolConfigList:
         """
         Test that an empty tools list returns an empty result.
         """
-        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools:
+        with patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools:
 
             mock_search_tools.return_value = []
 
@@ -1744,9 +1728,9 @@ class TestCreateToolConfigList:
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "LangChainTool"
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools') as mock_discover, \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools') as mock_discover, \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools:
 
             mock_tool_config.return_value = mock_tool_instance
             mock_discover.return_value = [mock_langchain_tool]
@@ -1783,11 +1767,11 @@ class TestCreateToolConfigList:
 
         mock_tool_config.side_effect = [mock_tool_1, mock_tool_2]
 
-        with patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+        with patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_embedding, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank:
 
             mock_search_tools.return_value = [
                 {
@@ -1852,14 +1836,14 @@ class TestCreateToolConfigList:
             "prompt": "override prompt",
         }
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names', return_value={"idx_override": "Override KB"}), \
-                patch('backend.agents.create_agent_info.get_llm_adapter', return_value='llm-model'):
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_embedding, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
+                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names', return_value={"idx_override": "Override KB"}), \
+                patch('management.services.agent.preparation.tools.get_llm_adapter', return_value='llm-model'):
             mock_tool_config.side_effect = [kb_tool, analyze_tool]
             mock_get_vector_db_core.return_value = 'vdb-core'
             mock_embedding.return_value = ('embedding-model', 1, {'status': 'ok'})
@@ -1935,10 +1919,10 @@ class TestCreateToolConfigList:
             "prompt": "override prompt",
         }
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_adapter', return_value='llm-model'):
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_llm_adapter', return_value='llm-model'):
             mock_tool_config.return_value = mock_tool_instance
 
             mock_search_tools.return_value = [
@@ -1986,10 +1970,10 @@ class TestCreateToolConfigList:
             "rerank_model_name": "gte-rerank-v2",
         }
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank:
 
             mock_tool_config.return_value = mock_tool_instance
             mock_rerank.return_value = "mock_rerank_model"
@@ -2031,10 +2015,10 @@ class TestCreateToolConfigList:
             "rerank_model_name": "",
         }
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -2073,10 +2057,10 @@ class TestCreateToolConfigList:
             "rerank_model_name": "",
         }
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -2114,12 +2098,12 @@ class TestCreateToolConfigList:
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "AnalyzeImageTool"
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vlm_adapter') as mock_get_vlm_model, \
-                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock), \
-                patch('backend.agents.create_agent_info.validate_urls_access') as mock_validate:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vlm_adapter') as mock_get_vlm_model, \
+                patch('management.services.agent.preparation.tools.minio_client', new_callable=MagicMock), \
+                patch('management.services.agent.preparation.tools.validate_urls_access') as mock_validate:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -2158,12 +2142,12 @@ class TestCreateToolConfigList:
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "AnalyzeTextFileTool"
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_llm_adapter') as mock_get_llm_model, \
-                patch('backend.agents.create_agent_info.minio_client', new_callable=MagicMock), \
-                patch('backend.agents.create_agent_info.validate_urls_access') as mock_validate:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_llm_adapter') as mock_get_llm_model, \
+                patch('management.services.agent.preparation.tools.minio_client', new_callable=MagicMock), \
+                patch('management.services.agent.preparation.tools.validate_urls_access') as mock_validate:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -2206,18 +2190,18 @@ class TestCreateAgentConfig:
         memory_switch: bool = False,
         fixed_search_result: str = "No relevant memories found.",
     ):
-        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
-                patch('backend.agents.create_agent_info.create_tool_config_list', return_value=[]), \
-                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
-                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
-                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.prepare_prompt_templates', new_callable=AsyncMock) as mock_prepare_templates, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
-                patch('backend.agents.create_agent_info.build_context_inputs') as mock_build_components, \
-                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
-                patch('backend.agents.create_agent_info._create_fixed_search_memory_tool') as mock_search_tool, \
-                patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]), \
+        with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('management.services.agent.preparation.compiler.query_sub_agent_relations', return_value=[]), \
+                patch('management.services.agent.preparation.compiler.create_tool_config_list', return_value=[]), \
+                patch('management.services.agent.preparation.compiler.get_agent_prompt_template') as mock_get_template, \
+                patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
+                patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
+                patch('management.services.agent.preparation.inputs.prepare_prompt_templates', new_callable=AsyncMock) as mock_prepare_templates, \
+                patch('management.services.agent.preparation.compiler.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('management.services.agent.preparation.compiler.build_context_inputs') as mock_build_components, \
+                patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
+                patch('management.services.agent.preparation.compiler._create_fixed_search_memory_tool') as mock_search_tool, \
+                patch('management.services.agent.preparation.compiler._get_skills_for_template', return_value=[]), \
                 patch.dict(sys.modules, {
                     'management.services.memory.records': MagicMock(
                         _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
@@ -2237,7 +2221,7 @@ class TestCreateAgentConfig:
                     ),
                 }), \
                 patch(
-                    'backend.agents.create_agent_info.ContextManagerConfig',
+                    'management.services.agent.preparation.compiler.ContextManagerConfig',
                     side_effect=lambda **kwargs: Mock(**kwargs),
                 ):
             mock_search_agent.return_value = {
@@ -2309,7 +2293,7 @@ class TestCreateAgentConfig:
             types.SimpleNamespace(name="store_memory"),
         ]
         with patch(
-            "backend.agents.create_agent_info._get_skill_script_tools",
+            'management.services.agent.preparation.compiler._get_skill_script_tools',
             return_value=memory_tools,
         ):
             mocks = await self._run_context_manager_case(
@@ -2330,10 +2314,10 @@ class TestCreateAgentConfig:
     ):
         sdk_authorized_imports = ["sdk_default_import", "sdk_extra_import"]
         with patch(
-            "backend.agents.create_agent_info.NEXENT_SANDBOX_DEFAULT_LEVEL",
+            'management.services.agent.preparation.compiler.NEXENT_SANDBOX_DEFAULT_LEVEL',
             sandbox_default_level,
         ), patch(
-            "backend.agents.create_agent_info.get_local_python_authorized_imports",
+            'management.services.agent.preparation.compiler.get_local_python_authorized_imports',
             return_value=sdk_authorized_imports,
         ) as get_authorized_imports:
             mocks = await self._run_context_manager_case(
@@ -2409,7 +2393,7 @@ class TestCreateAgentConfig:
             types.SimpleNamespace(name="upload_to_s3"),
         ]
         with patch(
-            'backend.agents.create_agent_info._get_skill_script_tools',
+            'management.services.agent.preparation.compiler._get_skill_script_tools',
             return_value=builtin_tools,
         ):
             mocks = await self._run_context_manager_case(
@@ -2440,7 +2424,7 @@ class TestCreateAgentConfig:
             types.SimpleNamespace(name="upload_to_s3"),
         ]
         with patch(
-            'backend.agents.create_agent_info._get_skill_script_tools',
+            'management.services.agent.preparation.compiler._get_skill_script_tools',
             return_value=builtin_tools,
         ):
             mocks = await self._run_context_manager_case(
@@ -2488,16 +2472,16 @@ class TestCreateAgentConfig:
         # tests may have left an exhausted iterator on the shared mock.
         mock_tool_config.reset_mock()
         mock_tool_config.side_effect = None
-        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
-                patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
-                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
-                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
-                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
-                patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
-                patch('backend.agents.create_agent_info.RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS', 240):
+        with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('management.services.agent.preparation.compiler.query_sub_agent_relations') as mock_query_sub, \
+                patch('management.services.agent.preparation.compiler.create_tool_config_list') as mock_create_tools, \
+                patch('management.services.agent.preparation.compiler.get_agent_prompt_template') as mock_get_template, \
+                patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
+                patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
+                patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
+                patch('management.services.agent.preparation.inputs.prepare_prompt_templates') as mock_prepare_templates, \
+                patch('management.services.agent.preparation.compiler.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('management.services.agent.preparation.compiler.RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS', 240):
 
             # Set mock return values
             mock_search_agent.return_value = {
@@ -2568,15 +2552,15 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_with_sub_agents(self):
         """Test case for creating agent configuration with sub-agents"""
-        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
-                patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
-                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
-                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
-                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
-                patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
+        with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('management.services.agent.preparation.compiler.query_sub_agent_relations') as mock_query_sub, \
+                patch('management.services.agent.preparation.compiler.create_tool_config_list') as mock_create_tools, \
+                patch('management.services.agent.preparation.compiler.get_agent_prompt_template') as mock_get_template, \
+                patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
+                patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
+                patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
+                patch('management.services.agent.preparation.inputs.prepare_prompt_templates') as mock_prepare_templates, \
+                patch('management.services.agent.preparation.compiler.get_model_by_model_id') as mock_get_model_by_id:
 
             # Set mock return values
             mock_search_agent.return_value = {
@@ -2611,7 +2595,7 @@ class TestCreateAgentConfig:
             mock_sub_agent_config.name = "sub_agent"
 
             # Return sub-agent config on recursive call to create_agent_config
-            with patch('backend.agents.create_agent_info.create_agent_config', return_value=mock_sub_agent_config):
+            with patch('management.services.agent.preparation.compiler.create_agent_config', return_value=mock_sub_agent_config):
                 # Reset mock state, as previous tests might have called AgentConfig
                 mock_agent_config.reset_mock()
 
@@ -2645,14 +2629,14 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_mounts_runtime_sub_agents_without_relation_write(self):
         """Workbench children are pinned request inputs, not persisted relations."""
-        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]) as mock_query_sub, \
-                patch('backend.agents.create_agent_info.create_tool_config_list', new_callable=AsyncMock, return_value=[]), \
-                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
-                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
-                patch('backend.agents.create_agent_info.prepare_prompt_templates', new_callable=AsyncMock, return_value={"system_prompt": "manager"}), \
-                patch('backend.agents.create_agent_info.get_model_by_model_id', return_value={"display_name": "test_model"}):
+        with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('management.services.agent.preparation.compiler.query_sub_agent_relations', return_value=[]) as mock_query_sub, \
+                patch('management.services.agent.preparation.compiler.create_tool_config_list', new_callable=AsyncMock, return_value=[]), \
+                patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
+                patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
+                patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
+                patch('management.services.agent.preparation.inputs.prepare_prompt_templates', new_callable=AsyncMock, return_value={"system_prompt": "manager"}), \
+                patch('management.services.agent.preparation.compiler.get_model_by_model_id', return_value={"display_name": "test_model"}):
 
             mock_search_agent.return_value = {
                 "name": "workbench_main",
@@ -2674,7 +2658,7 @@ class TestCreateAgentConfig:
             child.display_name = "Published name"
 
             with patch(
-                'backend.agents.create_agent_info.create_agent_config',
+                'management.services.agent.preparation.compiler.create_agent_config',
                 new_callable=AsyncMock,
                 return_value=child,
             ) as recursive_create:
@@ -2707,16 +2691,16 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_with_pinned_sub_agent_version(self):
         """Test sub-agent config uses pinned selected_agent_version_no from relation"""
-        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
-                patch('backend.agents.create_agent_info.resolve_sub_agent_version_no', return_value=3) as mock_resolve, \
-                patch('backend.agents.create_agent_info.create_tool_config_list', new_callable=AsyncMock) as mock_create_tools, \
-                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
-                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
-                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
-                patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
+        with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('management.services.agent.preparation.compiler.query_sub_agent_relations') as mock_query_sub, \
+                patch('management.services.agent.preparation.compiler.resolve_sub_agent_version_no', return_value=3) as mock_resolve, \
+                patch('management.services.agent.preparation.compiler.create_tool_config_list', new_callable=AsyncMock) as mock_create_tools, \
+                patch('management.services.agent.preparation.compiler.get_agent_prompt_template') as mock_get_template, \
+                patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
+                patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
+                patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
+                patch('management.services.agent.preparation.inputs.prepare_prompt_templates') as mock_prepare_templates, \
+                patch('management.services.agent.preparation.compiler.get_model_by_model_id') as mock_get_model_by_id:
 
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -2746,7 +2730,7 @@ class TestCreateAgentConfig:
             mock_sub_agent_config.name = "sub_agent"
 
             with patch(
-                'backend.agents.create_agent_info.create_agent_config',
+                'management.services.agent.preparation.compiler.create_agent_config',
                 new_callable=AsyncMock,
                 return_value=mock_sub_agent_config,
             ) as mock_recursive_create:
@@ -2765,15 +2749,15 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_with_memory(self):
         """UT-BE-WMA-018: standard Agent configuration preserves memory."""
-        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
-                patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
-                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
-                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
-                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info._create_fixed_search_memory_tool') as mock_search_tool, \
-                patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
+        with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('management.services.agent.preparation.compiler.query_sub_agent_relations') as mock_query_sub, \
+                patch('management.services.agent.preparation.compiler.create_tool_config_list') as mock_create_tools, \
+                patch('management.services.agent.preparation.compiler.get_agent_prompt_template') as mock_get_template, \
+                patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
+                patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
+                patch('management.services.agent.preparation.compiler._create_fixed_search_memory_tool') as mock_search_tool, \
+                patch('management.services.agent.preparation.inputs.prepare_prompt_templates') as mock_prepare_templates, \
+                patch('management.services.agent.preparation.compiler.get_model_by_model_id') as mock_get_model_by_id, \
                 patch.dict(sys.modules, {
                     'management.services.memory.records': MagicMock(
                         _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
@@ -2845,31 +2829,31 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_memory_disabled_no_search(self):
         with patch(
-            "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+            'management.services.agent.preparation.compiler.search_agent_info_by_agent_id'
         ) as mock_search_agent, \
             patch(
-                "backend.agents.create_agent_info.query_sub_agent_relations"
+                'management.services.agent.preparation.compiler.query_sub_agent_relations'
             ) as mock_query_sub, \
             patch(
-                "backend.agents.create_agent_info.create_tool_config_list"
+                'management.services.agent.preparation.compiler.create_tool_config_list'
             ) as mock_create_tools, \
             patch(
-                "backend.agents.create_agent_info.get_agent_prompt_template"
+                'management.services.agent.preparation.compiler.get_agent_prompt_template'
             ) as mock_get_template, \
             patch(
-                "backend.agents.create_agent_info.tenant_config_manager"
+                'management.services.agent.preparation.compiler.tenant_config_manager'
             ) as mock_tenant_config, \
             patch(
-                "backend.agents.create_agent_info.build_memory_context"
+                'management.services.agent.preparation.compiler.build_memory_context'
             ) as mock_build_memory, \
             patch(
-                "backend.agents.create_agent_info.get_model_by_model_id"
+                'management.services.agent.preparation.compiler.get_model_by_model_id'
             ) as mock_get_model_by_id, \
             patch(
-                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+                'management.services.agent.preparation.compiler._create_fixed_search_memory_tool'
             ) as mock_search_tool, \
             patch(
-                "backend.agents.create_agent_info.prepare_prompt_templates"
+                'management.services.agent.preparation.inputs.prepare_prompt_templates'
             ) as mock_prepare_templates:
             mock_search_agent.return_value = {
                 "name": "test_agent",
@@ -2924,15 +2908,15 @@ class TestCreateAgentConfig:
     @pytest.mark.asyncio
     async def test_create_agent_config_model_id_none(self):
         """Test case for creating agent configuration when model_id is None"""
-        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
-                patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
-                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
-                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
-                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
-                patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id:
+        with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('management.services.agent.preparation.compiler.query_sub_agent_relations') as mock_query_sub, \
+                patch('management.services.agent.preparation.compiler.create_tool_config_list') as mock_create_tools, \
+                patch('management.services.agent.preparation.compiler.get_agent_prompt_template') as mock_get_template, \
+                patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
+                patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
+                patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
+                patch('management.services.agent.preparation.inputs.prepare_prompt_templates') as mock_prepare_templates, \
+                patch('management.services.agent.preparation.compiler.get_model_by_model_id') as mock_get_model_by_id:
 
             # Set mock return values
             mock_search_agent.return_value = {
@@ -3005,31 +2989,31 @@ class TestCreateAgentConfig:
 
         with (
             patch(
-                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+                'management.services.agent.preparation.compiler.search_agent_info_by_agent_id'
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agent_relations"
+                'management.services.agent.preparation.compiler.query_sub_agent_relations'
             ) as mock_query_sub,
             patch(
-                "backend.agents.create_agent_info.create_tool_config_list"
+                'management.services.agent.preparation.compiler.create_tool_config_list'
             ) as mock_create_tools,
             patch(
-                "backend.agents.create_agent_info.get_agent_prompt_template"
+                'management.services.agent.preparation.compiler.get_agent_prompt_template'
             ) as mock_get_template,
             patch(
-                "backend.agents.create_agent_info.tenant_config_manager"
+                'management.services.agent.preparation.compiler.tenant_config_manager'
             ) as mock_tenant_config,
             patch(
-                "backend.agents.create_agent_info.build_memory_context"
+                'management.services.agent.preparation.compiler.build_memory_context'
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+                'management.services.agent.preparation.compiler._create_fixed_search_memory_tool'
             ) as mock_search_tool,
             patch(
-                "backend.agents.create_agent_info.prepare_prompt_templates"
+                'management.services.agent.preparation.inputs.prepare_prompt_templates'
             ) as mock_prepare_templates,
             patch(
-                "backend.agents.create_agent_info.logger"
+                'management.services.agent.preparation.compiler.logger'
             ) as mock_logger,
             patch.dict(sys.modules, {
                 'services': services_pkg,
@@ -3114,37 +3098,37 @@ class TestCreateAgentConfig:
         """
         with (
             patch(
-                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+                'management.services.agent.preparation.compiler.search_agent_info_by_agent_id'
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agent_relations"
+                'management.services.agent.preparation.compiler.query_sub_agent_relations'
             ) as mock_query_sub,
             patch(
-                "backend.agents.create_agent_info.create_tool_config_list"
+                'management.services.agent.preparation.compiler.create_tool_config_list'
             ) as mock_create_tools,
             patch(
-                "backend.agents.create_agent_info.get_agent_prompt_template"
+                'management.services.agent.preparation.compiler.get_agent_prompt_template'
             ) as mock_get_template,
             patch(
-                "backend.agents.create_agent_info.tenant_config_manager"
+                'management.services.agent.preparation.compiler.tenant_config_manager'
             ) as mock_tenant_config,
             patch(
-                "backend.agents.create_agent_info.build_memory_context"
+                'management.services.agent.preparation.compiler.build_memory_context'
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+                'management.services.agent.preparation.compiler._create_fixed_search_memory_tool'
             ) as mock_search_tool,
             patch(
-                "backend.agents.create_agent_info.prepare_prompt_templates"
+                'management.services.agent.preparation.inputs.prepare_prompt_templates'
             ) as mock_prepare_templates,
             patch(
-                "backend.agents.create_agent_info.get_model_by_model_id"
+                'management.services.agent.preparation.compiler.get_model_by_model_id'
             ) as mock_get_model_by_id,
             patch(
-                "backend.agents.create_agent_info._get_skills_for_template"
+                'management.services.agent.preparation.compiler._get_skills_for_template'
             ) as mock_get_skills,
             patch(
-                "backend.agents.create_agent_info._get_skill_script_tools"
+                'management.services.agent.preparation.compiler._get_skill_script_tools'
             ) as mock_get_skill_tools,
             patch.dict(sys.modules, {
                 'management.services.memory.records': MagicMock(
@@ -3224,37 +3208,37 @@ class TestCreateAgentConfig:
         """
         with (
             patch(
-                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+                'management.services.agent.preparation.compiler.search_agent_info_by_agent_id'
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agent_relations"
+                'management.services.agent.preparation.compiler.query_sub_agent_relations'
             ) as mock_query_sub,
             patch(
-                "backend.agents.create_agent_info.create_tool_config_list"
+                'management.services.agent.preparation.compiler.create_tool_config_list'
             ) as mock_create_tools,
             patch(
-                "backend.agents.create_agent_info.get_agent_prompt_template"
+                'management.services.agent.preparation.compiler.get_agent_prompt_template'
             ) as mock_get_template,
             patch(
-                "backend.agents.create_agent_info.tenant_config_manager"
+                'management.services.agent.preparation.compiler.tenant_config_manager'
             ) as mock_tenant_config,
             patch(
-                "backend.agents.create_agent_info.build_memory_context"
+                'management.services.agent.preparation.compiler.build_memory_context'
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+                'management.services.agent.preparation.compiler._create_fixed_search_memory_tool'
             ) as mock_search_tool,
             patch(
-                "backend.agents.create_agent_info.prepare_prompt_templates"
+                'management.services.agent.preparation.inputs.prepare_prompt_templates'
             ) as mock_prepare_templates,
             patch(
-                "backend.agents.create_agent_info.get_model_by_model_id"
+                'management.services.agent.preparation.compiler.get_model_by_model_id'
             ) as mock_get_model_by_id,
             patch(
-                "backend.agents.create_agent_info._get_skills_for_template"
+                'management.services.agent.preparation.compiler._get_skills_for_template'
             ) as mock_get_skills,
             patch(
-                "backend.agents.create_agent_info._get_skill_script_tools"
+                'management.services.agent.preparation.compiler._get_skill_script_tools'
             ) as mock_get_skill_tools,
             patch.dict(sys.modules, {
                 'management.services.memory.records': MagicMock(
@@ -3333,37 +3317,37 @@ class TestCreateAgentConfig:
         """
         with (
             patch(
-                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+                'management.services.agent.preparation.compiler.search_agent_info_by_agent_id'
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agent_relations"
+                'management.services.agent.preparation.compiler.query_sub_agent_relations'
             ) as mock_query_sub,
             patch(
-                "backend.agents.create_agent_info.create_tool_config_list"
+                'management.services.agent.preparation.compiler.create_tool_config_list'
             ) as mock_create_tools,
             patch(
-                "backend.agents.create_agent_info.get_agent_prompt_template"
+                'management.services.agent.preparation.compiler.get_agent_prompt_template'
             ) as mock_get_template,
             patch(
-                "backend.agents.create_agent_info.tenant_config_manager"
+                'management.services.agent.preparation.compiler.tenant_config_manager'
             ) as mock_tenant_config,
             patch(
-                "backend.agents.create_agent_info.build_memory_context"
+                'management.services.agent.preparation.compiler.build_memory_context'
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info._create_fixed_search_memory_tool"
+                'management.services.agent.preparation.compiler._create_fixed_search_memory_tool'
             ) as mock_search_tool,
             patch(
-                "backend.agents.create_agent_info.prepare_prompt_templates"
+                'management.services.agent.preparation.inputs.prepare_prompt_templates'
             ) as mock_prepare_templates,
             patch(
-                "backend.agents.create_agent_info.get_model_by_model_id"
+                'management.services.agent.preparation.compiler.get_model_by_model_id'
             ) as mock_get_model_by_id,
             patch(
-                "backend.agents.create_agent_info._get_skills_for_template"
+                'management.services.agent.preparation.compiler._get_skills_for_template'
             ) as mock_get_skills,
             patch(
-                "backend.agents.create_agent_info._get_skill_script_tools"
+                'management.services.agent.preparation.compiler._get_skill_script_tools'
             ) as mock_get_skill_tools,
             patch.dict(sys.modules, {
                 'management.services.memory.records': MagicMock(
@@ -3438,43 +3422,43 @@ class TestCreateAgentConfig:
     async def test_create_agent_config_with_knowledge_base_summary_filtering(self):
         with (
             patch(
-                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+                'management.services.agent.preparation.compiler.search_agent_info_by_agent_id'
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agent_relations"
+                'management.services.agent.preparation.compiler.query_sub_agent_relations'
             ) as mock_query_sub,
             patch(
-                "backend.agents.create_agent_info.create_tool_config_list"
+                'management.services.agent.preparation.compiler.create_tool_config_list'
             ) as mock_create_tools,
             patch(
-                "backend.agents.create_agent_info.get_agent_prompt_template"
+                'management.services.agent.preparation.compiler.get_agent_prompt_template'
             ) as mock_get_template,
             patch(
-                "backend.agents.create_agent_info.tenant_config_manager"
+                'management.services.agent.preparation.compiler.tenant_config_manager'
             ) as mock_tenant_config,
             patch(
-                "backend.agents.create_agent_info.build_memory_context"
+                'management.services.agent.preparation.compiler.build_memory_context'
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info.ElasticSearchService"
+                'management.services.agent.preparation.resources.ElasticSearchService'
             ) as mock_es_service,
             patch(
-                "backend.agents.create_agent_info.logger"
+                'management.services.agent.preparation.resources.logger'
             ) as mock_logger,
             patch(
-                "backend.agents.create_agent_info.prepare_prompt_templates"
+                'management.services.agent.preparation.inputs.prepare_prompt_templates'
             ) as mock_prepare_templates,
             patch(
-                "backend.agents.create_agent_info.get_model_by_model_id"
+                'management.services.agent.preparation.compiler.get_model_by_model_id'
             ) as mock_get_model_by_id,
             patch(
-                "backend.agents.create_agent_info._get_skills_for_template"
+                'management.services.agent.preparation.compiler._get_skills_for_template'
             ) as mock_get_skills,
             patch(
-                "backend.agents.create_agent_info._get_skill_script_tools"
+                'management.services.agent.preparation.compiler._get_skill_script_tools'
             ) as mock_get_skill_tools,
             patch(
-                "backend.agents.create_agent_info.get_knowledge_name_map_by_index_names"
+                'management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names'
             ) as mock_get_knowledge_name_map,
         ):
             mock_search_agent.return_value = {
@@ -3555,10 +3539,10 @@ class TestCreateAgentConfig:
             assert "idx_b" in mock_logger.warning.call_args[0][0]
 
             mock_prepare_templates.assert_not_called()
-            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
+            assert preparation_compiler.build_context_inputs.call_args.kwargs[
                 "knowledge_base_summaries"
             ] == [{"index_name": "idx_a", "display_name": "idx_a", "summary": "AAA"}]
-            assert create_agent_info_module.build_context_inputs.call_args.kwargs[
+            assert preparation_compiler.build_context_inputs.call_args.kwargs[
                 "knowledge_scope"
             ]["local_display_names"] == ["selected resources"]
 
@@ -3579,13 +3563,13 @@ class TestCreateAgentConfig:
         )
 
         with patch(
-            "backend.agents.create_agent_info.ElasticSearchService"
+            'management.services.agent.preparation.resources.ElasticSearchService'
         ) as mock_es_service:
             mock_es_service.return_value.get_summary.return_value = {
                 "summary": "Selected summary"
             }
             summaries, no_indexes = (
-                create_agent_info_module._build_effective_knowledge_base_summary(
+                resource_preparation._build_effective_knowledge_base_summary(
                     [kb_tool],
                     include_empty_message=False,
                 )
@@ -3613,13 +3597,13 @@ class TestCreateAgentConfig:
         )
 
         with patch(
-            "backend.agents.create_agent_info.ElasticSearchService"
+            'management.services.agent.preparation.resources.ElasticSearchService'
         ) as mock_es_service:
             mock_es_service.return_value.get_summary.return_value = {
                 "summary": "Allowed summary"
             }
             summaries, no_indexes = (
-                create_agent_info_module._build_effective_knowledge_base_summary(
+                resource_preparation._build_effective_knowledge_base_summary(
                     [kb_tool],
                     include_empty_message=False,
                 )
@@ -3641,10 +3625,10 @@ class TestCreateAgentConfig:
         )
 
         with patch(
-            "backend.agents.create_agent_info.ElasticSearchService"
+            'management.services.agent.preparation.resources.ElasticSearchService'
         ) as mock_es_service:
             summaries, no_indexes = (
-                create_agent_info_module._build_effective_knowledge_base_summary(
+                resource_preparation._build_effective_knowledge_base_summary(
                     [kb_tool],
                     include_empty_message=False,
                 )
@@ -3664,40 +3648,40 @@ class TestCreateAgentConfig:
         """
         with (
             patch(
-                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+                'management.services.agent.preparation.compiler.search_agent_info_by_agent_id'
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agent_relations"
+                'management.services.agent.preparation.compiler.query_sub_agent_relations'
             ) as mock_query_sub,
             patch(
-                "backend.agents.create_agent_info.create_tool_config_list"
+                'management.services.agent.preparation.compiler.create_tool_config_list'
             ) as mock_create_tools,
             patch(
-                "backend.agents.create_agent_info.get_agent_prompt_template"
+                'management.services.agent.preparation.compiler.get_agent_prompt_template'
             ) as mock_get_template,
             patch(
-                "backend.agents.create_agent_info.tenant_config_manager"
+                'management.services.agent.preparation.compiler.tenant_config_manager'
             ) as mock_tenant_config,
             patch(
-                "backend.agents.create_agent_info.build_memory_context"
+                'management.services.agent.preparation.compiler.build_memory_context'
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info.ElasticSearchService"
+                'management.services.agent.preparation.resources.ElasticSearchService'
             ) as mock_es_service,
             patch(
-                "backend.agents.create_agent_info.prepare_prompt_templates"
+                'management.services.agent.preparation.inputs.prepare_prompt_templates'
             ) as mock_prepare_templates,
             patch(
-                "backend.agents.create_agent_info.get_model_by_model_id"
+                'management.services.agent.preparation.compiler.get_model_by_model_id'
             ) as mock_get_model_by_id,
             patch(
-                "backend.agents.create_agent_info._get_skills_for_template"
+                'management.services.agent.preparation.compiler._get_skills_for_template'
             ) as mock_get_skills,
             patch(
-                "backend.agents.create_agent_info._get_skill_script_tools"
+                'management.services.agent.preparation.compiler._get_skill_script_tools'
             ) as mock_get_skill_tools,
             patch(
-                "backend.agents.create_agent_info.get_knowledge_name_map_by_index_names"
+                'management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names'
             ) as mock_get_knowledge_name_map,
         ):
             mock_search_agent.return_value = {
@@ -3759,7 +3743,7 @@ class TestCreateAgentConfig:
 
             # Verify the SDK context component uses display names from metadata.
             mock_prepare_templates.assert_not_called()
-            knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
+            knowledge_summary = preparation_compiler.build_context_inputs.call_args.kwargs[
                 "knowledge_base_summaries"
             ]
             assert [item["display_name"] for item in knowledge_summary] == ["Custom Name 1", "Custom Name 2"]
@@ -3774,40 +3758,40 @@ class TestCreateAgentConfig:
         """
         with (
             patch(
-                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+                'management.services.agent.preparation.compiler.search_agent_info_by_agent_id'
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agent_relations"
+                'management.services.agent.preparation.compiler.query_sub_agent_relations'
             ) as mock_query_sub,
             patch(
-                "backend.agents.create_agent_info.create_tool_config_list"
+                'management.services.agent.preparation.compiler.create_tool_config_list'
             ) as mock_create_tools,
             patch(
-                "backend.agents.create_agent_info.get_agent_prompt_template"
+                'management.services.agent.preparation.compiler.get_agent_prompt_template'
             ) as mock_get_template,
             patch(
-                "backend.agents.create_agent_info.tenant_config_manager"
+                'management.services.agent.preparation.compiler.tenant_config_manager'
             ) as mock_tenant_config,
             patch(
-                "backend.agents.create_agent_info.build_memory_context"
+                'management.services.agent.preparation.compiler.build_memory_context'
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info.ElasticSearchService"
+                'management.services.agent.preparation.resources.ElasticSearchService'
             ) as mock_es_service,
             patch(
-                "backend.agents.create_agent_info.prepare_prompt_templates"
+                'management.services.agent.preparation.inputs.prepare_prompt_templates'
             ) as mock_prepare_templates,
             patch(
-                "backend.agents.create_agent_info.get_model_by_model_id"
+                'management.services.agent.preparation.compiler.get_model_by_model_id'
             ) as mock_get_model_by_id,
             patch(
-                "backend.agents.create_agent_info._get_skills_for_template"
+                'management.services.agent.preparation.compiler._get_skills_for_template'
             ) as mock_get_skills,
             patch(
-                "backend.agents.create_agent_info._get_skill_script_tools"
+                'management.services.agent.preparation.compiler._get_skill_script_tools'
             ) as mock_get_skill_tools,
             patch(
-                "backend.agents.create_agent_info.get_knowledge_name_map_by_index_names"
+                'management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names'
             ) as mock_get_knowledge_name_map,
         ):
             mock_search_agent.return_value = {
@@ -3855,7 +3839,7 @@ class TestCreateAgentConfig:
             # When metadata is empty, it should fall back to using index_name
             # as the display_name (no mapping available)
             mock_prepare_templates.assert_not_called()
-            knowledge_summary = create_agent_info_module.build_context_inputs.call_args.kwargs[
+            knowledge_summary = preparation_compiler.build_context_inputs.call_args.kwargs[
                 "knowledge_base_summaries"
             ]
             assert [item["display_name"] for item in knowledge_summary] == ["idx1", "idx2"]
@@ -3867,31 +3851,31 @@ class TestCreateAgentConfig:
     ):
         with (
             patch(
-                "backend.agents.create_agent_info.search_agent_info_by_agent_id"
+                'management.services.agent.preparation.compiler.search_agent_info_by_agent_id'
             ) as mock_search_agent,
             patch(
-                "backend.agents.create_agent_info.query_sub_agent_relations"
+                'management.services.agent.preparation.compiler.query_sub_agent_relations'
             ) as mock_query_sub,
             patch(
-                "backend.agents.create_agent_info.create_tool_config_list"
+                'management.services.agent.preparation.compiler.create_tool_config_list'
             ) as mock_create_tools,
             patch(
-                "backend.agents.create_agent_info.get_agent_prompt_template"
+                'management.services.agent.preparation.compiler.get_agent_prompt_template'
             ) as mock_get_template,
             patch(
-                "backend.agents.create_agent_info.tenant_config_manager"
+                'management.services.agent.preparation.compiler.tenant_config_manager'
             ) as mock_tenant_config,
             patch(
-                "backend.agents.create_agent_info.build_memory_context"
+                'management.services.agent.preparation.compiler.build_memory_context'
             ) as mock_build_memory,
             patch(
-                "backend.agents.create_agent_info.ElasticSearchService"
+                'management.services.agent.preparation.resources.ElasticSearchService'
             ) as mock_es_service,
             patch(
-                "backend.agents.create_agent_info.prepare_prompt_templates"
+                'management.services.agent.preparation.inputs.prepare_prompt_templates'
             ) as mock_prepare_templates,
             patch(
-                "backend.agents.create_agent_info.get_model_by_model_id"
+                'management.services.agent.preparation.compiler.get_model_by_model_id'
             ) as mock_get_model_by_id,
         ):
             mock_search_agent.return_value = {
@@ -3927,23 +3911,23 @@ class TestCreateAgentConfig:
             )
 
             mock_es_service.assert_not_called()
-            context_kwargs = create_agent_info_module.build_context_inputs.call_args.kwargs
+            context_kwargs = preparation_compiler.build_context_inputs.call_args.kwargs
             assert context_kwargs["knowledge_base_summaries"] == []
             assert context_kwargs["knowledge_base_no_indexes"] is True
 
     @pytest.mark.asyncio
     async def test_create_agent_config_knowledge_base_summary_error(self):
         """Test case for error handling during knowledge base summary build"""
-        with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search_agent, \
-                patch('backend.agents.create_agent_info.query_sub_agent_relations') as mock_query_sub, \
-                patch('backend.agents.create_agent_info.create_tool_config_list') as mock_create_tools, \
-                patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
-                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
-                patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
-                patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
-                patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
-                patch('backend.agents.create_agent_info.logger') as mock_logger:
+        with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search_agent, \
+                patch('management.services.agent.preparation.compiler.query_sub_agent_relations') as mock_query_sub, \
+                patch('management.services.agent.preparation.compiler.create_tool_config_list') as mock_create_tools, \
+                patch('management.services.agent.preparation.compiler.get_agent_prompt_template') as mock_get_template, \
+                patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
+                patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
+                patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
+                patch('management.services.agent.preparation.inputs.prepare_prompt_templates') as mock_prepare_templates, \
+                patch('management.services.agent.preparation.compiler.get_model_by_model_id') as mock_get_model_by_id, \
+                patch('management.services.agent.preparation.resources.logger') as mock_logger:
 
             # Set mock return values
             mock_search_agent.return_value = {
@@ -3984,16 +3968,16 @@ class TestCreateAgentConfig:
         @pytest.mark.asyncio
         async def test_create_agent_config_includes_parallel_executor(self):
             """parallel_executor is always included as a system-managed tool."""
-            with patch('backend.agents.create_agent_info.search_agent_info_by_agent_id') as mock_search, \
-                    patch('backend.agents.create_agent_info.query_sub_agent_relations', return_value=[]), \
-                    patch('backend.agents.create_agent_info.create_tool_config_list', return_value=[]), \
-                    patch('backend.agents.create_agent_info.get_agent_prompt_template') as mock_get_template, \
-                    patch('backend.agents.create_agent_info.tenant_config_manager') as mock_tenant_config, \
-                    patch('backend.agents.create_agent_info.build_memory_context') as mock_build_memory, \
-                    patch('backend.agents.create_agent_info.AgentConfig') as mock_agent_config, \
-                    patch('backend.agents.create_agent_info.prepare_prompt_templates') as mock_prepare_templates, \
-                    patch('backend.agents.create_agent_info.get_model_by_model_id') as mock_get_model_by_id, \
-                    patch('backend.agents.create_agent_info._get_skills_for_template', return_value=[]):
+            with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search, \
+                    patch('management.services.agent.preparation.compiler.query_sub_agent_relations', return_value=[]), \
+                    patch('management.services.agent.preparation.compiler.create_tool_config_list', return_value=[]), \
+                    patch('management.services.agent.preparation.compiler.get_agent_prompt_template') as mock_get_template, \
+                    patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
+                    patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
+                    patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
+                    patch('management.services.agent.preparation.inputs.prepare_prompt_templates') as mock_prepare_templates, \
+                    patch('management.services.agent.preparation.compiler.get_model_by_model_id') as mock_get_model_by_id, \
+                    patch('management.services.agent.preparation.compiler._get_skills_for_template', return_value=[]):
                 mock_search.return_value = {
                     "name": "test_agent", "description": "desc",
                     "prompt": "d", "max_steps": 5,
@@ -4021,7 +4005,7 @@ class TestCreateModelConfigList:
     """Tests for the create_model_config_list function"""
 
     def test_reasoning_helpers_filter_model_fields_and_resolve_effort(self):
-        module = create_agent_info_module
+        module = model_bindings
 
         assert module._is_thinking_enabled(None) is False
         assert module._is_thinking_enabled({"enable_thinking": True}) is True
@@ -4082,7 +4066,7 @@ class TestCreateModelConfigList:
             ) is None
 
     def test_reasoning_capability_resolver_delegates_to_catalog(self):
-        module = create_agent_info_module
+        module = model_bindings
         capability = {"status": "supported", "levels": ["low"], "default": "low"}
         loader = types.ModuleType("configs.model_catalog_loader")
         resolver = MagicMock(return_value=capability)
@@ -4108,10 +4092,10 @@ class TestCreateModelConfigList:
         # Reset mock call count before test
         mock_model_config.reset_mock()
 
-        with patch('backend.agents.create_agent_info.get_model_records') as mock_get_records, \
-                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_manager, \
-                patch('backend.agents.create_agent_info.get_model_name_from_config') as mock_get_model_name, \
-                patch('backend.agents.create_agent_info.add_repo_to_name') as mock_add_repo:
+        with patch('management.services.model.run_bindings.get_model_records') as mock_get_records, \
+                patch('management.services.model.run_bindings.tenant_config_manager') as mock_manager, \
+                patch('management.services.model.run_bindings.get_model_name_from_config') as mock_get_model_name, \
+                patch('management.services.model.run_bindings.add_repo_to_name') as mock_add_repo:
 
             # Mock database records
             mock_get_records.return_value = [
@@ -4189,11 +4173,11 @@ class TestCreateModelConfigList:
     async def test_create_model_config_list_includes_reasoning_metadata(self):
         mock_model_config.reset_mock()
         capability = {"status": "supported", "levels": ["low", "high"], "default": "high"}
-        with patch("backend.agents.create_agent_info.get_model_records") as records, \
-                patch("backend.agents.create_agent_info.tenant_config_manager") as manager, \
-                patch("backend.agents.create_agent_info.get_model_name_from_config", return_value="default"), \
-                patch("backend.agents.create_agent_info.add_repo_to_name", return_value="openai/o3"), \
-                patch("backend.agents.create_agent_info._resolve_reasoning_capability", return_value=capability):
+        with patch('management.services.model.run_bindings.get_model_records') as records, \
+                patch('management.services.model.run_bindings.tenant_config_manager') as manager, \
+                patch('management.services.model.run_bindings.get_model_name_from_config', return_value="default"), \
+                patch('management.services.model.run_bindings.add_repo_to_name', return_value="openai/o3"), \
+                patch('management.services.model.run_bindings._resolve_reasoning_capability', return_value=capability):
             records.return_value = [{
                 "display_name": "O3",
                 "api_key": "key",
@@ -4222,9 +4206,9 @@ class TestCreateModelConfigList:
         # Reset mock call count before test
         mock_model_config.reset_mock()
 
-        with patch('backend.agents.create_agent_info.get_model_records') as mock_get_records, \
-                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_manager, \
-                patch('backend.agents.create_agent_info.get_model_name_from_config') as mock_get_model_name:
+        with patch('management.services.model.run_bindings.get_model_records') as mock_get_records, \
+                patch('management.services.model.run_bindings.tenant_config_manager') as mock_manager, \
+                patch('management.services.model.run_bindings.get_model_name_from_config') as mock_get_model_name:
 
             # Mock empty database records
             mock_get_records.return_value = []
@@ -4257,9 +4241,9 @@ class TestCreateModelConfigList:
         # Reset mock call count before test
         mock_model_config.reset_mock()
 
-        with patch('backend.agents.create_agent_info.get_model_records') as mock_get_records, \
-                patch('backend.agents.create_agent_info.tenant_config_manager') as mock_manager, \
-                patch('backend.agents.create_agent_info.get_model_name_from_config') as mock_get_model_name:
+        with patch('management.services.model.run_bindings.get_model_records') as mock_get_records, \
+                patch('management.services.model.run_bindings.tenant_config_manager') as mock_manager, \
+                patch('management.services.model.run_bindings.get_model_name_from_config') as mock_get_model_name:
 
             # Mock empty database records
             mock_get_records.return_value = []
@@ -4409,19 +4393,19 @@ class TestCreateAgentRunInfo:
             extra_body={"keep": True, "remove": True},
         )
         with patch(
-            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            'management.services.agent.preparation.run.join_minio_file_description_to_query',
             new_callable=AsyncMock,
             return_value="processed_query",
         ), patch(
-            "backend.agents.create_agent_info.create_model_config_list",
+            'management.services.agent.preparation.run.create_model_config_list',
             new_callable=AsyncMock,
             return_value=[selected],
         ), patch(
-            "backend.agents.create_agent_info.create_agent_config",
+            'management.services.agent.preparation.run.create_agent_config',
             new_callable=AsyncMock,
             return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
         ), patch(
-            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            'management.services.agent.preparation.run.search_agent_info_by_agent_id',
             return_value={
                 "model_params_override": {
                     "7": {
@@ -4435,20 +4419,20 @@ class TestCreateAgentRunInfo:
                 }
             },
         ), patch(
-            "backend.agents.create_agent_info.get_model_by_model_id",
+            'management.services.agent.preparation.run.get_model_by_model_id',
             return_value={"display_name": "selected"},
         ), patch(
-            "backend.agents.create_agent_info.get_remote_mcp_server_list",
+            'management.services.agent.preparation.run.get_remote_mcp_server_list',
             new_callable=AsyncMock,
             return_value=[],
         ), patch(
-            "backend.agents.create_agent_info.filter_mcp_servers_and_tools",
+            'management.services.agent.preparation.run.filter_mcp_servers_and_tools',
             return_value=[],
         ), patch(
-            "backend.agents.create_agent_info.urljoin",
+            'management.services.agent.preparation.run.urljoin',
             return_value="http://nexent.mcp/sse",
         ), patch(
-            "backend.agents.create_agent_info.threading"
+            'runtime.adapters.nexent.factory.threading'
         ) as threading_mock:
             threading_mock.Event.return_value = "stop_event"
             await create_agent_run_info(
@@ -4481,38 +4465,38 @@ class TestCreateAgentRunInfo:
             extra_body=None,
         )
         with patch(
-            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            'management.services.agent.preparation.run.join_minio_file_description_to_query',
             new_callable=AsyncMock,
             return_value="processed_query",
         ), patch(
-            "backend.agents.create_agent_info.create_model_config_list",
+            'management.services.agent.preparation.run.create_model_config_list',
             new_callable=AsyncMock,
             return_value=[selected],
         ), patch(
-            "backend.agents.create_agent_info.create_agent_config",
+            'management.services.agent.preparation.run.create_agent_config',
             new_callable=AsyncMock,
             return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
         ), patch(
-            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            'management.services.agent.preparation.run.search_agent_info_by_agent_id',
             return_value={
                 "model_params_override": {
                     "7": {"extra_params": {"enable_thinking": True, "reasoning_budget_tokens": 4096}}
                 }
             },
         ), patch(
-            "backend.agents.create_agent_info.get_model_by_model_id",
+            'management.services.agent.preparation.run.get_model_by_model_id',
             return_value={"display_name": "selected"},
         ), patch(
-            "backend.agents.create_agent_info.get_remote_mcp_server_list",
+            'management.services.agent.preparation.run.get_remote_mcp_server_list',
             new_callable=AsyncMock,
             return_value=[],
         ), patch(
-            "backend.agents.create_agent_info.filter_mcp_servers_and_tools",
+            'management.services.agent.preparation.run.filter_mcp_servers_and_tools',
             return_value=[],
         ), patch(
-            "backend.agents.create_agent_info.urljoin",
+            'management.services.agent.preparation.run.urljoin',
             return_value="http://nexent.mcp/sse",
-        ), patch("backend.agents.create_agent_info.threading") as threading_mock:
+        ), patch('runtime.adapters.nexent.factory.threading') as threading_mock:
             threading_mock.Event.return_value = "stop_event"
             await create_agent_run_info(
                 agent_id="agent-1",
@@ -4543,29 +4527,29 @@ class TestCreateAgentRunInfo:
         )
         common_patches = [
             patch(
-                "backend.agents.create_agent_info.join_minio_file_description_to_query",
+                'management.services.agent.preparation.run.join_minio_file_description_to_query',
                 new_callable=AsyncMock,
                 return_value="processed_query",
             ),
             patch(
-                "backend.agents.create_agent_info.create_model_config_list",
+                'management.services.agent.preparation.run.create_model_config_list',
                 new_callable=AsyncMock,
                 return_value=[selected],
             ),
             patch(
-                "backend.agents.create_agent_info.create_agent_config",
+                'management.services.agent.preparation.run.create_agent_config',
                 new_callable=AsyncMock,
                 return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
             ),
-            patch("backend.agents.create_agent_info.search_agent_info_by_agent_id", return_value={}),
+            patch('management.services.agent.preparation.run.search_agent_info_by_agent_id', return_value={}),
             patch(
-                "backend.agents.create_agent_info.get_remote_mcp_server_list",
+                'management.services.agent.preparation.run.get_remote_mcp_server_list',
                 new_callable=AsyncMock,
                 return_value=[],
             ),
-            patch("backend.agents.create_agent_info.filter_mcp_servers_and_tools", return_value=[]),
-            patch("backend.agents.create_agent_info.urljoin", return_value="http://nexent.mcp/sse"),
-            patch("backend.agents.create_agent_info.threading"),
+            patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools', return_value=[]),
+            patch('management.services.agent.preparation.run.urljoin', return_value="http://nexent.mcp/sse"),
+            patch('runtime.adapters.nexent.factory.threading'),
         ]
         with ExitStack() as stack:
             for item in common_patches:
@@ -4606,19 +4590,19 @@ class TestCreateAgentRunInfo:
             extra_body={"keep": True},
         )
         with patch(
-            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            'management.services.agent.preparation.run.join_minio_file_description_to_query',
             new_callable=AsyncMock,
             return_value="processed_query",
         ), patch(
-            "backend.agents.create_agent_info.create_model_config_list",
+            'management.services.agent.preparation.run.create_model_config_list',
             new_callable=AsyncMock,
             return_value=[selected],
         ), patch(
-            "backend.agents.create_agent_info.create_agent_config",
+            'management.services.agent.preparation.run.create_agent_config',
             new_callable=AsyncMock,
             return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
         ), patch(
-            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            'management.services.agent.preparation.run.search_agent_info_by_agent_id',
             return_value={
                 "model_params_override": {
                     "7": {
@@ -4631,20 +4615,20 @@ class TestCreateAgentRunInfo:
                 }
             },
         ), patch(
-            "backend.agents.create_agent_info.get_model_by_model_id",
+            'management.services.agent.preparation.run.get_model_by_model_id',
             return_value={"display_name": "selected"},
         ), patch(
-            "backend.agents.create_agent_info.get_remote_mcp_server_list",
+            'management.services.agent.preparation.run.get_remote_mcp_server_list',
             new_callable=AsyncMock,
             return_value=[],
         ), patch(
-            "backend.agents.create_agent_info.filter_mcp_servers_and_tools",
+            'management.services.agent.preparation.run.filter_mcp_servers_and_tools',
             return_value=[],
         ), patch(
-            "backend.agents.create_agent_info.urljoin",
+            'management.services.agent.preparation.run.urljoin',
             return_value="http://nexent.mcp/sse",
         ), patch(
-            "backend.agents.create_agent_info.threading"
+            'runtime.adapters.nexent.factory.threading'
         ) as threading_mock:
             threading_mock.Event.return_value = "stop_event"
             await create_agent_run_info(
@@ -4676,19 +4660,19 @@ class TestCreateAgentRunInfo:
     )
     async def test_create_agent_run_info_rejects_invalid_reasoning_effort(self, model_config):
         with patch(
-            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            'management.services.agent.preparation.run.join_minio_file_description_to_query',
             new_callable=AsyncMock,
             return_value="processed_query",
         ), patch(
-            "backend.agents.create_agent_info.create_model_config_list",
+            'management.services.agent.preparation.run.create_model_config_list',
             new_callable=AsyncMock,
             return_value=[] if model_config is None else [model_config],
         ), patch(
-            "backend.agents.create_agent_info.create_agent_config",
+            'management.services.agent.preparation.run.create_agent_config',
             new_callable=AsyncMock,
             return_value=types.SimpleNamespace(model_name="selected"),
         ), patch(
-            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            'management.services.agent.preparation.run.search_agent_info_by_agent_id',
             return_value={},
         ):
             with pytest.raises(RunModelControlsError, match="model_"):
@@ -4731,32 +4715,32 @@ class TestCreateAgentRunInfo:
             extra_body=None,
         )
         with patch(
-            "backend.agents.create_agent_info.join_minio_file_description_to_query",
+            'management.services.agent.preparation.run.join_minio_file_description_to_query',
             new_callable=AsyncMock,
             return_value="processed_query",
         ), patch(
-            "backend.agents.create_agent_info.create_model_config_list",
+            'management.services.agent.preparation.run.create_model_config_list',
             new_callable=AsyncMock,
             return_value=[selected],
         ), patch(
-            "backend.agents.create_agent_info.create_agent_config",
+            'management.services.agent.preparation.run.create_agent_config',
             new_callable=AsyncMock,
             return_value=types.SimpleNamespace(model_name="selected", sandbox_policy=None),
         ), patch(
-            "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+            'management.services.agent.preparation.run.search_agent_info_by_agent_id',
             return_value={},
         ), patch(
-            "backend.agents.create_agent_info.get_remote_mcp_server_list",
+            'management.services.agent.preparation.run.get_remote_mcp_server_list',
             new_callable=AsyncMock,
             return_value=[],
         ), patch(
-            "backend.agents.create_agent_info.filter_mcp_servers_and_tools",
+            'management.services.agent.preparation.run.filter_mcp_servers_and_tools',
             return_value=[],
         ), patch(
-            "backend.agents.create_agent_info.urljoin",
+            'management.services.agent.preparation.run.urljoin',
             return_value="http://nexent.mcp/sse",
         ), patch(
-            "backend.agents.create_agent_info.threading"
+            'runtime.adapters.nexent.factory.threading'
         ) as threading_mock:
             threading_mock.Event.return_value = "stop_event"
             await create_agent_run_info(
@@ -4778,15 +4762,15 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_success(self):
         """Test case for successfully creating agent run info with dict format mcp_host"""
         mock_agent_run_info.reset_mock()
-        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
-                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
-                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
-                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
-                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
-                patch('backend.agents.create_agent_info.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
-                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+                patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
+                patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
+                patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('management.services.agent.preparation.run.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
+                patch('management.services.agent.preparation.run.urljoin') as mock_urljoin, \
+                patch('runtime.adapters.nexent.factory.threading') as mock_threading, \
+                patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no:
 
             # Set mock return values
             mock_join_query.return_value = "processed_query"
@@ -4882,33 +4866,33 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_enables_automation_tool_for_conversation(self):
         mock_agent_run_info.reset_mock()
         with patch(
-            'backend.agents.create_agent_info.join_minio_file_description_to_query',
+            'management.services.agent.preparation.run.join_minio_file_description_to_query',
             new_callable=AsyncMock,
             return_value="processed_query",
         ), patch(
-            'backend.agents.create_agent_info.create_model_config_list',
+            'management.services.agent.preparation.run.create_model_config_list',
             new_callable=AsyncMock,
             return_value=["model_config"],
         ), patch(
-            'backend.agents.create_agent_info.get_remote_mcp_server_list',
+            'management.services.agent.preparation.run.get_remote_mcp_server_list',
             new_callable=AsyncMock,
             return_value=[],
         ), patch(
-            'backend.agents.create_agent_info.create_agent_config',
+            'management.services.agent.preparation.run.create_agent_config',
             new_callable=AsyncMock,
             return_value="agent_config",
         ) as mock_create_agent, patch(
-            'backend.agents.create_agent_info.filter_mcp_servers_and_tools',
+            'management.services.agent.preparation.run.filter_mcp_servers_and_tools',
             return_value=[],
         ), patch(
-            'backend.agents.create_agent_info.urljoin',
+            'management.services.agent.preparation.run.urljoin',
             return_value="http://nexent.mcp/sse",
         ), patch(
-            'backend.agents.create_agent_info.threading'
+            'runtime.adapters.nexent.factory.threading'
         ) as mock_threading, patch(
-            'backend.agents.create_agent_info.query_current_version_no',
+            'management.services.agent.preparation.run.query_current_version_no',
             return_value=1,
-        ), patch('backend.agents.create_agent_info.get_model_by_model_id', return_value={"model_type": "llm", "connect_status": "available"}):
+        ), patch('management.services.agent.preparation.run.get_model_by_model_id', return_value={"model_type": "llm", "connect_status": "available"}):
             mock_threading.Event.return_value = "stop_event"
 
             await create_agent_run_info(
@@ -4933,15 +4917,15 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_with_authorization_token(self):
         """Test case for mcp_host with authorization token"""
         mock_agent_run_info.reset_mock()
-        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
-                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
-                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
-                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
-                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
-                patch('backend.agents.create_agent_info.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
-                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+                patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
+                patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
+                patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('management.services.agent.preparation.run.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
+                patch('management.services.agent.preparation.run.urljoin') as mock_urljoin, \
+                patch('runtime.adapters.nexent.factory.threading') as mock_threading, \
+                patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -4984,14 +4968,14 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_with_custom_headers_only(self):
         """Test case for mcp_host with only custom_headers (no authorization_token)"""
         mock_agent_run_info.reset_mock()
-        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
-                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
-                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
-                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
-                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
-                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+                patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
+                patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
+                patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('management.services.agent.preparation.run.urljoin') as mock_urljoin, \
+                patch('runtime.adapters.nexent.factory.threading') as mock_threading, \
+                patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -5035,14 +5019,14 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_with_authorization_and_custom_headers(self):
         """Test case for mcp_host with both authorization_token and custom_headers"""
         mock_agent_run_info.reset_mock()
-        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
-                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
-                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
-                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
-                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
-                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+                patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
+                patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
+                patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('management.services.agent.preparation.run.urljoin') as mock_urljoin, \
+                patch('runtime.adapters.nexent.factory.threading') as mock_threading, \
+                patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -5087,14 +5071,14 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_with_custom_headers_null(self):
         """Test case for mcp_host with custom_headers=None (should not add headers)"""
         mock_agent_run_info.reset_mock()
-        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
-                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
-                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
-                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
-                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
-                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+                patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
+                patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
+                patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('management.services.agent.preparation.run.urljoin') as mock_urljoin, \
+                patch('runtime.adapters.nexent.factory.threading') as mock_threading, \
+                patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -5138,14 +5122,14 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_with_custom_headers_string_not_dict(self):
         """Test case for mcp_host with custom_headers as string (not dict) - should be ignored"""
         mock_agent_run_info.reset_mock()
-        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
-                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
-                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
-                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
-                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
-                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+                patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
+                patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
+                patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('management.services.agent.preparation.run.urljoin') as mock_urljoin, \
+                patch('runtime.adapters.nexent.factory.threading') as mock_threading, \
+                patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -5190,15 +5174,15 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_with_sse_transport(self):
         """Test case for mcp_host with SSE transport (URL ends with /sse)"""
         mock_agent_run_info.reset_mock()
-        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
-                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
-                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
-                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
-                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
-                patch('backend.agents.create_agent_info.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
-                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+                patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
+                patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
+                patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('management.services.agent.preparation.run.get_tenant_local_mcp_server', return_value='http://nexent.mcp/sse'), \
+                patch('management.services.agent.preparation.run.urljoin') as mock_urljoin, \
+                patch('runtime.adapters.nexent.factory.threading') as mock_threading, \
+                patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -5227,10 +5211,10 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://nexent.mcp/sse",
                 "transport": "sse",
-                "httpx_client_factory": create_agent_info_module.create_httpx_client,
+                "httpx_client_factory": run_preparation.create_httpx_client,
                 "headers": {
                     "X-Tenant-ID": "tenant_1",
-                    "X-Nexent-Internal-Token": create_agent_info_module.TOKEN,
+                    "X-Nexent-Internal-Token": run_preparation.TOKEN,
                 },
             }
 
@@ -5238,14 +5222,14 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_fallback_to_string_format(self):
         """Test case for fallback to string format when MCP record not found"""
         mock_agent_run_info.reset_mock()
-        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
-                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
-                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
-                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
-                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
-                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+                patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
+                patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
+                patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('management.services.agent.preparation.run.urljoin') as mock_urljoin, \
+                patch('runtime.adapters.nexent.factory.threading') as mock_threading, \
+                patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -5279,14 +5263,14 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_mixed_scenarios(self):
         """Test case for mixed scenarios: multiple servers with different configurations"""
         mock_agent_run_info.reset_mock()
-        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
-                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
-                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
-                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
-                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
-                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+                patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
+                patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
+                patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('management.services.agent.preparation.run.urljoin') as mock_urljoin, \
+                patch('runtime.adapters.nexent.factory.threading') as mock_threading, \
+                patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -5354,14 +5338,14 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_with_status_false(self):
         """Test case for MCP record with status=False (should not be matched)"""
         mock_agent_run_info.reset_mock()
-        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
-                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
-                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
-                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
-                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
-                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+                patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
+                patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
+                patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('management.services.agent.preparation.run.urljoin') as mock_urljoin, \
+                patch('runtime.adapters.nexent.factory.threading') as mock_threading, \
+                patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -5401,24 +5385,24 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_forwards_allow_memory_false(self):
         with (
             patch(
-                "backend.agents.create_agent_info.join_minio_file_description_to_query"
+                'management.services.agent.preparation.run.join_minio_file_description_to_query'
             ) as mock_join_query,
             patch(
-                "backend.agents.create_agent_info.create_model_config_list"
+                'management.services.agent.preparation.run.create_model_config_list'
             ) as mock_create_models,
             patch(
-                "backend.agents.create_agent_info.get_remote_mcp_server_list",
+                'management.services.agent.preparation.run.get_remote_mcp_server_list',
                 new_callable=AsyncMock,
             ) as mock_get_mcp,
             patch(
-                "backend.agents.create_agent_info.create_agent_config"
+                'management.services.agent.preparation.run.create_agent_config'
             ) as mock_create_agent,
             patch(
-                "backend.agents.create_agent_info.filter_mcp_servers_and_tools"
+                'management.services.agent.preparation.run.filter_mcp_servers_and_tools'
             ) as mock_filter,
-            patch("backend.agents.create_agent_info.urljoin") as mock_urljoin,
-            patch("backend.agents.create_agent_info.threading") as mock_threading,
-            patch("backend.agents.create_agent_info.query_current_version_no") as mock_version_no,
+            patch('management.services.agent.preparation.run.urljoin') as mock_urljoin,
+            patch('runtime.adapters.nexent.factory.threading') as mock_threading,
+            patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no,
         ):
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -5458,14 +5442,14 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_is_debug_true(self):
         """Test case for is_debug=True uses version_no=0 without calling query_current_version_no"""
         mock_agent_run_info.reset_mock()
-        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
-                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
-                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
-                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
-                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
-                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+                patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
+                patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
+                patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('management.services.agent.preparation.run.urljoin') as mock_urljoin, \
+                patch('runtime.adapters.nexent.factory.threading') as mock_threading, \
+                patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -5508,15 +5492,15 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_no_published_version_fallback(self):
         """Test case when query_current_version_no returns None, should fallback to version_no=0"""
         mock_agent_run_info.reset_mock()
-        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
-                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
-                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
-                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
-                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
-                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no, \
-                patch('backend.agents.create_agent_info.logger') as mock_logger:
+        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+                patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
+                patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
+                patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('management.services.agent.preparation.run.urljoin') as mock_urljoin, \
+                patch('runtime.adapters.nexent.factory.threading') as mock_threading, \
+                patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no, \
+                patch('management.services.agent.preparation.run.logger') as mock_logger:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -5566,14 +5550,14 @@ class TestCreateAgentRunInfo:
     async def test_create_agent_run_info_is_need_auth_true_includes_token(self):
         """Test that get_remote_mcp_server_list is called with is_need_auth=True and returns authorization_token"""
         mock_agent_run_info.reset_mock()
-        with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
-                patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
-                patch('backend.agents.create_agent_info.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
-                patch('backend.agents.create_agent_info.create_agent_config') as mock_create_agent, \
-                patch('backend.agents.create_agent_info.filter_mcp_servers_and_tools') as mock_filter, \
-                patch('backend.agents.create_agent_info.urljoin') as mock_urljoin, \
-                patch('backend.agents.create_agent_info.threading') as mock_threading, \
-                patch('backend.agents.create_agent_info.query_current_version_no') as mock_version_no:
+        with patch('management.services.agent.preparation.run.join_minio_file_description_to_query') as mock_join_query, \
+                patch('management.services.agent.preparation.run.create_model_config_list') as mock_create_models, \
+                patch('management.services.agent.preparation.run.get_remote_mcp_server_list', new_callable=AsyncMock) as mock_get_mcp, \
+                patch('management.services.agent.preparation.run.create_agent_config') as mock_create_agent, \
+                patch('management.services.agent.preparation.run.filter_mcp_servers_and_tools') as mock_filter, \
+                patch('management.services.agent.preparation.run.urljoin') as mock_urljoin, \
+                patch('runtime.adapters.nexent.factory.threading') as mock_threading, \
+                patch('management.services.agent.preparation.run.query_current_version_no') as mock_version_no:
 
             mock_join_query.return_value = "processed_query"
             mock_create_models.return_value = ["model_config"]
@@ -5860,7 +5844,7 @@ class TestPreparePromptTemplates:
     @pytest.mark.asyncio
     async def test_prepare_prompt_templates_manager_zh(self):
         """Manager templates are loaded once through the bundle boundary."""
-        with patch('backend.agents.create_agent_info.load_agent_prompt_bundle', wraps=_load_stub_prompt_bundle) as mock_loader:
+        with patch('management.services.agent.preparation.inputs.load_agent_prompt_bundle', wraps=_load_stub_prompt_bundle) as mock_loader:
             result = await prepare_prompt_templates(True, "zh")
             mock_loader.assert_called_once_with(is_manager=True, language="zh")
             assert result["system_prompt"] == ""
@@ -5869,7 +5853,7 @@ class TestPreparePromptTemplates:
     @pytest.mark.asyncio
     async def test_prepare_prompt_templates_worker_en(self):
         """Worker templates are loaded once through the bundle boundary."""
-        with patch('backend.agents.create_agent_info.load_agent_prompt_bundle', wraps=_load_stub_prompt_bundle) as mock_loader:
+        with patch('management.services.agent.preparation.inputs.load_agent_prompt_bundle', wraps=_load_stub_prompt_bundle) as mock_loader:
             result = await prepare_prompt_templates(False, "en")
             mock_loader.assert_called_once_with(is_manager=False, language="en")
             assert result["system_prompt"] == ""
@@ -5884,7 +5868,7 @@ class TestPreparePromptTemplates:
                 "system_prompt": "stale prompt", "user_prompt": "keep me",
             },
         ).bundle
-        with patch('backend.agents.create_agent_info.load_agent_prompt_bundle', return_value=stale_bundle):
+        with patch('management.services.agent.preparation.inputs.load_agent_prompt_bundle', return_value=stale_bundle):
             result = await prepare_prompt_templates(False, "en")
             assert result["system_prompt"] == ""
             assert result["user_prompt"] == "keep me"
@@ -5896,7 +5880,7 @@ class TestAdditionalAgentInfoCoverage:
             tenant_long_term=[{"content": "tenant preference", "metadata": {"version_id": 7}, "source": "manual"}],
             user_long_term=[types.SimpleNamespace(content="## Preferences\n\n- concise", metadata={"version_id": 8}, source="dreaming")],
         )
-        result = create_agent_info_module._build_long_term_memory_items(context)
+        result = preparation_compiler._build_long_term_memory_items(context)
         assert [item["scope"] for item in result] == ["tenant", "user"]
         assert [item["version_id"] for item in result] == [7, 8]
         assert result[1]["source"] == "dreaming"
@@ -5906,11 +5890,11 @@ class TestAdditionalAgentInfoCoverage:
             _normalize_tool_params_request("not-an-object")
 
     def test_resolve_input_budget_uses_legacy_fallback_for_unknown_capacity(self):
-        create_agent_info_module._CAPACITY_WARNING_EMITTED.clear()
+        model_budget._CAPACITY_WARNING_EMITTED.clear()
         with patch(
-            "backend.agents.create_agent_info.resolve_capacity",
+            'management.services.model.run_budget.resolve_capacity',
             side_effect=MockProviderCapabilityUnknown("unknown provider"),
-        ), patch("backend.agents.create_agent_info.logger") as mock_logger:
+        ), patch('management.services.model.run_budget.logger') as mock_logger:
             result = _resolve_input_budget({"model_id": 7, "model_name": "unknown"})
 
         assert result == (32768, None, None)
@@ -5921,7 +5905,7 @@ class TestAdditionalAgentInfoCoverage:
         calculator = MagicMock()
         calculator.calculate_context_budget.side_effect = MockUncertaintyReserveBasisUnknown("missing context")
         with patch(
-            "backend.agents.create_agent_info.ContextBudgetCalculator",
+            'management.services.model.run_budget.ContextBudgetCalculator',
             return_value=calculator,
         ):
             result = _resolve_context_budget(
@@ -5943,8 +5927,8 @@ class TestAdditionalAgentInfoCoverage:
         mock_tool_config.side_effect = [first_tool, second_tool]
 
         try:
-            create_agent_info_module._inject_plan_tools(tools, True)
-            create_agent_info_module._inject_plan_tools(tools, True)
+            tool_preparation._inject_plan_tools(tools, True)
+            tool_preparation._inject_plan_tools(tools, True)
         finally:
             mock_tool_config.side_effect = None
 
@@ -5962,11 +5946,11 @@ class TestAdditionalAgentInfoCoverage:
         mock_tool_config.side_effect = [first_tool, second_tool]
 
         try:
-            create_agent_info_module._inject_plan_tools(tools, False)
+            tool_preparation._inject_plan_tools(tools, False)
             assert tools == []
             assert mock_tool_config.call_count == 0
 
-            create_agent_info_module._inject_plan_tools(tools, True)
+            tool_preparation._inject_plan_tools(tools, True)
         finally:
             mock_tool_config.side_effect = None
 
@@ -5975,26 +5959,26 @@ class TestAdditionalAgentInfoCoverage:
     def test_resolve_runtime_tool_records_rejects_missing_or_unavailable_dependency(self):
         common_patches = (
             patch(
-                "backend.agents.create_agent_info.search_tools_for_sub_agent",
+                'management.services.agent.resource_resolver.search_tools_for_sub_agent',
                 return_value=[],
             ),
             patch(
-                "backend.agents.create_agent_info.skill_db.search_skills_for_agent",
+                'management.services.agent.resource_resolver.skill_db.search_skills_for_agent',
                 return_value=[{"skill_id": 1, "config_values": {}}],
             ),
             patch(
-                "backend.agents.create_agent_info.skill_db.get_skill_by_id",
+                'management.services.agent.resource_resolver.skill_db.get_skill_by_id',
                 return_value={"name": "skill", "tool_ids": [5]},
             ),
         )
         with common_patches[0], common_patches[1], common_patches[2], patch(
-            "backend.agents.create_agent_info.query_tools_by_ids", return_value=[]
+            'management.services.agent.resource_resolver.query_tools_by_ids', return_value=[]
         ):
             with pytest.raises(ValidationError, match="missing tools"):
                 _resolve_runtime_tool_records(1, "tenant-1")
 
         with common_patches[0], common_patches[1], common_patches[2], patch(
-            "backend.agents.create_agent_info.query_tools_by_ids",
+            'management.services.agent.resource_resolver.query_tools_by_ids',
             return_value=[{"tool_id": 5, "name": "required", "is_available": False}],
         ):
             with pytest.raises(ValidationError, match="unavailable tool"):
@@ -6135,7 +6119,7 @@ class TestBuildExternalAgentConfig:
         }
         agent_url = "http://external.com/a2a"
 
-        with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as MockConfig:
+        with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as MockConfig:
             result = _build_external_agent_config(agent, agent_url)
 
             MockConfig.assert_called_once_with(
@@ -6161,7 +6145,7 @@ class TestBuildExternalAgentConfig:
         }
         agent_url = "http://default.com/agent"
 
-        with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as MockConfig:
+        with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as MockConfig:
             result = _build_external_agent_config(agent, agent_url)
 
             MockConfig.assert_called_once_with(
@@ -6190,7 +6174,7 @@ class TestBuildExternalAgentConfig:
         }
         agent_url = "http://raw.com"
 
-        with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as MockConfig:
+        with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as MockConfig:
             result = _build_external_agent_config(agent, agent_url)
 
             call_kwargs = MockConfig.call_args[1]
@@ -6201,7 +6185,7 @@ class TestBuildExternalAgentConfig:
 
 @pytest.mark.parametrize("value", [True, False])
 def test_build_external_config_preserves_ssl_preference(value):
-    with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as config:
+    with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as config:
         _build_external_agent_config({"external_agent_id": 1, "ssl_verify": value}, "https://peer")
         assert config.call_args.kwargs["ssl_verify"] is value
 
@@ -6227,7 +6211,7 @@ class TestGetExternalA2AAgents:
         ]
 
         with patch('management.db.a2a.repository.query_external_sub_agents', return_value=mock_query_result):
-            with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+            with patch('management.services.agent.preparation.resources._build_external_agent_config') as mock_build:
                 result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1", version_no=1)
 
                 assert len(result) == 2
@@ -6255,7 +6239,7 @@ class TestGetExternalA2AAgents:
         ]
 
         with patch('management.db.a2a.repository.query_external_sub_agents', return_value=mock_query_result):
-            with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+            with patch('management.services.agent.preparation.resources._build_external_agent_config') as mock_build:
                 result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
 
                 assert len(result) == 1
@@ -6264,7 +6248,7 @@ class TestGetExternalA2AAgents:
     def test_get_external_a2a_agents_empty_db_response(self):
         """Test case for empty database response"""
         with patch('management.db.a2a.repository.query_external_sub_agents', return_value=[]):
-            with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+            with patch('management.services.agent.preparation.resources._build_external_agent_config') as mock_build:
                 result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
 
                 assert result == []
@@ -6282,8 +6266,8 @@ class TestGetExternalA2AAgents:
         ]
 
         with patch('management.db.a2a.repository.query_external_sub_agents', return_value=mock_query_result):
-            with patch('backend.agents.create_agent_info._extract_url_from_card') as mock_extract:
-                with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+            with patch('management.services.agent.preparation.resources._extract_url_from_card') as mock_extract:
+                with patch('management.services.agent.preparation.resources._build_external_agent_config') as mock_build:
                     result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
 
                     assert len(result) == 1
@@ -6306,8 +6290,8 @@ class TestGetExternalA2AAgents:
         ]
 
         with patch('management.db.a2a.repository.query_external_sub_agents', return_value=mock_query_result):
-            with patch('backend.agents.create_agent_info._extract_url_from_card', return_value="http://card-jsonrpc.com") as mock_extract:
-                with patch('backend.agents.create_agent_info._build_external_agent_config') as mock_build:
+            with patch('management.services.agent.preparation.resources._extract_url_from_card', return_value="http://card-jsonrpc.com") as mock_extract:
+                with patch('management.services.agent.preparation.resources._build_external_agent_config') as mock_build:
                     result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
 
                     assert len(result) == 1
@@ -6317,7 +6301,7 @@ class TestGetExternalA2AAgents:
     def test_get_external_a2a_agents_exception_handling(self):
         """Test case for exception handling"""
         with patch('management.db.a2a.repository.query_external_sub_agents', side_effect=Exception("Database error")):
-            with patch('backend.agents.create_agent_info.logger') as mock_logger:
+            with patch('management.services.agent.preparation.resources.logger') as mock_logger:
                 result = _get_external_a2a_agents(agent_id=1, tenant_id="tenant_1")
 
                 assert result == []
@@ -6332,7 +6316,7 @@ class TestCreateToolConfigListWithDisplayNameMap:
     @pytest.fixture(autouse=True)
     def mock_filter_accessible_indices(self):
         """Pass-through mock for filter_accessible_indices for all tests in this class."""
-        with patch('backend.agents.create_agent_info.ElasticSearchService.filter_accessible_indices',
+        with patch('management.services.agent.preparation.tools.ElasticSearchService.filter_accessible_indices',
                    side_effect=lambda index_names, **kwargs: index_names):
             yield
 
@@ -6346,13 +6330,13 @@ class TestCreateToolConfigListWithDisplayNameMap:
             "rerank": False,
         }
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_embedding, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
+                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -6400,13 +6384,13 @@ class TestCreateToolConfigListWithDisplayNameMap:
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_embedding, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
+                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -6447,13 +6431,13 @@ class TestCreateToolConfigListWithDisplayNameMap:
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_embedding, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
+                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -6496,13 +6480,13 @@ class TestCreateToolConfigListWithDisplayNameMap:
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_embedding, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
+                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -6557,13 +6541,13 @@ class TestCreateToolConfigListWithDisplayNameMap:
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_embedding, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_embedding, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
+                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -6621,13 +6605,13 @@ class TestCreateToolConfigListWithDisplayNameMap:
             "rerank": False,
         }
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_get_emb, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_get_emb, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
+                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -6669,13 +6653,13 @@ class TestCreateToolConfigListWithDisplayNameMap:
             "rerank": False,
         }
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_get_emb_by_index:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
+                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_get_emb_by_index:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -6719,13 +6703,13 @@ class TestCreateToolConfigListWithDisplayNameMap:
             "rerank_model_name": "gte-rerank-v2",
         }
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_get_emb_by_index:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
+                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_get_emb_by_index:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -6794,13 +6778,13 @@ class TestCreateToolConfigListWithDisplayNameMap:
             "rerank": False,
         }
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_get_emb_by_index:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
+                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_get_emb_by_index:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -6854,13 +6838,13 @@ class TestCreateToolConfigListWithDisplayNameMap:
         mock_tool_instance = MagicMock()
         mock_tool_instance.class_name = "KnowledgeBaseSearchTool"
 
-        with patch('backend.agents.create_agent_info.ToolConfig') as mock_tool_config, \
-                patch('backend.agents.create_agent_info.discover_langchain_tools', return_value=[]), \
-                patch('backend.agents.create_agent_info.search_tools_for_sub_agent') as mock_search_tools, \
-                patch('backend.agents.create_agent_info.get_vector_db_core') as mock_get_vector_db_core, \
-                patch('backend.agents.create_agent_info.get_rerank_model') as mock_rerank, \
-                patch('backend.agents.create_agent_info.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
-                patch('backend.agents.create_agent_info.get_embedding_model_by_index_name') as mock_get_emb_by_index:
+        with patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+                patch('management.services.agent.preparation.tools.discover_langchain_tools', return_value=[]), \
+                patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_search_tools, \
+                patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_get_vector_db_core, \
+                patch('management.services.agent.preparation.tools.get_rerank_model') as mock_rerank, \
+                patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_get_knowledge_map, \
+                patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_get_emb_by_index:
 
             mock_tool_config.return_value = mock_tool_instance
 
@@ -7488,15 +7472,15 @@ class TestDispatchProfileHitMetric:
             capability_profile_version="openai/gpt-4o@1",
         )
         with patch.object(
-            create_agent_info_module,
+            model_budget,
             "_capacity_dispatch_profile_hit_total",
             counter,
         ), patch.object(
-            create_agent_info_module,
+            model_budget,
             "resolve_capacity",
             return_value=snapshot,
         ):
-            create_agent_info_module._resolve_input_budget(
+            model_budget._resolve_input_budget(
                 {"model_factory": "openai", "model_name": "gpt-4o"}
             )
 
@@ -7513,15 +7497,15 @@ class TestDispatchProfileHitMetric:
             capability_profile_version=None,
         )
         with patch.object(
-            create_agent_info_module,
+            model_budget,
             "_capacity_dispatch_profile_hit_total",
             counter,
         ), patch.object(
-            create_agent_info_module,
+            model_budget,
             "resolve_capacity",
             return_value=snapshot,
         ):
-            create_agent_info_module._resolve_input_budget(
+            model_budget._resolve_input_budget(
                 {"model_factory": "custom", "model_name": "custom-local"}
             )
 
@@ -7532,11 +7516,11 @@ class TestDispatchProfileHitMetric:
         is None so agent dispatch works in deployments without OpenTelemetry.
         """
         with patch.object(
-            create_agent_info_module,
+            model_budget,
             "_capacity_dispatch_profile_hit_total",
             None,
         ):
-            create_agent_info_module._record_dispatch_profile_hit("openai")
+            model_budget._record_dispatch_profile_hit("openai")
 
 
 # ============================================================================
@@ -7555,7 +7539,7 @@ async def test_runtime_knowledge_records_reach_tool_constructor_without_mutation
                 "params": [{"name": "top_k", "default": 8},
                            {"name": "index_names", "default": ["old"]}]}]
     before = deepcopy(runtime)
-    prefix = "backend.agents.create_agent_info."
+    prefix = 'management.services.agent.preparation.tools.'
     mocker.patch(prefix + "_resolve_runtime_tool_records", return_value=original)
     mocker.patch(prefix + "discover_langchain_tools", new_callable=AsyncMock, return_value=[])
     mocker.patch(prefix + "search_agent_info_by_agent_id", return_value={"name": "root"})
@@ -7564,7 +7548,7 @@ async def test_runtime_knowledge_records_reach_tool_constructor_without_mutation
     mocker.patch(prefix + "get_knowledge_name_map_by_index_names", return_value={"new": "Selected"})
     mocker.patch(prefix + "ElasticSearchService.filter_accessible_indices", return_value=["new"])
     mocker.patch(prefix + "ToolConfig", side_effect=lambda **kwargs: SimpleNamespace(metadata=None, **kwargs))
-    configs = await create_agent_info_module.create_tool_config_list(
+    configs = await tool_preparation.create_tool_config_list(
         1, "tenant", "user", runtime_knowledge_tools=runtime,
         tool_params={"agents": {"root": {"tools": {"knowledge_base_search": {"index_names": ["new"]}}}}},
     )
@@ -7585,13 +7569,13 @@ class TestKBPermissionFilteringInCreateToolConfigList:
         When user lacks read permission on some knowledge bases, those indices are filtered out
         from the KnowledgeBaseSearchTool's index_names.
         """
-        with patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
-             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id", return_value={"name": "test_agent"}), \
-             patch("backend.agents.create_agent_info.get_knowledge_name_map_by_index_names") as mock_kb_map, \
-             patch("backend.agents.create_agent_info.get_vector_db_core") as mock_vdb, \
-             patch("backend.agents.create_agent_info.get_embedding_model_by_index_name") as mock_get_embedding, \
-             patch("backend.agents.create_agent_info.ElasticSearchService") as mock_es_service, \
-             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+        with patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_tools, \
+             patch('management.services.agent.preparation.tools.search_agent_info_by_agent_id', return_value={"name": "test_agent"}), \
+             patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_kb_map, \
+             patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_vdb, \
+             patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_get_embedding, \
+             patch('management.services.agent.preparation.tools.ElasticSearchService') as mock_es_service, \
+             patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config:
 
             # Mock tool list with KnowledgeBaseSearchTool
             # params must be a list of dicts with "name" and "default" keys
@@ -7634,7 +7618,7 @@ class TestKBPermissionFilteringInCreateToolConfigList:
                 return mock_tc_instance
             mock_tool_config.side_effect = capture_and_return
 
-            result = await create_agent_info_module.create_tool_config_list(
+            result = await tool_preparation.create_tool_config_list(
                 agent_id="agent_123",
                 tenant_id="tenant_456",
                 user_id="user_789",
@@ -7661,10 +7645,10 @@ class TestKBPermissionFilteringInCreateToolConfigList:
         clear "no accessible knowledge base" message, allowing the LLM to explain the
         situation to the user instead of entering a retry loop against a non-existent tool.
         """
-        with patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
-             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id", return_value={"name": "test_agent"}), \
-             patch("backend.agents.create_agent_info.ElasticSearchService") as mock_es_service, \
-             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+        with patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_tools, \
+             patch('management.services.agent.preparation.tools.search_agent_info_by_agent_id', return_value={"name": "test_agent"}), \
+             patch('management.services.agent.preparation.tools.ElasticSearchService') as mock_es_service, \
+             patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config:
 
             mock_tools.return_value = [{
                 "class_name": "KnowledgeBaseSearchTool",
@@ -7699,7 +7683,7 @@ class TestKBPermissionFilteringInCreateToolConfigList:
                 return mock_tc_instance
             mock_tool_config.side_effect = capture_and_return
 
-            result = await create_agent_info_module.create_tool_config_list(
+            result = await tool_preparation.create_tool_config_list(
                 agent_id="agent_123",
                 tenant_id="tenant_456",
                 user_id="user_789",
@@ -7716,21 +7700,21 @@ class TestKBPermissionFilteringInCreateToolConfigList:
         """A persisted null index_names value behaves like an empty KB selection."""
         with (
             patch(
-                "backend.agents.create_agent_info.search_tools_for_sub_agent"
+                'management.services.agent.resource_resolver.search_tools_for_sub_agent'
             ) as mock_tools,
             patch(
-                "backend.agents.create_agent_info.search_agent_info_by_agent_id",
+                'management.services.agent.preparation.tools.search_agent_info_by_agent_id',
                 return_value={"name": "workbench_main"},
             ),
             patch(
-                "backend.agents.create_agent_info.get_vector_db_core",
+                'management.services.agent.preparation.tools.get_vector_db_core',
                 return_value=MagicMock(),
             ),
             patch(
-                "backend.agents.create_agent_info.get_embedding_model_by_index_name"
+                'management.services.agent.preparation.tools.get_embedding_model_by_index_name'
             ) as mock_get_embedding,
             patch(
-                "backend.agents.create_agent_info.ToolConfig"
+                'management.services.agent.preparation.tools.ToolConfig'
             ) as mock_tool_config,
         ):
             mock_tools.return_value = [{
@@ -7759,7 +7743,7 @@ class TestKBPermissionFilteringInCreateToolConfigList:
 
             mock_tool_config.side_effect = capture_and_return
 
-            result = await create_agent_info_module.create_tool_config_list(
+            result = await tool_preparation.create_tool_config_list(
                 agent_id="agent_123",
                 tenant_id="tenant_456",
                 user_id="user_789",
@@ -7775,13 +7759,13 @@ class TestKBPermissionFilteringInCreateToolConfigList:
         """
         After filtering, the order of accessible knowledge bases is preserved.
         """
-        with patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
-             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id", return_value={"name": "test_agent"}), \
-             patch("backend.agents.create_agent_info.get_knowledge_name_map_by_index_names") as mock_kb_map, \
-             patch("backend.agents.create_agent_info.get_vector_db_core") as mock_vdb, \
-             patch("backend.agents.create_agent_info.get_embedding_model_by_index_name") as mock_get_embedding, \
-             patch("backend.agents.create_agent_info.ElasticSearchService") as mock_es_service, \
-             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config:
+        with patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_tools, \
+             patch('management.services.agent.preparation.tools.search_agent_info_by_agent_id', return_value={"name": "test_agent"}), \
+             patch('management.services.agent.preparation.tools.get_knowledge_name_map_by_index_names') as mock_kb_map, \
+             patch('management.services.agent.preparation.tools.get_vector_db_core') as mock_vdb, \
+             patch('management.services.agent.preparation.tools.get_embedding_model_by_index_name') as mock_get_embedding, \
+             patch('management.services.agent.preparation.tools.ElasticSearchService') as mock_es_service, \
+             patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config:
 
             mock_tools.return_value = [{
                 "class_name": "KnowledgeBaseSearchTool",
@@ -7822,7 +7806,7 @@ class TestKBPermissionFilteringInCreateToolConfigList:
                 return mock_tc_instance
             mock_tool_config.side_effect = capture_and_return
 
-            result = await create_agent_info_module.create_tool_config_list(
+            result = await tool_preparation.create_tool_config_list(
                 agent_id="agent_123",
                 tenant_id="tenant_456",
                 user_id="user_789",
@@ -7848,22 +7832,22 @@ class TestCreateAgentConfigMemoryBuildFailure:
     @pytest.mark.asyncio
     async def test_memory_service_build_failure_skips_store_tool(self):
         """Storage failure is isolated while pipeline pre-search continues."""
-        with patch("backend.agents.create_agent_info.search_agent_info_by_agent_id") as mock_search_agent, \
-             patch("backend.agents.create_agent_info.query_sub_agent_relations", return_value=[]), \
-             patch("backend.agents.create_agent_info._get_external_a2a_agents", return_value=[]), \
-             patch("backend.agents.create_agent_info.create_tool_config_list",
+        with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search_agent, \
+             patch('management.services.agent.preparation.compiler.query_sub_agent_relations', return_value=[]), \
+             patch('management.services.agent.preparation.compiler._get_external_a2a_agents', return_value=[]), \
+             patch('management.services.agent.preparation.compiler.create_tool_config_list',
                    new_callable=AsyncMock, return_value=[]), \
-             patch("backend.agents.create_agent_info.get_agent_prompt_template", return_value={}), \
-             patch("backend.agents.create_agent_info.tenant_config_manager") as mock_tenant_config, \
-             patch("backend.agents.create_agent_info.build_memory_context") as mock_build_memory, \
-             patch("backend.agents.create_agent_info._create_fixed_search_memory_tool") as mock_search_tool, \
-             patch("backend.agents.create_agent_info.prepare_prompt_templates",
+             patch('management.services.agent.preparation.compiler.get_agent_prompt_template', return_value={}), \
+             patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
+             patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
+             patch('management.services.agent.preparation.compiler._create_fixed_search_memory_tool') as mock_search_tool, \
+             patch('management.services.agent.preparation.inputs.prepare_prompt_templates',
                    new_callable=AsyncMock, return_value={"system_prompt": "sp"}), \
-             patch("backend.agents.create_agent_info.get_model_by_model_id",
+             patch('management.services.agent.preparation.compiler.get_model_by_model_id',
                    return_value={"display_name": "model", "max_tokens": 1000}), \
-             patch("backend.agents.create_agent_info.build_context_inputs", return_value=[]), \
-             patch("backend.agents.create_agent_info.AgentConfig") as mock_agent_config, \
-             patch("backend.agents.create_agent_info._get_skills_for_template", return_value=[]), \
+             patch('management.services.agent.preparation.compiler.build_context_inputs', return_value=[]), \
+             patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
+             patch('management.services.agent.preparation.compiler._get_skills_for_template', return_value=[]), \
              patch.dict(sys.modules, {
                  "management.services.memory.records": MagicMock(
                      _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
@@ -7917,22 +7901,22 @@ class TestCreateAgentConfigMemoryContextServiceFailure:
     @pytest.mark.asyncio
     async def test_memory_context_service_failure_skips_presearch(self):
         """Missing pipeline degrades to no memory without direct retrieval."""
-        with patch("backend.agents.create_agent_info.search_agent_info_by_agent_id") as mock_search_agent, \
-             patch("backend.agents.create_agent_info.query_sub_agent_relations", return_value=[]), \
-             patch("backend.agents.create_agent_info._get_external_a2a_agents", return_value=[]), \
-             patch("backend.agents.create_agent_info.create_tool_config_list",
+        with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search_agent, \
+             patch('management.services.agent.preparation.compiler.query_sub_agent_relations', return_value=[]), \
+             patch('management.services.agent.preparation.compiler._get_external_a2a_agents', return_value=[]), \
+             patch('management.services.agent.preparation.compiler.create_tool_config_list',
                    new_callable=AsyncMock, return_value=[]), \
-             patch("backend.agents.create_agent_info.get_agent_prompt_template", return_value={}), \
-             patch("backend.agents.create_agent_info.tenant_config_manager") as mock_tenant_config, \
-             patch("backend.agents.create_agent_info.build_memory_context") as mock_build_memory, \
-             patch("backend.agents.create_agent_info._create_fixed_search_memory_tool") as mock_search_tool, \
-             patch("backend.agents.create_agent_info.prepare_prompt_templates",
+             patch('management.services.agent.preparation.compiler.get_agent_prompt_template', return_value={}), \
+             patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
+             patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
+             patch('management.services.agent.preparation.compiler._create_fixed_search_memory_tool') as mock_search_tool, \
+             patch('management.services.agent.preparation.inputs.prepare_prompt_templates',
                    new_callable=AsyncMock, return_value={"system_prompt": "sp"}), \
-             patch("backend.agents.create_agent_info.get_model_by_model_id",
+             patch('management.services.agent.preparation.compiler.get_model_by_model_id',
                    return_value={"display_name": "model", "max_tokens": 1000}), \
-             patch("backend.agents.create_agent_info.build_context_inputs", return_value=[]), \
-             patch("backend.agents.create_agent_info.AgentConfig") as mock_agent_config, \
-             patch("backend.agents.create_agent_info._get_skills_for_template", return_value=[]), \
+             patch('management.services.agent.preparation.compiler.build_context_inputs', return_value=[]), \
+             patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
+             patch('management.services.agent.preparation.compiler._get_skills_for_template', return_value=[]), \
              patch.dict(sys.modules, {
                  "management.services.memory.records": MagicMock(
                      _resolve_tenant_embedding_model_info=MagicMock(return_value=None),
@@ -8004,20 +7988,20 @@ class TestCreateAgentConfigMemoryProviderResults:
             return_value=memory_service
         )
 
-        with patch("backend.agents.create_agent_info.search_agent_info_by_agent_id") as mock_search_agent, \
-             patch("backend.agents.create_agent_info.query_sub_agent_relations", return_value=[]), \
-             patch("backend.agents.create_agent_info._get_external_a2a_agents", return_value=[]), \
-             patch("backend.agents.create_agent_info.create_tool_config_list", new_callable=AsyncMock, return_value=[]), \
-             patch("backend.agents.create_agent_info.get_agent_prompt_template", return_value={}), \
-             patch("backend.agents.create_agent_info.tenant_config_manager") as mock_tenant_config, \
-             patch("backend.agents.create_agent_info.build_memory_context") as mock_build_memory, \
-             patch("backend.agents.create_agent_info._create_fixed_search_memory_tool") as mock_search_tool, \
-             patch("backend.agents.create_agent_info.prepare_prompt_templates", new_callable=AsyncMock, return_value={"system_prompt": "sp"}), \
-             patch("backend.agents.create_agent_info.get_model_by_model_id", return_value={"display_name": "model", "max_tokens": 1000}), \
-             patch("backend.agents.create_agent_info.build_context_inputs", return_value=[]), \
-             patch("backend.agents.create_agent_info.ToolConfig", side_effect=lambda **kwargs: types.SimpleNamespace(**kwargs)), \
-             patch("backend.agents.create_agent_info.AgentConfig") as mock_agent_config, \
-             patch("backend.agents.create_agent_info._get_skills_for_template", return_value=[]), \
+        with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search_agent, \
+             patch('management.services.agent.preparation.compiler.query_sub_agent_relations', return_value=[]), \
+             patch('management.services.agent.preparation.compiler._get_external_a2a_agents', return_value=[]), \
+             patch('management.services.agent.preparation.compiler.create_tool_config_list', new_callable=AsyncMock, return_value=[]), \
+             patch('management.services.agent.preparation.compiler.get_agent_prompt_template', return_value={}), \
+             patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
+             patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
+             patch('management.services.agent.preparation.compiler._create_fixed_search_memory_tool') as mock_search_tool, \
+             patch('management.services.agent.preparation.inputs.prepare_prompt_templates', new_callable=AsyncMock, return_value={"system_prompt": "sp"}), \
+             patch('management.services.agent.preparation.compiler.get_model_by_model_id', return_value={"display_name": "model", "max_tokens": 1000}), \
+             patch('management.services.agent.preparation.compiler.build_context_inputs', return_value=[]), \
+             patch('management.services.agent.preparation.compiler.ToolConfig', side_effect=lambda **kwargs: types.SimpleNamespace(**kwargs)), \
+             patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
+             patch('management.services.agent.preparation.compiler._get_skills_for_template', return_value=[]), \
              patch.dict(sys.modules, {
                  "management.services.memory.records": memory_record_service_mod,
                  "management.services.memory.context": memory_context_service_mod,
@@ -8056,20 +8040,20 @@ class TestCreateAgentConfigMemoryProviderResults:
         memory_backend_adapter_mod = types.ModuleType("management.services.memory.provider")
         memory_backend_adapter_mod.build_memory_service_for_agent = MagicMock(return_value=None)
 
-        with patch("backend.agents.create_agent_info.search_agent_info_by_agent_id") as mock_search_agent, \
-             patch("backend.agents.create_agent_info.query_sub_agent_relations", return_value=[]), \
-             patch("backend.agents.create_agent_info._get_external_a2a_agents", return_value=[]), \
-             patch("backend.agents.create_agent_info.create_tool_config_list", new_callable=AsyncMock, return_value=[]), \
-             patch("backend.agents.create_agent_info.get_agent_prompt_template", return_value={}), \
-             patch("backend.agents.create_agent_info.tenant_config_manager") as mock_tenant_config, \
-             patch("backend.agents.create_agent_info.build_memory_context") as mock_build_memory, \
-             patch("backend.agents.create_agent_info._create_fixed_search_memory_tool") as mock_search_tool, \
-             patch("backend.agents.create_agent_info.prepare_prompt_templates", new_callable=AsyncMock, return_value={"system_prompt": "sp"}), \
-             patch("backend.agents.create_agent_info.get_model_by_model_id", return_value={"display_name": "model", "max_tokens": 1000}), \
-             patch("backend.agents.create_agent_info.build_context_inputs", return_value=[]), \
-             patch("backend.agents.create_agent_info.ToolConfig", side_effect=lambda **kwargs: types.SimpleNamespace(**kwargs)), \
-             patch("backend.agents.create_agent_info.AgentConfig") as mock_agent_config, \
-             patch("backend.agents.create_agent_info._get_skills_for_template", return_value=[]), \
+        with patch('management.services.agent.preparation.compiler.search_agent_info_by_agent_id') as mock_search_agent, \
+             patch('management.services.agent.preparation.compiler.query_sub_agent_relations', return_value=[]), \
+             patch('management.services.agent.preparation.compiler._get_external_a2a_agents', return_value=[]), \
+             patch('management.services.agent.preparation.compiler.create_tool_config_list', new_callable=AsyncMock, return_value=[]), \
+             patch('management.services.agent.preparation.compiler.get_agent_prompt_template', return_value={}), \
+             patch('management.services.agent.preparation.compiler.tenant_config_manager') as mock_tenant_config, \
+             patch('management.services.agent.preparation.compiler.build_memory_context') as mock_build_memory, \
+             patch('management.services.agent.preparation.compiler._create_fixed_search_memory_tool') as mock_search_tool, \
+             patch('management.services.agent.preparation.inputs.prepare_prompt_templates', new_callable=AsyncMock, return_value={"system_prompt": "sp"}), \
+             patch('management.services.agent.preparation.compiler.get_model_by_model_id', return_value={"display_name": "model", "max_tokens": 1000}), \
+             patch('management.services.agent.preparation.compiler.build_context_inputs', return_value=[]), \
+             patch('management.services.agent.preparation.compiler.ToolConfig', side_effect=lambda **kwargs: types.SimpleNamespace(**kwargs)), \
+             patch('management.services.agent.preparation.compiler.AgentConfig') as mock_agent_config, \
+             patch('management.services.agent.preparation.compiler._get_skills_for_template', return_value=[]), \
              patch.dict(sys.modules, {
                  "management.services.memory.records": memory_record_service_mod,
                  "management.services.memory.context": memory_context_service_mod,
@@ -8112,22 +8096,22 @@ class TestCreateToolConfigListAidpSearch:
     @pytest.fixture(autouse=True)
     def mock_filter_accessible_indices(self):
         """Pass-through mock for filter_accessible_indices for all tests in this class."""
-        with patch("backend.agents.create_agent_info.ElasticSearchService.filter_accessible_indices",
+        with patch("management.services.agent.preparation.tools.ElasticSearchService.filter_accessible_indices",
                    side_effect=lambda index_names, **kwargs: index_names):
             yield
 
     @pytest.mark.asyncio
     async def test_aidp_search_injects_credentials_from_env(self):
         """AidpSearchTool must pop stale creds and inject AIDP_SERVER_URL, AIDP_API_KEY, AIDP_TENANT_ID."""
-        with patch("backend.agents.create_agent_info.discover_langchain_tools",
+        with patch('management.services.agent.preparation.tools.discover_langchain_tools',
                    new_callable=AsyncMock, return_value=[]), \
-             patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
-             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id",
+             patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_tools, \
+             patch('management.services.agent.preparation.tools.search_agent_info_by_agent_id',
                    return_value={"name": "test_agent"}), \
-             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config, \
-             patch("backend.agents.create_agent_info.AIDP_SERVER_URL", "https://aidp.test"), \
-             patch("backend.agents.create_agent_info.AIDP_API_KEY", "key-123"), \
-             patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "aidp-tenant"), \
+             patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+             patch('management.services.agent.preparation.tools.AIDP_SERVER_URL', "https://aidp.test"), \
+             patch('management.services.agent.preparation.tools.AIDP_API_KEY', "key-123"), \
+             patch('management.services.agent.preparation.tools.AIDP_TENANT_ID', "aidp-tenant"), \
              patch.dict(sys.modules, {
                  "ext_components.aidp.services": MagicMock(
                      aidp_permission_service=MagicMock(
@@ -8163,7 +8147,7 @@ class TestCreateToolConfigListAidpSearch:
 
             mock_tool_config.side_effect = capture_and_return
 
-            result = await create_agent_info_module.create_tool_config_list(
+            result = await tool_preparation.create_tool_config_list(
                 agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
             )
 
@@ -8190,15 +8174,15 @@ class TestCreateToolConfigListAidpSearch:
                 "Denied configured": "kb_not_accessible",
             },
         )
-        with patch("backend.agents.create_agent_info.discover_langchain_tools",
+        with patch('management.services.agent.preparation.tools.discover_langchain_tools',
                    new_callable=AsyncMock, return_value=[]), \
-             patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
-             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id",
+             patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_tools, \
+             patch('management.services.agent.preparation.tools.search_agent_info_by_agent_id',
                    return_value={"name": "test_agent"}), \
-             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config, \
-             patch("backend.agents.create_agent_info.AIDP_SERVER_URL", "https://aidp.test"), \
-             patch("backend.agents.create_agent_info.AIDP_API_KEY", "key"), \
-             patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
+             patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+             patch('management.services.agent.preparation.tools.AIDP_SERVER_URL', "https://aidp.test"), \
+             patch('management.services.agent.preparation.tools.AIDP_API_KEY', "key"), \
+             patch('management.services.agent.preparation.tools.AIDP_TENANT_ID', "tenant"), \
              patch.dict(sys.modules, {
                  "ext_components.aidp.services.aidp_access_service": access_module,
              }):
@@ -8228,7 +8212,7 @@ class TestCreateToolConfigListAidpSearch:
 
             mock_tool_config.side_effect = capture_and_return
 
-            result = await create_agent_info_module.create_tool_config_list(
+            result = await tool_preparation.create_tool_config_list(
                 agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
             )
 
@@ -8250,15 +8234,15 @@ class TestCreateToolConfigListAidpSearch:
         """Snapshot failure keeps configured scope but leaves execution denied."""
         access_module = MagicMock()
         access_module.resolve_current_aidp_access.side_effect = Exception("AIDP down")
-        with patch("backend.agents.create_agent_info.discover_langchain_tools",
+        with patch('management.services.agent.preparation.tools.discover_langchain_tools',
                    new_callable=AsyncMock, return_value=[]), \
-             patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
-             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id",
+             patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_tools, \
+             patch('management.services.agent.preparation.tools.search_agent_info_by_agent_id',
                    return_value={"name": "test_agent"}), \
-             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config, \
-             patch("backend.agents.create_agent_info.AIDP_SERVER_URL", "https://aidp.test"), \
-             patch("backend.agents.create_agent_info.AIDP_API_KEY", "key"), \
-             patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
+             patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+             patch('management.services.agent.preparation.tools.AIDP_SERVER_URL', "https://aidp.test"), \
+             patch('management.services.agent.preparation.tools.AIDP_API_KEY', "key"), \
+             patch('management.services.agent.preparation.tools.AIDP_TENANT_ID', "tenant"), \
              patch.dict(sys.modules, {
                  "ext_components.aidp.services.aidp_access_service": access_module,
              }):
@@ -8285,7 +8269,7 @@ class TestCreateToolConfigListAidpSearch:
 
             mock_tool_config.side_effect = capture_and_return
 
-            result = await create_agent_info_module.create_tool_config_list(
+            result = await tool_preparation.create_tool_config_list(
                 agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
             )
 
@@ -8302,15 +8286,15 @@ class TestCreateToolConfigListAidpSearch:
         matching_langchain_tool = Mock()
         matching_langchain_tool.name = "AidpSearchTool"
 
-        with patch("backend.agents.create_agent_info.discover_langchain_tools",
+        with patch('management.services.agent.preparation.tools.discover_langchain_tools',
                    new_callable=AsyncMock, return_value=[matching_langchain_tool]), \
-             patch("backend.agents.create_agent_info.search_tools_for_sub_agent") as mock_tools, \
-             patch("backend.agents.create_agent_info.search_agent_info_by_agent_id",
+             patch('management.services.agent.resource_resolver.search_tools_for_sub_agent') as mock_tools, \
+             patch('management.services.agent.preparation.tools.search_agent_info_by_agent_id',
                    return_value={"name": "test_agent"}), \
-             patch("backend.agents.create_agent_info.ToolConfig") as mock_tool_config, \
-             patch("backend.agents.create_agent_info.AIDP_SERVER_URL", "https://aidp.test"), \
-             patch("backend.agents.create_agent_info.AIDP_API_KEY", "key"), \
-             patch("backend.agents.create_agent_info.AIDP_TENANT_ID", "tenant"), \
+             patch('management.services.agent.preparation.tools.ToolConfig') as mock_tool_config, \
+             patch('management.services.agent.preparation.tools.AIDP_SERVER_URL', "https://aidp.test"), \
+             patch('management.services.agent.preparation.tools.AIDP_API_KEY', "key"), \
+             patch('management.services.agent.preparation.tools.AIDP_TENANT_ID', "tenant"), \
              patch.dict(sys.modules, {
                  "ext_components.aidp.services": MagicMock(
                      aidp_permission_service=MagicMock(
@@ -8341,7 +8325,7 @@ class TestCreateToolConfigListAidpSearch:
 
             mock_tool_config.side_effect = capture_and_return
 
-            result = await create_agent_info_module.create_tool_config_list(
+            result = await tool_preparation.create_tool_config_list(
                 agent_id="agent_1", tenant_id="tenant_1", user_id="user_1",
             )
 
@@ -8440,26 +8424,26 @@ class TestBuildSecurityHeaders:
             "security_requirements": [{"schemes": {"k": {}}}],
             "security_credentials": {"k": "secret-token"},
         }
-        with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as MockConfig:
+        with patch('management.services.agent.preparation.resources.ExternalA2AAgentConfig') as MockConfig:
             _build_external_agent_config(agent, "http://test/a2a")
             call_kwargs = MockConfig.call_args[1]
             assert call_kwargs["custom_headers"] == {"X-Token": "secret-token"}
 
     def test_resolve_scheme_field_empty_scheme_string(self):
         """scheme['scheme'] is empty string -> None."""
-        from backend.agents.create_agent_info import _resolve_scheme_field
+        from management.services.agent.preparation.resources import _resolve_scheme_field
         scheme = {"scheme": ""}
         assert _resolve_scheme_field(scheme, "httpAuthSecurityScheme") is None
 
     def test_build_auth_header_empty_auth_scheme(self):
         """httpAuth with empty scheme -> None."""
-        from backend.agents.create_agent_info import _build_auth_header_for_scheme
+        from management.services.agent.preparation.resources import _build_auth_header_for_scheme
         scheme = {"httpAuthSecurityScheme": {"scheme": ""}}
         assert _build_auth_header_for_scheme(scheme, "cred") is None
 
     def test_collect_auth_headers_non_dict_req(self):
         """Requirement is not a dict -> skipped."""
-        from backend.agents.create_agent_info import _build_security_headers
+        from management.services.agent.preparation.resources import _build_security_headers
         agent = {
             "security_schemes": {"k": {"apiKeySecurityScheme": {"name": "X", "location": "header"}}},
             "security_requirements": ["not_a_dict"],
@@ -8469,7 +8453,7 @@ class TestBuildSecurityHeaders:
 
     def test_build_security_headers_missing_credential(self):
         """scheme_id in requirements but not in credentials -> skipped."""
-        from backend.agents.create_agent_info import _build_security_headers
+        from management.services.agent.preparation.resources import _build_security_headers
         agent = {
             "security_schemes": {"k": {"apiKeySecurityScheme": {"name": "X", "location": "header"}}},
             "security_requirements": [{"schemes": {"k": {}, "missing": {}}}],
@@ -8480,7 +8464,7 @@ class TestBuildSecurityHeaders:
 
     def test_build_security_headers_scheme_builds_none(self):
         """Credential present but header build returns None (e.g. query location) -> skipped."""
-        from backend.agents.create_agent_info import _build_security_headers
+        from management.services.agent.preparation.resources import _build_security_headers
         agent = {
             "security_schemes": {"k": {"apiKeySecurityScheme": {"name": "key", "location": "query"}}},
             "security_requirements": [{"schemes": {"k": {}}}],
@@ -8490,16 +8474,16 @@ class TestBuildSecurityHeaders:
 
     def test_select_agent_model_id_prefers_first_available_model(self):
         """Runtime model selection skips unavailable configured models."""
-        from backend.agents.create_agent_info import _select_agent_model_id
+        from management.services.agent.preparation.compiler import _select_agent_model_id
         records = {
             7: {"connect_status": "unavailable"},
             8: {"connect_status": "available"},
         }
         with patch(
-            "backend.agents.create_agent_info.get_model_by_model_id",
+            'management.services.agent.preparation.compiler.get_model_by_model_id',
             side_effect=lambda model_id, **kwargs: records[model_id],
         ), patch(
-            "backend.agents.create_agent_info.is_model_available",
+            'management.services.agent.preparation.compiler.is_model_available',
             side_effect=lambda record: bool(record) and record.get("connect_status") == "available",
         ):
             assert _select_agent_model_id([7, 8], None, "tenant") == 8
@@ -8509,7 +8493,7 @@ class TestDeepSeekRuntimeLanguage:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("language", ["zh", "en"])
     async def test_runtime_language_overrides_instance_language(self, language):
-        from backend.agents import create_agent_info as module
+        from management.services.agent.preparation import tools as module
 
         records = [{"tool_id": 7, "name": "deepseek_search", "class_name": "DeepSeekSearchTool",
                     "source": "local", "output_type": "string", "inputs": "{}"}]

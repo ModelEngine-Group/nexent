@@ -101,7 +101,7 @@ def test_cancel_retry_rejects_delayed_old_provider_output(runtime, path, workben
             runtime.provider.release.set()
             finished, _ = wait([old_run.thread_future], timeout=10)
             assert finished
-            from agents.agent_run_manager import agent_run_manager
+            from management.services.agent.lifecycle import agent_run_manager
             deadline = time.monotonic() + 2
             while agent_run_manager.get_agent_run_info(stop_id, runtime.storage["owner"]) and time.monotonic() < deadline:
                 time.sleep(0.02)

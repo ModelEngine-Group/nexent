@@ -135,7 +135,7 @@ def resolve_creator_model(
     """Bind a creator root to its actual record, preserving all other aliases."""
     record = validate_selected_model(model_id, tenant_id) if model_id is not None else default_record or {}
     if record:
-        from agents.create_agent_info import create_model_config_from_record
+        from management.services.model.run_bindings import create_model_config_from_record
         base = create_model_config_from_record(record)
     else:
         base = next((m for m in model_list if m.cite_name == record.get("display_name")), None)
@@ -172,7 +172,7 @@ def preflight_turn_controls(request, tenant_id: str, agent_record: dict | None =
         if model_id is None:
             raise RunModelControlsError("model_not_available")
     record = validate_selected_model(model_id, tenant_id)
-    from agents.create_agent_info import create_model_config_from_record
+    from management.services.model.run_bindings import create_model_config_from_record
     base = create_model_config_from_record(record)
     if agent_record:
         override = (agent_record.get("model_params_override") or {}).get(str(model_id), {})

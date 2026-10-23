@@ -34,7 +34,7 @@ from management.services.evaluation.common import (
 )
 from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
-from nexent.core.agents.run_agent import agent_run
+from runtime.adapters.nexent.runner import agent_run
 
 
 def _is_llm_related_error(exc: Exception) -> bool:
@@ -140,7 +140,7 @@ async def _run_agent_to_final_answer(
     try:
         run_manager = agent_run_manager
         if run_manager is None:
-            from agents.agent_run_manager import agent_run_manager as run_manager
+            from management.services.agent.lifecycle import agent_run_manager as run_manager
 
         agent_run_info, _memory_context = await prepare_agent_run(
             agent_request=agent_request,

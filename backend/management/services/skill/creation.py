@@ -5,7 +5,6 @@
 from nexent.core.agents.agent_model import AgentConfig
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 
-
 NL2SKILL_NAME = "__skill_creator__"
 
 

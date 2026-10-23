@@ -8,7 +8,7 @@ import pytest
 from smolagents import CodeAgent
 
 import services.nl2skill_service as nl2skill_service
-from agents.nl2skill_agent import create_nl2skill_agent_config
+from management.services.skill.creation import create_nl2skill_agent_config
 from contracts.agent import NL2SkillRunRequest
 from management.services.skill.prompt import get_nl2skill_prompt_template
 from nexent.core.agents.context import ContextManager, ContextManagerConfig
