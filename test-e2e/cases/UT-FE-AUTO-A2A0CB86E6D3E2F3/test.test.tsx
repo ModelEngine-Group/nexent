@@ -80,6 +80,7 @@ vi.mock('@/components/providers/deploymentProvider', () => ({
 
 vi.mock('@/contexts/nl2AgentFlow', () => ({
   useNl2AgentFlow: () => ({ configFocusRequest: null }),
+  useNl2AgentFormLock: () => false,
 }));
 
 vi.mock('@/components/common/ExpandEditModal', () => ({
@@ -93,7 +94,8 @@ vi.mock('@/components/ui/tabs', () => ({
   TabsContent: ({ children }: any) => <div>{children}</div>,
 }));
 
-vi.mock('react-i18next', () => ({
+vi.mock('react-i18next', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-i18next')>()),
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } }),
 }));
 

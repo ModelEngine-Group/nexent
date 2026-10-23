@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { configuredModel, runToken } from "../../infra/automation/d4/runner/runtime-config";
@@ -54,28 +56,20 @@ journey("PW-AGENT-01", async (context) => {
       },
       async () => {
         await agents.setDescription(description);
-        const roleModelSection = await agents.openSection("模型与提示词");
-        const modelSelector = roleModelSection.getByRole("combobox").first();
-        await modelSelector.click();
-        await modelSelector.fill(llm.displayName);
-        const option = page.getByText(llm.displayName, { exact: true }).last();
-        await expect(option).toBeVisible();
-        modelDisplay = (await option.innerText()).trim();
-        await option.click();
+        await agents.selectModel(llm.displayName);
+        modelDisplay = llm.displayName;
         registerReadyAsset("models", "d4_basic_model_display_name", modelDisplay, "PW-AGENT-01");
         await agents.setPrompts({ duty: `只按要求回答，并在要求时输出标记 ${marker}` });
         return `Basic persisted the description, real model ${modelDisplay} and core prompt`;
       },
       async () => {
-        const tab = page.getByRole("tab", { name: "工具与技能", exact: true });
-        await tab.click();
-        await expect(tab).toHaveAttribute("aria-selected", "true");
-        return "inspected the independent Tools & Skills tab and retained valid minimal defaults";
+        await agents.openToolsSkills();
+        return "inspected the independent tool and skill management sections and retained valid minimal defaults";
       },
       async () => {
         await agents.openAdvanced();
-        for (const section of ["运行策略", "发布属性"]) await agents.openSection(section);
-        return "inspected Run Strategy and Publish Attributes under Advanced and retained valid minimal defaults";
+        for (const section of ["权限设置"]) await agents.openSection(section);
+        return "inspected advanced runtime and publication permission settings and retained valid minimal defaults";
       },
       async () => {
         await page.waitForLoadState("networkidle").catch(() => undefined);
@@ -91,10 +85,10 @@ journey("PW-AGENT-01", async (context) => {
         });
         await expect(page.getByPlaceholder("请输入智能体名称", { exact: true })).toHaveValue(otherName);
         await agents.select(displayName);
-        await agents.openSection("展示信息");
-        await expect(page.getByPlaceholder("请输入智能体描述")).toHaveValue(description);
+        await agents.openSection("基础信息");
+        await expect(page.getByRole("textbox", { name: "智能体描述", exact: true })).toHaveValue(description);
         const roleModelSection = await agents.openSection("模型与提示词");
-        await expect(roleModelSection.locator(".ant-select-selection-item").first()).toHaveText(modelDisplay);
+        await expect(roleModelSection.getByTestId(/^agent-selected-model-/).first()).toContainText(modelDisplay);
         return "switched to a second run-owned Agent and back, recovering persisted description and model";
       },
       async () => {
@@ -108,8 +102,8 @@ journey("PW-AGENT-01", async (context) => {
       async () => {
         await page.reload({ waitUntil: "domcontentloaded" });
         await agents.select(displayName);
-        await agents.openSection("展示信息");
-        await expect(page.getByPlaceholder("请输入智能体描述")).toHaveValue(description);
+        await agents.openSection("基础信息");
+        await expect(page.getByRole("textbox", { name: "智能体描述", exact: true })).toHaveValue(description);
         return "full /agents refresh retained the server-side Draft configuration";
       },
     ],
@@ -121,9 +115,12 @@ journey("PW-AGENT-01", async (context) => {
       },
       async () => {
         await agents.openBasic();
-        await expect(page.getByRole("tab", { name: /工具与技能/ })).toBeVisible();
-        await expect(page.getByRole("tab", { name: /高级/ })).toBeVisible();
-        return "Basic, Tools & Skills and Advanced remain separate product tabs";
+        await agents.openToolsSkills();
+        await agents.openAdvanced();
+        await expect(page.getByTestId("agent-config-card-info")).toBeVisible();
+        await expect(page.getByTestId("agent-config-card-resources")).toBeVisible();
+        await expect(page.getByTestId("agent-config-card-advanced")).toBeVisible();
+        return "Basic, resource and advanced settings remain separate visible configuration regions";
       },
       async () => "Debug opened only after the real product validate/save guard accepted the Draft",
       async () => {
