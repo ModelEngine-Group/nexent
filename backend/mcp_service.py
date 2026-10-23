@@ -193,7 +193,66 @@ def get_mcp_management_app():
                 "data": get_registered_openapi_services()
             }
 
+        @_mcp_management_app.get("/internal/tools/openapi-service-map")
+        async def list_openapi_service_tool_map_endpoint(
+            tenant_id: str = Query(..., description="Tenant ID"),
+            authorization: Optional[str] = Header(None),
+        ):
+            """Return the internal tool-to-service map to the authenticated backend."""
+            _require_management_authorization(authorization)
+            server = _tenant_mcp_servers.get(tenant_id)
+            registry = getattr(server, "_nexent_openapi_services", {})
+            data = []
+            seen = set()
+            service_prefixes = []
+
+            async def iter_tools(server_instance):
+                get_tools = getattr(server_instance, "get_tools", None)
+                if get_tools is None:
+                    return []
+                tools = await get_tools()
+                return tools.values() if isinstance(tools, dict) else tools
+
+            for service_name, service_mcp in registry.items():
+                service_id = getattr(service_mcp, "_nexent_service_id", None)
+                if service_id is None:
+                    continue
+                service_prefixes.append(
+                    (_sanitize_function_name(service_name) + "_", service_id)
+                )
+                for tool in await iter_tools(service_mcp):
+                    tool_name = getattr(tool, "name", None)
+                    item = (tool_name, service_id)
+                    if tool_name and item not in seen:
+                        data.append({"name": tool_name, "service_id": service_id})
+                        seen.add(item)
+
+            # FastMCP mounts the tools on the tenant-level parent server. The
+            # child server returned by the registry may therefore expose an
+            # empty local tool list even though the tools are callable.
+            for tool in await iter_tools(server):
+                tool_name = getattr(tool, "name", None)
+                normalized_name = _sanitize_function_name(tool_name or "")
+                for prefix, service_id in sorted(
+                    service_prefixes, key=lambda item: len(item[0]), reverse=True
+                ):
+                    if normalized_name.startswith(prefix):
+                        item = (tool_name, service_id)
+                        if tool_name and item not in seen:
+                            data.append({"name": tool_name, "service_id": service_id})
+                            seen.add(item)
+                        break
+            return {"status": "success", "data": data}
+
     return _mcp_management_app
+
+
+def _require_management_authorization(authorization: Optional[str]) -> None:
+    """Require the configured internal token for management-only endpoints."""
+    if not TOKEN:
+        raise HTTPException(status_code=403, detail="Internal token is not configured")
+    if authorization not in (TOKEN, f"Bearer {TOKEN}"):
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 
 def _sanitize_function_name(name: str) -> str:

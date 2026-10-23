@@ -5,7 +5,7 @@ import time
 from typing import Any, Dict, List
 
 import requests
-from consts.const import MCP_MANAGEMENT_API
+from consts.const import MCP_MANAGEMENT_API, TOKEN
 from database.outer_api_tool_db import (
     delete_openapi_service as db_delete_openapi_service,
 )
@@ -149,7 +149,7 @@ def get_openapi_service_tool_map(tenant_id: str) -> Dict[str, int]:
         response = requests.get(
             map_url,
             params={"tenant_id": tenant_id},
-            headers={"Authorization": f"Bearer {MCP_INTERNAL_TOKEN}"},
+            headers={"Authorization": f"Bearer {TOKEN}"},
             timeout=30,
         )
         response.raise_for_status()

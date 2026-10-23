@@ -342,6 +342,18 @@ async def get_all_mcp_tools(tenant_id: str) -> List[ToolInfo]:
     mcp_info = get_mcp_records_by_tenant(tenant_id=tenant_id)
     tools_info = []
     for record in mcp_info:
+        # API-to-MCP services are mounted into the tenant-local MCP server.
+        # Their mcp_record_t rows are registration metadata, not remote MCP
+        # endpoints. Probing the OpenAPI URL as an MCP server causes false
+        # connection failures (for example HTTP 405 from an API root).
+        config_json = record.get("config_json")
+        if isinstance(config_json, str):
+            try:
+                config_json = json.loads(config_json)
+            except json.JSONDecodeError:
+                config_json = None
+        if isinstance(config_json, dict) and "openapi" in config_json:
+            continue
         # Only scan MCP services that are explicitly enabled and currently healthy.
         if bool(record.get("enabled")) and bool(record.get("status")):
             try:

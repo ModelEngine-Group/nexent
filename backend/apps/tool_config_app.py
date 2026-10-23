@@ -24,6 +24,7 @@ from management.services.tool.configuration import (
 )
 from consts.exceptions import AgentDraftEditError, ResourceBindingError
 from database.user_tenant_db import get_user_email_map
+from database.remote_mcp_db import delete_mcp_record_by_name_and_url
 from management.services.monitor.audit import record_security_event
 from management.services.permission.identity.authentication_helpers import get_current_user_id
 
@@ -357,14 +358,29 @@ async def delete_openapi_service_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        service = next(
+            (
+                item
+                for item in list_openapi_services(tenant_id)
+                if item.get("mcp_service_name") == service_name
+            ),
+            None,
+        )
         deleted = delete_openapi_service(service_name, tenant_id, user_id)
         if not deleted:
             raise HTTPException(
-                status_code=HTTPStatus.NOT_FOUND,
-                detail="Service not found"
+                status_code=HTTPStatus.NOT_FOUND, detail="Service not found"
+            )
+        if service and service.get("server_url"):
+            delete_mcp_record_by_name_and_url(
+                mcp_name=service_name,
+                mcp_server=service["server_url"],
+                tenant_id=tenant_id,
+                user_id=user_id,
             )
         # Refresh MCP service to reflect the deletion
         mcp_result = _refresh_openapi_services_in_mcp(tenant_id)
+        tool_sync = await update_tool_list(tenant_id=tenant_id, user_id=user_id)
         record_security_event("tool_openapi_delete", request=http_request,
                               user_id=user_id, tenant_id=tenant_id,
                               details={"service_name": service_name})
@@ -373,7 +389,8 @@ async def delete_openapi_service_api(
             content={
                 "message": "Service deleted successfully",
                 "status": "success",
-                "mcp_refresh": mcp_result
+                "mcp_refresh": mcp_result,
+                "tool_sync": tool_sync,
             }
         )
     except HTTPException:
