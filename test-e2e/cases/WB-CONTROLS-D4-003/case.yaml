@@ -48,8 +48,19 @@ case:
       rows collapse while thinking is off. Enabling again restores the selected Agent effort override, or model effort when
       that field is absent, rather than the previous temporary effort. With no saved Agent/model effort, off/on restores auto
       even when capability default is high; saved explicit Agent and model defaults still win.
+  - order: 4
+    action: Open missing, unknown-toggle, unsupported-toggle and supported toggle-only model controls. Inspect unavailable
+      explanations on hover and explicit activation and attempt changes; check focus alone and reopening/switching models do not show a tooltip or permanent text. Enable the toggle-only model. Resize Workbench to narrow panes and inspect the toolbar.
+    expected: All unavailable reasoning controls show the same localized message, 当前模型不支持开启思考模式, without exposing capability status distinctions. Explanations appear only on hover or explicit click/keyboard activation, never on menu autofocus or model switches, with no permanent visible paragraph. The text-only tooltip does not intercept clicks on the model menu trigger. Closing/reopening the menu and switching models clear stale tooltip state. Unavailable controls cannot change
+      their value or create requests. Toggle-only thinking has no empty effort/budget row. At 679px and 390px viewport widths,
+      model text, selector and send action remain visible, contained and usable; layout checks do not submit messages.
+  - order: 5
+    action: In Agent chat send with the default model, switch to a non-default model with explicit thinking and sampling, then open another history whose response is deliberately deferred. Return after loading and send again.
+    expected: Loading blocks composer interactions without unmounting its subtree. The other session uses its own controls. Returning restores the last model, thinking effort and explicit sampling, and the next request carries those same values. Earlier captured requests remain unchanged and switching alone never submits or writes configuration.
   expected_results:
   - Users can select the same model-supported effort levels and send their actual values from both routes.
+  - Unavailable controls explain their reason, toggle-only controls contain no empty selectors and narrow composers retain usable model actions.
+  - Cold history switching retains independent session model controls and immutable prior requests; the next send matches the restored UI.
   forbidden_side_effects:
   - No real model calls or database mutations; no implicit sampling override or global model configuration mutation; no unsupported
     effort submission.
@@ -81,3 +92,13 @@ case:
     - 1
     forbidden_side_effects:
     - 1
+  - id: AC-02
+    description: Reasoned unavailable states, toggle-only controls and usable narrow composer layout preserve existing request boundaries.
+    steps: [4]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Page-lifetime history restoration survives pending loads and preserves exact run controls and earlier snapshots.
+    steps: [5]
+    expected_results: [3]
+    forbidden_side_effects: [1]

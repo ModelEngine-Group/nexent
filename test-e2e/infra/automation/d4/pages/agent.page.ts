@@ -64,15 +64,14 @@ export class AgentPage {
     await this.open();
     const search = this.page.getByPlaceholder("按名称、描述或标签搜索", { exact: true });
     await search.fill(displayName);
-    // The card body opens details, not the editor. The editor entry is the
-    // card's 配置 action, revealed only on hover/focus-within, scoped to the
-    // exact run-owned Agent card so search matches cannot select another ID.
+    // Scope the menu to the exact owned Agent card before opening its editor.
     const card = this.page
       .getByRole("button", { name: displayName, exact: true })
       .locator("xpath=ancestor::article[1]");
     await expect(card).toHaveCount(1);
     await card.hover();
-    await card.getByRole("button", { name: "配置", exact: true }).click();
+    await card.getByRole("button", { name: "更多操作", exact: true }).click();
+    await this.page.getByRole("menuitem", { name: "配置", exact: true }).click();
     // The configure action routes to the agent's own editor page.
     await expect(this.page).toHaveURL(/\/agents\/\d+/);
     await expect(this.page.getByPlaceholder("请输入智能体名称", { exact: true })).toHaveValue(displayName);
@@ -194,13 +193,13 @@ export class AgentPage {
     const drawer = this.page.getByRole("dialog");
     await expect(drawer.getByPlaceholder("搜索知识库名称及描述")).toBeVisible();
     await drawer.getByPlaceholder("搜索知识库名称及描述").fill(knowledgeBaseName);
-    const item = drawer.getByText(knowledgeBaseName, { exact: true }).last();
+    const item = drawer.getByRole("option", { name: knowledgeBaseName, exact: true });
     await expect(item).toBeVisible();
-    // KnowledgeRow: name span -> header flex -> text column -> row div whose
-    // only button is the CheckMark selector.
-    const checkMark = item.locator("xpath=ancestor::div[3]").getByRole("button").first();
-    await checkMark.click();
-    await expect(checkMark).toHaveAttribute("aria-pressed", "true");
+    // The current AddKnowledgeDrawer renders each row as a role=option button
+    // whose aria-label is the knowledge-base name. Clicking that row toggles
+    // selection (the old CheckMark button/aria-pressed shape was replaced).
+    await item.click();
+    await expect(item).toHaveAttribute("aria-selected", "true");
     const toolSaves: Record<string, unknown>[] = [];
     const captureToolSave = (response: Response) => {
       const request = response.request();
@@ -246,7 +245,9 @@ export class AgentPage {
       { timeout: 60_000 },
     );
     await this.page.getByRole("button", { name: "发布", exact: true }).click();
-    const modal = this.page.getByRole("dialog", { name: "发布", exact: true });
+    // The publish modal title is plain text, so the dialog has no accessible
+    // name; identify the visible modal by its version field.
+    const modal = this.page.locator("[role='dialog']:visible").filter({ hasText: /版本名称/ });
     await expect(modal).toBeVisible();
     await modal.getByPlaceholder("请输入版本名称").fill(versionName);
     await modal.getByPlaceholder("请输入发布说明（可选）").fill(releaseNote);
@@ -483,20 +484,11 @@ export class AgentPage {
     return this.page.locator("[data-testid='agent-debug-panel']");
   }
 
-  /**
-   * Debug panel composer.
-   *
-   * `agent-debug.tsx` renders an `@assistant-ui` `Thread`, whose composer is a
-   * Lexical contenteditable rather than a `<textarea>`. The historical
-   * `textarea[placeholder='输入"/"快速引用技能及指令']` selector and the
-   * `agent.debug.placeholder` locale key (both still present in the repo) are no
-   * longer wired to any DOM node, so resolve the composer through the same
-   * anchors the chat page uses.
-   */
+  /** Resolve the visible composer while normal and Compare panes stay mounted. */
   private debugComposer(): Locator {
     return this.debugPanel()
-      .locator("[data-workbench-composer], .aui-lexical-input")
-      .first();
+      .getByRole("textbox", { name: "对话输入", exact: true })
+      .filter({ visible: true });
   }
 
   async openDebug(): Promise<void> {
@@ -692,7 +684,7 @@ export class AgentPage {
     // A selected Ant Select no longer exposes its placeholder. The two
     // comboboxes inside the visible Debug panel are the real compare columns.
     await expect(debugPanel.getByRole("combobox")).toHaveCount(2);
-    await expect(debugPanel.locator("[data-workbench-composer], .aui-lexical-input")).toHaveCount(1);
+    await expect(this.debugComposer()).toHaveCount(1);
   }
 
   async sendDebugCompare(prompt: string, expectedMarker?: string): Promise<string[]> {
@@ -737,7 +729,7 @@ export class AgentPage {
 
   async closeDebugCompare(): Promise<void> {
     await this.setDebugCompareMode(false);
-    await expect(this.debugPanel().locator("[data-workbench-composer], .aui-lexical-input")).toHaveCount(1);
+    await expect(this.debugComposer()).toHaveCount(1);
   }
 
   async publish(): Promise<Locator> {

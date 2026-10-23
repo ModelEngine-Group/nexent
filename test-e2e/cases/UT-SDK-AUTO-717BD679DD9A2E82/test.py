@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 
@@ -183,8 +185,9 @@ def test_aidp_search_tool_retry_and_image_safety(monkeypatch, caplog):
     assert ProcessType.PICTURE_WEB.value in by_type6
     picture6 = json.loads(by_type6[ProcessType.PICTURE_WEB.value][0])
     assert picture6['images_url'] == [FULL_IMAGE_URL]
-    for content in by_type6[ProcessType.SEARCH_CONTENT.value]:
-        assert FULL_IMAGE_URL not in content
+    ui_items6 = json.loads(by_type6[ProcessType.SEARCH_CONTENT.value][0])
+    assert ui_items6[0]['url'] == FULL_IMAGE_URL
+    assert FULL_IMAGE_URL not in ui_items6[0]['text']
     assert len(client6.calls) == 1
 
     observer7 = MessageObserver()
