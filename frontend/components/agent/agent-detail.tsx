@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { Button, Spin } from "antd";
@@ -16,7 +14,6 @@ import {
   Wrench,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 import ResourceDetail from "@/components/resource/ResourceDetail";
 import type { MyAgentDetailView } from "@/lib/myAgentDetail";
@@ -97,7 +94,6 @@ export function AgentDetail({
   onRetry,
 }: AgentDetailProps) {
   const { t } = useTranslation("common");
-  const displayName = useUserDisplayName();
 
   return (
     <ResourceDetail
@@ -203,12 +199,9 @@ export function AgentDetail({
                       </span>
                       <span
                         className="ml-auto min-w-0 flex-1 truncate text-right font-medium text-slate-900 dark:text-slate-100"
-                        title={displayName(
-                          detail.authorCasUsername,
-                          detail.author
-                        )}
+                        title={detail.author}
                       >
-                        {displayName(detail.authorCasUsername, detail.author)}
+                        {detail.author}
                       </span>
                     </div>
                   ) : null}

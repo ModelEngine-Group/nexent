@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useMemo } from "react";
@@ -143,6 +141,12 @@ export function buildModelSlots(
   );
 }
 
+const PRIORITY_LABELS: Record<ModelSlotPriority, string> = {
+  required: "（必填）",
+  recommended: "（推荐）",
+  optional: "（可选）",
+};
+
 export function ModelSlotSelect({
   slot,
   models,
@@ -185,17 +189,15 @@ export function ModelSlotSelect({
           </label>
           {slot.priority !== "optional" && (
             <span className="shrink-0 text-xs font-normal leading-none text-muted-foreground">
-              {t(`modelConfig.slot.priority.${slot.priority}`)}
+              {PRIORITY_LABELS[slot.priority]}
             </span>
           )}
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label={t("modelConfig.slot.hintLabel", {
-                  model: slot.label,
-                })}
-                className="cursor-help rounded-sm text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                aria-label={`${slot.label}说明`}
+                className="text-muted-foreground/60 transition-colors hover:text-foreground"
               >
                 <Info className="size-3.5" />
               </button>

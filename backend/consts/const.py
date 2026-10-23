@@ -1,16 +1,14 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 from enum import Enum
 from pathlib import Path
 from dotenv import load_dotenv
 
 try:
-    from infrastructure.config_validation import parse_positive_float, parse_positive_int
-except ModuleNotFoundError as exc:
-    if exc.name != "infrastructure":
-        raise
-    # Repository-root callers import this module through the backend namespace.
-    from backend.infrastructure.config_validation import parse_positive_float, parse_positive_int
+    from backend.utils.config_validation import parse_positive_float, parse_positive_int
+except ModuleNotFoundError:
+    # The production service runs with ``backend`` as the working directory,
+    # where backend-local modules are imported from the top-level package.
+    from utils.config_validation import parse_positive_float, parse_positive_int
 
 # Load environment variables
 # Explicitly sourced deployment variables take precedence over a nearby
@@ -61,9 +59,6 @@ MAX_KNOWLEDGE_FILE_SIZE_BYTES = MAX_KNOWLEDGE_FILE_SIZE_MB * 1024 * 1024
 MAX_CONCURRENT_UPLOADS = 5
 UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER', 'uploads')
 AGENT_WORKSPACE_ROOT = os.getenv('AGENT_WORKSPACE_ROOT', '/mnt/nexent/workdir')
-NEXENT_SANDBOX_WORKSPACE_MODE = os.getenv('NEXENT_SANDBOX_WORKSPACE_MODE', 'legacy')
-NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT = os.getenv('NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT', '')
-NEXENT_SANDBOX_FAILURE_POLICY = os.getenv('NEXENT_SANDBOX_FAILURE_POLICY', 'local')
 ROOT_DIR = os.getenv("ROOT_DIR")
 
 PER_WAVE_TIMEOUT = int(os.getenv("DP_SPLIT_WAIT_TIMEOUT_PER_WAVE_S", "30"))
@@ -316,10 +311,8 @@ IS_SPEED_MODE = DEPLOYMENT_VERSION == "speed"
 
 # AIDP Knowledge Base configuration
 ENABLE_AIDP_KNOWLEDGE = os.getenv("ENABLE_AIDP_KNOWLEDGE", "false").lower() in ("true", "1", "yes", "on")
-# Defaults are on so a fresh deployment lands on the Agent Workbench with the
-# standalone Home page hidden. Set either variable to a falsey value to opt out.
-ENABLE_AGENT_WORKBENCH = os.getenv("ENABLE_AGENT_WORKBENCH", "true").lower() in ("true", "1", "yes", "on")
-HIDE_HOME_PAGE = os.getenv("HIDE_HOME_PAGE", "true").lower() in ("true", "1", "yes", "on")
+ENABLE_AGENT_WORKBENCH = os.getenv("ENABLE_AGENT_WORKBENCH", "false").lower() in ("true", "1", "yes", "on")
+HIDE_HOME_PAGE = os.getenv("HIDE_HOME_PAGE", "false").lower() in ("true", "1", "yes", "on")
 AIDP_SERVER_URL = os.getenv("AIDP_SERVER_URL", "")
 AIDP_API_KEY = os.getenv("AIDP_API_KEY", "")
 AIDP_TENANT_ID = os.getenv("AIDP_TENANT_ID", "aidp")
@@ -411,16 +404,19 @@ FORWARD_REDIS_RETRY_DELAY_S = int(os.getenv("FORWARD_REDIS_RETRY_DELAY_S", "5"))
 FORWARD_REDIS_RETRY_MAX = int(os.getenv("FORWARD_REDIS_RETRY_MAX", "12"))
 
 
-# Data processing parser configuration
+# Ray Configuration
 DP_PART_PROCESSOR_COUNT = int(os.getenv("DP_PART_PROCESSOR_COUNT", "3"))
 DP_FILE_SPLIT_SIZE_MB = int(os.getenv("DP_FILE_SPLIT_SIZE_MB", "5"))
-DP_PARSE_MAX_PROCESSES = int(os.getenv("DP_PARSE_MAX_PROCESSES", "3"))
-DP_PARSE_MIN_PROCESSES = int(os.getenv("DP_PARSE_MIN_PROCESSES", "1"))
-DP_PARSE_THREADS_PER_PROCESS = int(os.getenv("DP_PARSE_THREADS_PER_PROCESS", "2"))
-DP_PARSE_MAX_TASKS_PER_CHILD = int(os.getenv("DP_PARSE_MAX_TASKS_PER_CHILD", "1000"))
-DP_PRELOAD_MODELS = os.getenv("DP_PRELOAD_MODELS", "unstructured_default").strip()
-DP_PARSER_STARTUP_TIMEOUT_S = int(os.getenv("DP_PARSER_STARTUP_TIMEOUT_S", "300"))
-DP_PARSER_WORKER_GENERATION = os.getenv("DP_PARSER_WORKER_GENERATION", "").strip()
+RAY_ACTOR_NUM_CPUS = int(os.getenv("RAY_ACTOR_NUM_CPUS", "2"))
+RAY_DASHBOARD_PORT = int(os.getenv("RAY_DASHBOARD_PORT", "8265"))
+RAY_DASHBOARD_HOST = os.getenv("RAY_DASHBOARD_HOST", "0.0.0.0")
+RAY_NUM_CPUS = DP_PART_PROCESSOR_COUNT * RAY_ACTOR_NUM_CPUS
+RAY_OBJECT_STORE_MEMORY_GB = float(os.getenv("RAY_OBJECT_STORE_MEMORY_GB", "0.25"))
+RAY_TEMP_DIR = os.getenv("RAY_TEMP_DIR", "/tmp/ray")
+RAY_LOG_LEVEL = os.getenv("RAY_LOG_LEVEL", "INFO").upper()
+# Disable plasma preallocation to reduce idle memory usage
+# When set to false, Ray will allocate object store memory on-demand instead of preallocating
+RAY_preallocate_plasma = os.getenv("RAY_preallocate_plasma", "false").lower() == "true"
 
 
 # Logging Configuration
@@ -434,6 +430,8 @@ LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "30"))
 
 
 # Service Control Flags
+DISABLE_RAY_DASHBOARD = os.getenv(
+    "DISABLE_RAY_DASHBOARD", "false").lower() == "true"
 DISABLE_CELERY_FLOWER = os.getenv(
     "DISABLE_CELERY_FLOWER", "false").lower() == "true"
 DOCKER_ENVIRONMENT = os.getenv("DOCKER_ENVIRONMENT", "false").lower() == "true"
@@ -453,9 +451,10 @@ ELASTICSEARCH_REQUEST_TIMEOUT = int(
 
 
 # Worker Configuration
+RAY_ADDRESS = os.getenv("RAY_ADDRESS", "auto")
 QUEUES = os.getenv(
     "QUEUES",
-    "process_q,parse_q,forward_q,forward_part_q,forward_aggregate_q",
+    "process_q,process_part_q,forward_q,forward_part_q,forward_aggregate_q",
 )
 # Will be dynamically set based on PID if not provided
 WORKER_NAME = os.getenv("WORKER_NAME")
@@ -464,6 +463,15 @@ WORKER_NAME = os.getenv("WORKER_NAME")
 WORKER_CONCURRENCY = int(
     os.getenv("WORKER_CONCURRENCY", str(DP_PART_PROCESSOR_COUNT + 1))
 )
+RAY_WARM_ACTOR_POOL_SIZE_PART = int(
+    os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PART", "2"))
+RAY_WARM_ACTOR_POOL_SIZE_PROCESS = int(
+    os.getenv("RAY_WARM_ACTOR_POOL_SIZE_PROCESS", "1"))
+RAY_ACTOR_WARM_TIMEOUT_S = float(os.getenv("RAY_ACTOR_WARM_TIMEOUT_S", "60"))
+RAY_GLOBAL_ACTOR_POOL_NAME = os.getenv(
+    "RAY_GLOBAL_ACTOR_POOL_NAME", "nexent_global_data_processor_pool")
+RAY_GLOBAL_ACTOR_POOL_NAMESPACE = os.getenv(
+    "RAY_GLOBAL_ACTOR_POOL_NAMESPACE", "nexent-data-process")
 
 
 # Voice Service Configuration
@@ -723,14 +731,6 @@ MONITORING_FASTAPI_EXCLUDED_URLS = os.getenv(
     "MONITORING_FASTAPI_EXCLUDED_URLS", "")
 MONITORING_FASTAPI_EXCLUDE_SPANS = os.getenv(
     "MONITORING_FASTAPI_EXCLUDE_SPANS", "receive,send")
-# Explicit empty values disable the respective export filter.
-MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS = os.getenv(
-    "MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS",
-    "search,indices.stats,indices.get_settings,indices.get_alias,bulk,indices.exists,indices.delete",
-)
-MONITORING_EXCLUDED_SPAN_NAMES = os.getenv(
-    "MONITORING_EXCLUDED_SPAN_NAMES", "knowledge.process.submit,knowledge.upload.batch"
-)
 MONITORING_PROJECT_NAME = os.getenv("MONITORING_PROJECT_NAME", "")
 MONITORING_DASHBOARD_URL = os.getenv("MONITORING_DASHBOARD_URL", "")
 MONITORING_DASHBOARD_ALLOWED_ROLES = os.getenv(
@@ -849,18 +849,6 @@ APP_VERSION = _resolve_app_version()
 # Agent Sandbox Configuration
 # =============================================================================
 
-NEXENT_TOOL_FASTPATH_ENABLED = (
-    os.getenv("NEXENT_TOOL_FASTPATH_ENABLED", "true").strip().lower() == "true"
-)
-NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS = tuple(dict.fromkeys(
-    item.strip()
-    for item in os.getenv(
-        "NEXENT_TOOL_FASTPATH_ALLOWED_TOOLS",
-        "KnowledgeBaseSearchTool,ReadSkillMdTool,ReadSkillConfigTool,AidpSearchTool",
-    ).split(",")
-    if item.strip()
-))
-
 NEXENT_SANDBOX_DEFAULT_LEVEL = os.getenv("NEXENT_SANDBOX_DEFAULT_LEVEL", "local").lower()
 """Default sandbox isolation level: local / docker / wasm.
    Default 'local' preserves backward-compatibility for existing deployments."""
@@ -949,17 +937,3 @@ MODELS_DEV_CATALOG_JSON_PATH = os.getenv(
 
 # External Memory Provider Configuration
 MEMORY_PROVIDER_PLUGINS_DIR = os.getenv("MEMORY_PROVIDER_PLUGINS_DIR", "")
-
-
-# Bundled LiteLLM catalog used for model capacity suggestions.
-NEXENT_LITELLM_JSON = os.environ.get("NEXENT_LITELLM_JSON", "/opt/nexent/litellm_models.json")
-
-
-# Exact, operator-verified endpoint/model reasoning transport overrides.
-MODEL_REASONING_WIRE_PROFILES_PATH = os.getenv(
-    "MODEL_REASONING_WIRE_PROFILES_PATH",
-    os.path.join(os.path.dirname(__file__), "..", "configs", "model_reasoning_wire_profiles.json"),
-)
-MODEL_RESPONSE_DIAGNOSTIC_CHUNKS = os.getenv(
-    "NEXENT_MODEL_DIAGNOSTIC_CHUNKS", os.getenv("NEXENT_PROTOCOL_DIAGNOSTIC_CONTENT", "0")
-) == "1"

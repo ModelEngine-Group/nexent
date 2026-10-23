@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import { STATUS_CODES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
 import { withBasePath } from "@/lib/basePath";
@@ -19,10 +17,6 @@ import type { NotificationListParams } from "@/types/notification";
 export const API_BASE_URL = withBasePath("/api");
 
 export const API_ENDPOINTS = {
-  skillTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/skill/batch_read`,
-  knowledgeTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/knowledge_base/batch_read`,
-  agentTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/agent/batch_read`,
-  toolTagAssignmentsBatch: `${API_BASE_URL}/tag-libraries/assignments/tool/batch_read`,
   user: {
     signup: `${API_BASE_URL}/user/signup`,
     signin: `${API_BASE_URL}/user/signin`,
@@ -55,9 +49,6 @@ export const API_ENDPOINTS = {
   },
   conversation: {
     list: `${API_BASE_URL}/conversation/list`,
-    workbenchPins: `${API_BASE_URL}/conversation/workbench_pins`,
-    workbenchPin: (id: number) =>
-      `${API_BASE_URL}/conversation/${id}/workbench_pin`,
     create: `${API_BASE_URL}/conversation/create`,
     save: `${API_BASE_URL}/conversation/save`,
     rename: `${API_BASE_URL}/conversation/rename`,
@@ -179,8 +170,19 @@ export const API_ENDPOINTS = {
     updateLabels: `${API_BASE_URL}/tool/labels`,
   },
   prompt: {
+    generate: `${API_BASE_URL}/prompt/generate`,
     optimize: `${API_BASE_URL}/prompt/optimize`,
     optimizeFromDebug: `${API_BASE_URL}/prompt/optimize/from_debug`,
+  },
+  promptTemplates: {
+    list: `${API_BASE_URL}/prompt_templates`,
+    detail: (templateId: number) =>
+      `${API_BASE_URL}/prompt_templates/${templateId}`,
+    create: `${API_BASE_URL}/prompt_templates`,
+    update: (templateId: number) =>
+      `${API_BASE_URL}/prompt_templates/${templateId}`,
+    delete: (templateId: number) =>
+      `${API_BASE_URL}/prompt_templates/${templateId}`,
   },
   evaluationSets: {
     list: `${API_BASE_URL}/evaluation-sets`,
@@ -317,8 +319,6 @@ export const API_ENDPOINTS = {
     summaryFrequencyOptions: `${API_BASE_URL}/indices/summary_frequency_options`,
     indices: `${API_BASE_URL}/indices`,
     checkName: `${API_BASE_URL}/indices/check_exist`,
-    boundAgents: (indexName: string) =>
-      `${API_BASE_URL}/indices/${encodeURIComponent(indexName)}/bound_agents`,
     listFiles: (indexName: string) =>
       `${API_BASE_URL}/indices/${indexName}/files`,
     indexDetail: (indexName: string) => `${API_BASE_URL}/indices/${indexName}`,
@@ -381,30 +381,16 @@ export const API_ENDPOINTS = {
     knowledgeBases: `${API_BASE_URL}/ind-aidp/knowledge-bases/list`,
   },
   aidpMgmt: {
-    boundAgents: (id: string) =>
-      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${encodeURIComponent(id)}/bound_agents`,
     knowledgeBases: `${API_BASE_URL}/aidp-mgmt/knowledge-bases`,
     kbCount: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/count`,
     kbDetail: (id: string) => `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}`,
     kbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents`,
-    kbFiles: (id: string) =>
-      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/files`,
-    kbUploadTasks: (id: string) =>
-      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/upload-tasks`,
-    retryKbUploadTasks: (id: string) =>
-      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/upload-tasks/retry`,
     removeKbDocuments: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/remove`,
     downloadKbDocument: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/download`,
-    /** GET endpoint that streams one AIDP document for preview. AIDP serves
-     *  the original bytes for docx/xlsx/pptx/pdf/txt and a PDF conversion for
-     *  every other format, and reports the served name in `X-File-Name`. */
-    previewKbDocument: (id: string, fileUuid: string) =>
-      `${API_BASE_URL}/aidp-mgmt/knowledge-bases/${id}/documents/${encodeURIComponent(fileUuid)}/preview`,
     models: `${API_BASE_URL}/aidp-mgmt/models`,
-    graphTemplate: `${API_BASE_URL}/aidp-mgmt/knowledge-bases/graph-template`,
     /** PATCH endpoint for the per-KB in-group permission. */
     kbPermission: (id: string) =>
       `${API_BASE_URL}/aidp-mgmt/aidp-permissions/${id}`,
@@ -601,9 +587,6 @@ export const API_ENDPOINTS = {
         );
       }
       if (params?.tag?.trim()) queryParams.append("tag", params.tag.trim());
-      if (params?.sort_by_update_time) {
-        queryParams.append("sort_by_update_time", "true");
-      }
       const queryString = queryParams.toString();
       return `${API_BASE_URL}/repository/agent${queryString ? `?${queryString}` : ""}`;
     },

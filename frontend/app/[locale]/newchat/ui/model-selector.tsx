@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import {
@@ -7,7 +5,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useId,
   useRef,
   useState,
   createContext,
@@ -17,26 +14,12 @@ import {
   type ReactNode,
 } from "react";
 import { cva, type VariantProps } from "class-variance-authority";
-import { ModelParameterSettings } from "@/components/chat/ModelParameterSettings";
-import { DEFAULT_MODEL_PARAMETER_VALUES } from "@/const/modelParameterSettings";
-import type {
-  ModelParameterValue,
-  ModelParameterSettingsControl,
-} from "@/types/modelParameterSettings";
+import { Select } from "antd";
 import { CheckIcon, ChevronDownIcon, CpuIcon } from "lucide-react";
 import { useAui } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
-import { Tooltip } from "antd";
-import { resolveReasoningAvailability } from "@/lib/modelReasoning";
 import type { ReasoningCapability } from "@/types/modelConfig";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Popover,
   PopoverContent,
@@ -64,11 +47,8 @@ export const DEFAULT_EFFORT_OPTIONS: readonly ModelSelectorEffortOption[] = [
   { id: "high", name: "High" },
 ];
 
-const getReasoningEffortName = (
-  option: ModelSelectorEffortOption,
-  t: (key: string, options?: Record<string, unknown>) => string
-): string =>
-  t(`chat.modelSelector.effort.${option.id}`, { defaultValue: option.name });
+const getReasoningEffortName = (option: ModelSelectorEffortOption): string =>
+  option.id;
 
 export type ModelOption = {
   id: string;
@@ -86,13 +66,10 @@ export type ModelOption = {
   efforts?: boolean | readonly ModelSelectorEffortOption[];
   /** Default effort from the model capability profile. */
   defaultEffort?: string;
-  defaultDeepThinking?: boolean;
   /** Token budget range for models whose reasoning control is numeric. */
   budgetTokens?: { min: number; max: number };
   /** Persisted model/agent budget, when one was explicitly configured. */
   defaultBudgetTokens?: number;
-  /** Effective Agent/model sampling defaults, separate from turn overrides. */
-  defaultSampling?: ModelParameterValue;
   reasoningCapability?: ReasoningCapability;
 };
 
@@ -310,15 +287,19 @@ function ModelSelectorRoot({
       ? selectedModel.defaultEffort
       : undefined;
   const activeEffort =
-    resolveEffort(efforts, effort) ?? resolvedDefaultEffort ?? efforts?.[0]?.id;
+    resolveEffort(
+      selectedModel && efforts?.length
+        ? efforts
+        : showDeepThinkingControl
+          ? DEFAULT_EFFORT_OPTIONS
+          : efforts,
+      effort
+    ) ?? resolvedDefaultEffort;
   const budgetRange = selectedModel?.budgetTokens;
-  const activeBudgetTokens = !budgetRange
-    ? undefined
-    : budgetTokens !== undefined && budgetTokens > 0
+  const activeBudgetTokens =
+    budgetRange && budgetTokens !== undefined
       ? Math.min(budgetRange.max, Math.max(budgetRange.min, budgetTokens))
-      : budgetTokens === 0
-        ? 0
-        : selectedModel?.defaultBudgetTokens;
+      : selectedModel?.defaultBudgetTokens;
   const contextValue = useMemo(
     () => ({
       models,
@@ -363,7 +344,7 @@ function ModelSelectorRoot({
 }
 
 export const modelSelectorTriggerVariants = cva(
-  "focus-visible:ring-ring/50 flex w-fit min-w-0 cursor-pointer items-center justify-between gap-2 overflow-hidden rounded-md text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "focus-visible:ring-ring/50 flex w-fit cursor-pointer items-center justify-between gap-2 overflow-hidden rounded-md text-sm whitespace-nowrap transition-colors outline-none focus-visible:ring-2 disabled:cursor-not-allowed disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -434,8 +415,7 @@ function ModelSelectorValue({
   className,
 }: ModelSelectorValueProps) {
   const { t } = useTranslation();
-  const { selectedModel, efforts, effort, deepThinking } =
-    useModelSelectorContext();
+  const { selectedModel, efforts, effort } = useModelSelectorContext();
   const resolvedPlaceholder =
     placeholder ?? t("chat.modelSelector.selectModel");
 
@@ -452,17 +432,11 @@ function ModelSelectorValue({
 
   const effortName =
     showEffort &&
-    deepThinking &&
     selectedModel.budgetTokens === undefined &&
     effort !== undefined
       ? (() => {
           const option = efforts?.find((e) => e.id === effort);
-          if (option) return getReasoningEffortName(option, t);
-          // Models without catalog effort options still show the current
-          // effort level next to the name (design: "DeepSeek 高").
-          return t(`chat.modelSelector.effort.${effort}`, {
-            defaultValue: effort,
-          });
+          return option ? getReasoningEffortName(option) : undefined;
         })()
       : undefined;
 
@@ -472,11 +446,9 @@ function ModelSelectorValue({
       className={cn("flex min-w-0 items-center gap-2", className)}
     >
       {selectedModel.icon && <ModelIcon>{selectedModel.icon}</ModelIcon>}
-      <span className="truncate font-medium" title={selectedModel.name}>
-        {selectedModel.name}
-      </span>
+      <span className="truncate font-medium">{selectedModel.name}</span>
       {effortName && (
-        <span className="shrink-0 text-muted-foreground">{effortName}</span>
+        <span className="text-muted-foreground truncate">{effortName}</span>
       )}
     </span>
   );
@@ -491,8 +463,6 @@ function ModelSelectorContent({
   align = "start",
   sideOffset = 6,
   children,
-  onInteractOutside,
-  onEscapeKeyDown,
   ...props
 }: ModelSelectorContentProps) {
   const { value } = useModelSelectorContext();
@@ -503,23 +473,10 @@ function ModelSelectorContent({
       align={align}
       sideOffset={sideOffset}
       className={cn(
-        "z-[1100] bg-popover/95 w-72 min-w-(--radix-popover-trigger-width) overflow-hidden rounded-xl p-0 shadow-lg backdrop-blur-sm",
+        "bg-popover/95 w-72 min-w-(--radix-popover-trigger-width) overflow-hidden rounded-xl p-0 shadow-lg backdrop-blur-sm",
         className
       )}
       {...props}
-      onEscapeKeyDown={(event) => {
-        event.stopPropagation();
-        onEscapeKeyDown?.(event);
-      }}
-      onInteractOutside={(event) => {
-        if (
-          event.target instanceof Element &&
-          (event.target.closest("[data-model-parameter-panel]") ||
-            event.target.closest("[data-model-effort-popup]"))
-        )
-          event.preventDefault();
-        onInteractOutside?.(event);
-      }}
     >
       {/* Seeding cmdk with the selected id makes it the active item, which
           cmdk scrolls into view when the popover opens. */}
@@ -696,22 +653,13 @@ function ModelSelectorEffort({
     setBudgetTokens,
   } = useModelSelectorContext();
   const resolvedLabel = label ?? t("chat.modelSelector.reasoningEffort");
-  const displayedEfforts = efforts ?? [];
+  const displayedEfforts = efforts?.length ? efforts : DEFAULT_EFFORT_OPTIONS;
   const budgetRange = selectedModel?.budgetTokens;
-  const availability = resolveReasoningAvailability(
-    selectedModel?.reasoningCapability,
-    Boolean(displayedEfforts.length || budgetRange)
-  );
-  const canToggle = Boolean(selectedModel) && availability === "supported";
-  const explanationId = useId();
-  const unavailableReason = canToggle
-    ? undefined
-    : t("chat.modelSelector.reasoningUnsupported");
 
   return (
     <div
       data-slot="model-selector-effort"
-      className={cn("border-b px-3 pt-1 pb-0", className)}
+      className={cn("border-b px-3 py-2", className)}
       onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => {
         // cmdk must not turn Enter on a focused setting into model selection.
         if (e.key === "Enter") e.stopPropagation();
@@ -721,141 +669,91 @@ function ModelSelectorEffort({
     >
       <div className="flex items-center justify-between gap-3 py-1">
         <span className="text-sm">{t("chat.modelSelector.deepThinking")}</span>
-        <Tooltip
-          key={`${selectedModel?.id ?? ""}:${availability}`}
-          title={unavailableReason}
-          trigger={canToggle ? [] : ["hover", "click"]}
-          styles={{ root: { pointerEvents: "none" } }}
-          zIndex={1130}
+        <button
+          type="button"
+          role="switch"
+          aria-label={t("chat.modelSelector.deepThinking")}
+          aria-checked={deepThinking}
+          onClick={() => setDeepThinking(!deepThinking)}
+          className={cn(
+            "relative h-5 w-9 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+            deepThinking ? "bg-primary" : "bg-muted-foreground/40"
+          )}
         >
-          <button
-            type="button"
-            role="switch"
-            aria-label={t("chat.modelSelector.deepThinking")}
-            aria-checked={deepThinking}
-            aria-disabled={!canToggle}
-            aria-describedby={unavailableReason ? explanationId : undefined}
-            onClick={() => {
-              if (canToggle) setDeepThinking(!deepThinking);
-            }}
+          <span
             className={cn(
-              "relative h-5 w-9 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-              !canToggle && "cursor-not-allowed opacity-60",
-              deepThinking ? "bg-primary" : "bg-muted-foreground/40"
+              "absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform",
+              deepThinking ? "left-[18px]" : "left-0.5"
             )}
-          >
-            <span
-              className={cn(
-                "absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform",
-                deepThinking ? "left-[18px]" : "left-0.5"
-              )}
-            />
-          </button>
-        </Tooltip>
+          />
+        </button>
       </div>
-      {unavailableReason && (
-        <span id={explanationId} className="sr-only">
-          {unavailableReason}
+      <div className="flex items-center justify-between gap-3 py-1">
+        <span className="text-sm">
+          {budgetRange
+            ? t("model.advanced.reasoningBudget", {
+                defaultValue: "Budget tokens",
+              })
+            : resolvedLabel}
         </span>
-      )}
-      {deepThinking &&
-        canToggle &&
-        (budgetRange || displayedEfforts.length > 0) && (
-          <div className="flex items-center justify-between gap-3 py-1">
-            <span className="text-sm">
-              {budgetRange
-                ? t("model.advanced.reasoningBudget", {
-                    defaultValue: "Budget tokens",
-                  })
-                : resolvedLabel}
+        {budgetRange ? (
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <input
+              type="range"
+              min={budgetRange.min}
+              max={budgetRange.max}
+              value={budgetTokens ?? budgetRange.min}
+              disabled={!deepThinking}
+              aria-label={t("model.advanced.reasoningBudget", {
+                defaultValue: "Budget tokens",
+              })}
+              onChange={(event) => setBudgetTokens(Number(event.target.value))}
+              className="min-w-0 flex-1"
+            />
+            <span className="w-14 text-right text-xs text-muted-foreground">
+              {budgetTokens ?? "auto"}
             </span>
-            {budgetRange ? (
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <input
-                  type="range"
-                  min={budgetRange.min}
-                  max={budgetRange.max}
-                  value={budgetTokens ?? budgetRange.min}
-                  disabled={!deepThinking}
-                  aria-label={t("model.advanced.reasoningBudget", {
-                    defaultValue: "Budget tokens",
-                  })}
-                  onChange={(event) =>
-                    setBudgetTokens(Number(event.target.value))
-                  }
-                  className="min-w-0 flex-1"
-                />
-                <span className="w-14 text-right text-xs text-muted-foreground">
-                  {budgetTokens || t("chat.modelSelector.effort.auto")}
-                </span>
-                <button
-                  type="button"
-                  disabled={!deepThinking}
-                  onClick={() => setBudgetTokens(0)}
-                  className="text-xs text-muted-foreground hover:text-foreground"
-                >
-                  {t("chat.modelSelector.effort.auto")}
-                </button>
-              </div>
-            ) : (
-              <Select
-                value={effort}
-                disabled={!deepThinking || displayedEfforts.length === 0}
-                onValueChange={setEffort}
-              >
-                <SelectTrigger
-                  aria-label={t("chat.modelSelector.reasoningEffort")}
-                  size="sm"
-                  className="h-7 w-fit border-0 bg-transparent px-1.5 py-0 text-sm shadow-none hover:bg-accent/50 focus-visible:ring-0"
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent
-                  data-model-effort-popup
-                  align="end"
-                  className="z-[1120] w-max min-w-20 p-0"
-                  onEscapeKeyDown={(event) => event.stopPropagation()}
-                >
-                  {displayedEfforts.map((option) => (
-                    <SelectItem
-                      key={option.id}
-                      value={option.id}
-                      className="h-7 pl-2 pr-8 text-sm"
-                    >
-                      {t(`chat.modelSelector.effort.${option.id}`, option.name)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
           </div>
+        ) : (
+          <Select
+            aria-label={t("chat.modelSelector.reasoningEffort")}
+            value={effort ?? displayedEfforts[0].id}
+            disabled={!deepThinking}
+            onChange={setEffort}
+            onKeyDown={(event) => event.stopPropagation()}
+            getPopupContainer={(trigger) =>
+              (trigger.closest(
+                '[data-slot="model-selector-content"]'
+              ) as HTMLElement | null) ??
+              trigger.parentElement ??
+              document.body
+            }
+            popupMatchSelectWidth={false}
+            size="small"
+            variant="borderless"
+            className="min-w-16 text-sm"
+            options={displayedEfforts.map((option) => ({
+              value: option.id,
+              label: t(`chat.modelSelector.effort.${option.id}`, option.name),
+            }))}
+          />
         )}
+      </div>
     </div>
   );
 }
 
-export type ModelSelectorProps = {
-  disabled?: boolean;
-  parameterSettings?: ModelParameterSettingsControl;
-  parameterSettingsScopeKey?: string;
-  parameterSettingsDisabled?: boolean;
-} & Omit<ModelSelectorRootProps, "children"> &
+export type ModelSelectorProps = Omit<ModelSelectorRootProps, "children"> &
   VariantProps<typeof modelSelectorTriggerVariants> & {
     /** Render a search input above the model list. */
     searchable?: boolean;
-    /** Show the active effort level next to the model name. */
-    showEffort?: boolean;
     className?: string;
     contentClassName?: string;
   };
 
 /** Registers the selection with assistant-ui's ModelContext system. The
  * context's effort is already resolved against the selected model. */
-function ModelSelectorModelContext({
-  sampling,
-}: {
-  sampling?: ModelParameterValue;
-}) {
+function ModelSelectorModelContext() {
   const {
     selectedModel,
     value,
@@ -874,10 +772,6 @@ function ModelSelectorModelContext({
         modelName: value,
         ...(showDeepThinkingControl ? { deepThinking } : undefined),
         reasoningCapability: selectedModel?.reasoningCapability,
-        ...(sampling?.temperature != null
-          ? { temperature: sampling.temperature }
-          : {}),
-        ...(sampling?.top_p != null ? { top_p: sampling.top_p } : {}),
         ...(deepThinking
           ? budgetPreferred
             ? budgetTokens !== undefined
@@ -900,105 +794,36 @@ function ModelSelectorModelContext({
     budgetPreferred,
     showDeepThinkingControl,
     selectedModel?.reasoningCapability,
-    sampling?.temperature,
-    sampling?.top_p,
     value,
   ]);
 
   return null;
 }
 
-export interface ModelSelectorAdvancedSettingsProps {
-  control?: ModelParameterSettingsControl;
-  scopeKey?: string;
-  disabled?: boolean;
-}
-
-/** Controlled sampling settings with a scoped fallback for composed selectors. */
-function ModelSelectorAdvancedSettings({
-  control,
-  scopeKey,
-  disabled = false,
-}: ModelSelectorAdvancedSettingsProps) {
-  const { value, selectedModel } = useModelSelectorContext();
-  const localScope = JSON.stringify([
-    scopeKey ?? "default",
-    value ?? "default",
-  ]);
-  const [localValues, setLocalValues] = useState<
-    Record<string, ModelParameterValue>
-  >({});
-  const resolved = control ?? {
-    scopeKey: localScope,
-    value: localValues[localScope] ?? DEFAULT_MODEL_PARAMETER_VALUES,
-    defaultValue: DEFAULT_MODEL_PARAMETER_VALUES,
-    onChange: (next: ModelParameterValue) =>
-      setLocalValues((current) => ({ ...current, [localScope]: next })),
-  };
-  return (
-    <ModelParameterSettings
-      key={resolved.scopeKey ?? localScope}
-      {...resolved}
-      inheritedValue={resolved.inheritedValue ?? selectedModel?.defaultSampling}
-      disabled={disabled || Boolean(resolved.disabled) || !selectedModel}
-    />
-  );
-}
-
-const ModelSelectorBody = ({
-  disabled = false,
-  parameterSettings,
-  parameterSettingsScopeKey,
-  parameterSettingsDisabled,
+const ModelSelectorImpl = ({
   searchable,
-  showEffort,
   variant,
   size,
   className,
   contentClassName,
+  ...rootProps
 }: ModelSelectorProps) => {
-  const { value } = useModelSelectorContext();
-  const scope = JSON.stringify([parameterSettingsScopeKey ?? "default", value]);
-  const [sampling, setSampling] = useState<Record<string, ModelParameterValue>>(
-    {}
-  );
-  const resolved = parameterSettings ?? {
-    scopeKey: scope,
-    value: sampling[scope] ?? DEFAULT_MODEL_PARAMETER_VALUES,
-    defaultValue: DEFAULT_MODEL_PARAMETER_VALUES,
-    onChange: (next: ModelParameterValue) =>
-      setSampling((current) => ({ ...current, [scope]: next })),
-  };
   return (
-    <>
-      <ModelSelectorModelContext sampling={resolved.value} />
+    <ModelSelectorRoot {...rootProps}>
+      <ModelSelectorModelContext />
       <ModelSelectorTrigger
-        disabled={disabled}
         variant={variant}
         size={size}
         className={className}
-      >
-        <ModelSelectorValue showEffort={showEffort} />
-      </ModelSelectorTrigger>
-      <ModelSelectorContent align="end" className={contentClassName}>
+      />
+      <ModelSelectorContent className={contentClassName}>
         {searchable && <ModelSelectorSearch />}
-        <ModelSelectorEffort className="border-b-0" />
-        <ModelSelectorAdvancedSettings
-          control={resolved}
-          scopeKey={parameterSettingsScopeKey}
-          disabled={disabled || parameterSettingsDisabled}
-        />
+        <ModelSelectorEffort />
         <ModelSelectorList />
       </ModelSelectorContent>
-    </>
+    </ModelSelectorRoot>
   );
 };
-
-const ModelSelectorImpl = (props: ModelSelectorProps) => (
-  <ModelSelectorRoot {...props} open={props.disabled ? false : props.open}>
-    <ModelSelectorBody {...props} />
-  </ModelSelectorRoot>
-);
 
 type ModelSelectorComponent = typeof ModelSelectorImpl & {
   displayName?: string;
@@ -1013,7 +838,6 @@ type ModelSelectorComponent = typeof ModelSelectorImpl & {
   Separator: typeof ModelSelectorSeparator;
   Item: typeof ModelSelectorItem;
   Effort: typeof ModelSelectorEffort;
-  AdvancedSettings: typeof ModelSelectorAdvancedSettings;
 };
 
 const ModelSelector = memo(
@@ -1032,7 +856,6 @@ ModelSelector.Group = ModelSelectorGroup;
 ModelSelector.Separator = ModelSelectorSeparator;
 ModelSelector.Item = ModelSelectorItem;
 ModelSelector.Effort = ModelSelectorEffort;
-ModelSelector.AdvancedSettings = ModelSelectorAdvancedSettings;
 
 export {
   ModelSelector,
@@ -1047,5 +870,4 @@ export {
   ModelSelectorSeparator,
   ModelSelectorItem,
   ModelSelectorEffort,
-  ModelSelectorAdvancedSettings,
 };

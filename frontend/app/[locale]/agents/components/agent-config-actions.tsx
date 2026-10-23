@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useState } from "react";
@@ -15,8 +13,6 @@ import {
   GitBranch,
   MoreHorizontal,
   Network,
-  Send,
-  Settings2,
   Trash2,
 } from "lucide-react";
 
@@ -30,7 +26,6 @@ import { a2aClientService } from "@/services/a2aService";
 import {
   deleteAgent,
   exportAgent,
-  generateUniqueCopyName,
   searchAgentInfo,
   updateAgentInfo,
   updateToolConfig,
@@ -39,19 +34,13 @@ import { useAgentStore } from "@/stores/agentStore";
 
 export default function AgentConfigActions({
   agentId: agentIdProp,
-  agentName: agentNameProp,
   readOnly,
   variant = "buttons",
-  onConfigure,
-  onPublish,
   onManageVersions,
 }: {
   agentId?: number | null;
-  agentName?: string;
   readOnly?: boolean;
-  variant?: "buttons" | "menu" | "table";
-  onConfigure?: (agentId: number) => void;
-  onPublish?: (agentId: number) => void;
+  variant?: "buttons" | "menu";
   onManageVersions?: (agentId: number) => void;
 }) {
   const { t } = useTranslation("common");
@@ -67,8 +56,7 @@ export default function AgentConfigActions({
   const storeIsReadOnly = useAgentStore((state) => state.isReadOnly);
   const isReadOnly = readOnly ?? storeIsReadOnly;
   const reset = useAgentStore((state) => state.reset);
-  const agentName =
-    agentNameProp || editedAgent?.display_name || editedAgent?.name || "agent";
+  const agentName = editedAgent?.display_name || editedAgent?.name || "agent";
   const { agentInfo } = useAgentInfo(variant === "buttons" ? agentId : null);
   const [isRelationshipVisible, setIsRelationshipVisible] = useState(false);
   const [isA2ASettingsVisible, setIsA2ASettingsVisible] = useState(false);
@@ -155,36 +143,12 @@ export default function AgentConfigActions({
         return legacySingleId ? [legacySingleId] : undefined;
       })();
 
-      const baseCopyName = `${detail.name || "agent"}_copy`;
-      const baseCopyDisplayName = `${
-        detail.display_name || t("agentConfig.agents.defaultDisplayName")
-      }${t("agent.copySuffix")}`;
-      const copyNames = await generateUniqueCopyName(
-        baseCopyName,
-        baseCopyDisplayName
-      );
-
-      // Build skill_instances from source agent. Only carry config_values
-      // (which may hold secrets such as API keys) when the caller has EDIT
-      // permission on the source agent; read-only copies fall back to skill
-      // defaults so secrets are not persisted into the new agent.
-      const canEditSource = detail.permission === "EDIT";
-      const skillInstancesFromSource = (
-        Array.isArray(detail.skills) ? detail.skills : []
-      )
-        .map((skill: any) => ({
-          skill_id: Number(skill.skill_id ?? skill.id),
-          enabled: true,
-          config_values: canEditSource
-            ? (skill.config_values ?? undefined)
-            : undefined,
-        }))
-        .filter((inst) => Number.isFinite(inst.skill_id));
-
       const createResult = await updateAgentMutation.mutateAsync({
         agent_id: undefined,
-        name: copyNames.name,
-        display_name: copyNames.display_name,
+        name: `${detail.name || "agent"}_copy`,
+        display_name: `${
+          detail.display_name || t("agentConfig.agents.defaultDisplayName")
+        }${t("agent.copySuffix")}`,
         description: detail.description,
         author: detail.author,
         model_ids: modelIdsForCopy,
@@ -196,12 +160,13 @@ export default function AgentConfigActions({
           detail.enable_protocol_repair_retry ?? false,
         enabled: detail.enabled,
         business_description: detail.business_description,
-        prompt: detail.prompt,
+        duty_prompt: detail.duty_prompt,
+        constraint_prompt: detail.constraint_prompt,
+        few_shots_prompt: detail.few_shots_prompt,
         business_logic_model_name:
           detail.business_logic_model_name ?? undefined,
         business_logic_model_id: detail.business_logic_model_id ?? undefined,
         enabled_tool_ids: enabledToolIds,
-        skill_instances: skillInstancesFromSource,
         related_agent_ids: subAgentIds,
       });
 
@@ -233,10 +198,6 @@ export default function AgentConfigActions({
 
       queryClient.invalidateQueries({ queryKey: ["agents"] });
       message.success(t("agentConfig.agents.copySuccess"));
-
-      if (!canEditSource && skillInstancesFromSource.length > 0) {
-        message.info(t("agentConfig.agents.copySkillConfigsSkipped"));
-      }
 
       if (unavailableTools.length > 0) {
         const names =
@@ -285,31 +246,7 @@ export default function AgentConfigActions({
   };
 
   const disabled = agentId === null;
-  const menuItems: NonNullable<MenuProps["items"]> = [];
-  if (onConfigure) {
-    menuItems.push({
-      key: "configure",
-      icon: <Settings2 className="size-3.5" />,
-      label: t("agentConfig.list.configure"),
-      disabled,
-      onClick: () => {
-        if (agentId !== null) onConfigure(agentId);
-      },
-    });
-  }
-  if (onPublish) {
-    menuItems.push({
-      key: "publish",
-      icon: <Send className="size-3.5" />,
-      label: t("agentConfig.list.publish"),
-      disabled: disabled || isReadOnly,
-      onClick: () => {
-        if (agentId !== null) onPublish(agentId);
-      },
-    });
-  }
-  if (onConfigure || onPublish) menuItems.push({ type: "divider" });
-  menuItems.push(
+  const menuItems: MenuProps["items"] = [
     {
       key: "copy",
       icon: <Copy className="size-3.5" />,
@@ -362,54 +299,18 @@ export default function AgentConfigActions({
           }),
           onOk: handleDelete,
         }),
-    }
-  );
-
-  const handleDeleteAction = () =>
-    confirm.confirm({
-      title: t("businessLogic.config.modal.deleteTitle"),
-      content: t("businessLogic.config.modal.deleteContent", {
-        name: agentName,
-      }),
-      onOk: handleDelete,
-    });
+    },
+  ];
 
   return (
     <>
-      {variant === "table" ? (
-        <>
-          <button
-            type="button"
-            className="text-[#0067d1] hover:text-[#0052a8] disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={disabled || isReadOnly}
-            onClick={handleDeleteAction}
-          >
-            {t("agent.contextMenu.delete")}
-          </button>
-          <Dropdown
-            menu={{
-              items: menuItems?.filter(
-                (item) => item && (!("key" in item) || item.key !== "delete")
-              ),
-            }}
-            trigger={["click"]}
-          >
-            <Button
-              type="text"
-              size="small"
-              className="size-6 text-slate-400 hover:text-slate-600"
-              icon={<MoreHorizontal className="size-4" />}
-              aria-label={t("agentRepository.mine.menu.more")}
-            />
-          </Dropdown>
-        </>
-      ) : variant === "menu" ? (
+      {variant === "menu" ? (
         <Dropdown menu={{ items: menuItems }} trigger={["click"]}>
           <Button
             type="text"
             size="small"
-            className="!size-8 !p-0 !text-[#191919]"
-            icon={<MoreHorizontal className="size-3" />}
+            className="size-8 text-slate-400 hover:text-slate-600"
+            icon={<MoreHorizontal className="size-4" />}
             aria-label={t("agentRepository.mine.menu.more")}
           />
         </Dropdown>

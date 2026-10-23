@@ -1,8 +1,0 @@
-schema_version: '1.0'
-case_id: CMSR-D1-003
-implementations:
-- framework: pytest
-  file: test.py
-  selector: test_cmsr_d1_003
-  profiles:
-  - mock

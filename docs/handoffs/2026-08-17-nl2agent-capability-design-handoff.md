@@ -1,5 +1,3 @@
-> Historical handoff: prompt field examples below reflect the 2026-08-17 design. Current runtime uses one `prompt`; legacy sections are merged only when importing old JSON.
-
 # NL2Agent 能力发现、安装、绑定与 Agent 草稿设计方案
 
 > 日期：2026-08-17  

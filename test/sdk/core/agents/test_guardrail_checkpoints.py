@@ -207,7 +207,6 @@ def _make_step_agent(rule, messages, model_output="ok"):
     """
     controller = _make_controller(rule)
     agent = object.__new__(CoreAgent)
-    agent.prompt_templates = {}
     agent.workspace_path = None
     agent.name = "test"
     agent.agent_name = "test"
@@ -329,7 +328,6 @@ def test_run_stream_silently_retries_invalid_action_then_returns_real_final_answ
     from smolagents.memory import FinalAnswerStep
 
     agent = object.__new__(CoreAgent)
-    agent.prompt_templates = {}
     agent.agent_name = "test"
     agent.name = "test"
     agent.observer = MagicMock()
@@ -376,7 +374,7 @@ def test_fault_injected_model_outputs_silently_repair_then_execute_explicit_fina
     rule = GuardrailRule(name="irrelevant", pattern="never-match", severity="block")
     agent = _make_step_agent(rule, messages=[_msg("user", "solve this")])
     responses = []
-    for content in ("<UNKNOWN/>", "bare answer", "<final_answer>42</final_answer>"):
+    for content in ("<UNKNOWN/>", "bare answer", "<code>final_answer('42')</code>"):
         response = MagicMock()
         response.content = content
         response.token_usage = None

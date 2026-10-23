@@ -1,11 +1,9 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { App, Button, Empty, Input, Select, Spin } from "antd";
+import { App, Button, Empty, Grid, Input, Spin } from "antd";
 import { Search } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import CreateAgentModal, {
@@ -57,7 +55,6 @@ import { MineReviewStatusModal } from "./components/MineReviewStatusModal";
 import { AgentUsageGuideModal } from "./components/AgentUsageGuideModal";
 import { CreateNewAgentCard } from "./components/CreateNewAgentCard";
 import { MyAgentCard } from "./components/MyAgentCard";
-import { REPOSITORY_PAGE_SIZE } from "@/const/resource";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
 import type { TagResourcePredicate } from "@/types/tagManagement";
@@ -71,7 +68,9 @@ const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
   "created",
   "others",
 ];
-type MineSortOrder = "default" | "latest";
+const CARD_GAP = 20;
+const MIN_CARD_HEIGHT = 240;
+const PAGINATION_HEIGHT = 60;
 
 export function MyAgent({
   active,
@@ -89,9 +88,54 @@ export function MyAgent({
   const queryClient = useQueryClient();
   const params = useParams<{ locale: string }>();
   const locale = params.locale || "en";
+  const screens = Grid.useBreakpoint();
+  const gridRegionRef = useRef<HTMLDivElement>(null);
+  const [availableGridHeight, setAvailableGridHeight] = useState<number | null>(
+    null
+  );
+  const columns = screens.xxl
+    ? 4
+    : screens.xl
+      ? 3
+      : screens.lg || screens.md || screens.sm
+        ? 2
+        : screens.xs
+          ? 1
+          : 4;
+  const pageBottomPadding = screens.sm ? 40 : 32;
+  const rows = getRowCount(
+    Math.max(0, (availableGridHeight ?? 0) - PAGINATION_HEIGHT)
+  );
+  const gridSlots = columns * rows;
+  const measureGridHeight = useCallback(() => {
+    if (!active || !gridRegionRef.current) return;
+
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const { top } = gridRegionRef.current.getBoundingClientRect();
+    setAvailableGridHeight(
+      Math.max(0, Math.floor(viewportHeight - top - pageBottomPadding - 8))
+    );
+  }, [active, pageBottomPadding]);
+
+  useEffect(() => {
+    if (!active) return;
+
+    const frame = window.requestAnimationFrame(measureGridHeight);
+    const observer = new ResizeObserver(measureGridHeight);
+    const visualViewport = window.visualViewport;
+    if (gridRegionRef.current) observer.observe(gridRegionRef.current);
+    window.addEventListener("resize", measureGridHeight);
+    visualViewport?.addEventListener("resize", measureGridHeight);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", measureGridHeight);
+      visualViewport?.removeEventListener("resize", measureGridHeight);
+    };
+  }, [active, measureGridHeight]);
   const [ownership, setOwnership] = useState<MineOwnershipFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortOrder, setSortOrder] = useState<MineSortOrder>("default");
   const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
     []
   );
@@ -108,7 +152,8 @@ export function MyAgent({
     () => getTagSearchPredicates(tagDefinitions, searchQuery, t),
     [tagDefinitions, searchQuery, t]
   );
-  const pageSize = REPOSITORY_PAGE_SIZE - 1;
+  const createCardInGrid = gridSlots > 1;
+  const pageSize = Math.max(1, gridSlots - (createCardInGrid ? 1 : 0));
   const listParams = useMemo(
     (): AgentListFilters => ({
       tenantId: user?.tenantId ?? null,
@@ -121,7 +166,6 @@ export function MyAgent({
       searchTagPredicates,
       createdBy: ownership === "created" ? user?.id : undefined,
       createdByNot: ownership === "others" ? user?.id : undefined,
-      sortByUpdateTime: sortOrder === "latest" || undefined,
     }),
     [
       active,
@@ -133,7 +177,6 @@ export function MyAgent({
       searchQuery,
       tagPredicates,
       searchTagPredicates,
-      sortOrder,
     ]
   );
   const {
@@ -156,6 +199,10 @@ export function MyAgent({
       onTotalChange?.(creatorCounts.all);
     }
   }, [active, creatorCounts, onTotalChange, tagPredicates.length]);
+  const gridHeight =
+    availableGridHeight === null
+      ? undefined
+      : Math.max(0, availableGridHeight - (total > 0 ? PAGINATION_HEIGHT : 0));
   const reviewDeepLink = useMemo(
     () => parseReviewDeepLinkParams(searchParams),
     [searchParams]
@@ -194,10 +241,6 @@ export function MyAgent({
   }, [locale, router, usageGuideTarget]);
   const onOwnershipChange = (value: MineOwnershipFilter) => {
     setOwnership(value);
-    setPage(1);
-  };
-  const onSortOrderChange = (value: MineSortOrder) => {
-    setSortOrder(value);
     setPage(1);
   };
   const onSearchChange = (value: string) => {
@@ -345,7 +388,7 @@ export function MyAgent({
       invalidateAgentRepositoryCaches(queryClient),
       queryClient.invalidateQueries({ queryKey: [AGENTS_LIST_QUERY_KEY] }),
     ]);
-    router.push(`/${locale}/agents/${agentId}?onboarding=1`);
+    router.push(`/${locale}/agents/${agentId}`);
   };
 
   const handleEdit = (
@@ -638,16 +681,6 @@ export function MyAgent({
           value={tagPredicates}
           onChange={onTagPredicatesChange}
         />
-        <Select<MineSortOrder>
-          value={sortOrder}
-          onChange={onSortOrderChange}
-          className="w-44 shrink-0"
-          aria-label={t("agentRepository.sort.label")}
-          options={[
-            { value: "default", label: t("agentRepository.sort.default") },
-            { value: "latest", label: t("agentRepository.sort.latest") },
-          ]}
-        />
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
@@ -668,7 +701,12 @@ export function MyAgent({
         ))}
       </div>
 
-      <div className="min-h-0">
+      <div ref={gridRegionRef} className="min-h-0">
+        {!createCardInGrid ? (
+          <div className="mb-5">
+            <CreateNewAgentCard onClick={handleCreateAgent} />
+          </div>
+        ) : null}
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
             <Spin size="large" />
@@ -690,7 +728,9 @@ export function MyAgent({
           <>
             <ResourceCardGrid
               items={displayedAgents}
-              pageSize={REPOSITORY_PAGE_SIZE}
+              columns={columns}
+              rows={rows}
+              gridHeight={showFilteredEmpty ? undefined : gridHeight}
               page={page}
               total={total}
               onPageChange={setPage}
@@ -703,8 +743,12 @@ export function MyAgent({
                   />
                 ) : undefined
               }
-              showCreateCard
-              createCard={<CreateNewAgentCard onClick={handleCreateAgent} />}
+              showCreateCard={createCardInGrid}
+              createCard={
+                createCardInGrid ? (
+                  <CreateNewAgentCard onClick={handleCreateAgent} />
+                ) : undefined
+              }
               renderItem={(agent) => (
                 <MyAgentCard
                   key={agent.agent_id}
@@ -745,7 +789,7 @@ export function MyAgent({
                 />
               )}
             />
-            {showFilteredEmpty ? (
+            {showFilteredEmpty && createCardInGrid ? (
               <Empty
                 className="py-16"
                 description={t("agentRepository.mine.emptyFiltered")}
@@ -834,8 +878,18 @@ function toMyAgentItem(agent: Agent): MyEditableAgentItem {
       (currentVersionNo > 0 ? `V${currentVersionNo}` : null),
     version_create_time: agent.version_create_time ?? null,
     permission: agent.permission,
-    is_main_agent: agent.is_main_agent,
     tags: agent.tags,
     repository_info: agent.repository_info ?? [],
   };
+}
+
+function getRowCount(availableHeight: number) {
+  if (availableHeight <= 0) return 3;
+  return Math.min(
+    3,
+    Math.max(
+      1,
+      Math.floor((availableHeight + CARD_GAP) / (MIN_CARD_HEIGHT + CARD_GAP))
+    )
+  );
 }

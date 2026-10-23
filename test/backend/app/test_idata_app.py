@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for iData App Layer.
 
@@ -107,7 +106,7 @@ with patch('nexent.storage.storage_client_factory.create_storage_client_from_con
         # So we import them the same way to ensure type matching
         from consts.error_code import ErrorCode
         from consts.exceptions import AppException
-        from management.services.knowledge_base.providers.idata import (
+        from backend.services.idata_service import (
             fetch_idata_knowledge_spaces_impl,
             fetch_idata_datasets_impl,
         )

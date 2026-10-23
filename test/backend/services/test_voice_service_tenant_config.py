@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for VoiceService tenant config methods.
 These tests cover _get_stt_model_from_tenant_config.
@@ -31,8 +30,8 @@ _shared_stt = None
 
 def _reset_singleton():
     """Reset the voice service singleton between tests."""
-    import management.services.model.voice
-    management.services.model.voice._voice_service_instance = None
+    import services.voice_service
+    services.voice_service._voice_service_instance = None
 
 
 def _mock_all_models(stt_success=True):
@@ -41,14 +40,14 @@ def _mock_all_models(stt_success=True):
     _shared_stt.check_connectivity = AsyncMock(return_value=stt_success)
 
     patches = [
-        patch("management.services.model.voice.VolcSTTModel", return_value=_shared_stt),
-        patch("management.services.model.voice.AliSTTModel", return_value=_shared_stt),
+        patch("services.voice_service.VolcSTTModel", return_value=_shared_stt),
+        patch("services.voice_service.AliSTTModel", return_value=_shared_stt),
     ]
     return patches, _shared_stt
 
 
-import management.services.model.voice
-from management.services.model.voice import VoiceService
+import services.voice_service
+from services.voice_service import VoiceService
 
 
 class TestGetSTTModelFromTenantConfig:
@@ -98,8 +97,8 @@ class TestGetSTTModelFromTenantConfig:
                 "api_key": "test_api_key",
             }
 
-            with patch('management.services.model.voice.tenant_config_manager') as mock_config_mgr, \
-                 patch('management.services.model.voice.get_model_records') as mock_get_records:
+            with patch('services.voice_service.tenant_config_manager') as mock_config_mgr, \
+                 patch('services.voice_service.get_model_records') as mock_get_records:
                 mock_config_mgr.get_model_config.return_value = None
                 mock_get_records.return_value = [mock_record]
 
@@ -120,8 +119,8 @@ class TestGetSTTModelFromTenantConfig:
         try:
             service = VoiceService()
 
-            with patch('management.services.model.voice.tenant_config_manager') as mock_config_mgr, \
-                 patch('management.services.model.voice.get_model_records') as mock_get_records:
+            with patch('services.voice_service.tenant_config_manager') as mock_config_mgr, \
+                 patch('services.voice_service.get_model_records') as mock_get_records:
                 mock_config_mgr.get_model_config.return_value = None
                 mock_get_records.return_value = []
 
@@ -142,7 +141,7 @@ class TestGetSTTModelFromTenantConfig:
         try:
             service = VoiceService()
 
-            with patch('management.services.model.voice.tenant_config_manager') as mock_config_mgr:
+            with patch('services.voice_service.tenant_config_manager') as mock_config_mgr:
                 mock_config_mgr.get_model_config.side_effect = Exception("Database error")
 
                 with patch.object(service, '_get_stt_model_from_config') as mock_get_model:

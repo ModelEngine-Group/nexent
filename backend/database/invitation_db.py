@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Database operations for invitation code management
 """
@@ -6,7 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from database.client import as_dict, get_db_session
 from database.db_models import TenantInvitationCode, TenantInvitationRecord
-from management.db.serialization import convert_list_to_string
+from utils.str_utils import convert_list_to_string
 
 
 def query_invitation_by_code(invitation_code: str) -> Optional[Dict[str, Any]]:

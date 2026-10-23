@@ -1,11 +1,10 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for knowledge-base source-object accounting helpers."""
 
 from unittest.mock import patch
 
 import pytest
 
-import management.services.knowledge_base.storage as storage_service
+import backend.services.knowledge_storage_service as storage_service
 
 KnowledgeStorageContext = storage_service.KnowledgeStorageContext
 commit_uploaded_object = storage_service.commit_uploaded_object

@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import "@testing-library/jest-dom/vitest";
 import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
@@ -31,6 +29,3 @@ globalThis.ResizeObserver = class {
   disconnect() {}
 };
 HTMLElement.prototype.scrollIntoView = vi.fn();
-HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
-HTMLElement.prototype.setPointerCapture = vi.fn();
-HTMLElement.prototype.releasePointerCapture = vi.fn();

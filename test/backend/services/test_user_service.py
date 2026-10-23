@@ -1,6 +1,5 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
-Unit tests for management.services.permission.identity.users module
+Unit tests for backend.services.user_service module
 """
 import sys
 import os
@@ -57,7 +56,7 @@ patch('database.group_db.query_groups_by_users', return_value={}).start()
 
 # Import unit under test
 from consts.exceptions import ForbiddenError, NotFoundException
-from management.services.permission.identity.users import (
+from backend.services.user_service import (
     delete_user_and_cleanup,
     get_users,
     get_users_for_requester,
@@ -71,7 +70,7 @@ class TestUserAuthorization:
 
     def test_admin_can_list_own_tenant(self, mocker):
         mock_get_users = mocker.patch(
-            "management.services.permission.identity.users.get_users",
+            "backend.services.user_service.get_users",
             return_value={"users": [], "total": 0},
         )
 
@@ -99,11 +98,11 @@ class TestUserAuthorization:
     @pytest.mark.asyncio
     async def test_admin_can_update_non_su_in_own_tenant(self, mocker):
         mocker.patch(
-            "management.services.permission.identity.users.get_user_tenant_by_user_id",
+            "backend.services.user_service.get_user_tenant_by_user_id",
             return_value={"tenant_id": "tenant-1", "user_role": "USER"},
         )
         mock_update = mocker.patch(
-            "management.services.permission.identity.users.update_user",
+            "backend.services.user_service.update_user",
             return_value={"id": "user-2", "role": "DEV"},
         )
 
@@ -127,7 +126,7 @@ class TestUserAuthorization:
         ],
     )
     async def test_admin_cannot_update_cross_tenant_or_su(self, mocker, target):
-        mocker.patch("management.services.permission.identity.users.get_user_tenant_by_user_id", return_value=target)
+        mocker.patch("backend.services.user_service.get_user_tenant_by_user_id", return_value=target)
 
         with pytest.raises(ForbiddenError, match="update this user"):
             await update_user_for_requester(
@@ -140,7 +139,7 @@ class TestUserAuthorization:
 
     @pytest.mark.asyncio
     async def test_update_missing_user_returns_not_found(self, mocker):
-        mocker.patch("management.services.permission.identity.users.get_user_tenant_by_user_id", return_value=None)
+        mocker.patch("backend.services.user_service.get_user_tenant_by_user_id", return_value=None)
 
         with pytest.raises(NotFoundException, match="not found"):
             await update_user_for_requester(
@@ -155,7 +154,7 @@ class TestUserAuthorization:
 @pytest.fixture(autouse=True)
 def reset_mocks():
     """Reset mock return values, call counts, and side effects for each test"""
-    from management.services.permission.identity import users as user_service
+    from backend.services import user_service
 
     # Reset all mocks and clear side effects
     user_service.get_users_by_tenant_id.reset_mock()
@@ -183,7 +182,7 @@ class TestGetUsers:
     ])
     def test_get_users_success_with_pagination(self, page, page_size, expected_page, expected_page_size):
         """Test successfully retrieving users with various pagination settings"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_db = user_service.get_users_by_tenant_id
         tenant_id = "tenant123"
 
@@ -218,7 +217,7 @@ class TestGetUsers:
 
     def test_get_users_success_without_pagination(self):
         """Test successfully retrieving users without pagination (returns all data)"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_db = user_service.get_users_by_tenant_id
         tenant_id = "tenant123"
 
@@ -248,7 +247,7 @@ class TestGetUsers:
 
     def test_get_users_success_with_only_page(self):
         """Test retrieving users with only page parameter (no pagination info in result)"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_db = user_service.get_users_by_tenant_id
         tenant_id = "tenant123"
 
@@ -271,7 +270,7 @@ class TestGetUsers:
 
     def test_get_users_success_with_only_page_size(self):
         """Test retrieving users with only page_size parameter (no pagination info in result)"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_db = user_service.get_users_by_tenant_id
         tenant_id = "tenant123"
 
@@ -294,7 +293,7 @@ class TestGetUsers:
 
     def test_get_users_success_with_asc_sort(self):
         """Test successfully retrieving users with ascending sort order"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_db = user_service.get_users_by_tenant_id
         tenant_id = "tenant123"
 
@@ -315,7 +314,7 @@ class TestGetUsers:
 
     def test_get_users_empty_result(self):
         """Test retrieving users when no users exist"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_db.return_value = {
             "users": [],
@@ -330,7 +329,7 @@ class TestGetUsers:
 
     def test_get_users_with_null_email(self):
         """Test retrieving users when user_email is None"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_relationships = [
             {"user_id": "user1", "user_email": None, "user_role": "USER", "tenant_id": "tenant123"}
@@ -348,7 +347,7 @@ class TestGetUsers:
 
     def test_get_users_default_parameters(self):
         """Test get_users with default parameters"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_db.return_value = {
             "users": [],
@@ -364,7 +363,7 @@ class TestGetUsers:
 
     def test_get_users_calculates_total_pages_correctly(self):
         """Test that total_pages is calculated correctly for pagination"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_db.return_value = {
             "users": [
@@ -380,7 +379,7 @@ class TestGetUsers:
 
     def test_get_users_includes_group_names(self):
         """Test that get_users returns group_names populated from batch query"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_group_db = user_service.query_groups_by_users
         tenant_id = "tenant123"
@@ -403,7 +402,7 @@ class TestGetUsers:
 
     def test_get_users_with_no_groups_returns_empty_list(self):
         """Test that users with no group memberships get empty group_names list"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_group_db = user_service.query_groups_by_users
         tenant_id = "tenant123"
@@ -420,7 +419,7 @@ class TestGetUsers:
 
     def test_get_users_batch_query_passes_user_ids(self):
         """Test that query_groups_by_users is called with the tenant's user IDs"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_db = user_service.get_users_by_tenant_id
         mock_group_db = user_service.query_groups_by_users
 
@@ -437,7 +436,7 @@ class TestGetUsers:
 
     def test_get_users_with_filters_passes_filter_arguments(self):
         """Test that resource filters are forwarded to the database layer."""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
 
         user_service.get_users_by_tenant_id.return_value = {
             "users": [], "total": 0
@@ -463,7 +462,7 @@ class TestUpdateUser:
     @pytest.mark.parametrize("role", ["ADMIN", "DEV", "USER"])
     async def test_update_user_success_valid_roles(self, role):
         """Test successfully updating user with valid roles"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_update_role = user_service.update_user_tenant_role
         mock_get_user = user_service.get_user_tenant_by_user_id
 
@@ -492,7 +491,7 @@ class TestUpdateUser:
 
     async def test_update_user_success_with_null_email(self):
         """Test successfully updating user when user_email is None"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_update_role = user_service.update_user_tenant_role
         mock_get_user = user_service.get_user_tenant_by_user_id
 
@@ -515,7 +514,7 @@ class TestUpdateUser:
 
     async def test_update_user_invalid_role(self):
         """Test updating user with invalid role"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_update_role = user_service.update_user_tenant_role
 
         user_id = "user123"
@@ -531,7 +530,7 @@ class TestUpdateUser:
 
     async def test_update_user_update_failed(self):
         """Test updating user when database update fails"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_update_role = user_service.update_user_tenant_role
         mock_get_user = user_service.get_user_tenant_by_user_id
 
@@ -551,7 +550,7 @@ class TestUpdateUser:
 
     async def test_update_user_not_found_after_update(self):
         """Test updating user when user not found after update"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_update_role = user_service.update_user_tenant_role
         mock_get_user = user_service.get_user_tenant_by_user_id
 
@@ -572,7 +571,7 @@ class TestUpdateUser:
 
     async def test_update_user_empty_update_data(self):
         """Test updating user with empty update data"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_update_role = user_service.update_user_tenant_role
         mock_get_user = user_service.get_user_tenant_by_user_id
 
@@ -598,7 +597,7 @@ class TestUpdateUser:
 
     async def test_update_user_unexpected_error(self):
         """Test updating user with unexpected error"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_update_role = user_service.update_user_tenant_role
 
         user_id = "user123"
@@ -618,7 +617,7 @@ class TestDataValidation:
     @pytest.mark.asyncio
     async def test_update_user_role_validation_all_valid_roles(self):
         """Test role validation with all valid roles"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         valid_roles = ["ADMIN", "DEV", "USER"]
 
         for role in valid_roles:
@@ -646,7 +645,7 @@ class TestDataValidation:
     @pytest.mark.asyncio
     async def test_update_user_without_role_key(self):
         """Test updating user without role key in update_data"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_update_role = user_service.update_user_tenant_role
         mock_get_user = user_service.get_user_tenant_by_user_id
 
@@ -671,7 +670,7 @@ class TestDataValidation:
     @pytest.mark.parametrize("invalid_role", ["invalid", "SUPER_ADMIN", "GUEST", "", None])
     async def test_update_user_invalid_role_various_cases(self, invalid_role):
         """Test updating user with various invalid roles"""
-        from management.services.permission.identity import users as user_service
+        from backend.services import user_service
         mock_update_role = user_service.update_user_tenant_role
 
         user_id = "user123"
@@ -694,26 +693,26 @@ class TestDeleteUserAndCleanup:
         """Test successful complete user deletion and cleanup"""
         # Mock all the dependencies
         mock_soft_delete_tenant = mocker.patch(
-            "management.services.permission.identity.users.soft_delete_user_tenant_by_user_id",
+            "backend.services.user_service.soft_delete_user_tenant_by_user_id",
             return_value=True
         )
         mock_remove_groups = mocker.patch(
-            "management.services.permission.identity.users.remove_user_from_all_groups",
+            "backend.services.user_service.remove_user_from_all_groups",
             return_value=1
         )
         mock_soft_delete_configs = mocker.patch(
-            "management.services.permission.identity.users.soft_delete_all_configs_by_user_id"
+            "backend.services.user_service.soft_delete_all_configs_by_user_id"
         )
         mock_soft_delete_convs = mocker.patch(
-            "management.services.permission.identity.users.soft_delete_all_conversations_by_user",
+            "backend.services.user_service.soft_delete_all_conversations_by_user",
             return_value=5
         )
         mock_soft_delete_oauth = mocker.patch(
-            "management.services.permission.identity.users.soft_delete_all_oauth_accounts_by_user_id",
+            "backend.services.user_service.soft_delete_all_oauth_accounts_by_user_id",
             return_value=0
         )
         mock_get_admin = mocker.patch(
-            "management.services.permission.identity.users.get_supabase_admin_client"
+            "backend.services.user_service.get_supabase_admin_client"
         )
 
         # Setup mock admin client
@@ -740,27 +739,27 @@ class TestDeleteUserAndCleanup:
         """Test that errors in individual steps don't fail the entire cleanup"""
         # Mock all dependencies with exceptions
         mocker.patch(
-            "management.services.permission.identity.users.soft_delete_user_tenant_by_user_id",
+            "backend.services.user_service.soft_delete_user_tenant_by_user_id",
             side_effect=Exception("tenant deletion failed")
         )
         mocker.patch(
-            "management.services.permission.identity.users.remove_user_from_all_groups",
+            "backend.services.user_service.remove_user_from_all_groups",
             side_effect=Exception("groups removal failed")
         )
         mocker.patch(
-            "management.services.permission.identity.users.soft_delete_all_configs_by_user_id",
+            "backend.services.user_service.soft_delete_all_configs_by_user_id",
             side_effect=Exception("configs failed")
         )
         mocker.patch(
-            "management.services.permission.identity.users.soft_delete_all_conversations_by_user",
+            "backend.services.user_service.soft_delete_all_conversations_by_user",
             side_effect=Exception("convs failed")
         )
         mocker.patch(
-            "management.services.permission.identity.users.soft_delete_all_oauth_accounts_by_user_id",
+            "backend.services.user_service.soft_delete_all_oauth_accounts_by_user_id",
             side_effect=Exception("oauth failed")
         )
         mocker.patch(
-            "management.services.permission.identity.users.get_supabase_admin_client",
+            "backend.services.user_service.get_supabase_admin_client",
             side_effect=Exception("admin failed")
         )
 
@@ -772,26 +771,26 @@ class TestDeleteUserAndCleanup:
 
     def _mock_base_cleanup(self, mocker):
         mocker.patch(
-            "management.services.permission.identity.users.soft_delete_user_tenant_by_user_id",
+            "backend.services.user_service.soft_delete_user_tenant_by_user_id",
             return_value=True,
         )
         mocker.patch(
-            "management.services.permission.identity.users.remove_user_from_all_groups",
+            "backend.services.user_service.remove_user_from_all_groups",
             return_value=1,
         )
         mocker.patch(
-            "management.services.permission.identity.users.soft_delete_all_configs_by_user_id"
+            "backend.services.user_service.soft_delete_all_configs_by_user_id"
         )
         mocker.patch(
-            "management.services.permission.identity.users.soft_delete_all_conversations_by_user",
+            "backend.services.user_service.soft_delete_all_conversations_by_user",
             return_value=5,
         )
         mocker.patch(
-            "management.services.permission.identity.users.soft_delete_all_oauth_accounts_by_user_id",
+            "backend.services.user_service.soft_delete_all_oauth_accounts_by_user_id",
             return_value=0,
         )
         mock_get_admin = mocker.patch(
-            "management.services.permission.identity.users.get_supabase_admin_client"
+            "backend.services.user_service.get_supabase_admin_client"
         )
         mock_admin = MagicMock()
         mock_admin.auth.admin.delete_user = MagicMock()
@@ -815,7 +814,7 @@ class TestDeleteUserAndCleanup:
     ):
         self._mock_base_cleanup(mocker)
         mocker.patch(
-            "management.services.permission.identity.users.get_private_knowledge_info_by_creator",
+            "backend.services.user_service.get_private_knowledge_info_by_creator",
             return_value=[
                 {"knowledge_id": 1, "index_name": "private-kb-1"},
                 {"knowledge_id": 2, "index_name": "private-kb-2"},
@@ -844,7 +843,7 @@ class TestDeleteUserAndCleanup:
     ):
         self._mock_base_cleanup(mocker)
         mocker.patch(
-            "management.services.permission.identity.users.get_private_knowledge_info_by_creator",
+            "backend.services.user_service.get_private_knowledge_info_by_creator",
             return_value=[
                 {"knowledge_id": 1, "index_name": "private-kb-1"},
                 {"knowledge_id": 2, "index_name": "private-kb-2"},
@@ -868,7 +867,7 @@ class TestDeleteUserAndCleanup:
     ):
         self._mock_base_cleanup(mocker)
         mocker.patch(
-            "management.services.permission.identity.users.get_private_knowledge_info_by_creator",
+            "backend.services.user_service.get_private_knowledge_info_by_creator",
             return_value=[],
         )
         fake_vdb = self._install_fake_vdb(mocker)
@@ -885,7 +884,7 @@ class TestDeleteUserAndCleanup:
     ):
         self._mock_base_cleanup(mocker)
         mocker.patch(
-            "management.services.permission.identity.users.get_private_knowledge_info_by_creator",
+            "backend.services.user_service.get_private_knowledge_info_by_creator",
             return_value=[
                 {"knowledge_id": 1, "index_name": None},
                 {"knowledge_id": 2, "index_name": "private-kb-2"},
@@ -906,7 +905,7 @@ class TestDeleteUserAndCleanup:
     ):
         self._mock_base_cleanup(mocker)
         mocker.patch(
-            "management.services.permission.identity.users.get_private_knowledge_info_by_creator",
+            "backend.services.user_service.get_private_knowledge_info_by_creator",
             side_effect=Exception("query failed"),
         )
 
@@ -920,7 +919,7 @@ class TestCoverageGaps:
 
     def test_superuser_can_list_any_tenant(self, mocker):
         mock_get_users = mocker.patch(
-            "management.services.permission.identity.users.get_users",
+            "backend.services.user_service.get_users",
             return_value={"users": [], "total": 0},
         )
 
@@ -934,7 +933,7 @@ class TestCoverageGaps:
     def test_requester_forwards_resource_filters(self, mocker):
         """Test that authorized requests with filters use the filtered call path."""
         mock_get_users = mocker.patch(
-            "management.services.permission.identity.users.get_users",
+            "backend.services.user_service.get_users",
             return_value={"users": [], "total": 0},
         )
 
@@ -951,11 +950,11 @@ class TestCoverageGaps:
     @pytest.mark.asyncio
     async def test_superuser_can_update_any_user(self, mocker):
         mocker.patch(
-            "management.services.permission.identity.users.get_user_tenant_by_user_id",
+            "backend.services.user_service.get_user_tenant_by_user_id",
             return_value={"tenant_id": "tenant-2", "user_role": "SU"},
         )
         mock_update = mocker.patch(
-            "management.services.permission.identity.users.update_user",
+            "backend.services.user_service.update_user",
             return_value={"id": "user-2", "role": "USER"},
         )
 
@@ -973,25 +972,25 @@ class TestCoverageGaps:
     @pytest.mark.asyncio
     async def test_cleanup_handles_missing_supabase_admin_client(self, mocker):
         mocker.patch(
-            "management.services.permission.identity.users.soft_delete_user_tenant_by_user_id",
+            "backend.services.user_service.soft_delete_user_tenant_by_user_id",
             return_value=True,
         )
-        mocker.patch("management.services.permission.identity.users.get_supabase_admin_client", return_value=None)
+        mocker.patch("backend.services.user_service.get_supabase_admin_client", return_value=None)
 
         await delete_user_and_cleanup("user-1", "tenant-1")
 
     @pytest.mark.asyncio
     async def test_cleanup_revokes_api_keys_and_skips_supabase_without_email(self, mocker):
         mocker.patch(
-            "management.services.permission.identity.users.get_user_tenant_by_user_id",
+            "backend.services.user_service.get_user_tenant_by_user_id",
             return_value={"user_id": "user-1", "user_email": None},
         )
         mocker.patch(
-            "management.services.permission.identity.users.soft_delete_user_tenant_by_user_id",
+            "backend.services.user_service.soft_delete_user_tenant_by_user_id",
             return_value=True,
         )
         mock_revoke = mocker.patch("database.token_db.soft_delete_tokens_by_user")
-        mock_get_admin = mocker.patch("management.services.permission.identity.users.get_supabase_admin_client")
+        mock_get_admin = mocker.patch("backend.services.user_service.get_supabase_admin_client")
 
         await delete_user_and_cleanup("user-1", "tenant-1")
 

@@ -1,10 +1,7 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useTranslation } from "react-i18next";
+import { useEffect, useState } from "react";
 import { tagManagementApi } from "@/services/tagManagementService";
 import type {
+  TagDefinition,
   TagResourcePredicate,
   TagResourceType,
 } from "@/types/tagManagement";
@@ -21,79 +18,82 @@ export function intersectAuthorizedIds(
 export function useResourceTags(
   open: boolean,
   resourceType: TagResourceType,
-  candidateIds: string[],
-  filterOnServer = false
+  candidateIds: string[]
 ) {
-  const { t } = useTranslation();
+  const [definitions, setDefinitions] = useState<TagDefinition[]>([]);
   const [predicates, setPredicates] = useState<TagResourcePredicate[]>([]);
-  const [previousOpen, setPreviousOpen] = useState(open);
-  if (previousOpen !== open) {
-    setPreviousOpen(open);
-    if (!open) setPredicates([]);
-  }
-  const definitions = useQuery({
-    queryKey: ["workbenchTagDefinitions", resourceType],
-    enabled: open,
-    queryFn: async () => {
-      const libraries = await tagManagementApi.listLibraries();
-      const groups = await Promise.all(
-        libraries
-          .filter(
-            (library) =>
-              library.status === "active" &&
-              library.resource_types.includes(resourceType)
+  const [visibleIds, setVisibleIds] = useState<Set<string> | null>(null);
+  const [error, setError] = useState<string>();
+  const candidateKey = JSON.stringify(candidateIds);
+  const [resolvedKey, setResolvedKey] = useState("");
+  const requestKey = JSON.stringify([candidateKey, predicates]);
+  useEffect(() => {
+    if (!open) {
+      setPredicates([]);
+      return;
+    }
+    let cancelled = false;
+    void tagManagementApi
+      .listLibraries()
+      .then(async (libraries) => {
+        const librariesForType = libraries.filter(
+          (library) =>
+            library.status === "active" &&
+            library.resource_types.includes(resourceType)
+        );
+        const groups = await Promise.all(
+          librariesForType.map((library) =>
+            tagManagementApi.listDefinitions(library.bucket_id)
           )
-          .map((library) => tagManagementApi.listDefinitions(library.bucket_id))
-      );
-      return groups
-        .flat()
-        .filter((definition) => definition.status === "active");
-    },
-  });
-  const matches = useQuery({
-    queryKey: ["workbenchTagMatches", resourceType, candidateIds, predicates],
-    enabled: open && !filterOnServer && predicates.length > 0,
-    queryFn: async () => {
-      const candidates = Array.from(new Set(candidateIds));
-      const results = await Promise.all(
-        Array.from({ length: Math.ceil(candidates.length / 500) }, (_, index) =>
-          tagManagementApi.filterResourceIds(
-            resourceType,
-            candidates.slice(index * 500, (index + 1) * 500),
-            predicates
-          )
-        )
-      );
-      return intersectAuthorizedIds(
-        candidates,
-        results.flatMap((result) => result.matched_resource_ids)
-      );
-    },
-  });
+        );
+        if (!cancelled) setDefinitions(groups.flat());
+      })
+      .catch(() => {
+        if (!cancelled) setError("标签定义加载失败");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, resourceType]);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setError(undefined);
+    if (!predicates.length) {
+      setVisibleIds(null);
+      setResolvedKey(requestKey);
+      return;
+    }
+    const candidates: string[] = JSON.parse(candidateKey);
+    void tagManagementApi
+      .filterResourceIds(resourceType, candidates, predicates)
+      .then((result) => {
+        if (!cancelled) {
+          setVisibleIds(
+            intersectAuthorizedIds(candidates, result.matched_resource_ids)
+          );
+          setResolvedKey(requestKey);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setVisibleIds(new Set());
+          setResolvedKey(requestKey);
+          setError("标签筛选失败，请重试或清除筛选");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, candidateKey, predicates, resourceType, requestKey]);
   return {
-    definitions: definitions.data ?? [],
+    definitions,
     predicates,
     setPredicates,
-    loading:
-      definitions.isFetching ||
-      (!filterOnServer && predicates.length > 0 && matches.isFetching),
-    error: definitions.isError
-      ? t("workbench.controls.tagsLoadFailed", "标签加载失败，请重试")
-      : matches.isError && predicates.length > 0 && !filterOnServer
-        ? t(
-            "workbench.controls.tagsFilterFailed",
-            "标签筛选失败，请重试或清除筛选"
-          )
-        : undefined,
-    retry: () => {
-      void definitions.refetch();
-      if (predicates.length && !filterOnServer) void matches.refetch();
-    },
+    error,
     visibleIds:
-      predicates.length && !filterOnServer
-        ? matches.isError
-          ? new Set<string>()
-          : (matches.data ?? new Set<string>())
-        : null,
+      predicates.length && resolvedKey !== requestKey
+        ? new Set<string>()
+        : visibleIds,
   };
 }

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Run the EventQA benchmark with the nexent agent.
 
 EventQA (MemoryAgentBench) gives a full novel plus 100 six-choice
@@ -60,7 +59,7 @@ INGEST_DUTY = (
     "the next part of the novel. Read it carefully and remember the events, "
     "the characters, and the order in which things happen. Do not analyze, "
     "review, or summarize the text. Simply acknowledge that you have read it "
-    "by returning exactly: <final_answer>OK</final_answer>"
+    "by calling final_answer with the single word: OK"
 )
 
 PROBE_DUTY = (
@@ -75,11 +74,12 @@ PROBE_DUTY = (
     "mandatory even when none seems certain — pick the most likely.\n"
     "- Never reply that none of the events occur, and never put your "
     "reasoning into the answer.\n"
-    "- Answer in a SINGLE step with one final envelope. Do not write a bare "
-    "string, a print, or any inspection code.\n"
-    "- Emit exactly one envelope of this form, with the chosen option's "
+    "- Answer in a SINGLE step. Your first and only code block must call "
+    "final_answer directly. Do NOT first write a bare string, a print, or "
+    "any inspection code — a bare string is NOT an answer and wastes a step.\n"
+    "- Emit exactly one code block of this form, with the chosen option's "
     "text copied verbatim from the candidate list:\n"
-    '<final_answer><exact text of the option you choose></final_answer>'
+    '<code>\nfinal_answer("<exact text of the option you choose>")\n</code>'
 )
 
 
@@ -260,12 +260,12 @@ async def ingest_and_compress(book: EventQABook, cm_config: ContextManagerConfig
             f"{chunk_msg}\n\n"
             f"You have now read this part of the novel. Acknowledge it by "
             f"emitting exactly this code and nothing else:\n"
-            f'<final_answer>OK</final_answer>'
+            f'<code>\nfinal_answer("OK")\n</code>'
         )
         run_info = build_agent_run_info(
             query,
             conversation_history,
-            prompt=INGEST_DUTY,
+            duty_prompt=INGEST_DUTY,
             max_steps=args.ingest_max_steps,
             context_manager_config=cm_config,
             language="en",
@@ -321,7 +321,7 @@ async def run_probes(items, history: list[AgentHistory], args) -> tuple[list[dic
             run_info = build_agent_run_info(
                 it.question,
                 probe_history,
-                prompt=PROBE_DUTY,
+                duty_prompt=PROBE_DUTY,
                 max_steps=args.probe_max_steps,
                 context_manager_config=disabled_cm,
                 language="en",

@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 import {
   useState,
@@ -74,26 +72,6 @@ const EVALUATION_DELETE_ALL_ROLES = new Set<string>([
   USER_ROLES.SPEED,
   USER_ROLES.ASSET_OWNER,
 ]);
-
-/**
- * A required `expected` input means the evaluator grades against a reference
- * answer. Code evaluators may declare it without using it, so the input
- * declaration is the only signal considered here.
- */
-type EvaluatorInputField = {
-  name?: string;
-  required?: boolean;
-};
-
-function evaluatorRequiresExpectedAnswer(
-  evaluator: { input_fields?: EvaluatorInputField[] | null } | null | undefined
-): boolean {
-  const fields = evaluator?.input_fields;
-  return (
-    Array.isArray(fields) &&
-    fields.some((field) => field.name === "expected" && field.required === true)
-  );
-}
 
 /**
  * Fire a body-less mutating request (DELETE / POST) and surface backend
@@ -463,23 +441,6 @@ function RunsTab() {
     },
   ];
 
-  // no_set mode generates questions only, so evaluators that need a golden
-  // answer stay visible but disabled, after the selectable ones.
-  const publishedEvaluators = evaluators.filter(
-    (e) => e.status === "PUBLISHED"
-  );
-  const evaluatorOptions =
-    evalMode === "no_set"
-      ? [
-          ...publishedEvaluators.filter(
-            (e) => !evaluatorRequiresExpectedAnswer(e)
-          ),
-          ...publishedEvaluators.filter((e) =>
-            evaluatorRequiresExpectedAnswer(e)
-          ),
-        ]
-      : publishedEvaluators;
-
   return (
     <div>
       <Flex justify="space-between" align="center" style={{ marginBottom: 16 }}>
@@ -696,11 +657,6 @@ function RunsTab() {
               }
             >
               <Flex vertical gap={8}>
-                {evalMode === "no_set" && (
-                  <Text type="secondary" className="text-xs">
-                    {t("agentEvaluation.noSetEvaluatorHint")}
-                  </Text>
-                )}
                 <Select
                   mode="multiple"
                   maxCount={5}
@@ -726,9 +682,9 @@ function RunsTab() {
                     });
                     setMappings(newM);
                   }}
-                  options={evaluatorOptions.map((e) => {
-                    const needsExpected = evaluatorRequiresExpectedAnswer(e);
-                    return {
+                  options={evaluators
+                    .filter((e: any) => e.status === "PUBLISHED")
+                    .map((e: any) => ({
                       label:
                         currentLang === "en"
                           ? e.name_en || e.name
@@ -738,34 +694,10 @@ function RunsTab() {
                         currentLang === "en"
                           ? e.description_en || e.description || ""
                           : e.description || e.description_en || "",
-                      needsExpected,
-                      disabled: evalMode === "no_set" && needsExpected,
-                    };
-                  })}
+                    }))}
                   optionRender={(opt: any) => (
                     <Flex vertical gap={2}>
-                      <Flex align="center" gap={6} wrap>
-                        <Text
-                          strong
-                          type={opt.data.disabled ? "secondary" : undefined}
-                        >
-                          {opt.label}
-                        </Text>
-                        {evalMode === "no_set" && (
-                          <Tag
-                            color={
-                              opt.data.needsExpected ? "default" : "success"
-                            }
-                            style={{ margin: 0 }}
-                          >
-                            {opt.data.needsExpected
-                              ? t("agentEvaluation.evaluatorRequiresExpected")
-                              : t(
-                                  "agentEvaluation.evaluatorNoExpectedRequired"
-                                )}
-                          </Tag>
-                        )}
-                      </Flex>
+                      <Text strong>{opt.label}</Text>
                       {opt.data.desc && (
                         <Text
                           type="secondary"
@@ -1568,61 +1500,47 @@ function EvaluatorsTab() {
                 </Flex>
               }
             >
-              <Flex vertical gap={4}>
+              <Flex vertical gap={8}>
                 <Text className="text-xs" type="secondary">
                   {t("agentEvaluation.evaluatorAiGenHint")}
                 </Text>
                 <Input.TextArea
                   rows={3}
                   maxLength={500}
-                  aria-describedby="evaluator-generation-description-count"
+                  showCount
                   value={genDesc}
                   onChange={(e) => setGenDesc(e.target.value)}
                   placeholder={t("agentEvaluation.evaluatorAiGenPlaceholder")}
                 />
-                <Text
-                  id="evaluator-generation-description-count"
-                  className="block min-h-4 text-right text-xs leading-4"
-                  type="secondary"
-                >
-                  {genDesc.length} / 500
-                </Text>
-                <div className="-mt-1 flex flex-wrap items-end gap-2">
-                  <Flex align="center" gap={6} className="min-w-[180px] flex-1">
-                    <Text className="shrink-0 text-xs">
-                      {t("agentEvaluation.aiGenModel")}
-                    </Text>
-                    <Select
-                      style={{ minWidth: 0, flex: 1 }}
-                      aria-label={t("agentEvaluation.aiGenModel")}
-                      value={genModel}
-                      onChange={setGenModel}
-                      options={availableLlmModels.map((m) => ({
-                        label: m.displayName || m.name,
-                        value: m.id,
-                      }))}
-                    />
-                  </Flex>
-                  <Flex align="center" gap={6} className="min-w-[180px] flex-1">
-                    <Text className="shrink-0 text-xs">
-                      {t("agentEvaluation.aiGenAgent")}
-                    </Text>
-                    <Select
-                      style={{ minWidth: 0, flex: 1 }}
-                      aria-label={t("agentEvaluation.aiGenAgent")}
-                      value={genAgent}
-                      onChange={setGenAgent}
-                      allowClear
-                      placeholder={t("agentEvaluation.genSelectAgent")}
-                      options={agents.map((a: any) => ({
-                        label: a.display_name || a.name,
-                        value: a.agent_id,
-                      }))}
-                    />
-                  </Flex>
+                <Flex gap={8} align="center" wrap>
+                  <Text className="text-xs" style={{ whiteSpace: "nowrap" }}>
+                    {t("agentEvaluation.aiGenModel")}
+                  </Text>
+                  <Select
+                    style={{ width: 200 }}
+                    value={genModel}
+                    onChange={setGenModel}
+                    options={availableLlmModels.map((m) => ({
+                      label: m.displayName || m.name,
+                      value: m.id,
+                    }))}
+                  />
+                  <Text className="text-xs" style={{ whiteSpace: "nowrap" }}>
+                    {t("agentEvaluation.aiGenAgent")}
+                  </Text>
+                  <Select
+                    style={{ width: 180 }}
+                    value={genAgent}
+                    onChange={setGenAgent}
+                    allowClear
+                    placeholder={t("agentEvaluation.genSelectAgent")}
+                    options={agents.map((a: any) => ({
+                      label: a.display_name || a.name,
+                      value: a.agent_id,
+                    }))}
+                  />
                   <Button
                     type="primary"
-                    className="shrink-0"
                     icon={<Zap className="size-4" />}
                     loading={busy}
                     onClick={async () => {
@@ -1675,7 +1593,7 @@ function EvaluatorsTab() {
                   >
                     {t("agentEvaluation.aiGenerate")}
                   </Button>
-                </div>
+                </Flex>
               </Flex>
             </Card>
             {/* Manual edit section */}

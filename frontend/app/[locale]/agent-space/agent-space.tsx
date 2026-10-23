@@ -1,12 +1,9 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MenuProps } from "antd";
-import { App, Button, Dropdown, Empty, Input, Modal, Select, Spin } from "antd";
+import { App, Button, Dropdown, Empty, Grid, Input, Modal, Spin } from "antd";
 import {
-  Bot,
   Copy,
   Download,
   MoreHorizontal,
@@ -14,14 +11,12 @@ import {
   Search,
   ShieldCheck,
 } from "lucide-react";
-import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { USER_ROLES } from "@/const/auth";
 import { useTagLibraries, useTagDefinitions } from "@/hooks/useTagManagement";
 import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 
-import { REPOSITORY_PAGE_SIZE } from "@/const/resource";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import ResourceCard from "@/components/resource/ResourceCard";
 import { AgentDetail } from "@/components/agent/agent-detail";
@@ -37,19 +32,65 @@ import {
 } from "@/hooks/agentRepository/useAgentRepositoryListings";
 import { useRepositoryAgentDetail } from "@/hooks/agentRepository/useRepositoryAgentDetail";
 
-type RepositorySortOrder = "default" | "latest";
+const CARD_GAP = 20;
+const MIN_CARD_HEIGHT = 240;
+const PAGINATION_HEIGHT = 60;
 
 export function AgentSpace({ active }: { active: boolean }) {
   const { t } = useTranslation("common");
-  const displayName = useUserDisplayName();
   const { message } = App.useApp();
   const { user } = useAuthorizationContext();
   const showAdminMenu = user?.role === USER_ROLES.ADMIN;
+  const screens = Grid.useBreakpoint();
+  const gridRegionRef = useRef<HTMLDivElement>(null);
+  const [availableGridHeight, setAvailableGridHeight] = useState<number | null>(
+    null
+  );
+  const columns = screens.xxl
+    ? 4
+    : screens.xl
+      ? 3
+      : screens.lg || screens.md || screens.sm
+        ? 2
+        : screens.xs
+          ? 1
+          : 4;
+  const pageBottomPadding = screens.sm ? 40 : 32;
+  const rows = getRowCount(
+    Math.max(0, (availableGridHeight ?? 0) - PAGINATION_HEIGHT)
+  );
+  const pageSize = columns * rows;
+  const measureGridHeight = useCallback(() => {
+    if (!active || !gridRegionRef.current) return;
+
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const { top } = gridRegionRef.current.getBoundingClientRect();
+    setAvailableGridHeight(
+      Math.max(0, Math.floor(viewportHeight - top - pageBottomPadding - 8))
+    );
+  }, [active, pageBottomPadding]);
+
+  useEffect(() => {
+    if (!active) return;
+
+    const frame = window.requestAnimationFrame(measureGridHeight);
+    const observer = new ResizeObserver(measureGridHeight);
+    const visualViewport = window.visualViewport;
+    if (gridRegionRef.current) observer.observe(gridRegionRef.current);
+    window.addEventListener("resize", measureGridHeight);
+    visualViewport?.addEventListener("resize", measureGridHeight);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      window.removeEventListener("resize", measureGridHeight);
+      visualViewport?.removeEventListener("resize", measureGridHeight);
+    };
+  }, [active, measureGridHeight]);
   const [searchQuery, setSearchQuery] = useState("");
   const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
     []
   );
-  const [sortOrder, setSortOrder] = useState<RepositorySortOrder>("default");
   const [page, setPage] = useState(1);
   const { data: tagLibraries } = useTagLibraries();
   const defaultTagLibrary =
@@ -67,21 +108,34 @@ export function AgentSpace({ active }: { active: boolean }) {
     () => ({
       status: "shared" as const,
       page,
-      page_size: REPOSITORY_PAGE_SIZE,
+      page_size: pageSize,
       ...(searchQuery.trim() ? { search: searchQuery.trim() } : {}),
       ...(searchTagPredicates.length > 0
         ? { search_tag_predicates: searchTagPredicates }
         : {}),
       ...(tagPredicates.length > 0 ? { tag_predicates: tagPredicates } : {}),
-      ...(sortOrder === "latest" ? { sort_by_update_time: true } : {}),
     }),
-    [page, searchQuery, searchTagPredicates, tagPredicates, sortOrder]
+    [page, pageSize, searchQuery, searchTagPredicates, tagPredicates]
   );
   const { data, isLoading, isError, isFetching, refetch } =
     useAgentRepositoryListings(listingParams, active);
   const updateStatusMutation = useUpdateAgentRepositoryStatus();
   const listings = data?.items ?? [];
   const total = data?.pagination?.total ?? 0;
+  const gridHeight =
+    availableGridHeight === null
+      ? undefined
+      : Math.max(0, availableGridHeight - (total > 0 ? PAGINATION_HEIGHT : 0));
+  const cardHeight =
+    gridHeight === undefined
+      ? undefined
+      : Math.max(0, (gridHeight - CARD_GAP * (rows - 1)) / rows);
+  const descriptionLines =
+    cardHeight === undefined || cardHeight >= 320
+      ? 3
+      : cardHeight >= 260
+        ? 2
+        : 1;
   const updatingRepositoryId = updateStatusMutation.isPending
     ? (updateStatusMutation.variables?.agentRepositoryId ?? null)
     : null;
@@ -91,10 +145,6 @@ export function AgentSpace({ active }: { active: boolean }) {
   };
   const onTagPredicatesChange = (value: TagResourcePredicate[]) => {
     setTagPredicates(value);
-    setPage(1);
-  };
-  const onSortOrderChange = (value: RepositorySortOrder) => {
-    setSortOrder(value);
     setPage(1);
   };
   const onTakeDown = (listing: AgentRepositoryListingItem) =>
@@ -145,18 +195,12 @@ export function AgentSpace({ active }: { active: boolean }) {
       listing.display_name?.trim() ||
       listing.name?.trim() ||
       t("agentRepository.card.untitled");
-    const author = displayName(
-      listing.author_cas_username,
-      listing.author?.trim() || ""
-    );
+    const author = listing.author?.trim();
     const tags = listing.tags?.filter((tag) => tag.trim()) ?? [];
     const toolCount = listing.tool_count ?? 0;
     const downloads = listing.downloads ?? 0;
     const isTakingDown = updatingRepositoryId === listing.agent_repository_id;
     const isOfficialListing = listing.is_official === true;
-    const isMainAgent = listing.is_main_agent !== false;
-    const showBadge =
-      isOfficialListing || Boolean(listing.version_label) || isMainAgent;
     // Official templates are managed from the super-admin resource page.
     // The ordinary repository status menu must not expose take-down actions
     // for official listings to tenant administrators.
@@ -177,9 +221,10 @@ export function AgentSpace({ active }: { active: boolean }) {
     return (
       <ResourceCard
         key={listing.agent_repository_id}
-        className="h-full"
+        className="h-full min-h-0"
         title={title}
         onClick={() => setDetailListing(listing)}
+        descriptionLines={descriptionLines}
         icon={
           <div className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-xl text-primary">
             <RepositoryAgentIcon
@@ -194,18 +239,12 @@ export function AgentSpace({ active }: { active: boolean }) {
           listing.description?.trim() || t("agentRepository.card.noDescription")
         }
         badge={
-          showBadge ? (
+          isOfficialListing || listing.version_label ? (
             <>
               {isOfficialListing ? (
                 <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-1.5 py-0.5 text-[11px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
                   <ShieldCheck className="size-3" aria-hidden />
                   {t("agentRepository.card.official")}
-                </span>
-              ) : null}
-              {isMainAgent ? (
-                <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-                  <Bot className="size-3" aria-hidden />
-                  {t("agentRepository.card.mainAgent")}
                 </span>
               ) : null}
               {listing.version_label ? (
@@ -244,13 +283,7 @@ export function AgentSpace({ active }: { active: boolean }) {
           ) : undefined
         }
         footerLayout="inline"
-        meta={
-          author ? (
-            <span className="block truncate" title={author}>
-              {author}
-            </span>
-          ) : undefined
-        }
+        meta={author ? <span className="truncate">{author}</span> : undefined}
         headerActions={
           <div className="flex items-center gap-1">
             <span
@@ -309,18 +342,8 @@ export function AgentSpace({ active }: { active: boolean }) {
           value={tagPredicates}
           onChange={onTagPredicatesChange}
         />
-        <Select<RepositorySortOrder>
-          value={sortOrder}
-          onChange={onSortOrderChange}
-          className="w-44 shrink-0"
-          aria-label={t("agentRepository.sort.label")}
-          options={[
-            { value: "default", label: t("agentRepository.sort.default") },
-            { value: "latest", label: t("agentRepository.sort.latest") },
-          ]}
-        />
       </div>
-      <div className="min-h-0">
+      <div ref={gridRegionRef} className="min-h-0">
         {isLoading ? (
           <div className="flex items-center justify-center py-16">
             <Spin size="large" />
@@ -341,7 +364,9 @@ export function AgentSpace({ active }: { active: boolean }) {
         ) : (
           <ResourceCardGrid
             items={listings}
-            pageSize={REPOSITORY_PAGE_SIZE}
+            columns={columns}
+            rows={rows}
+            gridHeight={gridHeight}
             page={page}
             total={total}
             onPageChange={setPage}
@@ -387,5 +412,16 @@ export function AgentSpace({ active }: { active: boolean }) {
         }}
       />
     </div>
+  );
+}
+
+function getRowCount(availableHeight: number) {
+  if (availableHeight <= 0) return 3;
+  return Math.min(
+    3,
+    Math.max(
+      1,
+      Math.floor((availableHeight + CARD_GAP) / (MIN_CARD_HEIGHT + CARD_GAP))
+    )
   );
 }

@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for backend/database/remote_mcp_db.py
 
@@ -39,7 +38,7 @@ utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
 sys.modules['utils'] = utils_mock
-sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
+sys.modules['utils.auth_utils'] = utils_mock.auth_utils
 
 # Mock boto3
 boto3_mock = MagicMock()

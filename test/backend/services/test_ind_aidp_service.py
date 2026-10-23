@@ -1,8 +1,7 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
 import httpx
 
-from management.services.knowledge_base.providers import aidp as ind_aidp_service
+from services import ind_aidp_service
 
 
 @pytest.mark.asyncio

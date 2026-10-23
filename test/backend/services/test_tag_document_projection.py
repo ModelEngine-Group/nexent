@@ -1,7 +1,6 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
-from management.services.knowledge_base import tag_projection as projection_module
-from management.services.knowledge_base.tag_projection import (
+from services import tag_document_projection as projection_module
+from services.tag_document_projection import (
     AIDP_DOCUMENT_PROVIDER,
     STATUS_FAILED,
     STATUS_SYNCED,
@@ -17,8 +16,8 @@ from management.services.knowledge_base.tag_projection import (
     project_document_assignments,
     retry_pending_document_projections,
 )
-from management.services.tag.library import TagManagementService
-from management.services.tag.resources import (
+from services.tag_management_service import TagManagementService
+from services.tag_resource_adapters import (
     AuthenticatedCaller,
     CanonicalResourceIdentity,
     ResolvedTagResource,
@@ -205,61 +204,6 @@ def test_provider_rejection_is_retryable_and_preserves_canonical_assignments(mon
     assert result["status"] == STATUS_FAILED
     assert result["retry_count"] == 2
     assert result["next_attempt_at"] is not None
-    assert captured["last_error"] == "es unavailable"
-    assert captured["status"] == STATUS_FAILED
-    assert projected[0]["tags"] == assignments
-    assert assignments == _assignments()
-
-
-def test_first_attempt_failure_records_retryable_state(monkeypatch):
-    """First-ever projection has no ledger row: failure must still record a retryable state."""
-    assignments = _assignments()
-    monkeypatch.setattr(
-        projection_module.TagManagementDB,
-        "list_resource_assignments",
-        lambda *args, **kwargs: assignments,
-    )
-    monkeypatch.setattr(
-        projection_module.document_tag_projection_db,
-        "get_projection_state",
-        lambda *args, **kwargs: None,
-    )
-    captured = {}
-
-    def fake_upsert(**kwargs):
-        captured.update(kwargs)
-        return {**kwargs, "payload": kwargs["payload"]}
-
-    monkeypatch.setattr(
-        projection_module.document_tag_projection_db,
-        "upsert_projection_state",
-        fake_upsert,
-    )
-    projected = []
-
-    class FailingProvider:
-        provider_name = "local"
-
-        def capability(self):
-            return "full"
-
-        def project(self, payload):
-            projected.append(payload)
-            raise RuntimeError("es unavailable")
-
-        def clear(self, resource_id):
-            pass
-
-    monkeypatch.setattr(
-        projection_module, "get_projection_provider", lambda *args, **kwargs: FailingProvider()
-    )
-
-    result = project_document_assignments("t1", "local", "kb-1", "doc-a", "user-1")
-
-    assert result["status"] == STATUS_FAILED
-    assert result["retry_count"] == 1
-    assert result["next_attempt_at"] is not None
-    assert captured["retry_count"] == 1
     assert captured["last_error"] == "es unavailable"
     assert captured["status"] == STATUS_FAILED
     assert projected[0]["tags"] == assignments
@@ -571,10 +515,10 @@ async def test_replace_document_assignments_returns_projection_status(monkeypatc
         TagManagementService, "resource_adapter_registry", _Registry(_document_resource())
     )
     monkeypatch.setattr(
-        "management.services.tag.library.TagManagementDB.replace_resource_assignments",
+        "services.tag_management_service.TagManagementDB.replace_resource_assignments",
         lambda *args, **kwargs: [],
     )
-    monkeypatch.setattr("management.services.tag.library.TAG_DOCUMENT_PROJECTION_ENABLED", True)
+    monkeypatch.setattr("services.tag_management_service.TAG_DOCUMENT_PROJECTION_ENABLED", True)
     called = {}
 
     def fake_project(tenant_id, provider, kb, doc, actor, **kwargs):
@@ -584,7 +528,7 @@ async def test_replace_document_assignments_returns_projection_status(monkeypatc
         return {"status": STATUS_SYNCED, "version": 1, "tag_count": 0}
 
     monkeypatch.setattr(
-        "management.services.knowledge_base.tag_projection.project_document_assignments", fake_project
+        "services.tag_document_projection.project_document_assignments", fake_project
     )
 
     result = await TagManagementService.replace_resource_assignments(
@@ -617,7 +561,7 @@ async def test_replace_non_document_skips_projection(monkeypatch):
         TagManagementService, "resource_adapter_registry", _Registry(resource)
     )
     monkeypatch.setattr(
-        "management.services.tag.library.TagManagementDB.replace_resource_assignments",
+        "services.tag_management_service.TagManagementDB.replace_resource_assignments",
         lambda *args, **kwargs: [],
     )
     calls = []
@@ -627,7 +571,7 @@ async def test_replace_non_document_skips_projection(monkeypatch):
         return {"status": STATUS_SYNCED}
 
     monkeypatch.setattr(
-        "management.services.knowledge_base.tag_projection.project_document_assignments", fake_project
+        "services.tag_document_projection.project_document_assignments", fake_project
     )
 
     result = await TagManagementService.replace_resource_assignments(
@@ -637,7 +581,7 @@ async def test_replace_non_document_skips_projection(monkeypatch):
     assert result["projection_status"] is None
     assert calls == []
 
-from management.services.knowledge_base.tag_projection import document_projection_status_dict
+from services.tag_document_projection import document_projection_status_dict
 
 
 def test_document_projection_status_dict_formats_raw_state():

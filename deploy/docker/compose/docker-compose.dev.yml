@@ -47,7 +47,6 @@ services:
       - /opt/backend/.venv/
       - ${ROOT_DIR}:/mnt/nexent-data
     environment:
-      TZ: "${TZ:-Asia/Shanghai}"
       skip_proxy: "true"
       PATH: "/usr/local/bin:/usr/bin/:/opt/backend/.venv/bin:${PATH}"
       VIRTUAL_ENV: "/opt/backend/.venv"

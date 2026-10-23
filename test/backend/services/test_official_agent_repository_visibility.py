@@ -1,7 +1,6 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from unittest.mock import patch
 
-from management.services.repository.agent import listing as repository_service
+from services import agent_repository_service as repository_service
 
 
 def _record(repository_id: int, tenant_id: str, status: str = "shared") -> dict:

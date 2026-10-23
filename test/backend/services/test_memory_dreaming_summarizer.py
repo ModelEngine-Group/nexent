@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import threading
 import time
 from types import SimpleNamespace
@@ -10,12 +9,12 @@ from nexent.memory.dreaming import (
     DreamingSummarizationRequest,
 )
 from nexent.core.concurrency import LanePolicy, ThreadManager
-from management.services.memory.dreaming.summarizer import (
+from services.memory_dreaming_summarizer import (
     TenantDreamingSummarizer,
     _load_prompt,
     _parse_summary_envelope,
 )
-from management.services.memory.dreaming import summarizer as memory_dreaming_summarizer
+from services import memory_dreaming_summarizer
 
 
 @pytest.mark.parametrize("value", ["", "# User Memory", "<summary>x", "x<summary>y</summary>",

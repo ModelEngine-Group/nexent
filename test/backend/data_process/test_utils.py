@@ -1,14 +1,13 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Focused tests for backend.data_process.utils.
 
 Targets the public async helpers (`get_task_info`, `get_task_details`) and the
 small parsing helpers `_parse_failure_info` / `get_all_task_ids_from_redis`.
 
-The data_process package requires a heavy set of dependencies (celery,
-consts, management.services.knowledge_base.task_state, etc.), so this module installs minimal stubs
+The data_process package requires a heavy set of dependencies (celery, ray,
+consts, services.redis_service, etc.), so this module installs minimal stubs
 *before* importing backend.data_process.utils. We deliberately do NOT call
-the task module from `test_tasks.py` because that helper reloads
+`import_tasks_with_fake_ray` from `test_tasks.py` because that helper reloads
 celery — which fails when sibling tests have already installed MagicMock
 versions of the celery.* submodules.
 """
@@ -24,6 +23,15 @@ import pytest
 
 def _ensure_stubs(monkeypatch):
     """Install minimal stubs so `backend.data_process.utils` can be imported."""
+    # Stub ray (utils never touches ray, but the package __init__ chains through
+    # tasks → app → utils, so we still need it).
+    fake_ray = types.ModuleType("ray")
+    fake_ray.is_initialized = lambda: False
+    fake_ray.init = lambda **kw: None
+    fake_ray.get = lambda ref, *a, **kw: ref
+    fake_ray.remote = lambda **kw: (lambda obj: obj)
+    monkeypatch.setitem(sys.modules, "ray", fake_ray)
+
     # Stub celery.result with AsyncResult and allow_join_result (utils.py imports
     # both via `from celery.result import AsyncResult`).
     celery_result_mod = types.ModuleType("celery.result")
@@ -107,13 +115,13 @@ def _ensure_stubs(monkeypatch):
             here, '..', '..', '..', 'backend', 'data_process'))]
         monkeypatch.setitem(sys.modules, "backend.data_process", backend_dp_pkg)
 
-    # management.services.knowledge_base.task_state: utils.py imports it lazily inside get_task_info
+    # services.redis_service: utils.py imports it lazily inside get_task_info
     # to call get_redis_service().get_progress_info(...).
-    fake_redis_service = types.ModuleType("management.services.knowledge_base.task_state")
+    fake_redis_service = types.ModuleType("services.redis_service")
     fake_redis_service.get_redis_service = lambda: types.SimpleNamespace(
         get_progress_info=lambda tid: None,
     )
-    monkeypatch.setitem(sys.modules, "management.services.knowledge_base.task_state", fake_redis_service)
+    monkeypatch.setitem(sys.modules, "services.redis_service", fake_redis_service)
     monkeypatch.setitem(sys.modules, "services", types.ModuleType("services"))
 
     return {
@@ -332,51 +340,6 @@ def test_get_all_task_ids_empty_redis(monkeypatch):
     assert get_all_task_ids_from_redis(redis_client) == []
 
 
-def test_document_lifecycle_and_delete_fence_helpers(monkeypatch):
-    from backend.data_process import utils
-
-    transitions = []
-    lifecycle = types.ModuleType("database.knowledge_file_lifecycle_db")
-    lifecycle.get_file_record = lambda **kwargs: (
-        {"file_id": "fid", "status": "PROCESSING"}
-        if kwargs.get("file_id") == "fid"
-        else {"file_id": "source-fid", "status": "PROCESSING"}
-    )
-    lifecycle.transition_file_record = lambda file_id, **kwargs: transitions.append((file_id, kwargs))
-    monkeypatch.setitem(sys.modules, "database.knowledge_file_lifecycle_db", lifecycle)
-
-    utils.update_file_lifecycle(
-        file_id="fid", tenant_id="tenant", index_name="idx", source="source", status="FORWARDING", stage="FORWARD"
-    )
-    utils.update_file_lifecycle(
-        file_id=None, tenant_id=None, index_name="idx", source="source", status="FAILED", stage="PROCESS"
-    )
-    assert [item[0] for item in transitions] == ["fid", "source-fid"]
-
-    utils.update_file_lifecycle(
-        file_id="fid", tenant_id="tenant", index_name=None, source="source", status="FAILED", stage="PROCESS"
-    )
-    lifecycle.get_file_record = lambda **_kwargs: {"file_id": "fid", "status": "DELETED"}
-    utils.update_file_lifecycle(
-        file_id="fid", tenant_id="tenant", index_name="idx", source="source", status="FAILED", stage="PROCESS"
-    )
-
-    redis_service = sys.modules["management.services.knowledge_base.task_state"]
-    monkeypatch.setattr(redis_service, "get_redis_service", lambda: types.SimpleNamespace(
-        is_document_delete_requested=lambda **_kwargs: True,
-    ))
-    assert utils.is_document_delete_requested(index_name="idx", source="source", file_id="fid") is True
-    assert utils.is_document_delete_requested(index_name="idx", source="source", file_id=None) is False
-    with pytest.raises(utils.DocumentDeleteRequested):
-        utils.ensure_document_not_deleted(index_name="idx", source="source", file_id="fid")
-
-    monkeypatch.setattr(redis_service, "get_redis_service", lambda: (_ for _ in ()).throw(RuntimeError("redis down")))
-    lifecycle.get_file_record = lambda **_kwargs: {"file_id": "fid", "status": "DELETE_REQUESTED"}
-    assert utils.is_document_delete_requested(index_name="idx", source="source", file_id="fid") is True
-    lifecycle.get_file_record = lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("db down"))
-    assert utils.is_document_delete_requested(index_name="idx", source="source", file_id="fid") is False
-
-
 # ----------------------------------------------------------------------
 # get_task_info — backend_available / status parsing
 # ----------------------------------------------------------------------
@@ -499,7 +462,7 @@ def test_get_task_info_redis_progress_overrides_metadata(
     metadata = {"total_chunks": 100, "processed_chunks": 25}
     fake = _FakeAsyncResult(status="STARTED", info=metadata)
 
-    rs = sys.modules["management.services.knowledge_base.task_state"]
+    rs = sys.modules["services.redis_service"]
     original_get = rs.get_redis_service
     rs.get_redis_service = lambda: types.SimpleNamespace(
         get_progress_info=lambda tid: {"processed_chunks": 80, "total_chunks": 100}
@@ -526,7 +489,7 @@ def test_get_task_info_redis_progress_failure_falls_back(
         def get_progress_info(self, task_id):
             raise RuntimeError("redis down")
 
-    rs = sys.modules["management.services.knowledge_base.task_state"]
+    rs = sys.modules["services.redis_service"]
     original_get = rs.get_redis_service
     rs.get_redis_service = lambda: _Boom()
 

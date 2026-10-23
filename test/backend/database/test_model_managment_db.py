@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import importlib
 import sys
 import pytest
@@ -35,7 +34,7 @@ utils_mock.auth_utils.get_current_user_id = MagicMock(return_value=("test_user_i
 
 # Register mocked utils module in sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
+sys.modules['utils.auth_utils'] = utils_mock.auth_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -158,29 +157,29 @@ def test_create_model_record(monkeypatch):
     """Test create_model_record function (covers lines 23-42)"""
     mock_result = MagicMock()
     mock_result.rowcount = 1
-
+    
     mock_stmt = MagicMock()
     mock_stmt.values.return_value = mock_stmt
-
+    
     mock_insert = MagicMock(return_value=mock_stmt)
     monkeypatch.setattr("backend.database.model_management_db.insert", mock_insert)
-
+    
     session = MagicMock()
     session.execute.return_value = mock_result
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
-
+    
     # Mock clean_string_values and add_creation_tracking
     monkeypatch.setattr("backend.database.model_management_db.db_client.clean_string_values", lambda x: x)
     monkeypatch.setattr("backend.database.model_management_db.add_creation_tracking", lambda x, uid: x)
     monkeypatch.setattr("backend.database.model_management_db.func.current_timestamp", MagicMock())
-
+    
     model_data = {"model_name": "test", "model_type": "llm"}
     result = model_mgmt_db.create_model_record(model_data, user_id="u1", tenant_id="t1")
-
+    
     assert result is True
     session.execute.assert_called_once()
 
@@ -189,30 +188,30 @@ def test_update_model_record(monkeypatch):
     """Test update_model_record function (covers lines 63-84)"""
     mock_result = MagicMock()
     mock_result.rowcount = 1
-
+    
     mock_stmt = MagicMock()
     mock_stmt.where.return_value = mock_stmt
     mock_stmt.values.return_value = mock_stmt
-
+    
     mock_update = MagicMock(return_value=mock_stmt)
     monkeypatch.setattr("backend.database.model_management_db.update", mock_update)
-
+    
     session = MagicMock()
     session.execute.return_value = mock_result
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
-
+    
     # Mock clean_string_values and add_update_tracking
     monkeypatch.setattr("backend.database.model_management_db.db_client.clean_string_values", lambda x: x)
     monkeypatch.setattr("backend.database.model_management_db.add_update_tracking", lambda x, uid: x)
     monkeypatch.setattr("backend.database.model_management_db.func.current_timestamp", MagicMock())
-
+    
     update_data = {"model_name": "updated"}
     result = model_mgmt_db.update_model_record(1, update_data, user_id="u1", tenant_id="t1")
-
+    
     assert result is True
     session.execute.assert_called_once()
 
@@ -244,28 +243,28 @@ def test_delete_model_record(monkeypatch):
     """Test delete_model_record function (covers lines 99-119)"""
     mock_result = MagicMock()
     mock_result.rowcount = 1
-
+    
     mock_stmt = MagicMock()
     mock_stmt.where.return_value = mock_stmt
     mock_stmt.values.return_value = mock_stmt
-
+    
     mock_update = MagicMock(return_value=mock_stmt)
     monkeypatch.setattr("backend.database.model_management_db.update", mock_update)
-
+    
     session = MagicMock()
     session.execute.return_value = mock_result
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
-
+    
     # Mock add_update_tracking
     monkeypatch.setattr("backend.database.model_management_db.add_update_tracking", lambda x, uid: x)
     monkeypatch.setattr("backend.database.model_management_db.func.current_timestamp", MagicMock())
-
+    
     result = model_mgmt_db.delete_model_record(1, user_id="u1", tenant_id="t1")
-
+    
     assert result is True
     session.execute.assert_called_once()
 
@@ -283,13 +282,13 @@ def test_get_model_records_with_tenant_id(monkeypatch):
     mock_scalars.all.return_value = [mock_model]
     session = MagicMock()
     session.scalars.return_value = mock_scalars
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
-
+    
     records = model_mgmt_db.get_model_records({"model_type": "llm"}, tenant_id="tenant4")
     assert len(records) == 1
     assert records[0]["tenant_id"] == "tenant4"
@@ -309,13 +308,13 @@ def test_get_model_records_with_none_filter(monkeypatch):
     mock_scalars.all.return_value = [mock_model]
     session = MagicMock()
     session.scalars.return_value = mock_scalars
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
-
+    
     records = model_mgmt_db.get_model_records({"display_name": None}, tenant_id="tenant5")
     assert len(records) == 1
 
@@ -334,13 +333,13 @@ def test_get_model_by_display_name(monkeypatch):
     mock_scalars.all.return_value = [mock_model]
     session = MagicMock()
     session.scalars.return_value = mock_scalars
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
-
+    
     result = model_mgmt_db.get_model_by_display_name("GPT-4", "tenant6")
     assert result is not None
     assert result["display_name"] == "GPT-4"
@@ -360,13 +359,13 @@ def test_get_model_id_by_display_name(monkeypatch):
     mock_scalars.all.return_value = [mock_model]
     session = MagicMock()
     session.scalars.return_value = mock_scalars
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
-
+    
     result = model_mgmt_db.get_model_id_by_display_name("GPT-4", "tenant7")
     assert result == 7
 
@@ -412,12 +411,12 @@ def test_get_model_by_model_id_with_tenant_id(monkeypatch):
     mock_scalars.first.return_value = mock_model
     session = MagicMock()
     session.scalars.return_value = mock_scalars
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
-
+    
     result = model_mgmt_db.get_model_by_model_id(8, tenant_id="tenant8")
     assert result is not None
     assert result["model_id"] == 8
@@ -436,13 +435,13 @@ def test_get_model_by_name_factory(monkeypatch):
     mock_scalars.all.return_value = [mock_model]
     session = MagicMock()
     session.scalars.return_value = mock_scalars
-
+    
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
-
+    
     result = model_mgmt_db.get_model_by_name_factory("gpt-4", "openai", "tenant9")
     assert result is not None
     assert result["model_name"] == "gpt-4"

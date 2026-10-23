@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP endpoint tests for agent evaluations and evaluation sets.
 
 The project runner executes each file in a separate process. Service and
@@ -26,14 +25,14 @@ sys.path.insert(0, backend_dir)
 
 # Isolate service and persistence boundaries before loading the real routers.
 _STUB_SYMBOLS = {
-    "management.services.evaluation.runs": (
+    "services.agent_evaluation_service": (
         "create_agent_evaluation_run_impl", "delete_agent_evaluation_run_impl",
         "generate_analysis_report_impl", "get_agent_evaluation_run_impl",
         "get_evaluation_stats_impl", "list_agent_evaluation_cases_impl",
         "list_agent_evaluations_by_agent_impl", "trial_run_evaluator_impl",
     ),
-    "management.services.evaluation.reporting.report": ("generate_agent_evaluation_report_impl",),
-    "management.services.evaluation.sets": (
+    "services.evaluation_report_service": ("generate_agent_evaluation_report_impl",),
+    "services.evaluation_set_service": (
         "_generate_cases_async", "_update_generation_status", "add_evaluation_set_case_impl",
         "batch_delete_evaluation_set_cases_impl", "count_active_runs_using_set",
         "count_evaluation_sets_impl", "create_empty_evaluation_set", "create_evaluation_set_from_cases",
@@ -42,11 +41,11 @@ _STUB_SYMBOLS = {
         "update_evaluation_set_case_impl",
     ),
     "database.agent_evaluation_db": ("update_annotation_schema_ids",),
-    "management.services.permission.identity.authentication_helpers": ("get_current_user_id", "get_current_user_info", "generate_internal_runtime_jwt"),
-    "management.services.evaluation.spreadsheet": (
+    "utils.auth_utils": ("get_current_user_id", "get_current_user_info", "generate_internal_runtime_jwt"),
+    "utils.evaluation_set_excel_utils": (
         "build_evaluation_set_excel_template_bytes", "parse_evaluation_cases_from_excel",
     ),
-    "infrastructure.concurrency": ("config_thread_manager",),
+    "utils.thread_utils": ("pool",),
 }
 for _module_name, _symbols in _STUB_SYMBOLS.items():
     _module = types.ModuleType(_module_name)
@@ -73,20 +72,20 @@ for _module_name, _symbols in _STUB_SYMBOLS.items():
 # 12  list_evaluation_sets_impl
 # 13  get_current_user_info          → ("u1", "t1", "zh")
 _PATCH_TARGETS = [
-    "management.services.evaluation.runs.delete_agent_evaluation_run_impl",
-    "management.services.evaluation.sets.delete_evaluation_set_impl",
-    "management.services.permission.identity.authentication_helpers.get_current_user_id",
-    "management.services.evaluation.runs.create_agent_evaluation_run_impl",
-    "management.services.evaluation.reporting.report.generate_agent_evaluation_report_impl",
-    "management.services.evaluation.runs.get_agent_evaluation_run_impl",
-    "management.services.evaluation.runs.list_agent_evaluation_cases_impl",
-    "management.services.evaluation.runs.list_agent_evaluations_by_agent_impl",
-    "management.services.evaluation.sets.create_evaluation_set_from_cases",
-    "management.services.evaluation.sets.create_empty_evaluation_set",
-    "management.services.evaluation.sets.get_evaluation_set_impl",
-    "management.services.evaluation.sets.list_evaluation_set_cases_impl",
-    "management.services.evaluation.sets.list_evaluation_sets_impl",
-    "management.services.permission.identity.authentication_helpers.get_current_user_info",
+    "services.agent_evaluation_service.delete_agent_evaluation_run_impl",
+    "services.evaluation_set_service.delete_evaluation_set_impl",
+    "utils.auth_utils.get_current_user_id",
+    "services.agent_evaluation_service.create_agent_evaluation_run_impl",
+    "services.evaluation_report_service.generate_agent_evaluation_report_impl",
+    "services.agent_evaluation_service.get_agent_evaluation_run_impl",
+    "services.agent_evaluation_service.list_agent_evaluation_cases_impl",
+    "services.agent_evaluation_service.list_agent_evaluations_by_agent_impl",
+    "services.evaluation_set_service.create_evaluation_set_from_cases",
+    "services.evaluation_set_service.create_empty_evaluation_set",
+    "services.evaluation_set_service.get_evaluation_set_impl",
+    "services.evaluation_set_service.list_evaluation_set_cases_impl",
+    "services.evaluation_set_service.list_evaluation_sets_impl",
+    "utils.auth_utils.get_current_user_info",
 ]
 
 
@@ -133,8 +132,8 @@ class TestEvaluationDeleteEndpoints(unittest.TestCase):
         # this the module's ``delete_*_impl`` symbol is still bound to the
         # real function in the imported apps modules' namespaces, and
         # patches appear to be ignored.
-        import management.services.evaluation.runs as _svc_a
-        import management.services.evaluation.sets as _svc_b
+        import services.agent_evaluation_service as _svc_a
+        import services.evaluation_set_service as _svc_b
 
         assert _svc_a.delete_agent_evaluation_run_impl is _DELETE_EVAL_MOCK
         assert _svc_b.delete_evaluation_set_impl is _DELETE_SET_MOCK

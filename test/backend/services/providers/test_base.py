@@ -7,7 +7,7 @@ import pytest
 from unittest.mock import MagicMock, AsyncMock, patch
 from pytest_mock import MockFixture
 
-from management.services.model.providers.base import (
+from backend.services.providers.base import (
     _create_error_response,
     _classify_provider_error,
     AbstractModelProvider,

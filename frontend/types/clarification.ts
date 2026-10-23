@@ -1,7 +1,7 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 export type ClarificationQuestionType =
-  "single_choice" | "multiple_choice" | "text";
+  | "single_choice"
+  | "multiple_choice"
+  | "text";
 
 export interface ClarificationOption {
   id: string;
@@ -51,18 +51,4 @@ export interface ClarificationMessageData {
   form: ClarificationForm;
   unitIndex?: number;
   completed?: boolean;
-  answers?: ClarificationAnswer[];
-  submitted?: boolean;
-}
-
-export interface ClarificationResponse {
-  schema_version: 1;
-  form: ClarificationForm;
-  unit_index?: number | null;
-  answers: ClarificationAnswer[];
-}
-
-export interface PersistedClarificationResponse extends ClarificationResponse {
-  source_message_id: number;
-  unit_index: number;
 }

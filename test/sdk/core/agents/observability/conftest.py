@@ -1,18 +1,15 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Use a real local tracer and bounded workers without external exporters."""
 
 import asyncio
 from types import SimpleNamespace
 
 import pytest
+from nexent.core.concurrency import LanePolicy, ThreadManager
+from nexent.monitor import MonitoringConfig, get_monitoring_manager
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from pytest_mock import MockerFixture
-
-from nexent.core.concurrency import LanePolicy, ThreadManager
-from nexent.monitor import MonitoringConfig, get_monitoring_manager
-from nexent.monitor.span_processor import MonitoringSpanProcessor
 
 
 @pytest.fixture
@@ -27,7 +24,7 @@ def mocker(pytestconfig):
 def spans(monkeypatch):
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
-    provider.add_span_processor(MonitoringSpanProcessor(SimpleSpanProcessor(exporter)))
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
     tracer = provider.get_tracer("nexent-test")
     manager = get_monitoring_manager()
     monkeypatch.setattr(manager, "_config", MonitoringConfig(enable_telemetry=True))

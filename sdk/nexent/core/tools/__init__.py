@@ -1,7 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 from .sql_tools import MySqlTool, PostgreSqlTool, MsSqlTool
-from .deepseek_search_tool import DeepSeekSearchTool
 from .exa_search_tool import ExaSearchTool
 from .get_email_tool import GetEmailTool
 from .knowledge_base_search_tool import KnowledgeBaseSearchTool
@@ -35,7 +32,6 @@ from .upload_to_s3_tool import UploadToS3Tool
 from .plan_tools import CreatePlanTool, UpdatePlanStepTool
 
 __all__ = [
-    "DeepSeekSearchTool",
     "MySqlTool",
     "PostgreSqlTool",
     "MsSqlTool",

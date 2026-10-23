@@ -17,7 +17,6 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
 ]
 dependencies = [
-    "cryptography>=42.0.0",
     "aiofiles>=24.1.0",
     "elasticsearch==8.17.2",
     "exa_py==1.14.0",
@@ -103,7 +102,7 @@ exclude = ["tests*", "examples*"]
 namespaces = true
 
 [tool.setuptools.package-data]
-"nexent.core.prompts" = ["zh/*/*.yaml", "en/*/*.yaml"]
+"nexent.core.prompts" = ["*.yaml"]
 "nexent.assets" = ["*.png", "*.jpg", "*.gif", "*.webp"]
 
 [tool.ruff]

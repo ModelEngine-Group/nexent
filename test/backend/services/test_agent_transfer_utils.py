@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """Regression coverage for platform AIDP agent transfers."""
 
 import sys
@@ -9,10 +7,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "backend"))
 
-from consts.exceptions import (
+from utils.agent_transfer_utils import (
     AgentToolImportError,
+    portable_tool_params,
+    validate_import_tool_params,
 )
-from management.services.agent.policy import portable_tool_params, validate_import_tool_params
 
 
 def test_aidp_runtime_fields_are_removed_without_mutating_snapshot():

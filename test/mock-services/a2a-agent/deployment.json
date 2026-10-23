@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "a2a-agent",
+  "aliases": ["a2a"],
+  "project": "nexent-mock-a2a",
+  "compose_files": [
+    "test/compose/compose.a2a.yaml",
+    "test/compose/compose.a2a-faults.yaml"
+  ],
+  "product_network_files": ["test/compose/compose.a2a.product-network.yaml"],
+  "services": ["nacos-a2a-test", "a2a-agent", "a2a-fault-proxy", "a2a-fault-proxy-init"],
+  "oneshot_services": ["a2a-fault-proxy-init"],
+  "networks": ["nexent-a2a-test"],
+  "readiness": [
+    {"url": "http://127.0.0.1:8888/readyz", "json_equals": {"status": "ready", "nacos.registered": true}},
+    {"url": "http://127.0.0.1:8474/proxies/a2a-agent", "json_equals": {"enabled": true, "upstream": "a2a-agent:8888"}},
+    {"url": "http://127.0.0.1:8474/proxies/nacos-a2a", "json_equals": {"enabled": true, "upstream": "nacos-a2a-test:8848"}}
+  ]
+}

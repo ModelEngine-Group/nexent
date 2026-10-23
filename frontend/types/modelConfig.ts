@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 // Model connection status type
 export type ModelConnectStatus =
   "not_detected" | "detecting" | "available" | "unavailable";
@@ -42,7 +40,14 @@ export type ModelType =
   | "multi_embedding";
 
 export type ReasoningEffort =
-  "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+  | "auto"
+  | "none"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
 
 export interface ReasoningCapability {
   status: "supported" | "unsupported" | "unknown";
@@ -58,8 +63,7 @@ export interface ReasoningCapability {
   >;
   provider_id?: string | null;
   budget_wire_format?: "thinking_object" | "thinking_budget" | null;
-  toggle_wire_format?:
-    "thinking_object" | "enable_thinking" | "chat_template" | null;
+  toggle_wire_format?: "thinking_object" | "enable_thinking" | "chat_template" | null;
   matched_api?: string | null;
   matched_model_id?: string | null;
   source: "catalog" | "models_dev" | "operator" | "unknown";
@@ -95,16 +99,12 @@ export interface ModelOption {
   // v2.6.0 inference params (model-level defaults)
   temperature?: number;
   topP?: number;
-  /** Read-only model/SDK sampling fallback; never part of a model save request. */
-  effectiveSampling?: { temperature: number; top_p: number };
   extraParams?: Record<string, unknown>;
   reasoningCapability?: ReasoningCapability;
   /** Whether the model-level thinking switch is enabled. */
   enableThinking?: boolean;
   /** Persisted model-level default, stored in extra_params.reasoning_effort. */
   defaultReasoningEffort?: ReasoningEffort;
-  /** Whether the provider/model profile supports tool calls when supplied by the API. */
-  supportToolCalls?: boolean | null;
 }
 
 // Application configuration interface

@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for VoiceService TTS methods.
 
@@ -55,8 +54,8 @@ _shared_tts = None
 
 def _reset_singleton():
     """Reset the voice service singleton between tests."""
-    import management.services.model.voice
-    management.services.model.voice._voice_service_instance = None
+    import services.voice_service
+    services.voice_service._voice_service_instance = None
 
 
 def _mock_all_models(stt_success=True, tts_success=True, stt_exc=None, tts_exc=None):
@@ -79,16 +78,16 @@ def _mock_all_models(stt_success=True, tts_success=True, stt_exc=None, tts_exc=N
         _shared_tts.generate_speech = AsyncMock(side_effect=tts_exc)
 
     patches = [
-        patch("management.services.model.voice.VolcSTTModel", return_value=_shared_stt),
-        patch("management.services.model.voice.AliSTTModel", return_value=_shared_stt),
-        patch("management.services.model.voice.VolcTTSModel", return_value=_shared_tts),
-        patch("management.services.model.voice.AliTTSModel", return_value=_shared_tts),
+        patch("services.voice_service.VolcSTTModel", return_value=_shared_stt),
+        patch("services.voice_service.AliSTTModel", return_value=_shared_stt),
+        patch("services.voice_service.VolcTTSModel", return_value=_shared_tts),
+        patch("services.voice_service.AliTTSModel", return_value=_shared_tts),
     ]
     return patches, _shared_stt, _shared_tts
 
 
-import management.services.model.voice
-from management.services.model.voice import VoiceService
+import services.voice_service
+from services.voice_service import VoiceService
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +228,7 @@ class TestGetTTSModelFromTenantConfig:
                 "model_name": "test_model"
             }
 
-            with patch('management.services.model.voice.tenant_config_manager') as mock_config_mgr:
+            with patch('services.voice_service.tenant_config_manager') as mock_config_mgr:
                 mock_config_mgr.get_model_config.return_value = mock_tts_config
 
                 with patch.object(service, '_get_tts_model_from_config') as mock_get_model:
@@ -256,8 +255,8 @@ class TestGetTTSModelFromTenantConfig:
                 "speed_ratio": 1.0
             }
 
-            with patch('management.services.model.voice.tenant_config_manager') as mock_config_mgr, \
-                 patch('management.services.model.voice.get_model_records') as mock_get_records:
+            with patch('services.voice_service.tenant_config_manager') as mock_config_mgr, \
+                 patch('services.voice_service.get_model_records') as mock_get_records:
                 mock_config_mgr.get_model_config.return_value = None
                 mock_get_records.return_value = [mock_record]
 
@@ -278,8 +277,8 @@ class TestGetTTSModelFromTenantConfig:
         try:
             service = VoiceService()
 
-            with patch('management.services.model.voice.tenant_config_manager') as mock_config_mgr, \
-                 patch('management.services.model.voice.get_model_records') as mock_get_records:
+            with patch('services.voice_service.tenant_config_manager') as mock_config_mgr, \
+                 patch('services.voice_service.get_model_records') as mock_get_records:
                 mock_config_mgr.get_model_config.return_value = None
                 mock_get_records.return_value = []
 
@@ -300,7 +299,7 @@ class TestGetTTSModelFromTenantConfig:
         try:
             service = VoiceService()
 
-            with patch('management.services.model.voice.tenant_config_manager') as mock_config_mgr:
+            with patch('services.voice_service.tenant_config_manager') as mock_config_mgr:
                 mock_config_mgr.get_model_config.side_effect = Exception("Database error")
 
                 with patch.object(service, '_get_tts_model_from_config') as mock_get_model:
@@ -509,10 +508,10 @@ class TestStreamTTSToWebSocket:
 
         _shared_tts = SyncIterTTSModel()
         patches = [
-            patch("management.services.model.voice.VolcTTSModel", return_value=_shared_tts),
-            patch("management.services.model.voice.AliTTSModel", return_value=_shared_tts),
-            patch("management.services.model.voice.VolcSTTModel", return_value=MockSTTModel()),
-            patch("management.services.model.voice.AliSTTModel", return_value=MockSTTModel()),
+            patch("services.voice_service.VolcTTSModel", return_value=_shared_tts),
+            patch("services.voice_service.AliTTSModel", return_value=_shared_tts),
+            patch("services.voice_service.VolcSTTModel", return_value=MockSTTModel()),
+            patch("services.voice_service.AliSTTModel", return_value=MockSTTModel()),
         ]
         for p in patches:
             p.start()
@@ -544,10 +543,10 @@ class TestStreamTTSToWebSocket:
         _reset_singleton()
         _shared_tts = SingleChunkTTSModel()
         patches = [
-            patch("management.services.model.voice.VolcTTSModel", return_value=_shared_tts),
-            patch("management.services.model.voice.AliTTSModel", return_value=_shared_tts),
-            patch("management.services.model.voice.VolcSTTModel", return_value=MockSTTModel()),
-            patch("management.services.model.voice.AliSTTModel", return_value=MockSTTModel()),
+            patch("services.voice_service.VolcTTSModel", return_value=_shared_tts),
+            patch("services.voice_service.AliTTSModel", return_value=_shared_tts),
+            patch("services.voice_service.VolcSTTModel", return_value=MockSTTModel()),
+            patch("services.voice_service.AliSTTModel", return_value=MockSTTModel()),
         ]
         for p in patches:
             p.start()

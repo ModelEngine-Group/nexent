@@ -1,7 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Unit tests for management.services.notification.service."""
-
-from test.backend.management.import_patching import patch_imports
+"""Unit tests for services.notification_service."""
 from datetime import datetime, timezone
 
 import pytest
@@ -16,14 +13,14 @@ from consts.notification import (
     SCOPE_TENANT_ADMIN,
     SCOPE_USER,
 )
-from management.services.notification import service as service
+from services import notification_service as service
 
 
 def test_list_notifications_serializes_naive_and_aware_datetimes(mocker):
     naive = datetime(2026, 1, 2, 3, 4, 5)
     aware = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
-    patch_imports(mocker,
-        "management.services.notification.service.list_notifications_by_user",
+    mocker.patch(
+        "services.notification_service.list_notifications_by_user",
         return_value={
             "items": [
                 {"create_time": naive, "receiver_id": 1},
@@ -47,8 +44,8 @@ def test_mark_notifications_read_requires_receiver_id_when_not_mark_all():
 
 
 def test_mark_notifications_read_raises_not_found_when_zero_updated(mocker):
-    patch_imports(mocker,
-        "management.services.notification.service.mark_notifications_read_db",
+    mocker.patch(
+        "services.notification_service.mark_notifications_read_db",
         return_value=0,
     )
 
@@ -57,8 +54,8 @@ def test_mark_notifications_read_raises_not_found_when_zero_updated(mocker):
 
 
 def test_mark_notifications_read_success(mocker):
-    mock_db = patch_imports(mocker,
-        "management.services.notification.service.mark_notifications_read_db",
+    mock_db = mocker.patch(
+        "services.notification_service.mark_notifications_read_db",
         return_value=2,
     )
 
@@ -69,8 +66,8 @@ def test_mark_notifications_read_success(mocker):
 
 
 def test_deactivate_notifications(mocker):
-    mock_db = patch_imports(mocker,
-        "management.services.notification.service.deactivate_notifications_db",
+    mock_db = mocker.patch(
+        "services.notification_service.deactivate_notifications_db",
         return_value=3,
     )
 
@@ -98,8 +95,8 @@ def test_deactivate_notifications(mocker):
     ],
 )
 def test_create_repository_review_notification_maps_status(mocker, review_status, expected_event):
-    mock_create = patch_imports(mocker,
-        "management.services.notification.service.create_notification",
+    mock_create = mocker.patch(
+        "services.notification_service.create_notification",
         return_value={"notification_id": 1, "receiver_count": 1},
     )
 
@@ -127,7 +124,7 @@ def test_create_repository_review_notification_maps_status(mocker, review_status
 
 
 def test_create_repository_review_notification_skips_invalid_status(mocker):
-    mock_create = patch_imports(mocker, "management.services.notification.service.create_notification")
+    mock_create = mocker.patch("services.notification_service.create_notification")
 
     result = service.create_repository_review_notification(
         resource_type=RESOURCE_TYPE_AGENT_REPOSITORY,
@@ -140,8 +137,8 @@ def test_create_repository_review_notification_skips_invalid_status(mocker):
 
 
 def test_create_repository_pending_review_notification(mocker):
-    mock_create = patch_imports(mocker,
-        "management.services.notification.service.create_notification",
+    mock_create = mocker.patch(
+        "services.notification_service.create_notification",
         return_value={"notification_id": 9, "receiver_count": 2},
     )
 

@@ -5,7 +5,7 @@ import os
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
 
-from management.services.model.names import split_repo_name, add_repo_to_name, split_display_name, sort_models_by_id
+from backend.utils.model_name_utils import split_repo_name, add_repo_to_name, split_display_name, sort_models_by_id
 
 class TestModelNameUtils:
     """Test cases for model_name_utils.py"""

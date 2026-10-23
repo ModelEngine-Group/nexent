@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import types
 import importlib.machinery
 import importlib.util
@@ -52,7 +51,7 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 
 services_module = types.ModuleType("services")
-tenant_service_module = types.ModuleType("management.services.permission.identity.tenants")
+tenant_service_module = types.ModuleType("services.tenant_service")
 tenant_service_module.create_tenant = MagicMock()
 tenant_service_module.get_tenant_info = MagicMock()
 tenant_service_module.get_tenant_info_for_user = MagicMock()
@@ -62,24 +61,27 @@ tenant_service_module.update_tenant_info = MagicMock()
 tenant_service_module.delete_tenant = AsyncMock(return_value=True)
 services_module.tenant_service = tenant_service_module
 
-auth_utils_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
+utils_module = types.ModuleType("utils")
+auth_utils_module = types.ModuleType("utils.auth_utils")
 auth_utils_module.get_current_user_id = MagicMock()
 auth_utils_module.get_current_user_context = MagicMock()
+utils_module.auth_utils = auth_utils_module
 
 sys.modules["services"] = services_module
-sys.modules["management.services.permission.identity.tenants"] = tenant_service_module
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_module
+sys.modules["services.tenant_service"] = tenant_service_module
+sys.modules["utils"] = utils_module
+sys.modules["utils.auth_utils"] = auth_utils_module
 
 # The `services` stub above is not a package, so the audit submodule is loaded from
 # its file: without it collection fails, and the audit assertions further down would
 # observe a mock instead of real audit lines.
 _audit_spec = importlib.util.spec_from_file_location(
-    "management.services.monitor.audit",
-    os.path.join(os.path.dirname(__file__), "../../../backend/management/services/monitor/audit.py"),
+    "services.audit_service",
+    os.path.join(os.path.dirname(__file__), "../../../backend/services/audit_service.py"),
 )
 _audit_service = importlib.util.module_from_spec(_audit_spec)
 _audit_spec.loader.exec_module(_audit_service)
-sys.modules["management.services.monitor.audit"] = _audit_service
+sys.modules["services.audit_service"] = _audit_service
 
 from apps.tenant_app import router
 
@@ -281,7 +283,7 @@ class TestTenantServiceCalls:
         # Import mock services from conftest
         import sys
         self.mock_tenant_service = sys.modules['services'].tenant_service
-        self.mock_utils = auth_utils_module
+        self.mock_utils = sys.modules['utils'].auth_utils
         self.mock_tenant_service.create_tenant.reset_mock(side_effect=True, return_value=True)
         self.mock_tenant_service.get_tenant_info.reset_mock(side_effect=True, return_value=True)
         self.mock_tenant_service.get_tenants_paginated.reset_mock(side_effect=True, return_value=True)
@@ -291,7 +293,7 @@ class TestTenantServiceCalls:
 
     def test_create_tenant_calls_service(self):
         """Test that create_tenant is called with correct parameters."""
-        from management.services.permission.identity.tenants import create_tenant
+        from services.tenant_service import create_tenant
 
         mock_tenant_info = {
             "tenant_id": "tenant-123",
@@ -319,7 +321,7 @@ class TestTenantServiceCalls:
 
     def test_get_tenant_calls_service(self):
         """Test that get_tenant_info is called with correct parameters."""
-        from management.services.permission.identity.tenants import get_tenant_info
+        from services.tenant_service import get_tenant_info
 
         mock_tenant_info = {
             "tenant_id": "tenant-123",
@@ -334,7 +336,7 @@ class TestTenantServiceCalls:
 
     def test_get_tenants_paginated_calls_service(self):
         """Test that get_tenants_paginated is called with correct parameters."""
-        from management.services.permission.identity.tenants import get_tenants_paginated
+        from services.tenant_service import get_tenants_paginated
 
         mock_result = {
             "data": [],
@@ -352,7 +354,7 @@ class TestTenantServiceCalls:
 
     def test_update_tenant_calls_service(self):
         """Test that update_tenant_info is called with correct parameters."""
-        from management.services.permission.identity.tenants import update_tenant_info
+        from services.tenant_service import update_tenant_info
 
         mock_updated_tenant = {
             "tenant_id": "tenant-123",
@@ -376,7 +378,7 @@ class TestTenantServiceCalls:
     def test_delete_tenant_calls_service(self):
         """Test that delete_tenant is called with correct parameters."""
         import asyncio
-        from management.services.permission.identity.tenants import delete_tenant
+        from services.tenant_service import delete_tenant
 
         # The delete_tenant in conftest is already a mock async function
         # We just need to call it and verify the call
@@ -398,12 +400,12 @@ class TestTenantAuth:
     def setup(self):
         """Set up mocks for each test."""
         import sys
-        self.mock_utils = auth_utils_module
+        self.mock_utils = sys.modules['utils'].auth_utils
         self.mock_utils.get_current_user_id.reset_mock(side_effect=True, return_value=True)
 
     def test_get_current_user_id_is_called(self):
         """Test that get_current_user_id is used for authorization."""
-        from management.services.permission.identity.authentication_helpers import get_current_user_id
+        from utils.auth_utils import get_current_user_id
 
         self.mock_utils.get_current_user_id.return_value = ("user-456", "tenant-123")
 
@@ -415,7 +417,7 @@ class TestTenantAuth:
 
     def test_get_current_user_id_raises_unauthorized(self):
         """Test that get_current_user_id raises UnauthorizedError for invalid tokens."""
-        from management.services.permission.identity.authentication_helpers import get_current_user_id
+        from utils.auth_utils import get_current_user_id
 
         self.mock_utils.get_current_user_id.side_effect = UnauthorizedError("Invalid token")
 
@@ -432,7 +434,7 @@ class TestTenantEndpointExceptionHandling:
         """Set up mocks for each test."""
         import sys
         self.mock_tenant_service = sys.modules['services'].tenant_service
-        self.mock_utils = auth_utils_module
+        self.mock_utils = sys.modules['utils'].auth_utils
         self.mock_tenant_service.create_tenant.reset_mock(side_effect=True, return_value=True)
         self.mock_tenant_service.get_tenant_info.reset_mock(side_effect=True, return_value=True)
         self.mock_tenant_service.get_tenants_paginated.reset_mock(side_effect=True, return_value=True)
@@ -442,7 +444,7 @@ class TestTenantEndpointExceptionHandling:
 
     def test_not_found_exception_handling(self):
         """Test that NotFoundException is caught and raises HTTPException 404."""
-        from management.services.permission.identity.tenants import get_tenant_info
+        from services.tenant_service import get_tenant_info
 
         self.mock_tenant_service.get_tenant_info.side_effect = NotFoundException("Tenant not found")
 
@@ -452,7 +454,7 @@ class TestTenantEndpointExceptionHandling:
 
     def test_validation_error_handling(self):
         """Test that ValidationError is caught and raises HTTPException 400."""
-        from management.services.permission.identity.tenants import create_tenant
+        from services.tenant_service import create_tenant
 
         self.mock_tenant_service.create_tenant.side_effect = ValidationError("Invalid data")
 
@@ -462,7 +464,7 @@ class TestTenantEndpointExceptionHandling:
 
     def test_unexpected_error_handling(self):
         """Test that unexpected exceptions are caught and return 500."""
-        from management.services.permission.identity.tenants import get_tenant_info
+        from services.tenant_service import get_tenant_info
 
         self.mock_tenant_service.get_tenant_info.side_effect = RuntimeError("Unexpected error")
 

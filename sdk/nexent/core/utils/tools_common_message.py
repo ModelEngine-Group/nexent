@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import json
 from dataclasses import dataclass
 from enum import Enum
@@ -12,7 +10,6 @@ class ToolSign(Enum):
     EXA_SEARCH = "b"  # Exa search tool identifier
     LINKUP_SEARCH = "c"       # Linkup search tool identifier
     TAVILY_SEARCH = "d"  # Tavily search tool identifier
-    DEEPSEEK_SEARCH = "o"  # DeepSeek search tool identifier
     DATAMATE_SEARCH = "e"  # DataMate search tool identifier
     FILE_OPERATION = "f"      # File operation tool identifier
     DIFY_SEARCH = "g"  # Dify search tool identifier
@@ -31,7 +28,6 @@ class ToolSign(Enum):
 
 # Tool sign mapping for backward compatibility
 TOOL_SIGN_MAPPING = {
-    "deepseek_search": ToolSign.DEEPSEEK_SEARCH.value,
     "knowledge_base_search": ToolSign.KNOWLEDGE_BASE.value,
     "tavily_search": ToolSign.TAVILY_SEARCH.value,
     "linkup_search": ToolSign.LINKUP_SEARCH.value,

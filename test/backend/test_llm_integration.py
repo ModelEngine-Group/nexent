@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """
 Test LLM integration for knowledge base summarization
 """
@@ -53,7 +51,7 @@ if "database.tenant_config_db" not in sys.modules:
     sys.modules["database.tenant_config_db"] = tenant_config_db_mod
     setattr(sys.modules["database"], "tenant_config_db", tenant_config_db_mod)
 
-from management.services.knowledge_base.summary import summarize_document, summarize_cluster
+from utils.document_vector_utils import summarize_document, summarize_cluster
 
 
 class TestLLMIntegration:

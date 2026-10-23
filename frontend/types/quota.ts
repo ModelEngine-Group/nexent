@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 // Quota management type definitions
 
 import { ErrorCode } from "@/const/errorCode";
@@ -155,7 +153,6 @@ export type PersonalQuotaSource = "individual" | "default" | "unlimited";
 export interface PersonalCapacityUser {
   user_id: string;
   user_name: string;
-  cas_username?: string | null;
   email: string | null;
   kb_count: number;
   total_bytes: number;

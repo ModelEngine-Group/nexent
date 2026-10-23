@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """SDK-UT-013: sandbox warm-up duration, identity and parentage."""
 
 import threading
@@ -22,29 +21,19 @@ from .conftest import assert_child, by_name
 def config(name="root", display_name="主智能体", children=()):
     return AgentConfig(
         name=name, display_name=display_name, description="Warm-up test", model_name="test-model",
-        tools=[], worker_agents=list(children),
+        tools=[], managed_agents=list(children),
     )
 
 
 @pytest.fixture
 def factory(mocker):
-    class WarmupAgent(SimpleNamespace):
-        def __init__(self, **kwargs):
-            super().__init__(**kwargs)
-            self.state = {}
-
-        def __call__(self, task):
-            return task
-
     runtime = NexentAgent(
         observer=MessageObserver(), model_config_list=[], stop_event=threading.Event(),
         sandbox_config=SandboxConfig(level=SandboxLevel.DOCKER, scope=SandboxScope.SYSTEM),
-        tool_fastpath_enabled=False,
     )
-    mocker.patch.object(NexentAgent, "create_model", side_effect=lambda *_args: mocker.Mock())
-    mocker.patch("nexent.core.agents.nexent_agent.CoreAgent", new=WarmupAgent)
+    mocker.patch.object(runtime, "create_model", return_value=mocker.Mock())
+    mocker.patch("nexent.core.agents.nexent_agent.CoreAgent", side_effect=lambda **kwargs: SimpleNamespace(**kwargs))
     mocker.patch("nexent.core.agents.sandbox.SandboxSkillScriptRunner")
-    mocker.patch("nexent.core.agents.sandbox.release_python_executor")
     return runtime
 
 
@@ -52,7 +41,7 @@ def warmups(spans):
     return [s for s in spans.exporter.get_finished_spans() if s.name == "agent.sandbox.warmup"]
 
 
-def test_sdk_ut_013_01_lazy_agent_warmups_are_timed_children_of_invocation(spans, mocker, factory):
+def test_sdk_ut_013_01_agent_tree_warmups_are_timed_children_of_run(spans, mocker, factory):
     intervals = []
 
     def execute(code):
@@ -63,7 +52,7 @@ def test_sdk_ut_013_01_lazy_agent_warmups_are_timed_children_of_invocation(spans
         intervals.append((start, time.time_ns()))
 
     executors = [mocker.Mock(_nexent_backend="docker", side_effect=execute) for _ in range(2)]
-    build = mocker.patch("nexent.core.agents.sandbox.build_python_executor", side_effect=executors)
+    mocker.patch("nexent.core.agents.sandbox.build_python_executor", side_effect=executors)
     child = config("child", "子智能体")
     child._sub_agent_id = 23
     metadata = AgentRunMetadata(
@@ -72,13 +61,7 @@ def test_sdk_ut_013_01_lazy_agent_warmups_are_timed_children_of_invocation(spans
     )
     with spans.tracer.start_as_current_span("request"), spans.manager.start_agent_run(metadata):
         parent = trace.get_current_span()
-        agent = factory.create_single_agent(config(children=[child]))
-        assert build.call_count == 1
-        assert len(warmups(spans)) == 1
-        assert trace.get_current_span() is parent
-        assert get_agent_monitoring_context() is metadata
-        assert agent.managed_agents[0](task="warm up child") == "warm up child"
-        assert build.call_count == 2
+        factory.create_single_agent(config(children=[child]))
         assert trace.get_current_span() is parent
         assert get_agent_monitoring_context() is metadata
 
@@ -88,14 +71,11 @@ def test_sdk_ut_013_01_lazy_agent_warmups_are_timed_children_of_invocation(spans
     assert_child(tree["agent.run"], tree["request"])
     assert tree["agent.run"].attributes["langfuse.trace.name"] == "主智能体"
     assert sum(s.name == "agent.run" for s in spans.exporter.get_finished_spans()) == 1
-    child_call = tree["agent.subagent.子智能体"]
-    assert_child(child_call, tree["agent.run"])
-    assert sum(s.name.startswith("agent.subagent.") for s in spans.exporter.get_finished_spans()) == 1
-    for span, interval, executor, name, display, agent_id, parent_span in zip(
-        observations, intervals, executors, ("root", "child"), ("主智能体", "子智能体"), (7, 23),
-        (tree["agent.run"], child_call), strict=True,
+    assert not any(s.name.startswith("agent.subagent.") for s in spans.exporter.get_finished_spans())
+    for span, interval, executor, name, display, agent_id in zip(
+        observations, intervals, executors, ("child", "root"), ("子智能体", "主智能体"), (23, 7), strict=True,
     ):
-        assert_child(span, parent_span)
+        assert_child(span, tree["agent.run"])
         assert span.start_time <= interval[0] <= interval[1] <= span.end_time
         assert span.attributes["openinference.span.kind"] == "CHAIN"
         assert span.attributes["agent.step.type"] == "sandbox_warmup"
@@ -104,7 +84,7 @@ def test_sdk_ut_013_01_lazy_agent_warmups_are_timed_children_of_invocation(spans
         assert span.attributes["agent.id"] == agent_id
         assert span.attributes["user.id"] == "warmup@example.test"
         assert span.attributes["session.id"] == "42"
-        assert span.attributes["langfuse.trace.name"] == "主智能体"
+        assert "langfuse.trace.name" not in span.attributes
         assert "input.value" not in span.attributes
         executor.assert_called_once_with("[0, None]")
     probes = [s for s in spans.exporter.get_finished_spans() if s.name == "warmup-probe"]

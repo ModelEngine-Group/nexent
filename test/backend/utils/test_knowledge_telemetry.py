@@ -1,10 +1,9 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import types
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from infrastructure.observability import knowledge as knowledge_telemetry
+from backend.utils import knowledge_telemetry
 
 
 def test_span_kind_distinguishes_storage_tools_from_chains():
@@ -21,7 +20,7 @@ def test_safe_attributes_maps_part_diagnostics():
         "parallel_parts": 3,
         "timeout_seconds": 300,
         "poll_interval_ms": 200,
-        "queue_name": "parse_q",
+        "queue_name": "process_part_q",
     })
 
     assert attrs == {
@@ -30,7 +29,7 @@ def test_safe_attributes_maps_part_diagnostics():
         "processor.parallel_count": 3,
         "timeout.seconds": 300,
         "poll.interval_ms": 200,
-        "messaging.destination.name": "parse_q",
+        "messaging.destination.name": "process_part_q",
     }
 
 

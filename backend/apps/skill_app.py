@@ -1,12 +1,10 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """Skill management HTTP endpoints."""
 
 import logging
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 
@@ -20,19 +18,25 @@ from consts.model import (
 )
 from permissions.depends import require
 from permissions.models import CurrentUser
-from consts.exceptions import RunModelControlsError
-from management.services.permission.asset_owner import can_view_skill
-from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
-from consts.exceptions import AgentDraftEditError, ResourceBindingError
-from management.services.agent.authorization import require_agent_draft_edit
+from services.asset_owner_visibility import can_view_skill
+from services.agent_draft_permission_service import (
+    AgentDraftEditError,
+    ResourceBindingError,
+    require_agent_draft_edit,
+)
 from services.nl2skill_service import create_nl2skill_stream
-from management.services.conversation.creation_history import (
+from services.workbench_creation_history_service import (
     prepare_creation_history,
     persist_creation_stream,
 )
-from management.services.skill.service import SkillService, UnsupportedSkillFilePreview
-from management.services.skill.transfer import get_official_skills_with_status, install_skills_from_zip_for_tenant, update_skill_list
-from management.services.permission.identity.authentication_helpers import get_current_user_id, get_current_user_info
+from management.services.skill.service import (
+    SkillService,
+    UnsupportedSkillFilePreview,
+    get_official_skills_with_status,
+    install_skills_from_zip_for_tenant,
+    update_skill_list,
+)
+from utils.auth_utils import get_current_user_id, get_current_user_info
 
 ASSET_OWNER_SKILL_VIEW_DENIED = {"content": "您无权限查看"}
 
@@ -129,7 +133,6 @@ class InstallSkillsRequest(BaseModel):
 @router.post("/install")
 async def install_skills(
     request: InstallSkillsRequest,
-    http_request: Request,
     tenant_id: Optional[str] = Query(
         None, description="Tenant ID for super admin to install skills for a specific tenant"),
     authorization: Optional[str] = Header(None)
@@ -149,9 +152,6 @@ async def install_skills(
             user_id=user_id,
             locale=request.locale
         )
-        record_security_event("skill_install", request=http_request,
-                              user_id=user_id, tenant_id=effective_tenant_id,
-                              details={"skill_names": request.skill_names[:AUDIT_DETAIL_LIST_LIMIT] if request.skill_names else None})
         return JSONResponse(content={
             "message": "Skills installed successfully",
             "installed": installed_names,
@@ -168,7 +168,6 @@ async def install_skills(
 @router.post("")
 async def create_skill(
     request: SkillCreateRequest,
-    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Create a new skill (JSON format)."""
@@ -197,12 +196,6 @@ async def create_skill(
         }
         skill = service.create_skill(
             skill_data, tenant_id=tenant_id, user_id=user_id)
-        # Skill body/description/config_values are free-form content and
-        # never reach the log; name and source identify the skill.
-        record_security_event("skill_create", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"skill_name": request.name,
-                                       "source": request.source})
         return JSONResponse(content=skill, status_code=201)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -220,7 +213,6 @@ async def create_skill(
 
 @router.post("/upload")
 async def create_skill_from_file(
-    http_request: Request,
     file: UploadFile = File(..., description="SKILL.md file or ZIP archive"),
     skill_name: Optional[str] = Form(
         None, description="Optional skill name override"),
@@ -254,12 +246,6 @@ async def create_skill_from_file(
             user_id=user_id,
             tenant_id=tenant_id
         )
-        # File content never reaches the log; filename/source identify the upload.
-        record_security_event("skill_upload", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"filename": file.filename,
-                                       "skill_name": skill_name,
-                                       "source": source})
         return JSONResponse(content=skill, status_code=201)
     except UnauthorizedError as e:
         logger.warning(f"Unauthorized: {e}")
@@ -371,7 +357,6 @@ async def get_skill_file_content(
 )
 async def update_skill_from_file(
     skill_name: str,
-    http_request: Request,
     file: UploadFile = File(..., description="SKILL.md file or ZIP archive"),
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
@@ -399,11 +384,6 @@ async def update_skill_from_file(
             user_id=user_id,
             tenant_id=tenant_id
         )
-        # File content never reaches the log.
-        record_security_event("skill_update", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"skill_name": skill_name,
-                                       "filename": file.filename})
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -475,7 +455,6 @@ async def get_skill_instance(
 @router.post("/instance/update")
 async def update_skill_instance(
     request: SkillInstanceInfoRequest,
-    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Create or update a skill instance for a specific agent.
@@ -526,12 +505,6 @@ async def update_skill_instance(
         merged.update(instance_config_values)
         instance["config_values"] = merged
 
-        # config_values may embed secrets and never reaches the log.
-        record_security_event("skill_instance_update", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"skill_id": request.skill_id,
-                                       "agent_id": request.agent_id,
-                                       "enabled": request.enabled})
         return JSONResponse(content={"message": "Skill instance updated", "instance": instance})
     except (AgentDraftEditError, ResourceBindingError) as exc:
         status_code = (
@@ -651,7 +624,6 @@ async def get_skill_by_id(skill_id: int, authorization: Optional[str] = Header(N
 async def update_skill_by_id(
     skill_id: int,
     request: SkillUpdateRequest,
-    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Update an existing skill by ID."""
@@ -669,12 +641,6 @@ async def update_skill_by_id(
             tenant_id=tenant_id,
             user_id=user_id,
         )
-        # patch_keys carries field names only; content/config_values values
-        # are free-form and never reach the log.
-        record_security_event("skill_update", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"skill_id": skill_id,
-                                       "patch_keys": sorted(update_data.keys())[:AUDIT_DETAIL_LIST_LIMIT]})
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -718,7 +684,6 @@ async def get_skill(skill_name: str, authorization: Optional[str] = Header(None)
 async def update_skill(
     skill_name: str,
     request: SkillUpdateRequest,
-    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Update an existing skill.
@@ -753,11 +718,6 @@ async def update_skill(
             tenant_id=tenant_id,
             user_id=user_id,
         )
-        # patch_keys carries field names only; values never reach the log.
-        record_security_event("skill_update", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"skill_name": skill_name,
-                                       "patch_keys": sorted(update_data.keys())[:AUDIT_DETAIL_LIST_LIMIT]})
         return JSONResponse(content=skill)
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -777,7 +737,6 @@ async def update_skill(
 @router.delete("/{skill_name}")
 async def delete_skill(
     skill_name: str,
-    http_request: Request,
     authorization: Optional[str] = Header(None)
 ) -> JSONResponse:
     """Delete a skill."""
@@ -785,9 +744,6 @@ async def delete_skill(
         user_id, tenant_id = get_current_user_id(authorization)
         service = SkillService(tenant_id=tenant_id)
         service.delete_skill(skill_name, tenant_id=tenant_id, user_id=user_id)
-        record_security_event("skill_delete", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"skill_name": skill_name})
         return JSONResponse(content={"message": f"Skill {skill_name} deleted successfully"})
     except UnauthorizedError as e:
         raise HTTPException(status_code=401, detail=str(e))
@@ -846,9 +802,6 @@ async def nl2skill_run_api(
                 headers={"conversation_id": str(conversation_id)},
             )
         return StreamingResponse(stream, media_type="text/event-stream")
-    except RunModelControlsError as exc:
-        status = {"model_not_available": 404, "model_unavailable": 409, "model_type_invalid": 400}.get(exc.code, 422)
-        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid Workbench creation session.") from exc
     except HTTPException:

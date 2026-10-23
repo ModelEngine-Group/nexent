@@ -1,11 +1,5 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
-import {
-  ComposerAttachment,
-  ComposerDictation,
-} from "@/app/newchat/assistant-ui/composer-tools";
 import {
   useCallback,
   useEffect,
@@ -46,9 +40,6 @@ const isDictationConfigured = (config: STTModelConfig | undefined): boolean => {
 
 interface AgentDebugComparePanelProps {
   agentId?: number | null;
-  clearEpoch?: number;
-  chatMode?: ChatMode;
-  onChatModeChange?: (mode: ChatMode) => void;
 }
 
 const toDebugAgent = (
@@ -82,7 +73,6 @@ const createSideAdapter = (
 });
 
 interface SideThreadProps {
-  clearEpoch: number;
   agent: Agent;
   modelId: number;
   availableModels: Array<{ id: number; displayName?: string; name: string }>;
@@ -98,7 +88,6 @@ interface SideThreadProps {
 }
 
 const SideThread: FC<SideThreadProps> = ({
-  clearEpoch,
   agent,
   modelId,
   availableModels,
@@ -128,13 +117,6 @@ const SideThread: FC<SideThreadProps> = ({
   });
 
   useEffect(() => {
-    if (clearEpoch === 0) return;
-    runtime.thread.cancelRun();
-    runtime.thread.reset();
-    mirroredMessageIds.current.clear();
-  }, [clearEpoch, runtime]);
-
-  useEffect(() => {
     runtime.thread.composer.setRunConfig({
       custom: {
         agentId: Number(agent.id),
@@ -155,10 +137,7 @@ const SideThread: FC<SideThreadProps> = ({
       const latestUserMessage = [...runtime.thread.getState().messages]
         .reverse()
         .find((message) => message.role === "user");
-      if (
-        !latestUserMessage ||
-        mirroredMessageIds.current.has(latestUserMessage.id)
-      ) {
+      if (!latestUserMessage || mirroredMessageIds.current.has(latestUserMessage.id)) {
         return;
       }
 
@@ -182,7 +161,8 @@ const SideThread: FC<SideThreadProps> = ({
   }, [rightRuntimeRef, runtime]);
 
   const filteredModels = useMemo(
-    () => availableModels.filter((model) => model.id !== excludeModelId),
+    () =>
+      availableModels.filter((model) => model.id !== excludeModelId),
     [availableModels, excludeModelId]
   );
 
@@ -205,27 +185,26 @@ const SideThread: FC<SideThreadProps> = ({
           </div>
           <div className="min-h-0 flex-1 overflow-hidden">
             <Thread
-              agent={agent}
-              chatMode={chatMode}
-              onChatModeChange={onChatModeChange}
-              showModelSelector={false}
-              showConversationTitle={false}
-              variant="embedded"
-              showComposer={false}
-            />
-            {composerPortalTarget &&
-              createPortal(
-                <Composer
-                  models={[]}
-                  chatMode={chatMode}
-                  onChatModeChange={onChatModeChange}
-                  showModelSelector={false}
-                >
-                  <ComposerAttachment />
-                  <ComposerDictation configured={dictationConfigured} />
-                </Composer>,
-                composerPortalTarget
-              )}
+            agent={agent}
+            chatMode={chatMode}
+            onChatModeChange={onChatModeChange}
+            showModelSelector={false}
+            showConversationTitle={false}
+            isDictationConfigured={dictationConfigured}
+            variant="embedded"
+            showComposer={false}
+          />
+          {composerPortalTarget &&
+            createPortal(
+              <Composer
+                models={[]}
+                chatMode={chatMode}
+                onChatModeChange={onChatModeChange}
+                showModelSelector={false}
+                isDictationConfigured={dictationConfigured}
+              />,
+              composerPortalTarget
+            )}
           </div>
         </div>
       </TooltipProvider>
@@ -235,32 +214,19 @@ const SideThread: FC<SideThreadProps> = ({
 
 export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
   agentId,
-  clearEpoch = 0,
-  chatMode: controlledChatMode,
-  onChatModeChange,
 }) => {
   const { t } = useTranslation();
   const { modelConfig } = useConfig();
   const { editedAgent } = useAgentStore();
   const { availableLlmModels } = useModelList();
-  const [compareLeftModelId, setCompareLeftModelId] = useState<number | null>(
-    null
-  );
-  const [compareRightModelId, setCompareRightModelId] = useState<number | null>(
-    null
-  );
-  const [localChatMode, setLocalChatMode] = useState<ChatMode>("execution");
-  const chatMode = controlledChatMode ?? localChatMode;
-  const setChatMode = onChatModeChange ?? setLocalChatMode;
-  const [composerPortalTarget, setComposerPortalTarget] =
-    useState<HTMLElement | null>(null);
+  const [compareLeftModelId, setCompareLeftModelId] = useState<number | null>(null);
+  const [compareRightModelId, setCompareRightModelId] = useState<number | null>(null);
+  const [chatMode, setChatMode] = useState<ChatMode>("execution");
+  const [composerPortalTarget, setComposerPortalTarget] = useState<HTMLElement | null>(null);
   const rightRuntimeRef = useRef<AssistantRuntime | null>(null);
 
   const debugAgent = useMemo(
-    () =>
-      agentId != null && editedAgent
-        ? toDebugAgent(agentId, editedAgent)
-        : null,
+    () => (agentId != null && editedAgent ? toDebugAgent(agentId, editedAgent) : null),
     [agentId, editedAgent]
   );
   const debugModelIds = useMemo<number[]>(() => {
@@ -282,8 +248,7 @@ export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
     } else if (debugModelIds.length === 1) {
       setCompareLeftModelId(debugModelIds[0]);
       setCompareRightModelId(
-        availableLlmModels.find((model) => model.id !== debugModelIds[0])?.id ??
-          null
+        availableLlmModels.find((model) => model.id !== debugModelIds[0])?.id ?? null
       );
     } else if (availableLlmModels.length >= 2) {
       setCompareLeftModelId(availableLlmModels[0].id);
@@ -314,7 +279,6 @@ export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
           <div className="flex min-h-0 flex-1 flex-col border-r border-gray-200">
             {compareLeftModelId != null && (
               <SideThread
-                clearEpoch={clearEpoch}
                 agent={debugAgent}
                 modelId={compareLeftModelId}
                 availableModels={availableLlmModels}
@@ -333,7 +297,6 @@ export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
           <div className="flex min-h-0 flex-1 flex-col">
             {compareRightModelId != null && (
               <SideThread
-                clearEpoch={clearEpoch}
                 agent={debugAgent}
                 modelId={compareRightModelId}
                 availableModels={availableLlmModels}

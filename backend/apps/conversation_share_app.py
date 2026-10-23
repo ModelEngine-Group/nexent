@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from datetime import datetime
 from http import HTTPStatus
@@ -10,13 +9,13 @@ from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
 from consts.exceptions import FileTooLargeException, NotFoundException, UnsupportedFileTypeException, TokenExpiredError
-from management.services.conversation.sharing import (
+from services.conversation_share_service import (
     create_share_snapshot_service,
     get_share_asset_service,
     get_share_snapshot_service,
 )
-from management.services.file.service import get_file_stream_impl, get_preview_stream, resolve_preview_file
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from services.file_management_service import get_file_stream_impl, get_preview_stream, resolve_preview_file
+from utils.auth_utils import get_current_user_id
 
 from .file_management_app import build_content_disposition_header
 

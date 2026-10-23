@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for config_sync_service STT model config saving.
 These tests cover the STT specific fields in save_config_impl.
@@ -65,7 +64,7 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 # Import backend modules after all patches are applied
 with patch('backend.database.client.MinioClient', return_value=minio_client_mock), \
         patch('nexent.storage.minio_config.MinIOStorageConfig', return_value=minio_config_mock):
-    from management.services.configuration.tenant.service import (
+    from backend.services.config_sync_service import (
         save_config_impl,
         build_model_config,
     )
@@ -74,13 +73,13 @@ with patch('backend.database.client.MinioClient', return_value=minio_client_mock
 @pytest.fixture
 def service_mocks():
     """Create mocks for service layer dependencies."""
-    with patch('management.services.configuration.tenant.service.tenant_config_manager') as mock_tenant_config_manager, \
-            patch('management.services.configuration.tenant.service.get_env_key') as mock_get_env_key, \
-            patch('management.services.configuration.tenant.service.safe_value') as mock_safe_value, \
-            patch('management.services.configuration.tenant.service.get_model_records') as mock_get_model_records, \
-            patch('management.services.configuration.tenant.service.get_model_id_by_display_name') as mock_get_model_id, \
-            patch('management.services.configuration.tenant.service.get_model_name_from_config') as mock_get_model_name, \
-            patch('management.services.configuration.tenant.service.logger') as mock_logger:
+    with patch('backend.services.config_sync_service.tenant_config_manager') as mock_tenant_config_manager, \
+            patch('backend.services.config_sync_service.get_env_key') as mock_get_env_key, \
+            patch('backend.services.config_sync_service.safe_value') as mock_safe_value, \
+            patch('backend.services.config_sync_service.get_model_records') as mock_get_model_records, \
+            patch('backend.services.config_sync_service.get_model_id_by_display_name') as mock_get_model_id, \
+            patch('backend.services.config_sync_service.get_model_name_from_config') as mock_get_model_name, \
+            patch('backend.services.config_sync_service.logger') as mock_logger:
 
         mock_get_model_records.return_value = []
         yield {

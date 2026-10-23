@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 /**
  * Types for tenant agent repository (marketplace listings)
  */
@@ -7,7 +5,10 @@
 import type { TagResourcePredicate } from "@/types/tagManagement";
 
 export type AgentRepositoryListingStatus =
-  "not_shared" | "pending_review" | "rejected" | "shared";
+  | "not_shared"
+  | "pending_review"
+  | "rejected"
+  | "shared";
 
 export interface AgentRepositoryListingItem {
   agent_repository_id: number;
@@ -16,7 +17,6 @@ export interface AgentRepositoryListingItem {
   display_name?: string | null;
   description?: string | null;
   author?: string | null;
-  author_cas_username?: string | null;
   status: AgentRepositoryListingStatus;
   icon_url?: string | null;
   tags?: string[];
@@ -26,13 +26,10 @@ export interface AgentRepositoryListingItem {
   create_time?: string | null;
   downloads?: number;
   submitted_by?: string | null;
-  submitted_by_cas_username?: string | null;
   publisher_tenant_id?: string | null;
   content?: string | null;
   /** Platform-provided template; readable/copyable but not tenant-editable. */
   is_official?: boolean;
-  /** Whether the bundle's root agent is a main agent; absent means main. */
-  is_main_agent?: boolean;
 }
 
 export type OfficialAgentManagementItem = AgentRepositoryListingItem;
@@ -58,8 +55,6 @@ export interface AgentRepositoryListingListParams {
   search_tag_predicates?: TagResourcePredicate[];
   tag_predicates?: TagResourcePredicate[];
   tag?: string;
-  /** Request latest-published-first ordering; omitted keeps the default order. */
-  sort_by_update_time?: boolean;
 }
 
 export interface AgentRepositoryListingDetail {
@@ -70,18 +65,15 @@ export interface AgentRepositoryListingDetail {
   display_name?: string | null;
   description?: string | null;
   author?: string | null;
-  author_cas_username?: string | null;
   icon_url?: string | null;
   status: AgentRepositoryListingStatus;
   version_label?: string | null;
   downloads?: number;
   created_at?: string | null;
   model_name?: string | null;
-  prompt?: string | null;
+  duty_prompt?: string | null;
   tools?: string[];
   is_official?: boolean;
-  /** Whether the bundle's root agent is a main agent; absent means main. */
-  is_main_agent?: boolean;
 }
 
 export interface MyAgentRepositoryInfoItem {
@@ -106,8 +98,6 @@ export interface MyEditableAgentItem {
   current_version_no?: number | null;
   version_label?: string | null;
   version_create_time?: string | null;
-  /** Whether this agent is a main agent; absent means main. */
-  is_main_agent?: boolean;
   /** EDIT: editable, READ_ONLY: read-only (from /agent/list permission logic). */
   permission?: "EDIT" | "READ_ONLY";
   /** Total downloads summed across all repository listings for this agent_id. */
@@ -121,7 +111,8 @@ export interface MyEditableAgentPaddingItem {
 }
 
 export type MyEditableAgentListItem =
-  MyEditableAgentItem | MyEditableAgentPaddingItem;
+  | MyEditableAgentItem
+  | MyEditableAgentPaddingItem;
 
 export function isNewAgentPaddingItem(
   item: MyEditableAgentListItem
@@ -168,7 +159,11 @@ export interface AgentRepositoryListingCreatePayload {
 }
 
 export type RepositoryImportRequirementType =
-  "model" | "knowledge_base" | "mcp" | "skill" | "tool";
+  | "model"
+  | "knowledge_base"
+  | "mcp"
+  | "skill"
+  | "tool";
 
 export interface RepositoryImportRequirementItem {
   type: RepositoryImportRequirementType;
@@ -199,7 +194,11 @@ export interface RepositoryImportPrecheckResponse {
 export type OfficialAgentStatus = "installed" | "needs_model" | "installable";
 
 export type OfficialAgentInstallStatus =
-  "installed" | "needs_model" | "already_installed" | "not_found" | "failed";
+  | "installed"
+  | "needs_model"
+  | "already_installed"
+  | "not_found"
+  | "failed";
 
 /** Item returned by GET /repository/agent/official. */
 export interface OfficialAgentItem {

@@ -1,8 +1,7 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
 from consts.exceptions import TagManagementNotFoundError
-from management.services.tag.library import TagManagementService
-from management.services.tag.resources import (
+from services.tag_management_service import TagManagementService
+from services.tag_resource_adapters import (
     AuthenticatedCaller,
     CanonicalResourceIdentity,
     ResolvedTagResource,
@@ -68,7 +67,7 @@ async def test_replace_uses_canonical_identity_and_controlled_values(monkeypatch
         return []
 
     monkeypatch.setattr(
-        "management.services.tag.library.TagManagementDB.replace_resource_assignments", replace
+        "services.tag_management_service.TagManagementDB.replace_resource_assignments", replace
     )
 
     result = await TagManagementService.replace_resource_assignments(
@@ -98,7 +97,7 @@ async def test_legacy_flat_tags_projection_is_bounded_sorted_and_deduplicated(mo
         ]
 
     monkeypatch.setattr(
-        "management.services.tag.library.TagManagementDB.list_resource_assignments",
+        "services.tag_management_service.TagManagementDB.list_resource_assignments",
         list_assignments,
     )
 
@@ -127,7 +126,7 @@ async def test_legacy_flat_tags_projection_respects_bounded_limit(monkeypatch):
         ]
 
     monkeypatch.setattr(
-        "management.services.tag.library.TagManagementDB.list_resource_assignments",
+        "services.tag_management_service.TagManagementDB.list_resource_assignments",
         list_assignments,
     )
 

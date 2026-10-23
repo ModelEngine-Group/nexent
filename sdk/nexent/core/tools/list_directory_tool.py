@@ -14,9 +14,12 @@ logger = logging.getLogger("list_directory_tool")
 class ListDirectoryTool(Tool):
     """Directory listing tool for displaying directory contents in tree structure"""
     name = "list_directory"
-    description = "List workspace directory contents as a tree with file metadata."
+    description = "List contents of a directory in tree structure format. " \
+                  "Path should be relative to the workspace (e.g., 'documents' or '.' for current workspace). " \
+                  "Absolute paths are not allowed for security reasons. " \
+                  "Returns a hierarchical tree view of files and directories with metadata."
 
-    description_zh = "以树形结构列出工作区目录内容及文件元数据。"
+    description_zh = "以树形结构格式列出目录下所有内容。路径需为工作区相对路径（例如，'documents'或'.'表示当前工作空间），出于安全考虑，不支持绝对路径。"
 
     inputs = {
         "directory_path": {

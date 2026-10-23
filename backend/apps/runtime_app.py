@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -13,7 +11,6 @@ from apps.agent_automation_app import (
 from apps.agent_evaluation_runtime_app import router as agent_evaluation_runtime_router
 from apps.voice_app import voice_runtime_router as voice_router
 from apps.conversation_management_app import router as conversation_management_router
-from apps.workbench_pins_app import router as workbench_pins_router
 from apps.conversation_share_app import router as conversation_share_router
 from apps.file_management_app import (
     file_management_runtime_router as file_management_router,
@@ -27,15 +24,15 @@ from nexent.core.concurrency import (
     clear_default_thread_manager,
     set_default_thread_manager,
 )
-from infrastructure.concurrency import runtime_thread_manager
-from management.services.agent.run_state import runtime_state_service
+from services.thread_lifecycle_service import runtime_thread_manager
+from services.runtime_state_service import runtime_state_service
 
 logger = logging.getLogger("runtime_app")
 
 
 async def start_agent_automation_scheduler():
-    from management.services.automation.scheduler import agent_automation_scheduler
-    from management.recovery import recover_runtime_tasks
+    from services.agent_automation.scheduler import agent_automation_scheduler
+    from services.startup_recovery_service import recover_runtime_tasks
     from services.workspace_cleanup_service import cleanup_orphaned_agent_workspaces
 
     await runtime_thread_manager.run(
@@ -51,7 +48,7 @@ async def start_agent_automation_scheduler():
 
 
 async def stop_agent_automation_scheduler():
-    from management.services.automation.scheduler import agent_automation_scheduler
+    from services.agent_automation.scheduler import agent_automation_scheduler
 
     await agent_automation_scheduler.stop()
 
@@ -70,9 +67,7 @@ async def runtime_lifespan(_app):
             time.monotonic() + RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
         )
         await stop_agent_automation_scheduler()
-        from management.services.agent.execution import (
-            shutdown_agent_stream_tasks,
-        )
+        from management.services.agent.run import shutdown_agent_stream_tasks
 
         pending_stream_tasks = await shutdown_agent_stream_tasks(
             timeout=max(0, shutdown_deadline - time.monotonic())
@@ -116,7 +111,6 @@ app.include_router(agent_router)
 app.include_router(agent_evaluation_runtime_router)
 app.include_router(agent_automation_router)
 app.include_router(conversation_automation_router)
-app.include_router(workbench_pins_router)
 app.include_router(conversation_management_router)
 app.include_router(conversation_share_router)
 app.include_router(file_management_router)

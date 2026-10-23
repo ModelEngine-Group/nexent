@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Tests for the security audit logging service."""
 
 import logging
@@ -10,7 +9,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-from management.services.monitor.audit import (
+from services.audit_service import (
     AUDIT_LOG_PREFIX,
     USER_AGENT_MAX_LENGTH,
     format_audit_entry,

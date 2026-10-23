@@ -1,18 +1,9 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useParams, useRouter } from "next/navigation";
 import { App, Button, Col, Flex, Row } from "antd";
-import {
-  BlocksIcon,
-  ExternalLink,
-  Plug,
-  RefreshCw,
-  Wrench,
-} from "lucide-react";
+import { BlocksIcon, Plug, RefreshCw, Wrench } from "lucide-react";
 
 import { updateToolList } from "@/services/mcpService";
 import { searchAgentInfo } from "@/services/agentConfigService";
@@ -22,31 +13,25 @@ import { useToolList } from "@/hooks/agent/useToolList";
 import { useSkillList } from "@/hooks/agent/useSkillList";
 import type { Skill } from "@/types/agentConfig";
 import type { MyEditableSkillItem } from "@/types/skillRepository";
-import { ResourceAddButton } from "@/components/common/ResourceAddButton";
-import type { ResourceSectionProps } from "./resource-section.types";
 import ToolManagement from "./capability/ToolManagement";
 import SkillBuildModal from "../../components/capability/SkillBuildModal";
 import SelectedSkillManagement from "./capability/SelectedSkillManagement";
 import McpConfigModal from "./capability/McpConfigModal";
-import { ToolDrawer } from "@/components/resource-picker/ToolDrawer";
-import { SkillDrawer } from "@/components/resource-picker/SkillDrawer";
+import SelectToolsDialog from "./capability/tool/SelectToolsDialog";
+import LabelManagementModal from "./capability/tool/LabelManagementModal";
+import SelectSkillsDialog from "./capability/skill/SelectSkillsDialog";
+import SkillTagManagementModal from "./capability/skill/SkillTagManagementModal";
 
-const EMPTY_SELECTED_SKILLS: import("@/types/agentConfig").Skill[] = [];
-
-export function AgentToolCapability({
-  highFidelity = false,
-  renderSection,
-}: ResourceSectionProps = {}) {
+export function AgentToolCapability() {
   const { t } = useTranslation("common");
-  const router = useRouter();
-  const { locale } = useParams<{ locale: string }>();
   const { message } = App.useApp();
   const currentAgentId = useAgentStore((state) => state.agentId);
   const isReadOnly = useAgentReadOnly();
   const [isMcpModalOpen, setIsMcpModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isToolSelectOpen, setIsToolSelectOpen] = useState(false);
-  const { invalidate } = useToolList();
+  const [labelModalOpen, setLabelModalOpen] = useState(false);
+  const { invalidate, availableTools } = useToolList();
 
   const prepareAgentForMcpDeletion = useCallback(async () => {
     const initialState = useAgentStore.getState();
@@ -93,121 +78,77 @@ export function AgentToolCapability({
     }
   }, [invalidate, message, t]);
 
-  const resourceActions = (
-    <div className="flex h-6 items-center gap-2">
-      <Button
-        type="link"
-        disabled={isReadOnly}
-        onClick={() => router.push(`/${locale}/mcp-space`)}
-        className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
-      >
-        <span className="inline-flex items-center gap-1">
-          {t("agentConfig.layout.newTool")}
-          <ExternalLink size={14} />
-        </span>
-      </Button>
-    </div>
-  );
-  const resourceContent = (
-    <ToolManagement
-      currentAgentId={currentAgentId ?? undefined}
-      hideEmpty
-      highFidelity
-      addEntry={
-        <ResourceAddButton
-          data-testid="agent-tool-add-entry"
-          onClick={() => setIsToolSelectOpen(true)}
-          disabled={currentAgentId === null || isReadOnly}
-        >
-          {t("agentConfig.layout.addTool")}
-        </ResourceAddButton>
-      }
-    />
-  );
-
   return (
     <>
-      {highFidelity ? (
-        renderSection ? (
-          renderSection(resourceContent, resourceActions)
-        ) : (
-          <div className="flex flex-col gap-2">
-            <div className="flex justify-end">{resourceActions}</div>
-            {resourceContent}
-          </div>
-        )
-      ) : (
-        <>
-          <Row gutter={[12, 12]} className="mb-3">
-            <Col xs={24}>
-              <Flex justify="space-between" align="center">
-                <div className="flex items-center gap-4 text-sm">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<RefreshCw size={16} />}
-                    onClick={handleRefreshTools}
-                    loading={isRefreshing}
-                    className="!text-emerald-600 hover:!text-emerald-700 hover:!bg-emerald-50"
-                  >
-                    {t("toolManagement.refresh.button.refresh")}
-                  </Button>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Plug size={16} />}
-                    onClick={() => setIsMcpModalOpen(true)}
-                    className="!text-blue-600 hover:!text-blue-700 hover:!bg-blue-50"
-                  >
-                    {t("toolManagement.mcp.button")}
-                  </Button>
-                </div>
-                <Button
-                  size="small"
-                  icon={<Wrench size={14} />}
-                  onClick={() => setIsToolSelectOpen(true)}
-                  disabled={currentAgentId === null || isReadOnly}
-                  className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
-                >
-                  <span className="inline-flex items-center self-center leading-none">
-                    {t("toolPool.selectTools")}
-                  </span>
-                </Button>
-              </Flex>
-            </Col>
-          </Row>
-          <ToolManagement currentAgentId={currentAgentId ?? undefined} />
-        </>
-      )}
+      <Row gutter={[12, 12]} className="mb-3">
+        <Col xs={24}>
+          <Flex justify="space-between" align="center">
+            <div className="flex items-center gap-4 text-sm">
+              <Button
+                type="text"
+                size="small"
+                icon={<RefreshCw size={16} />}
+                onClick={handleRefreshTools}
+                loading={isRefreshing}
+                className="!text-emerald-600 hover:!text-emerald-700 hover:!bg-emerald-50"
+              >
+                {t("toolManagement.refresh.button.refresh")}
+              </Button>
+              <Button
+                type="text"
+                size="small"
+                icon={<Plug size={16} />}
+                onClick={() => setIsMcpModalOpen(true)}
+                className="!text-blue-600 hover:!text-blue-700 hover:!bg-blue-50"
+              >
+                {t("toolManagement.mcp.button")}
+              </Button>
+            </div>
+            <Button
+              size="small"
+              icon={<Wrench size={14} />}
+              onClick={() => setIsToolSelectOpen(true)}
+              disabled={currentAgentId === null || isReadOnly}
+              className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
+            >
+              <span className="inline-flex items-center self-center leading-none">
+                {t("toolPool.selectTools")}
+              </span>
+            </Button>
+          </Flex>
+        </Col>
+      </Row>
+      <ToolManagement currentAgentId={currentAgentId ?? undefined} />
       <McpConfigModal
         visible={isMcpModalOpen}
         onCancel={() => setIsMcpModalOpen(false)}
         onBeforeMcpDelete={prepareAgentForMcpDeletion}
         onMcpDeleted={refreshAgentAfterMcpDeletion}
       />
-      <ToolDrawer
+      <SelectToolsDialog
         open={isToolSelectOpen}
         onClose={() => setIsToolSelectOpen(false)}
+        onOpenManageLabels={() => setLabelModalOpen(true)}
         currentAgentId={currentAgentId ?? undefined}
+      />
+      <LabelManagementModal
+        open={labelModalOpen}
+        onClose={() => setLabelModalOpen(false)}
+        availableTools={availableTools}
       />
     </>
   );
 }
 
-export function AgentSkillCapability({
-  highFidelity = false,
-  renderSection,
-}: ResourceSectionProps = {}) {
+export function AgentSkillCapability() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const currentAgentId = useAgentStore((state) => state.agentId);
   const isReadOnly = useAgentReadOnly();
   const [isSkillModalOpen, setIsSkillModalOpen] = useState(false);
   const [isRefreshingSkill, setIsRefreshingSkill] = useState(false);
-  const selectedAgentSkills =
-    useAgentStore((state) => state.editedAgent?.skills) ??
-    EMPTY_SELECTED_SKILLS;
   const [isSkillSelectOpen, setIsSkillSelectOpen] = useState(false);
+  const [tagModalOpen, setTagModalOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<MyEditableSkillItem | null>(
     null
   );
@@ -252,128 +193,67 @@ export function AgentSkillCapability({
     setEditingSkill(null);
   }, []);
 
-  const resourceActions = (
-    <div className="flex h-6 items-center gap-2">
-      <Button
-        type="link"
-        disabled={isReadOnly}
-        onClick={() => {
-          setEditingSkill(null);
-          setIsSkillModalOpen(true);
-        }}
-        className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
-      >
-        <span className="inline-flex items-center gap-1">
-          {t("agentConfig.layout.newSkill")}
-          <ExternalLink size={14} />
-        </span>
-      </Button>
-    </div>
-  );
-  const addSkillEntry = (
-    <ResourceAddButton
-      data-testid="agent-skill-add-entry"
-      onClick={() => setIsSkillSelectOpen(true)}
-      disabled={currentAgentId === null || isReadOnly}
-    >
-      {t("agentConfig.layout.addSkill")}
-    </ResourceAddButton>
-  );
-  const resourceContent = highFidelity ? (
-    <SelectedSkillManagement
-      currentAgentId={currentAgentId ?? undefined}
-      isReadOnly={isReadOnly}
-      onEditSkill={handleOpenSkillEditor}
-      highFidelity
-      addEntry={addSkillEntry}
-    />
-  ) : (
-    <div className="flex flex-col gap-2">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {addSkillEntry}
-      </div>
+  return (
+    <>
+      <Row gutter={[12, 12]} className="mb-3">
+        <Col xs={24}>
+          <Flex justify="space-between" align="center">
+            <div className="flex items-center gap-4 text-sm">
+              <Button
+                type="text"
+                size="small"
+                icon={<RefreshCw size={16} />}
+                onClick={handleRefreshSkills}
+                loading={isRefreshingSkill}
+                className="!text-emerald-600 hover:!text-emerald-700 hover:!bg-emerald-50"
+              >
+                {t("skillManagement.refresh.button")}
+              </Button>
+              <Button
+                type="text"
+                size="small"
+                icon={<BlocksIcon size={16} />}
+                onClick={() => {
+                  setEditingSkill(null);
+                  setIsSkillModalOpen(true);
+                }}
+                className="!text-blue-600 hover:!text-blue-700 hover:!bg-blue-50"
+                title={t("skillManagement.build.title")}
+              >
+                {t("skillManagement.build.button")}
+              </Button>
+            </div>
+            <Button
+              size="small"
+              icon={<Wrench size={14} />}
+              onClick={() => setIsSkillSelectOpen(true)}
+              disabled={currentAgentId === null || isReadOnly}
+              className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
+            >
+              <span className="inline-flex items-center self-center leading-none">
+                {t("skillPool.selectSkills")}
+              </span>
+            </Button>
+          </Flex>
+        </Col>
+      </Row>
       <SelectedSkillManagement
         currentAgentId={currentAgentId ?? undefined}
         isReadOnly={isReadOnly}
         onEditSkill={handleOpenSkillEditor}
-        hideEmpty
       />
-    </div>
-  );
-
-  return (
-    <>
-      {highFidelity ? (
-        renderSection ? (
-          renderSection(resourceContent, resourceActions)
-        ) : (
-          <div className="flex flex-col gap-2">
-            <div className="flex justify-end">{resourceActions}</div>
-            {resourceContent}
-          </div>
-        )
-      ) : (
-        <>
-          <Row gutter={[12, 12]} className="mb-3">
-            <Col xs={24}>
-              <Flex justify="space-between" align="center">
-                <div className="flex items-center gap-4 text-sm">
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<RefreshCw size={16} />}
-                    onClick={handleRefreshSkills}
-                    loading={isRefreshingSkill}
-                    className="!text-emerald-600 hover:!text-emerald-700 hover:!bg-emerald-50"
-                  >
-                    {t("skillManagement.refresh.button")}
-                  </Button>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<BlocksIcon size={16} />}
-                    onClick={() => {
-                      setEditingSkill(null);
-                      setIsSkillModalOpen(true);
-                    }}
-                    className="!text-blue-600 hover:!text-blue-700 hover:!bg-blue-50"
-                    title={t("skillManagement.build.title")}
-                  >
-                    {t("skillManagement.build.button")}
-                  </Button>
-                </div>
-                <Button
-                  size="small"
-                  icon={<Wrench size={14} />}
-                  onClick={() => setIsSkillSelectOpen(true)}
-                  disabled={currentAgentId === null || isReadOnly}
-                  className="!inline-flex h-7 !items-center !justify-center gap-1 border border-gray-200 bg-white text-xs leading-none hover:!border-gray-300 hover:!bg-gray-50"
-                >
-                  <span className="inline-flex items-center self-center leading-none">
-                    {t("skillPool.selectSkills")}
-                  </span>
-                </Button>
-              </Flex>
-            </Col>
-          </Row>
-          <SelectedSkillManagement
-            currentAgentId={currentAgentId ?? undefined}
-            isReadOnly={isReadOnly}
-            onEditSkill={handleOpenSkillEditor}
-          />
-        </>
-      )}
-      <SkillDrawer
-        key={currentAgentId ?? "new"}
+      <SelectSkillsDialog
         open={isSkillSelectOpen}
-        selectedSkills={selectedAgentSkills}
-        onConfirm={(skills) => useAgentStore.getState().updateSkills(skills)}
         onClose={() => setIsSkillSelectOpen(false)}
+        onOpenManageTags={() => setTagModalOpen(true)}
         onEditSkill={handleOpenSkillEditor}
         currentAgentId={currentAgentId ?? undefined}
         isReadOnly={isReadOnly}
       />
-
+      <SkillTagManagementModal
+        open={tagModalOpen}
+        onClose={() => setTagModalOpen(false)}
+      />
       <SkillBuildModal
         isOpen={isSkillModalOpen}
         onCancel={handleCloseSkillModal}

@@ -68,7 +68,6 @@ interface SkillBuildModalProps {
   editingSkill?: MyEditableSkillItem | null;
   onBeforeEditSave?: (skill: MyEditableSkillItem) => Promise<boolean>;
   zIndex?: number;
-  initialTab?: "interactive" | "upload";
 }
 
 interface StreamedFrontmatter {
@@ -154,7 +153,6 @@ export default function SkillBuildModal({
   editingSkill,
   onBeforeEditSave,
   zIndex = 1000,
-  initialTab = "interactive",
 }: SkillBuildModalProps) {
   const { t, i18n } = useTranslation("common");
   const { user, getAccessibleGroupIds } = useAuthorizationContext();
@@ -194,7 +192,7 @@ export default function SkillBuildModal({
       })),
     [filteredGroups]
   );
-  const [activeTab, setActiveTab] = useState<string>(initialTab);
+  const [activeTab, setActiveTab] = useState<string>("interactive");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingEditFiles, setIsLoadingEditFiles] = useState(false);
   const [loadedEditSkillId, setLoadedEditSkillId] = useState<number | null>(
@@ -299,7 +297,7 @@ export default function SkillBuildModal({
 
   useEffect(() => {
     if (!isOpen) {
-      setActiveTab(initialTab);
+      setActiveTab("interactive");
       setUploadFile(null);
       setInteractiveSkillName("");
       setUploadExtractingName(false);
@@ -318,7 +316,7 @@ export default function SkillBuildModal({
       setEditFilesError(null);
       setIsLoadingEditFiles(false);
     }
-  }, [isOpen, initialTab]);
+  }, [isOpen]);
 
   // Detect create/update mode when extracted skill name changes (upload tab)
   const [uploadIsCreateMode, setUploadIsCreateMode] = useState(true);

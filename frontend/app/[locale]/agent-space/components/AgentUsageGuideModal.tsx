@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -173,6 +171,8 @@ export function AgentUsageGuideModal({
                       <a
                         className="text-primary hover:underline"
                         href={buildUserApiKeyPath(locale)}
+                        target="_blank"
+                        rel="noopener noreferrer"
                       >
                         {t("agentUsageGuide.northbound.stepKey")}
                       </a>

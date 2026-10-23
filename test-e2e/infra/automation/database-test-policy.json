@@ -1,4 +1,0 @@
-{
-  "reason": "Database- and migration-specific tests are excluded at the user's request; retained cases are not PASS.",
-  "excluded_case_ids": []
-}
