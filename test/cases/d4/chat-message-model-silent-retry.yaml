@@ -1,0 +1,30 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-MESSAGE
+cases:
+  - case_id: CMSR-D4-001
+    feature_id: CMSR-005
+    requirement_ids: [CMSR-005]
+    business_rule_ids: [CMSR-RULE-013, CMSR-RULE-014, CMSR-RULE-015, CMSR-RULE-016]
+    title: Browser shows retry output incrementally without blank steps
+    type: E2E
+    priority: P0
+    status: blocked
+    automation: automated
+    objective: Verify a user sees only successful raw code and one executed action in a real conversation.
+    preconditions: [A local Nexent instance, test tenant and controllable model provider are configured.]
+    test_data: {profile: mock, sequences: ['failed transport partial then success', 'step-one invalid protocol then valid paused repair']}
+    steps:
+      - {order: 1, action: Open Agent chat and send the fixed prompt., expected: Step 1 appears before the first model token; the first partial output is then rolled back while the label remains.}
+      - {order: 2, action: Pause the second provider response after its first safe fragment., expected: The reasoning card displays the successful raw fragment before provider completion.}
+      - {order: 3, action: Complete the response and reload the page., expected: A nonempty reasoning card and one executed code card remain.}
+      - {order: 4, action: Repeat in a new conversation with semantic repair at step one., expected: Corrected raw code is visible during the pause and after refresh; Connecting does not persist.}
+    expected_results: [Running Step 1 is visible before content., No terminal label-only reasoning card., Successful raw content is streamed after Step 1., Refreshed history matches the final UI.]
+    forbidden_side_effects: [No failed partial text after rollback., No duplicate execution card.]
+    actor: Authenticated test tenant user
+    journey: [Open the Agent conversation., Trigger controlled retry., Observe streaming., Reload and inspect history.]
+    final_business_result: [Only the committed attempt and its single executed code action are visible.]
+    failure_evidence: [Retain browser screenshot, network timing and console trace on failure.]
+    execution:
+      profiles:
+        - {name: mock, required_services: [model-provider]}

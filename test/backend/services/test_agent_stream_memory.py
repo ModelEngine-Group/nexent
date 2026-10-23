@@ -1,8 +1,6 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """Acceptance-driven tests for Agent stream memory helpers."""
 
-from management.services.agent.stream import finalize_buffered_unit_fragments as _finalize_buffered_unit_fragments
+from management.services.agent.run import _finalize_buffered_unit_fragments
 
 
 def test_ac_003_mergeable_fragments_finalize_once_without_private_fields():

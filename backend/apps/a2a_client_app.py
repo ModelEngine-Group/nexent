@@ -1,11 +1,9 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 A2A Client API endpoints.
 
 These endpoints allow users to discover and manage external A2A agents.
 Used internally for configuring A2A sub-agents.
 """
-import asyncio
 import logging
 import uuid
 from typing import Annotated, Any, Dict, List, Optional
@@ -17,23 +15,19 @@ from pydantic import BaseModel, Field
 
 from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
 from consts.exceptions import (
-    AgentNotFoundError,
     AppException,
-    ForbiddenError,
     RuntimeMetadataValidationError,
 )
-from infrastructure.http.a2a import AGENT_CARD_TIMEOUT
 
-from management.services.agent.a2a.catalog import (
+from services.a2a_client_service import (
     a2a_client_service,
     AgentCallError,
     AgentDiscoveryError,
 )
-from management.services.agent.a2a.service import a2a_server_service
+from services.a2a_server_service import a2a_server_service
 from database import a2a_agent_db
-from management.services.agent.authorization import require_external_relation_edit
-from management.services.permission.identity.authentication_helpers import get_current_user_info
-from infrastructure.serialization.runtime_metadata import (
+from utils.auth_utils import get_current_user_info
+from utils.runtime_metadata_utils import (
     validate_runtime_metadata,
 )
 
@@ -46,7 +40,6 @@ class DiscoverFromUrlRequest(BaseModel):
     url: str
     name: Optional[str] = None
     custom_headers: Optional[Dict[str, str]] = None
-    ssl_verify: bool = True
 
 
 class DiscoverFromNacosRequest(BaseModel):
@@ -94,15 +87,11 @@ async def discover_from_url(
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
-        result = await asyncio.wait_for(
-            a2a_client_service.discover_from_url(
-                url=request.url,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                custom_headers=request.custom_headers,
-                ssl_verify=request.ssl_verify,
-            ),
-            timeout=AGENT_CARD_TIMEOUT
+        result = await a2a_client_service.discover_from_url(
+            url=request.url,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            custom_headers=request.custom_headers
         )
 
         return JSONResponse(
@@ -110,12 +99,6 @@ async def discover_from_url(
             content={"status": "success", "data": result}
         )
 
-    except asyncio.TimeoutError as e:
-        logger.warning("URL Agent discovery timed out")
-        raise HTTPException(
-            status_code=HTTPStatus.GATEWAY_TIMEOUT,
-            detail="Agent discovery timed out after 10 seconds. Check the Agent address and connectivity, then retry."
-        ) from e
     except AgentDiscoveryError as e:
         logger.error(f"Agent discovery failed: {e}")
         raise HTTPException(
@@ -143,15 +126,12 @@ async def discover_from_nacos(
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
-        results = await asyncio.wait_for(
-            a2a_client_service.discover_from_nacos(
-                nacos_config_id=request.nacos_config_id,
-                agent_names=[name.strip() for name in request.agent_names],
-                tenant_id=tenant_id,
-                user_id=user_id,
-                namespace=request.namespace
-            ),
-            timeout=AGENT_CARD_TIMEOUT
+        results = await a2a_client_service.discover_from_nacos(
+            nacos_config_id=request.nacos_config_id,
+            agent_names=[name.strip() for name in request.agent_names],
+            tenant_id=tenant_id,
+            user_id=user_id,
+            namespace=request.namespace
         )
 
         return JSONResponse(
@@ -159,12 +139,6 @@ async def discover_from_nacos(
             content={"status": "success", "data": results}
         )
 
-    except asyncio.TimeoutError as e:
-        logger.warning("Nacos Agent discovery timed out")
-        raise HTTPException(
-            status_code=HTTPStatus.GATEWAY_TIMEOUT,
-            detail="Agent discovery timed out after 10 seconds. Check Nacos and Agent connectivity, then retry."
-        ) from e
     except AgentDiscoveryError as e:
         logger.error(f"Nacos discovery failed: {e}")
         raise HTTPException(
@@ -482,7 +456,6 @@ async def add_external_agent_relation(
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
-        require_external_relation_edit(request_body.local_agent_id, tenant_id, user_id)
         result = a2a_agent_db.add_external_agent_relation(
             local_agent_id=request_body.local_agent_id,
             external_agent_id=request_body.external_agent_id,
@@ -495,10 +468,6 @@ async def add_external_agent_relation(
             content={"status": "success", "data": result}
         )
 
-    except AgentNotFoundError as e:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent not found") from e
-    except ForbiddenError as e:
-        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except ValueError as e:
         logger.error(f"Add relation failed: {e}")
         raise HTTPException(
@@ -522,9 +491,8 @@ async def remove_external_agent_relation(
 ):
     """Remove a relation between a local agent and an external A2A agent."""
     try:
-        user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
+        _, tenant_id, _ = get_current_user_info(authorization, http_request)
 
-        require_external_relation_edit(local_agent_id, tenant_id, user_id)
         result = a2a_agent_db.remove_external_agent_relation(
             local_agent_id=local_agent_id,
             external_agent_id=external_agent_id,
@@ -542,10 +510,6 @@ async def remove_external_agent_relation(
             content={"status": "success", "message": "Relation removed"}
         )
 
-    except AgentNotFoundError as e:
-        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Agent not found") from e
-    except ForbiddenError as e:
-        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(e)) from e
     except HTTPException:
         raise
     except Exception as e:
@@ -820,7 +784,7 @@ async def test_nacos_connection(
     http_request: Request = None
 ):
     """Test connectivity to Nacos server without saving the configuration."""
-    from infrastructure.discovery.nacos import NacosClient, NacosConnectionError
+    from utils.nacos_client import NacosClient, NacosConnectionError
 
     try:
         get_current_user_info(authorization, http_request)

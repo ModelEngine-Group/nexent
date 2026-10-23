@@ -1,4 +1,4 @@
-from management.services.model.reasoning import (
+from utils.reasoning import (
     _control,
     _controls,
     normalize_reasoning_params,

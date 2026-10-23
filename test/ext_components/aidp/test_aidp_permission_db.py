@@ -213,16 +213,15 @@ class TestReadHelpers:
             "group_ids": [1, 2], "resource_status": "ACTIVE",
             "delete_flag": "N",
         }
-        fake_session.execute_result.one_or_none.return_value = (_row(payload), "owner@example.test")
+        fake_session.execute_result.scalar_one_or_none.return_value = _row(payload)
 
         result = aidp_permission_db.get_permission_by_kb_id("kb-1", "tenant-a")
         assert result["kb_id"] == "kb-1"
         assert result["ingroup_permission"] == "EDIT"
         assert result["group_ids"] == [1, 2]
-        assert result["creator_name"] == "owner@example.test"
 
     def test_get_permission_by_kb_id_missing_returns_none(self, aidp_permission_db, fake_session):
-        fake_session.execute_result.one_or_none.return_value = None
+        fake_session.execute_result.scalar_one_or_none.return_value = None
 
         assert aidp_permission_db.get_permission_by_kb_id("kb-missing", "tenant-a") is None
 
@@ -389,8 +388,8 @@ class TestListAllPermissionsByTenant:
             {"id": 1, "kb_id": "kb-1", "tenant_id": "tenant-a", "delete_flag": "N"},
             {"id": 2, "kb_id": "kb-2", "tenant_id": "tenant-a", "delete_flag": "N"},
         ]
-        fake_session.execute_result.all.return_value = [
-            (_row(rows[0]), "owner@example.test"), (_row(rows[1]), None),
+        fake_session.execute_result.scalars.return_value.all.return_value = [
+            _row(r) for r in rows
         ]
 
         result = aidp_permission_db.list_all_permissions_by_tenant("tenant-a")
@@ -398,15 +397,7 @@ class TestListAllPermissionsByTenant:
         assert len(result) == 2
         assert result[0]["kb_id"] == "kb-1"
         assert result[1]["kb_id"] == "kb-2"
-        assert result[0]["creator_name"] == "owner@example.test"
-        assert result[1]["creator_name"] is None
         assert len(fake_session.executed) == 1
-        sql = str(fake_session.executed[0][0])
-        assert "LEFT OUTER JOIN" in sql
-        assert "user_tenant_t.user_id = nexent.aidp_kb_permission_t.owner_user_id" in sql
-        assert "user_tenant_t.tenant_id = nexent.aidp_kb_permission_t.tenant_id" in sql
-        assert "user_tenant_t.delete_flag" in sql
-        assert "LIMIT" not in sql
 
     def test_rejects_empty_tenant_id(self, aidp_permission_db, fake_session):
         with pytest.raises(ValueError):

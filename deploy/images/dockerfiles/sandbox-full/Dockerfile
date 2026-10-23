@@ -155,7 +155,8 @@ LABEL org.opencontainers.image.title="Nexent Sandbox Full" \
 USER root
 RUN umask 0022
 
-# Install runtime utilities and document-processing dependencies.
+# Minimal apt surface: curl is required by some tools to fetch the
+# /files endpoints; libgomp1 is needed by numpy/scipy wheels.
 RUN --mount=type=cache,id=nexent-sandbox-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=nexent-sandbox-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
@@ -173,10 +174,6 @@ RUN --mount=type=cache,id=nexent-sandbox-apt-cache-${TARGETARCH},target=/var/cac
     apt-get update && \
     apt-get install -y --no-install-recommends \
         curl \
-        vim \
-        procps \
-        wget \
-        less \
         fontconfig \
         fonts-dejavu-core \
         fonts-liberation \

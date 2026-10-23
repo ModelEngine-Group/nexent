@@ -1,11 +1,11 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import type { TFunction } from "i18next";
 
 /** Agent-like object that may include prompts_hidden from /agent/search_info. */
 export type AgentPromptVisibilitySource = {
   prompts_hidden?: boolean;
-  prompt?: string | null;
+  duty_prompt?: string | null;
+  constraint_prompt?: string | null;
+  few_shots_prompt?: string | null;
 };
 
 export function isAgentPromptsHidden(
@@ -20,7 +20,7 @@ export function isAgentPromptsHidden(
  */
 export function renderAgentPromptFieldValue(
   agent: AgentPromptVisibilitySource | null | undefined,
-  field: "prompt",
+  field: "duty_prompt" | "constraint_prompt" | "few_shots_prompt",
   t: TFunction,
   noneLabel?: string
 ): string {

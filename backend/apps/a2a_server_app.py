@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 A2A Server internal management endpoints.
 
@@ -15,8 +14,8 @@ from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from management.services.agent.a2a.service import a2a_server_service, EndpointNotFoundError
-from management.services.permission.identity.authentication_helpers import get_current_user_info
+from services.a2a_server_service import a2a_server_service, EndpointNotFoundError
+from utils.auth_utils import get_current_user_info
 
 logger = logging.getLogger("a2a_server_app")
 

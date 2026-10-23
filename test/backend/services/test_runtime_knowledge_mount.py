@@ -1,10 +1,9 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
 
-from management.services.knowledge_base import mount as service
+from services import runtime_knowledge_mount as service
 
 
 def scope(source="local", mode="override", params=None):
@@ -58,7 +57,7 @@ def test_rejects_connection_range_and_invalid_parameters(mocker, params):
 
 def test_selected_range_replaces_defaults_before_tool_construction(mocker):
     from consts.model import ConversationKnowledgeScopeRequest
-    from management.services.knowledge_base import scope as scopes
+    from services import knowledge_scope_service as scopes
 
     mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", False)
     original = tool()

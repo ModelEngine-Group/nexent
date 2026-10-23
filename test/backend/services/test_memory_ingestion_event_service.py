@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -62,15 +61,15 @@ sys.modules["nexent"] = nexent_pkg
 sys.modules["nexent.memory"] = memory_pkg
 
 services_pkg = types.ModuleType("services")
-ext_provider_svc_mod = types.ModuleType("management.services.memory.providers.service")
-config_svc_mod = types.ModuleType("management.services.memory.providers.configuration")
+ext_provider_svc_mod = types.ModuleType("services.memory_external_provider_service")
+config_svc_mod = types.ModuleType("services.memory_provider_config_service")
 ext_provider_svc_mod.MemoryExternalProviderService = MagicMock
 config_svc_mod.MemoryProviderConfigService = MagicMock
 sys.modules["services"] = services_pkg
-sys.modules["management.services.memory.providers.service"] = ext_provider_svc_mod
-sys.modules["management.services.memory.providers.configuration"] = config_svc_mod
+sys.modules["services.memory_external_provider_service"] = ext_provider_svc_mod
+sys.modules["services.memory_provider_config_service"] = config_svc_mod
 
-from management.services.memory.ingestion import MemoryIngestionEventService
+from backend.services.memory_ingestion_event_service import MemoryIngestionEventService
 
 
 @pytest.fixture

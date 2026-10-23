@@ -1,6 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
-import { useTranslation } from "react-i18next";
 import { useId, type ReactNode } from "react";
 import SharedResourceCard from "@/components/resource/ResourceCard";
 import { ArrowRight, Bot, BookOpen, Check, Puzzle } from "lucide-react";
@@ -34,7 +31,6 @@ export function ResourceCard({
   actions?: ReactNode;
   resourceType?: "agent" | "skill" | "knowledge";
 }) {
-  const { t } = useTranslation();
   const reasonId = useId();
   const Icon =
     resourceType === "skill"
@@ -75,7 +71,7 @@ export function ResourceCard({
         badges.length > 0 ? (
           <span
             className="flex gap-1 overflow-hidden whitespace-nowrap"
-            aria-label={t("ui.localization.resourceStatus")}
+            aria-label="资源状态"
             title={badges.join("、")}
           >
             {badges.map((badge) => (
@@ -93,7 +89,7 @@ export function ResourceCard({
         uniqueTags.length > 0 ? (
           <span
             className="flex max-w-full gap-1 overflow-hidden whitespace-nowrap"
-            aria-label={t("ui.localization.tags")}
+            aria-label="标签"
             title={uniqueTags.join("、")}
           >
             {uniqueTags.slice(0, 3).map((tag) => (
@@ -139,12 +135,7 @@ export function ResourceCard({
             onClick={onClick}
             className="inline-flex items-center gap-2 whitespace-nowrap text-sm font-medium text-slate-600 hover:text-blue-600 disabled:cursor-not-allowed"
           >
-            {disabled
-              ? t("ui.localization.unavailable")
-              : footer ||
-                (selected
-                  ? t("ui.localization.selected")
-                  : t("ui.localization.select"))}
+            {disabled ? "不可用" : footer || (selected ? "已选择" : "选择")}
             {!disabled && <ArrowRight size={16} aria-hidden />}
           </button>
         )

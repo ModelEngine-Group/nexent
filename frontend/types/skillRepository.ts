@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 /**
  * Types for tenant skill repository marketplace listings.
  */
@@ -23,9 +21,7 @@ export interface SkillRepositoryListingItem {
   downloads?: number;
   category_id?: number | null;
   author?: string | null;
-  author_cas_username?: string | null;
   submitted_by?: string | null;
-  submitted_by_cas_username?: string | null;
   content?: string | null;
   can_take_down?: boolean;
 }

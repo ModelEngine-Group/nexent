@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import sys
 from unittest.mock import MagicMock
 
@@ -6,7 +5,7 @@ from test.backend.services import test_conversation_management_service as legacy
 
 
 service = __import__(
-    "management.services.conversation.service",
+    "backend.services.conversation_management_service",
     fromlist=["update_conversation_workbench_config_service"],
 )
 

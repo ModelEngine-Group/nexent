@@ -1,5 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Unit tests for ``management.services.memory.index`` (Phase 2).
+"""Unit tests for ``backend.services.memory_index_service`` (Phase 2).
 
 Focus: the hybrid (BM25 + kNN) branch of ``MemoryIndexService.search_similar``.
 The pure-kNN branch is exercised end-to-end through the retrieval service
@@ -141,7 +140,7 @@ sys.modules["services"] = services_pkg
 sys.modules["management.services.knowledge_base.service"] = vdb_service
 
 
-from management.services.memory import index as memory_index_service  # noqa: E402
+from backend.services import memory_index_service  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -10,10 +8,10 @@ from mcp.types import Tool
 from pydantic import ValidationError
 
 import services.nl2agent_service as nl2agent_service
-import management.services.tool.configuration as tool_configuration_service
+import services.tool_configuration_service as tool_configuration_service
 import tool_collection.mcp.nl2agent_mcp_tools as nl2agent_mcp_tools_module
-from consts.exceptions import AgentDraftEditError
-from management.services.tool.configuration import get_tool_from_remote_mcp_server
+from services.agent_draft_permission_service import AgentDraftEditError
+from services.tool_configuration_service import get_tool_from_remote_mcp_server
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
@@ -584,7 +582,7 @@ async def test_save_agent_draft_fields_emits_prompt_failure_state(mocker):
     )
 
     result_json, state_wrapper = (
-        await save_agent_draft_fields(1042, {"prompt": "Research"})
+        await save_agent_draft_fields(1042, {"duty_prompt": "Research"})
     ).split("\n", 1)
 
     assert json.loads(result_json)["code"] == "draft_save_failed"
@@ -593,7 +591,7 @@ async def test_save_agent_draft_fields_emits_prompt_failure_state(mocker):
     ) == {
         "event": "prompt_generation_failed",
         "agent_id": 1042,
-        "failed_fields": ["prompt"],
+        "failed_fields": ["duty_prompt"],
     }
 
 
@@ -637,7 +635,7 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
     first = await save_agent_draft_fields(1042, {"description": "Updated"})
     second = await save_agent_draft_fields(
         1042,
-        {"prompt": "Verify sources"},
+        {"duty_prompt": "Verify sources"},
     )
 
     assert [call.kwargs["agent_id"] for call in save.call_args_list] == [1042, 1042]
@@ -711,7 +709,7 @@ async def test_clarification_wrapper_keeps_trusted_agent_id(mocker):
         return_value=("user-a", "tenant-a"),
     )
     require_edit = mocker.patch(
-        "management.services.agent.authorization.require_agent_draft_edit"
+        "services.agent_draft_permission_service.require_agent_draft_edit"
     )
 
     wrapped = await nl2a_wrapper(
@@ -826,7 +824,7 @@ async def test_uninstalled_search_returns_stable_permission_and_runtime_errors(m
         return_value=("user-a", "tenant-a"),
     )
     require_edit = mocker.patch(
-        "management.services.agent.authorization.require_agent_draft_edit"
+        "services.agent_draft_permission_service.require_agent_draft_edit"
     )
     search_impl = mocker.patch.object(
         nl2agent_service,
@@ -900,7 +898,7 @@ async def test_resource_tools_return_tenant_scoped_results_and_stable_errors(
         new=AsyncMock(return_value=recommend_output),
     )
     mocker.patch(
-        "management.services.agent.authorization.require_agent_draft_edit"
+        "services.agent_draft_permission_service.require_agent_draft_edit"
     )
     requirements = [{"requirement_id": "lookup", "query": "web search"}]
     candidate = {
@@ -991,7 +989,7 @@ async def test_installed_binding_wrapper_rechecks_agent_and_candidates(mocker):
         return_value=("user-a", "tenant-a"),
     )
     require_edit = mocker.patch(
-        "management.services.agent.authorization.require_agent_draft_edit"
+        "services.agent_draft_permission_service.require_agent_draft_edit"
     )
     resource_result = {
         "status": "success",
@@ -1059,7 +1057,7 @@ async def test_installation_wrapper_rechecks_agent_and_candidates(mocker):
         return_value=("user-a", "tenant-a"),
     )
     mocker.patch(
-        "management.services.agent.authorization.require_agent_draft_edit"
+        "services.agent_draft_permission_service.require_agent_draft_edit"
     )
     resource_result = {
         "status": "success",
@@ -1120,7 +1118,7 @@ async def test_resource_wrapper_validates_results_sources_and_empty_binding(mock
         return_value=("user-a", "tenant-a"),
     )
     mocker.patch(
-        "management.services.agent.authorization.require_agent_draft_edit"
+        "services.agent_draft_permission_service.require_agent_draft_edit"
     )
 
     with pytest.raises(ValueError, match="requires agent_id and resource_result"):
@@ -1251,12 +1249,12 @@ async def test_final_prompt_batch_emits_generation_completed_state(mocker):
     [
         (
             {
-                "prompt": "Use reliable sources.",
+                "constraint_prompt": "Use reliable sources.",
                 "greeting_message": "Hello",
                 "example_questions": ["What should I research?"],
             },
             [
-                "prompt",
+                "constraint_prompt",
                 "greeting_message",
                 "example_questions",
             ],
@@ -1265,14 +1263,14 @@ async def test_final_prompt_batch_emits_generation_completed_state(mocker):
             {"example_questions": ["What should I research?"]},
             ["example_questions"],
         ),
-        ({"prompt": "Research the requested topic."}, ["prompt"]),
+        ({"duty_prompt": "Research the requested topic."}, ["duty_prompt"]),
         (
-            {"greeting_message": "Hello"},
-            ["greeting_message"],
+            {"constraint_prompt": "Use reliable sources."},
+            ["constraint_prompt"],
         ),
         (
-            {"prompt": "Question: Example\nAnswer: Example", "example_questions": ["Question"]},
-            ["prompt", "example_questions"],
+            {"few_shots_prompt": "Question: Example\nAnswer: Example"},
+            ["few_shots_prompt"],
         ),
     ],
 )
@@ -1332,7 +1330,7 @@ async def test_completion_validation_uses_persisted_state_for_prompt_saves(
     ("fields", "updated_fields"),
     [
         ({"greeting_message": "Hello"}, ["greeting_message"]),
-        ({"prompt": "Research the requested topic."}, ["prompt"]),
+        ({"duty_prompt": "Research the requested topic."}, ["duty_prompt"]),
     ],
 )
 async def test_partial_prompt_save_remains_saved_when_database_is_incomplete(
@@ -1413,7 +1411,7 @@ async def test_final_prompt_batch_emits_failure_when_database_is_incomplete(mock
         new=AsyncMock(
             side_effect=nl2agent_service.Nl2AgentCompletionError(
                 "prompt_fields_incomplete",
-                ["prompt"],
+                ["few_shots_prompt"],
             )
         ),
     )
@@ -1443,7 +1441,7 @@ async def test_final_prompt_batch_emits_failure_when_database_is_incomplete(mock
     ) == {
         "event": "prompt_generation_failed",
         "agent_id": 42,
-        "failed_fields": ["prompt"],
+        "failed_fields": ["few_shots_prompt"],
     }
 
 
@@ -1573,8 +1571,6 @@ async def test_mcp_search_empty_result_returns_business_payload(mocker):
 
 @pytest.mark.asyncio
 async def test_public_mcp_scanner_skips_internal_tools(mocker):
-    from management.services.tool import discovery as tool_discovery
-
     client = AsyncMock()
     client.__aenter__.return_value = client
     client.list_tools.return_value = [
@@ -1597,12 +1593,12 @@ async def test_public_mcp_scanner_skips_internal_tools(mocker):
         ),
     ]
     client_class = mocker.patch.object(
-        tool_discovery,
+        tool_configuration_service,
         "Client",
         return_value=client,
     )
     transport = mocker.patch.object(
-        tool_discovery,
+        tool_configuration_service,
         "_create_mcp_transport",
         return_value=object(),
     )

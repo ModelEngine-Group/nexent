@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """
 Built-in labels for well-known local tools.
 
@@ -30,7 +28,6 @@ _category_file = {
     "list_directory": ["file"], "move_item": ["file"],
 }
 _category_search = {
-    "deepseek_search": ["search"],
     "tavily_search": ["search"], "exa_search": ["search"], "linkup_search": ["search"],
     "search_memory": ["search"], "knowledge_base_search": ["search"],
 }

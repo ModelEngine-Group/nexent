@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for A2A Server Service - Task Management.
 
@@ -15,7 +14,7 @@ class TestValidateEndpoint:
 
     def test_validate_endpoint_success(self):
         """Test successful endpoint validation."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -25,7 +24,7 @@ class TestValidateEndpoint:
             "is_enabled": True
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = mock_server_agent
 
             result = service._validate_endpoint("test-endpoint")
@@ -35,14 +34,14 @@ class TestValidateEndpoint:
 
     def test_validate_endpoint_not_found(self):
         """Test endpoint validation when endpoint not found."""
-        from management.services.agent.a2a.service import (
+        from backend.services.a2a_server_service import (
             A2AServerService,
             EndpointNotFoundError
         )
 
         service = A2AServerService()
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = None
 
             with pytest.raises(EndpointNotFoundError) as exc_info:
@@ -52,7 +51,7 @@ class TestValidateEndpoint:
 
     def test_validate_endpoint_disabled(self):
         """Test endpoint validation when endpoint is disabled."""
-        from management.services.agent.a2a.service import (
+        from backend.services.a2a_server_service import (
             A2AServerService,
             AgentNotEnabledError
         )
@@ -64,7 +63,7 @@ class TestValidateEndpoint:
             "is_enabled": False
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = mock_server_agent
 
             with pytest.raises(AgentNotEnabledError) as exc_info:
@@ -78,7 +77,7 @@ class TestResolveTaskId:
 
     def test_resolve_task_id_with_existing_client_task_id(self):
         """Test resolving task ID when client provides existing taskId."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -93,7 +92,7 @@ class TestResolveTaskId:
             "task_state": "TASK_STATE_WORKING"
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_task.return_value = mock_existing_task
 
             task_id, context_id, is_complex = service._resolve_task_id(
@@ -105,7 +104,7 @@ class TestResolveTaskId:
 
     def test_resolve_task_id_with_terminal_task(self):
         """Test resolving task ID when task is already terminal."""
-        from management.services.agent.a2a.service import (
+        from backend.services.a2a_server_service import (
             A2AServerService,
             UnsupportedOperationError
         )
@@ -123,7 +122,7 @@ class TestResolveTaskId:
             "task_state": "TASK_STATE_COMPLETED"
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_task.return_value = mock_task
 
             with pytest.raises(UnsupportedOperationError) as exc_info:
@@ -135,7 +134,7 @@ class TestResolveTaskId:
 
     def test_resolve_task_id_with_context_id_creates_new_task(self):
         """Test creating new task when contextId is present."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -145,7 +144,7 @@ class TestResolveTaskId:
         }
         server_agent = {"endpoint_id": "test-endpoint"}
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_task.return_value = None
             mock_db.create_task.return_value = MagicMock()
 
@@ -161,7 +160,7 @@ class TestResolveTaskId:
 
     def test_resolve_task_id_with_history_creates_new_task(self):
         """Test creating new task when history is present."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -171,7 +170,7 @@ class TestResolveTaskId:
         }
         server_agent = {"endpoint_id": "test-endpoint"}
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_task.return_value = None
             mock_db.create_task.return_value = MagicMock()
 
@@ -185,7 +184,7 @@ class TestResolveTaskId:
 
     def test_resolve_task_id_simple_request(self):
         """Test simple request without complex flags."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -209,7 +208,7 @@ class TestGetTask:
 
     def test_get_task_success(self):
         """Test successful get_task."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -222,7 +221,7 @@ class TestGetTask:
             "update_time": "2024-01-01T00:00:00Z"
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_task.return_value = mock_task
 
             result = service.get_task("task_123", user_id="user-1")
@@ -234,14 +233,14 @@ class TestGetTask:
 
     def test_get_task_not_found(self):
         """Test get_task when task not found."""
-        from management.services.agent.a2a.service import (
+        from backend.services.a2a_server_service import (
             A2AServerService,
             TaskNotFoundError
         )
 
         service = A2AServerService()
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_task.return_value = None
 
             with pytest.raises(TaskNotFoundError) as exc_info:
@@ -251,7 +250,7 @@ class TestGetTask:
 
     def test_get_task_unauthorized(self):
         """Test get_task with wrong user_id."""
-        from management.services.agent.a2a.service import (
+        from backend.services.a2a_server_service import (
             A2AServerService,
             A2AServerServiceError
         )
@@ -264,7 +263,7 @@ class TestGetTask:
             "task_state": "TASK_STATE_WORKING"
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_task.return_value = mock_task
 
             with pytest.raises(A2AServerServiceError) as exc_info:
@@ -274,7 +273,7 @@ class TestGetTask:
 
     def test_get_task_without_authorization(self):
         """Test get_task without user_id (no authorization check)."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -284,7 +283,7 @@ class TestGetTask:
             "caller_user_id": "user-1"
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_task.return_value = mock_task
 
             result = service.get_task("task_123")
@@ -293,7 +292,7 @@ class TestGetTask:
 
     def test_get_task_state_mapping(self):
         """Test task state mapping to A2A format."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -304,7 +303,7 @@ class TestGetTask:
             "result": {"error": "Something went wrong"}
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_task.return_value = mock_task
 
             result = service.get_task("task_123", user_id="user-1")
@@ -317,7 +316,7 @@ class TestListTasks:
 
     def test_list_tasks_basic(self):
         """Test basic list_tasks."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -326,7 +325,7 @@ class TestListTasks:
             {"id": "task_2", "task_state": "TASK_STATE_COMPLETED"}
         ]
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.list_tasks.return_value = mock_tasks
 
             result = service.list_tasks(tenant_id="tenant-1")
@@ -336,7 +335,7 @@ class TestListTasks:
 
     def test_list_tasks_with_filters(self):
         """Test list_tasks with various filters."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -344,7 +343,7 @@ class TestListTasks:
             {"id": "task_1", "endpoint_id": "ep_1", "task_state": "TASK_STATE_WORKING"}
         ]
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.list_tasks.return_value = mock_tasks
 
             result = service.list_tasks(
@@ -367,7 +366,7 @@ class TestListTasksPaginated:
 
     def test_list_tasks_paginated_success(self):
         """Test list_tasks_paginated with results."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -375,7 +374,7 @@ class TestListTasksPaginated:
             {"id": "task_1", "task_state": "TASK_STATE_WORKING"}
         ]
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.list_tasks_paginated.return_value = (mock_tasks, "next_cursor_token")
 
             tasks, next_token = service.list_tasks_paginated(
@@ -388,7 +387,7 @@ class TestListTasksPaginated:
 
     def test_list_tasks_paginated_no_next_page(self):
         """Test list_tasks_paginated when no more pages."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -396,7 +395,7 @@ class TestListTasksPaginated:
             {"id": "task_1"}
         ]
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.list_tasks_paginated.return_value = (mock_tasks, None)
 
             tasks, next_token = service.list_tasks_paginated(
@@ -409,14 +408,14 @@ class TestListTasksPaginated:
 
     def test_list_tasks_paginated_with_cursor(self):
         """Test list_tasks_paginated with cursor."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
         mock_cursor = {"update_time": "2024-01-01T00:00:00Z"}
         mock_tasks = [{"id": "task_1"}]
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.list_tasks_paginated.return_value = (mock_tasks, None)
 
             tasks, next_token = service.list_tasks_paginated(
@@ -433,7 +432,7 @@ class TestCancelTask:
 
     def test_cancel_task_success(self):
         """Test successful task cancellation."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -443,7 +442,7 @@ class TestCancelTask:
             "task_state": "TASK_STATE_CANCELED"
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_task.return_value = mock_task
             mock_db.cancel_task.return_value = True
 
@@ -453,14 +452,14 @@ class TestCancelTask:
 
     def test_cancel_task_not_found(self):
         """Test cancel_task when task not found."""
-        from management.services.agent.a2a.service import (
+        from backend.services.a2a_server_service import (
             A2AServerService,
             TaskNotFoundError
         )
 
         service = A2AServerService()
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_task.return_value = None
 
             with pytest.raises(TaskNotFoundError) as exc_info:
@@ -470,7 +469,7 @@ class TestCancelTask:
 
     def test_cancel_task_unauthorized(self):
         """Test cancel_task with wrong user_id."""
-        from management.services.agent.a2a.service import (
+        from backend.services.a2a_server_service import (
             A2AServerService,
             A2AServerServiceError
         )
@@ -482,7 +481,7 @@ class TestCancelTask:
             "caller_user_id": "user-1"
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_task.return_value = mock_task
 
             with pytest.raises(A2AServerServiceError) as exc_info:
@@ -492,7 +491,7 @@ class TestCancelTask:
 
     def test_cancel_task_cannot_cancel(self):
         """Test cancel_task when task cannot be canceled (already completed)."""
-        from management.services.agent.a2a.service import (
+        from backend.services.a2a_server_service import (
             A2AServerService,
             A2AServerServiceError
         )
@@ -505,7 +504,7 @@ class TestCancelTask:
             "task_state": "TASK_STATE_COMPLETED"
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_task.return_value = mock_task
             mock_db.cancel_task.return_value = False
 

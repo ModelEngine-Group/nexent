@@ -1,0 +1,47 @@
+version: "3.7"
+
+services:
+  nacos-a2a-test:
+    image: nacos/nacos-server:v3.2.1
+    environment:
+      MODE: standalone
+      NACOS_AUTH_ENABLE: "false"
+      NACOS_AUTH_TOKEN: ${NACOS_AUTH_TOKEN:-eW91ci1zZWNyZXQta2V5LTIwMjQtbmFjb3MtYXV0aC0xMjM0NTY3OA==}
+      NACOS_AUTH_IDENTITY_KEY: ${NACOS_AUTH_IDENTITY_KEY:-dGVzdC10ZW5hbnQta2V5}
+      NACOS_AUTH_IDENTITY_VALUE: ${NACOS_AUTH_IDENTITY_VALUE:-dGVzdC10ZW5hbnQtdmFsdWU=}
+      NACOS_CORE_AUTH_ENABLED: "false"
+      NACOS_CORE_AUTH_ENABLE_USER_AGENT_AUTH_WHITE: "false"
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+      - "9849:9849"
+      - "8080:8080"
+    networks:
+      - nexent-a2a-test
+
+  a2a-agent:
+    build:
+      context: ../mock-services/a2a-agent
+    environment:
+      A2A_MOCK_HOST: 0.0.0.0
+      A2A_MOCK_PORT: "8888"
+      A2A_ADVERTISED_BASE_URL: http://a2a-agent:8888
+      A2A_CONTROL_TOKEN: ${A2A_CONTROL_TOKEN:-local-test-control}
+      A2A_JWT_SECRET: ${A2A_JWT_SECRET:-local-a2a-mock-secret}
+      A2A_SCENARIO_CATALOG: scenarios/catalog.yaml
+      NACOS_ENABLED: "true"
+      NACOS_REQUIRED: "true"
+      NACOS_SERVER_URL: http://nacos-a2a-test:8848
+      NACOS_NAMESPACE_ID: ${A2A_NACOS_NAMESPACE:-public}
+      NACOS_AGENT_NAME: ${A2A_NACOS_AGENT_NAME:-nexent-a2a-mock}
+      NACOS_AUTH_ENABLED: "false"
+    depends_on:
+      - nacos-a2a-test
+    ports:
+      - "8888:8888"
+    networks:
+      - nexent-a2a-test
+
+networks:
+  nexent-a2a-test:
+    name: nexent-a2a-test

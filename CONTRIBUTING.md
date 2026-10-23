@@ -85,30 +85,6 @@ git checkout -b your-branch-name
 ### Step 4 Make Your Changes
 🧙‍♂️ Code like a wizard! Follow our [Development Guide](https://modelengine-group.github.io/nexent/en/getting-started/development-guide) for setup instructions and coding standards. Ensure your changes are well-tested and documented.
 
-### 📜 Copyright Header Requirement
-
-Every source file you add or modify must start with the standard copyright header. The CI **Copyright Header Check** job inspects all changed `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.sh` and `.sql` files on every PR, and the check fails when the header is missing.
-
-The header uses the comment style of the file type (`#` for Python/Shell, `--` for SQL, `//` for TypeScript/JavaScript):
-
-```python
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-```
-
-The end year of the range always tracks the current year (e.g. `2025-2027` in 2027); the checker accepts any existing year variant, and `--fix` generates the current range automatically.
-
-To verify locally before pushing:
-
-```bash
-python scripts/check_copyright.py --files path/to/your/file.py
-```
-
-Missing headers can also be inserted automatically:
-
-```bash
-python scripts/check_copyright.py --fix path/to/your/file.py
-```
-
 ### Step 5 Commit Your Changes
 📝 Commit with a clear and concise message following our commit message guidelines：
 

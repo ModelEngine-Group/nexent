@@ -1,10 +1,7 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useState } from "react";
 import { App, Button, Empty, Spin } from "antd";
-import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 import { CheckCircle, Clock, Eye, XCircle } from "lucide-react";
 import {
@@ -170,15 +167,11 @@ function ReviewTableRow({
   onReject: () => void;
 }) {
   const { t } = useTranslation("common");
-  const displayName = useUserDisplayName();
   const deploymentType = resolveDeploymentType(service);
   const deploymentLabel = t(getDeploymentTypeLabelKey(deploymentType));
   const reviewStatus = service.reviewStatus || "pending";
   const isPending = reviewStatus === "pending";
-  const author = displayName(
-    service.authorCasUsername,
-    service.authorDisplayName || service.authorName || "-"
-  );
+  const author = service.authorDisplayName || service.authorName || "-";
   const submitDate = formatRegistryDate(service.createdAt || "");
   const listingNote = service.content?.trim() || "—";
 

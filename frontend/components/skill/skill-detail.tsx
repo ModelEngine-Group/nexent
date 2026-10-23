@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { Button, Spin } from "antd";
@@ -10,7 +8,6 @@ import {
   Tag as TagIcon,
   UserRound,
 } from "lucide-react";
-import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 import ResourceDetail from "@/components/resource/ResourceDetail";
 import { mapSkillRepositoryDetail } from "@/lib/skillRepositoryDetail";
@@ -54,7 +51,6 @@ export function SkillDetail({
   onRetry,
 }: SkillDetailProps) {
   const { t } = useTranslation("common");
-  const displayName = useUserDisplayName();
   const view = detail ? mapSkillRepositoryDetail(detail) : null;
 
   return (
@@ -130,9 +126,9 @@ export function SkillDetail({
                     </span>
                     <span
                       className="ml-auto min-w-0 flex-1 truncate text-right font-medium text-slate-900 dark:text-slate-100"
-                      title={displayName(view.authorCasUsername, view.author)}
+                      title={view.author}
                     >
-                      {displayName(view.authorCasUsername, view.author)}
+                      {view.author}
                     </span>
                   </div>
                 </div>

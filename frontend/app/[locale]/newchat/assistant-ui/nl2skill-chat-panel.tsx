@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useMemo, type FC } from "react";
@@ -13,7 +11,7 @@ import { useTranslation } from "react-i18next";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Agent } from "@/types/agentConfig";
 import type { SkillFileContent } from "@/types/skill";
-import { useCreatorModelControls } from "@/features/model-controls/useCreatorModelControls";
+import { useConfig } from "@/hooks/useConfig";
 import {
   remoteChatModelAdapter,
   type Nl2SkillStreamEvent,
@@ -46,40 +44,30 @@ export const Nl2SkillChatPanel: FC<Nl2SkillChatPanelProps> = ({
   onSkillFileSelect,
 }) => {
   const { t } = useTranslation("common");
-  const modelControls = useCreatorModelControls(
-    NL2SKILL_DISPLAY_BASE,
-    "nl2skill",
-    "skill:create"
-  );
+  // Get the current tenant's configured LLM model ID for NL2Skill
+  const { defaultLlmModelConfig } = useConfig();
+  const modelId = defaultLlmModelConfig?.id;
 
   const adapter = useMemo<ChatModelAdapter>(
     () => ({
-      async *run(options) {
-        if (!modelControls.canSend) return;
-        const result = remoteChatModelAdapter.run({
+      run(options) {
+        return remoteChatModelAdapter.run({
           ...options,
           runConfig: {
             custom: {
               ...options.runConfig?.custom,
               runtimeMode: "nl2skill",
               draftSnapshot: getDraftSnapshot(),
+              complexity: "complicated",
               language,
               onNl2SkillEvent: onStreamEvent,
-              turnModelControls: modelControls.snapshot,
+              modelId,
             },
           },
         });
-        if ("then" in result) yield await result;
-        else yield* result;
       },
     }),
-    [
-      getDraftSnapshot,
-      language,
-      onStreamEvent,
-      modelControls.snapshot,
-      modelControls.canSend,
-    ]
+    [getDraftSnapshot, language, onStreamEvent, modelId]
   );
   const runtime = useLocalRuntime(adapter);
   const assistantTitle = t("skillManagement.tabs.interactive");
@@ -98,10 +86,7 @@ export const Nl2SkillChatPanel: FC<Nl2SkillChatPanelProps> = ({
             generatedTitle={assistantTitle}
             welcomeTitle={t("skillManagement.chat.createWelcomeTitle")}
             isLoadingAgents={false}
-            {...modelControls}
-            modelSelectionScope="tenant"
-            showModelSelector
-            readOnly={!modelControls.canCreate}
+            showModelSelector={false}
             variant="embedded"
             skillFiles={availableFiles}
             onSkillFileSelect={onSkillFileSelect}

@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """
 Unit tests for backend.apps.agent_app module.
 
@@ -34,7 +32,7 @@ from consts.exceptions import (
     tenant_resource_limit_error_payload,
 )
 from consts.model import NL2AgentRunRequest
-from consts.exceptions import AgentDraftEditError
+from services.agent_draft_permission_service import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
 
 # Filter out deprecation warnings from third-party libraries
@@ -136,20 +134,20 @@ sys.modules['database.client'] = MagicMock()
 sys.modules['database.agent_db'] = MagicMock()
 sys.modules['agents.create_agent_info'] = MagicMock()
 sys.modules['nexent.core.agents.run_agent'] = MagicMock()
-sys.modules['management.services.permission.identity.authentication_helpers'] = MagicMock()
-sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
+sys.modules['utils.auth_utils'] = MagicMock()
+sys.modules['utils.config_utils'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
-sys.modules['infrastructure.observability.bootstrap'] = MagicMock()
-sys.modules['infrastructure.observability.bootstrap'].monitoring_manager = monitoring_manager_mock
-sys.modules['infrastructure.observability.bootstrap'].setup_fastapi_app = MagicMock(
+sys.modules['utils.monitoring'] = MagicMock()
+sys.modules['utils.monitoring'].monitoring_manager = monitoring_manager_mock
+sys.modules['utils.monitoring'].setup_fastapi_app = MagicMock(
     return_value=True)
 sys.modules['agents.agent_run_manager'] = MagicMock()
 sys.modules['management.services.agent.service'] = MagicMock()
 sys.modules['management.services.skill.service'] = MagicMock()
-sys.modules['management.services.conversation.service'] = MagicMock()
-sys.modules['management.services.configuration.user.memory'] = MagicMock()
-sys.modules['management.services.agent.versions'] = MagicMock()
-sys.modules['management.services.agent.prompt_generation'] = MagicMock()
+sys.modules['services.conversation_management_service'] = MagicMock()
+sys.modules['services.memory_config_service'] = MagicMock()
+sys.modules['services.agent_version_service'] = MagicMock()
+sys.modules['services.prompt_service'] = MagicMock()
 
 # Now safe to import app modules after all mocks are set up
 from apps.agent_app import (
@@ -1066,7 +1064,9 @@ def test_search_agent_info_api_masks_asset_owner_prompts(mocker, mock_auth_heade
     mock_get_agent_info.return_value = {
         "agent_id": 1,
         "tenant_id": ASSET_OWNER_TENANT_ID,
-        "prompt": "Responsibilities and secret constraints/examples",
+        "duty_prompt": "secret duty",
+        "constraint_prompt": "secret constraint",
+        "few_shots_prompt": "secret few",
     }
 
     response = config_client.post(
@@ -1077,9 +1077,9 @@ def test_search_agent_info_api_masks_asset_owner_prompts(mocker, mock_auth_heade
 
     assert response.status_code == 200
     body = response.json()
-    assert body["prompt"] is None
-    assert "constraint_prompt" not in body
-    assert "few_shots_prompt" not in body
+    assert body["duty_prompt"] is None
+    assert body["constraint_prompt"] is None
+    assert body["few_shots_prompt"] is None
     assert body[AGENT_PROMPTS_HIDDEN_FLAG] is True
 
 
@@ -1131,10 +1131,8 @@ def test_get_agent_by_name_api_with_explicit_tenant_id(mocker, mock_auth_header)
 def test_get_agent_by_name_api_exception(mocker, mock_auth_header):
     """Test get_agent_by_name_api exception handling."""
     mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mocker.patch(
-        "apps.agent_app.get_agent_by_name_impl",
-        side_effect=RuntimeError("database unavailable"),
-    )
+    mock_get_agent_info = mocker.patch(
+        "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
 
     response = config_client.get(
@@ -1143,7 +1141,7 @@ def test_get_agent_by_name_api_exception(mocker, mock_auth_header):
     )
 
     assert response.status_code == 500
-    assert response.json() == {"detail": "Agent by name lookup error."}
+    assert "Agent not found" in response.json()["detail"]
 
 
 # Legacy creating-sub-agent endpoint removal
@@ -1379,7 +1377,7 @@ def test_export_agent_api_success_with_zip(mocker, mock_auth_header):
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/zip"
-    assert "attachment; filename*=UTF-8''agent_export.zip" in response.headers["content-disposition"]
+    assert "attachment; filename=\"agent_export.zip\"" in response.headers["content-disposition"]
     assert response.content == b"PK\x03\x04test zip content"
 
 
@@ -1400,31 +1398,7 @@ def test_export_agent_api_success_with_zip_default_filename(mocker, mock_auth_he
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/zip"
-    assert "attachment; filename*=UTF-8''agent_export.zip" in response.headers["content-disposition"]
-
-
-def test_export_agent_api_success_with_zip_non_ascii_filename(mocker, mock_auth_header):
-    """Test export_agent_api ZIP response with a non-ASCII agent display name."""
-    from urllib.parse import quote
-
-    mock_export_agent = mocker.patch(
-        "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
-    mock_export_agent.return_value = {
-        "_zip": True,
-        "data": b"PK\x03\x04zip content",
-        "filename": "\u667a\u80fd\u4f53\u5bfc\u51fa.zip"
-    }
-
-    response = config_client.post(
-        "/agent/export",
-        json={"agent_id": 789},
-        headers=mock_auth_header
-    )
-
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "application/zip"
-    expected = "attachment; filename*=UTF-8''" + quote("\u667a\u80fd\u4f53\u5bfc\u51fa.zip")
-    assert response.headers["content-disposition"] == expected
+    assert "attachment; filename=\"agent_export.zip\"" in response.headers["content-disposition"]
 
 
 def test_export_agent_api_exception(mocker, mock_auth_header):
@@ -1746,33 +1720,8 @@ def test_list_agent_page_api_forwards_filters_and_returns_paged_agents(
         search="support",
         page=2,
         page_size=5,
-        sort_by_update_time=False,
         include_repository_info=True,
     )
-
-
-def test_list_agent_page_api_forwards_publish_time_sort(mocker, mock_auth_header):
-    """The latest-published-first selector is forwarded to the service."""
-    mocker.patch(
-        "apps.agent_app.get_current_user_info",
-        return_value=("test_user", "auth_tenant", "en"),
-    )
-    mock_list = mocker.patch(
-        "apps.agent_app.list_agent_page_impl", new_callable=AsyncMock
-    )
-    mock_list.return_value = {
-        "items": [],
-        "pagination": {"page": 1, "page_size": 5, "total": 0, "total_pages": 0},
-    }
-
-    response = config_client.get(
-        "/agent/list/page",
-        params={"sort_by_update_time": "true"},
-        headers=mock_auth_header,
-    )
-
-    assert response.status_code == 200
-    assert mock_list.await_args.kwargs["sort_by_update_time"] is True
 
 
 def test_list_agent_page_api_forwards_creator_and_structured_tag_filters(
@@ -3183,144 +3132,3 @@ def test_get_agent_icon_api_internal_error(mocker, mock_auth_header):
 
     assert response.status_code == 500
     assert response.json()["detail"] == "Agent icon retrieval error."
-
-
-# ---------------------------------------------------------------------------
-# Security audit entries
-# ---------------------------------------------------------------------------
-
-
-def test_update_agent_info_api_emits_audit_entry(mocker, mock_auth_header, caplog):
-    """Successful agent update records an identifier-only audit line."""
-    import logging
-
-    mocker.patch("apps.agent_app.update_agent_info_impl", new_callable=AsyncMock,
-                 return_value={"updated": True})
-    mocker.patch(
-        "apps.agent_app.get_current_user_id",
-        return_value=("test_user", "test_tenant"),
-    )
-
-    with caplog.at_level(logging.INFO, logger="audit.security"):
-        response = config_client.post(
-            "/agent/update",
-            json={"agent_id": 123, "display_name": "Bot",
-                  "prompt": "secret prompt text"},
-            headers=mock_auth_header,
-        )
-
-    assert response.status_code == 200
-    messages = [record.getMessage() for record in caplog.records
-                if record.name == "audit.security"]
-    assert len(messages) == 1
-    assert "event=agent_update" in messages[0]
-    assert "result=success" in messages[0]
-    assert "user_id=test_user" in messages[0]
-    assert '"agent_id":123' in messages[0]
-    assert '"patch_keys":["agent_id","display_name","prompt"]' in messages[0]
-    assert "secret prompt text" not in messages[0]
-
-
-def test_upload_agent_icon_api_emits_audit_entry(mocker, mock_auth_header, caplog):
-    """Successful icon upload records filename and size, never the bytes."""
-    import logging
-
-    mocker.patch(
-        "apps.agent_app.upload_agent_icon_impl",
-        new_callable=AsyncMock,
-        return_value={"icon_url": "/agent/7/icon/x"},
-    )
-    mocker.patch(
-        "apps.agent_app.get_current_user_id",
-        return_value=("test_user", "test_tenant"),
-    )
-
-    with caplog.at_level(logging.INFO, logger="audit.security"):
-        response = config_client.post(
-            "/agent/7/icon",
-            files={"file": ("avatar.png", b"binary-image", "image/png")},
-            headers=mock_auth_header,
-        )
-
-    assert response.status_code == 200
-    messages = [record.getMessage() for record in caplog.records
-                if record.name == "audit.security"]
-    assert len(messages) == 1
-    assert "event=agent_icon_upload" in messages[0]
-    assert '"agent_id":7' in messages[0]
-    assert '"filename":"avatar.png"' in messages[0]
-    assert '"size":12' in messages[0]
-    assert "binary-image" not in messages[0]
-
-
-def test_import_agent_api_emits_audit_entry_without_payload(mocker, mock_auth_header, caplog):
-    """Successful import records identifiers and counts, not the agent payload."""
-    import logging
-
-    mocker.patch("apps.agent_app.import_agent_impl", new_callable=AsyncMock,
-                 return_value={123: 456})
-    mocker.patch(
-        "apps.agent_app.get_current_user_id",
-        return_value=("test_user", "test_tenant"),
-    )
-
-    with caplog.at_level(logging.INFO, logger="audit.security"):
-        response = config_client.post(
-            "/agent/import",
-            json={
-                "agent_info": {
-                    "agent_id": 123,
-                    "agent_info": {
-                        "test_agent": {
-                            "agent_id": 123,
-                            "name": "ImportedAgent",
-                            "description": "Test description",
-                            "business_description": "Business desc",
-                            "max_steps": 10,
-                            "provide_run_summary": True,
-                            "enabled": True,
-                            "tools": [],
-                            "managed_agents": []
-                        }
-                    },
-                    "mcp_info": []
-                },
-                "force_import": True
-            },
-            headers=mock_auth_header,
-        )
-
-    assert response.status_code == 200
-    messages = [record.getMessage() for record in caplog.records
-                if record.name == "audit.security"]
-    assert len(messages) == 1
-    assert "event=agent_import" in messages[0]
-    assert '"source_agent_id":123' in messages[0]
-    assert '"force_import":true' in messages[0]
-    assert '"skills_count":0' in messages[0]
-    assert "ImportedAgent" not in messages[0]
-    assert "Test description" not in messages[0]
-
-
-def test_publish_version_api_emits_audit_entry(mocker, mock_auth_header, caplog):
-    """Successful publish records agent_id and version name."""
-    import logging
-
-    mocker.patch("apps.agent_app.get_current_user_id",
-                 return_value=("test_user", "test_tenant"))
-    mocker.patch("apps.agent_app.publish_version_impl", return_value={"version_no": 1})
-
-    with caplog.at_level(logging.INFO, logger="audit.security"):
-        response = config_client.post(
-            "/agent/123/publish",
-            json={"version_name": "v1.0.0", "release_note": "Initial release"},
-            headers=mock_auth_header,
-        )
-
-    assert response.status_code == 200
-    messages = [record.getMessage() for record in caplog.records
-                if record.name == "audit.security"]
-    assert len(messages) == 1
-    assert "event=agent_version_publish" in messages[0]
-    assert '"agent_id":123' in messages[0]
-    assert '"version_name":"v1.0.0"' in messages[0]

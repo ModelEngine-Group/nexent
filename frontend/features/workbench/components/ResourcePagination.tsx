@@ -1,21 +1,18 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { Pagination } from "antd";
 
-export const RESOURCE_PAGE_SIZE = 10;
+export const RESOURCE_PAGE_SIZE = 6;
 
-export function resourcePage<T>(
-  items: T[],
-  page: number,
-  pageSize = RESOURCE_PAGE_SIZE
-): T[] {
+export function resourcePage<T>(items: T[], page: number): T[] {
   const current = Math.min(
     page,
-    Math.max(1, Math.ceil(items.length / pageSize))
+    Math.max(1, Math.ceil(items.length / RESOURCE_PAGE_SIZE))
   );
-  return items.slice((current - 1) * pageSize, current * pageSize);
+  return items.slice(
+    (current - 1) * RESOURCE_PAGE_SIZE,
+    current * RESOURCE_PAGE_SIZE
+  );
 }
 
 export function ResourcePagination({

@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Focused unit tests for skill repository service."""
 
 import base64
@@ -24,8 +23,8 @@ _MOCKED_MODULE_NAMES = [
     "database.tag_management_db",
     "database.user_tenant_db",
     "management.services.skill.service",
-    "management.services.notification.service",
-    "management.db.serialization",
+    "services.notification_service",
+    "utils.str_utils",
 ]
 _ORIGINAL_MODULES = {
     name: sys.modules.get(name)
@@ -85,7 +84,7 @@ _group_db_mock = MagicMock()
 _group_db_mock.query_group_ids_by_user = MagicMock(return_value=[])
 sys.modules["database.group_db"] = _group_db_mock
 
-_utils_str_utils_mock = types.ModuleType("management.db.serialization")
+_utils_str_utils_mock = types.ModuleType("utils.str_utils")
 _utils_str_utils_mock.convert_string_to_list = MagicMock(
     side_effect=lambda value: [
         int(item)
@@ -93,7 +92,7 @@ _utils_str_utils_mock.convert_string_to_list = MagicMock(
         if item.strip().isdigit()
     ]
 )
-sys.modules["management.db.serialization"] = _utils_str_utils_mock
+sys.modules["utils.str_utils"] = _utils_str_utils_mock
 
 _skill_db_mock = MagicMock()
 _skill_db_mock.get_skill_by_name = MagicMock(return_value=None)
@@ -185,7 +184,7 @@ _skill_service_module_mock.SkillService = _SkillServiceMock
 sys.modules["management.services.skill.service"] = _skill_service_module_mock
 
 _notification_service_mock = MagicMock()
-sys.modules["management.services.notification.service"] = _notification_service_mock
+sys.modules["services.notification_service"] = _notification_service_mock
 
 import consts.exceptions as exceptions_module
 
@@ -213,7 +212,7 @@ if not _has_duplicate_names:
 
     exceptions_module.SkillDuplicateError = SkillDuplicateError
 
-from services import skill_repository_service as srs
+from backend.services import skill_repository_service as srs
 
 from consts.notification import (
     EVENT_TYPE_REPOSITORY_REVIEW_PENDING,

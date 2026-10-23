@@ -1,8 +1,4 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
-import { UserIdentity } from "@/components/auth/UserIdentity";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
@@ -24,7 +20,6 @@ interface ToolRow {
   source: string;
   labels: string[];
   updatedBy: string;
-  updatedByCasUsername?: string | null;
 }
 
 export default function LabelManagementModal({
@@ -59,7 +54,6 @@ export default function LabelManagementModal({
           source: tool.source || "",
           labels: Array.isArray(tool.labels) ? [...tool.labels] : [],
           updatedBy: tool.updated_by_name || "",
-          updatedByCasUsername: tool.updated_by_cas_username,
         }));
         setDataSource(rows);
         builtRef.current = true;
@@ -84,27 +78,14 @@ export default function LabelManagementModal({
         const result = await updateToolLabels(toolId, newLabels);
         const updatedBy = result.updated_by_name || "";
         setDataSource((prev) =>
-          prev.map((row) =>
-            row.id === toolId
-              ? {
-                  ...row,
-                  updatedBy,
-                  updatedByCasUsername: result.updated_by_cas_username,
-                }
-              : row
-          )
+          prev.map((row) => (row.id === toolId ? { ...row, updatedBy } : row))
         );
         // Synchronous cache update — no timing gaps, no refetch race
         queryClient.setQueryData(["tools"], (old: any[]) => {
           if (!old) return old;
           return old.map((tool: any) =>
             tool.id === toolId
-              ? {
-                  ...tool,
-                  labels: newLabels,
-                  updated_by_name: updatedBy,
-                  updated_by_cas_username: result.updated_by_cas_username,
-                }
+              ? { ...tool, labels: newLabels, updated_by_name: updatedBy }
               : tool
           );
         });
@@ -134,13 +115,8 @@ export default function LabelManagementModal({
       dataIndex: "updatedBy",
       key: "updatedBy",
       width: 140,
-      render: (val: string, record: ToolRow) => (
-        <span className="text-xs text-gray-400">
-          <UserIdentity
-            casUsername={record.updatedByCasUsername}
-            fallback={val || "—"}
-          />
-        </span>
+      render: (val: string) => (
+        <span className="text-xs text-gray-400">{val || "—"}</span>
       ),
     },
     {

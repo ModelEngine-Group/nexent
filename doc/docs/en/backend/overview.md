@@ -32,6 +32,7 @@ backend/
 │   ├── a2a_server_app.py        # A2A server APIs (publish local agents as A2A)
 │   ├── northbound_app.py / northbound_base_app.py / northbound_knowledge_app.py  # Northbound open APIs (/nb/v1, /nb/a2a)
 │   ├── skill_app.py             # Skill management and NL2Skill APIs
+│   ├── prompt_template_app.py   # Prompt template management APIs
 │   ├── agent_repository_app.py / skill_repository_app.py  # Agent/skill marketplace repository APIs
 │   ├── agent_evaluation_app.py / evaluation_set_app.py / evaluator_app.py  # Evaluation APIs
 │   ├── agent_automation_app.py  # Agent automation scheduled task APIs

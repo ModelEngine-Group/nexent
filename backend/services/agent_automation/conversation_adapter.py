@@ -1,0 +1,172 @@
+import json
+import logging
+from typing import Any, Dict, List, Optional
+
+from consts.model import HistoryItem, MessageRequest, MessageUnit
+from services.conversation_management_service import (
+    get_conversation_history_service,
+    save_message,
+    save_message_unit,
+    update_unit_content,
+)
+
+logger = logging.getLogger("agent_automation.conversation_adapter")
+
+
+class AutomationConversationAdapter:
+    """Persist automation UI events through the existing conversation service."""
+
+    @staticmethod
+    def _message_content(message: Dict[str, Any]) -> str:
+        content = message.get("message", "")
+        if isinstance(content, list):
+            final = next(
+                (
+                    unit.get("content")
+                    for unit in reversed(content)
+                    if unit.get("type") == "final_answer"
+                ),
+                "",
+            )
+            visible_units = [
+                unit
+                for unit in content
+                if unit.get("type") != "automation_proposal"
+            ]
+            content = final or " ".join(
+                str(unit.get("content", "")) for unit in visible_units
+            )
+        return str(content or "")
+
+    @classmethod
+    def _history_items(cls, messages: List[Dict[str, Any]]) -> List[HistoryItem]:
+        history: List[HistoryItem] = []
+        latest_positions = {
+            message["message_index"]: position
+            for position, message in enumerate(messages)
+            if isinstance(message.get("message_index"), int)
+        }
+        for position, message in enumerate(messages):
+            message_index = message.get("message_index")
+            if (
+                isinstance(message_index, int)
+                and latest_positions[message_index] != position
+            ):
+                continue
+            content = cls._message_content(message)
+            if content:
+                history.append(
+                    HistoryItem(
+                        role=message.get("role", "user"),
+                        content=content,
+                    )
+                )
+        return history
+
+    def append_run_prompt(
+        self,
+        conversation_id: int,
+        prompt: str,
+        user_id: str,
+        tenant_id: str,
+    ) -> Dict[str, Any]:
+        """Append a new automation turn without regenerating an existing message."""
+        history_payload = get_conversation_history_service(conversation_id, user_id)
+        messages = history_payload[0].get("message", []) if history_payload else []
+        message_indexes = [
+            message.get("message_index")
+            for message in messages
+            if isinstance(message.get("message_index"), int)
+        ]
+        if message_indexes:
+            highest_message_index = max(message_indexes)
+            next_message_index = highest_message_index + (
+                1 if highest_message_index % 2 else 2
+            )
+        else:
+            next_message_index = len(messages)
+        request = MessageRequest(
+            conversation_id=conversation_id,
+            message_idx=next_message_index,
+            role="user",
+            message=[MessageUnit(type="string", content=prompt)],
+        )
+        message_id = save_message(request, user_id, tenant_id)
+        save_message_unit(
+            message_id=message_id,
+            conversation_id=conversation_id,
+            unit_index=0,
+            unit_type="automation_prompt",
+            unit_content=prompt,
+            user_id=user_id,
+        )
+        return {
+            "user_message_id": message_id,
+            "history": self._history_items(messages),
+        }
+
+    def append_proposal_exchange(
+        self,
+        conversation_id: int,
+        user_instruction: str,
+        payload: Dict[str, Any],
+        user_id: str,
+        tenant_id: str,
+    ) -> Dict[str, int]:
+        history_payload = get_conversation_history_service(conversation_id, user_id)
+        messages = history_payload[0].get("message", []) if history_payload else []
+        user_role_count = sum(message.get("role") == "user" for message in messages)
+        user_request = MessageRequest(
+            conversation_id=conversation_id,
+            message_idx=user_role_count * 2,
+            role="user",
+            message=[MessageUnit(type="string", content=user_instruction)],
+        )
+        user_message_id = save_message(user_request, user_id, tenant_id)
+        user_unit_id = save_message_unit(
+            message_id=user_message_id,
+            conversation_id=conversation_id,
+            unit_index=0,
+            unit_type="string",
+            unit_content=user_instruction,
+            user_id=user_id,
+        )
+        content = json.dumps(payload, ensure_ascii=False)
+        request = MessageRequest(
+            conversation_id=conversation_id,
+            message_idx=user_role_count * 2 + 1,
+            role="assistant",
+            message=[MessageUnit(type="automation_proposal", content=content)],
+        )
+        message_id = save_message(request, user_id, tenant_id)
+        unit_id = save_message_unit(
+            message_id=message_id,
+            conversation_id=conversation_id,
+            unit_index=0,
+            unit_type="automation_proposal",
+            unit_content=content,
+            user_id=user_id,
+        )
+        return {
+            "user_message_id": user_message_id,
+            "user_unit_id": user_unit_id,
+            "message_id": message_id,
+            "unit_id": unit_id,
+        }
+
+    def update_proposal(
+        self,
+        unit_id: Optional[int],
+        payload: Dict[str, Any],
+        user_id: str,
+    ) -> None:
+        if not unit_id:
+            return
+        update_unit_content(
+            unit_id,
+            json.dumps(payload, ensure_ascii=False),
+            user_id,
+        )
+
+
+automation_conversation_adapter = AutomationConversationAdapter()

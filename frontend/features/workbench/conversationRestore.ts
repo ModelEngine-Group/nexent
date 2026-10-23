@@ -1,6 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
-import { t as translate } from "i18next";
 import { previewWorkbenchAgent } from "./api";
 import { fetchSkillsList } from "@/services/skillService";
 import type { WorkbenchSessionConfig } from "./types";
@@ -29,10 +26,7 @@ export async function resolveRestoredWorkbench(conversation: {
       const skill = skills.find(
         (item) => Number(item.skill_id) === mount.skill_id
       );
-      if (!skill)
-        throw new Error(
-          translate("ui.localization.conversationSkillsUnavailable")
-        );
+      if (!skill) throw new Error("会话中有不可用的 Skill，请检查资源权限");
       skillNames[mount.skill_id] = skill.name;
     }
   }

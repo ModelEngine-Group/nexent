@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import sys
 import types
@@ -7,7 +6,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from management import recovery as startup_recovery_service
+from backend.services import startup_recovery_service
 
 
 def _install_module(monkeypatch, name, **attributes):
@@ -46,7 +45,7 @@ def test_recover_runtime_tasks_finishes_database_and_redis_state(monkeypatch):
     )
     _install_module(
         monkeypatch,
-        "management.services.agent.run_state",
+        "services.runtime_state_service",
         runtime_state_service=runtime_state,
     )
 
@@ -122,7 +121,7 @@ def test_recover_data_process_tasks_marks_each_celery_id_cancelled_once(monkeypa
     )
     _install_module(
         monkeypatch,
-        "management.services.knowledge_base.task_state",
+        "services.redis_service",
         get_redis_service=MagicMock(return_value=redis_service),
     )
 
@@ -266,9 +265,9 @@ async def test_schedule_interrupted_upload_cleanup_checks_now_and_after_grace(
 async def test_schedule_workbench_main_backfill_runs_in_background(monkeypatch):
     """UT-BE-SAL-006: historical bootstrap must not block config startup."""
     backfill = MagicMock(return_value={"total": 2, "succeeded": 2, "failed": 0})
-    tenant_service_module = types.ModuleType("management.services.permission.identity.tenants")
+    tenant_service_module = types.ModuleType("services.tenant_service")
     tenant_service_module.backfill_workbench_main_agents = backfill
-    monkeypatch.setitem(sys.modules, "management.services.permission.identity.tenants", tenant_service_module)
+    monkeypatch.setitem(sys.modules, "services.tenant_service", tenant_service_module)
     startup_recovery_service._system_agent_backfill_tasks.clear()
 
     startup_recovery_service.schedule_workbench_main_backfill()

@@ -1,13 +1,11 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """
 User management API endpoints
 """
 import logging
-from http import HTTPStatus
 from typing import Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
+from http import HTTPStatus
 from starlette.responses import JSONResponse
 
 from consts.model import (
@@ -20,12 +18,12 @@ from consts.exceptions import (
     UnauthorizedError,
     tenant_resource_limit_error_payload,
 )
-from management.services.monitor.audit import record_security_event
-from management.services.permission.identity.users import (
+from services.audit_service import record_security_event
+from services.user_service import (
     delete_user_and_cleanup, get_users_for_requester, update_user_for_requester
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
-from management.services.permission.identity.authentication_helpers import extract_session_id_from_authorization, get_current_user_context, get_current_user_id
+from utils.auth_utils import get_current_user_context, get_current_user_id
 
 logger = logging.getLogger("user_app")
 router = APIRouter(prefix="/users", tags=["users"])
@@ -54,8 +52,6 @@ async def get_users_endpoint(
             "group_ids": request.group_ids,
         }
         filter_kwargs = {key: value for key, value in filter_kwargs.items() if value}
-        if request.search and request.search.strip() and extract_session_id_from_authorization(authorization):
-            filter_kwargs["search_cas_username"] = True
         result = get_users_for_requester(
             request.tenant_id,
             request.page,

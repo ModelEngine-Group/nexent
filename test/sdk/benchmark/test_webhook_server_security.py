@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import logging
 from types import SimpleNamespace
 
@@ -250,7 +248,9 @@ def test_run_experiment_task_executes_scoring_tracing_and_compression(
 agent_info:
   display_name: Test agent
 prompts:
-  prompt: Solve the task with secret-prompt-value; Be exact; Example
+  duty_prompt: Solve the task with secret-prompt-value
+  constraint_prompt: Be exact
+  few_shots_prompt: Example
 agent_config:
   max_steps: 12
   enable_context_manager: true
@@ -271,7 +271,7 @@ agent_config:
 
     trace = fake_langfuse.traces[0]
     assert task_configuration["max_steps"] == 12
-    assert task_configuration["prompt"] == "Solve the task with secret-prompt-value; Be exact; Example"
+    assert task_configuration["duty_prompt"] == "Solve the task with secret-prompt-value"
     assert (
         task_configuration["context_manager_config"].policy_layers.platform[
             "processing_mode"

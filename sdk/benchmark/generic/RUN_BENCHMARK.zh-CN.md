@@ -56,7 +56,9 @@
 | `--max-steps`          | 最大执行步数                  |
 | `--temperature`        | LLM 温度；标准导出 YAML 不含该字段，不传时通常使用 `0.1` |
 | `--language`           | 提示语言（`en` / `zh`）       |
-| `--prompt`        | 角色描述 prompt             |
+| `--duty-prompt`        | 角色描述 prompt             |
+| `--constraint-prompt`  | 约束条件 prompt             |
+| `--few-shots-prompt`   | Few-shot 示例 prompt      |
 | `--system-prompt-file` | 自定义系统 prompt 文件（跳过模板引擎） |
 | `--tenant-id` | builtin skill tools 的运行范围；默认依次取 CLI、YAML `agent_info.tenant_id`、`tenant_id` |
 | `--skills-path` | builtin skill tools 使用的本地 Skill 根目录；未传时读取 `SKILLS_PATH` |
@@ -69,7 +71,8 @@ zh -> Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，�
 en -> Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multimodal Q&A, retrieval, data analysis, and processing capabilities.
 ```
 
-`--language` 不会翻译 YAML 中的完整 `prompt`；该字段包含职责、约束和示例，必须来自待测生产版本。切换语言后应重新生成对应
+`--language` 不会翻译 YAML 中的 `duty_prompt`、`constraint_prompt` 或
+`few_shots_prompt`；这些 Agent 自定义字段必须来自待测生产版本。切换语言后应重新生成对应
 snapshot，不能把 `en` snapshot 用于 `zh` run。
 
 ### 上下文管理
@@ -181,7 +184,7 @@ python run_benchmark.py \
 python run_benchmark.py \
   --dataset gsm8k-n10 \
   --evaluators numeric_answer \
-  --prompt "你是一个专业的数学解题助手，仅输出最终数字答案。" \
+  --duty-prompt "你是一个专业的数学解题助手，仅输出最终数字答案。" \
   --max-steps 15 \
   --run-name gsm8k-custom-prompt
 ```
@@ -276,7 +279,7 @@ python run_benchmark.py \
 **CLI 参数 > YAML 配置 > 默认值**
 
 ```
---prompt "..."           → 覆盖 YAML 中的 prompt
+--duty-prompt "..."           → 覆盖 YAML 中的 duty_prompt
 --max-steps 20                → 覆盖 YAML 中的 max_steps
 --context-processing-mode adaptive_compact → 覆盖 YAML policy
 --temperature 0.5             → 覆盖默认值 0.1
@@ -561,7 +564,8 @@ Benchmark 不经过 `backend/agents/create_agent_info.py`，因此在 benchmark 
 
 - YAML `tools:` 只保存 Agent 显式配置的工具；
 - 运行时额外注入 `parallel_executor`；
-- 当前 Agent 配置技能时，运行时额外注入 `run_skill_script`、`read_skill_md`、`read_skill_config`；
+- 运行时额外注入 `run_skill_script`、`read_skill_md`、`read_skill_config`、
+  `write_skill_file`；
 - builtin skill tools 使用 `agent_id`、`tenant_id`、`version_no` 和 skills path
   标记运行范围，不要求用户把它们写入 YAML；
 - YAML `skills:` 当前尚未实现生产的 Skill 发现、可见性过滤和完整执行链路。非空

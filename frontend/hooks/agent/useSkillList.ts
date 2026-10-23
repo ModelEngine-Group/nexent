@@ -5,8 +5,7 @@ import { Skill, SkillGroup } from "@/types/agentConfig";
 import { useTranslation } from "react-i18next";
 
 function isOfficialSkill(skill: Skill) {
-  const source = (skill.source || "").trim();
-  return source === "official" || source === "官方";
+  return (skill.source || "").trim() === "official";
 }
 
 export function useSkillList(options?: {

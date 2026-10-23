@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import React from "react";
@@ -10,7 +8,7 @@ import { useSetupFlow } from "@/hooks/useSetupFlow";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 
 import DataConfig from "./KnowledgeBaseConfiguration";
-import AidpKnowledgeConfiguration from "@/ext_components/aidp/AidpKnowledgeConfiguration";
+import AidpKnowledgeConfiguration from "@/ext_components/aidp/components/AidpKnowledgeConfiguration";
 
 /**
  * KnowledgesContent - Unified knowledge base entry page
@@ -63,7 +61,7 @@ export default function KnowledgesContent() {
   // Local knowledge base branch
   return (
     <>
-      <div className="w-full h-full p-6">
+      <div className="w-full h-full p-8">
         <motion.div
           initial="initial"
           animate="in"

@@ -1,0 +1,30 @@
+schema_version: '1.0'
+stage: D3
+module: CHAT-MESSAGE
+cases:
+  - case_id: CMSR-D3-001
+    feature_id: CMSR-005
+    requirement_ids: [CMSR-005]
+    business_rule_ids: [CMSR-RULE-013, CMSR-RULE-014, CMSR-RULE-015, CMSR-RULE-016]
+    title: Agent retry streams success and persists only committed output
+    type: AGENT-IT
+    priority: P0
+    status: blocked
+    automation: automated
+    objective: Verify the full Nexent Agent, observer, SSE and persistence path with controlled provider failure.
+    preconditions: [Local Nexent services and a disposable test conversation are available.]
+    test_data: {profile: mock, sequences: ['partial transport failure then success', 'step-one protocol invalid then valid paused repair']}
+    steps:
+      - {order: 1, action: Start the Agent and fail its first response after a visible fragment., expected: Step 1 is emitted before begin and remains after rollback.}
+      - {order: 2, action: Pause the successful response after safe content., expected: The SSE consumer receives it before provider completion.}
+      - {order: 3, action: Complete execution and load history., expected: Only successful content and one action remain.}
+      - {order: 4, action: Repeat with semantic repair and inspect database units., expected: Only corrected raw model output is stored; its fragments appeared before completion.}
+    expected_results: [Step 1 precedes all model chunks and is stored once., Successful text is incremental., Stored units contain no failed text., History matches committed SSE.]
+    forbidden_side_effects: [No failed-fragment persistence., No duplicate tool execution., No extra model request.]
+    integration_boundary: [Agent runtime to provider fixture, Observer to SSE, SSE to conversation persistence]
+    observations: [Attempt control order, SSE arrival before provider release, persisted message units, sanitized repair lifecycle logs]
+    cleanup: [Delete the disposable conversation and provider fixture.]
+    execution:
+      profiles:
+        - {name: mock, required_services: [model-provider]}
+        - {name: real_smoke, required_services: [model-provider]}

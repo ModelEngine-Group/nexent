@@ -1,0 +1,239 @@
+quest_reason_ans: |
+  [query]: {question}
+  [assistant answer]: {answer}
+  ===
+
+gt_quest_reason_ans: |
+  [query]: {question}
+  [assistant answer]: {answer}
+
+quest_reason_ans_error: |
+  [query]: {question}
+  [expected answer]: {answer}
+  [assistant answer]: {predict}
+  ===
+
+prompt_critique_template: |
+  作为提示词优化专家，我的目标是帮助代理高效且成功地完成任务
+  当前的提示词是：“{instruction}”
+  然而，这个提示词在以下实例中并未能给出正确的结果：“{examples}”
+  请提供详细的反馈，分析指令可能出错的原因。
+  针对每个实例，具体说明指令中的问题，解释代理为何会误解指令，并提出如何让指令更加清晰和精确的建议
+  每个反馈信息请用<INS>和</INS>包裹
+
+optimize_prompt_instruction_template: |
+  你是一位提示词优化专家，你的任务是根据提供的信息对提示词进行优化。具体信息如下：
+  首先，请阅读以下提示词：
+  <prompt_base>
+  {{PROMPT_META_TEMPLATE}}
+  </prompt_base>
+  
+  你拥有的工具或API说明如下：
+  <tools_description>
+  {{API_TOOLS_DESCRIPTION}}
+  </tools_description>
+  
+  提示词在应用的过程中出现的错误case如下：
+  <error_case>
+  {{ERROR_CASES}}
+  </error_case>
+  
+  对这些错误case的反思如下：
+  <reflections_on_error_cases>
+  {{REFLECTIONS_ON_ERROR_CASES}}
+  </reflections_on_error_cases>
+  
+  在优化提示词模板时，请遵循如下要求：
+  1. 在`<思考>`标签中，请根据错误示例及其对应的反思内容，深入、全面地分析提示词中可能导致错误的部分。分析应覆盖：错误原因的识别、原始提示词中存在的问题，以及通过哪些具体修改可以有效规避这些问题。
+  2. 在`<PROMPT_OPTIMIZED>`标签中，基于上述分析，输出优化后的提示词版本。
+  3. 分析过程中应聚焦于问题的具体成因，结合模板结构、语意表达和格式规范等方面，系统性地进行优化。
+  4. 优化过程中务必信息表达完整、逻辑侵袭，不可遗漏重要内容或引入模糊表达
+  5. 不可直接使用给定的示例，也不要在提示词中加入示例中的具体信息，可以通过抽象、改写的方式总结
+  
+  输出格式：
+  <思考>
+  [在此详细说明你对提示词的优化分析]
+  </思考>
+  <PROMPT_OPTIMIZED>
+  [在此输出优化后的提示词]
+  </PROMPT_OPTIMIZED>
+  请确保优化后的内容能够有效避免之前出现的错误case。
+
+optimize_prompt_instruction_template_with_placeholder: |
+  你是一位提示词优化专家，你的任务是根据提供的信息对提示词进行优化。具体信息如下：
+  你拥有的工具或API说明如下：
+  <tools_description>
+  {{API_TOOLS_DESCRIPTION}}
+  </tools_description>
+
+  以下是提示词中出现的占位符名称以及对应内容：
+  <placeholder_content>
+  {{PLACEHOLDER_CONTENTS}}
+  </placeholder_content>
+  
+  提示词在应用的过程中出现的错误case如下：
+  <error_case>
+  {{ERROR_CASES}}
+  </error_case>
+  
+  以下是对这些错误case的反思：
+  <reflections_on_error_cases>
+  {{REFLECTIONS_ON_ERROR_CASES}}
+  </reflections_on_error_cases>
+  
+  以下是待优化的提示词模板，注意模板内容边界从<prompt_base>开始，到</prompt_base>结束：
+  <prompt_base>
+  {{PROMPT_META_TEMPLATE}}
+  </prompt_base>
+  
+  在优化提示词时，请遵循以下要求：
+  1. 在`<思考>`标签中，请根据错误示例及其对应的反思内容，深入、全面地分析提示词中可能导致错误的部分。分析应覆盖：错误原因的识别、原始提示词中存在的问题，以及通过哪些具体修改可以有效规避这些问题。
+  2. 在`<PROMPT_OPTIMIZED>`标签中，基于上述分析，输出优化后的提示词版本。
+  3. 分析过程中应聚焦于问题的具体成因，结合模板结构、语意表达和格式规范等方面，系统性地进行优化。
+  4. 优化过程中务必信息表达完整、逻辑侵袭，不可遗漏重要内容或引入模糊表达
+  5. 【重要】优化后的模板不能丢弃任何原有的占位符信息，务必保留占位符的双花括号
+  
+  输出格式：
+  <PROMPT_OPTIMIZED>
+  [在此输出优化后的提示词]
+  </PROMPT_OPTIMIZED>
+  请确保优化后的内容能够有效避免之前出现的错误case。
+
+optimize_prompt_placeholder_template: |
+  你是一位提示词优化专家，你的任务是根据提供的信息对指定占位符进行优化，优化后的占位符内容应详细具体，包含参数描述、注意事项等
+  
+  优化要求如下：
+  严格根据需要优化的占位符列表进行优化。不需要优化的占位符则保持不变。
+  优化结果格式：每个占位符需要用<xxx>、</xxx>包裹，xxx代表占位符的名称或key
+
+  以下是带占位符的提示词模板，注意模板内容边界从<prompt_base>开始，到</prompt_base>结束：
+  <prompt_base>
+  {{PROMPT_META_TEMPLATE}}
+  </prompt_base>
+
+  你拥有的工具或API说明如下：
+  <tools_description>
+  {{API_TOOLS_DESCRIPTION}}
+  </tools_description>
+
+  以下是提示词中出现的占位符名称以及对应内容：
+  <placeholder_content>
+  {{PLACEHOLDER_CONTENTS}}
+  </placeholder_content>
+  
+  以下是需要优化的占位符：
+  <placeholder_to_optimize>
+  {{PLACEHOLDER_TO_OPTIMIZE}}
+  </placeholder_to_optimize>
+  
+  提示词在应用的过程中出现的错误case如下：
+  <error_case>
+  {{ERROR_CASES}}
+  </error_case>
+  
+  以下是对这些错误case的反思：
+  <reflections_on_error_cases>
+  {{REFLECTIONS_ON_ERROR_CASES}}
+  </reflections_on_error_cases>
+  
+  请按照以下要求对占位符进行优化：
+  1. 仔细分析错误case和对其的反思、明确要改进的方向
+  2. 结合prompt模板和占位符对应内容，考虑占位符在整个提示词中的作用
+  3. 根据以上分析，对需要优化的占位符进行详细、具体的优化，包含参数描述，注意事项等。
+  
+  输出格式：
+  <PLACEHOLDER_OPTIMIZED>
+  [在此输出优化后的占位符及其对应内容，例如<xxx></xxx>]
+  </PLACEHOLDER_OPTIMIZED>
+  请确保优化后的内容能够有效避免之前出现的错误case。
+
+error_examples_critique_template: |
+  作为提示词优化专家，你的目标是帮助代理高效且成功地完成任务。
+  当前任务的描述：
+  [任务描述]：{task_description}
+  尝试通过使用{num_examples}个具备思维链的示例，编写一个有效的提示词，以解决上述任务中的任何问题。
+  我当前的{num_examples}个思维链示例是：{examples}
+  请从示例的多样性、复杂性以及与整个示例集的相关性、兼容性角度分析、理解以上任务示例。
+  但这个提示词在以下示例中得出了错误的结果：{error_examples}
+  请通过反思这些错误的原因，提出修正建议，以提高示例集的有效性。
+  输出所有可以改进的建议，帮助优化每个示例和整个示例选择集。
+
+examples_optimization_template: |
+  作为提示词优化专家，我的任务是帮助代理高效且成功地完成任务。
+  当前任务描述：
+  [任务描述]：{task_description}
+  我正在尝试通过使用{num_examples}个具备思维链的示例，编写一个有效的提示词，以解决上述任务中的任何问题。
+  我当前的{num_examples}个思维链示例是：{examples}
+  此外，我还有一组针对示例的建议/改进意见，以帮助每个示例和示例选择集。
+  [建议/改进]：{critique}
+  请根据上述信息，巧妙且认真地运用所有信息，精心创建一个新的示例集，要求示例数量严格为{num_examples}个，确保遵循这些建议和改进。
+  请确保每个示例都用<INS>和</INS>包裹。
+  
+  新的示例应遵循以下格式：
+  [query]:紧随其后的为示例中的问题部分
+  [assistant answer]: 紧随其后的为与答案相关的所有逻辑推理步骤，包含最终答案。
+  
+  请确保每个示例都用<INS>和</INS>包裹。
+  [以下是新生成的{num_examples}个示例]
+
+examples_select_template: |
+  作为提示词优化专家，我的任务是帮助代理高效且成功地完成任务。
+  当前任务描述：
+  [任务描述]：{task_description}
+  请从以下做错的数据中选择最具代表性的{num_examples}个示例，以解决上述任务中的任何问题。
+  当前的错误示例集是：{error_examples}
+  请确保每个示例都用<INS>和</INS>包裹。
+  
+  例如:
+  <INS>{gt_example}</INS>
+  
+  [选择示例]
+
+get_example_reasoning_template: |
+  你将获得一个任务描述和指令，后面跟着一组任务的正确示例。
+  [任务描述]：{task_description}
+  [指令]：{instruction}
+  示例包含一个问题，标记为问题[问题]和最终答案[答案]
+  [问题]：{question}
+  [答案]：{answer}
+  请根据任务描述和示例，生产一个简洁明了的思维链。
+  思维链应包含关键步骤，展示出正确答案的核心逻辑，最后给出最终结果。
+  确保每个步骤简洁且易于理解，避免过多细节。
+  
+  思维链：
+
+get_task_description: |
+  [提示词]：{instruction}
+  请简明扼要地总结以上提示词的任务，精炼其核心目标和要点，确保信息简洁、清晰。
+
+get_answer_format: |
+  [提示词]：{instruction}
+  根据给定提示词，用一句话总结用户要求的输出格式，不包含“用户要求的输出格式”这类似的前缀。请简洁明了地表述。
+
+result_compare_template: |
+  你是一个答案校验专家，负责校验给定的用户答案和标准答案之间的含义和结论一致性。请根据以下标准判断用户答案是否与标准答案的含义和结论一致。
+  
+  - 如果用户答案和标准答案含义一致，返回`true`。
+  - 如果用户答案和标准答案含义不一致，返回`false`。
+  - 注意区分对话和工具调用，两者通常不能按语意判断为一致
+  - 结合用户问题和标准答案，简要分析用户答案和标准答案不一致的理由
+  
+  以下是用户补充的自定义校验规则，如果与上述规则冲突，则优先遵从用户自定义规则，请严格遵守：
+  {user_compare_rules}
+  
+  输出JSON格式：
+  ```json
+  {{
+    “result”: true/false,
+    "reason": "校验理由"
+  }}
+  ```
+  
+  [问题]：{question}
+  
+  以下是需要比对的用户答案和标准答案：
+  [标准答案]：{actual_answer}
+  
+  [用户答案]：{answer_match}
+  
+  请校验并返回结果：

@@ -117,7 +117,9 @@ Agent draft:
   "name": "weather_assistant",
   "display_name": "Weather Assistant",
   "description": "Checks weather and provides travel advice",
-  "prompt": "Complete instructions including constraints and examples"
+  "duty_prompt": "...",
+  "constraint_prompt": "...",
+  "few_shots_prompt": null
 }
 ```
 
@@ -152,9 +154,12 @@ On confirmation, it calls `updateAgentConfig()` with:
 - `name`
 - `display_name`
 - `description`
-- `prompt`
+- `duty_prompt`
+- `constraint_prompt`
+- `few_shots_prompt`
 
-The complete `prompt` is saved as one field. The previously confirmed tool set remains unchanged.
+A null `few_shots_prompt` is normalized to an empty string. The previously
+confirmed tool set remains unchanged.
 
 ## 6. assistant-ui Mapping
 

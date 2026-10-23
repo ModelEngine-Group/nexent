@@ -7,9 +7,6 @@
 /.next/
 /out/
 
-# PDF.js resources are copied from the installed package by Next configuration.
-/public/pdfjs/
-
 # production
 /build
 

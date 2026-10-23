@@ -1,26 +1,25 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 import sys
 from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend"))
 sys.path.insert(0, backend_dir)
 
-prompt_service_stub = type(sys)("management.services.agent.prompt_generation")
+prompt_service_stub = type(sys)("services.prompt_service")
+prompt_service_stub.gen_system_prompt_streamable = MagicMock()
 prompt_service_stub.OptimizeRequest = type("OptimizeRequest", (), {"__init__": lambda self, **kwargs: self.__dict__.update(kwargs)})
 prompt_service_stub.OptimizeResult = type("OptimizeResult", (), {})
 prompt_service_stub.PromptOptimizationService = MagicMock()
-sys.modules["management.services.agent.prompt_generation"] = prompt_service_stub
-sys.modules["management.services.agent.prompt_generation"] = prompt_service_stub
+sys.modules["services.prompt_service"] = prompt_service_stub
+sys.modules["backend.services.prompt_service"] = prompt_service_stub
 
-auth_utils_stub = type(sys)("management.services.permission.identity.authentication_helpers")
+auth_utils_stub = type(sys)("utils.auth_utils")
 auth_utils_stub.get_current_user_info = MagicMock()
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_stub
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_stub
+sys.modules["utils.auth_utils"] = auth_utils_stub
+sys.modules["backend.utils.auth_utils"] = auth_utils_stub
 
 from apps.prompt_app import router
 
@@ -28,10 +27,6 @@ from apps.prompt_app import router
 app = FastAPI()
 app.include_router(router)
 client = TestClient(app)
-
-
-
-
 
 
 @patch("apps.prompt_app.get_current_user_info")
@@ -231,12 +226,3 @@ def test_optimize_badcase_api_nexent_capability_error(mock_service_cls, mock_get
     assert response.status_code == 400
     data = response.json()
     assert "badcase" in data["message"]
-
-
-@pytest.mark.parametrize("payload", [{}, {"agent_id": 1, "model_id": 2, "task_description": "Generate instructions"}])
-def test_retired_generation_route_returns_404_without_work(payload, mocker):
-    authenticate = mocker.patch("apps.prompt_app.get_current_user_info")
-    response = client.post("/prompt/generate", json=payload)
-    assert response.status_code == 404
-    assert "text/event-stream" not in response.headers.get("content-type", "")
-    authenticate.assert_not_called()

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP E2E evidence server for runtime-memory acceptance scenarios."""
 
 import asyncio
@@ -12,14 +11,14 @@ import time
 
 sys.path.insert(0, "/opt/backend")
 
-import infrastructure.streaming.channels as streaming_module
+import services.streaming_channel as streaming_module
 from agents.agent_run_manager import agent_run_manager
 from fastapi import FastAPI
 from management.services.agent.service import (
     _agent_stream_producer_tasks,
     _finalize_buffered_unit_fragments,
 )
-from infrastructure.streaming.channels import StreamingChannel, StreamingChannelManager
+from services.streaming_channel import StreamingChannel, StreamingChannelManager
 
 app = FastAPI()
 

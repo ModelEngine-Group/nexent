@@ -1,16 +1,10 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
 
 
-from test.common.module_stubs import capture_module_stubs
-
-_modules_before_stubs = sys.modules.copy()
-
 @pytest.fixture(autouse=True)
-def _default_to_ordinary_agent(monkeypatch, _isolated_imports):
+def _default_to_ordinary_agent(monkeypatch):
     """Keep general ToolInstance tests scoped to an ordinary Agent."""
     monkeypatch.setattr(
         sys.modules["backend.database.agent_db"],
@@ -79,7 +73,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
+sys.modules['utils.auth_utils'] = utils_mock.auth_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -116,7 +110,7 @@ agent_db_mock.logger = MagicMock()
 sys.modules['database.agent_db'] = agent_db_mock
 sys.modules['backend.database.agent_db'] = agent_db_mock
 
-# Mock management.services.tool.catalog module
+# Mock utils.tool_utils module
 tool_utils_mock = MagicMock()
 tool_utils_mock.get_local_tools_description_zh = MagicMock(return_value={})
 
@@ -124,8 +118,8 @@ utils_mock.tool_utils = tool_utils_mock
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
-sys.modules['management.services.tool.catalog'] = tool_utils_mock
+sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+sys.modules['utils.tool_utils'] = tool_utils_mock
 
 # Now we can safely import the module being tested
 from backend.database.tool_db import (
@@ -531,28 +525,6 @@ def test_update_tool_table_from_scan_tool_list_create_new_tool(monkeypatch, mock
         "is_available": True
     })
     mock_tool_info_class.assert_called_once_with(**expected_call_args)
-
-
-@pytest.mark.parametrize("already_registered", [False, True])
-def test_deepseek_default_tags_initialize_only_on_first_registration(monkeypatch, mock_session, already_registered):
-    from types import SimpleNamespace
-
-    session, query = mock_session
-    existing = SimpleNamespace(name="deepseek_search", source="local", tool_id=220)
-    query.filter.return_value.all.return_value = [existing] if already_registered else []
-    context = MagicMock()
-    context.__enter__.return_value = session
-    monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: context)
-    monkeypatch.setattr("backend.database.tool_db.filter_property", lambda data, model: data)
-    monkeypatch.setattr("backend.database.tool_db.ToolInfo", MagicMock(return_value=existing))
-    initialize = MagicMock()
-    monkeypatch.setitem(sys.modules, "database.tool_default_tags_db", SimpleNamespace(initialize_search_tool_tags=initialize))
-    update_tool_table_from_scan_tool_list("tenant", "actor", [SimpleNamespace(name="deepseek_search", source="local")])
-    if already_registered:
-        initialize.assert_not_called()
-    else:
-        initialize.assert_called_once_with(session, "tenant", 220, "actor")
-        session.flush.assert_called_once()
 
 
 def test_update_tool_table_from_scan_tool_list_create_new_tool_invalid_name(monkeypatch, mock_session):
@@ -1627,7 +1599,7 @@ def test_check_tool_list_initialized_correct_tenant_filter(monkeypatch, mock_ses
 
 class TestAddToolFieldDescriptionZh:
     """Tests for add_tool_field function - description_zh i18n support.
-
+    
     These tests verify that the add_tool_field function correctly merges
     Chinese description (description_zh) from SDK for local tools.
     """
@@ -1635,26 +1607,26 @@ class TestAddToolFieldDescriptionZh:
     def test_add_tool_field_merges_description_zh_from_sdk(self, monkeypatch, mock_session):
         """Test that add_tool_field merges description_zh from SDK for local tools."""
         from backend.database.tool_db import add_tool_field
-
+        
         session, query = mock_session
-
+        
         # Create a mock tool with source="local"
         mock_tool_info = MockToolInfo()
         mock_tool_info.source = "local"
         mock_tool_info.name = "test_local_tool"
-
+        
         mock_first = MagicMock()
         mock_first.return_value = mock_tool_info
         mock_filter = MagicMock()
         mock_filter.first = mock_first
         query.filter.return_value = mock_filter
-
+        
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
-
+        
         # Mock get_local_tools_description_zh to return SDK descriptions
         mock_sdk_descriptions = {
             "test_local_tool": {
@@ -1663,82 +1635,82 @@ class TestAddToolFieldDescriptionZh:
                 "inputs": {}
             }
         }
-
+        
         # Mock the function at the import path used in tool_db.py
         monkeypatch.setattr(
             "backend.database.tool_db.get_local_tools_description_zh",
             lambda: mock_sdk_descriptions
         )
-
+        
         tool_info = {"tool_id": 1, "params": {}}
         result = add_tool_field(tool_info)
-
+        
         # Verify that description_zh was merged from SDK
         assert result["description_zh"] == "测试本地工具"
 
     def test_add_tool_field_skips_non_local_tools(self, monkeypatch, mock_session):
         """Test that add_tool_field skips description_zh merge for non-local tools."""
         from backend.database.tool_db import add_tool_field
-
+        
         session, query = mock_session
-
+        
         # Create a mock tool with source="mcp" (not local)
         mock_tool_info = MockToolInfo()
         mock_tool_info.source = "mcp"
         mock_tool_info.name = "test_mcp_tool"
-
+        
         mock_first = MagicMock()
         mock_first.return_value = mock_tool_info
         mock_filter = MagicMock()
         mock_filter.first = mock_first
         query.filter.return_value = mock_filter
-
+        
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
-
+        
         # Mock get_local_tools_description_zh - should not be called for non-local tools
         mock_get_sdk_descriptions = MagicMock(return_value={})
-
+        
         # Mock the function at the import path used in tool_db.py
         monkeypatch.setattr(
             "backend.database.tool_db.get_local_tools_description_zh",
             mock_get_sdk_descriptions
         )
-
+        
         tool_info = {"tool_id": 1, "params": {}}
         result = add_tool_field(tool_info)
-
+        
         # Verify that get_local_tools_description_zh was NOT called for non-local tool
         mock_get_sdk_descriptions.assert_not_called()
 
     def test_add_tool_field_merges_params_description_zh(self, monkeypatch, mock_session):
         """Test that add_tool_field merges params description_zh from SDK."""
         from backend.database.tool_db import add_tool_field
-
+        
         session, query = mock_session
-
+        
         # Create a mock tool with source="local"
         mock_tool_info = MockToolInfo()
         mock_tool_info.source = "local"
         mock_tool_info.name = "test_local_tool"
         mock_tool_info.params = [{"name": "param1", "description": "Param1"}]
         mock_tool_info.inputs = "{}"
-
+        
         mock_first = MagicMock()
         mock_first.return_value = mock_tool_info
         mock_filter = MagicMock()
         mock_filter.first = mock_first
         query.filter.return_value = mock_filter
-
+        
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
-
+        
         # Mock get_local_tools_description_zh with params description_zh
         mock_sdk_descriptions = {
             "test_local_tool": {
@@ -1747,15 +1719,15 @@ class TestAddToolFieldDescriptionZh:
                 "inputs": {}
             }
         }
-
+        
         monkeypatch.setattr(
             "backend.database.tool_db.get_local_tools_description_zh",
             lambda: mock_sdk_descriptions
         )
-
+        
         tool_info = {"tool_id": 1, "params": {"param1": "value1"}}
         result = add_tool_field(tool_info)
-
+        
         # Verify that params description_zh was merged
         assert result["params"][0]["description_zh"] == "参数1"
 
@@ -1763,28 +1735,28 @@ class TestAddToolFieldDescriptionZh:
         """Test that add_tool_field merges inputs description_zh from SDK."""
         from backend.database.tool_db import add_tool_field
         import json
-
+        
         session, query = mock_session
-
+        
         # Create a mock tool with source="local"
         mock_tool_info = MockToolInfo()
         mock_tool_info.source = "local"
         mock_tool_info.name = "test_local_tool"
         mock_tool_info.params = []
         mock_tool_info.inputs = json.dumps({"query": {"type": "string", "description": "Query"}})
-
+        
         mock_first = MagicMock()
         mock_first.return_value = mock_tool_info
         mock_filter = MagicMock()
         mock_filter.first = mock_first
         query.filter.return_value = mock_filter
-
+        
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
-
+        
         # Mock get_local_tools_description_zh with inputs description_zh
         mock_sdk_descriptions = {
             "test_local_tool": {
@@ -1793,15 +1765,15 @@ class TestAddToolFieldDescriptionZh:
                 "inputs": {"query": {"description_zh": "查询词"}}
             }
         }
-
+        
         monkeypatch.setattr(
             "backend.database.tool_db.get_local_tools_description_zh",
             lambda: mock_sdk_descriptions
         )
-
+        
         tool_info = {"tool_id": 1, "params": {}}
         result = add_tool_field(tool_info)
-
+        
         # Verify that inputs description_zh was merged
         inputs = json.loads(result["inputs"])
         assert inputs["query"]["description_zh"] == "查询词"
@@ -1809,28 +1781,28 @@ class TestAddToolFieldDescriptionZh:
     def test_add_tool_field_inputs_json_decode_error(self, monkeypatch, mock_session):
         """Test that add_tool_field handles JSON decode error for inputs."""
         from backend.database.tool_db import add_tool_field
-
+        
         session, query = mock_session
-
+        
         # Create a mock tool with source="local" and invalid JSON inputs
         mock_tool_info = MockToolInfo()
         mock_tool_info.source = "local"
         mock_tool_info.name = "test_local_tool"
         mock_tool_info.params = []
         mock_tool_info.inputs = "invalid json{"
-
+        
         mock_first = MagicMock()
         mock_first.return_value = mock_tool_info
         mock_filter = MagicMock()
         mock_filter.first = mock_first
         query.filter.return_value = mock_filter
-
+        
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
-
+        
         # Mock get_local_tools_description_zh
         mock_sdk_descriptions = {
             "test_local_tool": {
@@ -1839,54 +1811,54 @@ class TestAddToolFieldDescriptionZh:
                 "inputs": {}
             }
         }
-
+        
         monkeypatch.setattr(
             "backend.database.tool_db.get_local_tools_description_zh",
             lambda: mock_sdk_descriptions
         )
-
+        
         tool_info = {"tool_id": 1, "params": {}}
         result = add_tool_field(tool_info)
-
+        
         # Should not crash, inputs should remain as original string
         assert result["inputs"] == "invalid json{"
 
     def test_add_tool_field_tool_not_in_sdk(self, monkeypatch, mock_session):
         """Test that add_tool_field handles tool not found in SDK descriptions."""
         from backend.database.tool_db import add_tool_field
-
+        
         session, query = mock_session
-
+        
         # Create a mock tool with source="local"
         mock_tool_info = MockToolInfo()
         mock_tool_info.source = "local"
         mock_tool_info.name = "unknown_tool"
         mock_tool_info.params = []
         mock_tool_info.inputs = "{}"
-
+        
         mock_first = MagicMock()
         mock_first.return_value = mock_tool_info
         mock_filter = MagicMock()
         mock_filter.first = mock_first
         query.filter.return_value = mock_filter
-
+        
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
-
+        
         # Mock get_local_tools_description_zh with empty dict
         mock_sdk_descriptions = {}
-
+        
         monkeypatch.setattr(
             "backend.database.tool_db.get_local_tools_description_zh",
             lambda: mock_sdk_descriptions
         )
-
+        
         tool_info = {"tool_id": 1, "params": {}}
         result = add_tool_field(tool_info)
-
+        
         # Should not have description_zh since tool not in SDK
         assert "description_zh" not in result or result.get("description_zh") is None
 
@@ -1990,11 +1962,3 @@ def test_update_tool_labels_not_found(monkeypatch, mock_session):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-
-
-_install_module_stubs = capture_module_stubs(_modules_before_stubs)
-
-
-@pytest.fixture(autouse=True)
-def _isolated_imports(monkeypatch):
-    _install_module_stubs(monkeypatch)

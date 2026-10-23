@@ -35,7 +35,6 @@ interface MineMcpServiceCardProps {
   unpublishing?: boolean;
   healthChecking?: boolean;
   connectionStatus?: McpConnectionStatus;
-  tagRefreshKey?: string | number;
   onEditLocal: (service: McpServiceItem) => void;
   onEditCommunity: (service: CommunityMcpCard) => void;
   onToggle: (service: McpServiceItem) => void;
@@ -63,7 +62,6 @@ export default function MineMcpServiceCard({
   unpublishing,
   healthChecking = false,
   connectionStatus = "unchecked",
-  tagRefreshKey,
   onEditLocal,
   onEditCommunity,
   onToggle,
@@ -239,7 +237,6 @@ export default function MineMcpServiceCard({
               resourceType="mcp_service"
               resourceId={String(item.service.mcpId)}
               max={3}
-              refreshKey={tagRefreshKey}
             />
           ) : null}
           <span className="rounded-md border border-slate-200 px-2 py-0.5 text-slate-500 dark:border-slate-700 dark:text-slate-400">

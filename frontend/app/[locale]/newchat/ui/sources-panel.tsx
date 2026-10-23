@@ -1,5 +1,3 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-
 "use client";
 
 import {
@@ -17,11 +15,11 @@ import {
   FileTextIcon,
   ImageIcon,
   LoaderCircleIcon,
+  ServerIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { getCitationKey } from "@/lib/citationDisplay";
 import {
   CiteIndexBadge,
   HighlightedChunkText,
@@ -39,19 +37,13 @@ import {
   storageService,
 } from "@/services/storageService";
 import { AuthenticatedImage } from "./authenticated-image";
-import type { SourceAttributes } from "@/types/source";
-import { getSourceLabel, getSourceProvider, isAidpSource } from "@/lib/source";
-import { SourceMetadata } from "@/components/common/sourceMetadata";
-import log from "@/lib/logger";
-
-export { getCitationKey } from "@/lib/citationDisplay";
 
 /**
  * Loose typing for the source items handled by the side panel. Matches the
  * shape of `SourcePartLike` used in `thread.tsx` so we can render each entry
  * consistently with the inline preview.
  */
-export interface PanelSourceItem extends SourceAttributes {
+export interface PanelSourceItem {
   sourceType?: "url" | "document";
   url?: string;
   title?: string;
@@ -62,17 +54,22 @@ export interface PanelSourceItem extends SourceAttributes {
   objectName?: string;
   isImage?: boolean;
   citeIndex?: number;
-  /** Message-wide number shared with inline citations, including image hits. */
-  displayIndex?: number;
   toolSign?: string;
   retrievalHighlightTerms?: string[];
 }
 
+export function getCitationKey(item: Pick<PanelSourceItem, "citeIndex" | "toolSign">): string | undefined {
+  if (!Number.isFinite(item.citeIndex)) return undefined;
+  const index = item.citeIndex as number;
+  const toolSign = item.toolSign?.trim().toLowerCase();
+  return toolSign ? `${toolSign}${index}` : String(index);
+}
+
 export function getCitationLabel(
-  item: Pick<PanelSourceItem, "citeIndex" | "displayIndex" | "toolSign" | "sourceType">,
+  item: Pick<PanelSourceItem, "citeIndex" | "toolSign" | "sourceType">,
   labels: { knowledgeBase: string; web: string; source: string },
 ): string {
-  const index = item.displayIndex ?? item.citeIndex ?? 0;
+  const index = item.citeIndex ?? 0;
   if (item.toolSign === "a" || item.sourceType === "document") {
     return `${labels.knowledgeBase} ${index}`;
   }
@@ -91,8 +88,6 @@ export interface SourcesPanelProps {
   open: boolean;
   selectedCitationKey?: string;
   citationContext?: string;
-  /** Changes for every citation click, including repeated clicks on one marker. */
-  selectionToken?: object;
   className?: string;
   onClose: () => void;
 }
@@ -110,7 +105,6 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   open,
   selectedCitationKey,
   citationContext,
-  selectionToken,
   className,
   onClose,
 }) => {
@@ -132,21 +126,12 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
     } else if (images.length > 0) {
       setActiveTab("images");
     }
-  }, [
-    open,
-    selectedCitationKey,
-    sources.length,
-    images.length,
-    selectionToken,
-  ]);
+  }, [open, selectedCitationKey, sources.length, images.length]);
 
   if (!open) return null;
 
   const showSources = activeTab === "sources";
   const currentItems = showSources ? sources : images;
-  const title = showSources
-    ? t("chat.sources.referenceTitle", { count: sources.length })
-    : t("chat.sources.imageTitle", { count: images.length });
 
   return (
     <aside
@@ -158,7 +143,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
       aria-label={t("chat.sources.panel")}
     >
       <header className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-2">
-        <h2 className="text-base font-medium text-foreground">{title}</h2>
+        <h2 className="text-sm font-semibold text-slate-800">{t("chatRightPanel.searchTitle")}</h2>
         <Button
           variant="ghost"
           size="icon"
@@ -169,7 +154,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
         </Button>
       </header>
 
-      {images.length > 0 && <div
+      <div
         role="tablist"
         aria-label={t("chat.sources.tabs")}
         className="grid grid-cols-2 gap-0 border-b border-slate-200 px-3 py-2"
@@ -188,7 +173,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
           active={!showSources}
           onClick={() => setActiveTab("images")}
         />
-      </div>}
+      </div>
 
       <div className="flex-1 overflow-y-auto bg-slate-50/40 px-3 py-3">
         {currentItems.length === 0 ? (
@@ -203,12 +188,8 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
               <SourceListItem
                 key={`${item.url ?? item.title ?? "source"}-${index}`}
                 item={item}
-                selected={
-                  selectedCitationKey !== undefined &&
-                  getCitationKey(item) === selectedCitationKey
-                }
+                selected={getCitationKey(item) === selectedCitationKey}
                 citationContext={citationContext}
-                selectionToken={selectionToken}
               />
             ))}
           </ul>
@@ -216,14 +197,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
           <ul className="grid grid-cols-2 gap-2">
             {currentItems.map((item, index) => (
               <li key={`${item.url ?? "image"}-${index}`}>
-                <ImageListItem
-                  item={item}
-                  selected={
-                    selectedCitationKey !== undefined &&
-                    getCitationKey(item) === selectedCitationKey
-                  }
-                  selectionToken={selectionToken}
-                />
+                <ImageListItem item={item} />
               </li>
             ))}
           </ul>
@@ -303,7 +277,7 @@ const SourceSummary: FC<{
 
   if (!text?.trim()) return null;
 
-  if (highlighted && highlightTerms.length > 0) {
+  if (highlighted) {
     return (
       <div className="mt-2">
         <p ref={textRef} className="max-h-52 overflow-y-auto whitespace-pre-wrap wrap-break-word pr-1 text-sm leading-6 text-gray-700">
@@ -317,7 +291,7 @@ const SourceSummary: FC<{
   }
 
   return (
-    <p className="mt-1 line-clamp-2 wrap-break-word text-sm leading-[19px] text-[#777]">
+    <p className="mt-1 line-clamp-3 wrap-break-word text-sm leading-6 text-gray-700">
       {text}
     </p>
   );
@@ -327,14 +301,21 @@ const SourceFooter: FC<{ item: PanelSourceItem; sourceLabel: string }> = ({
   item,
   sourceLabel,
 }) => {
+  const fileLabel = item.filename || item.title || item.url || "";
+  if (!fileLabel) return null;
+
   return (
-    <div className="mt-2 flex min-w-0 text-xs text-gray-500">
+    <div className="mt-2 flex min-w-0 flex-col gap-0.5 text-xs text-gray-500">
       <div className="flex min-w-0 items-center gap-1">
-        {getSourceProvider(item.searchType, item.toolSign) || item.sourceType === "document" ? (
+        {item.sourceType === "document" ? (
           <DatabaseIcon className="size-3 shrink-0" />
         ) : (
           <ExternalLinkIcon className="size-3 shrink-0" />
         )}
+        <span className="truncate text-[#1677ff]">{fileLabel}</span>
+      </div>
+      <div className="flex min-w-0 items-center gap-1">
+        <ServerIcon className="size-3 shrink-0" />
         <span className="truncate">{sourceLabel}</span>
       </div>
     </div>
@@ -351,12 +332,13 @@ const SourceCardBody: FC<{
   item: PanelSourceItem;
   selected: boolean;
   highlightTerms: string[];
-}> = ({ title, dateFallback, item, selected, highlightTerms }) => (
+  sourceLabel: string;
+}> = ({ title, dateFallback, item, selected, highlightTerms, sourceLabel }) => (
   <>
     <div className="flex items-start gap-1.5">
       {title}
       <CiteIndexBadge
-        index={item.displayIndex ?? item.citeIndex}
+        index={item.citeIndex}
         className="inline-flex shrink-0 items-center justify-center"
       />
     </div>
@@ -372,6 +354,7 @@ const SourceCardBody: FC<{
       highlighted={selected}
       highlightTerms={highlightTerms}
     />
+    <SourceFooter item={item} sourceLabel={sourceLabel} />
   </>
 );
 
@@ -379,25 +362,21 @@ const SourceListItem: FC<{
   item: PanelSourceItem;
   selected: boolean;
   citationContext?: string;
-  selectionToken?: object;
-}> = ({ item, selected, citationContext, selectionToken }) => {
+}> = ({
+  item,
+  selected,
+  citationContext,
+}) => {
   const { t } = useTranslation();
   const itemRef = useRef<HTMLLIElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const isAidp = isAidpSource(item);
-  const sourceLabel = getSourceLabel(item, {
-    knowledgeBase: t("chat.sources.knowledgeBase"),
-    web: t("chat.sources.web"),
-    document: t("chat.sources.document"),
-    source: t("chat.sources.source"),
-  });
 
   useEffect(() => {
     if (selected) {
       itemRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-  }, [selected, selectionToken]);
+  }, [selected]);
 
   const handleDocumentDownload = async () => {
     if (isDownloading) return;
@@ -429,8 +408,7 @@ const SourceListItem: FC<{
         throw new Error("Cannot determine the file location.");
       }
       await storageService.downloadFileWithAuth(objectName, filename);
-    } catch (error) {
-      log.error("Failed to download citation file", { searchType: item.searchType, error });
+    } catch {
       setDownloadError(t("chat.sources.downloadError"));
     } finally {
       setIsDownloading(false);
@@ -463,7 +441,7 @@ const SourceListItem: FC<{
         : [],
     [citationContext, retrievalHighlightTerms, item.text, selected],
   );
-  const previewUrl = isAidp ? undefined : getLocalFilePreviewUrl(
+  const previewUrl = getLocalFilePreviewUrl(
     item.url,
     item.filename || item.title,
     item.objectName
@@ -489,37 +467,33 @@ const SourceListItem: FC<{
             <div className="min-w-0 flex-1">
               <SourceCardBody
                 title={
-                  <span className="block min-w-0 flex-1 wrap-break-word text-sm font-medium text-foreground group-hover:underline">
+                  <span className="block min-w-0 flex-1 wrap-break-word text-base font-medium text-[#1677ff] group-hover:underline">
                     {item.title || item.filename || t("chat.sources.document")}
                   </span>
                 }
                 item={item}
                 selected={selected}
                 highlightTerms={highlightTerms}
+                sourceLabel="来源: Nexent"
               />
             </div>
           </button>
-          {!isAidp && (
-            <button
-              type="button"
-              onClick={() => void handleDocumentDownload()}
-              disabled={isDownloading}
-              className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-wait disabled:opacity-70"
-              aria-label={t("chat.sources.download", {
-                name:
-                  item.filename || item.title || t("chat.sources.document"),
-              })}
-            >
-              {isDownloading ? (
-                <LoaderCircleIcon className="size-4 animate-spin" />
-              ) : (
-                <DownloadIcon className="size-4" />
-              )}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => void handleDocumentDownload()}
+            disabled={isDownloading}
+            className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-wait disabled:opacity-70"
+            aria-label={t("chat.sources.download", {
+              name: item.filename || item.title || t("chat.sources.document"),
+            })}
+          >
+            {isDownloading ? (
+              <LoaderCircleIcon className="size-4 animate-spin" />
+            ) : (
+              <DownloadIcon className="size-4" />
+            )}
+          </button>
         </div>
-        <SourceMetadata metadata={item.sourceMetadata} />
-        <SourceFooter item={item} sourceLabel={sourceLabel} />
         {downloadError && (
           <p className="pt-2 text-xs text-destructive">{downloadError}</p>
         )}
@@ -542,7 +516,7 @@ const SourceListItem: FC<{
           <div className="min-w-0 flex-1">
             <SourceCardBody
               title={
-                <span className="block min-w-0 flex-1 truncate text-sm font-medium text-foreground hover:underline">
+                <span className="block min-w-0 flex-1 truncate text-base font-medium text-[#1677ff] hover:underline">
                   {displayTitle}
                 </span>
               }
@@ -554,11 +528,10 @@ const SourceListItem: FC<{
               item={item}
               selected={selected}
               highlightTerms={highlightTerms}
+              sourceLabel={`来源: ${domain}`}
             />
           </div>
         </a>
-        <SourceMetadata metadata={item.sourceMetadata} />
-        <SourceFooter item={item} sourceLabel={sourceLabel} />
       </li>
     );
   }
@@ -570,28 +543,21 @@ const SourceListItem: FC<{
     >
       <SourceCardBody
         title={
-          <span className="min-w-0 flex-1 text-sm font-medium text-foreground">
+          <span className="min-w-0 flex-1 text-base font-medium text-[#1677ff]">
             {item.title || t("chat.sources.untitled")}
           </span>
         }
         item={item}
         selected={selected}
         highlightTerms={highlightTerms}
+        sourceLabel="来源: Nexent"
       />
-      <SourceMetadata metadata={item.sourceMetadata} />
-      <SourceFooter item={item} sourceLabel={sourceLabel} />
     </li>
   );
 };
 
-const ImageListItem: FC<{
-  item: PanelSourceItem;
-  selected: boolean;
-  selectionToken?: object;
-}> = ({ item, selected, selectionToken }) => {
-  const { t } = useTranslation();
+const ImageListItem: FC<{ item: PanelSourceItem }> = ({ item }) => {
   const imageUrl = item.url || "";
-  const itemRef = useRef<HTMLDivElement>(null);
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
   const [loadError, setLoadError] = useState(false);
   const usesBackendStream = isLocalStorageObjectUrl(imageUrl);
@@ -624,81 +590,32 @@ const ImageListItem: FC<{
     };
   }, [imageUrl, usesBackendStream]);
 
-  useEffect(() => {
-    if (selected) {
-      itemRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }, [selected, selectionToken]);
-
   if (!imageUrl) return null;
-  const cardClassName = cn(
-    "aui-global-search-image relative overflow-hidden rounded-md border bg-muted/50",
-    selected && "border-[#1677ff] ring-1 ring-[#1677ff]"
-  );
   if (usesBackendStream && !resolvedUrl && !loadError) {
     return (
-      <div
-        ref={itemRef}
-        className={cn(
-          cardClassName,
-          "flex aspect-square items-center justify-center"
-        )}
-        data-citation-selected={selected ? "true" : undefined}
-      >
+      <div className="flex aspect-square items-center justify-center rounded-md border bg-muted/50">
         <LoaderCircleIcon className="size-5 animate-spin text-muted-foreground" />
       </div>
     );
   }
   if (loadError) {
     return (
-      <div
-        ref={itemRef}
-        className={cn(
-          cardClassName,
-          "flex aspect-square items-center justify-center px-2 text-center text-xs text-muted-foreground"
-        )}
-        data-citation-selected={selected ? "true" : undefined}
-      >
+      <div className="flex aspect-square items-center justify-center rounded-md border bg-muted/50 px-2 text-center text-xs text-muted-foreground">
         {item.title || imageUrl}
       </div>
     );
   }
 
   return (
-    <div
-      ref={itemRef}
-      className={cardClassName}
-      data-citation-selected={selected ? "true" : undefined}
-    >
-      <CiteIndexBadge
-        index={item.displayIndex ?? item.citeIndex}
-        className="absolute top-2 right-2 z-10"
-      />
+    <div className="aui-global-search-image overflow-hidden rounded-md border bg-muted/50">
       <AuthenticatedImage
         src={resolvedUrl || imageUrl}
         alt={item.title || imageUrl}
         loading="lazy"
         preview
         proxy={!resolvedUrl}
-        className="aspect-square w-full object-contain"
+        className="aspect-square w-full object-cover"
       />
-      <div className="px-2 pb-2">
-        {(item.filename || (item.title && item.title !== item.url)) && (
-          <p className="mt-1 truncate text-xs text-muted-foreground">
-            {item.filename || item.title}
-          </p>
-        )}
-        <SourceMetadata metadata={item.sourceMetadata} />
-        <SourceFooter
-          item={item}
-          sourceLabel={getSourceLabel(item, {
-            knowledgeBase: t("chat.sources.knowledgeBase"),
-            web: t("chat.sources.web"),
-            document: t("chat.sources.document"),
-            source: t("chat.sources.source"),
-          })}
-        />
-      </div>
     </div>
   );
 };

@@ -1,5 +1,0 @@
-# Explicit machine-local consent to redeploy the current test stack.
-# Copy to <test-home>/config/deployment-switch.yaml only for an owned test stack.
-# Commands come from the existing pipeline deploy/preflight hooks; data roots do not change.
-schema_version: 1
-enabled: false

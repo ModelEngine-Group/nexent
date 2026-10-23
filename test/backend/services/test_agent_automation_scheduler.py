@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import importlib
 import sys
 import types
@@ -11,7 +10,7 @@ from nexent.scheduler import ClaimedJob, ExecutionLease
 
 
 def _load_scheduler_with_runner_stub(monkeypatch):
-    runner_module = types.ModuleType("management.services.automation.runner")
+    runner_module = types.ModuleType("services.agent_automation.runner")
 
     class _Runner:
         async def execute_task(self, task, trigger_type="SCHEDULED", lease_owner=None):
@@ -22,9 +21,9 @@ def _load_scheduler_with_runner_stub(monkeypatch):
             }
 
     runner_module.agent_automation_runner = _Runner()
-    monkeypatch.setitem(sys.modules, "management.services.automation.runner", runner_module)
-    sys.modules.pop("management.services.automation.scheduler", None)
-    module = importlib.import_module("management.services.automation.scheduler")
+    monkeypatch.setitem(sys.modules, "services.agent_automation.runner", runner_module)
+    sys.modules.pop("services.agent_automation.scheduler", None)
+    module = importlib.import_module("services.agent_automation.scheduler")
 
     async def run_inline(_task_name, func, *args, **kwargs):
         kwargs.pop("lane", None)

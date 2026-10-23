@@ -1,8 +1,4 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
-import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -27,7 +23,7 @@ import {
 } from "antd";
 import { Search, Settings2 } from "lucide-react";
 import { ColumnsType, TableProps } from "antd/es/table";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useAuthorization } from "@/hooks/auth/useAuthorization";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import { USER_ROLES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
@@ -467,8 +463,7 @@ export default function PersonalKnowledgeBaseCapacity({
   tenantId: string | null;
 }) {
   const { t } = useTranslation("common");
-  const { user, hasPermission } = useAuthorizationContext();
-  const displayName = useUserDisplayName();
+  const { user, hasPermission } = useAuthorization();
   const userRole = user?.role ?? "";
   const isSuperAdmin =
     userRole === USER_ROLES.SU || userRole === USER_ROLES.SPEED;
@@ -794,17 +789,9 @@ export default function PersonalKnowledgeBaseCapacity({
       ),
       render: (_: unknown, record: PersonalCapacityUser) => (
         <div className="min-w-0">
-          <Tooltip
-            title={displayName(
-              record.cas_username,
-              record.user_name || record.user_id
-            )}
-          >
+          <Tooltip title={record.user_name || record.user_id}>
             <div className="font-medium truncate max-w-[160px]">
-              {displayName(
-                record.cas_username,
-                record.user_name || record.user_id
-              )}
+              {record.user_name || record.user_id}
             </div>
           </Tooltip>
           {record.email && (

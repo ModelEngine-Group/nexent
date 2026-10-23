@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import type {
   SkillRepositoryListingDetail,
   SkillRepositoryListingStatus,
@@ -9,7 +7,6 @@ export interface SkillRepositoryDetailView {
   title: string;
   description: string;
   author: string | null;
-  authorCasUsername?: string | null;
   status: SkillRepositoryListingStatus;
   tags: string[];
   downloads: number;
@@ -31,7 +28,6 @@ export function mapSkillRepositoryDetail(
     title: detail.name.trim(),
     description: detail.description?.trim() || "",
     author: detail.author?.trim() || null,
-    authorCasUsername: detail.author_cas_username,
     status: detail.status,
     tags: (detail.tags ?? []).map((tag) => tag.trim()).filter(Boolean),
     downloads: detail.downloads ?? 0,

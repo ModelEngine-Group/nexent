@@ -1,9 +1,8 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """UT-BE-TRACE-013: email enrichment uses trusted tenant-scoped identity."""
 
 import pytest
 
-from management.services.monitor import identity as monitoring_identity
+from utils import monitoring_identity
 
 
 @pytest.mark.parametrize("stored,expected", [

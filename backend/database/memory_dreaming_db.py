@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Persistence, scheduling, and PostgreSQL locking for Dreaming runs."""
 
 from __future__ import annotations
@@ -18,8 +17,8 @@ from .db_models import (
     MemoryLongTermVersion,
 )
 from nexent.scheduler import ScheduleMode, ScheduleRuleType
-from contracts.automation import ScheduleTrigger
-from management.services.automation.scheduler import compute_next_fire_at
+from services.agent_automation.models import ScheduleTrigger
+from services.agent_automation.schedule_engine import compute_next_fire_at
 
 
 def advisory_lock_key(tenant_id: str, user_id: str, agent_id: str) -> int:

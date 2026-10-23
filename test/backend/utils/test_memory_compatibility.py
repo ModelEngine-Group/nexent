@@ -1,9 +1,13 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Coverage for intentionally retained Memory compatibility shims."""
 
 import pytest
 
 from nexent.memory import memory_service
+from utils.memory_utils import build_memory_config
+
+
+def test_ac078_legacy_config_is_empty():
+    assert build_memory_config("tenant") == {}
 
 
 @pytest.mark.anyio

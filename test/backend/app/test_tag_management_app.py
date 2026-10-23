@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,9 +11,6 @@ from consts.exceptions import (
     ValidationError,
 )
 from consts.model import (
-    AgentTagAssignmentBatchRequest,
-    KnowledgeTagAssignmentBatchRequest,
-    SkillTagAssignmentBatchRequest,
     TagDefinitionCreateRequest,
     TagDefinitionUpdateRequest,
     TagHTTPConflictResponse,
@@ -23,7 +18,6 @@ from consts.model import (
     TagStatusUpdateRequest,
     TagValueCreateRequest,
     TagValueUpdateRequest,
-    ToolTagAssignmentBatchRequest,
 )
 
 AUTHORIZATION = "Bearer auth-token"
@@ -61,57 +55,6 @@ def value_payload():
         "sort_order": 0,
         "status": "active",
     }
-
-
-@pytest.mark.parametrize(
-    "endpoint_name,service_name,request_type,payload",
-    [
-        (
-            "get_skill_tag_assignments_batch", "get_skill_assignments_batch",
-            SkillTagAssignmentBatchRequest, {"skill_ids": [12]},
-        ),
-        (
-            "get_knowledge_tag_assignments_batch", "get_knowledge_assignments_batch",
-            KnowledgeTagAssignmentBatchRequest, {"index_names": ["kb-a"]},
-        ),
-        (
-            "get_agent_tag_assignments_batch", "get_agent_assignments_batch",
-            AgentTagAssignmentBatchRequest, {"agent_ids": [12]},
-        ),
-        (
-            "get_tool_tag_assignments_batch", "get_tool_assignments_batch",
-            ToolTagAssignmentBatchRequest, {"tool_ids": [12]},
-        ),
-    ],
-    ids=["skill", "knowledge_base", "agent", "tool"],
-)
-@pytest.mark.parametrize(
-    "error_type,status_code,message",
-    [
-        (TagManagementNotFoundError, 404, "Resource not found"),
-        (ValidationError, 400, "Invalid batch request"),
-    ],
-    ids=["not_found", "validation"],
-)
-def test_batch_assignment_endpoints_translate_domain_errors(
-    monkeypatch, endpoint_name, service_name, request_type, payload,
-    error_type, status_code, message,
-):
-    install_auth(monkeypatch)
-    domain_error = error_type(message)
-    service = MagicMock(side_effect=domain_error)
-    monkeypatch.setattr(tag_app.TagManagementService, service_name, service)
-    request = request_type(**payload)
-
-    with pytest.raises(HTTPException) as error:
-        getattr(tag_app, endpoint_name)(request, AUTHORIZATION)
-
-    assert error.value.status_code == status_code
-    assert error.value.detail == message
-    assert error.value.__cause__ is domain_error
-    service.assert_called_once_with(
-        tag_app._assignment_caller(AUTHORIZATION), next(iter(payload.values()))
-    )
 
 
 def test_management_permission_is_derived_from_auth_and_tenant_cannot_be_overridden(monkeypatch):

@@ -1,9 +1,4 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import { BASE_PATH } from "./base-path.mjs";
-import { preparePdfAssets } from "./scripts/prepare-pdf-assets.mjs";
-
-preparePdfAssets();
 
 let userConfig = undefined
 try {

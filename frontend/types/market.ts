@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 /**
  * Market types for agent marketplace
  */
@@ -63,7 +61,9 @@ export interface MarketAgentDetail extends MarketAgentListItem {
   business_description: string;
   max_steps: number;
   provide_run_summary: boolean;
-  prompt: string;
+  duty_prompt: string;
+  constraint_prompt: string;
+  few_shots_prompt: string;
   prompts_hidden?: boolean;
   enabled: boolean;
   model_id: number;

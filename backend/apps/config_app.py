@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import logging
 from contextlib import asynccontextmanager
@@ -22,6 +21,7 @@ from apps.mock_user_management_app import router as mock_user_management_router
 from apps.model_managment_app import router as model_manager_router
 from apps.oauth_app import router as oauth_router
 from apps.prompt_app import router as prompt_router
+from apps.prompt_template_app import router as prompt_template_router
 from apps.mcp_management_app import router as mcp_management_router
 from apps.remote_mcp_app import router as remote_mcp_router
 from apps.skill_app import router as skill_router
@@ -71,14 +71,15 @@ from nexent.core.concurrency import (
     set_default_thread_manager,
 )
 from consts.task_recovery import CONFIG_SERVICE_NAME
-from infrastructure.concurrency import config_thread_manager
+from services.prompt_template_service import sync_system_default_prompt_template
+from services.thread_lifecycle_service import config_thread_manager
 
 logger = logging.getLogger("base_app")
 
 
 async def recover_config_tasks_on_startup():
-    from management.services.evaluation.maintenance import start as start_eval_maintenance
-    from management.recovery import (
+    from services.evaluation_maintenance import start as start_eval_maintenance
+    from services.startup_recovery_service import (
         recover_config_tasks,
         schedule_interrupted_upload_cleanup,
         schedule_workbench_main_backfill,
@@ -98,23 +99,28 @@ async def recover_config_tasks_on_startup():
         schedule_workbench_main_backfill()
 
 
-async def validate_external_service_configuration():
-    """Validate enabled external service configuration before startup."""
+async def sync_default_prompt_template_on_startup():
+    """Sync defaults and validate enabled external service configuration."""
     if ENABLE_AIDP_KNOWLEDGE and (not AIDP_SERVER_URL or not AIDP_API_KEY):
         raise RuntimeError(
             "AIDP_SERVER_URL and AIDP_API_KEY are required when ENABLE_AIDP_KNOWLEDGE=true"
         )
 
+    try:
+        sync_system_default_prompt_template()
+        logger.info("System default prompt template synced successfully.")
+    except Exception as exc:
+        logger.error(f"Failed to sync system default prompt template: {str(exc)}")
 
 
 async def start_dreaming_scheduler():
-    from management.services.memory.dreaming.scheduler import dreaming_scheduler
+    from services.memory_dreaming_scheduler import dreaming_scheduler
 
     await dreaming_scheduler.start()
 
 
 async def stop_dreaming_scheduler():
-    from management.services.memory.dreaming.scheduler import dreaming_scheduler
+    from services.memory_dreaming_scheduler import dreaming_scheduler
 
     await dreaming_scheduler.stop()
 
@@ -125,7 +131,7 @@ async def config_lifespan(_app):
         config_thread_manager.start()
     set_default_thread_manager(config_thread_manager)
     await recover_config_tasks_on_startup()
-    await validate_external_service_configuration()
+    await sync_default_prompt_template_on_startup()
     await start_dreaming_scheduler()
     try:
         yield
@@ -133,7 +139,7 @@ async def config_lifespan(_app):
         # Preserve the scheduler's existing graceful shutdown behavior. Task
         # state recovery remains exclusively in the startup path above.
         await stop_dreaming_scheduler()
-        from management.services.evaluation.maintenance import stop as stop_eval_maintenance
+        from services.evaluation_maintenance import stop as stop_eval_maintenance
 
         stop_eval_maintenance()
         try:
@@ -188,6 +194,7 @@ app.include_router(cas_router)
 
 app.include_router(summary_router)
 app.include_router(prompt_router)
+app.include_router(prompt_template_router)
 app.include_router(skill_router)
 app.include_router(tenant_config_router)
 app.include_router(mcp_management_router)

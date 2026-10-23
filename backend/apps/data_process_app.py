@@ -1,7 +1,7 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from contextlib import asynccontextmanager
 from http import HTTPStatus
+from typing import Optional
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
@@ -12,10 +12,9 @@ from consts.model import (
     ConvertStateRequest,
     TaskRequest,
 )
-from data_process.parse_tasks import load_chunks_from_redis
 from data_process.tasks import process_sync, submit_process_forward_chain
 from data_process.utils import get_task_details as get_task_details_util
-from data_process.services.tasks import get_data_process_service
+from services.data_process_service import get_data_process_service
 
 
 logger = logging.getLogger("data_process.app")
@@ -42,7 +41,7 @@ router = APIRouter(
 
 
 @router.post("")
-async def create_task(request: TaskRequest, authorization: str | None = Header(None)):
+async def create_task(request: TaskRequest, authorization: Optional[str] = Header(None)):
     """
     Create a new data processing task (Process → Forward chain)
 
@@ -99,41 +98,40 @@ async def process_sync_endpoint(
             kwargs={
                 'source': source,
                 'source_type': source_type,
-                'chunking_strategy': chunking_strategy
+                'chunking_strategy': chunking_strategy,
+                'timeout': timeout
             },
             priority=0,  # High priority for real-time processing
-            queue='parse_q'
+            queue='process_q'
         )
         # Wait for the result with timeout
         result = task_result.get(timeout=timeout)
-        chunks = load_chunks_from_redis(result["chunks_key"])
-        text = "\n\n".join(str(chunk.get("content", "")) for chunk in chunks)
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={
                 "success": True,
                 "task_id": task_result.id,
                 "source": source,
-                "text": text,
-                "chunks": chunks,
-                "chunks_count": result["chunks_count"],
-                "processing_time": result["processing_time"],
-                "text_length": result["text_length"]
+                "text": result.get("text", ""),
+                "chunks": result.get("chunks", []),
+                "chunks_count": result.get("chunks_count", 0),
+                "processing_time": result.get("processing_time", 0),
+                "text_length": result.get("text_length", 0)
             }
         )
     except HTTPException:
         # Preserve explicit HTTP errors
         raise
     except Exception as e:
-        logger.error(f"Error in synchronous processing: {e!s}")
+        logger.error(f"Error in synchronous processing: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error processing file: {e!s}"
+            detail=f"Error processing file: {str(e)}"
         )
 
 
 @router.post("/batch")
-async def create_batch_tasks(request: BatchTaskRequest, authorization: str | None = Header(None)):
+async def create_batch_tasks(request: BatchTaskRequest, authorization: Optional[str] = Header(None)):
     """
     Create multiple data processing tasks at once (individual Process → Forward chains)
 
@@ -143,13 +141,22 @@ async def create_batch_tasks(request: BatchTaskRequest, authorization: str | Non
     try:
         submission_result = await service.create_batch_tasks_impl(
             authorization=authorization, request=request)
+        # Keep compatibility with service implementations that still return a plain task-id list.
+        if isinstance(submission_result, list):
+            submission_result = {
+                "status": "success" if submission_result else "failed",
+                "task_ids": submission_result,
+                "results": [],
+                "submitted_count": len(submission_result),
+                "failed_count": 0,
+            }
         return JSONResponse(status_code=HTTPStatus.CREATED, content=submission_result)
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating batch tasks: {e!s}")
+        logger.error(f"Error creating batch tasks: {str(e)}")
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Failed to create batch tasks: {e!s}")
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Failed to create batch tasks: {str(e)}")
 
 
 @router.get("/load_image")
@@ -177,9 +184,9 @@ async def load_image(url: str):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error loading image: {e!s}")
+        logger.error(f"Error loading image: {str(e)}")
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error loading image: {e!s}")
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error loading image: {str(e)}")
 
 
 @router.get("")
@@ -261,9 +268,9 @@ async def filter_important_image(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error processing image: {e!s}")
+        logger.error(f"Error processing image: {str(e)}")
         raise HTTPException(
-            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error processing image: {e!s}")
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error processing image: {str(e)}")
 
 
 @router.post("/process_text_file")
@@ -296,10 +303,10 @@ async def process_text_file(
         raise
     except Exception as e:
         logger.exception(
-            f"Error processing uploaded file {file.filename}: {e!s}")
+            f"Error processing uploaded file {file.filename}: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred while processing the file: {e!s}"
+            detail=f"An error occurred while processing the file: {str(e)}"
         )
 
 
@@ -322,10 +329,10 @@ async def convert_state(request: ConvertStateRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error converting state: {e!s}")
+        logger.error(f"Error converting state: {str(e)}")
         raise HTTPException(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            detail=f"Error converting state: {e!s}"
+            detail=f"Error converting state: {str(e)}"
         )
 
 

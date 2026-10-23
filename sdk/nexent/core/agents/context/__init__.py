@@ -15,7 +15,7 @@ _EXPORTS = {
     "SkillContextItem": (".models", "SkillContextItem"),
     "MemoryContextItem": (".models", "MemoryContextItem"),
     "KnowledgeBaseContextItem": (".models", "KnowledgeBaseContextItem"),
-    "WorkerAgentContextItem": (".models", "WorkerAgentContextItem"),
+    "ManagedAgentContextItem": (".models", "ManagedAgentContextItem"),
     "ExternalAgentContextItem": (".models", "ExternalAgentContextItem"),
     "HistorySummaryContextItem": (".models", "HistorySummaryContextItem"),
     "ConversationTurnContextItem": (".models", "ConversationTurnContextItem"),

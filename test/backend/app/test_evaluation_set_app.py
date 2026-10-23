@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for ``backend.apps.evaluation_set_app``."""
 
 import io
@@ -157,7 +156,7 @@ def client():
 def _mock_service_impl(service_module, **impl_overrides):
     """Replace the imported service functions on the app module with mocks.
 
-    The app does ``from management.services.evaluation.sets import (
+    The app does ``from services.evaluation_set_service import (
         create_evaluation_set_from_cases, ...,
     )``, so the names live on the app module itself.
     """

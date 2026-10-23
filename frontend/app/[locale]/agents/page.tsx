@@ -1,100 +1,76 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { App, Empty, InputNumber, Modal, Select, Spin } from "antd";
 import {
-  ChevronDown,
-  ChevronUp,
-  FileInput,
-  LayoutGrid,
-  List,
-  Search,
-} from "lucide-react";
+  App,
+  Button,
+  Card,
+  Col,
+  Grid,
+  Input,
+  Modal,
+  Pagination,
+  Row,
+  Spin,
+  Tooltip,
+} from "antd";
+import { Bot, FileInput, Pencil, Search, Clock } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import AgentImportWizard from "@/components/agent/AgentImportWizard";
 import CreateAgentModal from "@/components/agent/CreateAgentModal";
-import { StandardButton } from "@/components/common/StandardButton";
-import { StandardInput } from "@/components/common/StandardInput";
-import { StandardPaginator } from "@/components/common/StandardPaginator";
-import TagFilterPopover from "@/components/tag/TagFilterPopover";
+import CreateResourceCard from "@/components/resource/CreateResourceCard";
+import ResourceCard from "@/components/resource/ResourceCard";
 import { useAgentList } from "@/hooks/agent/useAgentList";
-import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import {
   openImportWizardWithFile,
   type ImportAgentData,
 } from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
-import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 import { searchAgentInfo } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
 import type { Agent } from "@/types/agentConfig";
-import type { TagResourcePredicate } from "@/types/tagManagement";
+import { AgentDetail } from "@/components/agent/agent-detail";
+import { mapAgentInfoDetail } from "@/lib/myAgentDetail";
+import { getMineCardRepositoryStatusBadge } from "@/lib/agentRepositoryMine";
+import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 
-import AgentConfigurationGuide from "./components/agent-configuration-guide";
-import AgentListCard from "./components/agent-list-card";
-import AgentListTable, {
-  DEFAULT_AGENT_COLUMN_WIDTHS,
-} from "./components/agent-list-table";
+import AgentConfigActions from "./components/agent-config-actions";
+import AgentAvatar from "./components/agent-avatar";
 import AgentVersion from "./agent-version";
-import "./agent-list.css";
+
+interface AgentCardItem extends Agent {
+  create_time?: string;
+  update_time?: string;
+}
+
+function getAgentTitle(agent: AgentCardItem) {
+  return agent.display_name || agent.name;
+}
+
+function formatAgentDate(agent: AgentCardItem) {
+  const source = agent.update_time || agent.create_time;
+  if (!source) return null;
+  const date = new Date(source);
+  return Number.isNaN(date.getTime()) ? source : date.toLocaleDateString();
+}
 
 export default function AgentsPage() {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
   const pathname = usePathname();
   const router = useRouter();
+  const screens = Grid.useBreakpoint();
   const initialize = useAgentStore((state) => state.initialize);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(12);
-  const [jumpPage, setJumpPage] = useState<number | null>(null);
-  const [tableColumnWidths, setTableColumnWidths] = useState(
-    DEFAULT_AGENT_COLUMN_WIDTHS
-  );
-  const [view, setView] = useState<"grid" | "list">("grid");
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
-  const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
-    []
-  );
+  const [detailOpen, setDetailOpen] = useState(false);
   const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [importData, setImportData] = useState<ImportAgentData | null>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
-  const [isGuideExpanded, setIsGuideExpanded] = useState(true);
-  const [isGuideMounted, setIsGuideMounted] = useState(true);
-  const guideCollapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(
-    () => () => {
-      if (guideCollapseTimer.current) {
-        clearTimeout(guideCollapseTimer.current);
-      }
-    },
-    []
-  );
-
-  const setGuideExpanded = (expanded: boolean) => {
-    if (guideCollapseTimer.current) {
-      clearTimeout(guideCollapseTimer.current);
-      guideCollapseTimer.current = null;
-    }
-
-    if (expanded) {
-      setIsGuideMounted(true);
-      setIsGuideExpanded(true);
-      return;
-    }
-
-    setIsGuideExpanded(false);
-    guideCollapseTimer.current = setTimeout(() => {
-      setIsGuideMounted(false);
-      guideCollapseTimer.current = null;
-    }, 300);
-  };
 
   const loadAgent = useCallback(
     async (agentId: number) => {
@@ -111,49 +87,32 @@ export default function AgentsPage() {
     [initialize, message, t]
   );
 
-  const { data: tagLibraries } = useTagLibraries();
-  const defaultTagLibrary =
-    tagLibraries?.find(
-      (library) => library.bucket_key === "default_resource"
-    ) ?? null;
-  const { data: tagDefinitions } = useTagDefinitions(
-    defaultTagLibrary?.bucket_id ?? null
-  );
-  const searchTagPredicates = useMemo(
-    () => getTagSearchPredicates(tagDefinitions, search, t),
-    [tagDefinitions, search, t]
-  );
+  const columns = screens.xxl ? 4 : screens.xl ? 3 : screens.md ? 2 : 1;
+  const rows = screens.xs ? 2 : 3;
+  const itemsPerPage = Math.max(1, columns * rows - 1);
   const { agents, pagination, isLoading, isError, refetch } = useAgentList({
     search,
     page,
-    pageSize,
+    pageSize: itemsPerPage,
     includeRepositoryInfo: true,
-    ...(searchTagPredicates.length > 0 ? { searchTagPredicates } : {}),
-    ...(tagPredicates.length > 0 ? { tagPredicates } : {}),
   });
-  const isEmptyAgentList =
-    !isLoading &&
-    !isError &&
-    !search.trim() &&
-    tagPredicates.length === 0 &&
-    agents.length === 0 &&
-    (pagination?.total ?? 0) === 0;
+  const cardHeight = `calc((100% - ${(rows - 1) * 20}px) / ${rows})`;
+
   const updateUrl = useCallback(
     (agentId: number) => {
       router.push(`${pathname}/${agentId}`);
     },
     [pathname, router]
   );
-  const openPublishFlow = useCallback(
-    (agentId: number) => {
-      router.push(`${pathname}/${agentId}?publish=1`);
-    },
-    [pathname, router]
-  );
 
-  const handleOpenAgent = useCallback(
-    (agent: Agent) => updateUrl(Number(agent.id)),
-    [updateUrl]
+  const handleOpenDetail = useCallback(
+    async (agent: Agent) => {
+      const loadedAgent = await loadAgent(Number(agent.id));
+      if (!loadedAgent) return;
+      setSelectedAgent(loadedAgent);
+      setDetailOpen(true);
+    },
+    [loadAgent]
   );
 
   const handleManageVersions = useCallback(
@@ -176,7 +135,7 @@ export default function AgentsPage() {
   const handleCreate = ({ agentId }: { agentId: number }) => {
     setIsCreateOpen(false);
     void refetch();
-    router.push(`${pathname}/${agentId}?onboarding=1`);
+    updateUrl(agentId);
   };
 
   const handleImport = async () => {
@@ -199,269 +158,264 @@ export default function AgentsPage() {
   };
 
   return (
-    <div className="agent-development-list flex h-full min-h-0 w-full flex-col overflow-y-auto bg-white p-6">
-      <header className="flex h-12 shrink-0 items-center justify-between py-[10px]">
-        <h1 className="text-[20px] font-medium leading-7 ![letter-spacing:0px] text-[#191919]">
-          {t("sidebar.agentConfig")}
-        </h1>
-        <button
-          type="button"
-          className="flex h-[22px] min-w-[72px] shrink-0 items-center justify-center gap-[6px] text-[14px] font-normal leading-[22px] tracking-[0px] text-[#191919]"
-          aria-expanded={isGuideExpanded}
-          aria-controls="agent-configuration-guide"
-          onClick={() => setGuideExpanded(!isGuideExpanded)}
-        >
-          <span>
-            {t(
-              isGuideExpanded
-                ? "agentConfig.guide.collapse"
-                : "agentConfig.guide.expand"
-            )}
-          </span>
-          {isGuideExpanded ? (
-            <ChevronUp className="size-2" aria-hidden="true" />
-          ) : (
-            <ChevronDown className="size-2" aria-hidden="true" />
-          )}
-        </button>
-      </header>
-
-      <section className="mt-3 flex min-h-0 w-full flex-1 flex-col">
-        <div
-          id="agent-configuration-guide"
-          data-testid="agent-guide-background"
-          className={
-            isGuideExpanded
-              ? "max-h-[2000px] shrink-0 overflow-hidden rounded-2xl p-6 opacity-100 transition-[max-height,opacity,padding] duration-300 ease-in-out [background:linear-gradient(180deg,rgba(236,243,255,1)_0%,rgba(255,255,255,0)_100%),rgba(255,255,255,1)]"
-              : "max-h-0 shrink-0 overflow-hidden p-0 opacity-0 transition-[max-height,opacity,padding] duration-300 ease-in-out"
-          }
-          aria-hidden={!isGuideExpanded}
-        >
-          {isGuideMounted ? <AgentConfigurationGuide /> : null}
-        </div>
-
-        <div className="relative mt-3 flex min-h-[300px] flex-1 flex-col pb-5">
-          {isGuideExpanded ? (
-            <div
-              data-testid="agent-guide-divider"
-              aria-hidden="true"
-              className="absolute inset-x-0 top-0 h-px bg-[rgba(25,25,25,0.1)]"
-            />
-          ) : null}
-          {isEmptyAgentList ? (
-            <div className="relative flex min-h-0 flex-1 items-center justify-center">
-              <Empty
-                image={Empty.PRESENTED_IMAGE_DEFAULT}
-                description={
-                  <span className="text-[14px] leading-[22px] ![letter-spacing:0px] text-[#777777]">
-                    {t("agentConfig.empty.noAgents")}
-                  </span>
-                }
-              >
-                <StandardButton
-                  variant="primary"
-                  onClick={() => setIsCreateOpen(true)}
-                >
-                  {t("agent.action.create")}
-                </StandardButton>
-              </Empty>
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-white px-4 py-6 sm:px-6 xl:px-16">
+      <Card
+        className="flex h-full min-h-0 w-full flex-col"
+        styles={{
+          body: {
+            display: "flex",
+            minHeight: 0,
+            flex: 1,
+            flexDirection: "column",
+          },
+        }}
+      >
+        <div className="flex h-full min-h-0 w-full flex-col gap-5">
+          <section className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-4">
+              <span className="flex size-14 items-center justify-center rounded-2xl bg-primary/10 text-primary shadow-sm">
+                <Bot className="size-7" aria-hidden />
+              </span>
+              <div>
+                <h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
+                  {t("agentRepository.page.tab.mine")}
+                </h1>
+                <p className="mt-1 text-sm text-slate-600">
+                  {t(
+                    "agentRepository.mine.description",
+                    "选择一个智能体以查看详情或进入编辑。"
+                  )}
+                </p>
+              </div>
             </div>
-          ) : (
-            <>
-              <div className="mt-3 flex h-auto w-full shrink-0 flex-col items-start justify-between gap-3 lg:h-8 lg:flex-row lg:items-center lg:gap-4">
-                <div
-                  className={`flex w-full max-w-full shrink-0 items-center gap-2 ${view === "list" ? "lg:w-[296px]" : "lg:w-[360px]"}`}
-                >
-                  <StandardInput
-                    allowClear
-                    prefix={<Search className="size-4 text-[#777777]" />}
-                    placeholder={t("agentSelector.searchPlaceholder")}
-                    value={search}
-                    onChange={(event) => {
-                      setSearch(event.target.value);
-                      setPage(1);
-                    }}
-                    className="!h-8 !w-full"
-                  />
-                  <TagFilterPopover
-                    definitions={tagDefinitions ?? []}
-                    value={tagPredicates}
-                    onChange={(value) => {
-                      setTagPredicates(value);
-                      setPage(1);
-                    }}
-                    buttonClassName="!h-8 shrink-0"
-                  />
-                </div>
-                <div className="flex h-auto flex-wrap items-center gap-2 lg:h-8 lg:shrink-0 lg:flex-nowrap">
-                  <StandardButton
-                    icon={<FileInput className="size-4" />}
-                    onClick={handleImport}
-                  >
-                    {t("agentConfig.button.import")}
-                  </StandardButton>
-                  <StandardButton
-                    variant="primary"
-                    onClick={() => setIsCreateOpen(true)}
-                  >
-                    {t("agentConfig.list.new")}
-                  </StandardButton>
-                  <div className="flex h-8 items-center rounded-[4px] border border-solid border-[#c9c9c9]">
-                    <button
-                      type="button"
-                      className={`flex size-[30px] items-center justify-center ${
-                        view === "list"
-                          ? "bg-[#0067d1] text-white"
-                          : "text-[#777777]"
-                      }`}
-                      aria-label={t("agentConfig.list.listView")}
-                      aria-pressed={view === "list"}
-                      onClick={() => setView("list")}
-                    >
-                      <List className="size-4" aria-hidden="true" />
-                    </button>
-                    <button
-                      type="button"
-                      className={`flex size-[30px] items-center justify-center ${
-                        view === "grid"
-                          ? "bg-[#0067d1] text-white"
-                          : "text-[#777777]"
-                      }`}
-                      aria-label={t("agentConfig.list.gridView")}
-                      aria-pressed={view === "grid"}
-                      onClick={() => setView("grid")}
-                    >
-                      <LayoutGrid className="size-4" aria-hidden="true" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div
-                data-testid="agent-list-content"
-                className={`min-h-0 flex-1 ${
-                  view === "list"
-                    ? "mt-3 overflow-hidden"
-                    : "-mx-px mt-[11px] overflow-y-auto overflow-x-hidden px-px pb-5 pt-px"
-                }`}
+            <div className="flex flex-wrap gap-2">
+              <Button
+                icon={<FileInput className="size-4" />}
+                onClick={handleImport}
               >
-                {isLoading ? (
-                  <div className="flex min-h-40 items-center justify-center">
-                    <Spin size="large" />
-                  </div>
-                ) : isError ? (
-                  <div className="flex min-h-40 flex-col items-center justify-center gap-3">
-                    <p className="text-sm text-slate-500">
-                      {t("agentRepository.mine.loadError")}
-                    </p>
-                    <StandardButton onClick={() => refetch()}>
-                      {t("repository.common.retry")}
-                    </StandardButton>
-                  </div>
-                ) : (
-                  <div
-                    className={`flex min-h-0 flex-col gap-3 ${view === "list" ? "h-full" : ""}`}
-                  >
-                    {agents.length > 0 ? (
-                      view === "list" ? (
-                        <AgentListTable
-                          agents={agents}
-                          columnWidths={tableColumnWidths}
-                          onColumnWidthsChange={setTableColumnWidths}
-                          onOpen={handleOpenAgent}
-                          onConfigure={updateUrl}
-                          onPublish={openPublishFlow}
-                          onManageVersions={handleManageVersions}
-                        />
-                      ) : (
-                        <div className="grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                          {agents.map((agent) => (
-                            <AgentListCard
-                              key={agent.id}
-                              agent={agent}
-                              onOpen={handleOpenAgent}
-                              onConfigure={updateUrl}
-                              onPublish={openPublishFlow}
-                              onManageVersions={handleManageVersions}
-                            />
-                          ))}
-                        </div>
-                      )
-                    ) : (
-                      <Empty className="py-12" />
-                    )}
-                    <div className="flex min-h-8 w-full flex-wrap items-center justify-between gap-3">
-                      <span className="text-[12px] leading-[18px] ![letter-spacing:0px] text-[#191919]">
-                        {t("agentConfig.list.total", {
-                          count: pagination?.total ?? 0,
-                        })}
-                      </span>
-                      <div className="flex h-auto flex-wrap items-center justify-end gap-2 md:h-8">
-                        <Select
-                          aria-label={t("agentConfig.list.pageSize")}
-                          value={pageSize}
-                          options={[10, 12, 20, 50].map((size) => ({
-                            value: size,
-                            label: t("agentConfig.list.perPage", {
-                              count: size,
-                            }),
-                          }))}
-                          onChange={(nextSize) => {
-                            setPageSize(nextSize);
-                            setPage(1);
-                            setJumpPage(null);
-                          }}
-                          className="!h-8 !w-[116px] [&_.ant-select-selector]:!border-[#c9c9c9]"
-                        />
-                        <StandardPaginator
-                          current={pagination?.page ?? page}
-                          pageSize={pageSize}
-                          total={pagination?.total ?? 0}
-                          showSizeChanger={false}
-                          onChange={setPage}
-                        />
-                        <InputNumber
-                          aria-label={t("agentConfig.list.jumpPage")}
-                          min={1}
-                          max={Math.max(
-                            1,
-                            Math.ceil((pagination?.total ?? 0) / pageSize)
-                          )}
-                          controls={false}
-                          value={jumpPage}
-                          onChange={setJumpPage}
-                          className="!h-8 !w-10 [&_.ant-input-number-input]:!h-[30px] [&_.ant-input-number-input]:!text-center"
-                        />
-                        <StandardButton
-                          className="!px-2"
-                          onClick={() => {
-                            if (jumpPage !== null) {
-                              setPage(
-                                Math.min(
-                                  jumpPage,
-                                  Math.max(
-                                    1,
-                                    Math.ceil(
-                                      (pagination?.total ?? 0) / pageSize
-                                    )
-                                  )
-                                )
-                              );
-                            }
-                          }}
-                        >
-                          {t("agentConfig.list.jump")}
-                        </StandardButton>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      </section>
+                {t("agentConfig.button.import")}
+              </Button>
+            </div>
+          </section>
 
+          <Input
+            allowClear
+            prefix={<Search className="size-4 text-slate-400" />}
+            placeholder={t("agentSelector.searchPlaceholder")}
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
+            className="h-10"
+          />
+
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {isLoading ? (
+              <div className="flex h-full items-center justify-center">
+                <Spin size="large" />
+              </div>
+            ) : isError ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3">
+                <p className="text-sm text-slate-500">
+                  {t("agentRepository.mine.loadError")}
+                </p>
+                <Button onClick={() => refetch()}>
+                  {t("repository.common.retry")}
+                </Button>
+              </div>
+            ) : (
+              <div className="flex h-full min-h-0 flex-col">
+                <Row
+                  gutter={[20, 20]}
+                  className="min-h-0 flex-1 content-stretch overflow-hidden"
+                >
+                  <Col
+                    xs={24}
+                    sm={12}
+                    xl={8}
+                    xxl={6}
+                    className="flex"
+                    style={{ height: cardHeight }}
+                  >
+                    <CreateResourceCard
+                      title={t("agentConfig.button.new")}
+                      onClick={() => setIsCreateOpen(true)}
+                      className="min-h-0"
+                    />
+                  </Col>
+                  {(agents as AgentCardItem[]).map((agent) => {
+                    const date = formatAgentDate(agent);
+                    const repositoryBadge = getMineCardRepositoryStatusBadge(
+                      agent.repository_info ?? []
+                    );
+                    const unavailableReasonLabels = getUnavailableReasonLabels(
+                      agent.unavailable_reasons ?? [],
+                      t
+                    );
+                    return (
+                      <Col
+                        key={agent.id}
+                        xs={24}
+                        sm={12}
+                        xl={8}
+                        xxl={6}
+                        className="flex"
+                        style={{ height: cardHeight }}
+                      >
+                        <ResourceCard
+                          className="h-full min-h-0"
+                          title={getAgentTitle(agent)}
+                          subtitle={
+                            agent.current_version_no ? (
+                              <span className="flex min-w-0 items-center gap-1.5">
+                                <span
+                                  className="size-1.5 shrink-0 rounded-full bg-primary"
+                                  aria-hidden
+                                />
+                                <span className="min-w-0 truncate">
+                                  {t("agentRepository.mine.currentVersion", {
+                                    version:
+                                      agent.version_name ||
+                                      `V${agent.current_version_no}`,
+                                  })}
+                                </span>
+                              </span>
+                            ) : undefined
+                          }
+                          icon={
+                            <AgentAvatar
+                              agent={agent}
+                              size={44}
+                              iconSize={20}
+                            />
+                          }
+                          description={
+                            agent.description ||
+                            t("agentRepository.card.noDescription")
+                          }
+                          descriptionLines={2}
+                          fixedHeaderLayout
+                          statusRow={
+                            <div className="flex min-h-5 w-full min-w-0 items-center gap-2">
+                              <span
+                                className={`shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+                                  agent.current_version_no
+                                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300"
+                                    : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                                }`}
+                              >
+                                {agent.current_version_no
+                                  ? t(
+                                      "agentRepository.mine.lifecycle.published"
+                                    )
+                                  : t("agentRepository.mine.lifecycle.draft")}
+                              </span>
+                              {repositoryBadge ? (
+                                <span
+                                  aria-label={`${t(repositoryBadge.labelKey)}${repositoryBadge.versionLabel ? ` · ${repositoryBadge.versionLabel}` : ""}`}
+                                  className={`ml-auto block min-w-0 truncate rounded-md px-1.5 py-0.5 text-[11px] font-medium ${
+                                    repositoryBadge.variant === "pending"
+                                      ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+                                      : repositoryBadge.variant === "rejected"
+                                        ? "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300"
+                                        : "bg-blue-50 text-blue-700 dark:bg-blue-500/10 dark:text-blue-300"
+                                  }`}
+                                >
+                                  {t(repositoryBadge.labelKey)}
+                                  {repositoryBadge.versionLabel
+                                    ? ` · ${repositoryBadge.versionLabel}`
+                                    : null}
+                                </span>
+                              ) : null}
+                            </div>
+                          }
+                          actions={
+                            <div className="grid h-[60px] grid-rows-2">
+                              <div className="flex items-center justify-end">
+                                <AgentConfigActions
+                                  agentId={Number(agent.id)}
+                                  readOnly={agent.permission === "READ_ONLY"}
+                                  variant="menu"
+                                  onManageVersions={handleManageVersions}
+                                />
+                              </div>
+                              <div className="flex items-center justify-end">
+                                {agent.is_available === false ? (
+                                  <Tooltip
+                                    title={
+                                      unavailableReasonLabels.length > 0
+                                        ? unavailableReasonLabels.join(", ")
+                                        : t("agentSelector.agentUnavailable")
+                                    }
+                                  >
+                                    <span
+                                      className="rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-300"
+                                      aria-label={
+                                        unavailableReasonLabels.join(", ") ||
+                                        t("agentSelector.agentUnavailable")
+                                      }
+                                    >
+                                      {t("mcpConfig.status.unavailable")}
+                                    </span>
+                                  </Tooltip>
+                                ) : null}
+                              </div>
+                            </div>
+                          }
+                          meta={
+                            <span className="inline-flex items-center gap-1">
+                              <Clock className="size-3.5" aria-hidden />
+                              {date || "-"}
+                            </span>
+                          }
+                          footerLayout="inline"
+                          footer={
+                            <Button
+                              type="text"
+                              size="small"
+                              className="!text-slate-600 hover:!bg-transparent hover:!text-blue-500"
+                              icon={<Pencil className="size-3.5" aria-hidden />}
+                              onClick={() => updateUrl(Number(agent.id))}
+                            >
+                              {t("agentRepository.mine.edit")}
+                            </Button>
+                          }
+                          onClick={() => void handleOpenDetail(agent)}
+                        />
+                      </Col>
+                    );
+                  })}
+                </Row>
+                {(pagination?.total ?? 0) > itemsPerPage ? (
+                  <div className="flex shrink-0 justify-end pt-5">
+                    <Pagination
+                      current={pagination?.page ?? page}
+                      pageSize={itemsPerPage}
+                      total={pagination?.total ?? 0}
+                      showSizeChanger={false}
+                      onChange={setPage}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </div>
+      </Card>
+
+      <AgentDetail
+        detail={selectedAgent ? mapAgentInfoDetail(selectedAgent) : null}
+        agentIcon={
+          selectedAgent ? (
+            <AgentAvatar agent={selectedAgent} size={48} iconSize={24} />
+          ) : undefined
+        }
+        open={detailOpen}
+        onClose={() => setDetailOpen(false)}
+        onEdit={() => selectedAgent && updateUrl(Number(selectedAgent.id))}
+        published={Boolean(selectedAgent?.current_version_no)}
+      />
       <Modal
         centered
         width={900}

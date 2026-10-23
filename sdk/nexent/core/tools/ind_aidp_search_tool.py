@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """Independent AIDP FusionSearch tool.
 
 This tool deliberately owns its endpoint, credential, and default knowledge-base scope.
@@ -31,8 +29,8 @@ from ...utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("ind_aidp_search_tool")
 
-_VALID_SEARCH_METHODS = {"hybrid_search", "vector_search", "full_text_search", "graph_search"}
-_VALID_RERANK_MODES = {"performance", "high_accuracy", "jargon_coverage"}
+_VALID_SEARCH_METHODS = {"hybrid_search", "vector_search", "full_text_search"}
+_VALID_RERANK_MODES = {"performance", "high_accuracy"}
 _RETRY_STATUSES = {502, 503, 504}
 _MAX_ATTEMPTS = 3
 _MAX_KDS = 10
@@ -80,7 +78,6 @@ class IndependentAidpSearchTool(Tool):
     """Search an independently configured AIDP knowledge-base scope."""
 
     name = "ind_aidp_search"
-    is_user_selectable = True
     description = (
         "Searches independently configured AIDP knowledge bases with FusionSearch. "
         "The configured knowledge bases are the default scope; callers may provide a "
@@ -124,15 +121,9 @@ class IndependentAidpSearchTool(Tool):
             "description": "Knowledge base IDs fixed for this tool instance",
             "description_zh": "此工具实例固定检索的知识库 ID 列表",
         },
-        "search_method": {
-            "description": "FusionSearch method: hybrid_search, vector_search, full_text_search, graph_search",
-            "description_zh": "检索方式：hybrid_search/vector_search/full_text_search/graph_search",
-        },
+        "search_method": {"description": "FusionSearch method", "description_zh": "检索方式"},
         "reranking_enable": {"description": "Enable reranking", "description_zh": "是否启用重排"},
-        "reranking_mode": {
-            "description": "Reranking mode: performance, high_accuracy, jargon_coverage",
-            "description_zh": "重排模式：performance/high_accuracy/jargon_coverage",
-        },
+        "reranking_mode": {"description": "Reranking mode", "description_zh": "重排模式"},
         "rewrite_enable": {"description": "Enable query rewrite", "description_zh": "是否启用查询改写"},
         "related_search_enable": {"description": "Enable related search", "description_zh": "是否启用关联检索"},
         "score_threshold": {"description": "Similarity threshold (0-1)", "description_zh": "相似度阈值（0-1）"},

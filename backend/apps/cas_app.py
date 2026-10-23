@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import html
 import logging
 from http import HTTPStatus
@@ -13,7 +12,7 @@ from consts.exceptions import (
     tenant_resource_limit_error_payload,
 )
 
-from management.services.permission.identity.cas import (
+from services.cas_service import (
     CAS_SERVER_URL,
     CasAuthenticationError,
     build_login_url,
@@ -23,7 +22,7 @@ from management.services.permission.identity.cas import (
     renew_with_ticket,
     revoke_from_logout_request,
 )
-from management.services.monitor.audit import record_security_event
+from services.audit_service import record_security_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/user/cas", tags=["cas"])

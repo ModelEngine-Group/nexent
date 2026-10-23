@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useMemo, useState, type ReactNode } from "react";
@@ -11,7 +9,6 @@ import {
   UserRound,
   Wrench,
 } from "lucide-react";
-import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 import ResourceDetail from "@/components/resource/ResourceDetail";
 import McpToolListModal from "@/components/mcp/McpToolListModal";
@@ -45,7 +42,6 @@ export function McpDetail({
   onInstall,
 }: McpDetailProps) {
   const { t } = useTranslation("common");
-  const displayName = useUserDisplayName();
   const { message } = App.useApp();
   const [toolsOpen, setToolsOpen] = useState(false);
   const [loadingTools, setLoadingTools] = useState(false);
@@ -58,14 +54,12 @@ export function McpDetail({
   const deploymentLabel = t(
     getDeploymentTypeLabelKey(resolveDeploymentType(service))
   );
-  const author = displayName(
-    service.authorCasUsername,
+  const author =
     service.authorDisplayName ||
-      service.authorName ||
-      t("mcpTools.repository.authorFallback", {
-        name: service.communityId ? ` ${service.communityId}` : "",
-      })
-  );
+    service.authorName ||
+    t("mcpTools.repository.authorFallback", {
+      name: service.communityId ? ` ${service.communityId}` : "",
+    });
   const toolCount = resolveRepositoryMcpToolCount(service);
   const downloadCount = Number(service.installCount || 0);
   const tags = service.tags || [];

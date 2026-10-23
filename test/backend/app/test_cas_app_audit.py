@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Audit entries recorded on successful CAS login and single logout operations.
 
 Feature-scoped companion to ``test_cas_app.py``. The import-time stub is
@@ -36,7 +35,7 @@ LOGOUT_REQUEST_XML = """
 """
 
 # Import-time isolation: the CAS client talks to an external CAS server.
-_STUBBED_MODULES = ["management.services.permission.identity.cas", "apps.cas_app"]
+_STUBBED_MODULES = ["services.cas_service", "apps.cas_app"]
 _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in _STUBBED_MODULES}
 
 cas_service_stub = MagicMock()
@@ -44,7 +43,7 @@ cas_service_stub.CAS_SERVER_URL = "https://cas.example.com"
 cas_service_stub.CasAuthenticationError = _CasAuthenticationError
 cas_service_stub.login_with_ticket = AsyncMock(return_value=CAS_LOGIN_RESULT)
 cas_service_stub.revoke_from_logout_request = MagicMock(return_value=CAS_LOGOUT_RESULT)
-sys.modules["management.services.permission.identity.cas"] = cas_service_stub
+sys.modules["services.cas_service"] = cas_service_stub
 # Rebuild the app module against the stub above instead of reusing one a legacy
 # file already imported against its own stubs.
 sys.modules.pop("apps.cas_app", None)

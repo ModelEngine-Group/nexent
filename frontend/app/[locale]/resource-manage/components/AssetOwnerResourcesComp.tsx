@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import React from "react";
@@ -12,7 +10,6 @@ import { ASSET_OWNER_TENANT_ID } from "@/const/auth";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import UserList from "./resources/UserList";
 import ModelList from "./resources/ModelList";
-import TagList from "./resources/TagList";
 import { PlatformQuotaPanel } from "./resources/PlatformQuotaPanel";
 import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
@@ -102,11 +99,6 @@ export default function AssetOwnerResourcesComp() {
                 key: "skills",
                 label: "SKILLS",
                 children: <SkillList tenantId={ASSET_OWNER_TENANT_ID} />,
-              },
-              {
-                key: "tags",
-                label: t("tenantResources.tabs.tags"),
-                children: <TagList tenantId={ASSET_OWNER_TENANT_ID} />,
               },
               {
                 key: "invitations",

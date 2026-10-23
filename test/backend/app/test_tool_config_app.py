@@ -150,7 +150,7 @@ class TestUpdateToolInfoAPI:
                 "params": {"key": "value"},
                 "enabled": True
             }),
-            authorization=None, http_request=None,
+            authorization=None,
         )
 
         assert response == {"updated": True, "tool_id": "tool456"}
@@ -177,7 +177,7 @@ class TestUpdateToolInfoAPI:
                     params={"key": "value"},
                     enabled=True,
                 ),
-                authorization=None, http_request=None,
+                authorization=None,
             )
 
         assert exc_info.value.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
@@ -205,7 +205,7 @@ class TestUpdateToolInfoAPI:
                     params={},
                     enabled=True,
                 ),
-                authorization=None, http_request=None,
+                authorization=None,
             )
 
         assert exc_info.value.status_code == HTTPStatus.FORBIDDEN
@@ -1413,86 +1413,3 @@ class TestTokenExpiredMapping:
         response = client.put(
             "/tool/labels", json={"tool_id": 1, "labels": ["database"]})
         assert response.status_code == HTTPStatus.UNAUTHORIZED
-
-
-# ============================================================================
-# Security audit entries
-# ============================================================================
-
-class TestToolAuditEntries:
-    """Security audit entries emitted by tool configuration endpoints."""
-
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.update_tool_info_impl')
-    def test_update_emits_audit_entry_without_params(self, mock_update, mock_get_user_id, caplog):
-        """Successful tool update records ids and enabled, never the params dict."""
-        import logging
-        mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_update.return_value = {"message": "ok"}
-
-        with caplog.at_level(logging.INFO, logger="audit.security"):
-            response = client.post("/tool/update", json={
-                "tool_id": 3, "agent_id": 7,
-                "params": {"api_key": "sk-param-secret"},
-                "enabled": True,
-            })
-
-        assert response.status_code == HTTPStatus.OK
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=tool_config_update" in messages[0]
-        assert "result=success" in messages[0]
-        assert '"tool_id":3' in messages[0]
-        assert '"agent_id":7' in messages[0]
-        assert '"enabled":true' in messages[0]
-        assert "sk-param-secret" not in messages[0]
-
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.update_tool_list', new_callable=AsyncMock)
-    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
-    @patch('apps.tool_config_app.import_openapi_service')
-    def test_openapi_register_emits_audit_entry_without_spec(
-            self, mock_import, mock_refresh, mock_tool_list, mock_get_user_id, caplog):
-        """Successful OpenAPI import records name/url, never the spec or headers."""
-        import logging
-        mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_import.return_value = {"imported": 2}
-        mock_refresh.return_value = {"refreshed": True}
-
-        with caplog.at_level(logging.INFO, logger="audit.security"):
-            response = client.post("/tool/openapi_service", json={
-                "service_name": "pets-api",
-                "server_url": "https://api.example.com",
-                "openapi_json": {"openapi": "3.0.0", "paths": {}},
-                "headers_template": {"Authorization": "Bearer sk-openapi-secret"},
-            })
-
-        assert response.status_code == HTTPStatus.OK
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=tool_openapi_register" in messages[0]
-        assert '"service_name":"pets-api"' in messages[0]
-        assert '"server_url":"https://api.example.com"' in messages[0]
-        assert "sk-openapi-secret" not in messages[0]
-
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
-    @patch('apps.tool_config_app.delete_openapi_service')
-    def test_openapi_delete_emits_audit_entry(self, mock_delete, mock_refresh, mock_get_user_id, caplog):
-        """Successful OpenAPI service deletion records the service name."""
-        import logging
-        mock_get_user_id.return_value = ("user123", "tenant456")
-        mock_delete.return_value = True
-        mock_refresh.return_value = {}
-
-        with caplog.at_level(logging.INFO, logger="audit.security"):
-            response = client.delete("/tool/openapi_service/pets-api")
-
-        assert response.status_code == HTTPStatus.OK
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=tool_openapi_delete" in messages[0]
-        assert '"service_name":"pets-api"' in messages[0]
