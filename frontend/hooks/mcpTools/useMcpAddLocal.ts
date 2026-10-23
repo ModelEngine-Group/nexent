@@ -172,6 +172,10 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
         queryKey: MCP_TOOLS_QUERY_KEYS.services,
       });
       queryClient.invalidateQueries({ queryKey: MCP_SERVERS_QUERY_KEY });
+      // The agent tool picker reads the persisted catalog through the
+      // shared ["tools"] query. Invalidate it after the backend scan so an
+      // already-open agent configuration page can see newly added API tools.
+      queryClient.invalidateQueries({ queryKey: ["tools"] });
       await refreshToolListWithToast({
         message,
         t,
