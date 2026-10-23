@@ -7,3 +7,8 @@ implementations:
 acceptance_bindings:
   AC-01: [SEARCH-DEEPSEEK-D4-001]
 timeout_seconds: 240
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
