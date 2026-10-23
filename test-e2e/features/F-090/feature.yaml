@@ -9,7 +9,7 @@ feature:
   description: 'A2A / Client发现: Nacos config CRUD/active/discover'
   business_rules:
   - rule_id: F-090-RULE-01
-    description: Nacos config CRUD/active/discover
+    description: Nacos config CRUD/active/discover; discovery has a 10-second overall deadline and returns an explicit HTTP 504 on timeout.
   required_test_stages:
   - D2
   source:

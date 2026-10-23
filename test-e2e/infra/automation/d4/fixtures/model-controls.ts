@@ -88,8 +88,10 @@ export async function enter(page: Page, entry: Entry) {
     await page.getByRole("tab", { name: /^我的 Skill/ }).click();
     await page.getByRole("button", { name: "添加Skill服务", exact: true }).click();
   } else {
-    await page.goto(`${root}/zh/newchat`);
-    await page.getByRole("button", { name: /健康小助手 更多操作/ }).click();
+    // Select the controlled fixture explicitly. The page may restore its last
+    // Agent instead of rendering the discover grid on a subsequent visit.
+    await page.goto(`${root}/zh/newchat?agent_id=42`);
+    await expect(page.getByRole("heading", { name: makeDraft().display_name, exact: true })).toBeVisible();
   }
   await expect(input(page)).toBeVisible();
   await expect(trigger(page)).toBeVisible();
@@ -100,6 +102,13 @@ export const trigger = (page: Page) => composer(page).locator('[data-slot="model
 export const settings = (page: Page) => page.locator('[data-slot="model-selector-content"][data-state="open"]');
 export async function openControls(page: Page) {
   if (!(await settings(page).isVisible())) await trigger(page).click();
+  await expect(settings(page)).toBeVisible();
+  // Ant modal motion and the portaled menu can overlap on a reopened creator.
+  // Wait for the real opening animation before targeting an option; scrolling
+  // an animating portal can dismiss it through the modal's focus handling.
+  await settings(page).evaluate(async element => {
+    await Promise.allSettled(element.getAnimations().map(animation => animation.finished));
+  });
   await expect(settings(page)).toBeVisible();
 }
 export async function chooseModel(page: Page, name: string) {

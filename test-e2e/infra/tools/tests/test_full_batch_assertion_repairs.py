@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Offline fault detection for test repairs, not live product acceptance."""
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -286,7 +287,8 @@ function load(file) {
  const source=ts.transpileModule(fs.readFileSync(ROOT+'/'+file,'utf8'),{
   compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const resolve=(name)=>name==='playwright/test'?require(PACKAGE+'/test'):
-  name.includes('runtime-config')?{appPath:x=>x}:require(name);
+  name.includes('runtime-config')?{appPath:x=>x}:
+  name==='./atomic-file'?load('test-e2e/infra/automation/d4/runner/atomic-file.ts'):require(name);
  new Function('require','module','exports',source)(resolve,mod,mod.exports);
  return mod.exports;
 }
@@ -310,7 +312,7 @@ function load(file) {
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const page=await browser.newPage();
   await page.goto('http://127.0.0.1:'+server.address().port);
-  await page.setContent(`<style>.hidden{display:none}</style><section><h3>Debug</h3><textarea placeholder="发送消息..."></textarea><button>发送</button>
+  await page.setContent(`<style>.hidden{display:none}</style><section data-testid="agent-debug-panel"><h3>Debug</h3><textarea aria-label="对话输入" placeholder="发送消息..."></textarea><button>发送</button>
    <div id="normal"></div><div class="hidden"><div data-slot="aui_assistant-message-root"><div data-citation-index-map><div class="aui-md">OLD_COMPARE</div></div></div></div></section>
    <script>document.querySelector('textarea').oninput=()=>{
     document.querySelector('button').disabled=!document.querySelector('textarea').value;

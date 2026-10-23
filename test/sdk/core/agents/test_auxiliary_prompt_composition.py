@@ -48,7 +48,6 @@ compose_evaluator_run_prompt = evaluation.compose_evaluator_run_prompt
 compose_memory_prompt = memory.compose_memory_prompt
 format_dreaming_source = memory.format_dreaming_source
 render_evaluation_section = evaluation.render_evaluation_section
-compose_agent_generation_user = meta.compose_agent_generation_user
 compose_agent_optimization = meta.compose_agent_optimization
 compose_name_regeneration = meta.compose_name_regeneration
 compose_nl2skill = meta.compose_nl2skill
@@ -94,19 +93,6 @@ def test_custom_override_keeps_its_fields():
     assert prompt.user == "Title hello"
 
 
-@pytest.mark.parametrize("language", ["zh", "en"])
-def test_agent_generation_resources_and_knowledge_scope(language):
-    result = compose_agent_generation_user(
-        language, {"user_prompt": "{{tool_description}}\n{{assistant_description}}"},
-        task_description="task",
-        tools=[{"name": "search", "description": "find", "inputs": "query", "output_type": "str"}],
-        worker_agents=[{"name": "worker", "description": "delegate"}],
-        has_local_knowledge_tool=True,
-        has_aidp_knowledge_tool=False,
-        has_selected_resources=True,
-    )
-    assert "search" in result and "worker" in result
-    assert "index_names" in result
 
 
 def test_optimization_has_both_messages():
@@ -202,7 +188,7 @@ def test_evaluation_set_system_matches_complete_sdk_request():
 
 def test_structured_profile_formats_only_available_resources():
     profile = {
-        "name": "Example", "description": "", "duty_prompt": "Help",
+        "name": "Example", "description": "", "prompt": "Help",
         "constraint_prompt": "LEGACY_POISON", "business_description": "",
         "tools": [{"name": "search", "source": "remote", "description": "Finds pages"}],
         "skills": [{"name": "research", "description": ""}],

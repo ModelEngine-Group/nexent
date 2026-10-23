@@ -28,7 +28,7 @@ import toolbarStyles from "@/components/common/ConversationToolbar.module.css";
 import { useRecentAgentIds } from "./assistant-ui/use-recent-agent-ids";
 import {
   cacheHistoricalChatMode,
-  conversationThreadListAdapter,
+  createConversationThreadListAdapter,
   generateConversationTitle,
   restoreHistoricalChatMode,
   restoreHistoricalPlan,
@@ -51,6 +51,9 @@ import {
 } from "./last-chat-view";
 import { ConversationSidebarProvider } from "@/components/common/ConversationSidebarProvider";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { ConversationModelControlsProvider } from "@/features/model-controls/ConversationModelControlsProvider";
+import { ConversationLoadingBoundary } from "./components/ConversationLoadingBoundary";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
@@ -63,6 +66,12 @@ import { useConfig } from "@/hooks/useConfig";
 import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
 import type { STTModelConfig } from "@/types/modelConfig";
 import { conversationService } from "@/services/conversationService";
+import { useQueryClient } from "@tanstack/react-query";
+import { getWorkbenchPinStorageKey } from "./assistant-ui/thread-pins";
+import {
+  removeDeletedWorkbenchPins,
+  workbenchPinsQueryKey,
+} from "@/lib/workbenchPins";
 import { useTranslation } from "react-i18next";
 import { useConversationRouteGuard } from "@/features/workbench/hooks/useConversationRouteGuard";
 import type {
@@ -99,7 +108,26 @@ export default function Home() {
 }
 
 const PersistentChatHome: FC = () => {
+  const { user } = useAuthorizationContext();
   useConversationRouteGuard("agent_chat");
+  const queryClient = useQueryClient();
+  const pinScope = user
+    ? getWorkbenchPinStorageKey(user.id, user.tenantId)
+    : undefined;
+  const threadListAdapter = useMemo(
+    () =>
+      createConversationThreadListAdapter(
+        "agent_chat",
+        pinScope,
+        () =>
+          queryClient.ensureQueryData({
+            queryKey: workbenchPinsQueryKey(pinScope),
+            queryFn: () => conversationService.getWorkbenchPins(),
+          }),
+        (id) => removeDeletedWorkbenchPins(queryClient, [id])
+      ),
+    [pinScope, queryClient]
+  );
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
@@ -137,7 +165,7 @@ const PersistentChatHome: FC = () => {
     runtimeHook: function useChatRuntime() {
       return useLocalChatRuntime(dictationAdapter);
     },
-    adapter: conversationThreadListAdapter,
+    adapter: threadListAdapter,
     threadId: requestedThreadId,
     // Return to the conversation the user was viewing before the refresh.
     // The runtime switches to it once the adapter is ready; when the stored
@@ -205,16 +233,20 @@ const PersistentChatHome: FC = () => {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <TooltipProvider>
-        <HomeContent
-          runtime={runtime}
-          selectedAgent={selectedAgent}
-          setSelectedAgent={setSelectedAgent}
-          isLoadingAgents={isLoadingAgents}
-          agents={agents}
-          onAgentSelected={handleAgentSelected}
-          onBack={handleBack}
-          isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
-        />
+        <ConversationModelControlsProvider
+          key={JSON.stringify([user?.tenantId, user?.id])}
+        >
+          <HomeContent
+            runtime={runtime}
+            selectedAgent={selectedAgent}
+            setSelectedAgent={setSelectedAgent}
+            isLoadingAgents={isLoadingAgents}
+            agents={agents}
+            onAgentSelected={handleAgentSelected}
+            onBack={handleBack}
+            isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
+          />
+        </ConversationModelControlsProvider>
       </TooltipProvider>
     </AssistantRuntimeProvider>
   );
@@ -1024,43 +1056,38 @@ const HomeContent: FC<{
       </div>
 
       <div className="flex min-h-0 flex-1 min-w-0 flex-col">
-        <div className="min-h-0 flex-1">
-          {ready ? (
-            <Chat
-              newChatDesign
-              generatedTitle={
-                activeThreadId ? generatedTitles.get(activeThreadId) : undefined
-              }
-              conversationId={
-                activeConversationId && Number(activeConversationId) > 0
-                  ? Number(activeConversationId)
-                  : undefined
-              }
-              isLoadingAgents={isLoadingAgents}
-              selectedAgent={selectedAgent}
-              onAgentSelected={handleAgentSelectedFromLanding}
-              onBack={handleThreadBack}
-              chatMode={chatMode}
-              onChatModeChange={handleChatModeChange}
-              composerTools={
-                <>
-                  <ComposerAttachment />
-                  <ComposerDictation configured={isDictationConfigured} />
-                </>
-              }
-              knowledgeScope={knowledgeScope}
-              knowledgePreview={knowledgePreview}
-              knowledgeCapabilities={knowledgeCapabilities}
-              onKnowledgeScopeChange={handleKnowledgeScopeChange}
-              runtimeMetadata={runtimeMetadata}
-              onRuntimeMetadataChange={handleRuntimeMetadataChange}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {t("chat.threadList.loading")}
-            </div>
-          )}
-        </div>
+        <ConversationLoadingBoundary loading={!ready}>
+          <Chat
+            readOnly={!ready}
+            newChatDesign
+            generatedTitle={
+              activeThreadId ? generatedTitles.get(activeThreadId) : undefined
+            }
+            conversationId={
+              activeConversationId && Number(activeConversationId) > 0
+                ? Number(activeConversationId)
+                : undefined
+            }
+            isLoadingAgents={isLoadingAgents}
+            selectedAgent={selectedAgent}
+            onAgentSelected={handleAgentSelectedFromLanding}
+            onBack={handleThreadBack}
+            chatMode={chatMode}
+            onChatModeChange={handleChatModeChange}
+            composerTools={
+              <>
+                <ComposerAttachment />
+                <ComposerDictation configured={isDictationConfigured} />
+              </>
+            }
+            knowledgeScope={knowledgeScope}
+            knowledgePreview={knowledgePreview}
+            knowledgeCapabilities={knowledgeCapabilities}
+            onKnowledgeScopeChange={handleKnowledgeScopeChange}
+            runtimeMetadata={runtimeMetadata}
+            onRuntimeMetadataChange={handleRuntimeMetadataChange}
+          />
+        </ConversationLoadingBoundary>
       </div>
     </div>
   );

@@ -15,7 +15,7 @@ from consts.const import (
 from consts.exceptions import ValidationError
 
 
-_PROMPT_FIELDS = ("duty_prompt", "constraint_prompt", "few_shots_prompt")
+_PROMPT_FIELDS = ("prompt",)
 
 
 ASSET_OWNER_RESOURCES_ROUTE = "/asset-owner-resources"
@@ -88,7 +88,7 @@ def apply_agent_detail_prompt_visibility(
     """
     Mask system prompt fields when a non-ASSET_OWNER caller views an ASSET_OWNER-scoped agent.
 
-    Sets duty_prompt, constraint_prompt, and few_shots_prompt to None and adds
+    Sets prompt to None and adds
     prompts_hidden=True so clients can render a permission-denied state.
     """
     result = dict(agent_info)

@@ -20,6 +20,7 @@
       "type": "object", "additionalProperties": false,
       "required": ["url", "public_key_env", "secret_key_env"],
       "properties": {
+        "api_version": {"type": "string", "enum": ["v1", "v2"], "default": "v1"},
         "url": {"type": "string", "format": "uri", "pattern": "^https?://"},
         "public_key_env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"},
         "secret_key_env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"}

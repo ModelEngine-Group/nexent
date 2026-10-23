@@ -39,6 +39,7 @@ export default function TagDefinitionManagementModal({
             key={bucketId}
             bucketId={bucketId}
             canManage={canManage}
+            stableTableHeight
           />
         ) : (
           <div className="py-10 text-center text-sm text-gray-500">

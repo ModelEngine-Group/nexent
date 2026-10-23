@@ -64,15 +64,14 @@ export class AgentPage {
     await this.open();
     const search = this.page.getByPlaceholder("按名称、描述或标签搜索", { exact: true });
     await search.fill(displayName);
-    // The card body opens details, not the editor. The editor entry is the
-    // card's 配置 action, revealed only on hover/focus-within, scoped to the
-    // exact run-owned Agent card so search matches cannot select another ID.
+    // Scope the menu to the exact owned Agent card before opening its editor.
     const card = this.page
       .getByRole("button", { name: displayName, exact: true })
       .locator("xpath=ancestor::article[1]");
     await expect(card).toHaveCount(1);
     await card.hover();
-    await card.getByRole("button", { name: "配置", exact: true }).click();
+    await card.getByRole("button", { name: "更多操作", exact: true }).click();
+    await this.page.getByRole("menuitem", { name: "配置", exact: true }).click();
     // The configure action routes to the agent's own editor page.
     await expect(this.page).toHaveURL(/\/agents\/\d+/);
     await expect(this.page.getByPlaceholder("请输入智能体名称", { exact: true })).toHaveValue(displayName);
@@ -128,13 +127,16 @@ export class AgentPage {
     await expect(title).toBeVisible();
     const trigger = title.locator("xpath=ancestor::button[1]");
     if ((await trigger.getAttribute("data-state")) === "closed") await trigger.click();
-    return trigger.locator("xpath=../..");
+    await expect(trigger).toHaveAttribute("data-state", "open");
+    // Collapsible content is a sibling of the header wrapper, not inside it.
+    return trigger.locator("xpath=ancestor::*[@data-state][1]");
   }
 
   async openToolsSkills(): Promise<void> {
-    const tab = this.page.getByRole("tab", { name: "工具与技能", exact: true });
-    await tab.click();
-    await expect(tab).toHaveAttribute("aria-selected", "true");
+    await this.openSection("工具管理");
+    await this.openSection("技能管理");
+    await expect(this.page.getByTestId("agent-tool-add-entry")).toBeVisible();
+    await expect(this.page.getByTestId("agent-skill-add-entry")).toBeVisible();
   }
 
   async openAdvanced(): Promise<void> {
@@ -194,13 +196,13 @@ export class AgentPage {
     const drawer = this.page.getByRole("dialog");
     await expect(drawer.getByPlaceholder("搜索知识库名称及描述")).toBeVisible();
     await drawer.getByPlaceholder("搜索知识库名称及描述").fill(knowledgeBaseName);
-    const item = drawer.getByText(knowledgeBaseName, { exact: true }).last();
+    const item = drawer.getByRole("option", { name: knowledgeBaseName, exact: true });
     await expect(item).toBeVisible();
-    // KnowledgeRow: name span -> header flex -> text column -> row div whose
-    // only button is the CheckMark selector.
-    const checkMark = item.locator("xpath=ancestor::div[3]").getByRole("button").first();
-    await checkMark.click();
-    await expect(checkMark).toHaveAttribute("aria-pressed", "true");
+    // The current AddKnowledgeDrawer renders each row as a role=option button
+    // whose aria-label is the knowledge-base name. Clicking that row toggles
+    // selection (the old CheckMark button/aria-pressed shape was replaced).
+    await item.click();
+    await expect(item).toHaveAttribute("aria-selected", "true");
     const toolSaves: Record<string, unknown>[] = [];
     const captureToolSave = (response: Response) => {
       const request = response.request();
@@ -246,7 +248,9 @@ export class AgentPage {
       { timeout: 60_000 },
     );
     await this.page.getByRole("button", { name: "发布", exact: true }).click();
-    const modal = this.page.getByRole("dialog", { name: "发布", exact: true });
+    // The publish modal title is plain text, so the dialog has no accessible
+    // name; identify the visible modal by its version field.
+    const modal = this.page.locator("[role='dialog']:visible").filter({ hasText: /版本名称/ });
     await expect(modal).toBeVisible();
     await modal.getByPlaceholder("请输入版本名称").fill(versionName);
     await modal.getByPlaceholder("请输入发布说明（可选）").fill(releaseNote);
@@ -260,30 +264,23 @@ export class AgentPage {
 
   async bindInternalCollaborator(displayName: string, expectedVersionName?: string): Promise<void> {
     await this.openAdvanced();
-    // Sub-agent binding lives in the collaborating-agent management section; selection goes
-    // through the AddAgentDrawer and commits per row toggle (the drawer has
-    // no confirm button) through the agent update autosave.
+    // The current drawer stages local selections and commits on confirmation.
     await this.openSection("协作智能体管理");
     await this.page.getByRole("button", { name: "点击添加智能体", exact: true }).click();
-    const drawer = this.page.getByRole("dialog");
+    const drawer = this.page.getByRole("dialog", { name: "添加协作智能体", exact: true });
     await expect(drawer).toBeVisible();
-    // The source tabs are plain buttons (internal/external), not role=tab.
-    await drawer.getByRole("button", { name: "内部协作智能体", exact: true }).click();
-    await drawer.getByPlaceholder("搜索智能体名称或描述").fill(displayName);
-    const option = drawer.getByText(displayName, { exact: true });
-    await expect(option).toBeVisible();
-    // AgentCard: name span -> icon row -> card div whose only button is the
-    // CheckMark selector.
-    const checkMark = option.locator("xpath=ancestor::div[2]").getByRole("button").first();
+    await drawer.getByRole("button", { name: "本地智能体", exact: true }).click();
+    await drawer.getByRole("textbox").first().fill(displayName);
+    const option = drawer.getByRole("option", { name: displayName, exact: true });
+    await expect(option).toHaveCount(1);
+    if ((await option.getAttribute("aria-selected")) !== "true") await option.click();
+    await expect(option).toHaveAttribute("aria-selected", "true");
     const updated = this.page.waitForResponse(
-      (response) => response.request().method() === "POST" && response.url().includes("/api/agent/update"),
+      response => response.request().method() === "POST" && response.url().includes("/api/agent/update"),
     );
-    await checkMark.click();
-    const response = await updated;
-    if (!response.ok()) throw new Error(`agent collaborator autosave returned ${response.status()}`);
-    // The drawer header icon and the footer button share the 关闭 name; the
-    // footer one is the intended close action.
-    await drawer.getByRole("button", { name: "关闭", exact: true }).last().click();
+    await drawer.getByRole("button", { name: "确认", exact: true }).click();
+    if (!(await updated).ok()) throw new Error("agent collaborator autosave failed");
+    await expect(drawer).toBeHidden();
     const selectedGrid = this.page.getByTestId("agent-selected-child-grid");
     await expect(selectedGrid).toContainText(displayName);
     if (expectedVersionName) {
@@ -387,52 +384,62 @@ export class AgentPage {
   }
 
   async bindTool(toolName: string): Promise<void> {
-    await this.page.getByRole("tab", { name: "工具与技能", exact: true }).click();
-    await this.page.getByRole("button", { name: "选择工具", exact: true }).click();
-    const dialog = this.page.getByRole("dialog", { name: "选择工具" });
-    await dialog.getByRole("tab", { name: "MCP", exact: true }).click();
-    await dialog.getByPlaceholder("搜索工具名称、描述或标签…").fill(toolName);
-    const row = dialog.getByRole("button").filter({ hasText: toolName }).first();
-    await expect(row).toBeVisible();
-    const updated = this.page.waitForResponse(
-      (response) => response.request().method() === "POST" && response.url().includes("/api/agent/update"),
-    );
-    await row.click();
+    await this.bindToolFromService(undefined, toolName);
+  }
+
+  async bindToolFromService(serviceName: string | undefined, toolName: string): Promise<void> {
+    await this.openSection("工具管理");
+    await this.page.getByTestId("agent-tool-add-entry").click();
+    const dialog = this.page.getByRole("dialog", { name: "添加工具", exact: true });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "MCP服务", exact: true }).click();
+    await dialog.getByRole("textbox").first().fill(toolName);
+    let expectedToolId: number | undefined;
+    if (serviceName) {
+      const response = await this.page.request.get("/api/tool/list");
+      expect(response.ok()).toBe(true);
+      const payload = await response.json();
+      const tools = Array.isArray(payload) ? payload : payload.data || payload.tools || [];
+      const owned = tools.filter((tool: any) => tool.source === "mcp" &&
+        tool.usage === serviceName && (tool.origin_name || tool.name) === toolName);
+      expect(owned).toHaveLength(1);
+      expectedToolId = Number(owned[0].tool_id || owned[0].id);
+    }
+    const row = dialog.getByRole("option", { name: toolName, exact: true });
+    await expect(row).toHaveCount(1);
+    if ((await row.getAttribute("aria-selected")) !== "true") await row.click();
+    await expect(row).toHaveAttribute("aria-selected", "true");
+    const updated = this.page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname.endsWith("/api/agent/update"));
+    await dialog.getByRole("button", { name: "确认", exact: true }).click();
     if (!(await updated).ok()) throw new Error(`tool ${toolName} autosave failed`);
-    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    if (expectedToolId !== undefined) {
+      const agentId = Number(new URL(this.page.url()).pathname.split("/").at(-1));
+      const persisted = await this.page.request.post("/api/agent/search_info", { data: { agent_id: agentId, version_no: 0 } });
+      expect(persisted.ok()).toBe(true);
+      const payload = await persisted.json();
+      expect((payload.data || payload).tools.some((tool: any) => Number(tool.tool_id || tool.id) === expectedToolId)).toBe(true);
+    }
     await expect(this.page.getByText(toolName, { exact: true }).first()).toBeVisible();
   }
 
-  async bindToolFromService(serviceName: string, toolName: string): Promise<void> {
-    await this.page.getByRole("tab", { name: "工具与技能", exact: true }).click();
-    await this.page.getByRole("button", { name: "选择工具", exact: true }).click();
-    const dialog = this.page.getByRole("dialog", { name: "选择工具" });
-    await dialog.getByRole("tab", { name: "MCP", exact: true }).click();
-    await dialog.getByPlaceholder("搜索工具名称、描述或标签…").fill(toolName);
-    const category = dialog.getByRole("button", { name: new RegExp(serviceName) });
-    await expect(category).toBeVisible();
-    await category.click();
-    const row = dialog.getByRole("button").filter({ hasText: toolName }).first();
-    await expect(row).toBeVisible();
-    const updated = this.page.waitForResponse((response) => response.request().method() === "POST" && response.url().includes("/api/agent/update"));
-    await row.click();
-    if (!(await updated).ok()) throw new Error(`tool ${toolName} from ${serviceName} autosave failed`);
-    await dialog.getByRole("button", { name: "Close", exact: true }).click();
-  }
-
   async bindSkill(skillName: string): Promise<void> {
-    await this.page.getByRole("tab", { name: "工具与技能", exact: true }).click();
-    await this.page.getByRole("button", { name: "选择技能", exact: true }).click();
-    const dialog = this.page.getByRole("dialog", { name: "选择技能" });
-    await dialog.getByPlaceholder("按名称、描述或标签搜索").fill(skillName);
-    const row = dialog.getByRole("button").filter({ hasText: skillName }).first();
-    await expect(row).toBeVisible();
-    const updated = this.page.waitForResponse(
-      (response) => response.request().method() === "POST" && response.url().includes("/api/agent/update"),
-    );
-    await row.click();
+    await this.openSection("技能管理");
+    await this.page.getByTestId("agent-skill-add-entry").click();
+    const dialog = this.page.getByRole("dialog", { name: "添加技能", exact: true });
+    await expect(dialog).toBeVisible();
+    // This journey can create a Skill through the API after the editor cached
+    // its catalog. Refresh the catalog before searching for that new asset.
+    await dialog.getByRole("button", { name: "刷新", exact: true }).click();
+    await dialog.getByRole("textbox").first().fill(skillName);
+    const row = dialog.getByRole("option", { name: skillName, exact: true });
+    await expect(row).toHaveCount(1);
+    if ((await row.getAttribute("aria-selected")) !== "true") await row.click();
+    await expect(row).toHaveAttribute("aria-selected", "true");
+    const updated = this.page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname.endsWith("/api/agent/update"));
+    await dialog.getByRole("button", { name: "确认", exact: true }).click();
     if (!(await updated).ok()) throw new Error(`skill ${skillName} autosave failed`);
-    await dialog.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(dialog).toBeHidden();
     await expect(this.page.getByText(skillName, { exact: true }).first()).toBeVisible();
   }
 
@@ -441,7 +448,7 @@ export class AgentPage {
     const primary = this.page.locator("#agent-primary-prompt");
     if ((await primary.count()) && values.duty !== undefined) {
       await primary.fill(values.duty);
-      const saved = this.page.waitForResponse(r => r.url().includes("/api/agent/update") && r.request().method() === "POST" && r.request().postDataJSON()?.duty_prompt === values.duty);
+      const saved = this.page.waitForResponse(r => r.url().includes("/api/agent/update") && r.request().method() === "POST" && r.request().postDataJSON()?.prompt === values.duty);
       await primary.blur();
       expect((await saved).ok()).toBeTruthy();
       if (values.constraint === undefined && values.fewShots === undefined) return;
@@ -462,7 +469,7 @@ export class AgentPage {
     }
   }
 
-  async expandDutyPrompt(content: string): Promise<void> {
+  async expandPrompt(content: string): Promise<void> {
     await this.openSection("模型与提示词");
     await this.page.getByRole("tab", { name: "智能体角色", exact: true }).click();
     await this.page.getByRole("button", { name: "放大查看", exact: true }).click();
@@ -483,6 +490,13 @@ export class AgentPage {
     return this.page.locator("[data-testid='agent-debug-panel']");
   }
 
+  /** Resolve the visible composer while normal and Compare panes stay mounted. */
+  private debugComposer(): Locator {
+    return this.debugPanel()
+      .getByRole("textbox", { name: "对话输入", exact: true })
+      .filter({ visible: true });
+  }
+
   async openDebug(): Promise<void> {
     const debugButton = this.page.getByRole("button", { name: "智能体调试", exact: true });
     await expect(debugButton).toBeVisible();
@@ -499,13 +513,14 @@ export class AgentPage {
       throw new Error(`Cannot open Debug: Agent form validation failed: ${validationErrors.join("; ")}`);
     }
     await expect(this.debugPanel()).toBeVisible({ timeout: 30000 });
-    await expect(this.debugPanel().locator("textarea[placeholder='输入\"/\"快速引用技能及指令']:visible, textarea[placeholder*=\"输入测试问题\"]:visible")).toBeVisible({ timeout: 120000 });
+    await expect(this.debugComposer()).toBeVisible({ timeout: 120000 });
   }
 
   async sendDebug(prompt: string, expectedMarker?: string): Promise<string> {
     const debugPanel = this.debugPanel();
     await expect(debugPanel).toBeVisible();
-    const input = debugPanel.locator("textarea[placeholder='输入\"/\"快速引用技能及指令']:visible, textarea[placeholder*=\"输入测试问题\"]:visible");
+    const input = this.debugComposer();
+    await expect(input).toBeVisible({ timeout: 120000 });
     // Empty completed replies can have zero layout height. Count their DOM
     // unit too; visibility must not turn an empty answer into a five-minute wait.
     // Compare and normal histories stay mounted together. Exclude hidden
@@ -675,7 +690,7 @@ export class AgentPage {
     // A selected Ant Select no longer exposes its placeholder. The two
     // comboboxes inside the visible Debug panel are the real compare columns.
     await expect(debugPanel.getByRole("combobox")).toHaveCount(2);
-    await expect(debugPanel.locator("textarea[placeholder='输入\"/\"快速引用技能及指令']:visible")).toHaveCount(1);
+    await expect(this.debugComposer()).toHaveCount(1);
   }
 
   async sendDebugCompare(prompt: string, expectedMarker?: string): Promise<string[]> {
@@ -689,7 +704,7 @@ export class AgentPage {
     ));
     const histories = columns.map((column) => column.locator("[data-slot='aui_assistant-message-root']:visible"));
     const before = await Promise.all(histories.map((history) => history.count()));
-    const composer = debugPanel.locator("textarea[placeholder='输入\"/\"快速引用技能及指令']:visible");
+    const composer = this.debugComposer();
     await composer.fill(prompt);
     await debugPanel.getByRole("button", { name: "发送", exact: true }).click();
     await Promise.all(histories.map((history, index) => expect(history).toHaveCount(before[index] + 1, { timeout: 300000 })));
@@ -720,7 +735,7 @@ export class AgentPage {
 
   async closeDebugCompare(): Promise<void> {
     await this.setDebugCompareMode(false);
-    await expect(this.debugPanel().locator("textarea[placeholder='输入\"/\"快速引用技能及指令']:visible")).toHaveCount(1);
+    await expect(this.debugComposer()).toHaveCount(1);
   }
 
   async publish(): Promise<Locator> {

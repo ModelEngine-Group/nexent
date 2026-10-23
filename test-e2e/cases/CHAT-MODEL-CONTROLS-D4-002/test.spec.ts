@@ -87,12 +87,14 @@ journey("CHAT-MODEL-CONTROLS-D4-002", async ({ page, contract }) => {
   });
   await contract.step(contract.expectedIds("steps")[3], async () => {
     await enter(page, "workbench"); await page.locator("button[data-radix-collection-item]").filter({ hasText: "Invalid saved model" }).click();
-    await expect(page.getByText("所选模型不可用，请重新选择模型", { exact: true }).first()).toBeVisible();
+    await expect(trigger(page)).toContainText("选择模型");
+    await expect(composer(page).getByRole("button", { name: "发送", exact: true })).toBeDisabled();
     await input(page).fill("Recover invalid saved selection");
     await expect(composer(page).getByRole("button", { name: "发送", exact: true })).toBeDisabled();
     await chooseModel(page, "Effort B"); await send(page, state, "Recovered saved selection");
     state.unavailable = true; await send(page, state, "Controlled unavailable model");
-    await expect(page.getByText("所选模型不可用，请重新选择模型", { exact: true }).first()).toBeVisible();
+    await expect(trigger(page)).toContainText("选择模型");
+    await expect(composer(page).getByRole("button", { name: "发送", exact: true })).toBeDisabled();
     state.unavailable = false; await chooseModel(page, "Default A"); await send(page, state, "Reselected valid model");
     for (const [permission, label] of [["agent:create", "智能体创建"], ["skill:create", "技能创建"]]) {
       state.authorization.permissions = [permission === "agent:create" ? "skill:create" : "agent:create"];

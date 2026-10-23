@@ -31,26 +31,26 @@ def test_tool_schema_accepts_only_complete_prompt_and_array_questions():
     properties = tools.AgentDraftFields.model_json_schema()["properties"]
     assert "constraint_prompt" not in properties
     assert "few_shots_prompt" not in properties
-    fields = tools.AgentDraftFields(duty_prompt="Complete prompt", example_questions=["Q1", "Q2"])
-    assert fields.model_dump(exclude_unset=True) == {"duty_prompt": "Complete prompt", "example_questions": ["Q1", "Q2"]}
+    fields = tools.AgentDraftFields(prompt="Complete prompt", example_questions=["Q1", "Q2"])
+    assert fields.model_dump(exclude_unset=True) == {"prompt": "Complete prompt", "example_questions": ["Q1", "Q2"]}
     with pytest.raises(ValidationError):
         tools.AgentDraftFields(example_questions=[{"question": "Q"}])
 
 
 @pytest.mark.parametrize("fields,expected", [
-    ({"duty_prompt": "职责", "constraint_prompt": "规则", "few_shots_prompt": "示例"},
+    ({"prompt": "职责", "constraint_prompt": "规则", "few_shots_prompt": "示例"},
      "# Responsibilities\n职责\n\n# Constraints\n规则\n\n# Examples\n示例"),
     ({"constraint_prompt": "规则"}, "# Constraints\n规则"),
     ({"few_shots_prompt": "  <code>\n    call()\n  </code>"},
      "# Examples\n  <code>\n    call()\n  </code>"),
-    ({"duty_prompt": " exact\n  code ", "constraint_prompt": " \n", "few_shots_prompt": None}, " exact\n  code "),
-    ({"duty_prompt": ""}, ""),
-    ({"duty_prompt": None, "constraint_prompt": None, "few_shots_prompt": None}, None),
+    ({"prompt": " exact\n  code ", "constraint_prompt": " \n", "few_shots_prompt": None}, " exact\n  code "),
+    ({"prompt": ""}, ""),
+    ({"prompt": None, "constraint_prompt": None, "few_shots_prompt": None}, None),
 ])
 def test_import_conversion_preserves_content_and_consumes_old_sections_once(fields, expected):
     original = dict(fields)
     result = normalize_imported_agent_prompt(fields)
-    assert result.get("duty_prompt") == expected
+    assert result.get("prompt") == expected
     assert "constraint_prompt" not in result
     assert "few_shots_prompt" not in result
     assert normalize_imported_agent_prompt(result) == result
@@ -62,26 +62,27 @@ def test_current_request_and_export_schemas_expose_only_the_unified_prompt():
 
     for model in (AgentInfoRequest, ExportAndImportAgentInfo):
         properties = model.model_json_schema()["properties"]
-        assert "duty_prompt" in properties
+        assert "prompt" in properties
         assert "constraint_prompt" not in properties
         assert "few_shots_prompt" not in properties
 
 
-def test_import_model_consolidates_old_bundle_once_and_exports_only_duty_prompt():
-    from consts.model import ExportAndImportAgentInfo
+def test_external_import_consolidates_old_bundle_once_and_exports_only_prompt():
+    from consts.model import AgentImportRequest, ExportAndImportAgentInfo
 
-    model = ExportAndImportAgentInfo(
+    fields = dict(
         agent_id=1, name="test", description="Description", max_steps=5,
         provide_run_summary=False, enabled=True, tools=[], managed_agents=[],
-        duty_prompt="Purpose", constraint_prompt="Rule", few_shots_prompt="Example",
+        prompt="Purpose", constraint_prompt="Rule", few_shots_prompt="Example",
     )
-    assert model.duty_prompt == "# Responsibilities\nPurpose\n\n# Constraints\nRule\n\n# Examples\nExample"
+    model = AgentImportRequest(agent_info={"agent_id": 1, "agent_info": {"1": fields}, "mcp_info": []}).agent_info.agent_info["1"]
+    assert model.prompt == "# Responsibilities\nPurpose\n\n# Constraints\nRule\n\n# Examples\nExample"
     exported = model.model_dump()
     assert "constraint_prompt" not in exported
     assert "few_shots_prompt" not in exported
     assert not hasattr(model, "constraint_prompt")
     assert not hasattr(model, "few_shots_prompt")
-    assert ExportAndImportAgentInfo.model_validate(exported).duty_prompt == model.duty_prompt
+    assert ExportAndImportAgentInfo.model_validate(exported).prompt == model.prompt
 
 
 @pytest.mark.asyncio
@@ -89,7 +90,7 @@ async def test_verified_draft_context_exposes_only_the_unified_prompt(mocker):
     from services import nl2agent_service
 
     mocker.patch.object(nl2agent_service, "_load_verified_nl2agent_state", return_value=({
-        "duty_prompt": "Complete prompt",
+        "prompt": "Complete prompt",
         "constraint_prompt": "LEGACY_RULE_POISON",
         "few_shots_prompt": "LEGACY_EXAMPLE_POISON",
         "greeting_message": "Hello",
@@ -104,14 +105,14 @@ async def test_verified_draft_context_exposes_only_the_unified_prompt(mocker):
     assert "LEGACY" not in text
 
 
-@pytest.mark.parametrize("field", ["duty_prompt", "constraint_prompt", "few_shots_prompt"])
+@pytest.mark.parametrize("field", ["prompt", "constraint_prompt", "few_shots_prompt"])
 @pytest.mark.parametrize("value", [[], {"text": "wrong type"}, 7])
 def test_import_rejects_invalid_prompt_types_with_validation_error(field, value):
-    from consts.model import ExportAndImportAgentInfo
+    from consts.model import AgentImportRequest, ExportAndImportAgentInfo
 
     data = dict(agent_id=1, name="test", description="Description", max_steps=5,
                 provide_run_summary=False, enabled=True, tools=[], managed_agents=[],
                 constraint_prompt="Rule")
     data[field] = value
     with pytest.raises(ValidationError, match=field):
-        ExportAndImportAgentInfo.model_validate(data)
+        AgentImportRequest(agent_info={"agent_id": 1, "agent_info": {"1": data}, "mcp_info": []})

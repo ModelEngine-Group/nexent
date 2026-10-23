@@ -14,12 +14,13 @@ feature:
   - rule_id: CHAT-SIDEBAR-RULE-008
     description: Workbench uses a localized sidebar title above a full-width new-conversation action, without a conversation header. Its collapse uses responsive floating expand and compose actions. Agent discovery collapse uses one expand button. Selected-Agent collapse uses floating transparent controls, progressively hiding the title, back action and compose action at available content widths of 1340px, 1188px and 1106px. At 1034px or less only the panel-expand icon remains, retaining its original 12px left/top inset and 32px target. No header is added. Narrow mode reserves a 32px additional gutters on both sides combined with existing message padding for the original button; wider modes preserve conversation spacing. Navigation hover expansion renders above the floating button; expanded operations and mobile sheet state are retained.
   - rule_id: CHAT-SIDEBAR-RULE-003
-    description: Workbench pin/unpin persists on the owning personal conversation for the authenticated user,
+    description: Workbench and Agent-chat pin/unpin persist on the owning personal conversation for the authenticated user,
       using persisted conversation IDs. Tenant changes retain that personal preference. Focus/reconnect refresh hydrates missing pinned histories beyond the loaded page. Pins are newest first across devices;
       repinning moves first. Workbench rows show localized relative times when timestamps
       are available; recency/search/rename/paging
-      and Agent-chat pins are preserved. Failed saves do not report success; drafts
-      and inaccessible/non-Workbench conversations cannot be pinned. Pin times use
+      and Agent-chat grouping are preserved. Both pages filter the shared server snapshot by conversation type.
+      Agent-chat local pin storage is no longer read or written, with no migration or local fallback. Failed saves do not report success; drafts
+      and inaccessible conversations cannot be pinned. Pin times use
       UTC TIMESTAMP storage and explicit UTC ISO responses independently of the
       database or application timezone.
   - rule_id: CHAT-SIDEBAR-RULE-001

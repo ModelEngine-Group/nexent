@@ -1,0 +1,48 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: PDF-PREVIEW-D1-001
+  feature_id: F-163
+  business_rule_ids: [F-163-RULE-01]
+  title: Chinese PDF preview renders with local resources at root and prefixed paths
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove the preview rendering pipeline loads real local CMaps and renders Chinese glyphs rather than a rule-only page.
+  preconditions:
+    - Frontend dependencies and Playwright Chromium are installed.
+    - The case-local Chinese PDF fixture is available.
+  test_data:
+    pdf: chinese_sample.pdf
+    base_paths: ['', /nexent]
+  steps:
+    - order: 1
+      action: Prepare assets with the production helper in an isolated temporary public directory.
+      expected: Same-version CMaps and standard fonts are served locally.
+    - order: 2
+      action: Load the production document options and render the fixture with the real PDF.js worker in Chromium at root and prefixed paths.
+      expected: Chinese title and body text are extracted and painted above and below the rule; all resource requests succeed locally.
+    - order: 3
+      action: Render the same bytes with CMap options removed as a negative control.
+      expected: Missing-CMap warnings occur and text extraction and text-region painting fail.
+  expected_results:
+    - Configured previews contain the expected Chinese title and body, with visible canvas ink in both text regions at both base paths.
+    - CMap and font configuration URLs include the correct prefix and the CMap is fetched successfully.
+    - The negative control detects the original missing-CMap defect.
+  forbidden_side_effects:
+    - No external network access or modification of source PDF bytes.
+    - No application service, model, object storage or repository public-directory mutation.
+  unit_boundary: Real PDF preview options, asset preparation, PDF.js worker and canvas in Chromium; PDF transport and public files are provided by a controlled loopback HTTP server. React option forwarding is proved separately by frontend UT.
+  inputs: [ReportLab STSong-Light UniGB-UCS2-H PDF, root deployment, prefixed deployment, missing-CMap negative control]
+  assertions:
+    - Expected Chinese text exists in extracted text and both canvas text regions contain dark pixels.
+    - All observed resource requests stay on loopback and return successfully.
+    - Removing CMap configuration produces zero text items and no text-region ink.
+  acceptance:
+    - id: AC-01
+      description: Local resource preparation and options restore actual Chinese PDF rendering for both deployment paths, with a negative control and isolated inputs.
+      steps: [1, 2, 3]
+      expected_results: [1, 2, 3]
+      forbidden_side_effects: [1, 2]

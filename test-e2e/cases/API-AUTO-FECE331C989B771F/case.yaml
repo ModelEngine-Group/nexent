@@ -13,6 +13,8 @@ case:
   automation: automated
   objective: AIDP文档上传/列表：50文件上限、20MB/1GB大小校验、部分成功汇总、计数失败降级｜核心流程
   preconditions:
+  - 独占知识库创建请求包含非空 description 和从当前 AIDP 模型目录解析的 embedding_model。
+  - 由 aidp 部署例外组执行，产品 ENABLE_AIDP_KNOWLEDGE 与测试侧 aidp_knowledge 同时开启；外部 AIDP 使用用例所属 knowledge-provider Mock，产品权限、数据库、缓存和接口链路不被替换，结束后恢复 Local。
   - Nexent 本地测试全栈已启动，health check 通过。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。

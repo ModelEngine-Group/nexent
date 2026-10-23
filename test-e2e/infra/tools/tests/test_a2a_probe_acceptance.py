@@ -1,9 +1,15 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """A2A transport success or echoed input must not be counted as completion."""
 import ast
 import asyncio
 from pathlib import Path
 import types
 import unittest
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'automation'))
+from shared.final_answers import final_answer_text
 
 PATH = Path(__file__).resolve().parents[2] / 'automation/d4/a2a_client.py'
 tree = ast.parse(PATH.read_text(encoding='utf-8'))
@@ -11,7 +17,7 @@ definitions = ast.Module(body=[node for node in tree.body if
     isinstance(node, (ast.FunctionDef, ast.ClassDef)) and
     node.name in ('ProbeFailure', 'verify_invocation') or
     isinstance(node, ast.AsyncFunctionDef) and node.name == 'run'], type_ignores=[])
-namespace = {}
+namespace = {'final_answer_text': final_answer_text}
 exec(compile(definitions, str(PATH), 'exec'), namespace)
 verify = namespace['verify_invocation']
 
@@ -62,6 +68,23 @@ class AcceptanceTests(unittest.TestCase):
             {'data': {'type': 'final_answer', 'content': 'MAR'}, 'mediaType': 'application/json'},
             {'data': {'type': 'final_answer', 'content': 'KER'}, 'mediaType': 'application/json'},
         ]}}), 'MARKER')
+
+    def test_explicit_completion_reclassifies_only_its_visible_body(self):
+        verify(self.response({'message': {'parts': [{'data': event} for event in [
+            {'type': 'model_output_deep_thinking', 'content': 'private reasoning', 'step_id': 's', 'attempt_id': 'a'},
+            {'type': 'model_output_thinking', 'content': 'MAR', 'step_id': 's', 'attempt_id': 'a'},
+            {'type': 'model_output_thinking', 'content': 'KER', 'step_id': 's', 'attempt_id': 'a'},
+            {'type': 'final_answer', 'content': '', 'answer_phase': 'complete', 'reclassify_step': True, 'step_id': 's'},
+        ]]}}), 'MARKER')
+
+    def test_unclassified_reasoning_and_rolled_back_body_stay_rejected(self):
+        for rollback in (False, True):
+            events = [{'type': 'model_output_thinking', 'content': 'MARKER', 'step_id': 's', 'attempt_id': 'a'}]
+            if rollback:
+                events.append({'type': 'model_attempt_control', 'phase': 'rollback', 'step_id': 's', 'attempt_id': 'a'})
+            events.append({'type': 'final_answer', 'content': '', 'answer_phase': 'complete', 'reclassify_step': rollback, 'step_id': 's'})
+            with self.assertRaisesRegex(AssertionError, 'no completed root answer'):
+                verify(self.response({'message': {'parts': [{'data': event} for event in events]}}), 'MARKER')
 
     def test_reasoning_and_tool_echo_are_not_answers(self):
         for event_type in ['thinking', 'tool', 'deep_thinking', 'user']:

@@ -13,7 +13,7 @@ import aiohttp
 
 from database import a2a_agent_db
 from database.a2a_agent_db import PROTOCOL_HTTP_JSON, PROTOCOL_JSONRPC
-from infrastructure.http.a2a import A2AHttpClient, A2AHttpStatusError, build_a2a_headers
+from infrastructure.http.a2a import AGENT_CARD_TIMEOUT, A2AHttpClient, A2AHttpStatusError, build_a2a_headers
 from management.services.agent.a2a.validation import validate_a2a_agent_name
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,8 @@ class A2AClientService:
         url: str,
         tenant_id: str,
         user_id: str,
-        custom_headers: Optional[Dict[str, str]] = None
+        custom_headers: Optional[Dict[str, str]] = None,
+        ssl_verify: bool = True,
     ) -> Dict[str, Any]:
         """Discover an external A2A agent from a URL.
 
@@ -60,6 +61,7 @@ class A2AClientService:
             tenant_id: Tenant ID for isolation.
             user_id: User who initiated the discovery.
             custom_headers: Headers saved only for Agent Card discovery and refresh.
+            ssl_verify: Verify the peer certificate for discovery and subsequent calls.
 
         Returns:
             Discovered agent information dict.
@@ -70,7 +72,9 @@ class A2AClientService:
         try:
             # custom_headers=None means preserve existing stored headers (don't pass anything to DB).
             # custom_headers={} means explicitly clear stored headers.
-            async with A2AHttpClient() as client:
+            async with A2AHttpClient(
+                timeout=AGENT_CARD_TIMEOUT, max_retries=1, ssl_verify=ssl_verify
+            ) as client:
                 headers = build_a2a_headers()
                 if custom_headers:
                     headers.update(custom_headers)
@@ -128,6 +132,7 @@ class A2AClientService:
                 raw_card=card,
                 supported_interfaces=supported_interfaces,
                 agent_card_headers=custom_headers,
+                ssl_verify=ssl_verify,
                 security_schemes=card.get("securitySchemes"),
                 security_requirements=card.get("securityRequirements"),
             )
@@ -135,6 +140,8 @@ class A2AClientService:
             logger.info(f"Discovered A2A agent {agent_id} from URL: {url}")
             return result
 
+        except asyncio.TimeoutError:
+            raise
         except Exception as e:
             import traceback
             error_type = type(e).__name__
@@ -281,7 +288,7 @@ class A2AClientService:
 
             for card_url in card_urls:
                 try:
-                    async with A2AHttpClient() as http_client:
+                    async with A2AHttpClient(timeout=AGENT_CARD_TIMEOUT, max_retries=1) as http_client:
                         card = await http_client.get_json(card_url, headers=build_a2a_headers())
 
                     if card and (card.get("name") or card.get("agent_id")):
@@ -514,7 +521,7 @@ class A2AClientService:
                 health_url = f"{base_url.rstrip('/')}/health"
                 logger.info(f"Checking health for Nacos agent: {health_url}")
 
-                async with A2AHttpClient() as client:
+                async with A2AHttpClient(ssl_verify=agent.get("ssl_verify", True)) as client:
                     health_response = await client.get_json(health_url)
 
                 # Update availability based on health check
@@ -546,7 +553,7 @@ class A2AClientService:
                 if not source_url:
                     raise AgentDiscoveryError("No source URL available for refresh")
 
-                async with A2AHttpClient() as client:
+                async with A2AHttpClient(ssl_verify=agent.get("ssl_verify", True)) as client:
                     card_headers = agent.get("agent_card_headers")
                     headers = build_a2a_headers()
                     if isinstance(card_headers, dict):
@@ -763,7 +770,7 @@ class A2AClientService:
             headers = build_a2a_headers()
             auth_headers, auth_params, auth_cookies = self._build_security_request_parts(agent)
             headers.update(auth_headers)
-            async with A2AHttpClient() as client:
+            async with A2AHttpClient(ssl_verify=agent.get("ssl_verify", True)) as client:
                 response = await client.post_json(
                     endpoint_url,
                     payload,
@@ -857,7 +864,7 @@ class A2AClientService:
         headers.update(auth_headers)
 
         try:
-            async with A2AHttpClient() as client:
+            async with A2AHttpClient(ssl_verify=agent.get("ssl_verify", True)) as client:
                 async for event in client.post_stream(
                     endpoint_url,
                     payload,

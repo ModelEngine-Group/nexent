@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import threading
 import types
 
@@ -163,6 +165,8 @@ def _build_model(client, concurrency_limit=None):
     model.observer = _StubObserver()
     model.temperature = 0.2
     model.top_p = 0.95
+    model.explicit_sampling = ()
+    model.diagnostic_chunks_enabled = False
     model.stop_event = threading.Event()
     model.cancellation_scope = _StubCancellationScope()
     model.concurrency_limit = concurrency_limit

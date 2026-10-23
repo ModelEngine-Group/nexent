@@ -13,7 +13,7 @@ case:
   automation: automated
   objective: 独立验证AIDP分支，禁止同脚本locator猜Local/AIDP；知识召回通过真实Agent工具链证明。
   preconditions:
-  - AIDP服务由 ext mock 提供（knowledge-provider，种子 aidp-kb-product）；无需任何机器本地档位配置。
+  - AIDP 服务由 suite 自动启动的 ext mock 提供（knowledge-provider）；准备阶段通过 Nexent API 创建私有知识库及租户权限，再在该专属 Mock 知识库装载 aidp-kb-product 的召回 oracle。知识库 ID/名称由资产注册表解析，结束时清理，不修改共享种子的权限；无需机器本地 YAML、identity 或锁配置。
   - 已登录租户管理员账号。
   - /knowledges呈现AIDP分支，Local个人容量控件不出现。
   - run-owned Agent（d4_llm_agent）已READY且模型可用。

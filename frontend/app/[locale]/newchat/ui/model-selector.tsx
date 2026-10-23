@@ -7,6 +7,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useId,
   useRef,
   useState,
   createContext,
@@ -26,6 +27,8 @@ import { CheckIcon, ChevronDownIcon, CpuIcon } from "lucide-react";
 import { useAui } from "@assistant-ui/react";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { Tooltip } from "antd";
+import { resolveReasoningAvailability } from "@/lib/modelReasoning";
 import type { ReasoningCapability } from "@/types/modelConfig";
 import {
   Select,
@@ -695,6 +698,15 @@ function ModelSelectorEffort({
   const resolvedLabel = label ?? t("chat.modelSelector.reasoningEffort");
   const displayedEfforts = efforts ?? [];
   const budgetRange = selectedModel?.budgetTokens;
+  const availability = resolveReasoningAvailability(
+    selectedModel?.reasoningCapability,
+    Boolean(displayedEfforts.length || budgetRange)
+  );
+  const canToggle = Boolean(selectedModel) && availability === "supported";
+  const explanationId = useId();
+  const unavailableReason = canToggle
+    ? undefined
+    : t("chat.modelSelector.reasoningUnsupported");
 
   return (
     <div
@@ -709,101 +721,115 @@ function ModelSelectorEffort({
     >
       <div className="flex items-center justify-between gap-3 py-1">
         <span className="text-sm">{t("chat.modelSelector.deepThinking")}</span>
-        <button
-          type="button"
-          role="switch"
-          aria-label={t("chat.modelSelector.deepThinking")}
-          aria-checked={deepThinking}
-          disabled={
-            !selectedModel ||
-            (!efforts?.length &&
-              !budgetRange &&
-              selectedModel.reasoningCapability?.control !== "toggle")
-          }
-          onClick={() => setDeepThinking(!deepThinking)}
-          className={cn(
-            "relative h-5 w-9 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
-            deepThinking ? "bg-primary" : "bg-muted-foreground/40"
-          )}
+        <Tooltip
+          key={`${selectedModel?.id ?? ""}:${availability}`}
+          title={unavailableReason}
+          trigger={canToggle ? [] : ["hover", "click"]}
+          styles={{ root: { pointerEvents: "none" } }}
+          zIndex={1130}
         >
-          <span
+          <button
+            type="button"
+            role="switch"
+            aria-label={t("chat.modelSelector.deepThinking")}
+            aria-checked={deepThinking}
+            aria-disabled={!canToggle}
+            aria-describedby={unavailableReason ? explanationId : undefined}
+            onClick={() => {
+              if (canToggle) setDeepThinking(!deepThinking);
+            }}
             className={cn(
-              "absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform",
-              deepThinking ? "left-[18px]" : "left-0.5"
+              "relative h-5 w-9 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+              !canToggle && "cursor-not-allowed opacity-60",
+              deepThinking ? "bg-primary" : "bg-muted-foreground/40"
             )}
-          />
-        </button>
+          >
+            <span
+              className={cn(
+                "absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-transform",
+                deepThinking ? "left-[18px]" : "left-0.5"
+              )}
+            />
+          </button>
+        </Tooltip>
       </div>
-      {deepThinking && (
-        <div className="flex items-center justify-between gap-3 py-1">
-          <span className="text-sm">
-            {budgetRange
-              ? t("model.advanced.reasoningBudget", {
-                  defaultValue: "Budget tokens",
-                })
-              : resolvedLabel}
-          </span>
-          {budgetRange ? (
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <input
-                type="range"
-                min={budgetRange.min}
-                max={budgetRange.max}
-                value={budgetTokens ?? budgetRange.min}
-                disabled={!deepThinking}
-                aria-label={t("model.advanced.reasoningBudget", {
-                  defaultValue: "Budget tokens",
-                })}
-                onChange={(event) =>
-                  setBudgetTokens(Number(event.target.value))
-                }
-                className="min-w-0 flex-1"
-              />
-              <span className="w-14 text-right text-xs text-muted-foreground">
-                {budgetTokens || t("chat.modelSelector.effort.auto")}
-              </span>
-              <button
-                type="button"
-                disabled={!deepThinking}
-                onClick={() => setBudgetTokens(0)}
-                className="text-xs text-muted-foreground hover:text-foreground"
-              >
-                {t("chat.modelSelector.effort.auto")}
-              </button>
-            </div>
-          ) : (
-            <Select
-              value={effort}
-              disabled={!deepThinking || displayedEfforts.length === 0}
-              onValueChange={setEffort}
-            >
-              <SelectTrigger
-                aria-label={t("chat.modelSelector.reasoningEffort")}
-                size="sm"
-                className="h-7 w-fit border-0 bg-transparent px-1.5 py-0 text-sm shadow-none hover:bg-accent/50 focus-visible:ring-0"
-              >
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent
-                data-model-effort-popup
-                align="end"
-                className="z-[1120] w-max min-w-20 p-0"
-                onEscapeKeyDown={(event) => event.stopPropagation()}
-              >
-                {displayedEfforts.map((option) => (
-                  <SelectItem
-                    key={option.id}
-                    value={option.id}
-                    className="h-7 pl-2 pr-8 text-sm"
-                  >
-                    {t(`chat.modelSelector.effort.${option.id}`, option.name)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-        </div>
+      {unavailableReason && (
+        <span id={explanationId} className="sr-only">
+          {unavailableReason}
+        </span>
       )}
+      {deepThinking &&
+        canToggle &&
+        (budgetRange || displayedEfforts.length > 0) && (
+          <div className="flex items-center justify-between gap-3 py-1">
+            <span className="text-sm">
+              {budgetRange
+                ? t("model.advanced.reasoningBudget", {
+                    defaultValue: "Budget tokens",
+                  })
+                : resolvedLabel}
+            </span>
+            {budgetRange ? (
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <input
+                  type="range"
+                  min={budgetRange.min}
+                  max={budgetRange.max}
+                  value={budgetTokens ?? budgetRange.min}
+                  disabled={!deepThinking}
+                  aria-label={t("model.advanced.reasoningBudget", {
+                    defaultValue: "Budget tokens",
+                  })}
+                  onChange={(event) =>
+                    setBudgetTokens(Number(event.target.value))
+                  }
+                  className="min-w-0 flex-1"
+                />
+                <span className="w-14 text-right text-xs text-muted-foreground">
+                  {budgetTokens || t("chat.modelSelector.effort.auto")}
+                </span>
+                <button
+                  type="button"
+                  disabled={!deepThinking}
+                  onClick={() => setBudgetTokens(0)}
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {t("chat.modelSelector.effort.auto")}
+                </button>
+              </div>
+            ) : (
+              <Select
+                value={effort}
+                disabled={!deepThinking || displayedEfforts.length === 0}
+                onValueChange={setEffort}
+              >
+                <SelectTrigger
+                  aria-label={t("chat.modelSelector.reasoningEffort")}
+                  size="sm"
+                  className="h-7 w-fit border-0 bg-transparent px-1.5 py-0 text-sm shadow-none hover:bg-accent/50 focus-visible:ring-0"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent
+                  data-model-effort-popup
+                  align="end"
+                  className="z-[1120] w-max min-w-20 p-0"
+                  onEscapeKeyDown={(event) => event.stopPropagation()}
+                >
+                  {displayedEfforts.map((option) => (
+                    <SelectItem
+                      key={option.id}
+                      value={option.id}
+                      className="h-7 pl-2 pr-8 text-sm"
+                    >
+                      {t(`chat.modelSelector.effort.${option.id}`, option.name)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+        )}
     </div>
   );
 }

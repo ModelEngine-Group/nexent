@@ -251,9 +251,17 @@ export function ModelParamsModal({
 
       {/* Temperature slider */}
       <ParamField
-        label={t("modelParams.temperature", { defaultValue: "输出内容温度" })}
+        label={t("modelParams.temperature", { defaultValue: "温度" })}
         icon={
-          <QuestionCircleOutlined style={{ color: "#8C8C8C", fontSize: 12 }} />
+          <Tooltip
+            title={t("modelParams.temperatureInfo")}
+            trigger={["hover", "focus"]}
+          >
+            <QuestionCircleOutlined
+              tabIndex={0}
+              style={{ color: "#8C8C8C", fontSize: 12 }}
+            />
+          </Tooltip>
         }
       >
         <SliderStepper
@@ -276,7 +284,15 @@ export function ModelParamsModal({
       <ParamField
         label={t("modelParams.topP", { defaultValue: "Top P" })}
         icon={
-          <QuestionCircleOutlined style={{ color: "#8C8C8C", fontSize: 12 }} />
+          <Tooltip
+            title={t("modelParams.topPInfo")}
+            trigger={["hover", "focus"]}
+          >
+            <QuestionCircleOutlined
+              tabIndex={0}
+              style={{ color: "#8C8C8C", fontSize: 12 }}
+            />
+          </Tooltip>
         }
       >
         <SliderStepper

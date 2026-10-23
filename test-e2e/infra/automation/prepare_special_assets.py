@@ -123,12 +123,20 @@ async def prepare_fault_model(identity) -> None:
     payload = model_request("llm", display_name=display_name)
     payload.update({
         "model_name": "controlled-fault-model",
+        "model_factory": "OpenAI-API-Compatible",
+        "connect_status": "available",
+        "skip_default_backfill": True,
         "api_key": "controlled-test-key",
         "base_url": api_base,
     })
     async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
         created = await api.post("/model/create", json=payload)
     assert_status(created, 200)
+    # Own cleanup before the read-back; a failed catalog assertion must not leak it.
+    register_asset("reliability", "fault_model_display_name", display_name, owner_case_id="REL-02",
+        cleanup={"service": "config", "identity": identity.id, "method": "POST",
+                 "path": "/model/delete", "params": {"display_name": display_name},
+                 "allowed_statuses": [200, 404]})
     async with client("config", token=identity.access_token) as api:
         listed = await api.get("/model/list")
     assert_status(listed, 200)
@@ -136,19 +144,13 @@ async def prepare_fault_model(identity) -> None:
     match = next((row for row in rows if row.get("display_name") == display_name), None)
     if not match:
         raise AssertionError(f"fault model {display_name} not returned by /model/list")
+    assert match.get("connect_status") == "available", "Controlled fault model was not admitted by the catalog"
     fault_id = int(match.get("model_id") or match["id"])
     register_asset(
         "reliability",
         "fault_model_id",
         fault_id,
         owner_case_id="REL-02",
-        cleanup={
-            "service": "config",
-            "identity": "tenant_a_admin",
-            "method": "POST",
-            "path": f"/model/delete?display_name={quote(display_name)}",
-            "allowed_statuses": [200, 404],
-        },
     )
 
 

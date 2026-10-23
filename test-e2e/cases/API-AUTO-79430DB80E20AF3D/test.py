@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D2 agent version and repository state-machine contracts."""
 
 from __future__ import annotations
@@ -100,7 +102,7 @@ async def test_agent_repository_detail_projects_snapshot_card_and_download_field
         assert isinstance(payload["downloads"], int)
         assert payload["downloads"] >= 0
         assert "model_name" in payload
-        assert "duty_prompt" in payload
+        assert "prompt" in payload
         assert isinstance(payload["tools"], list)
         assert all(isinstance(tool, str) and tool for tool in payload["tools"])
     finally:

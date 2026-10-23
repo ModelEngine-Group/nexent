@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Negative detection for local revisions and observed Planning failures."""
 import copy
 import importlib.util
@@ -24,13 +26,13 @@ planning = load_case('AGT-025')
 class LocalRevisionTests(unittest.TestCase):
     def test_idempotent_optimization_still_requires_real_save_and_nonempty_readback(self):
         result = self.result()
-        snapshot = {'duty_prompt': 'already good', 'tools': []}
-        revision.assert_local_save(result, snapshot, dict(snapshot), 23, {'duty_prompt'}, require_change=False)
+        snapshot = {'prompt': 'already good', 'tools': []}
+        revision.assert_local_save(result, snapshot, dict(snapshot), 23, {'prompt'}, require_change=False)
         with self.assertRaises(AssertionError):
-            revision.assert_local_save(result, snapshot, {**snapshot, 'duty_prompt': ''}, 23,
-                                       {'duty_prompt'}, require_change=False)
+            revision.assert_local_save(result, snapshot, {**snapshot, 'prompt': ''}, 23,
+                                       {'prompt'}, require_change=False)
         with self.assertRaises(AssertionError):
-            self.check(result, {'duty_prompt': 'old', 'tools': []})
+            self.check(result, {'prompt': 'old', 'tools': []})
 
     def test_duty_content_ignores_only_trailing_punctuation_not_changed_meaning(self):
         revision.assert_requested_duty('我负责为用户提供专业的数据分析并输出可视化报告。')
@@ -54,13 +56,13 @@ class LocalRevisionTests(unittest.TestCase):
 
     def result(self, event='agent_generation_completed'):
         return {'save_results': [{'status': 'success', 'agent_id': 23, 'created': False,
-                                  'updated_fields': ['duty_prompt']}],
+                                  'updated_fields': ['prompt']}],
                 'tool_names': [revision.SAVE_TOOL], 'nl2a_payloads': [], 'final_text': 'Updated duty only',
-                'state_events': [{'agent_id': 23, 'event': event, 'updated_fields': ['duty_prompt']}]}
+                'state_events': [{'agent_id': 23, 'event': event, 'updated_fields': ['prompt']}]}
 
     def check(self, result, after=None):
-        revision.assert_local_save(result, {'duty_prompt': 'old', 'tools': []},
-                                   after or {'duty_prompt': 'new', 'tools': []}, 23, {'duty_prompt'})
+        revision.assert_local_save(result, {'prompt': 'old', 'tools': []},
+                                   after or {'prompt': 'new', 'tools': []}, 23, {'prompt'})
 
     def test_both_trusted_state_markers_accept_a_real_single_field_save(self):
         for event in ('agent_generation_completed', 'agent_draft_fields_saved'):
@@ -75,7 +77,7 @@ class LocalRevisionTests(unittest.TestCase):
     def test_extra_field_resource_change_duplicate_save_and_foreign_target_are_rejected(self):
         for mutation in ('extra_field', 'resource', 'duplicate', 'foreign'):
             result = self.result()
-            after = {'duty_prompt': 'new', 'tools': []}
+            after = {'prompt': 'new', 'tools': []}
             if mutation == 'extra_field':
                 result['save_results'][0]['updated_fields'].append('description')
             elif mutation == 'resource':

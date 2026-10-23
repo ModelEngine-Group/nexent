@@ -776,12 +776,13 @@ function handleAllApiProxy(pathname, req, res) {
     "/api/agent/automations",
     "/api/conversation/",
     "/api/share/",
-    "/api/file/storage",
     "/api/file/preprocess",
   ];
-  const isRuntime = runtimePathPrefixes.some((prefix) =>
-    pathname.startsWith(prefix)
-  );
+  const isStorageUpload =
+    req.method === "POST" && /^\/api\/file\/storage\/?$/.test(pathname);
+  const isRuntime =
+    isStorageUpload ||
+    runtimePathPrefixes.some((prefix) => pathname.startsWith(prefix));
 
   // 3. skills 特殊接口
   // 分发代理目标
