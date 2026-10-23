@@ -18,17 +18,21 @@ def load_file(relative, name):
 
 
 def test_ut_be_arb_001_product_callers_use_canonical_owners():
+    assert not (ROOT / "backend/agents").exists()
     violations = []
-    for path in (ROOT / "backend").rglob("*.py"):
-        if "agents" in path.relative_to(ROOT / "backend").parts[:1]:
-            continue
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
-                "agents."
-            ):
-                violations.append(
-                    (str(path.relative_to(ROOT)), node.lineno, node.module)
-                )
+    for folder in ("backend", "test/backend", "test-e2e/cases", "test-e2e/infra/automation"):
+        for path in (ROOT / folder).rglob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                modules = []
+                if isinstance(node, ast.ImportFrom):
+                    modules = [node.module or ""]
+                elif isinstance(node, ast.Import):
+                    modules = [alias.name for alias in node.names]
+                for module in modules:
+                    if module in {"agents", "backend.agents"} or module.startswith(
+                        ("agents.", "backend.agents.")
+                    ):
+                        violations.append((str(path.relative_to(ROOT)), node.lineno, module))
     assert not violations, violations
 
 

@@ -395,11 +395,9 @@ _asset_owner_spec.loader.exec_module(_asset_owner_mod)
 sys.modules["management.services.permission.asset_owner"] = _asset_owner_mod
 setattr(services_module, "asset_owner_visibility", _asset_owner_mod)
 
-# Mock agents submodules
-sys.modules["agents"] = MagicMock()
-sys.modules["agents.create_agent_info"] = MagicMock()
-sys.modules["management.services.agent.preparation.run"] = sys.modules["agents.create_agent_info"]
-sys.modules["management.services.agent.preparation.tools"] = sys.modules["agents.create_agent_info"]
+# Mock canonical preparation modules
+sys.modules["management.services.agent.preparation.run"] = MagicMock()
+sys.modules["management.services.agent.preparation.tools"] = MagicMock()
 
 agent_run_manager_module = types.ModuleType("management.services.agent.lifecycle")
 
@@ -426,7 +424,7 @@ sys.modules["management.services.agent.preprocessing"] = MagicMock()
 # Need to set up create_tool_config_list as an async mock
 mock_create_agent_info = MagicMock()
 mock_create_agent_info.create_tool_config_list = AsyncMock(return_value=[])
-sys.modules["agents.create_agent_info"].create_agent_info = mock_create_agent_info
+sys.modules["management.services.agent.preparation.tools"].create_tool_config_list = mock_create_agent_info.create_tool_config_list
 
 # Mock utils submodules
 utils_module = types.ModuleType("utils")

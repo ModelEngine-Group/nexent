@@ -3,9 +3,8 @@ change:
   change_id: AGENT-RUNTIME-BOUNDARIES-20261022
   change_type: refactor
   title: Separate Agent preparation, SDK assembly and local execution ownership
-  description: Preserve existing execution and persistence behavior while splitting
-    backend agents into canonical Management and Runtime owners. Durable RunService
-    and deployment isolation are excluded.
+  description: Preserve existing execution and persistence behavior while splitting backend agents into
+    canonical Management and Runtime owners. Durable RunService and deployment isolation are excluded.
   affected_features:
     existing:
     - F-185
@@ -14,6 +13,8 @@ change:
     - FAF-001
     - V5-REL-AUTO-1FAFCA5A681580F5
     - MSRF-001
+    - F-069
+    - CHAT-MODEL-CONTROLS
     added: []
     modified: []
     retired: []
@@ -28,25 +29,38 @@ change:
     - UT-BE-AUTO-93D927CF4107FF6F
     - MSRF-D1-001
     - MSRF-D1-002
+    - AGT-AUTO-BCDD880DF58AECED
+    - UT-BE-AUTO-9411BBC4D2CE908C
+    - UT-BE-AUTO-C7D9514542CF4A85
+    - CHAT-MODEL-CONTROLS-D2-001
+    - CHAT-MODEL-CONTROLS-D2-002
+    - CHAT-MODEL-CONTROLS-D3-001
+    - CHAT-MODEL-CONTROLS-D3-002
     added: []
-    modified: []
+    modified:
+    - AGT-AUTO-BCDD880DF58AECED
+    - UT-BE-AUTO-9411BBC4D2CE908C
+    - UT-BE-AUTO-C7D9514542CF4A85
+    - CHAT-MODEL-CONTROLS-D3-002
     retired: []
   feature_contract_changed: false
-  no_case_change_reason: Existing acceptance contracts and assertions remain unchanged;
-    only implementation imports and mock lookup sites are updated. Existing Cases
-    supply the required component evidence without adding duplicate Cases.
-  notes: User selected behavior-preserving responsibility refactoring. Existing formal
-    contracts remain; traditional UT strengthens factory/import/lifecycle boundaries.
-    No new formal D1 duplicates unit assertions.
+  no_case_change_reason: Existing acceptance contracts and assertions remain unchanged; only implementation
+    imports and mock lookup sites are updated. Existing Cases supply the required component evidence without
+    adding duplicate Cases.
+  notes: User selected behavior-preserving responsibility refactoring. Existing formal contracts remain;
+    traditional UT strengthens factory/import/lifecycle boundaries. No new formal D1 duplicates unit assertions.
+    Follow-up authorization on 2026-10-23 removes the old backend/agents package entirely. Formal scripts
+    and shared fixtures now import and patch canonical Management/Runtime owners. Existing acceptance
+    assertions remain unchanged.
   traditional_ut:
     decision: strengthen
     behaviors:
     - Preserve Agent configuration, overlays, export and preparation behavior
     - Preserve streaming, memory fallback, cancellation and shared-state notifications
-    - Assert Runtime factory and local execution ownership without business database
-      imports
-    reason: Reuse existing preparation and streaming regressions; add focused architecture
-      and injected factory/lifecycle tests.
+    - Assert Runtime factory and local execution ownership without business database imports
+    - Reject the old backend/agents package and imports across product and test code
+    reason: Reuse existing preparation and streaming regressions; add focused architecture and injected
+      factory/lifecycle tests.
     test_selectors:
     - test/backend/management/test_agent_runtime_boundaries.py
     - test/backend/agents/test_create_agent_info.py

@@ -17,7 +17,7 @@ case:
   preconditions:
   - 本地组件测试环境可运行；不要求外部模型服务在线。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
-  - backend/agents/create_agent_info.py 可正常导入，_resolve_context_budget、ContextBudgetCalculator、ContextBudgetSnapshot、UncertaintyReserveBasisUnknown、ModelCapacitySnapshot
+  - backend/management/services/model/run_budget.py 可正常导入，_resolve_context_budget、ContextBudgetCalculator、ContextBudgetSnapshot、UncertaintyReserveBasisUnknown、ModelCapacitySnapshot
     可引用。
   - 使用 unittest.mock 替换 ContextBudgetCalculator.calculate_context_budget 与 tenant_config_manager.get_capacity_reserve_policy，不依赖真实模型记录或数据库。
   - 测试代码不得读取生产凭据，不使用真实模型 Token。
@@ -27,7 +27,7 @@ case:
       - 测试代码不得读取生产凭据。'
   steps:
   - order: 1
-    action: 导入 backend/agents/create_agent_info.py 的 _resolve_context_budget，并 mock tenant_config_manager.get_capacity_reserve_policy
+    action: 导入 backend/management/services/model/run_budget.py 的 _resolve_context_budget，并 mock tenant_config_manager.get_capacity_reserve_policy
       与 ContextBudgetCalculator.calculate_context_budget。
     expected: capacity_snapshot=None 时 _resolve_context_budget 返回 None，不触发 ContextBudgetCalculator 调用。
   - order: 2

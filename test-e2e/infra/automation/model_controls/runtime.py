@@ -15,9 +15,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from management.api.agent import agent as agent_app
 from runtime.api.agent import execution as agent_app_execution
-from management.api.skill import skill as skill_app
 from runtime.api.skill import creation as skill_app_creation
 from model_controls.database import database_fixture
 from model_controls.provider import Provider
@@ -98,8 +96,8 @@ def runtime_fixture(monkeypatch):
     provider = Provider()
     try:
         with database_fixture(monkeypatch, provider) as storage, mcp_server() as mcp_url, TemporaryDirectory(prefix="model-controls-workspaces-") as workspace:
-            from agents import create_agent_info
-            monkeypatch.setattr(create_agent_info, "AGENT_WORKSPACE_ROOT", workspace)
+            from management.services.agent.preparation import inputs
+            monkeypatch.setattr(inputs, "AGENT_WORKSPACE_ROOT", workspace)
             manager = ThreadManager("model-controls-case", runtime_thread_manager._policies)
             manager.start()
             for name, module in list(sys.modules.items()):
@@ -109,7 +107,7 @@ def runtime_fixture(monkeypatch):
             # Authentication is an external issuer boundary. RBAC, DAC, storage,
             # model resolution, capacity policy, services and SDK remain real.
             for name, module in list(sys.modules.items()):
-                if name.startswith(("utils.", "services.", "management.", "apps.", "permissions.", "tool_collection.")):
+                if name.startswith(("utils.", "services.", "management.", "runtime.", "apps.", "permissions.", "tool_collection.")):
                     if hasattr(module, "get_current_user_id"):
                         monkeypatch.setattr(module, "get_current_user_id", lambda *a, **k: (owner, tenant))
                     if hasattr(module, "get_current_user_info"):
@@ -120,8 +118,8 @@ def runtime_fixture(monkeypatch):
             old_permissions, old_initialized = rbac._ROLE_PERMISSIONS.copy(), rbac._INITIALIZED
             rbac.init_rbac()
             monkeypatch.setattr(nl2agent_service, "get_tenant_local_mcp_server", lambda _: mcp_url)
-            monkeypatch.setattr(agent_app, "ENABLE_AGENT_WORKBENCH", True)
-            monkeypatch.setattr(skill_app, "ENABLE_AGENT_WORKBENCH", True)
+            monkeypatch.setattr(agent_app_execution, "ENABLE_AGENT_WORKBENCH", True)
+            monkeypatch.setattr(skill_app_creation, "ENABLE_AGENT_WORKBENCH", True)
             from management.services.agent import execution as ordinary
             runs = []
             for module in (nl2agent_service, nl2skill_service, ordinary):
@@ -131,7 +129,7 @@ def runtime_fixture(monkeypatch):
                     async for event in _original(run_info, *args, **kwargs):
                         yield event
                 monkeypatch.setattr(module, "agent_run", observe)
-            original_run = agent_app.run_agent_stream
+            original_run = agent_app_execution.run_agent_stream
             async def traced_run(*args, **kwargs):
                 try:
                     return await original_run(*args, **kwargs)
@@ -139,7 +137,7 @@ def runtime_fixture(monkeypatch):
                     import traceback
                     traceback.print_exc()
                     raise
-            monkeypatch.setattr(agent_app, "run_agent_stream", traced_run)
+            monkeypatch.setattr(agent_app_execution, "run_agent_stream", traced_run)
 
             def respond(body):
                 messages = json.dumps(body["messages"])

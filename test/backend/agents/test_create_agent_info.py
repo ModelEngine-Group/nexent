@@ -572,37 +572,14 @@ _langchain_utils_mod.discover_langchain_modules = MagicMock(return_value=[])
 sys.modules["management.services.tool.langchain"] = _langchain_utils_mod
 setattr(_utils_pkg, "langchain_utils", _langchain_utils_mod)
 
-# Ensure real backend.agents.create_agent_info is available and uses our stubs
-backend_pkg = sys.modules.get("backend")
-if backend_pkg is None:
-    backend_pkg = types.ModuleType("backend")
-    backend_pkg.__path__ = [str((TEST_ROOT.parent) / "backend")]
-    sys.modules["backend"] = backend_pkg
-
-agents_pkg = sys.modules.get("backend.agents")
-if agents_pkg is None:
-    agents_pkg = types.ModuleType("backend.agents")
-    agents_pkg.__path__ = [str((TEST_ROOT.parent) / "backend" / "agents")]
-    sys.modules["backend.agents"] = agents_pkg
-    setattr(backend_pkg, "agents", agents_pkg)
-
-create_agent_info_path = (TEST_ROOT.parent / "backend" / "agents" / "create_agent_info.py")
-spec = importlib.util.spec_from_file_location(
-    "backend.agents.create_agent_info", create_agent_info_path
-)
-create_agent_info_module = importlib.util.module_from_spec(spec)
-sys.modules["backend.agents.create_agent_info"] = create_agent_info_module
-assert spec.loader is not None
-spec.loader.exec_module(create_agent_info_module)
-# Keep older patch targets available while those tests are migrated to the loader.
-setattr(agents_pkg, "create_agent_info", create_agent_info_module)
-
+# Import the canonical preparation owners using the isolated collaborators above.
 import management.services.agent.preparation.compiler as preparation_compiler
 import management.services.agent.preparation.inputs as input_preparation
 import management.services.agent.preparation.resources as resource_preparation
 import management.services.agent.preparation.run as run_preparation
 import management.services.agent.preparation.tools as tool_preparation
 import management.services.model.run_budget as model_budget
+import management.services.model.run_bindings as model_bindings
 
 preparation_compiler.get_agent_prompt_template = MagicMock()
 run_preparation.urljoin = MagicMock()
@@ -4061,7 +4038,7 @@ class TestCreateModelConfigList:
     """Tests for the create_model_config_list function"""
 
     def test_reasoning_helpers_filter_model_fields_and_resolve_effort(self):
-        module = create_agent_info_module
+        module = model_bindings
 
         assert module._is_thinking_enabled(None) is False
         assert module._is_thinking_enabled({"enable_thinking": True}) is True
@@ -4122,7 +4099,7 @@ class TestCreateModelConfigList:
             ) is None
 
     def test_reasoning_capability_resolver_delegates_to_catalog(self):
-        module = create_agent_info_module
+        module = model_bindings
         capability = {"status": "supported", "levels": ["low"], "default": "low"}
         loader = types.ModuleType("configs.model_catalog_loader")
         resolver = MagicMock(return_value=capability)
@@ -7563,7 +7540,7 @@ class TestDispatchProfileHitMetric:
         is None so agent dispatch works in deployments without OpenTelemetry.
         """
         with patch.object(
-            create_agent_info_module,
+            model_budget,
             "_capacity_dispatch_profile_hit_total",
             None,
         ):

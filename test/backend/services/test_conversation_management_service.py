@@ -56,7 +56,6 @@ agent_run_manager_mod = types.ModuleType("management.services.agent.lifecycle")
 mock_agent_run_manager = MagicMock()
 agent_run_manager_mod.agent_run_manager = mock_agent_run_manager
 agent_run_manager_mod.AgentRunManager = object
-sys.modules["backend.agents"] = types.ModuleType("backend.agents")
 sys.modules["management.services.agent.lifecycle"] = agent_run_manager_mod
 # Stub nexent.core.utils.observer ProcessType and MessageObserver used by conversation service
 observer_mod = types.ModuleType("nexent.core.utils.observer")

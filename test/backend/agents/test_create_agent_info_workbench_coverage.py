@@ -11,7 +11,6 @@ from test.backend.agents import test_create_agent_info as legacy
 from runtime.adapters.nexent import factory as runtime_factory
 
 
-create_agent_info = legacy.create_agent_info_module
 WorkbenchError = legacy.WorkbenchError
 
 

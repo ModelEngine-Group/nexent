@@ -566,7 +566,7 @@ except Exception:  # pragma: no cover - OTel is optional at runtime
 # failure (no monitoring impact); only the log line is deduped, so a global
 # catalog bug surfaces once per (model_id, error_type) instead of flooding
 # logs on every endpoint call. Same pattern as
-# `_warn_missing_capacity_once` in `backend/agents/create_agent_info.py`.
+# `_warn_missing_capacity_once` in `backend/management/services/model/run_budget.py`.
 _CAPACITY_SUGGESTION_ERROR_EMITTED: set = set()
 _CAPACITY_SUGGESTION_ERROR_LOCK = threading.Lock()
 
