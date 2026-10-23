@@ -18,7 +18,11 @@ export const extractFilenameFromContentDisposition = (
     }
   }
 
-  const regex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+  const regex =
+    /(?:^|;)\s*filename\s*=\s*(?:"((?:\\.|[^"\\\r\n])*)"|([^";\r\n]*))/i;
   const match = regex.exec(contentDisposition);
-  return match?.[1]?.replace(/['"]/g, "").trim() ?? null;
+  // Only double quotes delimit a quoted filename; apostrophes are literal.
+  return match?.[1] !== undefined
+    ? match[1].replace(/\\(.)/g, "$1")
+    : (match?.[2]?.trim() ?? null);
 };
