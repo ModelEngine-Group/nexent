@@ -158,6 +158,9 @@ vi.mock("@/components/ui/sidebar", () => ({
 vi.mock("@/hooks/model/useModelList", () => ({
   useModelList: () => ({ availableLlmModels: [], isLoading: false }),
 }));
+vi.mock("@/hooks/useConfig", () => ({
+  useConfig: () => ({ modelConfig: undefined }),
+}));
 vi.mock("@/components/providers/AuthorizationProvider", () => ({
   useAuthorizationContext: () => ({
     hasPermission: () => true,

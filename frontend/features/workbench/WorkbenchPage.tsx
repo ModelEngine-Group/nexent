@@ -43,6 +43,7 @@ import { WorkbenchConversationLayout } from "./components/WorkbenchConversationL
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import { useModelList } from "@/hooks/model/useModelList";
+import { useConfig } from "@/hooks/useConfig";
 import { withDefaultWorkbenchModel } from "./modelOptions";
 import { WorkbenchLoadingBoundary } from "./components/WorkbenchLoadingBoundary";
 import { selectWorkbenchModel } from "@/features/model-controls/modelOptions";
@@ -131,9 +132,15 @@ const HomeContent: FC = () => {
     conversationDetails,
   } = useWorkbenchSession();
   const { availableLlmModels, isLoading: isLoadingModels } = useModelList();
+  const { modelConfig } = useConfig();
   const effectiveWorkbenchConfig = useMemo(
-    () => withDefaultWorkbenchModel(workbenchState.config, availableLlmModels),
-    [workbenchState.config, availableLlmModels]
+    () =>
+      withDefaultWorkbenchModel(
+        workbenchState.config,
+        availableLlmModels,
+        modelConfig?.llm?.id
+      ),
+    [workbenchState.config, availableLlmModels, modelConfig?.llm?.id]
   );
   const { t, i18n } = useTranslation();
   const { hasPermission, user } = useAuthorizationContext();
