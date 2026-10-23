@@ -498,22 +498,6 @@ export default function AddMcpServiceLocalSection({
                         </Form.Item>
                       </div>
                       {renderDescriptionInput()}
-                      <div className="flex items-center gap-2">
-                        <Switch
-                          checked={draft.sslVerify !== false}
-                          onChange={(checked) => patchDraft({ sslVerify: checked })}
-                        />
-                        <span>{t("mcpConfig.openapiService.form.sslVerifyLabel")}</span>
-                      </div>
-                      <Alert
-                        type={draft.sslVerify === false ? "warning" : "info"}
-                        showIcon
-                        message={t(
-                          draft.sslVerify === false
-                            ? "mcpConfig.openapiService.form.sslVerifyWarning"
-                            : "mcpConfig.openapiService.form.sslVerifyHint"
-                        )}
-                      />
                       <Form.Item
                         name="customHeaders"
                         className="mb-0"
@@ -544,6 +528,22 @@ export default function AddMcpServiceLocalSection({
                       <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>
                         {t("mcpConfig.openApiToMcp.form.apiJsonHint")}
                       </span>
+                      <div className="flex items-center gap-2 mt-3">
+                        <Switch
+                          checked={draft.sslVerify !== false}
+                          onChange={(checked) => patchDraft({ sslVerify: checked })}
+                        />
+                        <span>{t("mcpConfig.openapiService.form.sslVerifyLabel")}</span>
+                      </div>
+                      <Alert
+                        type={draft.sslVerify === false ? "warning" : "info"}
+                        showIcon
+                        message={t(
+                          draft.sslVerify === false
+                            ? "mcpConfig.openapiService.form.sslVerifyWarning"
+                            : "mcpConfig.openapiService.form.sslVerifyHint"
+                        )}
+                      />
                     </>
                   ) : null}
 
