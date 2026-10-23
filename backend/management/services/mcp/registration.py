@@ -14,6 +14,7 @@ async def add_remote_mcp_server_list(
     container_id: str | None = None,
     authorization_token: str | None = None,
     custom_headers: dict | None = None,
+    ssl_verify: bool = True,
     source: str | None = "local",
     container_port: int | None = None,
     group_ids: str | None = None,
@@ -183,6 +184,7 @@ async def add_mcp_service(
                     service_description=description,
                     auth_enabled=bool(custom_headers),
                     headers_template=custom_headers,
+                    ssl_verify=ssl_verify,
                     force_update=True,
                 )
                 _refresh_openapi_services_in_mcp(tenant_id)

@@ -115,6 +115,10 @@ class MCPUpdateRequest(BaseModel):
     custom_headers: Optional[Dict[str, Any]] = Field(
         None, description="Custom HTTP headers as JSON object"
     )
+    ssl_verify: bool = Field(
+        default=True,
+        description="Whether to verify TLS certificates for API-type MCP services",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +149,10 @@ class AddMcpServiceRequest(BaseModel):
     )
     custom_headers: Optional[Dict[str, Any]] = Field(
         None, description="Custom HTTP headers as JSON object"
+    )
+    ssl_verify: Optional[bool] = Field(
+        None,
+        description="Whether to verify TLS certificates for API-type MCP services",
     )
     container_config: Optional[Dict[str, Any]] = Field(
         None, description="Container configuration"
