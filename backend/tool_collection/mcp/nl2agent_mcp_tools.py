@@ -3,6 +3,7 @@
 """Define and implement the internal Local MCP tools used by NL2Agent."""
 
 import json
+import keyword
 import logging
 import re
 import unicodedata
@@ -16,7 +17,6 @@ from pydantic import (
 )
 
 from consts.exceptions import UnauthorizedError
-from consts.model import AgentInfoRequest
 from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 logger = logging.getLogger(__name__)
@@ -398,7 +398,12 @@ class AgentDraftFields(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    name: str | None = None
+    name: Annotated[str, StringConstraints(strip_whitespace=False)] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+        description="A valid Python identifier, not a Python keyword; no fixed suffix is required.",
+    )
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = None
     enable_protocol_repair_retry: StrictBool | None = None
@@ -411,11 +416,13 @@ class AgentDraftFields(BaseModel):
         default=None, max_length=6, description="Array of suggested question strings; not a newline-delimited string."
     )
 
-    @field_validator("name", mode="plain", json_schema_input_type=str | None)
+    @field_validator("name")
     @classmethod
-    def validate_name_as_agent_edit_request(cls, value: Any) -> str | None:
-        """Reuse backend name validation without the creator's string trimming."""
-        return AgentInfoRequest(name=value).name
+    def validate_name_as_runtime_identifier(cls, value: str) -> str:
+        """Match backend import and runtime identifier rules without trimming names."""
+        if not value.isidentifier() or keyword.iskeyword(value):
+            raise ValueError("Agent name must be a valid Python identifier and not a Python keyword")
+        return value
 
     @model_validator(mode="before")
     @classmethod

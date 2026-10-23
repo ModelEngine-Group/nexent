@@ -3,10 +3,10 @@ change:
   change_id: NL2A-NAME-VALIDATION-20261022
   change_type: bugfix
   bug_id: NL2A-NAME-VALIDATION-20261022
-  title: Align NL2Agent name validation with ordinary backend requests
-  description: Remove creator-only name constraints and reuse AgentInfoRequest validation.
+  title: Align NL2Agent name validation with backend runtime and storage
+  description: Restore explicit name constraints using backend import/runtime identifier rules and the 100-character storage limit.
   observed_behavior: The MCP patch model rejects agent_170 before reaching the draft save service because it requires an _assistant suffix and additional format/length constraints.
-  expected_behavior: Name values use the ordinary backend request validation; existing authorization, patch allowlist, initial naming, duplicate and persistence rules remain unchanged.
+  expected_behavior: Name values are 1–100-character Python identifiers excluding Python keywords, with Unicode allowed and no required suffix; existing authorization, patch allowlist, initial naming, duplicate and persistence rules remain unchanged.
   escaped_stage: D1
   coverage_gap:
     type: missing_boundary
@@ -25,10 +25,10 @@ change:
   traditional_ut:
     decision: strengthen
     behaviors:
-    - Backend-accepted name strings including suffix-free, non-identifier, long and whitespace names pass unchanged
+    - Valid Python identifiers including Unicode and suffix-free names of 1–100 characters pass unchanged; empty, whitespace, punctuation, digit-leading, keyword and overlong names fail without writes
     - Non-string names, forbidden fields and invalid patches remain rejected
     - Actual MCP-to-save-service orchestration retains target, authorization, duplicate and write behavior
-    - Rendered zh/en prompts and examples no longer impose creator-only naming constraints
+    - Tool schema exposes the 1–100-character bounds; rendered zh/en prompts and examples match runtime naming rules
     test_selectors:
     - test/backend/services/test_nl2agent_name_validation.py
     - test/backend/services/test_nl2agent_service.py
@@ -43,3 +43,5 @@ change:
     User selected exact ordinary backend name-field validation after reviewing the 30/60-character discrepancy.
     AGT-003 contract metadata is synchronized without claiming its legacy broad real-model script implements detailed naming assertions.
     Earlier frontend transport patch and dedicated artifacts were withdrawn; unrelated changes are preserved.
+
+    Follow-up 2026-10-23 restores explicit constraints per user request, superseding request-DTO-only parity; ordinary edit DTO and frontend guards remain unchanged.

@@ -30,10 +30,10 @@ case:
     expected: 功能结果与代码契约一致，测试过程无未处理异常。
   - order: 2
     action: 通过实际 API 创建一个带唯一 RunID 后缀的临时 Agent 草稿（name 留空），记录 agent_id。
-    expected: 空 name 草稿仅根据 display_name 生成并保存一次变量名，使用与普通后端 Agent 编辑请求相同的 name 字段校验，不要求固定后缀或额外格式/长度限制；重复 name 返回 retryable
+    expected: 空 name 草稿仅根据 display_name 生成并保存一次变量名，使用后端导入和运行时的合法 Python 标识符规则，排除 Python 关键字，长度为 1–100 字符，支持 Unicode 且不要求固定后缀；重复 name 返回 retryable
       的 agent_name_duplicate，已设置 name 返回 agent_name_already_set。
   - order: 3
-    action: 发起 NL2Agent 核心流程（full_generation）：先触发空 name 初始化，断言模型仅按 display_name 生成变量名并保存一次，变量名使用普通后端 Agent 编辑请求的 name 字段校验，保存后 draft.name 非空且 display_name 不变。
+    action: 发起 NL2Agent 核心流程（full_generation）：先触发空 name 初始化，断言模型仅按 display_name 生成变量名并保存一次，变量名使用后端导入和运行时的 Python 标识符规则并排除关键字，长度为 1–100 字符，保存后 draft.name 非空且 display_name 不变。
     expected: description 与 prompt 为第一人称；无资源需绑定或选中绑定集合为空时返回 binding_required=false，流程跳过绑定卡直接进入 prompt 生成，不出现空的 installed_resource_binding
       卡。
   - order: 4
@@ -63,7 +63,7 @@ case:
     expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
   expected_results:
   - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 空 name 草稿仅根据 display_name 生成并保存一次变量名，使用与普通后端 Agent 编辑请求相同的 name 字段校验，不要求固定后缀或额外格式/长度限制；重复 name 返回 retryable 的 agent_name_duplicate，已设置
+  - 空 name 草稿仅根据 display_name 生成并保存一次变量名，使用后端导入和运行时的合法 Python 标识符规则，排除 Python 关键字，长度为 1–100 字符，支持 Unicode 且不要求固定后缀；重复 name 返回 retryable 的 agent_name_duplicate，已设置
     name 返回 agent_name_already_set。
   - description 与 prompt 为第一人称；无资源需绑定或选中绑定集合为空时返回 binding_required=false，流程跳过绑定卡直接进入 prompt 生成，不出现空的 installed_resource_binding
     卡。
@@ -90,7 +90,7 @@ case:
   - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
   observations:
   - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 空 name 草稿仅根据 display_name 生成并保存一次变量名，使用与普通后端 Agent 编辑请求相同的 name 字段校验，不要求固定后缀或额外格式/长度限制；重复 name 返回 retryable 的 agent_name_duplicate，已设置
+  - 空 name 草稿仅根据 display_name 生成并保存一次变量名，使用后端导入和运行时的合法 Python 标识符规则，排除 Python 关键字，长度为 1–100 字符，支持 Unicode 且不要求固定后缀；重复 name 返回 retryable 的 agent_name_duplicate，已设置
     name 返回 agent_name_already_set。
   - description 与 prompt 为第一人称；无资源需绑定或选中绑定集合为空时返回 binding_required=false，流程跳过绑定卡直接进入 prompt 生成，不出现空的 installed_resource_binding
     卡。

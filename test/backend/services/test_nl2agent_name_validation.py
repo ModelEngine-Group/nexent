@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Name validation parity between the creator tool and ordinary Agent edits."""
+"""Name constraints aligned with backend import, runtime and storage."""
 
 import ast
 import json
@@ -19,26 +19,32 @@ from tool_collection.mcp import nl2agent_mcp_tools as tools
 
 
 @pytest.mark.parametrize("name", [
-    "agent_170", "my_agent", "research_assistant", "9agent", "with-dash", "中文助手",
-    "a" * 31, "a" * 61, "a" * 101, "", "  agent_170 \t",
+    "a", "_", "agent_170", "my_agent", "research_assistant", "中文助手",
+    "a" * 30, "a" * 31, "a" * 60, "a" * 61, "a" * 100,
 ])
-def test_name_uses_backend_request_validation_without_creator_constraints(name):
-    expected = AgentInfoRequest(name=name).name
-    assert tools.AgentDraftFields(name=name).name == expected
+def test_name_accepts_runtime_identifiers_within_storage_limit(name):
+    assert tools.AgentDraftFields(name=name).name == name
+    assert CoreAgent._validate_name(None, name) == name
 
 
-@pytest.mark.parametrize("name", [123, True, [], {}, b"invalid\xff"])
-def test_name_rejects_the_same_invalid_types_as_backend_request(name):
-    with pytest.raises(ValidationError):
-        AgentInfoRequest(name=name)
+@pytest.mark.parametrize("name", [
+    "", " ", "9agent", "with-dash", "with space", "agent\n", "  agent_170 \t",
+    "class", "for", "None", "True", "a" * 101,
+    123, True, [], {}, b"invalid\xff",
+])
+def test_name_rejects_invalid_runtime_names_and_types(name):
     with pytest.raises(ValidationError):
         tools.AgentDraftFields(name=name)
 
 
-def test_name_schema_retains_backend_type_without_local_constraints():
+def test_name_schema_exposes_runtime_and_storage_constraints():
     actual = tools.AgentDraftFields.model_json_schema()["properties"]["name"]
-    expected = AgentInfoRequest.model_json_schema()["properties"]["name"]
-    assert actual == expected
+    string_schema = next(item for item in actual["anyOf"] if item["type"] == "string")
+    assert string_schema["minLength"] == 1
+    assert string_schema["maxLength"] == 100
+    assert "Python identifier" in actual["description"]
+    assert "keyword" in actual["description"]
+    assert "pattern" not in string_schema
     assert tools.AgentDraftFields(description="Keep name").model_dump(exclude_unset=True) == {
         "description": "Keep name",
     }
@@ -62,7 +68,7 @@ def draft_boundary(mocker):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["agent_170", "my_agent", "  agent_170 \t", "中文助手", "a" * 61])
+@pytest.mark.parametrize("name", ["agent_170", "my_agent", "中文助手", "a" * 100])
 async def test_mcp_save_forwards_backend_accepted_name_unchanged(draft_boundary, name):
     authorize, _catalog, update = draft_boundary
     result = await tools.save_agent_draft_fields(170, {"name": name})
@@ -75,6 +81,16 @@ async def test_mcp_save_forwards_backend_accepted_name_unchanged(draft_boundary,
     }
     authorize.assert_called_once_with(agent_id=170, tenant_id="tenant-a", user_id="owner")
     update.assert_called_once_with(agent_id=170, tenant_id="tenant-a", fields={"name": name})
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["class", "9agent", "with-dash", " agent ", "", "a" * 101])
+async def test_mcp_save_rejects_invalid_names_without_writing(draft_boundary, name):
+    _authorize, _catalog, update = draft_boundary
+    result = json.loads(await tools.save_agent_draft_fields(170, {"name": name}))
+    assert result["status"] == "error"
+    assert result["code"] == "invalid_agent_fields"
+    update.assert_not_called()
 
 
 @pytest.mark.asyncio
