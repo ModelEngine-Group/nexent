@@ -51,6 +51,9 @@ import {
 } from "./last-chat-view";
 import { ConversationSidebarProvider } from "@/components/common/ConversationSidebarProvider";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { ConversationModelControlsProvider } from "@/features/model-controls/ConversationModelControlsProvider";
+import { ConversationLoadingBoundary } from "./components/ConversationLoadingBoundary";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import log from "@/lib/logger";
@@ -99,6 +102,7 @@ export default function Home() {
 }
 
 const PersistentChatHome: FC = () => {
+  const { user } = useAuthorizationContext();
   useConversationRouteGuard("agent_chat");
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [requestedThreadId, setRequestedThreadId] = useState<
@@ -205,16 +209,20 @@ const PersistentChatHome: FC = () => {
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <TooltipProvider>
-        <HomeContent
-          runtime={runtime}
-          selectedAgent={selectedAgent}
-          setSelectedAgent={setSelectedAgent}
-          isLoadingAgents={isLoadingAgents}
-          agents={agents}
-          onAgentSelected={handleAgentSelected}
-          onBack={handleBack}
-          isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
-        />
+        <ConversationModelControlsProvider
+          key={JSON.stringify([user?.tenantId, user?.id])}
+        >
+          <HomeContent
+            runtime={runtime}
+            selectedAgent={selectedAgent}
+            setSelectedAgent={setSelectedAgent}
+            isLoadingAgents={isLoadingAgents}
+            agents={agents}
+            onAgentSelected={handleAgentSelected}
+            onBack={handleBack}
+            isDictationConfigured={isDictationConfigured(modelConfig?.stt)}
+          />
+        </ConversationModelControlsProvider>
       </TooltipProvider>
     </AssistantRuntimeProvider>
   );
@@ -288,7 +296,6 @@ const HomeContent: FC<{
 
   // All hooks must be called before any early returns
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
-  const isLoading = useAuiState((s) => s.threads.isLoading);
   const isThreadLoading = useAuiState((s) => s.thread.isLoading);
   const isThreadRunning = useAuiState((s) => s.thread.isRunning);
   useEffect(() => {
@@ -297,8 +304,8 @@ const HomeContent: FC<{
     }
   }, [isThreadRunning, runtimeMainThreadId]);
   const threadItems = useAuiState((s) => s.threads.threadItems);
-  const ready =
-    runtimeMainThreadId !== undefined && !isLoading && !isThreadLoading;
+  // Sidebar metadata reloads must not unmount the active chat and composer.
+  const ready = runtimeMainThreadId !== undefined && !isThreadLoading;
 
   // Maintain thread ID state to pass conversation_id to the adapter reliably
   const [activeThreadId, setActiveThreadId] = useState<string | undefined>(
@@ -1025,43 +1032,38 @@ const HomeContent: FC<{
       </div>
 
       <div className="flex min-h-0 flex-1 min-w-0 flex-col">
-        <div className="min-h-0 flex-1">
-          {ready ? (
-            <Chat
-              newChatDesign
-              generatedTitle={
-                activeThreadId ? generatedTitles.get(activeThreadId) : undefined
-              }
-              conversationId={
-                activeConversationId && Number(activeConversationId) > 0
-                  ? Number(activeConversationId)
-                  : undefined
-              }
-              isLoadingAgents={isLoadingAgents}
-              selectedAgent={selectedAgent}
-              onAgentSelected={handleAgentSelectedFromLanding}
-              onBack={handleThreadBack}
-              chatMode={chatMode}
-              onChatModeChange={handleChatModeChange}
-              composerTools={
-                <>
-                  <ComposerAttachment />
-                  <ComposerDictation configured={isDictationConfigured} />
-                </>
-              }
-              knowledgeScope={knowledgeScope}
-              knowledgePreview={knowledgePreview}
-              knowledgeCapabilities={knowledgeCapabilities}
-              onKnowledgeScopeChange={handleKnowledgeScopeChange}
-              runtimeMetadata={runtimeMetadata}
-              onRuntimeMetadataChange={handleRuntimeMetadataChange}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-              {t("chat.threadList.loading")}
-            </div>
-          )}
-        </div>
+        <ConversationLoadingBoundary loading={!ready}>
+          <Chat
+            readOnly={!ready}
+            newChatDesign
+            generatedTitle={
+              activeThreadId ? generatedTitles.get(activeThreadId) : undefined
+            }
+            conversationId={
+              activeConversationId && Number(activeConversationId) > 0
+                ? Number(activeConversationId)
+                : undefined
+            }
+            isLoadingAgents={isLoadingAgents}
+            selectedAgent={selectedAgent}
+            onAgentSelected={handleAgentSelectedFromLanding}
+            onBack={handleThreadBack}
+            chatMode={chatMode}
+            onChatModeChange={handleChatModeChange}
+            composerTools={
+              <>
+                <ComposerAttachment />
+                <ComposerDictation configured={isDictationConfigured} />
+              </>
+            }
+            knowledgeScope={knowledgeScope}
+            knowledgePreview={knowledgePreview}
+            knowledgeCapabilities={knowledgeCapabilities}
+            onKnowledgeScopeChange={handleKnowledgeScopeChange}
+            runtimeMetadata={runtimeMetadata}
+            onRuntimeMetadataChange={handleRuntimeMetadataChange}
+          />
+        </ConversationLoadingBoundary>
       </div>
     </div>
   );

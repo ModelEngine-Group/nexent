@@ -107,11 +107,9 @@ def static_config_problems(home: Path, records: list[dict], *, repo: Path) -> li
             for name in ("NEXENT_TEST_ASSETS_CONTAINER_HOST", "NEXENT_TEST_MCP_CONTAINER_HOST"):
                 if not daily.get(name):
                     problems.append(f"daily.env {name} is required by selected anchored cases")
-    # ext-knowledge attach: validate the machine-local configuration when it
-    # exists (missing config is reported at attach time, only by cases that
-    # actually declare an ext-served logical service).
-    from ext_attach import config_problems
-    problems.extend(config_problems(home, repo))
+    # ext-knowledge is a suite-owned controlled service, so there is no
+    # machine-local attach config to validate. The optional external YAML is
+    # only consumed by the operator CLI, never by the suite run.
     return sorted(set(problems))
 
 

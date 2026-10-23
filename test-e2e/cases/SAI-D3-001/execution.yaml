@@ -7,6 +7,11 @@ implementations:
   profiles:
   - mock
 timeout_seconds: 600
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
 acceptance_bindings:
   AC-01:
   - test_SAI_D3_001_real_kernel_isolation

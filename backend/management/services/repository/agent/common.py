@@ -154,7 +154,7 @@ def _to_summary_item(
 
 
 def _normalize_listing_tags(tags: Any) -> List[str]:
-    """Trim, deduplicate, and validate marketplace listing tags."""
+    """Trim, deduplicate, and validate optional marketplace listing tags."""
     if not isinstance(tags, list):
         raise ValueError("tags must be a list of strings")
 
@@ -175,15 +175,17 @@ def _normalize_listing_tags(tags: Any) -> List[str]:
         seen.add(tag)
         normalized.append(tag)
 
-    if not normalized:
-        raise ValueError("tags must contain at least one non-empty tag")
     if len(normalized) > _MAX_LISTING_TAGS:
         raise ValueError(f"tags must contain at most {_MAX_LISTING_TAGS} items")
     return normalized
 
 
 def _validate_card_fields(repository_data: Dict[str, Any]) -> None:
-    """Validate marketplace card fields required for listing submission."""
+    """Validate marketplace card fields for listing submission.
+
+    Tags are optional: a listing may be submitted without any tag. When tags
+    are provided they are normalized and bounded by the listing limits.
+    """
     icon_url = repository_data.get("icon_url")
     if icon_url is not None and (
         not isinstance(icon_url, str)
@@ -195,9 +197,7 @@ def _validate_card_fields(repository_data: Dict[str, Any]) -> None:
         )
 
     tags = repository_data.get("tags")
-    if tags is None:
-        raise ValueError("tags is required for marketplace listing submission")
-    repository_data["tags"] = _normalize_listing_tags(tags)
+    repository_data["tags"] = _normalize_listing_tags([] if tags is None else tags)
 
 
 def _reset_repository_peer_statuses(

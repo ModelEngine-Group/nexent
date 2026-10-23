@@ -15,6 +15,8 @@ import {
   GitBranch,
   MoreHorizontal,
   Network,
+  Send,
+  Settings2,
   Trash2,
 } from "lucide-react";
 
@@ -40,12 +42,16 @@ export default function AgentConfigActions({
   agentName: agentNameProp,
   readOnly,
   variant = "buttons",
+  onConfigure,
+  onPublish,
   onManageVersions,
 }: {
   agentId?: number | null;
   agentName?: string;
   readOnly?: boolean;
   variant?: "buttons" | "menu" | "table";
+  onConfigure?: (agentId: number) => void;
+  onPublish?: (agentId: number) => void;
   onManageVersions?: (agentId: number) => void;
 }) {
   const { t } = useTranslation("common");
@@ -279,7 +285,31 @@ export default function AgentConfigActions({
   };
 
   const disabled = agentId === null;
-  const menuItems: MenuProps["items"] = [
+  const menuItems: NonNullable<MenuProps["items"]> = [];
+  if (onConfigure) {
+    menuItems.push({
+      key: "configure",
+      icon: <Settings2 className="size-3.5" />,
+      label: t("agentConfig.list.configure"),
+      disabled,
+      onClick: () => {
+        if (agentId !== null) onConfigure(agentId);
+      },
+    });
+  }
+  if (onPublish) {
+    menuItems.push({
+      key: "publish",
+      icon: <Send className="size-3.5" />,
+      label: t("agentConfig.list.publish"),
+      disabled: disabled || isReadOnly,
+      onClick: () => {
+        if (agentId !== null) onPublish(agentId);
+      },
+    });
+  }
+  if (onConfigure || onPublish) menuItems.push({ type: "divider" });
+  menuItems.push(
     {
       key: "copy",
       icon: <Copy className="size-3.5" />,
@@ -332,8 +362,8 @@ export default function AgentConfigActions({
           }),
           onOk: handleDelete,
         }),
-    },
-  ];
+    }
+  );
 
   const handleDeleteAction = () =>
     confirm.confirm({

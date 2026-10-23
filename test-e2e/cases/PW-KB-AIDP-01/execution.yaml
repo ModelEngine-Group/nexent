@@ -11,9 +11,10 @@ implementations:
   selector: PW-KB-AIDP-01
 notes: >-
   Local and AIDP execution groups are mutually exclusive by deployment
-  configuration. The journey attaches the ext-knowledge mock through the
-  plain required_mock_services path; the attach evidence (identity, lock,
-  reset) is recorded in runtime/ext-knowledge-attach.json.
+  configuration. The journey uses the suite-owned ext-knowledge mock started
+  through the plain required_mock_services path; health/reset evidence is
+  recorded in runtime/ext-knowledge-attach.json. No machine-local attach
+  YAML, identity or lock is required.
 acceptance_bindings:
   AC-01:
   - PW-KB-AIDP-01

@@ -223,23 +223,27 @@ def worker(repo, home, record, directory, settings):
         preparation_log = log
         outcome = "TIMEOUT" if code == 124 else "BLOCKED"
         raise RuntimeError("Preparation failed; inspect " + str(log.relative_to(directory)))
-    services = controlled_services(repo, directory, env, bool((review or {}).get("anchors")))
+    required_mock_services = record["execution"].get("required_mock_services") or []
+    services = controlled_services(
+        repo, directory, env, bool((review or {}).get("anchors")),
+        required_mock_services,
+    )
     services_started = False
-    # ext-knowledge mock attach runs BEFORE any preparation (including the
-    # controlled test-assets services): it only validates, locks and resets a
-    # pre-deployed batch-owned instance; the suite never starts or stops the
-    # mock's Compose stack.
+    # The ext-knowledge mock is a suite-owned controlled service. Starting it
+    # here (and stopping it in the finally block) means cases no longer need a
+    # machine-local attach YAML, identity or cross-batch lock. ExtKnowledgeAttach
+    # still performs the per-case health check and reset over HTTP.
     ext = ExtKnowledgeAttach(
         repo, home, directory, env,
-        (record["execution"].get("required_mock_services") or []),
+        required_mock_services,
         record["case_id"], record,
     )
     ext_attached = False
     try:
-        ext.attach()
-        ext_attached = True
         services.__enter__()
         services_started = True
+        ext.attach()
+        ext_attached = True
         if (review or {}).get("anchors"):
             code = run_logged([sys.executable, str(automation / "prepare_anchor_assets.py")], repo, env,
                           directory / "logs/prepare-anchors.log", settings["command_timeout_seconds"])

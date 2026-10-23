@@ -27,11 +27,13 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
   let origin = 0;
   let pollObserved = false;
   const draft = page.getByRole("textbox", { name: "对话输入", exact: true });
+  let draftNode: Awaited<ReturnType<typeof draft.elementHandle>> = null;
   await contract.precondition(
     contract.expectedIds("preconditions")[0],
     async () => {
       state = await prepareWorkbench(page, 1, { histories });
       await expect(draft).toBeVisible();
+      draftNode = await draft.elementHandle();
       await expect(
         page.getByText("Activity control 0", { exact: true }),
       ).toBeVisible();
@@ -53,13 +55,19 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
     await expect(
       page.getByText(automated.conversation_title, { exact: true }),
     ).toBeVisible({ timeout: 15_000 });
-    const oldPosition = await page
-      .getByText(automated.conversation_title, { exact: true })
-      .boundingBox();
-    const controlPosition = await page
-      .getByText("Activity control 0", { exact: true })
-      .boundingBox();
-    expect(oldPosition!.y).toBeLessThan(controlPosition!.y);
+    await expect
+      .poll(async () => {
+        const oldPosition = await page
+          .getByText(automated.conversation_title, { exact: true })
+          .boundingBox();
+        const controlPosition = await page
+          .getByText("Activity control 0", { exact: true })
+          .boundingBox();
+        return Boolean(
+          oldPosition && controlPosition && oldPosition.y < controlPosition.y,
+        );
+      })
+      .toBe(true);
     await expect(draft).toHaveValue(
       "Keep this draft while automation updates another history",
     );
@@ -82,7 +90,9 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
         const oldPosition = await page
           .getByText(automated.conversation_title, { exact: true })
           .boundingBox();
-        return controlPosition!.y < oldPosition!.y;
+        return Boolean(
+          controlPosition && oldPosition && controlPosition.y < oldPosition.y,
+        );
       })
       .toBe(true);
     await expect(
@@ -92,11 +102,12 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
       "Keep this draft while automation updates another history",
     );
   });
-  for (const id of contract.expectedIds("assertions")) {
+  for (const id of contract.expectedIds("assertions").slice(0, 2)) {
     await contract.assertion(id, async () => {
       expect(pollObserved).toBe(true);
       expect(page.url()).toBe(originalUrl);
       expect(await page.evaluate(() => performance.timeOrigin)).toBe(origin);
+      expect(await draftNode!.evaluate((node) => node.isConnected)).toBe(true);
       await expect(draft).toHaveValue(
         "Keep this draft while automation updates another history",
       );
@@ -110,4 +121,69 @@ journey("CHAT-ACTIVITY-D4-001", async ({ page, contract }) => {
       ).toBe(false);
     });
   }
+  const firstQuestion = "First persistence must retain this chat";
+  const firstAnswer = "Controlled first-run response";
+  const firstTitle = "First persisted Workbench history";
+  let runs = 0;
+  await contract.step(contract.expectedIds("steps")[2], async () => {
+    await page.route("**/api/conversation/generate_title", (route) =>
+      route.fulfill({ json: { code: 0, data: firstTitle } }),
+    );
+    await page.route("**/api/conversation/1303", (route) =>
+      route.fulfill({
+        json: {
+          code: 0,
+          data: [
+            {
+              conversation_id: 1303,
+              message: [],
+              workbench_config_version: 1,
+              workbench_config: {
+                schema_version: 3,
+                mode: "generic_chat",
+                model_id: 1,
+                generation_config: { deep_thinking: false },
+                agent_mounts: [],
+                skill_mounts: [],
+              },
+            },
+          ],
+        },
+      }),
+    );
+    await page.route("**/api/agent/run", async (route) => {
+      runs++;
+      const request = route.request().postDataJSON();
+      expect(request.query).toBe(firstQuestion);
+      expect(request.conversation_id).toBeUndefined();
+      histories.unshift({
+        conversation_id: 1303,
+        conversation_title: firstTitle,
+        create_time: Date.now(),
+        update_time: Date.now(),
+        last_activity_time: Date.now(),
+      });
+      await route.fulfill({
+        contentType: "text/event-stream",
+        headers: { conversation_id: "1303", "X-Workbench-Config-Version": "1" },
+        body: `data: ${JSON.stringify({ type: "final_answer", content: firstAnswer })}\n\n`,
+      });
+    });
+    await draft.fill(firstQuestion);
+    await draft.press("Enter");
+    await expect(page.getByText(firstAnswer, { exact: true })).toBeVisible();
+    await expect(
+      page.getByText(firstTitle, { exact: true }).first(),
+    ).toBeVisible({ timeout: 15_000 });
+  });
+  await contract.assertion(contract.expectedIds("assertions")[2], async () => {
+    expect(runs).toBe(1);
+    expect(await draftNode!.evaluate((node) => node.isConnected)).toBe(true);
+    expect(await page.evaluate(() => performance.timeOrigin)).toBe(origin);
+    await expect(page.getByText(firstQuestion, { exact: true })).toBeVisible();
+    await expect(page.getByText(firstAnswer, { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: new RegExp(firstTitle) }).first(),
+    ).toBeVisible();
+  });
 });

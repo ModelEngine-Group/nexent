@@ -8,3 +8,8 @@ acceptance_bindings:
   AC-01: [test_unavailable_and_stream_failure_never_fall_back]
   AC-02: [test_cancel_retry_rejects_delayed_old_provider_output]
 timeout_seconds: 240
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
