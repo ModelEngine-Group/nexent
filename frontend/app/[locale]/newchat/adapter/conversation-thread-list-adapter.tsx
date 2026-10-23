@@ -1784,7 +1784,7 @@ export const createConversationThreadListAdapter = (
       let pinnedMetadata: RemoteThreadMetadata[] = [];
       if (after === undefined) {
         prefetchedConversationIds.clear();
-        if (conversationType === "workbench" && pinStorageKey) {
+        if (pinStorageKey) {
           const loadedIds = new Set(
             items.map((item) => String(item.conversation_id))
           );
@@ -1792,6 +1792,10 @@ export const createConversationThreadListAdapter = (
             const pins = await loadPins();
             if (currentGeneration !== generation) return { threads: [] };
             pinnedMetadata = pins.items
+              .filter(
+                (item) =>
+                  (item.conversation_type ?? "workbench") === conversationType
+              )
               .filter((item) => !loadedIds.has(String(item.conversation_id)))
               .map(toRemoteThreadMetadata);
             for (const item of pinnedMetadata)
