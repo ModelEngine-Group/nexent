@@ -1,0 +1,66 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: SEC-04
+  feature_id: V5-SEC-04
+  business_rule_ids:
+  - V5-SEC-04-RULE-01
+  title: Token/API key/secret泄露
+  type: SECURITY
+  priority: P0
+  status: active
+  automation: automated
+  objective: API Key、OAuth token、MCP/A2A credential不进入日志/错误/列表
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/northbound.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/northbound.yaml'
+  steps:
+  - order: 1
+    action: 使用本地隔离账号/资源准备“Token/API key/secret泄露”正常基线，记录资源ID和初始状态。
+    expected: 除显式一次性创建响应外无明文secret；日志全量扫描无secret。
+  - order: 2
+    action: 触发成功/失败/500，抓取HTTP响应与测试日志；检查列表掩码、创建后secret生命周期。
+    expected: 除显式一次性创建响应外无明文secret；日志全量扫描无secret。
+  - order: 3
+    action: 所有越权/攻击请求必须直接命中真实本地 API/浏览器入口，不能只检查按钮隐藏。
+    expected: 除显式一次性创建响应外无明文secret；日志全量扫描无secret。
+  - order: 4
+    action: 每个攻击变体执行后重新检查数据库/对象存储/会话状态，确认失败请求无副作用。
+    expected: 除显式一次性创建响应外无明文secret；日志全量扫描无secret。
+  - order: 5
+    action: 扫描 HTTP 响应、backend/frontend 日志、Playwright trace 中是否出现 secret/内部路径/敏感堆栈。
+    expected: 除显式一次性创建响应外无明文secret；日志全量扫描无secret。
+  - order: 6
+    action: 保存脱敏请求响应、失败截图/trace（如有UI）、资源前后状态到当次 run 目录。
+    expected: 除显式一次性创建响应外无明文secret；日志全量扫描无secret。
+  expected_results:
+  - 除显式一次性创建响应外无明文secret；日志全量扫描无secret。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 5
+  risk_type: SECURITY
+  risk: API Key、OAuth token、MCP/A2A credential不进入日志/错误/列表
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/northbound.yaml'
+  metrics:
+  - 除显式一次性创建响应外无明文secret；日志全量扫描无secret。
+  thresholds:
+  - 除显式一次性创建响应外无明文secret；日志全量扫描无secret。
+  recovery_expectations:
+  - 除显式一次性创建响应外无明文secret；日志全量扫描无secret。

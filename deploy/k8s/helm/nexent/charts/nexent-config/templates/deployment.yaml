@@ -52,8 +52,13 @@ spec:
             - configMapRef:
                 name: nexent-config
             - secretRef:
+                name: nexent-env
+            - secretRef:
+                name: nexent-monitoring-env
+            - secretRef:
                 name: nexent-secrets
           env:
+{{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "migrate"
             - name: DEPLOYMENT_VERSION

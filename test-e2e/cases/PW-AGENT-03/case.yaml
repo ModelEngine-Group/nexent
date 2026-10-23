@@ -1,0 +1,95 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-AGENT-03
+  feature_id: V5-PW-AGENT-03
+  business_rule_ids:
+  - V5-PW-AGENT-03-RULE-01
+  title: 工具管理与技能管理 Tools+Skills选择→autosave→Debug真实调用
+  type: E2E
+  priority: P0
+  status: active
+  automation: automated
+  objective: 验证工具/技能绑定UI到真实运行。
+  preconditions:
+  - 本用例资产注册表中的READY受控MCP服务含唯一get_test_code；不得绑定其他历史服务的同名工具
+  - 本用例创建独占验证 Skill，指南要求读取 references/check.txt，答案只存在于该文件，不出现在用户提问中；结束后验证删除。
+  - 真实LLM支持tool call
+  test_data:
+    legacy_asset_declaration: config/mcp.yaml；assets/skills/*；config/models.yaml
+  steps:
+  - order: 1
+    action: 进入 /agents 页面，选择 Draft Agent。
+    expected: Tool/Skill绑定刷新后不丢。
+  - order: 2
+    action: 展开当前连续卡片中的工具管理与技能管理分区，确认两个添加入口可见。
+    expected: 真实LLM产生可用tool call且marker正确。
+  - order: 3
+    action: 在「工具」分区点击「选择工具」，选择本用例资产注册表中的受控MCP服务，再搜索并勾选get_test_code，读取保存结果核对工具ID与该服务一致。
+    expected: wire证明真实请求到达。
+  - order: 4
+    action: 在「技能」分区点击「选择技能」，搜索并绑定固定 Skill。
+    expected: wire证明真实请求到达。
+  - order: 5
+    action: 等待 autosave，切换 Agent 再切回并重新展开工具管理及技能管理，确认仍选中。
+    expected: wire证明真实请求到达。
+  - order: 6
+    action: 点击 Debug 按钮发送必须调用 Tool 的问题。
+    expected: wire证明真实请求到达。
+  - order: 7
+    action: 等待工具执行 UI 和最终 NX-92831。
+    expected: wire证明真实请求到达。
+  - order: 8
+    action: 刷新并重新打开同一 Draft 的 Debug，确认没有旧消息；发送执行绑定验证技能的问题，要求先读取指南及 references/check.txt，但不在提问中提供答案。
+    expected: 新会话完成并回答独占参考文件中的验证结果，不能用技能名回显或上一轮工具编号代替技能消费。
+  - order: 9
+    action: 关联 Test MCP wire log 确认真实调用。
+    expected: wire证明真实请求到达。
+  expected_results:
+  - Tool/Skill绑定刷新后不丢。
+  - 真实LLM产生可用tool call且marker正确。
+  - wire证明真实请求到达。
+  - 独立 Debug 会话消费验证技能的参考文件并给出仅在该文件中的答案，独占技能和 Agent 在结束时清理。
+  forbidden_side_effects: []
+  acceptance:
+  - id: AC-BINDING
+    description: 工具和技能通过 UI 绑定，切换及刷新后持久化，结束时清理独占资源。
+    steps: [1, 2, 3, 4, 5]
+    expected_results: [1]
+  - id: AC-TOOL
+    description: 真实 Debug 工具调用返回受控结果，MCP wire 记录实际请求。
+    steps: [6, 7, 9]
+    expected_results: [2, 3]
+  - id: AC-SKILL
+    description: 无历史冲突的 Debug 会话读取技能独占参考结果，而非回显用户输入。
+    steps: [8]
+    expected_results: [4]
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 20
+  actor: Nexent browser user
+  journey:
+  - 进入 /agents 页面，选择 Draft Agent。
+  - 展开当前连续卡片中的工具管理与技能管理分区，确认两个添加入口可见。
+  - 在「工具」分区点击「选择工具」，选择本用例资产注册表中的受控MCP服务，再搜索并勾选get_test_code，读取保存结果核对工具ID与该服务一致。
+  - 在「技能」分区点击「选择技能」，搜索并绑定固定 Skill。
+  - 等待 autosave，切换 Agent 再切回并重新展开工具管理及技能管理，确认仍选中。
+  - 点击 Debug 按钮发送必须调用 Tool 的问题。
+  - 等待工具执行 UI 和最终 NX-92831。
+  - 刷新后在无历史消息的独立 Debug 会话执行绑定验证技能，读取参考文件并返回其中规定的答案。
+  - 关联 Test MCP wire log 确认真实调用。
+  final_business_result:
+  - Tool/Skill绑定刷新后不丢。
+  - 真实LLM产生可用tool call且marker正确。
+  - wire证明真实请求到达。
+  - 独立 Debug 会话返回技能参考文件中的独占答案，结束时清理独占资源。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-AGENT-03/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

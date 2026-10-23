@@ -1,0 +1,48 @@
+schema_version: '1.0'
+change:
+  change_id: UI-REFRESH-STABILITY-20261022
+  change_type: bugfix
+  bug_id: UI-REFRESH-STABILITY-20261022
+  title: Preserve chat and resource tabs during background refresh
+  description: Separate background list/auth requests from mounted page readiness and reuse provider authorization.
+  observed_behavior: Chat disappears on conversation-list reload; mounting knowledge resources refetches authorization and resets resource management to Users.
+  expected_behavior: Metadata refresh and first server-ID assignment retain the active chat and local config; actual thread switches restore saved history. Knowledge and personal capacity reuse authorization without resetting tabs. Initial and revoked access remain guarded.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing chat and auth UT do not assert mounted-node continuity during pending refresh. Resource journey opens tabs without explicitly checking duplicate authorization initialization.
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-SIDEBAR, V5-PW-RESOURCE-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [PW-RESOURCE-01]
+    added: []
+    modified: [CHAT-ACTIVITY-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve mounted chat and draft across list refresh during and after runs, retaining initial and active-history loading guards.
+    - On first live server-ID assignment retain the mounted Workbench chat, config, knowledge selection and dirty metadata; returning after a real thread switch still restores history.
+    - Open knowledge and personal capacity with provider identity and no extra auth initialization or tab reset.
+    - Preserve established authorization during pending or failed refresh; hide protected content on initial load, logout and successful grant revocation.
+    reason: Changed behavior is React lifecycle and shared authorization state; real provider/layout collaboration and page UT detect unmounts. No Python behavior changes or duplicate formal D1 needed.
+    test_selectors:
+    - frontend/tests/component/agentChatRefreshRestore.test.tsx
+    - frontend/tests/workbench/WorkbenchPageLifecycle.test.tsx
+    - frontend/tests/component/authorizationRecovery.test.tsx
+    - frontend/tests/component/resourceKnowledgeAuthorization.test.tsx
+  notes: >-
+    Design ../nexent-doc/docs/Developing/auth-ui-refresh-stability/design.md dated 2026-10-22.
+    Existing session-state and explicit route-authorization SPECs inspected for adjacent contracts.
+    CHAT-ACTIVITY-D4-001 proves list reorder and draft retention; PW-RESOURCE-01 proves tenant tab navigation.
+    Retain formal contracts and bindings. Strengthen CHAT-ACTIVITY-D4-001 script with original composer node continuity;
+    retry bounding-box ordering during transient sidebar loading instead of dereferencing null.
+    Add direct frontend assertions for transient unmounts and repeated auth initialization.
+    User follow-up confirms a second trigger: first live server-ID assignment previously entered restore-start.
+    Extend the existing D4 contract with AC-03 and first-run persistence; preserve live config and metadata using stable thread ownership.
+    Reopening a saved conversation after a true thread switch must still restore it.
+    D2/D3/D5 are irrelevant to this UI-only repair. Execution evidence remains separate from formal contracts.

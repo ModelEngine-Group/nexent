@@ -407,7 +407,7 @@ push_log="$TMP_DIR/push-images.log"
 : > "$push_log"
 PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$push_log" \
-  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
   REGISTRY_PASSWORD=secret \
   bash "$latest_package_dir/push-images.sh" \
     --image-registry-prefix https://registry.local/nexent/ \
@@ -418,10 +418,12 @@ grep -q '^IMAGE_REGISTRY_PREFIX=registry.local/nexent$' "$TMP_DIR/push-images.en
 grep -q '^tag nexent/nexent:latest registry.local/nexent/nexent/nexent:latest$' "$push_log" || fail "push-images.sh should tag Nexent image with registry prefix"
 grep -q '^push registry.local/nexent/nexent/nexent:latest$' "$push_log" || fail "push-images.sh should push prefixed Nexent image"
 grep -q '^tag docker.elastic.co/elasticsearch/elasticsearch:8.17.4 registry.local/nexent/docker.elastic.co/elasticsearch/elasticsearch:8.17.4$' "$push_log" || fail "push-images.sh should tag third-party image with registry prefix"
+grep -q '^tag nexent/minio:RELEASE.2023-12-20T01-00-02Z registry.local/nexent/nexent/minio:RELEASE.2023-12-20T01-00-02Z$' "$push_log" || fail "push-images.sh should tag the configured MinIO image with registry prefix"
+grep -q '^push registry.local/nexent/nexent/minio:RELEASE.2023-12-20T01-00-02Z$' "$push_log" || fail "push-images.sh should push the configured MinIO image"
 : > "$push_log"
 PATH="$BIN_DIR:$PATH" \
   FAKE_DOCKER_LOG="$push_log" \
-  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,quay.io/minio/minio:RELEASE.2023-12-20T01-00-02Z" \
+  FAKE_DOCKER_LOCAL_IMAGES="nexent/nexent:latest,nexent/nexent-web:latest,nexent/nexent-mcp:latest,nexent/nexent-sandbox:latest,docker.elastic.co/elasticsearch/elasticsearch:8.17.4,postgres:15-alpine,redis:alpine,nexent/minio:RELEASE.2023-12-20T01-00-02Z,nginx:alpine" \
   REGISTRY_PASSWORD=secret \
   bash "$latest_package_dir/push-images.sh" \
     --load-images \
@@ -431,6 +433,8 @@ first_line="$(sed -n '1p' "$push_log")"
 second_line="$(sed -n '2p' "$push_log")"
 [ "$first_line" = "login registry.local --username user --password-stdin password=secret" ] || fail "push-images.sh should docker login before loading images"
 [[ "$second_line" == load\ -i\ * ]] || fail "push-images.sh should load images only after docker login"
+grep -q '^tag nexent/minio:RELEASE.2023-12-20T01-00-02Z registry.local/nexent/nexent/minio:RELEASE.2023-12-20T01-00-02Z$' "$push_log" || fail "push-images.sh should tag the configured MinIO image after loading images"
+grep -q '^push registry.local/nexent/nexent/minio:RELEASE.2023-12-20T01-00-02Z$' "$push_log" || fail "push-images.sh should push the configured MinIO image after loading images"
 if PATH="$BIN_DIR:$PATH" REGISTRY_PASSWORD=secret bash "$latest_package_dir/push-images.sh" --image-registry-prefix registry.local/nexent >/tmp/nexent-offline-package-push-missing-user.log 2>&1; then
   fail "push-images.sh should require registry username in non-interactive mode"
 fi

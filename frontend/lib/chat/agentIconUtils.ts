@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { LucideIcon } from "lucide-react";
 import {
   SparklesIcon,
@@ -20,7 +22,16 @@ const agentIconMap: Record<AgentIconType, LucideIcon> = {
   file: FileTextIcon,
 };
 
-const agentIcons = [SparklesIcon, BotIcon, WandIcon, LightbulbIcon, ZapIcon];
+export const DEFAULT_AGENT_ICONS = [
+  { key: "sparkles", icon: SparklesIcon },
+  { key: "bot", icon: BotIcon },
+  { key: "wand", icon: WandIcon },
+  { key: "lightbulb", icon: LightbulbIcon },
+  { key: "zap", icon: ZapIcon },
+] as const;
+
+export type DefaultAgentIconKey = (typeof DEFAULT_AGENT_ICONS)[number]["key"];
+const agentIcons = DEFAULT_AGENT_ICONS.map((option) => option.icon);
 
 /**
  * Get icon for an agent, with fallback logic:
@@ -59,7 +70,9 @@ export function getAgentUploadedIconId(agent: {
     : null;
 }
 
-export function getAgentUploadedIconRevision(iconUrl?: string | null): string | null {
+export function getAgentUploadedIconRevision(
+  iconUrl?: string | null
+): string | null {
   const query = iconUrl?.split("?", 2)[1];
   return query ? new URLSearchParams(query).get("v") : null;
 }

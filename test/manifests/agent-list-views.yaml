@@ -1,0 +1,22 @@
+schema_version: "1.0"
+cases:
+  - case_id: AGENT-LIST-D1-001
+    stage: D1
+    status: implemented
+    contract_hash: sha256:42084a90cedb1ae8ffba7cbe7cf1411f12a57a0d42205e6580e12ad08042aeb9
+    implementation_hash: sha256:6dd34b7871a706a8b5fc3aa75f7a0dce8d785c1dbc328369e21a9b47cebef59e
+    implementation:
+      - framework: custom
+        file: test/automation/d1/run_agent_list_table_test.mjs
+        selector: agentListTable.test.tsx
+        profiles: [mock]
+  - case_id: AGENT-LIST-D4-001
+    stage: D4
+    status: implemented
+    contract_hash: sha256:1093e9eea123f868058b2922bcb8becb7058e0378301e97276df51156c4ba9fc
+    implementation_hash: sha256:a905ec4d8fcce1e93354988f937f8f560872b64738f762662e6250e2413b9b8b
+    implementation:
+      - framework: custom
+        file: test/automation/d4/run_agent_list_views_e2e.mjs
+        selector: agent-list-high-fidelity.spec.ts
+        profiles: [mock]

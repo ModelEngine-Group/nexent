@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   API_ENDPOINTS,
   ApiError,
@@ -9,6 +11,7 @@ import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { fetchWithAuth, getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
+import { extractFilenameFromContentDisposition } from "@/lib/downloadFilename";
 import type { Agent } from "@/types/agentConfig";
 import yaml from "js-yaml";
 import type { SkillFileNode } from "@/types/skill";
@@ -17,11 +20,53 @@ import type { TagResourcePredicate } from "@/types/tagManagement";
 /**
  * Normalize tags field into a string array.
  * Ant Design mode="tags" sends a string when only one tag is entered, and
- * malformed/persisted skill data may also carry a non-array tags value.
+ * malformed/persisted data may also carry a non-array tags value, including a
+ * stringified array such as "['tag1', 'tag2']" or '["a", "b"]'. A plain
+ * non-empty scalar is treated as a single tag; anything else becomes an array.
  */
-function normalizeTags(tags: unknown): string[] {
-  if (Array.isArray(tags)) return tags;
-  if (typeof tags === "string" && tags.trim() !== "") return [tags.trim()];
+export function normalizeTags(tags: unknown): string[] {
+  if (Array.isArray(tags)) return cleanTagList(tags);
+  if (typeof tags === "string") {
+    const trimmed = tags.trim();
+    if (trimmed === "") return [];
+    const parsed = parseStringifiedTagArray(trimmed);
+    if (parsed !== null) return parsed;
+    return [trimmed];
+  }
+  return [];
+}
+
+function cleanTagList(values: unknown[]): string[] {
+  return values
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter((value) => value !== "");
+}
+
+/**
+ * Recover individual tags from a stringified array, or return null when the
+ * value does not look like an array. Array-like input that cannot be parsed
+ * yields an empty array so an unrecoverable value is ignored, not rendered.
+ */
+function parseStringifiedTagArray(value: string): string[] | null {
+  if (!value.startsWith("[") || !value.endsWith("]")) return null;
+  const candidates = [
+    value,
+    value
+      .replace(/"/g, "`")
+      .replace(/'/g, '"')
+      .replace(/\bTrue\b/g, "true")
+      .replace(/\bFalse\b/g, "false")
+      .replace(/\bNone\b/g, "null"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed)) return cleanTagList(parsed);
+    } catch {
+      // Try the next candidate representation.
+    }
+  }
   return [];
 }
 
@@ -114,6 +159,7 @@ export const fetchTools = async () => {
           : [],
       updated_by: tool.updated_by || "",
       updated_by_name: tool.updated_by_name || "",
+      updated_by_cas_username: tool.updated_by_cas_username,
       inputs: tool.inputs,
       initParams: tool.params.map((param: any) => {
         return {
@@ -161,8 +207,10 @@ type AgentListApiItem = {
   display_name?: string;
   description: string;
   author?: string;
+  author_cas_username?: string | null;
   created_by?: string | null;
   create_time?: string;
+  update_time?: string;
   tags?: unknown;
   model_ids?: number[];
   model_id?: number;
@@ -177,6 +225,7 @@ type AgentListApiItem = {
   current_version_no?: number;
   version_label?: string | null;
   version_create_time?: string | null;
+  is_main_agent?: boolean;
   is_a2a_server?: boolean;
   allow_chat_metadata?: boolean;
   enable_protocol_repair_retry?: boolean;
@@ -192,8 +241,10 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     display_name: agent.display_name || agent.name,
     description: agent.description,
     author: agent.author,
+    author_cas_username: agent.author_cas_username,
     created_by: agent.created_by,
     create_time: agent.create_time,
+    update_time: agent.update_time,
     tags: normalizeTags(agent.tags),
     model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
     model_names:
@@ -207,6 +258,7 @@ const formatAgentListItem = (agent: AgentListApiItem): Agent =>
     current_version_no: agent.current_version_no,
     version_label: agent.version_label,
     version_create_time: agent.version_create_time,
+    is_main_agent: agent.is_main_agent,
     is_a2a_server: agent.is_a2a_server || false,
     allow_chat_metadata: agent.allow_chat_metadata ?? false,
     enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
@@ -228,6 +280,8 @@ export type AgentListFilters = {
   search?: string;
   page?: number;
   pageSize?: number;
+  /** When true, request the latest-published-first ordering. */
+  sortByUpdateTime?: boolean;
 };
 
 export type AgentListPagination = {
@@ -298,6 +352,8 @@ export const fetchPagedAgentList = async (
       queryParams.set("search", filters.search.trim());
     if (filters.includeRepositoryInfo)
       queryParams.set("include_repository_info", "true");
+    if (filters.sortByUpdateTime)
+      queryParams.set("sort_by_update_time", "true");
     queryParams.set("page", String(filters.page ?? 1));
     queryParams.set("page_size", String(filters.pageSize ?? 20));
 
@@ -365,6 +421,7 @@ export const fetchPublishedAgentList = async () => {
       display_name: agent.display_name || agent.name,
       description: agent.description,
       author: agent.author,
+      author_cas_username: agent.author_cas_username,
       model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
       model_names:
         agent.model_names || (agent.model_name ? [agent.model_name] : []),
@@ -382,6 +439,11 @@ export const fetchPublishedAgentList = async () => {
       model_params_override: agent.model_params_override ?? null,
       enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
       icon_url: agent.icon_url,
+      tags: Array.isArray(agent.tags)
+        ? agent.tags.filter(
+            (tag: unknown): tag is string => typeof tag === "string"
+          )
+        : [],
     }));
 
     return {
@@ -554,9 +616,8 @@ export interface UpdateAgentInfoPayload {
   display_name?: string;
   description?: string;
   author?: string;
-  duty_prompt?: string;
-  constraint_prompt?: string;
-  few_shots_prompt?: string;
+  author_cas_username?: string | null;
+  prompt?: string;
   group_ids?: number[];
   model_ids?: number[];
   max_steps?: number;
@@ -582,8 +643,6 @@ export interface UpdateAgentInfoPayload {
   business_description?: string;
   business_logic_model_name?: string;
   business_logic_model_id?: number;
-  prompt_template_id?: number;
-  prompt_template_name?: string;
   enabled_tool_ids?: number[];
   enabled_skill_ids?: number[];
   skill_instances?: Array<{
@@ -724,21 +783,11 @@ export const exportAgent = async (agentId: number) => {
 
 /**
  * Extract filename from Content-Disposition header
- * Handles both quoted and unquoted filename values
+ * Handles RFC 5987 filename* (UTF-8 percent-encoded), quoted and unquoted filename values
  * @param contentDisposition The Content-Disposition header value
  * @returns Extracted filename or null if not found
  */
-const extractFilenameFromContentDisposition = (
-  contentDisposition: string | null
-): string | null => {
-  if (!contentDisposition) {
-    return null;
-  }
-
-  const regex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-  const match = regex.exec(contentDisposition);
-  return match?.[1]?.replace(/['"]/g, "").trim() ?? null;
-};
+export { extractFilenameFromContentDisposition };
 
 /**
  * Trigger browser download of a Blob
@@ -946,6 +995,36 @@ export const checkAgentNameConflictBatch = async (payload: {
   }
 };
 
+/**
+ * Generate unique copy names by appending a numeric suffix when the base
+ * name/display_name already exists in the tenant. Mirrors the backend
+ * import-link deduplication (base_1, base_2, ...).
+ */
+export const generateUniqueCopyName = async (
+  baseName: string,
+  baseDisplayName: string
+): Promise<{ name: string; display_name: string }> => {
+  let name = baseName;
+  let displayName = baseDisplayName;
+
+  // Probe at most 100 suffix candidates, matching the backend limit.
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await checkAgentNameConflictBatch({
+      items: [{ name, display_name: displayName }],
+    });
+    if (!result.success || !Array.isArray(result.data)) {
+      throw new Error("Failed to check agent name conflict");
+    }
+    const conflict = result.data[0];
+    if (!conflict?.name_conflict && !conflict?.display_name_conflict) {
+      return { name, display_name: displayName };
+    }
+    name = `${baseName}_${attempt + 1}`;
+    displayName = `${baseDisplayName}_${attempt + 1}`;
+  }
+  throw new Error("Failed to generate unique agent name after max attempts");
+};
+
 export const regenerateAgentNameBatch = async (payload: {
   items: Array<{
     name: string;
@@ -1020,6 +1099,7 @@ export const searchAgentInfo = async (
       display_name: data.display_name,
       description: data.description,
       author: data.author,
+      author_cas_username: data.author_cas_username,
       icon_url: data.icon_url,
       model:
         data.model_name ||
@@ -1034,14 +1114,10 @@ export const searchAgentInfo = async (
       // v2.6.0: per-agent model params override (model_id -> { temperature, top_p, extra_params })
       model_params_override: data.model_params_override ?? null,
       is_main_agent: data.is_main_agent ?? true,
-      duty_prompt: data.duty_prompt,
-      constraint_prompt: data.constraint_prompt,
-      few_shots_prompt: data.few_shots_prompt,
+      prompt: data.prompt,
       business_description: data.business_description,
       business_logic_model_name: data.business_logic_model_name,
       business_logic_model_id: data.business_logic_model_id,
-      prompt_template_id: data.prompt_template_id ?? 0,
-      prompt_template_name: data.prompt_template_name ?? "system_default",
       provide_run_summary: data.provide_run_summary,
       is_a2a: data.is_a2a ?? false,
       verification_config: data.verification_config,
@@ -1158,6 +1234,7 @@ export const fetchAllAgents = async () => {
       display_name: agent.display_name || agent.name,
       description: agent.description,
       author: agent.author,
+      author_cas_username: agent.author_cas_username,
       is_available: agent.is_available,
       is_new: agent.is_new || false,
     }));
@@ -1290,7 +1367,8 @@ export const validateTool = async (
   source: string,
   usage: string,
   inputs: Record<string, any> | null = null,
-  params: Record<string, any> | null = null
+  params: Record<string, any> | null = null,
+  language: "zh" | "en" = "zh"
 ) => {
   try {
     const requestBody = {
@@ -1299,6 +1377,7 @@ export const validateTool = async (
       usage: usage,
       inputs: inputs,
       params: params,
+      language,
     };
 
     const response = await fetch(API_ENDPOINTS.tool.validate, {

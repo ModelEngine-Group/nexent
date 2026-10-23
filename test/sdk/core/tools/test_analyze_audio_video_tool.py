@@ -31,11 +31,11 @@ def observer_en():
 def test_analyze_audio_uses_video_understanding_model(observer_en, mock_vlm_model, mock_storage_client, monkeypatch):
     calls = []
 
-    def _fake_get_prompt(template_type, language=None, **_):
-        calls.append((template_type, language))
+    def _fake_get_prompt(language, path):
+        calls.append((language, path))
         return {"system_prompt": "Analyze audio for {{ query }}"}
 
-    monkeypatch.setattr(analyze_audio_tool, "get_prompt_template", _fake_get_prompt)
+    monkeypatch.setattr(analyze_audio_tool, "load_prompt", _fake_get_prompt)
     mock_vlm_model.invoke_sync.return_value = SimpleNamespace(content="audio result")
     tool = AnalyzeAudioTool(
         observer=observer_en,
@@ -46,7 +46,7 @@ def test_analyze_audio_uses_video_understanding_model(observer_en, mock_vlm_mode
     result = tool._forward_impl(audio_url=b"ID3audio-bytes", query="what happened?")
 
     assert result == "audio result"
-    assert calls == [("analyze_audio", "en")]
+    assert calls == [("en", "tool/analyze_audio")]
     mock_vlm_model.invoke_sync.assert_called_once()
     request = mock_vlm_model.invoke_sync.call_args.args[0]
     assert request.media_type == "audio"
@@ -62,8 +62,8 @@ def test_analyze_audio_schema_uses_single_url():
 def test_analyze_audio_accepts_legacy_url_list(observer_en, mock_vlm_model, mock_storage_client, monkeypatch):
     monkeypatch.setattr(
         analyze_audio_tool,
-        "get_prompt_template",
-        lambda template_type, language=None, **_: {"system_prompt": "Analyze audio for {{ query }}"},
+        "load_prompt",
+        lambda language, path: {"system_prompt": "Analyze audio for {{ query }}"},
     )
     mock_vlm_model.invoke_sync.return_value = SimpleNamespace(content="audio result")
     tool = AnalyzeAudioTool(
@@ -114,11 +114,11 @@ def test_analyze_video_rejects_non_video_capable_model(observer_en, mock_storage
 def test_analyze_video_uses_video_understanding_model(observer_en, mock_vlm_model, mock_storage_client, monkeypatch):
     calls = []
 
-    def _fake_get_prompt(template_type, language=None, **_):
-        calls.append((template_type, language))
+    def _fake_get_prompt(language, path):
+        calls.append((language, path))
         return {"system_prompt": "Analyze video for {{ query }}"}
 
-    monkeypatch.setattr(analyze_video_tool, "get_prompt_template", _fake_get_prompt)
+    monkeypatch.setattr(analyze_video_tool, "load_prompt", _fake_get_prompt)
     mock_vlm_model.invoke_sync.return_value = SimpleNamespace(content="video result")
     tool = AnalyzeVideoTool(
         observer=observer_en,
@@ -129,7 +129,7 @@ def test_analyze_video_uses_video_understanding_model(observer_en, mock_vlm_mode
     result = tool._forward_impl(video_url=b"\x00\x00\x00\x18ftypmp42video-bytes", query="what happened?")
 
     assert result == "video result"
-    assert calls == [("analyze_video", "en")]
+    assert calls == [("en", "tool/analyze_video")]
     mock_vlm_model.invoke_sync.assert_called_once()
     request = mock_vlm_model.invoke_sync.call_args.args[0]
     assert request.media_type == "video"
@@ -145,8 +145,8 @@ def test_analyze_video_schema_uses_single_url():
 def test_analyze_video_accepts_legacy_url_list(observer_en, mock_vlm_model, mock_storage_client, monkeypatch):
     monkeypatch.setattr(
         analyze_video_tool,
-        "get_prompt_template",
-        lambda template_type, language=None, **_: {"system_prompt": "Analyze video for {{ query }}"},
+        "load_prompt",
+        lambda language, path: {"system_prompt": "Analyze video for {{ query }}"},
     )
     mock_vlm_model.invoke_sync.return_value = SimpleNamespace(content="video result")
     tool = AnalyzeVideoTool(

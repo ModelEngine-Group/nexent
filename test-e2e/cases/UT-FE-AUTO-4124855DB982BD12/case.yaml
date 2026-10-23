@@ -1,0 +1,87 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-AUTO-4124855DB982BD12
+  feature_id: F-024
+  business_rule_ids:
+  - F-024-RULE-01
+  title: CreateResourceCard/ResourceCard/ResourceCardGrid 键盘与焦点可达性、selected/aria-pressed 状态、分页/过滤/搜索/空态与 create 占位｜核心流程
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: CreateResourceCard/ResourceCard/ResourceCardGrid 键盘与焦点可达性、selected/aria-pressed 状态、分页/过滤/搜索/空态与 create 占位｜核心流程
+  preconditions:
+  - 本地组件测试环境可运行（Vitest + React Testing Library + jsdom）；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 组件依赖（antd Input/Pagination/Empty、lucide-react 图标、tailwind 样式）可在 jsdom 中渲染，测试不发起真实网络请求。
+  test_data:
+    legacy_asset_declaration: '- 无固定本地文件；组件测试内联构造 items/filters/renderItem 及 spy 回调，断言 aria 属性与回调参数。'
+  steps:
+  - order: 1
+    action: 渲染 ResourceCardGrid，注入 6 条含 title/description/icon/badge/tags/meta 的 items、renderItem 渲染 ResourceCard，columns=4、rows=3、不传
+      showCreateCard/total。
+    expected: ResourceCardGrid 列数由 columns 归一化（非法/缺失时回退 4），--resource-card-columns 反映列数；itemsPerPage=columns×rows，有 create
+      卡片时减 1。
+  - order: 2
+    action: 断言网格容器存在 --resource-card-columns:4 的自定义样式变量，首屏可见项数为 columns×rows=12 范围内的可见切片（itemsPerPage=12）。
+    expected: 交互型 ResourceCard 的 button 可聚焦、aria-labelledby 关联标题、aria-pressed 同步 selected，selected=true 时容器带 border-blue-400
+      与 ring 高亮。
+  - order: 3
+    action: 注入 20 条 items 且 columns=2、rows=2（itemsPerPage=4）、onPageChange spy，断言 Pagination 渲染、current=1、totalPages=ceil(20/4)=5；点击第
+      2 页断言 onPageChange(2)。
+    expected: 各 filter button 的 aria-pressed 仅对 activeFilter 为 true，点击回调携带对应 key。
+  - order: 4
+    action: 注入 createCardTitle 与 onCreate spy（无 showCreateCard），断言渲染 CreateResourceCard、其 aria-label 等于 createCardTitle，点击触发
+      onCreate，且 itemsPerPage 由 slotsPerPage 减去 1。
+    expected: 分页 totalPages=ceil(itemCount/itemsPerPage)，点击分页触发 onPageChange；totalPages<=1 或 itemCount=0 时不渲染 Pagination。
+  - order: 5
+    action: 渲染带 onClick 与 selected 的 ResourceCard，断言生成覆盖整卡的 button，其 aria-labelledby 指向标题 h2 的 id、aria-pressed 等于 selected；selected=true
+      时容器带 border-blue-400 与 ring 样式。
+    expected: 空清单渲染 emptyState，且不渲染 Pagination。
+  - order: 6
+    action: 模拟键盘 Tab 聚焦该 button，断言存在 focus-visible 样式（focus-visible:ring-2）。
+    expected: create 卡片占位渲染且 aria-label=createCardTitle，点击触发 onCreate，并占用一个槽位。
+  - order: 7
+    action: 向 ResourceCardGrid 注入 filters（含 key/label/count）与 activeFilter、onFilterChange spy，断言每个 filter button 的 aria-pressed
+      仅当 activeFilter===key 时为 true；点击某 filter 断言 onFilterChange(key)。
+    expected: search 受控输入触发 onSearchChange；未提供 onSearchChange 时 Input 只读；无 onSearchChange/search/filters 时工具栏隐藏。
+  - order: 8
+    action: 注入受控 search 值与 onSearchChange spy，在 Input 中输入文本断言 onSearchChange 收到新值；未提供 onSearchChange 时 Input 为 readOnly。
+    expected: page 溢出 totalPages 时自动通过 onPageChange 收敛到 totalPages。
+  - order: 9
+    action: 注入 items=[]（total=0），断言渲染 emptyState（默认 Empty）且不渲染 Pagination。
+    expected: page 溢出 totalPages 时自动通过 onPageChange 收敛到 totalPages。
+  - order: 10
+    action: 注入 page=5 且 totalPages=2，断言 useEffect 触发 onPageChange(totalPages) 将页码收敛到上限。
+    expected: page 溢出 totalPages 时自动通过 onPageChange 收敛到 totalPages。
+  expected_results:
+  - ResourceCardGrid 列数由 columns 归一化（非法/缺失时回退 4），--resource-card-columns 反映列数；itemsPerPage=columns×rows，有 create 卡片时减 1。
+  - 交互型 ResourceCard 的 button 可聚焦、aria-labelledby 关联标题、aria-pressed 同步 selected，selected=true 时容器带 border-blue-400 与 ring
+    高亮。
+  - 各 filter button 的 aria-pressed 仅对 activeFilter 为 true，点击回调携带对应 key。
+  - 分页 totalPages=ceil(itemCount/itemsPerPage)，点击分页触发 onPageChange；totalPages<=1 或 itemCount=0 时不渲染 Pagination。
+  - 空清单渲染 emptyState，且不渲染 Pagination。
+  - create 卡片占位渲染且 aria-label=createCardTitle，点击触发 onCreate，并占用一个槽位。
+  - search 受控输入触发 onSearchChange；未提供 onSearchChange 时 Input 只读；无 onSearchChange/search/filters 时工具栏隐藏。
+  - page 溢出 totalPages 时自动通过 onPageChange 收敛到 totalPages。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 428
+  unit_boundary: 资源卡片网格组件
+  inputs:
+  - '- 无固定本地文件；组件测试内联构造 items/filters/renderItem 及 spy 回调，断言 aria 属性与回调参数。'
+  assertions:
+  - ResourceCardGrid 列数由 columns 归一化（非法/缺失时回退 4），--resource-card-columns 反映列数；itemsPerPage=columns×rows，有 create 卡片时减 1。
+  - 交互型 ResourceCard 的 button 可聚焦、aria-labelledby 关联标题、aria-pressed 同步 selected，selected=true 时容器带 border-blue-400 与 ring
+    高亮。
+  - 各 filter button 的 aria-pressed 仅对 activeFilter 为 true，点击回调携带对应 key。
+  - 分页 totalPages=ceil(itemCount/itemsPerPage)，点击分页触发 onPageChange；totalPages<=1 或 itemCount=0 时不渲染 Pagination。
+  - 空清单渲染 emptyState，且不渲染 Pagination。
+  - create 卡片占位渲染且 aria-label=createCardTitle，点击触发 onCreate，并占用一个槽位。
+  - search 受控输入触发 onSearchChange；未提供 onSearchChange 时 Input 只读；无 onSearchChange/search/filters 时工具栏隐藏。
+  - page 溢出 totalPages 时自动通过 onPageChange 收敛到 totalPages。

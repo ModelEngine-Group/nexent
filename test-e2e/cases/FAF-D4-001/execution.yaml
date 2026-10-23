@@ -1,0 +1,13 @@
+schema_version: '1.0'
+case_id: FAF-D4-001
+implementations:
+- framework: playwright
+  file: test.spec.ts
+  selector: FAF-D4-001
+  profiles:
+  - real_smoke
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

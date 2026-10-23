@@ -1,0 +1,83 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-61960357AD3F71A3
+  feature_id: F-178
+  business_rule_ids:
+  - F-178-RULE-01
+  title: 外部provider错误矩阵：timeout/429/5xx重试降级、401/403非重试自动停用、unsupported/partial_acceptance移除重试/返回accepted｜异常/边界
+  type: BE-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 外部provider错误矩阵：timeout/429/5xx重试降级、401/403非重试自动停用、unsupported/partial_acceptance移除重试/返回accepted｜异常/边界
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 以内存 mock 构造 MemoryExternalProviderService 所需 PluginLoader/MemoryProviderConfigService 与 provider 插件，注入可编程 ProviderErrorCode（timeout/429/5xx/401/403/unsupported_unit_type/partial_acceptance）及最小
+    config/params/request 对象，测试代码不得读取生产凭据。
+  test_data:
+    legacy_asset_declaration: '- 无固定外部资产；使用内存 mock 的 provider 插件与可编程 ProviderError 对象构造输入。'
+  steps:
+  - order: 1
+    action: 构造 MemoryExternalProviderService 实例，注入 mock PluginLoader 与 mock MemoryProviderConfigService；构造含 provider_config_id/provider_name
+      的 config、含 plugin.name 的 params，以及 MemorySearchRequest/MemoryIngestRequest。
+    expected: 重试类错误：execute_with_retry 按 RetryConfig 耗尽重试后抛出 RetryableProviderError，search 返回 []（result_count=0），ingest 返回
+      status="error"，且不调用 disable_provider_config。
+  - order: 2
+    action: 重试类错误：令 mock provider 的 search/ingest 抛出 RetryableProviderError（ProviderErrorCode.TIMEOUT/RATE_LIMITED/PROVIDER_ERROR，对应
+      timeout/429/5xx），调用 service.search 与 service.ingest，记录 execute_with_retry 的重试次数、最终返回值与 telemetry outcome。
+    expected: 非重试类错误：401/403 不重试，直接进入 NonRetryableProviderError 分支；provider_config_id 有效时 memory_provider_config_db.disable_provider_config(provider_config_id)
+      被调用一次（enabled 置 False）。
+  - order: 3
+    action: 非重试类错误：令 mock provider 抛出 NonRetryableProviderError（ProviderErrorCode.UNAUTHORIZED/FORBIDDEN），调用 service.search
+      与 service.ingest，断言 _handle_non_retryable 调用 memory_provider_config_db.disable_provider_config 且不发生重试。
+    expected: 可降级错误：unsupported_unit_type 按 removable_units 移除对应 unit 后仅重试一次，成功时返回 accepted 且 status="degraded"；全部 unit 被移除时返回
+      status="degraded"、accepted_count=0、message="All units rejected"；重试仍失败返回 status="error"。
+  - order: 4
+    action: 可降级错误：令 mock provider.ingest 首次抛出 DegradableProviderError（code=UNSUPPORTED_UNIT_TYPE，removable_units 含部分 event_id），断言移除对应
+      unit 后仅重试一次并返回 accepted；再分别构造 removable_units 覆盖全部 unit、以及 removable_units 为空的边界。
+    expected: partial_acceptance：返回 status="degraded"、message="Partial acceptance"，不执行移除与重试。
+  - order: 5
+    action: partial_acceptance：令 mock provider.ingest 抛出 DegradableProviderError（code=PARTIAL_ACCEPTANCE），断言返回 status="degraded"
+      且不触发移除重试。
+    expected: 非法配置：缺失 plugin.name 抛 ValueError 且被 service 捕获，search 返回 []、ingest 返回 status="error"，不向外部发起调用。
+  - order: 6
+    action: 非法配置边界：params 缺失 plugin.name 时 build_provider 抛 ValueError，断言 search 返回空列表、ingest 返回 status="error"，且不向外部发起调用；provider_config_id
+      为 None 时非重试错误不调用 disable_provider_config。
+    expected: provider_config_id 为 None 时，非重试错误仅记录日志，不调用 disable_provider_config。
+  - order: 7
+    action: 确认日志与 telemetry 不输出 API Key/Token/凭据明文；测试结束释放 mock 对象，确保可重复执行。
+    expected: 全流程无未处理异常、无半写入/重复副作用；日志与 telemetry 不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 重试类错误：execute_with_retry 按 RetryConfig 耗尽重试后抛出 RetryableProviderError，search 返回 []（result_count=0），ingest 返回 status="error"，且不调用
+    disable_provider_config。
+  - 非重试类错误：401/403 不重试，直接进入 NonRetryableProviderError 分支；provider_config_id 有效时 memory_provider_config_db.disable_provider_config(provider_config_id)
+    被调用一次（enabled 置 False）。
+  - 可降级错误：unsupported_unit_type 按 removable_units 移除对应 unit 后仅重试一次，成功时返回 accepted 且 status="degraded"；全部 unit 被移除时返回 status="degraded"、accepted_count=0、message="All
+    units rejected"；重试仍失败返回 status="error"。
+  - partial_acceptance：返回 status="degraded"、message="Partial acceptance"，不执行移除与重试。
+  - 非法配置：缺失 plugin.name 抛 ValueError 且被 service 捕获，search 返回 []、ingest 返回 status="error"，不向外部发起调用。
+  - provider_config_id 为 None 时，非重试错误仅记录日志，不调用 disable_provider_config。
+  - 全流程无未处理异常、无半写入/重复副作用；日志与 telemetry 不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 402
+  unit_boundary: 外部记忆Provider
+  inputs:
+  - '- 无固定外部资产；使用内存 mock 的 provider 插件与可编程 ProviderError 对象构造输入。'
+  assertions:
+  - 重试类错误：execute_with_retry 按 RetryConfig 耗尽重试后抛出 RetryableProviderError，search 返回 []（result_count=0），ingest 返回 status="error"，且不调用
+    disable_provider_config。
+  - 非重试类错误：401/403 不重试，直接进入 NonRetryableProviderError 分支；provider_config_id 有效时 memory_provider_config_db.disable_provider_config(provider_config_id)
+    被调用一次（enabled 置 False）。
+  - 可降级错误：unsupported_unit_type 按 removable_units 移除对应 unit 后仅重试一次，成功时返回 accepted 且 status="degraded"；全部 unit 被移除时返回 status="degraded"、accepted_count=0、message="All
+    units rejected"；重试仍失败返回 status="error"。
+  - partial_acceptance：返回 status="degraded"、message="Partial acceptance"，不执行移除与重试。
+  - 非法配置：缺失 plugin.name 抛 ValueError 且被 service 捕获，search 返回 []、ingest 返回 status="error"，不向外部发起调用。
+  - provider_config_id 为 None 时，非重试错误仅记录日志，不调用 disable_provider_config。
+  - 全流程无未处理异常、无半写入/重复副作用；日志与 telemetry 不出现明文 API Key/Token/Password/模型密钥。

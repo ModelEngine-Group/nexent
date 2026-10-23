@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for apps.notification_app."""
 import os
 import sys
@@ -12,8 +13,8 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.insert(0, backend_dir)
 
-sys.modules.setdefault("services.notification_service", MagicMock())
-sys.modules.setdefault("utils.auth_utils", MagicMock())
+sys.modules.setdefault("management.services.notification.service", MagicMock())
+sys.modules.setdefault("management.services.permission.identity.authentication_helpers", MagicMock())
 
 from apps.notification_app import router
 from consts.exceptions import NotFoundException, UnauthorizedError

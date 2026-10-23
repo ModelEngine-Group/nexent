@@ -1,10 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
 from consts.exceptions import WorkbenchAgentError
-from management.services.agent import system_agent_provider as module
+from management.services.agent import system as module
 
 
 def _provider():

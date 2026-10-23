@@ -1,18 +1,19 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { forwardRef, useImperativeHandle, useMemo } from "react";
+import {
+  forwardRef,
+  useImperativeHandle,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
 import {
   AssistantRuntimeProvider,
   useLocalRuntime,
   type ChatModelAdapter,
 } from "@assistant-ui/react";
 import { useTranslation } from "react-i18next";
-import {
-  MessageSquareIcon,
-  SparklesIcon,
-  WrenchIcon,
-  ZapIcon,
-} from "lucide-react";
 
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Agent } from "@/types/agentConfig";
@@ -23,8 +24,13 @@ import {
   remoteChatModelAdapter,
   type Nl2AgentStateEvent,
 } from "../adapter/remote-chat-model-adapter";
-import { Chat } from "./chat";
-import type { WelcomeSuggestion } from "./thread";
+import type { AgentSuggestionItem } from "@/types/agentSuggestion";
+import { Thread } from "./thread";
+import { useCreatorModelControls } from "@/features/model-controls/useCreatorModelControls";
+import { AgentWelcome } from "@/components/agent/agent-welcome";
+import { CardSuggestion } from "@/components/agent/agent-suggestion";
+import { NL2AGENT_DEFAULT_SUGGESTIONS } from "@/const/nl2agent";
+import { AGENT_CREATION_EXAMPLES } from "@/const/agentCreationExamples";
 
 const NL2AGENT_DISPLAY_BASE: Agent = {
   id: "__nl2agent_runtime__",
@@ -38,7 +44,9 @@ const NL2AGENT_DISPLAY_BASE: Agent = {
 
 export interface Nl2AgentChatPanelProps {
   agentId?: number | null;
+  agentDescription?: string | null;
   disabled?: boolean;
+  /** Controls visibility in both creation and optimization modes. */
   showOptimizationSuggestions?: boolean;
   onStateEvent?: (event: Nl2AgentStateEvent) => void;
   onStopped?: (agentId: number) => void;
@@ -48,6 +56,7 @@ export interface Nl2AgentChatPanelProps {
 
 export interface Nl2AgentChatPanelHandle {
   cancelRun: () => void;
+  sendPrompt: (prompt: string) => void;
 }
 
 export const Nl2AgentChatPanel = forwardRef<
@@ -56,8 +65,9 @@ export const Nl2AgentChatPanel = forwardRef<
 >(function Nl2AgentChatPanel(
   {
     agentId = null,
+    agentDescription,
     disabled = false,
-    showOptimizationSuggestions = false,
+    showOptimizationSuggestions = true,
     onStateEvent,
     onStopped,
     onRunStart,
@@ -67,6 +77,11 @@ export const Nl2AgentChatPanel = forwardRef<
 ) {
   const { t } = useTranslation("common");
   const { modelConfig } = useConfig();
+  const modelControls = useCreatorModelControls(
+    NL2AGENT_DISPLAY_BASE,
+    `nl2agent:${agentId ?? "new"}`,
+    "agent:create"
+  );
   const adapters = useMemo(
     () => ({
       attachments: compositeAttachmentAdapter,
@@ -77,6 +92,7 @@ export const Nl2AgentChatPanel = forwardRef<
   const chatModelAdapter = useMemo<ChatModelAdapter>(
     () => ({
       async *run(options) {
+        if (!modelControls.canSend) return;
         if (agentId !== null) onRunStart?.(agentId);
         try {
           const runResult = remoteChatModelAdapter.run({
@@ -86,6 +102,7 @@ export const Nl2AgentChatPanel = forwardRef<
                 ...options.runConfig?.custom,
                 runtimeMode: "nl2agent",
                 agentId,
+                turnModelControls: modelControls.snapshot,
                 onNl2AgentState: onStateEvent,
                 onNl2AgentStopped: onStopped,
               },
@@ -101,75 +118,103 @@ export const Nl2AgentChatPanel = forwardRef<
         }
       },
     }),
-    [agentId, onRunEnd, onRunStart, onStateEvent, onStopped]
+    [
+      agentId,
+      onRunEnd,
+      onRunStart,
+      onStateEvent,
+      onStopped,
+      modelControls.snapshot,
+      modelControls.canSend,
+    ]
   );
   const runtime = useLocalRuntime(chatModelAdapter, { adapters });
+  const isRunning = useSyncExternalStore(
+    runtime.thread.subscribe,
+    () => runtime.thread.getState().isRunning,
+    () => false
+  );
   useImperativeHandle(
     ref,
     () => ({
       cancelRun: () => runtime.thread.cancelRun(),
+      sendPrompt: (prompt) => {
+        if (
+          disabled ||
+          agentId === null ||
+          !prompt.trim() ||
+          !modelControls.canSend ||
+          runtime.thread.getState().isRunning
+        )
+          return;
+        runtime.thread.append({
+          role: "user",
+          content: [{ type: "text", text: prompt.trim() }],
+        });
+      },
     }),
-    [runtime]
+    [agentId, disabled, runtime, modelControls.canSend]
   );
 
   const assistantTitle = t("agentConfig.button.generationAssistant");
+  const isOptimization = Boolean(agentDescription?.trim());
+  const welcomeSuggestions = useMemo<readonly AgentSuggestionItem[]>(
+    () =>
+      showOptimizationSuggestions
+        ? (isOptimization
+            ? NL2AGENT_DEFAULT_SUGGESTIONS
+            : AGENT_CREATION_EXAMPLES
+          ).map((suggestion) => ({
+            id: suggestion.id,
+            title: t(suggestion.titleKey),
+            description: t(suggestion.descriptionKey),
+            prompt: t(suggestion.promptKey),
+            icon: "icon" in suggestion ? suggestion.icon : undefined,
+          }))
+        : [],
+    [showOptimizationSuggestions, isOptimization, t]
+  );
   const nl2AgentDisplay: Agent = {
     ...NL2AGENT_DISPLAY_BASE,
     display_name: assistantTitle,
     description: t("nl2agent.assistant.description"),
+    example_questions: welcomeSuggestions.map(
+      (suggestion) => suggestion.prompt
+    ),
   };
-  const welcomeSuggestions = useMemo<readonly WelcomeSuggestion[] | undefined>(
-    () =>
-      showOptimizationSuggestions
-        ? [
-            {
-              id: "optimize-prompts",
-              icon: SparklesIcon,
-              title: t("nl2agent.optimization.prompt.title"),
-              description: t("nl2agent.optimization.prompt.description"),
-              prompt: t("nl2agent.optimization.prompt.input"),
-            },
-            {
-              id: "recommend-tools",
-              icon: WrenchIcon,
-              title: t("nl2agent.optimization.tools.title"),
-              description: t("nl2agent.optimization.tools.description"),
-              prompt: t("nl2agent.optimization.tools.input"),
-            },
-            {
-              id: "recommend-skills",
-              icon: ZapIcon,
-              title: t("nl2agent.optimization.skills.title"),
-              description: t("nl2agent.optimization.skills.description"),
-              prompt: t("nl2agent.optimization.skills.input"),
-            },
-            {
-              id: "optimize-conversation-guide",
-              icon: MessageSquareIcon,
-              title: t("nl2agent.optimization.conversation.title"),
-              description: t(
-                "nl2agent.optimization.conversation.description"
-              ),
-              prompt: t("nl2agent.optimization.conversation.input"),
-            },
-          ]
-        : undefined,
-    [showOptimizationSuggestions, t]
-  );
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <TooltipProvider>
-        <div className="h-full w-full">
-          <Chat
-            selectedAgent={nl2AgentDisplay}
+        <div
+          className="h-full w-full [&>div]:!bg-transparent"
+          style={{
+            background:
+              "radial-gradient(ellipse at 0% 100%, #66ebff1a, transparent 48%), radial-gradient(ellipse at 100% 100%, #7a66ff12, transparent 48%), radial-gradient(ellipse at 80% 85%, #669fff0f, transparent 48%), #fff",
+          }}
+        >
+          <Thread
+            agent={nl2AgentDisplay}
             generatedTitle={assistantTitle}
-            welcomeSuggestions={welcomeSuggestions}
-            isLoadingAgents={false}
-            showModelSelector={false}
+            chatMode="execution"
+            {...modelControls}
+            modelSelectionScope="tenant"
+            showModelSelector
             showConversationTitle={false}
-            readOnly={disabled}
+            readOnly={disabled || !modelControls.canCreate}
             variant="embedded"
+            welcomeContent={
+              <AgentWelcome
+                title={t("nl2agent.configuration.title")}
+                greeting={t("nl2agent.configuration.description")}
+              >
+                <CardSuggestion
+                  disabled={disabled || !modelControls.canCreate || isRunning}
+                  suggestions={welcomeSuggestions}
+                  onSelect={(prompt) => runtime.thread.composer.setText(prompt)}
+                />
+              </AgentWelcome>
+            }
           />
         </div>
       </TooltipProvider>

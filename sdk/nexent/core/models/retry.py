@@ -3,7 +3,7 @@
 This module is intentionally dependency-free (it imports neither the OpenAI
 SDK nor any ``nexent`` submodule) so it can be reused by both the SDK model
 layer (:class:`nexent.core.models.openai_llm.OpenAIModel`) and the backend
-direct LLM client path (:func:`utils.llm_utils.call_llm_for_system_prompt`)
+direct LLM client path (:func:`management.services.model.invocation.call_llm_for_system_prompt`)
 without coupling ``core.models`` to ``memory`` or to any specific provider SDK.
 
 Design notes (decision record):

@@ -1,4 +1,5 @@
-"""Unit tests for backend.services.model_gateway_service.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Unit tests for management.services.model.adapter.
 
 Covers factory normalization, context construction, adapter resolution and
 the VLM config-fetch helpers. Heavy database / utils / consts modules
@@ -27,7 +28,7 @@ class MockModule(mock.MagicMock):
 sys.modules['database'] = MockModule()
 sys.modules['database.model_management_db'] = MockModule()
 sys.modules['utils'] = MockModule()
-sys.modules['utils.config_utils'] = MockModule()
+sys.modules['management.services.configuration.tenant.settings'] = MockModule()
 sys.modules['consts'] = MockModule()
 consts_const_module = MockModule()
 consts_const_module.MODEL_CONFIG_MAPPING = {"vlm": "vlm_config_key", "vlm3": "vlm3_config_key", "llm": "llm_config_key", "embedding": "embedding_config_key"}
@@ -36,7 +37,7 @@ sys.modules['consts.const'] = consts_const_module
 from nexent import MessageObserver
 from nexent.core.gateway import ModelContext, VLMContext
 
-from backend.services import model_gateway_service as mgs
+from management.services.model import adapter as mgs
 
 # _normalize_factory
 

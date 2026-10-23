@@ -1,4 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import { t as translate } from "i18next";
 
 import { Fragment, useEffect } from "react";
 
@@ -23,6 +27,7 @@ import type {
   ReasoningEffort,
 } from "@/types/modelConfig";
 import { DEFAULT_REASONING_EFFORT } from "@/const/modelConfig";
+import { isVoiceModelType } from "./modelTypeUi";
 
 // =============================================================================
 // v2.6.0: ModelAdvancedSettings — per-type fixed-field form
@@ -567,6 +572,41 @@ export const buildInferenceParamsPayload = (
 };
 
 /**
+ * Extract the stt/tts voice credentials from an advanced-settings value into
+ * the camelCase request fields the service builders read
+ * (`modelFactory` / `modelAppid` / `accessToken`); the snake_case keys the
+ * payload builder emits are NOT read by the create / verify / update request
+ * builders, so every call site maps them through here.
+ *
+ * Gated by the CURRENT model type: gear settings and edit prefills survive a
+ * type change, and stale voice credentials must not leak into a non-voice
+ * model's create/update payload or its connectivity probe. Call sites stay
+ * one-liners (spread into verify params / assign into save params).
+ */
+export const buildVoiceCredentialParams = (
+  modelType: string | undefined,
+  settings: ModelAdvancedSettingsValue | undefined
+): {
+  modelFactory?: string;
+  modelAppid?: string;
+  accessToken?: string;
+} => {
+  if (!isVoiceModelType(modelType) || !settings) return {};
+  const params: {
+    modelFactory?: string;
+    modelAppid?: string;
+    accessToken?: string;
+  } = {};
+  if (settings.model_factory != null)
+    params.modelFactory = String(settings.model_factory);
+  if (settings.model_appid != null)
+    params.modelAppid = String(settings.model_appid);
+  if (settings.access_token != null)
+    params.accessToken = String(settings.access_token);
+  return params;
+};
+
+/**
  * Build the per-model override entry stored inside
  * `ag_tenant_agent_t.model_params_override` JSONB.
  * Includes all configured fields except `display_name` (model name is not
@@ -731,8 +771,8 @@ const renderBoolField = (
     />
     {value === undefined || value === null ? (
       <span className="text-xs text-gray-400">
-        <Tooltip title="默认开启（跟随模型默认）。切换开关以显式启用或禁用。">
-          <span>默认</span>
+        <Tooltip title={translate("ui.localization.inheritEnabledHelp")}>
+          <span>{translate("ui.localization.default")}</span>
         </Tooltip>
       </span>
     ) : null}

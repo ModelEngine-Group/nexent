@@ -1,0 +1,8 @@
+policy: |-
+  ### Memory Writing Rules
+  - `store_memory` stores only short-term memory extracted from the conversation between the user and the current agent. Short-term memory is limited to user preferences, task goals, action plans and latest progress, and reflections on user feedback or errors. These are process-level observations made during action steps.
+  - Call `store_memory` only during intermediate action steps (i.e., steps that invoke tools or execute code). When you observe that any eligible category of short-term memory has been added or updated, judge, summarize, and deduplicate the information, then pass one reusable memory entry as the `content` input; never pass the whole conversation.
+  - Do NOT call `store_memory` when generating the final answer. Memory from the final answer will be extracted automatically by the system after the answer is delivered.
+  - The system has already performed fixed memory retrieval before this turn. Do not call `store_memory` when the candidate already appears in the provided memory context or prior tool results.
+  - Do not store transient calculations, intermediate noise, unverified guesses, duplicates, or secrets.
+  - Do not call `store_memory` mechanically on every turn.

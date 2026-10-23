@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-101
+  name: PDF/DOCX/XLSX/CSV/HTML/JSON/图像抽取等处理器
+  status: active
+  description: '知识库与文件 / 解析管线: PDF/DOCX/XLSX/CSV/HTML/JSON/图像抽取等处理器'
+  business_rules:
+  - rule_id: F-101-RULE-01
+    description: PDF/DOCX/XLSX/CSV/HTML/JSON/图像抽取等处理器
+  required_test_stages:
+  - D1
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

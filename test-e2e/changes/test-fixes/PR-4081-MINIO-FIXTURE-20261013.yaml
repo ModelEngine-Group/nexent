@@ -1,0 +1,57 @@
+schema_version: '1.0'
+change:
+  change_id: PR-4081-MINIO-FIXTURE-20261013
+  change_type: test-fix
+  title: Align offline package push fixtures with the configured MinIO image
+  description: >-
+    PR 4081 changes the general MinIO source to nexent/minio, but the two
+    fake local-image lists in deploy/tests/test_build_offline_package.sh still
+    contain quay.io/minio/minio. The CI deployment shell tests stop at the
+    first push-images.sh invocation before reaching Python setup or tests.
+    Update both lists and assert the configured MinIO tag and push operations
+    for direct push and load-before-push. Product code and workflows are unchanged.
+  affected_features:
+    existing: [F-174]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    This repairs existing CI shell fixtures only. The former offline packaging
+    D5 Cases DEP-003 and DEP-05 were removed by user request on 2026-10-10;
+    this change does not recreate them or claim real deployment acceptance.
+  traditional_ut:
+    decision: exempt
+    behaviors: []
+    reason: >-
+      No Python or product behavior changes. Verification uses the existing
+      deployment shell suite with controlled Docker boundaries; it is not
+      registered as Python UT or formal D1-D5 evidence.
+  notes: >-
+    Proof gap: existing shell assertions cover Nexent and Elasticsearch tag/push
+    operations but do not explicitly assert MinIO. Strengthen the same script
+    rather than adding a new formal Case. Reproduction on a clean tracked
+    snapshot of c896ac9f61c32bcb701bf0805d112916ae11c84f produces
+    'image is not loaded locally: nexent/minio:RELEASE.2023-12-20T01-00-02Z',
+    matching Actions job 115176972834. Related SPECs were inspected under the
+    document repository's offline-package-after-image-build and
+    offline-package-platform-safe-export directories; their product contracts
+    do not change. PASS on the clean PR snapshot under Ubuntu WSL:
+    bash deploy/tests/test_build_offline_package.sh,
+    setsid bash deploy/tests/test_common.sh with stdin redirected from /dev/null,
+    bash deploy/tests/test_docker_backup.sh,
+    bash deploy/tests/test_k8s_backup.sh, and
+    bash deploy/tests/test_sql_migrations.sh. The local super-admin shell test
+    fails before its first PASS; the WSL host lacks jq, whereas the supplied
+    CI job passes that test. Its jq fallback reads an unset user_id under
+    set -u when neither container nor host jq is available. This separate
+    environment path is not changed or counted as passing. bash -n for the
+    modified script and git diff --check pass. validate_changes.py passes.
+    validate_test_assets.py --phase implementation is BLOCKED by the existing
+    UT-BE-AIDP-COOLDOWN-001 reference to unknown F-111-RULE-02; removing this
+    new change record from the clean snapshot reproduces the same validator
+    failure. No formal Case was run and no Python coverage is claimed.

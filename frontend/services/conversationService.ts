@@ -1,3 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import { t as translate } from "i18next";
+import type { RuntimeGenerationOverrides } from "@/features/model-controls/turnControls";
+import type { ClarificationResponse } from "@/types/clarification";
 import { API_ENDPOINTS, ApiError } from "./api";
 
 import { chatConfig } from "@/const/chatConfig";
@@ -7,6 +12,7 @@ import type {
   ConversationListParams,
   ApiConversationDetail,
   ApiConversationResponse,
+  WorkbenchPins,
 } from "@/types/conversation";
 import { getAuthHeaders, fetchWithAuth } from "@/lib/auth";
 import log from "@/lib/logger";
@@ -32,6 +38,40 @@ const getWebSocketUrl = (endpoint: string): string => {
 };
 
 export const conversationService = {
+  async getWorkbenchPins(): Promise<WorkbenchPins> {
+    const response = await fetch(API_ENDPOINTS.conversation.workbenchPins);
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data;
+  },
+
+  async setWorkbenchPin(
+    conversationId: number,
+    pinned: boolean
+  ): Promise<WorkbenchPins> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.workbenchPin(conversationId),
+      {
+        method: "PUT",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ pinned }),
+      }
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data;
+  },
+
   // Get conversation list
   async getList(
     params: ConversationListParams & {
@@ -48,6 +88,7 @@ export const conversationService = {
     if (params.conversationType) {
       query.set("conversation_type", params.conversationType);
     }
+    if (params.cursor) query.set("cursor", params.cursor);
     const response = await fetch(
       `${API_ENDPOINTS.conversation.list}?${query.toString()}`
     );
@@ -181,13 +222,18 @@ export const conversationService = {
   },
 
   // Rename conversation
-  async rename(conversationId: number, name: string) {
+  async rename(
+    conversationId: number,
+    name: string,
+    onlyIfDefaultTitle = false
+  ) {
     const response = await fetch(API_ENDPOINTS.conversation.rename, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify({
         conversation_id: conversationId,
         name,
+        ...(onlyIfDefaultTitle ? { only_if_default_title: true } : {}),
       }),
     });
 
@@ -217,7 +263,11 @@ export const conversationService = {
 
       // If the signal is aborted before the request returns, return early
       if (signal?.aborted) {
-        return { code: -1, message: "请求已取消", data: [] };
+        return {
+          code: -1,
+          message: translate("ui.localization.requestCancelled"),
+          data: [],
+        };
       }
 
       const data = await response.json();
@@ -233,7 +283,11 @@ export const conversationService = {
         (error instanceof Error && error.name === "AbortError") ||
         signal?.aborted
       ) {
-        return { code: -1, message: "请求已取消", data: [] };
+        return {
+          code: -1,
+          message: translate("ui.localization.requestCancelled"),
+          data: [],
+        };
       }
       throw error;
     }
@@ -336,7 +390,7 @@ export const conversationService = {
 
     throw new ApiError(
       data.code || -1,
-      data.message || data.detail || "停止失败"
+      data.message || data.detail || translate("ui.localization.stopFailed")
     );
   },
 
@@ -1032,6 +1086,7 @@ export const conversationService = {
   async runAgent(
     params: {
       query: string;
+      clarification_response?: ClarificationResponse;
       conversation_id?: number;
       history: Array<{ role: string; content: string }>;
       files?: File[];
@@ -1046,10 +1101,7 @@ export const conversationService = {
       }>;
       agent_id?: number; // Add agent_id parameter
       model_id?: number; // Optional model override
-      generation_config?: {
-        deep_thinking: boolean;
-        thinking_effort?: "low" | "medium" | "high";
-      };
+      generation_config?: RuntimeGenerationOverrides;
       reasoning_effort?:
         | "auto"
         | "none"
@@ -1076,7 +1128,6 @@ export const conversationService = {
       retry_user_message_id?: number;
       workbench_config?: import("@/features/workbench").WorkbenchSessionConfig;
       draft_snapshot?: Record<string, unknown>;
-      complexity?: "simple" | "complicated";
       language?: "zh" | "en";
     },
     signal?: AbortSignal,
@@ -1097,9 +1148,15 @@ export const conversationService = {
         is_debug: params.is_debug || false,
         enable_plan: params.enable_plan || false,
       };
+      if (
+        !params.is_resume &&
+        !params.runtime_mode &&
+        params.clarification_response
+      ) {
+        requestParams.clarification_response = params.clarification_response;
+      }
       if (params.runtime_mode === "nl2skill") {
         requestParams.draft_snapshot = params.draft_snapshot;
-        requestParams.complexity = params.complexity || "complicated";
         requestParams.language = params.language;
       }
       if (params.persist_history && params.runtime_mode) {
@@ -1281,7 +1338,7 @@ export const conversationService = {
       // If the error is caused by canceling the request, return a specific response instead of throwing an error
       if (error instanceof Error && error.name === "AbortError") {
         log.log("Agent请求已被取消");
-        throw new Error("请求已被取消");
+        throw new Error(translate("ui.localization.requestWasCancelled"));
       }
       // Other errors are thrown normally
       throw error;

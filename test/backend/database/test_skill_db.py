@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for backend.database.skill_db module."""
 import sys
 import os
@@ -13,11 +15,13 @@ from datetime import datetime
 
 @pytest.fixture(autouse=True)
 def _default_to_ordinary_agent(monkeypatch):
-    """Keep general SkillInstance tests scoped to an ordinary Agent."""
-    monkeypatch.setattr(
-        "backend.database.agent_db.is_system_agent",
-        lambda *_args, **_kwargs: False,
-    )
+    """Isolate the Agent collaborator without importing its database graph."""
+    import backend.database as database_package
+
+    agent_db_mock = types.ModuleType("backend.database.agent_db")
+    agent_db_mock.is_system_agent = MagicMock(return_value=False)
+    monkeypatch.setitem(sys.modules, "backend.database.agent_db", agent_db_mock)
+    monkeypatch.setattr(database_package, "agent_db", agent_db_mock, raising=False)
 
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
@@ -78,18 +82,18 @@ sys.modules['backend.database.db_models'] = db_models_mock
 
 utils_skill_params_mock = MagicMock()
 utils_skill_params_mock.strip_params_comments_for_db = lambda x: x
-utils_str_utils_mock = types.ModuleType('utils.str_utils')
+utils_str_utils_mock = types.ModuleType('management.db.serialization')
 utils_str_utils_mock.convert_list_to_string = lambda items: "" if items is None else ",".join(str(item) for item in items)
 utils_str_utils_mock.convert_string_to_list = (
     lambda items: [] if not items else [int(item.strip()) for item in items.split(",") if item.strip().isdigit()]
 )
 sys.modules['utils'] = MagicMock()
-sys.modules['utils.auth_utils'] = MagicMock()
-sys.modules['utils.skill_params_utils'] = utils_skill_params_mock
-sys.modules['utils.str_utils'] = utils_str_utils_mock
+sys.modules['management.services.permission.identity.authentication_helpers'] = MagicMock()
+sys.modules['management.services.skill.params'] = utils_skill_params_mock
+sys.modules['management.db.serialization'] = utils_str_utils_mock
 sys.modules['backend.utils'] = MagicMock()
-sys.modules['backend.utils.skill_params_utils'] = utils_skill_params_mock
-sys.modules['backend.utils.str_utils'] = utils_str_utils_mock
+sys.modules['backend.management.services.skill.params'] = utils_skill_params_mock
+sys.modules['management.db.serialization'] = utils_str_utils_mock
 
 from backend.database.skill_db import (
     _params_value_for_db,

@@ -5,6 +5,7 @@ ARG MIRROR
 ARG APT_MIRROR
 ARG TARGETARCH
 LABEL authors="nexent"
+ENV TZ=Asia/Shanghai
 
 # Set correct permissions as root
 USER root
@@ -25,8 +26,13 @@ RUN --mount=type=cache,id=nexent-data-process-apt-cache-${TARGETARCH},target=/va
         done; \
     fi && \
     apt-get update && \
-    apt-get install -y --no-install-recommends --fix-missing \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends --fix-missing \
         curl \
+        vim \
+        procps \
+        wget \
+        less \
+        tzdata \
         postgresql-client \
         libmagic1 \
         libmagic-dev \
@@ -167,12 +173,17 @@ RUN --mount=type=cache,id=nexent-data-process-apt-cache-${TARGETARCH},target=/va
     apt-get autoremove -y && \
     rm -rf /tmp/* /var/tmp/*
 
+# NLTK >= 3.10 refuses a data root that is group/world-writable or not owned by
+# root. cp -a preserves the build-context mode, and on Windows/WSL the
+# model-assets checkout is 777, so normalize the baked copy to match CI builds.
 RUN --mount=type=bind,source=model-assets,target=/tmp/model-assets,readonly \
     mkdir -p /opt/models && \
     cp -a /tmp/model-assets/clip-vit-base-patch32 /opt/models/clip-vit-base-patch32 && \
     cp -a /tmp/model-assets/nltk_data /opt/models/nltk_data && \
     cp -a /tmp/model-assets/table-transformer-structure-recognition /opt/models/table-transformer-structure-recognition && \
-    cp -a /tmp/model-assets/yolox /opt/models/yolox
+    cp -a /tmp/model-assets/yolox /opt/models/yolox && \
+    chown -R root:root /opt/models/nltk_data && \
+    chmod -R u+rwX,go+rX,go-w /opt/models/nltk_data
 
 COPY --from=data-process-deps /opt/backend/.venv /opt/backend/.venv
 COPY --from=data-process-deps /opt/sdk /opt/sdk

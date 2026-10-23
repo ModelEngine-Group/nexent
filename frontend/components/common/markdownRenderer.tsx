@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import React from "react";
@@ -923,8 +924,8 @@ const HoverableText = ({
               "--scrollbar-width": "8px",
               "--scrollbar-height": "8px",
               "--scrollbar-track-bg": "transparent",
-              "--scrollbar-thumb-bg": "rgb(209, 213, 219)",
-              "--scrollbar-thumb-hover-bg": "rgb(156, 163, 175)",
+              "--scrollbar-thumb-bg": "var(--scrollbar-thumb)",
+              "--scrollbar-thumb-hover-bg": "var(--scrollbar-thumb-hover)",
               "--scrollbar-thumb-radius": "9999px",
               boxSizing: "border-box",
               maxWidth: "min(720px, 50vw)",
@@ -963,14 +964,6 @@ const HoverableText = ({
                 }
                 div::-webkit-scrollbar-thumb:hover {
                   background: var(--scrollbar-thumb-hover-bg);
-                }
-                @media (prefers-color-scheme: dark) {
-                  div::-webkit-scrollbar-thumb {
-                    background: rgb(55, 65, 81);
-                  }
-                  div::-webkit-scrollbar-thumb:hover {
-                    background: rgb(75, 85, 99);
-                  }
                 }
               `}</style>
               {matchedResult ? (
@@ -1032,13 +1025,13 @@ const convertLatexDelimiters = (content: string): string => {
  * Handles both complete and incomplete tags (for streaming scenarios)
  * - <code>...</code> → ```python ... ```
  * - <code>... (incomplete) → ```python\n (open code fence)
- * - <DISPLAY:language>...</DISPLAY> → ```language ... ```
- * - <DISPLAY:language>... (incomplete) → ```language\n (open code fence)
+ * - <display:language>...</display> → ```language ... ```
+ * - <display:language>... (incomplete) → ```language\n (open code fence)
  */
 const convertCustomCodeTags = (content: string): string => {
-  // Step 1: Handle complete <DISPLAY:language>...</DISPLAY> blocks
+  // Step 1: Handle complete <display:language>...</display> blocks
   content = content.replace(
-    /<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g,
+    /<display:(\w+)>([\s\S]*?)<\/display>/g,
     (_match, language, code) => {
       return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
     }
@@ -1050,9 +1043,9 @@ const convertCustomCodeTags = (content: string): string => {
   });
 
   // Step 3: Handle incomplete tags during streaming
-  // <DISPLAY:language> without closing </DISPLAY> → ```language\n
+  // <display:language> without closing </display> → ```language\n
   content = content.replace(
-    /<DISPLAY:(\w+)>(?![\s\S]*<\/DISPLAY>)/g,
+    /<display:(\w+)>(?![\s\S]*<\/display>)/g,
     (_match, language) => {
       return `\`\`\`${language}\n`;
     }

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import base64
 import logging
 from http import HTTPStatus
@@ -15,21 +17,21 @@ from consts.exceptions import (
 from consts.model import HybridSearchRequest, ProcessParams
 from consts.task_recovery import NORTHBOUND_SERVICE_NAME
 from database.knowledge_db import get_index_name_by_knowledge_name
-from services.file_management_service import (
+from management.services.file.service import (
     upload_files_impl,
     get_file_url_impl,
     get_file_stream_impl,
     check_file_access,
 )
 from services.northbound_service import NorthboundContext
-from services.redis_service import get_redis_service
+from management.services.knowledge_base.task_state import get_redis_service
 from management.services.knowledge_base.service import (
     ElasticSearchService,
     KnowledgeBaseNeedsModelConfigError,
     get_vector_db_core,
 )
-from utils.auth_utils import generate_session_jwt
-from utils.file_management_utils import trigger_data_process
+from management.services.permission.identity.authentication_helpers import generate_session_jwt
+from management.services.knowledge_base.ingestion import trigger_data_process
 
 from .file_management_app import build_content_disposition_header
 from .northbound_app import _get_northbound_context

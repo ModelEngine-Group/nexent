@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 from contextlib import nullcontext
 from types import ModuleType, SimpleNamespace
@@ -9,6 +11,7 @@ from test.backend.services import test_agent_service as legacy
 
 
 agent_run = legacy.agent_run_service
+agent_subscription = legacy.agent_subscription
 AgentRequest = legacy.AgentRequest
 
 
@@ -54,10 +57,10 @@ def test_apply_workbench_runtime_plan_attaches_all_runtime_overrides(monkeypatch
     )
 
     knowledge_scope = __import__(
-        "services.knowledge_scope_service", fromlist=["snapshot_runtime_knowledge_tree"]
+        "management.services.knowledge_base.scope", fromlist=["snapshot_runtime_knowledge_tree"]
     )
-    workbench = ModuleType("services.workbench_service")
-    runtime_mount = ModuleType("services.runtime_knowledge_mount")
+    workbench = ModuleType("management.services.agent.workbench")
+    runtime_mount = ModuleType("management.services.knowledge_base.mount")
     snapshot = MagicMock(return_value=knowledge_tree)
     mount = MagicMock(return_value=mounted_tools)
     attach = MagicMock(return_value=attached_plan)
@@ -68,8 +71,8 @@ def test_apply_workbench_runtime_plan_attaches_all_runtime_overrides(monkeypatch
     workbench.attach_runtime_knowledge_tree = attach
     workbench.runtime_skill_snapshot = skill_snapshot
     runtime_mount.mount_knowledge_records = mount
-    monkeypatch.setitem(sys.modules, "services.workbench_service", workbench)
-    monkeypatch.setitem(sys.modules, "services.runtime_knowledge_mount", runtime_mount)
+    monkeypatch.setitem(sys.modules, "management.services.agent.workbench", workbench)
+    monkeypatch.setitem(sys.modules, "management.services.knowledge_base.mount", runtime_mount)
 
     agent_run.apply_workbench_runtime_plan(request, canonical, plan, "tenant-a")
 
@@ -142,10 +145,10 @@ async def test_prepare_agent_run_forwards_workbench_runtime_state(
     monkeypatch.setattr(agent_run, "get_current_run_user_message_id", MagicMock(return_value=None))
     monkeypatch.setattr(agent_run, "build_authorized_context_input", MagicMock(return_value="context"))
     monkeypatch.setattr(agent_run.agent_run_manager, "register_agent_run", register)
-    workbench = ModuleType("services.workbench_service")
+    workbench = ModuleType("management.services.agent.workbench")
     compile_plan = MagicMock(return_value=executable_tree)
     workbench.compile_runtime_mount_plan = compile_plan
-    monkeypatch.setitem(sys.modules, "services.workbench_service", workbench)
+    monkeypatch.setitem(sys.modules, "management.services.agent.workbench", workbench)
 
     result, memory = await agent_run.prepare_agent_run(
         request,
@@ -214,40 +217,40 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
         return_value={"workbench_config_version": 3, "runtime_metadata": {"existing": True}}
     )
 
-    workbench = ModuleType("services.workbench_service")
+    workbench = ModuleType("management.services.agent.workbench")
     workbench.assert_workbench_version = MagicMock()
     workbench.resolve_workbench_config = MagicMock(return_value=(canonical, plan))
-    monkeypatch.setitem(sys.modules, "services.workbench_service", workbench)
-    monkeypatch.setattr(agent_run, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setitem(sys.modules, "management.services.agent.workbench", workbench)
+    monkeypatch.setattr(agent_subscription, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(
-        agent_run,
+        agent_subscription,
         "_resolve_user_tenant_language",
         MagicMock(return_value=("user-a", "tenant-a", "en")),
     )
-    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone: query)
-    monkeypatch.setattr(agent_run, "get_conversation_service", MagicMock(return_value=conversation))
-    monkeypatch.setattr(agent_run, "apply_workbench_runtime_plan", apply_plan)
-    monkeypatch.setattr(agent_run, "update_conversation_workbench_config_service", update_config)
-    monkeypatch.setattr(agent_run, "update_conversation_chat_mode_service", MagicMock())
-    monkeypatch.setattr(agent_run, "save_messages", MagicMock())
+    monkeypatch.setattr(agent_subscription, "prepend_current_time", lambda query, _timezone, *, language: query)
+    monkeypatch.setattr(agent_subscription, "get_conversation_service", MagicMock(return_value=conversation))
+    monkeypatch.setattr(agent_subscription, "apply_workbench_runtime_plan", apply_plan)
+    monkeypatch.setattr(agent_subscription, "update_conversation_workbench_config_service", update_config)
+    monkeypatch.setattr(agent_subscription, "update_conversation_chat_mode_service", MagicMock())
+    monkeypatch.setattr(agent_subscription, "save_messages", MagicMock())
     monkeypatch.setattr(
-        agent_run,
+        agent_subscription,
         "build_agent_run_context",
         MagicMock(return_value=SimpleNamespace(metadata={}, enable_memory=False)),
     )
-    monkeypatch.setattr(agent_run, "agent_monitoring_context", lambda _metadata: nullcontext())
+    monkeypatch.setattr(agent_subscription, "agent_monitoring_context", lambda _metadata: nullcontext())
 
     execution = MagicMock()
     execution.execution_id = "execution-a"
     execution.future.done.return_value = True
-    monkeypatch.setattr(agent_run.agent_run_manager, "reserve_agent_capacity", MagicMock(return_value="cap"))
-    monkeypatch.setattr(agent_run.agent_run_manager, "reserve_agent_run", MagicMock(return_value="run"))
-    monkeypatch.setattr(agent_run.agent_run_manager, "release_agent_run_reservation", MagicMock())
-    monkeypatch.setattr(agent_run.runtime_thread_manager, "submit", MagicMock(return_value=execution))
-    monkeypatch.setattr(agent_run.runtime_thread_manager, "wait_until_started", AsyncMock())
-    monkeypatch.setattr(agent_run.runtime_state_service, "reset_stream_async", AsyncMock())
+    monkeypatch.setattr(agent_subscription.agent_run_manager, "reserve_agent_capacity", MagicMock(return_value="cap"))
+    monkeypatch.setattr(agent_subscription.agent_run_manager, "reserve_agent_run", MagicMock(return_value="run"))
+    monkeypatch.setattr(agent_subscription.agent_run_manager, "release_agent_run_reservation", MagicMock())
+    monkeypatch.setattr(agent_subscription.runtime_thread_manager, "submit", MagicMock(return_value=execution))
+    monkeypatch.setattr(agent_subscription.runtime_thread_manager, "wait_until_started", AsyncMock())
+    monkeypatch.setattr(agent_subscription.runtime_state_service, "reset_stream_async", AsyncMock())
     monkeypatch.setattr(
-        agent_run.streaming_channel_manager,
+        agent_subscription.streaming_channel_manager,
         "get_or_create_channel",
         AsyncMock(return_value=None),
     )
@@ -255,9 +258,9 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
     async def generate_stream(*_args, **_kwargs):
         yield 'data: {"type": "done"}\n\n'
 
-    monkeypatch.setattr(agent_run, "generate_stream", generate_stream)
+    monkeypatch.setattr(agent_subscription, "generate_stream", generate_stream)
 
-    response = await agent_run.run_agent_stream(
+    response = await agent_subscription.run_agent_stream(
         request,
         Request(scope={"type": "http", "headers": []}),
         "Bearer token",
@@ -289,10 +292,10 @@ async def test_run_agent_stream_rejects_disabled_workbench_entrypoint(monkeypatc
         {"mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7}]}
     )
     request = _request(entrypoint="workbench", workbench=workbench)
-    monkeypatch.setattr(agent_run, "ENABLE_AGENT_WORKBENCH", False)
+    monkeypatch.setattr(agent_subscription, "ENABLE_AGENT_WORKBENCH", False)
 
-    with pytest.raises(agent_run.WorkbenchError, match="WORKBENCH_DISABLED"):
-        await agent_run.run_agent_stream(
+    with pytest.raises(agent_subscription.WorkbenchError, match="WORKBENCH_DISABLED"):
+        await agent_subscription.run_agent_stream(
             request,
             Request(scope={"type": "http", "headers": []}),
             "Bearer token",
@@ -304,21 +307,21 @@ async def test_run_agent_stream_rejects_stored_workbench_when_disabled(monkeypat
     from fastapi import Request
 
     request = _request()
-    monkeypatch.setattr(agent_run, "ENABLE_AGENT_WORKBENCH", False)
+    monkeypatch.setattr(agent_subscription, "ENABLE_AGENT_WORKBENCH", False)
     monkeypatch.setattr(
-        agent_run,
+        agent_subscription,
         "_resolve_user_tenant_language",
         lambda **_kwargs: ("user-a", "tenant-a", "en"),
     )
-    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone: query)
+    monkeypatch.setattr(agent_subscription, "prepend_current_time", lambda query, _timezone, *, language: query)
     monkeypatch.setattr(
-        agent_run,
+        agent_subscription,
         "get_conversation_service",
         lambda **_kwargs: {"workbench_config": {"schema_version": 3}},
     )
 
-    with pytest.raises(agent_run.WorkbenchError, match="WORKBENCH_DISABLED"):
-        await agent_run.run_agent_stream(
+    with pytest.raises(agent_subscription.WorkbenchError, match="WORKBENCH_DISABLED"):
+        await agent_subscription.run_agent_stream(
             request,
             Request(scope={"type": "http", "headers": []}),
             "Bearer token",
@@ -330,21 +333,21 @@ async def test_run_agent_stream_rejects_conversation_entrypoint_mismatch(monkeyp
     from fastapi import Request
 
     request = _request(entrypoint="workbench", workbench=None)
-    monkeypatch.setattr(agent_run, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setattr(agent_subscription, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(
-        agent_run,
+        agent_subscription,
         "_resolve_user_tenant_language",
         lambda **_kwargs: ("user-a", "tenant-a", "en"),
     )
-    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone: query)
+    monkeypatch.setattr(agent_subscription, "prepend_current_time", lambda query, _timezone, *, language: query)
     monkeypatch.setattr(
-        agent_run,
+        agent_subscription,
         "get_conversation_service",
         lambda **_kwargs: {"workbench_config": None},
     )
 
-    with pytest.raises(agent_run.ForbiddenError, match="different chat entrypoint"):
-        await agent_run.run_agent_stream(
+    with pytest.raises(agent_subscription.ForbiddenError, match="different chat entrypoint"):
+        await agent_subscription.run_agent_stream(
             request,
             Request(scope={"type": "http", "headers": []}),
             "Bearer token",
@@ -365,30 +368,30 @@ async def test_run_agent_stream_rejects_stale_metadata_version(monkeypatch):
         metadata={"ticket": "NEX-1"},
         expected_metadata_version=2,
     )
-    monkeypatch.setattr(agent_run, "ENABLE_AGENT_WORKBENCH", True)
+    monkeypatch.setattr(agent_subscription, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(
-        agent_run,
+        agent_subscription,
         "_resolve_user_tenant_language",
         lambda **_kwargs: ("user-a", "tenant-a", "en"),
     )
-    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone: query)
+    monkeypatch.setattr(agent_subscription, "prepend_current_time", lambda query, _timezone, *, language: query)
     monkeypatch.setattr(
-        agent_run,
+        agent_subscription,
         "get_conversation_service",
         lambda **_kwargs: {
             "workbench_config": workbench.model_dump(mode="json"),
             "runtime_metadata_version": 3,
         },
     )
-    workbench_module = ModuleType("services.workbench_service")
+    workbench_module = ModuleType("management.services.agent.workbench")
     workbench_module.assert_workbench_version = MagicMock()
     workbench_module.resolve_workbench_config = MagicMock()
-    monkeypatch.setitem(sys.modules, "services.workbench_service", workbench_module)
+    monkeypatch.setitem(sys.modules, "management.services.agent.workbench", workbench_module)
 
-    with pytest.raises(agent_run.AppException) as caught:
-        await agent_run.run_agent_stream(
+    with pytest.raises(agent_subscription.AppException) as caught:
+        await agent_subscription.run_agent_stream(
             request,
             Request(scope={"type": "http", "headers": []}),
             "Bearer token",
         )
-    assert caught.value.error_code == agent_run.ErrorCode.CHAT_METADATA_VERSION_CONFLICT
+    assert caught.value.error_code == agent_subscription.ErrorCode.CHAT_METADATA_VERSION_CONFLICT

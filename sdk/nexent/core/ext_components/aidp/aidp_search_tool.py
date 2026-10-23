@@ -1,7 +1,9 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 """
 AIDP Search Tool
 Performs multimodal knowledge base retrieval via the AIDP FusionSearch API.
-Supports hybrid, vector, and full-text search with optional reranking.
+Supports hybrid, vector, full-text, and graph search with optional reranking.
 """
 import json
 import logging
@@ -28,8 +30,8 @@ from ....utils.http_client_manager import http_client_manager
 
 logger = logging.getLogger("aidp_search_tool")
 
-_VALID_SEARCH_METHODS = {"hybrid_search", "vector_search", "full_text_search"}
-_VALID_RERANK_MODES = {"performance", "high_accuracy"}
+_VALID_SEARCH_METHODS = {"hybrid_search", "vector_search", "full_text_search", "graph_search"}
+_VALID_RERANK_MODES = {"performance", "high_accuracy", "jargon_coverage"}
 _MAX_KDS = 10
 
 # Transient HTTP status codes that merit automatic retry. 502/503/504 per
@@ -123,11 +125,12 @@ class AidpSearchTool(Tool):
             "description_zh": "要检索的知识库 ID 列表",
         },
         "search_method": {
-            "description": "Search method: hybrid_search, vector_search, full_text_search",
+            "description": "Search method: hybrid_search, vector_search, full_text_search, graph_search",
             "description_zh": (
                 "搜索方法：hybrid_search（融合检索）/"
                 "vector_search（向量检索）/"
-                "full_text_search（全文检索）"
+                "full_text_search（全文检索）/"
+                "graph_search（图谱检索）"
             ),
         },
         "reranking_enable": {
@@ -135,8 +138,8 @@ class AidpSearchTool(Tool):
             "description_zh": "是否启用重排序",
         },
         "reranking_mode": {
-            "description": "Reranking mode: performance or high_accuracy",
-            "description_zh": "重排序模式：performance/high_accuracy",
+            "description": "Reranking mode: performance, high_accuracy, jargon_coverage",
+            "description_zh": "重排序模式：performance/high_accuracy/jargon_coverage",
         },
         "rewrite_enable": {
             "description": "Whether to enable query rewrite",
@@ -280,7 +283,7 @@ class AidpSearchTool(Tool):
             "", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False)
         )
 
-    def _build_chunk_message(self, chunk: Dict[str, Any], idx: int):
+    def _build_chunk_message(self, chunk: Dict[str, Any], idx: int, citation_start: Optional[int] = None):
         """Build a SearchResultTextMessage for a single record chunk."""
         chunk_type = str(chunk.get("chunk_type", "text") or "text")
         title = str(chunk.get("title") or "")
@@ -304,8 +307,9 @@ class AidpSearchTool(Tool):
                 "pages": pages,
                 "file_url": file_url,
                 "metadata": metadata,
+                "retrieval_source": chunk.get("retrieval_source"),
             },
-            cite_index=self.record_ops + idx,
+            cite_index=(self.record_ops if citation_start is None else citation_start) + idx,
             search_type=self.name,
             tool_sign=self.tool_sign,
         )
@@ -317,8 +321,13 @@ class AidpSearchTool(Tool):
         search_results_return: List[Dict[str, Any]] = []
         images_url: List[str] = []
 
-        for idx, chunk in enumerate(records[: self.top_k]):
-            msg = self._build_chunk_message(chunk, idx)
+        chunks = records[: self.top_k]
+        citation_start = (
+            self.observer.reserve_citations(self.tool_sign, len(chunks))
+            if self.observer else self.record_ops
+        )
+        for idx, chunk in enumerate(chunks):
+            msg = self._build_chunk_message(chunk, idx, citation_start)
             ui_result = msg.to_dict()
             ui_result["text"] = _HTML_IMAGE_TAG_PATTERN.sub("", ui_result["text"])
             search_results_json.append(ui_result)
@@ -335,6 +344,7 @@ class AidpSearchTool(Tool):
             # value because they aren't rendered as <img> tags.
             if chunk_type == "image" and file_url:
                 full_url = self._build_image_url(file_url)
+                ui_result["url"] = full_url
                 # Do NOT expose the image URL to the LLM: the URL is an
                 # AIDP endpoint that requires a Bearer token, so if the
                 # model embeds it in markdown the browser will GET it

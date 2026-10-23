@@ -1,4 +1,7 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 # -*- coding: utf-8 -*-
+
 """
 Shared utilities for building and running nexent agents in benchmarks.
 
@@ -24,8 +27,12 @@ from dotenv import load_dotenv  # noqa: E402
 # injects them into sys.path automatically - no manual path manipulation needed.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import paths  # noqa: E402, F401 - side-effect: adds sdk/, backend/ to sys.path
-from utils.context_utils import build_context_inputs  # noqa: E402
-from utils.prompt_template_utils import get_agent_prompt_template  # noqa: E402
+from management.services.agent.prompt import (
+    load_agent_prompt_bundle,
+)
+from management.services.agent.context import (
+    build_context_inputs,
+)
 
 from nexent.core.agents.agent_model import (  # noqa: E402
     AgentConfig,
@@ -38,6 +45,7 @@ from nexent.core.agents.context import (
     ContextItemInput,  # noqa: E402
     ContextManagerConfig,  # noqa: E402
 )
+from nexent.core.agents.prompt import AgentPromptComposer  # noqa: E402
 from nexent.core.agents.run_agent import agent_run  # noqa: E402
 from nexent.core.utils.observer import MessageObserver  # noqa: E402
 
@@ -61,16 +69,15 @@ THINKING_OFF_EXTRA_BODY = {
 }
 
 # ============ Default Prompt Templates ============
-DEFAULT_DUTY_PROMPT = """You are an intelligent assistant focused on helping users solve problems. You need to:
+DEFAULT_AGENT_PROMPT = """You are an intelligent assistant focused on helping users solve problems. You need to:
 1. Understand the user's needs and provide accurate answers
 2. Maintain a friendly and professional attitude
-3. Remember key information from the conversation"""
+3. Remember key information from the conversation
 
-DEFAULT_CONSTRAINT_PROMPT = """1. Do not generate harmful content
+# Constraints
+1. Do not generate harmful content
 2. Comply with laws and regulations
 3. Be honest with users when uncertain"""
-
-DEFAULT_FEW_SHOTS_PROMPT = ""
 
 # ============ Message Type Constants ============
 TRACKED_MESSAGE_TYPES = {
@@ -92,9 +99,8 @@ def build_prompt_templates(
     is_manager: bool = False
 ) -> dict:
     """Build non-context templates required by CoreAgent."""
-    prompt_templates = get_agent_prompt_template(is_manager=is_manager, language=language)
-    prompt_templates["system_prompt"] = ""
-    return prompt_templates
+    bundle = load_agent_prompt_bundle(is_manager=is_manager, language=language)
+    return AgentPromptComposer(bundle).compatibility_templates()
 
 
 # ============ AgentRunInfo Construction Functions ============
@@ -102,9 +108,7 @@ def build_prompt_templates(
 def build_agent_run_info(
     query: str,
     history: list[AgentHistory],
-    duty_prompt: str = "",
-    constraint_prompt: str = "",
-    few_shots_prompt: str = "",
+    prompt: str = "",
     fallback_prompt: str = "",
     tools: list = None,
     managed_agents: list = None,
@@ -128,11 +132,9 @@ def build_agent_run_info(
     Args:
         query: User query
         history: Conversation history
-        duty_prompt: Duty prompt (empty uses default)
-        constraint_prompt: Constraint prompt (empty uses default)
-        few_shots_prompt: Few-shot prompt
+        prompt: Complete business prompt, including constraints and examples (empty uses default)
         fallback_prompt: Optional single custom system component used when no
-                         segmented prompt fields are supplied
+                         business prompt is supplied
         tools: Tool list
         managed_agents: Managed sub-agent list
         max_steps: Max execution steps
@@ -154,9 +156,7 @@ def build_agent_run_info(
         AgentRunInfo object
     """
     # Use defaults
-    duty = duty_prompt or DEFAULT_DUTY_PROMPT
-    constraint = constraint_prompt or DEFAULT_CONSTRAINT_PROMPT
-    few_shots = few_shots_prompt or DEFAULT_FEW_SHOTS_PROMPT
+    complete_prompt = prompt or DEFAULT_AGENT_PROMPT
     tools = tools or []
     managed_agents = managed_agents or []
 
@@ -172,24 +172,26 @@ def build_agent_run_info(
         model_factory=model_factory,
     )
 
+    prompt_bundle = load_agent_prompt_bundle(
+        is_manager=is_manager,
+        language=language,
+    )
     context_items = build_context_inputs(
-        duty=duty,
-        constraint=constraint,
-        few_shots=few_shots,
+        prompt=complete_prompt,
         language=language,
         is_manager=is_manager,
         tools={tool.name: tool for tool in tools},
         skills=skills or [],
-        managed_agents={agent.name: agent for agent in managed_agents},
+        worker_agents={agent.name: agent for agent in managed_agents},
         external_a2a_agents={},
         memory_list=[],
-        knowledge_base_summary="",
+        knowledge_base_summaries=[],
+        prompt_bundle=prompt_bundle,
     )
     if prompt_components:
         component_item_ids = {
             "basic_information": "system:header",
-            "duty_prompt": "system:duty",
-            "constraint_prompt": "system:constraint",
+            "prompt": "system:duty",
             "execution_prompt": "system:execution_flow",
             "resource_prompt": "system:available_resources_header",
             "code_rules_prompt": "system:code_norms",
@@ -212,14 +214,14 @@ def build_agent_run_info(
             else item
             for item in context_items
         ]
-    if fallback_prompt and not any((duty_prompt, constraint_prompt, few_shots_prompt)):
+    if fallback_prompt and not prompt:
         context_items = [ContextItemInput(
             id="system:fallback",
             type="system",
             content={"text": fallback_prompt},
         )]
 
-    prompt_templates = build_prompt_templates(language=language, is_manager=is_manager)
+    prompt_templates = AgentPromptComposer(prompt_bundle).compatibility_templates()
     if "final_answer_contract" in (prompt_components or {}):
         final_contract = prompt_components["final_answer_contract"]
         prompt_templates["final_answer"] = (
@@ -239,7 +241,7 @@ def build_agent_run_info(
         max_steps=max_steps,
         model_name="main_model",
         prompt_templates=prompt_templates,
-        managed_agents=managed_agents,
+        worker_agents=managed_agents,
         context_manager_config=cm_config,
         context_items=context_items,
     )
@@ -315,7 +317,7 @@ def build_agent_run_info_with_custom_prompt(
         max_steps=max_steps,
         model_name="main_model",
         prompt_templates=prompt_templates,
-        managed_agents=managed_agents,
+        worker_agents=managed_agents,
         context_manager_config=context_manager_config or ContextManagerConfig(),
         context_items=[
             ContextItemInput(
@@ -478,8 +480,9 @@ def inject_production_managed_tools(
     tenant_id: str,
     version_no: int,
     local_skills_dir: str | None,
+    has_enabled_skills: bool,
 ) -> list[ToolConfig]:
-    """Mirror production's passive parallel and builtin skill-tool assembly."""
+    """Mirror production's passive parallel and conditional skill-tool assembly."""
     from nexent.core.tools.parallel_executor import ParallelExecutorTool
 
     existing_names = {tool.name for tool in tools}
@@ -512,13 +515,6 @@ def inject_production_managed_tools(
             "containing configuration variables needed for skill workflows.",
             '{"skill_name": "str"}',
         ),
-        (
-            "WriteSkillFileTool",
-            "write_skill_file",
-            "Write content to a file within a skill directory. Creates parent "
-            "directories if they do not exist.",
-            '{"skill_name": "str", "file_path": "str", "content": "str"}',
-        ),
     )
     injected: list[ToolConfig] = []
     if ParallelExecutorTool.name not in existing_names:
@@ -526,6 +522,7 @@ def inject_production_managed_tools(
             class_name=ParallelExecutorTool.__name__,
             name=ParallelExecutorTool.name,
             description=ParallelExecutorTool.description,
+            description_zh=ParallelExecutorTool.description_zh,
             inputs=json.dumps(ParallelExecutorTool.inputs, ensure_ascii=False),
             output_type=ParallelExecutorTool.output_type,
             params={},
@@ -545,7 +542,7 @@ def inject_production_managed_tools(
             metadata=skill_context,
         )
         for class_name, name, description, inputs in definitions
-        if name not in existing_names
+        if has_enabled_skills and name not in existing_names
     )
     return [*tools, *injected]
 

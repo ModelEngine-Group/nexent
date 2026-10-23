@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Database operations for group management
 """
@@ -5,7 +6,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from database.client import as_dict, get_db_session
 from database.db_models import TenantGroupInfo, TenantGroupUser
-from utils.str_utils import convert_string_to_list
+from management.db.serialization import convert_string_to_list
 from consts.exceptions import TenantResourceLimitError
 from consts.const import MAX_GROUPS_PER_TENANT
 from sqlalchemy import text

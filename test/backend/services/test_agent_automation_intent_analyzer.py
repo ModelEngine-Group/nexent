@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import json
 from datetime import datetime
@@ -5,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from services.agent_automation.intent_analyzer import (
+from management.services.automation.intent import (
     AutomationIntentContext,
     AutomationIntentStrategyFactory,
     LLMAutomationIntentStrategy,
@@ -198,7 +199,7 @@ def test_llm_analyzer_generate_sync_invokes_model_as_callable(monkeypatch):
     """The real _generate_sync must invoke the LLM adapter as a callable (llm([...]))."""
     from types import SimpleNamespace
 
-    from services.agent_automation.intent_analyzer import (
+    from management.services.automation.intent import (
         LLMAutomationIntentStrategy,
         RuleBasedAutomationIntentStrategy,
     )
@@ -238,11 +239,10 @@ def test_llm_analyzer_generate_sync_invokes_model_as_callable(monkeypatch):
 
     monkeypatch.setattr("nexent.core.models.OpenAIModel", build_fake_model)
     monkeypatch.setattr(
-        "services.agent_automation.intent_analyzer.get_prompt_template",
-        lambda *a, **k: {
-            "INTENT_ANALYSIS_SYSTEM_PROMPT": "sys",
-            "INTENT_ANALYSIS_USER_PROMPT": "msg: {{message}}",
-        },
+        "management.services.automation.intent.compose_auxiliary_prompt",
+        lambda language, operation, values: SimpleNamespace(
+            system="sys", user=f"msg: {values['message']}"
+        ),
     )
 
     strategy = LLMAutomationIntentStrategy(MODEL_CONFIG, RuleBasedAutomationIntentStrategy())
@@ -273,7 +273,7 @@ def test_strategy_factory_prefers_selected_llm_model(monkeypatch):
         return MODEL_CONFIG
 
     monkeypatch.setattr(
-        "services.agent_automation.intent_analyzer.get_model_by_model_id",
+        "management.services.automation.intent.get_model_by_model_id",
         fake_get_model_by_id,
     )
     context = AutomationIntentContext(

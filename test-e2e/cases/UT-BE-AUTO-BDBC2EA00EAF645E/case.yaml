@@ -1,0 +1,73 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-BDBC2EA00EAF645E
+  feature_id: F-185
+  business_rule_ids:
+  - F-185-RULE-01
+  title: KB 删除前置校验：UPLOADING/UPLOADED/PROCESSING/FORWARDING 文件阻断删除并返回 blocking_files，DELETE_REQUESTED/DELETED 放行
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: KB 删除前置校验：UPLOADING/UPLOADED/PROCESSING/FORWARDING 文件阻断删除并返回 blocking_files，DELETE_REQUESTED/DELETED 放行
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 被测目标为 backend/management/services/knowledge_base/management.py 的 _assert_knowledge_base_delete_allowed 与 KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES；通过
+    monkeypatch 隔离 list_file_records，无需真实 ES/MinIO/PostgreSQL。
+  test_data:
+    legacy_asset_declaration: '- 无外部资产：list_file_records 由测试桩提供固定 lifecycle 行；不使用真实模型或向量存储。'
+  steps:
+  - order: 1
+    action: 导入 management.services.knowledge_base.management 的 KnowledgeBaseManagementService._assert_knowledge_base_delete_allowed
+      与 KNOWLEDGE_BASE_DELETE_BLOCKING_STATUSES。
+    expected: 任一阻断状态行存在时删除被拒绝，抛出 KNOWLEDGE_DELETE_BLOCKED 领域异常，不继续执行任何删除动作。
+  - order: 2
+    action: 通过 monkeypatch 替换 list_file_records，返回包含 UPLOADING/UPLOADED/PROCESSING/FORWARDING 之一的 lifecycle 行（含 file_id、original_filename
+      或 object_name、status）。
+    expected: blocking_files 仅包含阻断状态行且每项含 file_id、file_name、status 三个字段。
+  - order: 3
+    action: 对 UPLOADING、UPLOADED、PROCESSING、FORWARDING 四种阻断状态分别调用 _assert_knowledge_base_delete_allowed(index_name)，断言抛出 AppException、错误码为
+      ErrorCode.KNOWLEDGE_DELETE_BLOCKED。
+    expected: file_name 按 original_filename → object_name → file_id → "unknown" 顺序回退取值。
+  - order: 4
+    action: 断言异常 details 中 blocking_files 仅聚合处于阻断状态的行，每项包含 file_id、file_name、status。
+    expected: 仅 DELETE_REQUESTED/DELETED 或空列表时，返回全部 lifecycle 行且不抛异常、不阻塞删除。
+  - order: 5
+    action: 构造 file_name 各来源组合，断言取值优先级为 original_filename → object_name → file_id → "unknown"。
+    expected: 读取 lifecycle 失败时抛出 SYSTEM_DATABASE_ERROR 领域异常，details 含 operation=knowledge_base_delete_guard 与 index_name，不吞异常后返回伪成功。
+  - order: 6
+    action: 将 lifecycle 行置为仅 DELETE_REQUESTED/DELETED 或空列表，再次调用，断言不抛异常且返回原始 lifecycle 行列表。
+    expected: 全过程无明文密钥泄露、纯判断无外部状态副作用。
+  - order: 7
+    action: 令 list_file_records 抛出异常，断言抛出 AppException、错误码为 ErrorCode.SYSTEM_DATABASE_ERROR，且 details 含 operation=knowledge_base_delete_guard
+      与 index_name。
+    expected: 全过程无明文密钥泄露、纯判断无外部状态副作用。
+  - order: 8
+    action: 确认日志不输出明文 API Key/Token/密码/模型密钥；测试结束后还原 monkeypatch 保证可重复执行。
+    expected: 全过程无明文密钥泄露、纯判断无外部状态副作用。
+  expected_results:
+  - 任一阻断状态行存在时删除被拒绝，抛出 KNOWLEDGE_DELETE_BLOCKED 领域异常，不继续执行任何删除动作。
+  - blocking_files 仅包含阻断状态行且每项含 file_id、file_name、status 三个字段。
+  - file_name 按 original_filename → object_name → file_id → "unknown" 顺序回退取值。
+  - 仅 DELETE_REQUESTED/DELETED 或空列表时，返回全部 lifecycle 行且不抛异常、不阻塞删除。
+  - 读取 lifecycle 失败时抛出 SYSTEM_DATABASE_ERROR 领域异常，details 含 operation=knowledge_base_delete_guard 与 index_name，不吞异常后返回伪成功。
+  - 全过程无明文密钥泄露、纯判断无外部状态副作用。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 413
+  unit_boundary: 删除前置校验
+  inputs:
+  - '- 无外部资产：list_file_records 由测试桩提供固定 lifecycle 行；不使用真实模型或向量存储。'
+  assertions:
+  - 任一阻断状态行存在时删除被拒绝，抛出 KNOWLEDGE_DELETE_BLOCKED 领域异常，不继续执行任何删除动作。
+  - blocking_files 仅包含阻断状态行且每项含 file_id、file_name、status 三个字段。
+  - file_name 按 original_filename → object_name → file_id → "unknown" 顺序回退取值。
+  - 仅 DELETE_REQUESTED/DELETED 或空列表时，返回全部 lifecycle 行且不抛异常、不阻塞删除。
+  - 读取 lifecycle 失败时抛出 SYSTEM_DATABASE_ERROR 领域异常，details 含 operation=knowledge_base_delete_guard 与 index_name，不吞异常后返回伪成功。
+  - 全过程无明文密钥泄露、纯判断无外部状态副作用。

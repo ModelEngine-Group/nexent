@@ -1,0 +1,107 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-MODEL-CONTROLS-D4-003
+  feature_id: CHAT-MODEL-CONTROLS
+  requirement_ids:
+  - CHAT-MODEL-CONTROLS-20261014
+  - WB-CREATION-TOGGLE-EXIT-20261015
+  - CHAT-SAMPLING-20261016
+  - CHAT-SAMPLING-DISPLAY-20261019
+  business_rule_ids:
+  - CHAT-MODEL-CONTROLS-RULE-002
+  - CHAT-MODEL-CONTROLS-RULE-006
+  title: 四个创建入口共享真实采样参数与继承恢复
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove creator advanced controls synchronize decimal sliders/inputs, isolate session/model state and serialize
+    explicit sampling into actual run/history snapshots without global configuration writes.
+  preconditions:
+  - actual frontend creator surfaces with isolated mock model directory, authorized identity and deterministic run endpoints.
+  - Two models and two creation sessions per applicable surface are available; browser records all run, snapshot and model
+    configuration writes.
+  test_data:
+    profile: mock
+    entries:
+    - workbench-agent-create
+    - workbench-skill-create
+    - independent-nl2agent
+    - independent-nl2skill
+    models:
+    - model-A
+    - model-B
+    levels:
+    - 0
+    - 0.7
+    - 1
+    - 2
+    invalid_inputs:
+    - negative
+    - above-maximum
+    - empty-invalid-draft
+    defaults:
+      temperature: configured-or-sdk-1.0
+      top_p: configured-or-sdk-1.0
+  steps:
+  - order: 1
+    action: Open model controls on each creator, hover/click/focus Advanced settings below reasoning effort; change both slider
+      and numeric input across minimum, middle and maximum values; exercise invalid/empty input and restore defaults.
+    expected: Shared panel is reachable by pointer and keyboard; numeric values and sliders stay synchronized at temperature
+      0-2 and Top P 0-1 with step 0.1, invalid committed values do not persist and restore clears both overrides and shows
+      the effective numeric defaults with matching sliders. Unconfigured models display SDK metadata defaults 1.0/1.0;
+      opening/focusing unchanged defaults does not create an override.
+  - order: 2
+    action: Set model-A sampling overrides, switch to B and back, switch to another creation session and return; transition
+      NL2Agent from welcome to subsequent composer.
+    expected: Values remain scoped to the current session and model during its lifetime, new scopes inherit defaults, and
+      NL2Agent composer transition retains that session's local settings.
+  - order: 3
+    action: Explicitly send valid creation requests after editing controls, then inspect all run bodies, Workbench creation
+      snapshots, model-context-derived payloads and captured configuration API writes.
+    expected: Explicit temperature/top_p reach generation_config and matching Workbench snapshots; untouched/reset fields
+      are absent or null for inheritance. No global model save occurs; actual model/thinking requests remain functional.
+  expected_results:
+  - Creator advanced panels match the existing shared control behavior, defaults and session/model isolation.
+  - Explicit sampling reaches run/history snapshots, while global model configuration remains unchanged.
+  forbidden_side_effects:
+  - No 1-100 conversion or implicit sampling injection, and no real provider/database calls through mock browser fixtures.
+  - No model selection or thinking reset, message/attachment loss, cross-session contamination or global model configuration
+    mutation caused by sampling edits.
+  actor: Isolated authorized Agent and Skill creator
+  journey:
+  - Open creator model controls
+  - Edit slider and numeric values
+  - Restore defaults
+  - Switch models and sessions
+  - Transition composer
+  - Send and inspect requests
+  final_business_result:
+  - Advanced settings consistently provide provider-scale runtime controls while preserving model and reasoning integration
+  failure_evidence:
+  - Browser screenshots and trace
+  - Sanitized captured run/snapshot/configuration request log
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Creator controls display configured or SDK defaults accurately, synchronize numeric sliders, and preserve scoped state.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 2
+  - id: AC-02
+    description: Sending from creator entries includes only explicit provider-scale sampling in backend snapshots.
+    steps:
+    - 3
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1

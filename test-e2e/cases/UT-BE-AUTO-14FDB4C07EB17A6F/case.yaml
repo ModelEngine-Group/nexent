@@ -1,0 +1,71 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-14FDB4C07EB17A6F
+  feature_id: F-185
+  business_rule_ids:
+  - F-185-RULE-01
+  title: get_embedding_model_by_index_name 按 index 显式解析 embedding 模型，model_id 缺失/无效返回 needs_config 且不回退租户默认模型｜核心流程
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: get_embedding_model_by_index_name 按 index 显式解析 embedding 模型，model_id 缺失/无效返回 needs_config 且不回退租户默认模型｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 数据库读取 get_knowledge_record 与模型解析 get_embedding_model_by_id 通过 monkeypatch/mock 注入，不连接真实 PG/ES/模型服务。
+  test_data:
+    legacy_asset_declaration: 无额外本地资产；依赖 database.knowledge_db.get_knowledge_record 与 management.services.model.resolver.get_embedding_model_by_id
+      通过 mock 注入。
+  steps:
+  - order: 1
+    action: 导入被测函数 backend/management/services/knowledge_base/common.py 的 get_embedding_model_by_index_name，并 mock 依赖 database.knowledge_db.get_knowledge_record
+      与 management.services.model.resolver.get_embedding_model_by_id。
+    expected: 'embedding_model_id 有效且模型存在时返回 (model, model_id, {"status": "ok", "needs_update": false})，model 与 model_id 与输入一致。'
+  - order: 2
+    action: 构造 knowledge_record 含有效 embedding_model_id，让 get_embedding_model_by_id 返回模型实例，调用函数并记录返回三元组 (model, model_id, meta)。
+    expected: 'embedding_model_id 缺失时返回 (None, None, {"status": "needs_config", "needs_update": false})，且不自动回退租户默认模型。'
+  - order: 3
+    action: 构造 knowledge_record 的 embedding_model_id 为 None（缺失），调用函数并记录返回。
+    expected: embedding_model_id 无效（模型不存在）时同样返回 needs_config，不将租户默认模型当作可用模型。
+  - order: 4
+    action: 构造 knowledge_record 含 embedding_model_id 但 get_embedding_model_by_id 返回 None（模型不存在/无效），调用函数并记录返回。
+    expected: '知识库记录不存在时返回 (None, None, {"status": "error"})，message 提示 knowledge base not found。'
+  - order: 5
+    action: 构造 get_knowledge_record 返回 None（知识库记录不存在），调用函数并记录返回。
+    expected: '依赖抛出异常时返回 (None, None, {"status": "error"})，message 为原始异常信息，不吞异常伪装成功。'
+  - order: 6
+    action: 构造 get_knowledge_record 抛出异常，调用函数并记录返回。
+    expected: 各分支中 get_embedding_model_by_id 仅以 record 的 embedding_model_id 调用，无任何对租户默认模型的隐式回退。
+  - order: 7
+    action: 断言各分支中 get_embedding_model_by_id 仅以 record 的 embedding_model_id 被调用，无任何以租户默认模型作为回退输入的调用。
+    expected: 各分支中 get_embedding_model_by_id 仅以 record 的 embedding_model_id 调用，无任何对租户默认模型的隐式回退。
+  - order: 8
+    action: 测试结束后恢复 mock 与临时对象，确保可重复执行。
+    expected: 各分支中 get_embedding_model_by_id 仅以 record 的 embedding_model_id 调用，无任何对租户默认模型的隐式回退。
+  expected_results:
+  - 'embedding_model_id 有效且模型存在时返回 (model, model_id, {"status": "ok", "needs_update": false})，model 与 model_id 与输入一致。'
+  - 'embedding_model_id 缺失时返回 (None, None, {"status": "needs_config", "needs_update": false})，且不自动回退租户默认模型。'
+  - embedding_model_id 无效（模型不存在）时同样返回 needs_config，不将租户默认模型当作可用模型。
+  - '知识库记录不存在时返回 (None, None, {"status": "error"})，message 提示 knowledge base not found。'
+  - '依赖抛出异常时返回 (None, None, {"status": "error"})，message 为原始异常信息，不吞异常伪装成功。'
+  - 各分支中 get_embedding_model_by_id 仅以 record 的 embedding_model_id 调用，无任何对租户默认模型的隐式回退。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 388
+  unit_boundary: 知识库检索
+  inputs:
+  - 无额外本地资产；依赖 database.knowledge_db.get_knowledge_record 与 management.services.model.resolver.get_embedding_model_by_id 通过
+    mock 注入。
+  assertions:
+  - 'embedding_model_id 有效且模型存在时返回 (model, model_id, {"status": "ok", "needs_update": false})，model 与 model_id 与输入一致。'
+  - 'embedding_model_id 缺失时返回 (None, None, {"status": "needs_config", "needs_update": false})，且不自动回退租户默认模型。'
+  - embedding_model_id 无效（模型不存在）时同样返回 needs_config，不将租户默认模型当作可用模型。
+  - '知识库记录不存在时返回 (None, None, {"status": "error"})，message 提示 knowledge base not found。'
+  - '依赖抛出异常时返回 (None, None, {"status": "error"})，message 为原始异常信息，不吞异常伪装成功。'
+  - 各分支中 get_embedding_model_by_id 仅以 record 的 embedding_model_id 调用，无任何对租户默认模型的隐式回退。

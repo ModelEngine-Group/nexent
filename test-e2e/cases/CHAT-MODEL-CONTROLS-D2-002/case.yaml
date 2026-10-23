@@ -1,0 +1,51 @@
+schema_version: '1.0'
+stage: D2
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-MODEL-CONTROLS-D2-002
+  feature_id: CHAT-MODEL-CONTROLS
+  requirement_ids: [CHAT-MODEL-CONTROLS-20261014]
+  business_rule_ids: [CHAT-MODEL-CONTROLS-RULE-001, CHAT-MODEL-CONTROLS-RULE-005]
+  title: 运行选模的租户、类型、状态、能力和创建权限校验
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Verify real endpoints enforce existing entry permissions and the selected model boundary with no fallback or cross-tenant disclosure.
+  preconditions:
+    - actual endpoint authentication and permission dependencies execute for real.
+    - Isolated two-tenant fixtures include model-owner, foreign-model, unavailable-model, embedding-model and an Agent with a restricted configured model set.
+  test_data:
+    profile: mock
+    identities: [authorized-creator, no-agent-create, no-skill-create, unauthenticated, tenant-b-user]
+    models: [authorized-llm, foreign-llm, missing-llm, unavailable-llm, embedding-model, capability-changed-llm, outside-agent-scope-llm]
+  steps:
+    - order: 1
+      action: Call NL2Agent and NL2Skill endpoints without authentication, then as users missing the respective create permission; exercise the same checks through Workbench creation.
+      expected: Unauthenticated requests return 401 and missing create permissions return existing 403; page access alone does not authorize creation.
+    - order: 2
+      action: As authorized creator submit a foreign or nonexistent model, an owned unavailable model and an owned non-LLM model; inspect error bodies and provider call records.
+      expected: Foreign/missing models share 404 model_not_available without foreign details; unavailable owned models return 409 model_unavailable; non-LLM returns 400 model_type_invalid; none calls fallback models.
+    - order: 3
+      action: Submit a formerly valid effort after capability removal and an available tenant model outside the ordinary Agent's configured set; then select a valid permitted model and submit again.
+      expected: Unsupported effort returns 422 before streaming; outside-Agent-scope selection is denied with existing scope enforcement; valid reselection succeeds through the original route.
+  expected_results:
+    - All explicit invalid model or permission requests fail before provider calls and maintain tenant-safe error details.
+    - Valid models remain selectable under each entry's original scope and successful reselection uses normal response contracts.
+  forbidden_side_effects:
+    - No unauthorized provider calls, draft/history/configuration writes or default-model fallback.
+    - No foreign model names, endpoints, secrets or tenant data in responses or diagnostics.
+  contract:
+    protocol: Authenticated HTTP JSON preflight with original SSE success
+    method: POST
+    endpoint: /api/agent/run; /api/agent/nl2agent/run; /api/skills/nl2skill/run
+    request_expectations: [Selected models and reasoning controls validated under current authenticated tenant, Existing agent:create and skill:create enforced, Ordinary Agent model scope retained]
+    response_expectations: [401 unauthenticated and 403 unauthorized creation, 404 uniform missing or foreign model, 409 unavailable owned model, 400 wrong model type, 422 unsupported capability]
+  execution:
+    profiles: [{name: mock, required_services: [http-fixture]}]
+  acceptance:
+    - id: AC-01
+      description: Permissions and tenant/model validity block forbidden execution without disclosure or fallback.
+      steps: [1, 2, 3]
+      expected_results: [1, 2]
+      forbidden_side_effects: [1, 2]

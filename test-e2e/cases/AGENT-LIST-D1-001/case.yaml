@@ -1,0 +1,112 @@
+schema_version: '1.0'
+stage: D1
+module: AGENT-LIST
+case:
+  case_id: AGENT-LIST-D1-001
+  feature_id: AGENT-LIST-VIEWS
+  requirement_ids:
+  - AGENT-LIST-REQ-001
+  - AGENT-LIST-REQ-002
+  business_rule_ids:
+  - AGENT-LIST-RULE-001
+  - AGENT-LIST-RULE-002
+  - AGENT-LIST-RULE-003
+  - AGENT-LIST-RULE-004
+  - AGENT-LIST-RULE-005
+  title: Render table view with data-backed agent metadata
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify native Ant Design Table rendering with adaptive scrolling and fixed row
+    actions while preserving all seven columns, metadata, update-time source, callbacks and
+    the card view contract.
+  preconditions:
+  - Render the table with agents containing author, tags, status, and update_time values.
+  - Render a second agent without update_time but with create_time.
+  test_data:
+    profile: mock
+    updated_agent:
+      author: 刘晨
+      tags:
+      - 保健
+      update_time: '2026-09-18T10:30:00'
+    no_update_agent:
+      author: null
+      create_time: '2026-09-17T10:30:00'
+      update_time: null
+  steps:
+  - order: 1
+    action: Render the table with the mocked agent rows.
+    expected: The seven columns appear in the specified order in native Ant Design Table; the
+      actions column remains fixed at the end.
+  - order: 2
+    action: Render a row whose update_time is absent and whose create_time is present.
+    expected: The update-time cell shows the missing-value placeholder rather than the creation
+      date.
+  - order: 3
+    action: Trigger the row's detail, configure, and publish actions.
+    expected: Each callback receives the corresponding agent or numeric agent ID.
+  - order: 4
+    action: Resize a real header cell with keyboard controls and trigger a row action.
+    expected: All seven headers expose resize handles; widths change and respect their minimum,
+      and the original configure callback still receives the numeric agent ID.
+  expected_results:
+  - The table labels include 更新时间 and do not label agents as knowledge bases.
+  - The native Ant Design table uses a subdued 44px header, readable 14px text and 52px body
+    rows.
+  - The table fills the available list area, keeps the header fixed, and scrolls its body independently
+    while existing pagination remains below it.
+  - Update time is formatted from update_time only; missing or invalid timestamps do not fall
+    back to create_time.
+  - Creator uses author when present and a placeholder when absent.
+  - The card component and its data behavior remain unchanged.
+  - All seven columns can be resized with pointer or keyboard controls; minimum widths protect
+    content and the fixed action column remains available.
+  forbidden_side_effects:
+  - Do not modify page title, guide area, tabs, or card-mode content.
+  - Do not add or change backend requests or response contracts.
+  - Do not fabricate creator or update-time values.
+  unit_boundary: AgentListTable React component with mocked callbacks and translation.
+  inputs:
+  - agent rows
+  - locale strings
+  - row-action callbacks
+  assertions:
+  - Table headers render in the required order.
+  - Update time never falls back to create_time.
+  - Missing creator and timestamp values render placeholders.
+  - Action callbacks receive the correct row data.
+  - The actions column is fixed at the end, and the table does not create duplicate pagination.
+  - The wrapper can shrink and fill available height so the native table body can scroll.
+  acceptance:
+  - id: AC-01
+    description: Verify native Ant Design Table rendering with adaptive scrolling and fixed
+      row actions while preserving all seven columns, metadata, update-time source, callbacks
+      and the card view contract.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    - 6
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
+  - id: AC-02
+    description: Real header cells update table widths with minimum-width protection while row
+      actions remain connected.
+    steps:
+    - 4
+    expected_results:
+    - 7
+    forbidden_side_effects:
+    - 1
+    - 2
+    - 3
