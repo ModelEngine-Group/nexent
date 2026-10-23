@@ -421,18 +421,24 @@ def test_group_rendering_uses_only_selected_tool_items():
     assert "must disappear" not in str(messages)
 
 
-def test_rendered_roles_and_sections_match_context_semantics():
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_rendered_roles_and_sections_match_context_semantics(language):
+    prompt = "Answer questions about the user's travel plans."
     messages = _messages(
-        prompt="duty",
+        prompt=prompt,
         memory_list=[{"memory": "fact", "memory_level": "user", "score": 1.0}],
         knowledge_base_summaries=[{"index_name": "kb", "display_name": "KB", "summary": "kb"}],
-        language="en",
+        language=language,
     )
 
     assert messages[0]["role"] == "system"
     first_user = next(index for index, message in enumerate(messages) if message["role"] == "user")
     assert all(message["role"] == "system" for message in messages[:first_user])
-    assert any(message["role"] == "system" and "Core Responsibilities" in str(message) for message in messages)
+    assert any(
+        message["role"] == "system" and prompt in block.get("text", "")
+        for message in messages
+        for block in message.get("content", ())
+    )
     assert any(message["role"] == "system" and "knowledge_base_search" in str(message) for message in messages)
 
 
