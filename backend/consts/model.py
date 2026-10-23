@@ -18,6 +18,7 @@ from pydantic import (
 )
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
+from contracts.clarification import ClarificationResponse
 from infrastructure.agent_prompt import normalize_imported_agent_prompt
 
 
@@ -1021,6 +1022,7 @@ class AgentRequest(BaseModel):
     # Internal provenance is never accepted from serialized client requests.
     _message_source: str = PrivateAttr(default="CHAT")
     query: str
+    clarification_response: Optional[ClarificationResponse] = None
     conversation_id: Optional[int] = None
     history: Optional[List[HistoryItem]] = None
     # Complete list of attachment information
@@ -1201,6 +1203,7 @@ class MessageRequest(BaseModel):
     message_idx: int  # Modified to integer type
     role: str
     message: List[MessageUnit]
+    clarification_response: Optional[ClarificationResponse] = None
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
 
