@@ -4,6 +4,7 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useMemo,
   useState,
@@ -29,6 +30,19 @@ function useLocalModelControlsState() {
     {}
   );
   const [rejected, setRejected] = useState<Record<string, boolean>>({});
+  const [threadBindings, setThreadBindings] = useState<Record<string, string>>(
+    {}
+  );
+  const bindThread = useCallback((threadId: string, serverId: string) => {
+    const numericId = Number(serverId);
+    if (!threadId || !Number.isSafeInteger(numericId) || numericId <= 0) return;
+    const remoteId = String(numericId);
+    setThreadBindings((current) =>
+      current[remoteId] !== undefined
+        ? current
+        : { ...current, [remoteId]: threadId }
+    );
+  }, []);
   return useMemo(
     () => ({
       sessions,
@@ -37,8 +51,10 @@ function useLocalModelControlsState() {
       setSampling,
       rejected,
       setRejected,
+      threadBindings,
+      bindThread,
     }),
-    [sessions, sampling, rejected]
+    [sessions, sampling, rejected, threadBindings, bindThread]
   );
 }
 
@@ -64,4 +80,20 @@ export function useModelControlsState() {
   const shared = useContext(ModelControlsContext);
   const local = useLocalModelControlsState();
   return shared ?? local;
+}
+
+/** Keep a draft and its later server-backed history on the original cache key. */
+export function useConversationModelThreadKey(
+  threadId: string | undefined,
+  remoteId?: string
+) {
+  const shared = useContext(ModelControlsContext);
+  const localId = threadId ?? "new";
+  if (!shared) return localId;
+  const identity = remoteId || localId;
+  return shared.threadBindings[identity] ?? identity;
+}
+
+export function useBindConversationModelThread() {
+  return useContext(ModelControlsContext)?.bindThread;
 }
