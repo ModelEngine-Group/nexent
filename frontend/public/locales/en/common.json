@@ -4113,6 +4113,8 @@
   "a2a.discovery.urlLabel": "Agent Card URL",
   "a2a.discovery.urlTooltip": "External A2A Agent Card address",
   "a2a.discovery.urlRequired": "Please enter Agent Card URL",
+  "a2a.discovery.sslVerify": "Verify SSL certificate",
+  "a2a.discovery.sslVerifyHelp": "Enabled by default. Disable for self-signed or internal CA certificates; this setting applies to discovery, refresh and conversation calls.",
   "a2a.discovery.customHeadersLabel": "Custom Request Headers (Optional)",
   "a2a.discovery.customHeadersTooltip": "Saved and used only to retrieve and refresh this Agent Card, never for agent calls.",
   "a2a.discovery.customHeadersPlaceholder": "{\"Authorization\": \"Bearer <token>\"}",

@@ -42,6 +42,7 @@ async function fetchDiscovery<T>(url: string, request: unknown): Promise<{
 // =============================================================================
 
 export interface A2AExternalAgent {
+  ssl_verify?: boolean;
   id: number;
   name: string;
   description?: string;
@@ -109,6 +110,7 @@ export interface A2AServerAgent {
 }
 
 export interface DiscoverFromUrlRequest {
+  ssl_verify?: boolean;
   url: string;
   name?: string;
   custom_headers?: Record<string, string>;

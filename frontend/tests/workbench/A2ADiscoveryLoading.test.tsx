@@ -47,6 +47,32 @@ afterEach(() => cleanup());
 
 const t = (key: string) => i18n.t(key);
 
+it.each([true, false])(
+  "submits the SSL verification choice %s",
+  async (verify) => {
+    const operation = vi
+      .spyOn(a2aClientService, "discoverFromUrl")
+      .mockResolvedValue({
+        success: false,
+        message: "Discovery failed",
+      });
+    const button = await openDiscovery("url", vi.fn());
+    const checkbox = screen.getByRole("checkbox", {
+      name: t("a2a.discovery.sslVerify"),
+    });
+    expect((checkbox as HTMLInputElement).checked).toBe(true);
+    if (!verify) fireEvent.click(checkbox);
+    fireEvent.click(button);
+    await waitFor(() =>
+      expect(operation).toHaveBeenCalledWith({
+        url: "https://example.com/card",
+        custom_headers: undefined,
+        ssl_verify: verify,
+      })
+    );
+  }
+);
+
 async function openDiscovery(mode: "url" | "nacos", onSuccess: () => void) {
   if (mode === "url") {
     render(

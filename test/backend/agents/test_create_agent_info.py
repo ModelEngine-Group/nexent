@@ -6141,6 +6141,7 @@ class TestBuildExternalAgentConfig:
                 protocol_version="1.0",
                 protocol_type="JSONRPC",
                 timeout=300.0,
+                ssl_verify=True,
                 raw_card=None,
                 custom_headers=None,
             )
@@ -6166,6 +6167,7 @@ class TestBuildExternalAgentConfig:
                 protocol_version="1.0",
                 protocol_type="JSONRPC",
                 timeout=300.0,
+                ssl_verify=True,
                 raw_card=None,
                 custom_headers=None,
             )
@@ -6188,6 +6190,13 @@ class TestBuildExternalAgentConfig:
             assert call_kwargs["agent_id"] == "ext_789"
             assert call_kwargs["raw_card"] == {"name": "raw_card_agent", "url": "http://raw.com"}
             assert result == MockConfig.return_value
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_build_external_config_preserves_ssl_preference(value):
+    with patch('backend.agents.create_agent_info.ExternalA2AAgentConfig') as config:
+        _build_external_agent_config({"external_agent_id": 1, "ssl_verify": value}, "https://peer")
+        assert config.call_args.kwargs["ssl_verify"] is value
 
 
 class TestGetExternalA2AAgents:

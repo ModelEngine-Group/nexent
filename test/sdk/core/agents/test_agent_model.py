@@ -898,6 +898,16 @@ class TestAgentRunInfoPlanning:
 # Tests for ExternalA2AAgentConfig
 # ----------------------------------------------------------------------------
 
+@pytest.mark.parametrize("preference", [{}, {"ssl_verify": True}, {"ssl_verify": False}])
+def test_certificate_preference_reaches_proxy(preference):
+    config = agent_model_module.ExternalA2AAgentConfig(
+        agent_id="peer", name="Peer", url="https://peer", **preference)
+    config.to_a2a_agent_info()
+    proxy_info = _module_mocks["sdk.nexent.core.agents.a2a_agent_proxy"].A2AAgentInfo
+    assert proxy_info.call_args.kwargs["ssl_verify"] is preference.get("ssl_verify", True)
+    proxy_info.reset_mock()
+
+
 class TestExternalA2AAgentConfig:
     """Tests for ExternalA2AAgentConfig Pydantic model."""
 

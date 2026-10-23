@@ -3918,6 +3918,8 @@
   "a2a.discovery.urlLabel": "Agent Card URL",
   "a2a.discovery.urlTooltip": "外部 A2A Agent 的 Agent Card 地址",
   "a2a.discovery.urlRequired": "请输入 Agent Card URL",
+  "a2a.discovery.sslVerify": "校验 SSL 证书",
+  "a2a.discovery.sslVerifyHelp": "默认开启。使用自签名或内部 CA 证书时可取消勾选；该设置同时用于发现、刷新及对话调用。",
   "a2a.discovery.customHeadersLabel": "自定义请求头（可选）",
   "a2a.discovery.customHeadersTooltip": "会保存并仅用于获取和刷新 Agent Card，不会用于后续调用",
   "a2a.discovery.customHeadersPlaceholder": "{\"Authorization\": \"Bearer <token>\"}",

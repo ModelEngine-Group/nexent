@@ -10,6 +10,8 @@ feature:
   business_rules:
   - rule_id: F-089-RULE-01
     description: URL Agent Card discovery preserves custom headers and uses a 10-second deadline with one HTTP attempt and an explicit HTTP 504 on timeout.
+  - rule_id: F-089-RULE-02
+    description: URL discovery defaults certificate verification on; an explicit ssl_verify false is persisted per Agent and used for Card refresh and direct or sub-agent invocation.
   required_test_stages:
   - D3
   source:

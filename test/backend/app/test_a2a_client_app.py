@@ -66,6 +66,25 @@ client = TestClient(app)
 CHAT_URL = "/a2a/client/agents/7/chat"
 
 
+@pytest.mark.parametrize("value", [True, False])
+def test_url_discovery_forwards_ssl_preference(value):
+    target = "apps.a2a_client_app.a2a_client_service.discover_from_url"
+    with patch(target, new=AsyncMock(return_value={"id": 1})) as operation:
+        response = client.post("/a2a/client/discover/url", json={"url": "https://peer/card", "ssl_verify": value})
+    assert response.status_code == 200
+    assert operation.await_args.kwargs["ssl_verify"] is value
+
+
+def test_url_discovery_defaults_verification_and_rejects_null():
+    target = "apps.a2a_client_app.a2a_client_service.discover_from_url"
+    with patch(target, new=AsyncMock(return_value={"id": 1})) as operation:
+        assert client.post("/a2a/client/discover/url", json={"url": "https://peer/card"}).status_code == 200
+        assert operation.await_args.kwargs["ssl_verify"] is True
+        response = client.post("/a2a/client/discover/url", json={"url": "https://peer/card", "ssl_verify": None})
+    assert response.status_code == 422
+    assert operation.await_count == 1
+
+
 @pytest.fixture(autouse=True)
 def _patch_auth():
     """Stub identity resolution so tests focus on the chat endpoint logic."""

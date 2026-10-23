@@ -46,6 +46,7 @@ class DiscoverFromUrlRequest(BaseModel):
     url: str
     name: Optional[str] = None
     custom_headers: Optional[Dict[str, str]] = None
+    ssl_verify: bool = True
 
 
 class DiscoverFromNacosRequest(BaseModel):
@@ -98,7 +99,8 @@ async def discover_from_url(
                 url=request.url,
                 tenant_id=tenant_id,
                 user_id=user_id,
-                custom_headers=request.custom_headers
+                custom_headers=request.custom_headers,
+                ssl_verify=request.ssl_verify,
             ),
             timeout=AGENT_CARD_TIMEOUT
         )

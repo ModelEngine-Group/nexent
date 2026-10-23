@@ -987,6 +987,7 @@ def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgen
         protocol_version=agent.get("protocol_version", "1.0"),
         protocol_type=agent.get("protocol_type", PROTOCOL_JSONRPC),
         timeout=300.0,
+        ssl_verify=agent.get("ssl_verify", True),
         raw_card=agent.get("raw_card"),
         custom_headers=_build_security_headers(agent) or None,
     )

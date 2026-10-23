@@ -587,7 +587,7 @@ class TestDiscoverFromUrl:
                     user_id="user-1"
                 )
 
-                MockClient.assert_called_once_with(timeout=10.0, max_retries=1)
+                MockClient.assert_called_once_with(timeout=10.0, max_retries=1, ssl_verify=True)
                 assert result == mock_result
                 mock_db.create_external_agent_from_url.assert_called_once()
                 # None means "preserve existing stored headers"; {} means "explicitly clear headers"
@@ -2489,5 +2489,5 @@ async def test_url_discovery_timeout_propagates_without_database_write():
         http.return_value.__aenter__.return_value.get_json = AsyncMock(side_effect=asyncio.TimeoutError())
         with pytest.raises(asyncio.TimeoutError):
             await A2AClientService().discover_from_url("https://example.com/card", "tenant", "user")
-        http.assert_called_once_with(timeout=10.0, max_retries=1)
+        http.assert_called_once_with(timeout=10.0, max_retries=1, ssl_verify=True)
         db.create_external_agent_from_url.assert_not_called()
