@@ -11,8 +11,31 @@ from types import SimpleNamespace
 
 import pytest
 import yaml
+import httpx
 
 REPO = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(REPO / 'test-e2e/infra/automation'))
+
+
+@pytest.mark.parametrize('status,message,valid', [
+    (400, 'At least one supported knowledge base field must be provided for update', True),
+    (200, 'At least one supported knowledge base field must be provided for update', False),
+    (422, 'At least one supported knowledge base field must be provided for update', False),
+    (400, 'name or description', False),
+    (400, 'Unrelated validation failure', False),
+])
+def test_aidp_empty_update_retains_exact_current_rejection(status, message, valid):
+    spec = importlib.util.spec_from_file_location(
+        'aidp_update_contract_repair', REPO / 'test-e2e/cases/API-AUTO-7513FEF9904B9F3F/test.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    response = httpx.Response(status, json={'message': message},
+                              request=httpx.Request('PUT', 'http://fixture.test/owned-kb'))
+    if valid:
+        module.assert_empty_update_rejected(response)
+    else:
+        with pytest.raises(AssertionError):
+            module.assert_empty_update_rejected(response)
 
 
 @pytest.mark.parametrize('case_id', ['FAF-D4-001', 'NL2AGENT-PROTOCOL-D4-001'])

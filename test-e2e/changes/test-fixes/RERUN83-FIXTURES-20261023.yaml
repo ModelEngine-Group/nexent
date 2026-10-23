@@ -29,6 +29,9 @@ change:
     import, server-owned conversation title lookup, accessible Debug panel/input
     and atomic-file module dependency. These fixtures do not change product code
     or replace real-provider acceptance evidence.
+    Align the AIDP empty-update error with the current supported-field contract;
+    require the exact HTTP 400 and message, keep subsequent no-mutation/delete/
+    isolation assertions, and prove wrong status/messages cannot pass.
   traditional_ut:
     decision: exempt
     behaviors: []

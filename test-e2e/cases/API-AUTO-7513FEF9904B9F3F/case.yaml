@@ -23,6 +23,7 @@ case:
   - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
   - 在 aidp 部署例外组执行；ENABLE_AIDP_KNOWLEDGE 与测试侧 aidp_knowledge 同时开启，外部 AIDP 边界由本用例所属 knowledge-provider Mock 提供，后端与 SDK 使用容器可达地址。
   test_data:
+    empty_update_error: At least one supported knowledge base field must be provided for update
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
 
       - ${NEXENT_TEST_HOME}/config/secrets.env'
