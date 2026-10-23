@@ -11,6 +11,7 @@ import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { fetchWithAuth, getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
+import { extractFilenameFromContentDisposition } from "@/lib/downloadFilename";
 import type { Agent } from "@/types/agentConfig";
 import yaml from "js-yaml";
 import type { SkillFileNode } from "@/types/skill";
@@ -786,28 +787,7 @@ export const exportAgent = async (agentId: number) => {
  * @param contentDisposition The Content-Disposition header value
  * @returns Extracted filename or null if not found
  */
-export const extractFilenameFromContentDisposition = (
-  contentDisposition: string | null
-): string | null => {
-  if (!contentDisposition) {
-    return null;
-  }
-
-  // RFC 5987 encoding, e.g. filename*=UTF-8''%E6%99%BA%E8%83%BD%E4%BD%93.zip
-  const utf8Regex = /filename\*=UTF-8''([^;]+)/i;
-  const utf8Match = utf8Regex.exec(contentDisposition);
-  if (utf8Match?.[1]) {
-    try {
-      return decodeURIComponent(utf8Match[1].trim());
-    } catch {
-      // fall back to plain filename parsing on invalid encoding
-    }
-  }
-
-  const regex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-  const match = regex.exec(contentDisposition);
-  return match?.[1]?.replace(/['"]/g, "").trim() ?? null;
-};
+export { extractFilenameFromContentDisposition };
 
 /**
  * Trigger browser download of a Blob
