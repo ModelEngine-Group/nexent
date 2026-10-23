@@ -24,8 +24,10 @@ from management.services.tool.configuration import (
     delete_openapi_service,
     _refresh_openapi_services_in_mcp,
 )
+<<<<<<< HEAD:backend/management/api/tool/tool_config.py
 from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingError
 from management.db.identity.user_tenant import get_user_email_map
+from management.db.mcp.remote import delete_mcp_record_by_name_and_url
 from management.services.monitor.audit import record_security_event
 from gateway.authentication.auth import get_current_user_id
 
@@ -321,21 +323,40 @@ async def delete_openapi_service_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        service = next(
+            (
+                item
+                for item in list_openapi_services(tenant_id)
+                if item.get("mcp_service_name") == service_name
+            ),
+            None,
+        )
         deleted = delete_openapi_service(service_name, tenant_id, user_id)
         if not deleted:
-            raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="Service not found")
+            raise HTTPException(
+                status_code=HTTPStatus.NOT_FOUND, detail="Service not found"
+            )
+        if service and service.get("server_url"):
+            delete_mcp_record_by_name_and_url(
+                mcp_name=service_name,
+                mcp_server=service["server_url"],
+                tenant_id=tenant_id,
+                user_id=user_id,
+            )
         # Refresh MCP service to reflect the deletion
         mcp_result = _refresh_openapi_services_in_mcp(tenant_id)
-        record_security_event(
-            "tool_openapi_delete",
-            request=http_request,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            details={"service_name": service_name},
-        )
+        tool_sync = await update_tool_list(tenant_id=tenant_id, user_id=user_id)
+        record_security_event("tool_openapi_delete", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"service_name": service_name})
         return JSONResponse(
             status_code=HTTPStatus.OK,
-            content={"message": "Service deleted successfully", "status": "success", "mcp_refresh": mcp_result},
+            content={
+                "message": "Service deleted successfully",
+                "status": "success",
+                "mcp_refresh": mcp_result,
+                "tool_sync": tool_sync,
+            }
         )
     except HTTPException:
         raise
