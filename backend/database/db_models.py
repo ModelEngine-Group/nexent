@@ -1977,6 +1977,13 @@ class OuterApiService(TableBase):
     openapi_json = Column(JSONB, doc="Complete OpenAPI JSON specification")
     server_url = Column(String(500), doc="Base URL of the REST API server")
     headers_template = Column(JSONB, doc="Default headers template as JSON")
+    auth_enabled = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+        doc="Whether authentication headers are enabled for the target API",
+    )
     ssl_verify = Column(
         Boolean,
         nullable=False,

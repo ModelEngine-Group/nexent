@@ -257,6 +257,7 @@ def register_openapi_service(
     mcp_server: Optional[FastMCP] = None,
     tenant_id: Optional[str] = None,
     ssl_verify: bool = True,
+    auth_enabled: bool = False,
 ) -> bool:
     """
     Register an OpenAPI service using FastMCP.from_openapi().
@@ -296,7 +297,7 @@ def register_openapi_service(
         client = httpx.AsyncClient(
             base_url=server_url,
             timeout=120.0,
-            headers=headers_template,
+            headers=headers_template if auth_enabled else None,
             verify=ssl_verify,
         )
 
@@ -403,6 +404,7 @@ def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
             openapi_json = service.get("openapi_json")
             server_url = service.get("server_url")
             headers_template = service.get("headers_template")
+            auth_enabled = service.get("auth_enabled", bool(headers_template))
             ssl_verify = service.get("ssl_verify", True)
 
             if not openapi_json:
@@ -416,6 +418,7 @@ def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
                 server_url,
                 headers_template,
                 ssl_verify=ssl_verify,
+                auth_enabled=auth_enabled,
                 mcp_server=tenant_mcp,
                 tenant_id=tenant_id,
             ):

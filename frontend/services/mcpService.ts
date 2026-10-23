@@ -1021,6 +1021,7 @@ export interface OpenApiServiceInput {
   service_name: string;
   server_url: string;
   openapi_json: Record<string, unknown>;
+  auth_enabled?: boolean;
   headers_template?: Record<string, unknown> | null;
   ssl_verify?: boolean;
 }
