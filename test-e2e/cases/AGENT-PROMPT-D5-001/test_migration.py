@@ -14,7 +14,17 @@ import pytest
 pytestmark = [pytest.mark.case_id("AGENT-PROMPT-D5-001"), pytest.mark.stage("D5")]
 
 ROOT = Path(__file__).resolve().parents[3]
-MIGRATION = ROOT / "deploy/sql/migrations/v2.7.1_005_unify_agent_prompts.sql"
+MERGED = ROOT / "deploy/sql/migrations/v2.8.0_merged_migrations.sql"
+SECTION = "v2.7.1_005_unify_agent_prompts.sql"
+
+
+def migration_sql():
+    """Read this case's section out of the consolidated v2.8.0 migration bundle."""
+    text = MERGED.read_text(encoding="utf-8")
+    marker = f"-- Source migration: {SECTION}"
+    start = text.index(marker)
+    end = text.find("-- Source migration: ", start + len(marker))
+    return text[start:] if end == -1 else text[start:end]
 
 
 def docker(*args, input=None):
@@ -65,7 +75,7 @@ def test_legacy_prompt_migration_preserves_rows_and_repeated_execution(postgres)
     for row in variants:
         postgres("INSERT INTO nexent.ag_tenant_agent_t VALUES (" + ",".join(literal(x) for x in row) + ");")
     snapshot_sql = "SELECT row_to_json(t) FROM nexent.ag_tenant_agent_t t ORDER BY id;"
-    postgres(MIGRATION.read_text(encoding="utf-8"))
+    postgres(migration_sql())
     after = postgres(snapshot_sql)
     rows = [json.loads(line) for line in after.splitlines()]
     for source, row in zip(variants, rows):
@@ -79,7 +89,7 @@ def test_legacy_prompt_migration_preserves_rows_and_repeated_execution(postgres)
         "# Constraints\nDeleted rule", "  Single prompt\n  untouched ", None, "Duty", "# Examples\nOnly example",
     ]
     assert [row["duty_prompt"] for row in rows] == expected
-    postgres(MIGRATION.read_text(encoding="utf-8"))
+    postgres(migration_sql())
     assert postgres(snapshot_sql) == after
     assert postgres("SELECT count(*) FROM information_schema.columns WHERE table_schema = 'nexent' AND table_name = 'ag_tenant_agent_t' AND column_name IN ('constraint_prompt', 'few_shots_prompt');") == "0"
 
@@ -91,7 +101,7 @@ def test_partial_legacy_schema_aborts_without_data_loss(postgres, column):
     snapshot = "SELECT row_to_json(t) FROM nexent.ag_tenant_agent_t t;"
     before = postgres(snapshot)
     with pytest.raises(subprocess.CalledProcessError) as error:
-        postgres(MIGRATION.read_text(encoding="utf-8"))
+        postgres(migration_sql())
     assert "Expected both legacy Agent prompt columns" in error.value.stderr.decode("utf-8")
     assert postgres(snapshot) == before
 
@@ -103,12 +113,12 @@ def test_drop_failure_rolls_back_consolidation_and_preserves_schema(postgres):
     snapshot = "SELECT row_to_json(t) FROM nexent.ag_tenant_agent_t t;"
     before = postgres(snapshot)
     with pytest.raises(subprocess.CalledProcessError) as error:
-        postgres(MIGRATION.read_text(encoding="utf-8"))
+        postgres(migration_sql())
     assert "depend" in error.value.stderr.decode("utf-8")
     assert postgres(snapshot) == before
     assert postgres("SELECT constraint_prompt FROM nexent.legacy_prompt_view;") == "Rule"
     postgres("DROP VIEW nexent.legacy_prompt_view;")
-    postgres(MIGRATION.read_text(encoding="utf-8"))
+    postgres(migration_sql())
     row = json.loads(postgres(snapshot))
     assert row["duty_prompt"] == "# Responsibilities\nDuty\n\n# Constraints\nRule\n\n# Examples\nExample"
     assert "constraint_prompt" not in row and "few_shots_prompt" not in row

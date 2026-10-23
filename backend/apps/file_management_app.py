@@ -490,6 +490,8 @@ async def get_storage_file(
         raise
     except UnauthorizedError as e:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except NotFoundException as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="File not found.") from e
     except Exception as e:
         logger.error(f"Failed to get file: object_name={object_name}, error={str(e)}")
         raise HTTPException(

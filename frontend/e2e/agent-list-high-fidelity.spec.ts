@@ -87,19 +87,17 @@ test("agent list matches the measured desktop card layout and keeps controls fun
   await mockAgentListApis(page);
   await page.goto(`${baseUrl}/zh/agents`);
 
-  await expect(page.getByRole("heading", { name: "智能体开发" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "智能体配置" })).toBeVisible();
   await expect(page.locator("article")).toHaveCount(8);
-  await expect(page.getByText("我创建的智能体")).toBeVisible();
+  await expect(page.getByTestId("agent-list-tabs")).toHaveCount(0);
   await expect(page.getByText("创建于2026-01-23").first()).toBeVisible();
   await expect(page.getByText("总计：8")).toBeVisible();
   await expect(page.getByText("10条/页")).toBeVisible();
 
   const guide = await page.getByTestId("agent-guide-background").boundingBox();
-  const tabs = await page.getByTestId("agent-list-tabs").boundingBox();
   expect(guide?.width).toBe(1808);
   expect(guide?.height).toBe(353);
-  expect(tabs?.y).toBe(guide!.y + guide!.height + 12);
-  await expect(page.getByTestId("agent-guide-divider")).toHaveCount(0);
+  await expect(page.getByTestId("agent-guide-divider")).toBeVisible();
 
   const firstCard = page.locator("article").first();
   await expect(firstCard).toHaveCSS("border-radius", "12px");
@@ -356,7 +354,7 @@ test("table body follows rendered content, caps available height, and scrolls in
   );
 });
 
-test("the guide divider is shown only when the agent list is empty", async ({
+test("the guide divider is shown for an empty list while the guide is expanded", async ({
   page,
 }) => {
   await mockAgentListApis(page, []);
@@ -367,6 +365,9 @@ test("the guide divider is shown only when the agent list is empty", async ({
 
   const guide = await page.getByTestId("agent-guide-background").boundingBox();
   expect(guide?.height).toBe(378);
+
+  await page.getByRole("button", { name: "收起教程" }).click();
+  await expect(page.getByTestId("agent-guide-divider")).toHaveCount(0);
 });
 
 test("publish shortcut routes to the existing configuration flow", async ({

@@ -6,7 +6,7 @@ import { prepareWorkbench } from "../../infra/automation/d4/fixtures/workbench-c
 
 journey("WB-CONTROLS-D4-003", async ({ page, contract }) => {
   await page.setViewportSize({ width: 1441, height: 1244 });
-  await prepareWorkbench(page, 1, { reasoning: true, modelEffort: "medium", agentEffort: "high" });
+  const { writes } = await prepareWorkbench(page, 1, { reasoning: true, modelEffort: "medium", agentEffort: "high" });
   const requests: Array<Record<string, any>> = [];
   await page.route("**/api/agent/run", async (route) => {
     requests.push(route.request().postDataJSON());
@@ -312,5 +312,88 @@ journey("WB-CONTROLS-D4-003", async ({ page, contract }) => {
         }
       },
     );
+  });
+  await contract.step(contract.expectedIds("steps")[3], async () => {
+    await contract.assertion(contract.expectedIds("assertions")[1], async () => {
+      const common = { model_type: "llm", model_factory: "openai", connect_status: "available" };
+      const models = [
+        { ...common, model_id: 1, model_name: "fixture-model", display_name: "Fixture Model" },
+        { ...common, model_id: 4, model_name: "missing-capability", display_name: "Missing Capability" },
+        ...(["unknown", "unsupported", "supported"] as const).map((status, index) => ({
+          ...common, model_id: 5 + index, model_name: `${status}-toggle`,
+          display_name: status === "supported" ? "Toggle Only Model" : `${status} Capability`,
+          extra_params: { enable_thinking: false },
+          reasoning_capability: { status, control: "toggle", levels: [], source: "catalog", controls: status === "supported" ? [{ type: "toggle" }] : [] },
+        })),
+      ];
+      await page.route("**/api/model/list", route => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ data: models }) }));
+      await page.goto(`${process.env.NEXENT_BASE_URL}/zh/workbench`);
+      const beforeRequests = requests.length;
+      const beforeWrites = writes.length;
+      const reason = "当前模型不支持开启思考模式";
+      for (const name of [
+        "Missing Capability", "unknown Capability", "unsupported Capability",
+      ]) {
+        await open();
+        await settings.getByText(name, { exact: true }).click();
+      await page.mouse.move(0, 0);
+        await open();
+        const toggle = settings.getByRole("switch");
+        await expect(toggle).toHaveAttribute("aria-disabled", "true");
+      await expect(toggle).toHaveAccessibleDescription(reason);
+      await expect(settings.locator('[data-slot="model-selector-effort"] > p')).toHaveCount(0);
+      await toggle.focus();
+      await expect(page.getByRole("tooltip")).toHaveCount(0);
+      await toggle.hover();
+      await expect(page.getByRole("tooltip")).toHaveText(reason);
+      await page.mouse.move(0, 0);
+      await expect(page.getByRole("tooltip")).toHaveCount(0);
+        await toggle.click({ force: true });
+        await expect(page.getByRole("tooltip")).toHaveText(reason);
+        await expect(toggle).toHaveAttribute("aria-checked", "false");
+        await expect(settings.getByRole("combobox")).toHaveCount(0);
+        await expect(trigger).toContainText(name);
+      await trigger.click();
+      await expect(settings).toBeHidden();
+      await page.mouse.move(0, 0);
+      await open();
+      await expect(page.getByRole("tooltip")).toHaveCount(0);
+      await settings.getByRole("switch").press("Enter");
+      await expect(page.getByRole("tooltip")).toHaveText(reason);
+      await expect(settings.getByRole("switch")).toHaveAttribute("aria-checked", "false");
+      await trigger.click();
+      await expect(settings).toBeHidden();
+      }
+      await open();
+      await settings.getByText("Toggle Only Model", { exact: true }).click();
+      await setThinking(true);
+      await expect(settings.getByRole("switch")).toHaveAttribute("aria-disabled", "false");
+      await expect(settings.getByText("思考强度", { exact: true })).toHaveCount(0);
+      await expect(settings.getByRole("combobox")).toHaveCount(0);
+      await expect(settings.getByRole("slider")).toHaveCount(0);
+      await trigger.click();
+      const input = page.getByRole("textbox", { name: "对话输入", exact: true });
+      await input.fill("Unsent narrow-layout verification draft");
+      for (const width of [679, 390]) {
+        await page.setViewportSize({ width, height: 1244 });
+        await expect.poll(async () => (await trigger.getByTitle("Toggle Only Model").boundingBox())?.width ?? 0).toBeGreaterThan(16);
+        const model = (await trigger.boundingBox())!;
+        const sendButton = page.getByRole("button", { name: "发送", exact: true });
+        const sendBox = (await sendButton.boundingBox())!;
+        const form = (await page.locator("form").filter({ has: trigger }).boundingBox())!;
+        expect(model.x).toBeGreaterThanOrEqual(form.x);
+        expect(model.x + model.width).toBeLessThanOrEqual(sendBox.x);
+        expect(sendBox.x + sendBox.width).toBeLessThanOrEqual(form.x + form.width + 1);
+        expect(sendBox.x + sendBox.width).toBeLessThanOrEqual(width);
+        await trigger.click();
+        await expect(settings).toBeVisible();
+        await expect(settings.getByRole("switch")).toHaveAttribute("aria-checked", "true");
+        await trigger.click();
+        await expect(input).toHaveValue("Unsent narrow-layout verification draft");
+      }
+      await input.fill("");
+      expect(requests).toHaveLength(beforeRequests);
+      expect(writes).toHaveLength(beforeWrites);
+    });
   });
 });

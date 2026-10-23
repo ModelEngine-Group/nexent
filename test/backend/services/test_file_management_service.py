@@ -1173,6 +1173,27 @@ class TestGetFileStreamImpl:
     """Test cases for get_file_stream_impl function"""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("size", [None, 0, 7])
+    async def test_failed_stream_distinguishes_missing_from_existing_object(self, mocker, size):
+        mocker.patch.object(file_management_service, "get_file_stream", return_value=None)
+        probe = mocker.patch.object(file_management_service, "get_file_size_from_minio_strict",
+                                    return_value=size)
+        with pytest.raises(Exception) as caught:
+            await get_file_stream_impl("workspace/owner/report.txt")
+        assert isinstance(caught.value, file_management_service.NotFoundException) == (size is None)
+        probe.assert_called_once_with("workspace/owner/report.txt")
+
+    @pytest.mark.asyncio
+    async def test_failed_stream_preserves_storage_probe_errors(self, mocker):
+        mocker.patch.object(file_management_service, "get_file_stream", return_value=None)
+        error = PermissionError("storage permission denied")
+        mocker.patch.object(file_management_service, "get_file_size_from_minio_strict",
+                            side_effect=error)
+        with pytest.raises(PermissionError) as caught:
+            await get_file_stream_impl("workspace/owner/report.txt")
+        assert caught.value is error
+
+    @pytest.mark.asyncio
     async def test_get_file_stream_impl_success(self):
         """Test successful file stream retrieval"""
         # Mock successful result

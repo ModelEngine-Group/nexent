@@ -773,8 +773,15 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
     searchQuery,
     newChatDesign,
     generatedTitles,
-    visibleThreadIds
+    visibleThreadIds,
+    selectedAgentId === undefined
   );
+  const [collapsedSearchGroups, setCollapsedSearchGroups] = useState<
+    Set<string>
+  >(() => new Set());
+  useEffect(() => {
+    setCollapsedSearchGroups(new Set());
+  }, [searchQuery]);
   const timeGroups = useThreadListGroups(
     generatedTitles,
     searchQuery,
@@ -962,7 +969,21 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
                 Number(pinned.pinnedIds.has(left.id))
             )
           : group.entries;
-        const isExpanded = expandedAgentKeys.has(groupKey);
+        const isExpanded = group.hasMatchingConversation
+          ? !collapsedSearchGroups.has(groupKey)
+          : expandedAgentKeys.has(groupKey);
+        const toggleExpanded = () => {
+          if (!group.hasMatchingConversation) {
+            onToggleAgentExpanded(groupKey);
+            return;
+          }
+          setCollapsedSearchGroups((previous) => {
+            const next = new Set(previous);
+            if (next.has(groupKey)) next.delete(groupKey);
+            else next.add(groupKey);
+            return next;
+          });
+        };
         const visibleEntries = getVisibleAgentThreads(
           entries,
           isExpanded,
@@ -1014,7 +1035,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
                   type="button"
                   data-slot="aui_thread-list-group-label"
                   className="group flex h-full min-w-0 flex-1 items-center gap-3 rounded-lg px-2 text-left text-[14px] text-[#191919]"
-                  onClick={() => onToggleAgentExpanded(groupKey)}
+                  onClick={toggleExpanded}
                   aria-expanded={isExpanded}
                 >
                   {groupLabel}
@@ -1040,7 +1061,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
                   "group flex h-10 items-center rounded-lg text-left text-[14px] text-[#191919] hover:bg-[#e5e7eb]",
                   newChatDesign ? "gap-5 px-1" : "gap-3 px-3"
                 )}
-                onClick={() => onToggleAgentExpanded(groupKey)}
+                onClick={toggleExpanded}
                 aria-expanded={isExpanded}
               >
                 {groupLabel}
@@ -1080,6 +1101,7 @@ type AgentThreadGroup = {
   agentId: number | null;
   agentName: string;
   entries: ThreadListGroupEntry[];
+  hasMatchingConversation: boolean;
 };
 
 // Group the current thread list by agent (conversation history), ordered by
@@ -1090,7 +1112,8 @@ const useThreadListAgentGroups = (
   searchQuery: string,
   newChatDesign: boolean,
   generatedTitles: ReadonlyMap<string, string> | undefined,
-  visibleThreadIds: readonly string[]
+  visibleThreadIds: readonly string[],
+  matchAgentName: boolean
 ): AgentThreadGroup[] | null => {
   const { t } = useTranslation();
   const threadIds = useAuiState((s) => s.threads.threadIds);
@@ -1156,19 +1179,23 @@ const useThreadListAgentGroups = (
               ? (agentNameById.get(agentId) ?? `#${agentId}`)
               : t("chat.threadList.recentConversations"),
           entries: [],
+          hasMatchingConversation: false,
         };
         groupByAgent.set(agentId, group);
         groups.push(group);
       }
       if (query) {
-        const agentNameMatch = group.agentName.toLowerCase().includes(query);
+        const agentNameMatch =
+          matchAgentName && group.agentName.toLowerCase().includes(query);
         const threadTitle =
           (
             generatedTitles?.get(threadIds[index]) ?? item?.title
           )?.toLowerCase() ?? "";
-        if (!agentNameMatch && !threadTitle.includes(query)) {
+        const conversationTitleMatch = threadTitle.includes(query);
+        if (!agentNameMatch && !conversationTitleMatch) {
           continue;
         }
+        group.hasMatchingConversation ||= conversationTitleMatch;
       }
       group.entries.push({
         id: threadIds[index],
@@ -1193,6 +1220,7 @@ const useThreadListAgentGroups = (
     generatedTitles,
     t,
     searchQuery,
+    matchAgentName,
     visibleThreadIds,
   ]);
   return newChatDesign ? groups : null;

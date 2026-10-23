@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Alert,
@@ -25,9 +25,11 @@ import { useTranslation } from "react-i18next";
 
 import { useTagDefinitions } from "@/hooks/useTagManagement";
 import {
+  getTagSearchMatches,
   getTagDefinitionDisplayName,
   getTagValueDisplayName,
 } from "@/lib/systemTagLabels";
+import HighlightedText from "@/components/common/HighlightedText";
 import { tagManagementApi } from "@/services/tagManagementService";
 import type {
   TagDefinition,
@@ -35,9 +37,18 @@ import type {
   TagValue,
 } from "@/types/tagManagement";
 
+import styles from "./TagDefinitionManagementPanel.module.css";
+
 interface TagDefinitionManagementPanelProps {
   bucketId: number;
   canManage: boolean;
+  /**
+   * Pins the table's scroll body to the height `scroll.y` already asks for.
+   * The body is otherwise only as tall as the rows it currently holds, so a
+   * host that sizes itself to the panel, such as a dialog, would resize on
+   * every keystroke that filters rows out.
+   */
+  stableTableHeight?: boolean;
 }
 
 interface DefinitionFormValues {
@@ -53,6 +64,7 @@ interface ValueFormValues {
 export default function TagDefinitionManagementPanel({
   bucketId,
   canManage,
+  stableTableHeight = false,
 }: TagDefinitionManagementPanelProps) {
   const { t } = useTranslation("common");
   const { message } = App.useApp();
@@ -72,9 +84,13 @@ export default function TagDefinitionManagementPanel({
   }>({ open: false, definition: null, editingValue: null });
   const [definitionPage, setDefinitionPage] = useState(1);
   const [definitionSearch, setDefinitionSearch] = useState("");
+  const [expandedRowKeys, setExpandedRowKeys] = useState<number[]>([]);
   const [hasValues, setHasValues] = useState(true);
   const [definitionForm] = Form.useForm<DefinitionFormValues>();
   const [valueForm] = Form.useForm<ValueFormValues>();
+  // Rows the current search opened on the user's behalf, tracked apart from the
+  // user's own expansions so a new keyword retracts only its own.
+  const autoExpandedKeysRef = useRef<number[]>([]);
 
   const handleCreateDefinition = useCallback(async () => {
     const values = await definitionForm.validateFields();
@@ -253,12 +269,16 @@ export default function TagDefinitionManagementPanel({
         title: t("tagManagement.column.displayValue"),
         dataIndex: "display_value",
         key: "display_value",
-        render: (_, tagValue) =>
-          getTagValueDisplayName(
-            definition.definition_key,
-            tagValue.display_value,
-            t
-          ),
+        render: (_, tagValue) => (
+          <HighlightedText
+            text={getTagValueDisplayName(
+              definition.definition_key,
+              tagValue.display_value,
+              t
+            )}
+            keyword={definitionSearch}
+          />
+        ),
       },
       {
         title: t("tagManagement.column.status"),
@@ -314,7 +334,7 @@ export default function TagDefinitionManagementPanel({
         ),
       },
     ],
-    [canManage, deleteValue, t, toggleValueStatus, valueForm]
+    [canManage, definitionSearch, deleteValue, t, toggleValueStatus, valueForm]
   );
 
   const columns: ColumnsType<TagDefinition> = [
@@ -322,18 +342,28 @@ export default function TagDefinitionManagementPanel({
       title: t("tagManagement.column.name"),
       dataIndex: "definition_name",
       key: "definition_name",
-      render: (_, definition) =>
-        getTagDefinitionDisplayName(
-          definition.definition_key,
-          definition.definition_name,
-          t
-        ),
+      render: (_, definition) => (
+        <HighlightedText
+          text={getTagDefinitionDisplayName(
+            definition.definition_key,
+            definition.definition_name,
+            t
+          )}
+          keyword={definitionSearch}
+        />
+      ),
     },
     {
       title: t("tagManagement.column.key"),
       dataIndex: "definition_key",
       key: "definition_key",
       width: 180,
+      render: (_, definition) => (
+        <HighlightedText
+          text={definition.definition_key}
+          keyword={definitionSearch}
+        />
+      ),
     },
     {
       title: t("tagManagement.column.mode"),
@@ -432,6 +462,74 @@ export default function TagDefinitionManagementPanel({
       ),
     },
   ];
+
+  // The table renders localized names and expands into per-value rows, so the
+  // search has to run over the same localized texts plus each value. Matching on
+  // the raw definition_name/definition_key fields alone hides rows the user can
+  // see, for example the translated "关键词" name or a value such as "Cache".
+  const hasDefinitionSearch = definitionSearch.trim().length > 0;
+  const definitionSearchMatches = useMemo(
+    () => getTagSearchMatches(definitions ?? [], definitionSearch, t),
+    [definitions, definitionSearch, t]
+  );
+
+  const filteredDefinitions = useMemo(() => {
+    const allDefinitions = definitions ?? [];
+    if (!definitionSearchMatches) return allDefinitions;
+    return allDefinitions.filter((definition) =>
+      definitionSearchMatches.has(definition.definition_id)
+    );
+  }, [definitions, definitionSearchMatches]);
+
+  // A row that matched through its own name or key highlights in place, because
+  // the matched text is already on screen. A row that matched only through one
+  // of its values has nothing to point at, so the search opens the row and the
+  // inner table lists just the values that matched.
+  const autoExpandedKeys = useMemo(() => {
+    if (!definitionSearchMatches) return [];
+    return Array.from(definitionSearchMatches.entries())
+      .filter(
+        ([, match]) =>
+          !match.definitionMatched && match.matchedValueIds.length > 0
+      )
+      .map(([definitionId]) => definitionId);
+  }, [definitionSearchMatches]);
+
+  useEffect(() => {
+    const previouslyAutoExpanded = autoExpandedKeysRef.current;
+    autoExpandedKeysRef.current = autoExpandedKeys;
+    // Only act on a change of the auto-expanded set. Re-running with the same
+    // set must not reopen a row the user collapsed by hand.
+    const added = autoExpandedKeys.filter(
+      (key) => !previouslyAutoExpanded.includes(key)
+    );
+    const retracted = previouslyAutoExpanded.filter(
+      (key) => !autoExpandedKeys.includes(key)
+    );
+    if (added.length === 0 && retracted.length === 0) return;
+
+    setExpandedRowKeys((previous) => {
+      const next = previous.filter((key) => !retracted.includes(key));
+      added.forEach((key) => {
+        if (!next.includes(key)) next.push(key);
+      });
+      return next;
+    });
+  }, [autoExpandedKeys]);
+
+  const handleExpandToggle = useCallback(
+    (expanded: boolean, definition: TagDefinition) => {
+      setExpandedRowKeys((previous) =>
+        expanded
+          ? previous.includes(definition.definition_id)
+            ? previous
+            : [...previous, definition.definition_id]
+          : previous.filter((key) => key !== definition.definition_id)
+      );
+    },
+    []
+  );
+
   return (
     <div className="min-w-0">
       {error && (
@@ -467,61 +565,86 @@ export default function TagDefinitionManagementPanel({
           setDefinitionPage(1);
         }}
       />
-      <Table
-        rowKey="definition_id"
-        dataSource={(definitions ?? []).filter((definition) => {
-          const search = definitionSearch.trim().toLocaleLowerCase();
-          return (
-            !search ||
-            definition.definition_name.toLocaleLowerCase().includes(search) ||
-            definition.definition_key.toLocaleLowerCase().includes(search)
-          );
-        })}
-        columns={columns}
-        loading={loading}
-        locale={{ emptyText: t("tagManagement.empty.noDefinitions") }}
-        size="small"
-        expandable={{
-          rowExpandable: (definition) =>
-            definition.selection_mode !== "no_value",
-          expandedRowRender: (definition) => (
-            <div className="p-2">
-              <div className="mb-2 flex items-center justify-end">
-                {canManage && (
-                  <Button
+      <div className={stableTableHeight ? styles.stableTableHeight : undefined}>
+        <Table
+          rowKey="definition_id"
+          dataSource={filteredDefinitions}
+          columns={columns}
+          loading={loading}
+          locale={{
+            emptyText: hasDefinitionSearch
+              ? t("tagManagement.empty.noMatchingDefinitions")
+              : t("tagManagement.empty.noDefinitions"),
+          }}
+          size="small"
+          expandable={{
+            rowExpandable: (definition) =>
+              definition.selection_mode !== "no_value",
+            expandedRowKeys,
+            onExpand: handleExpandToggle,
+            expandedRowRender: (definition) => {
+              // Only a value-only match narrows the inner rows: a row the user can
+              // already see keeps all of its values when it is opened.
+              const match = definitionSearchMatches?.get(
+                definition.definition_id
+              );
+              const matchedValueIds =
+                match && !match.definitionMatched
+                  ? match.matchedValueIds
+                  : null;
+              const values = definition.values ?? [];
+              return (
+                <div className="p-2">
+                  <div className="mb-2 flex items-center gap-2">
+                    {matchedValueIds && (
+                      <Typography.Text type="secondary" className="text-xs">
+                        {t("tagManagement.hint.matchedValues")}
+                      </Typography.Text>
+                    )}
+                    {canManage && (
+                      <Button
+                        className="ml-auto"
+                        size="small"
+                        onClick={() => {
+                          valueForm.resetFields();
+                          setValueModal({
+                            open: true,
+                            definition,
+                            editingValue: null,
+                          });
+                        }}
+                      >
+                        {t("tagManagement.action.addValue")}
+                      </Button>
+                    )}
+                  </div>
+                  <Table
+                    rowKey="value_id"
+                    dataSource={
+                      matchedValueIds
+                        ? values.filter((value) =>
+                            matchedValueIds.includes(value.value_id)
+                          )
+                        : values
+                    }
+                    columns={valueColumns(definition)}
                     size="small"
-                    onClick={() => {
-                      valueForm.resetFields();
-                      setValueModal({
-                        open: true,
-                        definition,
-                        editingValue: null,
-                      });
-                    }}
-                  >
-                    {t("tagManagement.action.addValue")}
-                  </Button>
-                )}
-              </div>
-              <Table
-                rowKey="value_id"
-                dataSource={definition.values ?? []}
-                columns={valueColumns(definition)}
-                size="small"
-                pagination={false}
-                scroll={{ x: 650 }}
-              />
-            </div>
-          ),
-        }}
-        pagination={{
-          current: definitionPage,
-          pageSize: 10,
-          size: "small",
-          onChange: setDefinitionPage,
-        }}
-        scroll={{ x: 1060, y: 500 }}
-      />
+                    pagination={false}
+                    scroll={{ x: 650 }}
+                  />
+                </div>
+              );
+            },
+          }}
+          pagination={{
+            current: definitionPage,
+            pageSize: 10,
+            size: "small",
+            onChange: setDefinitionPage,
+          }}
+          scroll={{ x: 1060, y: 500 }}
+        />
+      </div>
 
       <Modal
         title={

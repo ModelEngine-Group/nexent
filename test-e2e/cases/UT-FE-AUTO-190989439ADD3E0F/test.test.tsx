@@ -1,4 +1,7 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { render, screen, cleanup } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import UserProfileComp from '@/app/[locale]/users/components/UserProfileComp';
 import { useAuthenticationContext } from '@/components/providers/AuthenticationProvider';
@@ -111,7 +114,19 @@ function makeUser(overrides: any = {}) {
 
 function renderWithUser(user: any) {
   mocks.useAuthorizationContext.mockReturnValue({ user, groupIds: [] });
-  return render(<UserProfileComp />);
+  // UserProfileComp calls `useQuery` directly (oauthService config), so the tree
+  // must sit under a QueryClientProvider.
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false, gcTime: 0 },
+      mutations: { retry: false },
+    },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <UserProfileComp />
+    </QueryClientProvider>
+  );
 }
 
 beforeAll(() => {
@@ -158,20 +173,20 @@ describe('UserProfileComp Account Info', () => {
     expect(screen.getByText('cas_user_01')).toBeTruthy();
   });
 
-  it('场景B 本地用户标签为 Email 且仅取 email.trim() 不读取 username', async () => {
+  it('场景B 本地用户标签为 Email 且取值仅用 email.trim()，不采用 username', async () => {
+    // username is passed down unconditionally; only getUserDisplayName decides.
     const localUser: any = {
       id: 'u-local-1',
       email: 'local01@example.com',
       role: 'USER',
       tenantId: 'tenant-1',
       authProvider: 'local',
-      get username() {
-        throw new Error('username must not be read for local users');
-      },
+      username: 'should_not_be_used',
     };
     renderWithUser(localUser);
     expect(await screen.findByText('Email')).toBeTruthy();
     expect(screen.getByText('local01@example.com')).toBeTruthy();
+    expect(screen.queryByText('should_not_be_used')).toBeNull();
   });
 
   it('场景C CAS 空用户名时标签仍为 Username 且值回退 email.trim()', async () => {
