@@ -1,4 +1,16 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import i18next from "i18next";
+import type { ReasoningEffort } from "@/types/modelConfig";
+import { isReasoningEffort } from "@/lib/modelReasoning";
+import {
+  snapshotTurnModelControls,
+  type TurnModelControls,
+  type RuntimeGenerationOverrides,
+} from "@/features/model-controls/turnControls";
+import { rejectModelSelection } from "@/features/model-controls/rejectedSelection";
 
 import type {
   ChatModelAdapter,
@@ -14,6 +26,8 @@ import { ApiError } from "@/services/api";
 import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
 import log from "@/lib/logger";
 import { completeTrailingToolCalls } from "@/lib/toolCallStatus";
+import type { SourceAttributes } from "@/types/source";
+import { getSourceAttributes } from "@/lib/source";
 import {
   appendClarificationPart,
   isClarificationFallback,
@@ -23,10 +37,14 @@ import {
 } from "@/lib/clarification";
 import { stripAnsiControlSequences } from "@/lib/ansi";
 import { createReasoningAccumulator } from "@/lib/reasoningAccumulator";
-import { stripStreamedFinalAnswerEcho } from "@/lib/streamFinalAnswer";
+import { createFinalAnswerProjection } from "@/lib/finalAnswerProjection";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
+import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
-import type { HumanInteractionEvent } from "@/types/clarification";
+import type {
+  ClarificationResponse,
+  HumanInteractionEvent,
+} from "@/types/clarification";
 import { extractMinioFiles } from "../utils/history-attachments";
 
 // Backend SSE chunk format
@@ -77,6 +95,9 @@ interface SseChunk {
   // sibling sub-agents execute in parallel.
   invocation_id?: string;
   attempt_id?: string;
+  step_id?: string;
+  answer_phase?: "delta" | "complete";
+  reclassify_step?: boolean;
   phase?: "begin" | "rollback" | "commit";
   attempt?: number;
   path?: string;
@@ -123,7 +144,11 @@ export interface Nl2AgentCardAction {
 }
 
 export type Nl2AgentDraftField =
-  "name" | "display_name" | "description" | Nl2aPromptField;
+  | "name"
+  | "display_name"
+  | "description"
+  | "enable_protocol_repair_retry"
+  | Nl2aPromptField;
 
 export type Nl2AgentStateEvent =
   | {
@@ -181,9 +206,7 @@ export interface Nl2aAgentDraftPayload {
   name: string;
   display_name: string;
   description: string;
-  duty_prompt: string;
-  constraint_prompt: string;
-  few_shots_prompt: string | null;
+  prompt: string;
   greeting_message: string;
   example_questions: string[];
 }
@@ -237,11 +260,20 @@ export interface Nl2aInstallableResource {
   default_option_id: string;
 }
 
+export interface Nl2aKnowledgeRecommendation {
+  id: string;
+  binding_value: string;
+  name: string;
+  score: number;
+}
+
 export type Nl2aRecommendedResource =
   | {
       candidate: Nl2aResourceCandidate & { resource_type: "tool" };
       recommendation: "recommended" | "optional";
       is_bound: boolean;
+      knowledge_recommendations?: Nl2aKnowledgeRecommendation[];
+      knowledge_bound_values?: string[];
       form_kind: "TOOL_CONFIG";
       config: ToolParam[];
     }
@@ -249,16 +281,14 @@ export type Nl2aRecommendedResource =
       candidate: Nl2aResourceCandidate & { resource_type: "skill" };
       recommendation: "recommended" | "optional";
       is_bound: boolean;
+      knowledge_recommendations?: Nl2aKnowledgeRecommendation[];
+      knowledge_bound_values?: string[];
       form_kind: "SKILL_CONFIG";
       config: SkillParam[];
     };
 
 export type Nl2aPromptField =
-  | "duty_prompt"
-  | "constraint_prompt"
-  | "few_shots_prompt"
-  | "greeting_message"
-  | "example_questions";
+  "prompt" | "greeting_message" | "example_questions";
 
 export type Nl2aPayload =
   | Nl2aRequirementClarificationPayload
@@ -290,7 +320,6 @@ interface NexentRunConfig {
     resolution: import("@/types/knowledgeScope").KnowledgeScopeResolution
   ) => void;
   draftSnapshot?: Record<string, unknown>;
-  complexity?: "simple" | "complicated";
   language?: "zh" | "en";
   onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
   onNl2AgentState?: (event: Nl2AgentStateEvent) => void;
@@ -306,6 +335,7 @@ interface NexentRunConfig {
   }) => void | Promise<void>;
   onNl2AgentStopped?: (agentId: number) => void;
   modelId?: number;
+  turnModelControls?: TurnModelControls;
   runtimeMetadata?: Record<string, unknown>;
   runtimeMetadataVersion?: number;
   onRuntimeMetadataSent?: (version?: number) => void;
@@ -606,6 +636,15 @@ function parseSseChunk(line: string): SseChunk | HumanInteractionEvent | null {
   if (!jsonStr) return null;
   try {
     const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+    if (
+      parsed.type === "error" &&
+      parsed.code === "MODEL_SAMPLING_CONFIG_INVALID"
+    ) {
+      parsed.content = i18next.t("workbench.controls.providerRejected", {
+        defaultValue:
+          "The model provider rejected temperature or Top P. Restore defaults or change these settings.",
+      });
+    }
     if (typeof parsed.type === "string") {
       if (typeof parsed.content === "string") {
         parsed.content = stripAnsiControlSequences(parsed.content);
@@ -810,6 +849,21 @@ export function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
             !["tool", "skill"].includes(resource.candidate.resource_type) ||
             !["recommended", "optional"].includes(resource.recommendation) ||
             typeof resource.is_bound !== "boolean" ||
+            (resource.knowledge_bound_values !== undefined &&
+              (!Array.isArray(resource.knowledge_bound_values) ||
+                resource.knowledge_bound_values.some(
+                  (value) => typeof value !== "string"
+                ))) ||
+            (resource.knowledge_recommendations !== undefined &&
+              (!Array.isArray(resource.knowledge_recommendations) ||
+                resource.knowledge_recommendations.length > 5 ||
+                resource.knowledge_recommendations.some(
+                  (kb) =>
+                    !kb ||
+                    typeof kb.id !== "string" ||
+                    typeof kb.binding_value !== "string" ||
+                    typeof kb.name !== "string"
+                ))) ||
             !Array.isArray(resource.config)
         )
       ) {
@@ -862,9 +916,7 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
       return null;
     }
     const promptFields = new Set<Nl2aPromptField>([
-      "duty_prompt",
-      "constraint_prompt",
-      "few_shots_prompt",
+      "prompt",
       "greeting_message",
       "example_questions",
     ]);
@@ -894,6 +946,7 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
       "name",
       "display_name",
       "description",
+      "enable_protocol_repair_retry",
       ...promptFields,
     ]);
     if (
@@ -950,7 +1003,7 @@ export function attachExecutionLogsToTool(
  */
 export function attachSearchContentToTool(
   contentParts: any[],
-  item: {
+  item: SourceAttributes & {
     url: string;
     title: string;
     text?: string;
@@ -979,7 +1032,7 @@ export function attachSearchContentToTool(
   if (!targetToolCall.searchContent) {
     targetToolCall.searchContent = [];
   }
-  if (item.url || item.sourceFile) {
+  if (item.url || item.sourceFile || item.filename || item.title) {
     targetToolCall.searchContent.push(item);
   }
   return true;
@@ -1010,7 +1063,7 @@ function findMostRecentToolCall(
 
 // Global registry for search sources by message ID (used by MarkdownText for [[b1]] rendering)
 // Keyed by messageId (from message.id in the stream), value is SearchSource[]
-export interface SearchSource {
+export interface SearchSource extends SourceAttributes {
   citeIndex: number;
   url: string;
   title: string;
@@ -1283,14 +1336,13 @@ export function pushStepTokenCount(step: StepTokenCount): void {
 }
 
 /**
- * Clears the global step token counts registry and resets the shared plan
- * state. Called from `remoteChatModelAdapter.run()` so a fresh assistant
- * turn never inherits the previous run's plan panel.
+ * Clear per-turn timing while retaining the conversation's latest plan.
+ * Conversation switches restore or clear the plan in the history adapter;
+ * a later plan event replaces it when a new planning turn creates a plan.
  */
 export function clearStepTokenCounts(): void {
   stepTokenCounts.length = 0;
   accumulatedDuration = 0;
-  planRegistry.set(null);
 }
 
 /**
@@ -1367,6 +1419,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const onServerConversationId = custom?.onServerConversationId;
     const onRunId = custom?.onRunId;
     const isResume = !isEphemeralRuntime && custom?.resume === true;
+    // Freeze the controls before draft creation or other asynchronous work.
+    const creationConfig = custom?.creationWorkbenchConfig
+      ? structuredClone(custom.creationWorkbenchConfig)
+      : undefined;
+    const creatorTurn = custom?.turnModelControls
+      ? structuredClone(custom.turnModelControls)
+      : creationConfig?.model_id != null
+        ? snapshotTurnModelControls(
+            creationConfig.model_id,
+            creationConfig.generation_config
+          )
+        : undefined;
     let nl2AgentId =
       typeof custom?.agentId === "string"
         ? Number(custom.agentId)
@@ -1467,6 +1531,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       minio_files: minioFiles.length > 0 ? minioFiles : null,
       is_debug: isAgentDebug,
     };
+    const clarificationResponse =
+      lastUserIndex >= 0
+        ? messages[lastUserIndex].metadata?.custom?.clarificationResponse
+        : undefined;
+    if (!isResume && !isNl2Agent && clarificationResponse) {
+      requestBody.clarification_response = clarificationResponse;
+    }
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
       Number.isInteger(numericServerThreadId) && numericServerThreadId > 0;
@@ -1502,21 +1573,23 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       context.config as { reasoningBudgetTokens?: number } | undefined
     )?.reasoningBudgetTokens;
     const reasoningCapability = (
-      context.config as {
-        reasoningCapability?: {
-          status?: string;
-          controls?: Array<{ type?: string }>;
-          levels?: string[];
-          control?: string;
-        };
-      } | undefined
+      context.config as
+        | {
+            reasoningCapability?: {
+              status?: string;
+              controls?: Array<{ type?: string }>;
+              levels?: string[];
+              control?: string;
+            };
+          }
+        | undefined
     )?.reasoningCapability;
     const reasoningSupported =
       reasoningCapability?.status === "supported" &&
       Boolean(
         reasoningCapability.controls?.length ||
-          reasoningCapability.levels?.length ||
-          reasoningCapability.control === "toggle"
+        reasoningCapability.levels?.length ||
+        reasoningCapability.control === "toggle"
       );
     const hasBudgetSelection =
       typeof reasoningBudgetTokens === "number" &&
@@ -1566,21 +1639,52 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       delete requestBody.reasoning_effort;
       delete requestBody.reasoning_budget_tokens;
     }
-    if (!workbenchConfig && !isEphemeralRuntime) {
+    if (!workbenchConfig) {
       const modelContext = context.config as
-        | { deepThinking?: boolean; reasoningEffort?: string }
+        | {
+            deepThinking?: boolean;
+            reasoningEffort?: string;
+            temperature?: number;
+            top_p?: number;
+          }
         | undefined;
       if (modelContext?.deepThinking !== undefined) {
         requestBody.generation_config = {
           deep_thinking: modelContext.deepThinking,
+          ...(hasBudgetSelection
+            ? { reasoning_budget_tokens: reasoningBudgetTokens }
+            : {}),
           ...(modelContext.deepThinking &&
-          ["low", "medium", "high"].includes(
-            modelContext.reasoningEffort ?? ""
-          )
+          !hasBudgetSelection &&
+          isReasoningEffort(modelContext.reasoningEffort)
             ? { thinking_effort: modelContext.reasoningEffort }
             : {}),
         };
       }
+      if (
+        !isAgentDebug &&
+        !isResume &&
+        (modelContext?.temperature != null || modelContext?.top_p != null)
+      ) {
+        requestBody.generation_config = {
+          ...(requestBody.generation_config as
+            RuntimeGenerationOverrides | undefined),
+          ...snapshotTurnModelControls(
+            Number(requestBody.model_id),
+            modelContext
+          ).generation_config,
+        };
+      }
+    }
+    if (isNl2Agent || isNl2Skill) {
+      const turn = creatorTurn;
+      if (turn) {
+        requestBody.model_id = turn.model_id;
+        requestBody.generation_config = { ...turn.generation_config };
+      }
+      // One authority per creator turn; compatibility top-level fields are not duplicated.
+      delete requestBody.reasoning_effort;
+      delete requestBody.reasoning_budget_tokens;
     }
 
     let backendConversationId = hasServerConversationId
@@ -1645,6 +1749,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         {
           ...requestBody,
           query: String(requestBody.query || ""),
+          clarification_response: requestBody.clarification_response as
+            ClarificationResponse | undefined,
           history: (requestBody.history || []) as Array<{
             role: string;
             content: string;
@@ -1672,21 +1778,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           retry_user_message_id: isEphemeralRuntime
             ? custom?.retry_user_message_id
             : undefined,
-          workbench_config: isEphemeralRuntime
-            ? custom?.creationWorkbenchConfig
-            : undefined,
+          workbench_config: isEphemeralRuntime ? creationConfig : undefined,
           draft_snapshot: isNl2Skill ? custom?.draftSnapshot : undefined,
-          complexity: isNl2Skill ? custom?.complexity : undefined,
           language: isNl2Skill ? custom?.language : undefined,
-          model_id: isNl2Skill
-            ? (custom?.modelId ?? (requestBody.model_id as number | undefined))
-            : (requestBody.model_id as number | undefined),
+          model_id: requestBody.model_id as number | undefined,
           generation_config: requestBody.generation_config as
-            | {
-                deep_thinking: boolean;
-                thinking_effort?: "low" | "medium" | "high";
-              }
-            | undefined,
+            RuntimeGenerationOverrides | undefined,
           metadata: custom?.runtimeMetadata,
           expected_metadata_version: custom?.runtimeMetadataVersion,
           entrypoint: workbenchConfig ? "workbench" : undefined,
@@ -1703,7 +1800,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               void stopBackendRun(numericId);
             }
           }
-          if (numericId > 0 && onServerConversationId) {
+          if (!userAborted && numericId > 0 && onServerConversationId) {
             onServerConversationId(
               String(numericId),
               !isResume && !hasServerConversationId ? query : undefined
@@ -1711,22 +1808,39 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
         },
         (version) => {
-          returnedRuntimeMetadataVersion = version;
+          if (!userAborted) returnedRuntimeMetadataVersion = version;
         },
         (runId) => {
           backendRunId = runId;
-          onRunId?.(runId);
+          if (!userAborted) onRunId?.(runId);
           if (userAborted) {
             void stopBackendRun(runId);
           }
         },
-        (version) => custom?.onWorkbenchConfigVersion?.(version)
+        (version) => {
+          if (!userAborted) custom?.onWorkbenchConfigVersion?.(version);
+        }
       );
+      if (userAborted) {
+        if (!("type" in agentResponse)) await agentResponse.cancel();
+        cleanupAbortHandler();
+        await backendStopPromise;
+        return;
+      }
       if (!("type" in agentResponse)) custom?.onRunStarted?.();
       if (custom?.runtimeMetadata !== undefined) {
         custom.onRuntimeMetadataSent?.(returnedRuntimeMetadataVersion);
       }
     } catch (error: unknown) {
+      if (
+        !userAborted &&
+        error instanceof ApiError &&
+        ["model_not_available", "model_unavailable"].includes(
+          String(error.code)
+        )
+      ) {
+        rejectModelSelection(Number(requestBody.model_id));
+      }
       custom?.onRunRejected?.(error, messages[lastUserIndex]);
       cleanupAbortHandler();
       if (
@@ -2054,6 +2168,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       ) {
         return false;
       }
+      finalAnswers.control(chunk);
       const top = resolveSubAgent(chunk.invocation_id);
       if (!top) {
         if (chunk.phase === "begin") {
@@ -2128,18 +2243,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       }
       parentReasoning.close();
     };
-    const removeFinalAnswerEcho = (answer: string) => {
-      for (let index = contentParts.length - 1; index >= 0; index -= 1) {
-        const part = contentParts[index];
-        if (part?.type !== "reasoning") continue;
-        const remaining = stripStreamedFinalAnswerEcho(part.text, answer);
-        if (remaining !== null) {
-          if (remaining.trim()) contentParts[index] = { ...part, text: remaining };
-          else removeContentPart(index);
-        }
-        break;
-      }
-    };
+    const finalAnswers = createFinalAnswerProjection(
+      contentParts,
+      removeContentPart
+    );
 
     // Helper: build a fresh sub-agent metadata object for a given invocation.
     function subAgentMetadataFor(entry: ActiveSubAgent): SubAgentPartMetadata {
@@ -2161,6 +2268,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Preserves cite_index for [[b1]] → source registry linkage.
     const searchSourcesAccumulator: SearchSource[] = [];
     const searchImagesAccumulator: SearchSource[] = [];
+    const consumedImageMetadata = new Set<SearchSource>();
     let skillFileAttachments: CompleteAttachment[] = [];
     let nl2a: Nl2aMessage | undefined;
     const acceptNl2aBoundary = (chunk: SseChunk): boolean => {
@@ -2223,12 +2331,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       for (const imageUrl of imageUrls) {
         if (!imageUrl) continue;
 
-        const metadata = imageMetadata[searchImagesAccumulator.length];
+        const metadata = imageMetadata.find(
+          (source) =>
+            source.url === imageUrl && !consumedImageMetadata.has(source)
+        );
+        if (metadata) consumedImageMetadata.add(metadata);
         const imageSource: SearchSource = {
           ...metadata,
           url: imageUrl,
           title: metadata?.title || imageUrl,
           text: metadata?.text,
+          citeIndex: metadata?.citeIndex ?? 0,
+          toolSign: metadata?.toolSign ?? "",
           sourceType: "url",
           isImage: true,
           imageKey:
@@ -2309,6 +2423,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        if (userAborted || abortSignal.aborted) return;
 
         buffer += decoder.decode(value, { stream: true });
 
@@ -2319,6 +2434,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         for (const line of lines) {
           const chunk = parseSseChunk(line);
           if (!chunk) continue;
+          if (chunk.type === "final_answer") {
+            chunk.content = unwrapFinalAnswer(chunk.content);
+          }
 
           if (isHumanInteractionEvent(chunk)) {
             flushOpenReasoning();
@@ -2418,6 +2536,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }
 
           if (chunk.type === "step_count") {
+            finalAnswers.recordStep(chunk);
             // NL2Skill can emit a step marker with no thinking text. It is
             // metadata, not a standalone reasoning card in creation mode.
             if (isNl2Skill) continue;
@@ -2427,15 +2546,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             flushOpenReasoning(chunk.invocation_id);
             const top = resolveSubAgent(chunk.invocation_id);
             if (top) {
-              const part = makeReasoningPart(
-                chunk.content,
-                true,
-                subAgentMetadataFor(top)
-              );
-              contentParts.push(part);
-              top.slot.reasoningIdx = contentParts.length - 1;
+              top.slot.reasoningIdx = null;
               top.slot.stepLabel = chunk.content;
-              top.slot.pendingStepLabel = "";
+              top.slot.pendingStepLabel = chunk.content;
               top.slot.pendingWhitespace = "";
             } else {
               parentReasoning.queueStepLabel(chunk.content);
@@ -2535,33 +2648,43 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             continue;
           }
 
-          // The final answer (or other terminal events) terminates the self-check lifecycle.
-          // Mark the existing panel complete before exposing terminal output.
+          if (chunk.type === "final_answer") {
+            const top = resolveSubAgent(chunk.invocation_id);
+            if (chunk.reclassify_step) {
+              if (top) top.slot.reasoningIdx = null;
+              else parentReasoning.detach();
+            }
+            finalAnswers.apply(
+              chunk,
+              top ? subAgentMetadataFor(top) : undefined
+            );
+            if (chunk.answer_phase !== "delta") {
+              for (const part of contentParts) {
+                const sameScope = top
+                  ? part.metadata?.runId === top.runId
+                  : !part.metadata?.subagentId;
+                if (sameScope && part.type === "text" && part.isError) {
+                  delete part.isError;
+                  part.isWarning = true;
+                }
+              }
+            }
+            flushOpenReasoning(chunk.invocation_id);
+            if (!chunk.invocation_id && chunk.answer_phase !== "delta")
+              completeVerificationPanel();
+            upsertCreatedAgentPart(false);
+            yield buildStreamResult(contentParts);
+            continue;
+          }
+
+          // Complete only the lifecycle belonging to this terminal event.
           if (
-            chunk.type === "final_answer" ||
             chunk.type === "error" ||
             chunk.type === "agent_finish" ||
             chunk.type === "max_steps_reached"
           ) {
-            // Commit any pending parent reasoning BEFORE writing the final
-            // answer text so the answer does not appear before its preceding
-            // step thought in the merged view.
-            flushOpenReasoning();
-            completeVerificationPanel();
-          }
-
-          if (chunk.type === "final_answer") {
-            removeFinalAnswerEcho(chunk.content);
-            upsertCreatedAgentPart(false);
-            // Backward compatibility for streams produced before the warning
-            // event existed. A later final answer proves those earlier step
-            // errors were recovered, so update their presentation in place.
-            for (const part of contentParts) {
-              if (part?.type === "text" && part.isError) {
-                delete part.isError;
-                part.isWarning = true;
-              }
-            }
+            flushOpenReasoning(chunk.invocation_id);
+            if (!chunk.invocation_id) completeVerificationPanel();
           }
 
           if (chunk.type === "warning") {
@@ -2696,9 +2819,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               } else {
                 contentParts[top.slot.reasoningIdx].text += chunk.content;
               }
+              finalAnswers.recordReasoning(
+                chunk,
+                contentParts[top.slot.reasoningIdx!]
+              );
               yield buildStreamResult(contentParts);
             } else {
               parentReasoning.append(chunk.content);
+              finalAnswers.recordReasoning(
+                chunk,
+                [...contentParts]
+                  .reverse()
+                  .find(
+                    (part) =>
+                      part.type === "reasoning" && !part.metadata?.subagentId
+                  )
+              );
               yield buildStreamResult(contentParts);
             }
           } else if (partType === "tool-call") {
@@ -2788,6 +2924,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     isImage,
                     imageKey: result.image_key,
                     retrievalHighlightTerms,
+                    ...getSourceAttributes(
+                      result.search_type,
+                      result.score_details
+                    ),
                   });
                 }
                 attachSearchContentToTool(
@@ -2808,6 +2948,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                     isImage,
                     imageKey: result.image_key,
                     retrievalHighlightTerms,
+                    ...getSourceAttributes(
+                      result.search_type,
+                      result.score_details
+                    ),
                   },
                   chunk.tool_call_id
                 );
@@ -2826,20 +2970,18 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         const chunk = parseSseChunk(buffer);
         if (chunk && chunk.type !== "status") {
           if (!isHumanInteractionEvent(chunk)) {
+            if (chunk.type === "final_answer") {
+              chunk.content = unwrapFinalAnswer(chunk.content);
+            }
             if (isNl2Skill) custom?.onNl2SkillEvent?.(chunk);
             if (chunk.type === "step_count") {
+              finalAnswers.recordStep(chunk);
               flushOpenReasoning(chunk.invocation_id);
               const top = resolveSubAgent(chunk.invocation_id);
               if (top) {
-                const part = makeReasoningPart(
-                  chunk.content,
-                  true,
-                  subAgentMetadataFor(top)
-                );
-                contentParts.push(part);
-                top.slot.reasoningIdx = contentParts.length - 1;
+                top.slot.reasoningIdx = null;
                 top.slot.stepLabel = chunk.content;
-                top.slot.pendingStepLabel = "";
+                top.slot.pendingStepLabel = chunk.content;
                 top.slot.pendingWhitespace = "";
               } else {
                 parentReasoning.queueStepLabel(chunk.content);
@@ -2959,23 +3101,25 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             // The buffered SSE tail follows the live NL2Skill rule too.
           } else {
             if (chunk.type === "final_answer") {
-              upsertCreatedAgentPart(false);
-              // Commit any pending parent reasoning so the answer is emitted
-              // after the most recent step thought instead of being reordered
-              // in front of it.
-              flushOpenReasoning();
-              removeFinalAnswerEcho(chunk.content);
-              completeVerificationPanel();
-              for (const part of contentParts) {
-                if (part?.type === "text" && part.isError) {
-                  delete part.isError;
-                  part.isWarning = true;
-                }
+              const top = resolveSubAgent(chunk.invocation_id);
+              if (chunk.reclassify_step) {
+                if (top) top.slot.reasoningIdx = null;
+                else parentReasoning.detach();
               }
+              finalAnswers.apply(
+                chunk,
+                top ? subAgentMetadataFor(top) : undefined
+              );
+              flushOpenReasoning(chunk.invocation_id);
+              if (!chunk.invocation_id && chunk.answer_phase !== "delta")
+                completeVerificationPanel();
+              upsertCreatedAgentPart(false);
+              yield buildStreamResult(contentParts);
             } else if (chunk.type === "warning") {
               flushOpenReasoning();
             }
-            const partType = mapChunkType(chunk.type);
+            const partType =
+              chunk.type === "final_answer" ? null : mapChunkType(chunk.type);
             if (chunk.type === "parse") {
               flushOpenReasoning(chunk.invocation_id);
               if (chunk.content.trim()) {
@@ -3011,10 +3155,23 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                   contentParts[top.slot.reasoningIdx].text += chunk.content;
                 }
                 if (top.slot.reasoningIdx !== null) {
+                  finalAnswers.recordReasoning(
+                    chunk,
+                    contentParts[top.slot.reasoningIdx]
+                  );
                   yield buildStreamResult(contentParts);
                 }
               } else {
                 parentReasoning.append(chunk.content);
+                finalAnswers.recordReasoning(
+                  chunk,
+                  [...contentParts]
+                    .reverse()
+                    .find(
+                      (part) =>
+                        part.type === "reasoning" && !part.metadata?.subagentId
+                    )
+                );
                 yield buildStreamResult(contentParts);
               }
             } else if (partType === "tool-call") {
@@ -3102,6 +3259,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       isImage,
                       imageKey: result.image_key,
                       retrievalHighlightTerms,
+                      ...getSourceAttributes(
+                        result.search_type,
+                        result.score_details
+                      ),
                     });
                   }
                   attachSearchContentToTool(
@@ -3122,6 +3283,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                       isImage,
                       imageKey: result.image_key,
                       retrievalHighlightTerms,
+                      ...getSourceAttributes(
+                        result.search_type,
+                        result.score_details
+                      ),
                     },
                     chunk.tool_call_id
                   );
@@ -3173,13 +3338,14 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       const imageMetadata = searchSourcesAccumulator.filter(
         (source) => source.isImage
       );
+      const matchedImageSources = new Set<SearchSource>();
       for (const [index, image] of searchImagesAccumulator.entries()) {
-        const metadata =
-          imageMetadata.find((source) => {
-            if (!source.url) return false;
-            const relativeUrl = source.url.replace(/^\/+/, "");
-            return image.url.endsWith(relativeUrl);
-          }) ?? imageMetadata[index];
+        const metadata = imageMetadata.find((source) => {
+          if (!source.url || matchedImageSources.has(source)) return false;
+          const relativeUrl = source.url.replace(/^\/+/, "");
+          return image.url.endsWith(relativeUrl);
+        });
+        if (metadata) matchedImageSources.add(metadata);
         const imageKey =
           metadata?.imageKey ||
           (metadata?.toolSign && metadata.citeIndex !== undefined
@@ -3247,6 +3413,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             citeIndex: source.citeIndex,
             toolSign: source.toolSign,
             retrievalHighlightTerms: source.retrievalHighlightTerms,
+            searchType: source.searchType,
+            sourceMetadata: source.sourceMetadata,
+            sourceReference: source.sourceReference,
+            publishedDate: source.publishedDate,
             messageId, // used by thread.tsx / MarkdownText to look up from registry
           });
         }
@@ -3263,6 +3433,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           toolSign: image.toolSign,
           isImage: true,
           imageKey: image.imageKey,
+          searchType: image.searchType,
+          sourceMetadata: image.sourceMetadata,
+          sourceReference: image.sourceReference,
           messageId,
         });
       }

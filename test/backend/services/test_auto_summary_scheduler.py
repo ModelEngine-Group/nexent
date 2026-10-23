@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for auto_summary_scheduler module.
 
@@ -211,8 +213,8 @@ sys.modules['redis.lock'] = MagicMock()
 # Mock services modules
 sys.modules['services'] = _create_package_mock('services')
 
-# Mock services.redis_service
-redis_service_mock = types.ModuleType('services.redis_service')
+# Mock management.services.knowledge_base.task_state
+redis_service_mock = types.ModuleType('management.services.knowledge_base.task_state')
 redis_service_mock.get_redis_service = MagicMock(return_value=MagicMock(
     is_task_cancelled=MagicMock(return_value=False),
     save_progress_info=MagicMock(return_value=True),
@@ -220,13 +222,13 @@ redis_service_mock.get_redis_service = MagicMock(return_value=MagicMock(
     get_progress_info=MagicMock(return_value=None),
     get_error_info=MagicMock(return_value=None),
 ))
-sys.modules['services.redis_service'] = redis_service_mock
+sys.modules['management.services.knowledge_base.task_state'] = redis_service_mock
 setattr(sys.modules['services'], 'redis_service', redis_service_mock)
 
-# Mock services.group_service
-group_service_mock = types.ModuleType('services.group_service')
+# Mock management.services.permission.identity.groups
+group_service_mock = types.ModuleType('management.services.permission.identity.groups')
 group_service_mock.get_tenant_default_group_id = MagicMock(return_value=1)
-sys.modules['services.group_service'] = group_service_mock
+sys.modules['management.services.permission.identity.groups'] = group_service_mock
 setattr(sys.modules['services'], 'group_service', group_service_mock)
 
 # Mock management.services.knowledge_base.service
@@ -251,27 +253,27 @@ sys.modules['backend.utils'] = sys.modules['utils']
 sys.modules['utils'].__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../backend/utils'))]
 
 # Create document_vector_utils mock
-document_vector_utils_mock = types.ModuleType('backend.utils.document_vector_utils')
+document_vector_utils_mock = types.ModuleType('backend.management.services.knowledge_base.summary')
 document_vector_utils_mock.process_documents_for_clustering = MagicMock(return_value=([], []))
 document_vector_utils_mock.kmeans_cluster_documents = MagicMock(return_value=[])
 document_vector_utils_mock.summarize_clusters_map_reduce = MagicMock(return_value="test summary")
 document_vector_utils_mock.merge_cluster_summaries = MagicMock(return_value="merged summary")
-sys.modules['backend.utils.document_vector_utils'] = document_vector_utils_mock
-sys.modules['utils.document_vector_utils'] = document_vector_utils_mock
+sys.modules['backend.management.services.knowledge_base.summary'] = document_vector_utils_mock
+sys.modules['management.services.knowledge_base.summary'] = document_vector_utils_mock
 setattr(sys.modules['utils'], 'document_vector_utils', document_vector_utils_mock)
 
-str_utils_mock = types.ModuleType('utils.str_utils')
+str_utils_mock = types.ModuleType('management.db.serialization')
 str_utils_mock.convert_list_to_string = lambda items: ",".join(str(item) for item in items) if items else ""
 str_utils_mock.convert_string_to_list = lambda s: [int(x.strip()) for x in s.split(',') if x.strip().isdigit()] if s and s.strip() else []
-sys.modules['utils.str_utils'] = str_utils_mock
+sys.modules['management.db.serialization'] = str_utils_mock
 setattr(sys.modules['utils'], 'str_utils', str_utils_mock)
 
-config_utils_mock = types.ModuleType('utils.config_utils')
+config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
 config_utils_mock.tenant_config_manager = MagicMock()
 config_utils_mock.tenant_config_manager.get_app_config = MagicMock(return_value='')
 config_utils_mock.tenant_config_manager.get_model_config = MagicMock(return_value={})
 config_utils_mock.get_model_name_from_config = MagicMock(return_value='')
-sys.modules['utils.config_utils'] = config_utils_mock
+sys.modules['management.services.configuration.tenant.settings'] = config_utils_mock
 setattr(sys.modules['utils'], 'config_utils', config_utils_mock)
 
 # =============================================================================
@@ -293,7 +295,7 @@ with patch.object(backend_database_client_module, 'MinioClient', minio_client_mo
 # =============================================================================
 # Import modules under test
 # =============================================================================
-from backend.services.auto_summary_scheduler import (
+from management.services.knowledge_base.scheduler import (
     _parse_last_summary_time,
     _is_due_for_summary,
     _run_auto_summary_for_kb,
@@ -446,7 +448,7 @@ class TestRunAutoSummaryForKb:
         """Should skip processing if index_name is already in _in_flight."""
         _in_flight.add("test_index")
 
-        with patch('backend.services.auto_summary_scheduler.get_vector_db_core') as mock_vdb:
+        with patch('management.services.knowledge_base.scheduler.get_vector_db_core') as mock_vdb:
             _run_auto_summary_for_kb("test_index", "tenant_id")
             mock_vdb.assert_not_called()
 
@@ -455,13 +457,13 @@ class TestRunAutoSummaryForKb:
         mock_vdb = MagicMock()
         mock_service = MagicMock()
 
-        with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
-             patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc1"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]), \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final summary"), \
-             patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "1"}), \
+        with patch('management.services.knowledge_base.scheduler.get_vector_db_core', return_value=mock_vdb), \
+             patch('management.services.knowledge_base.scheduler.ElasticSearchService', return_value=mock_service), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc1"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]), \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final summary"), \
+             patch('management.services.knowledge_base.scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "1"}), \
              patch('backend.database.knowledge_db.update_last_summary_time'):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
@@ -472,8 +474,8 @@ class TestRunAutoSummaryForKb:
         """Should remove from in-flight set even when exception occurs."""
         mock_vdb = MagicMock()
 
-        with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
-             patch('backend.services.auto_summary_scheduler.ElasticSearchService', side_effect=Exception("Error")):
+        with patch('management.services.knowledge_base.scheduler.get_vector_db_core', return_value=mock_vdb), \
+             patch('management.services.knowledge_base.scheduler.ElasticSearchService', side_effect=Exception("Error")):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
 
@@ -484,9 +486,9 @@ class TestRunAutoSummaryForKb:
         mock_vdb = MagicMock()
         mock_service = MagicMock()
 
-        with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
-             patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=([], [])):
+        with patch('management.services.knowledge_base.scheduler.get_vector_db_core', return_value=mock_vdb), \
+             patch('management.services.knowledge_base.scheduler.ElasticSearchService', return_value=mock_service), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=([], [])):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
 
@@ -497,13 +499,13 @@ class TestRunAutoSummaryForKb:
         mock_vdb = MagicMock()
         mock_service = MagicMock()
 
-        with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
-             patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final"), \
-             patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "8"}), \
+        with patch('management.services.knowledge_base.scheduler.get_vector_db_core', return_value=mock_vdb), \
+             patch('management.services.knowledge_base.scheduler.ElasticSearchService', return_value=mock_service), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final"), \
+             patch('management.services.knowledge_base.scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "8"}), \
              patch('backend.database.knowledge_db.update_last_summary_time'):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
@@ -517,13 +519,13 @@ class TestRunAutoSummaryForKb:
         mock_vdb = MagicMock()
         mock_service = MagicMock()
 
-        with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
-             patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final"), \
-             patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', side_effect=Exception("No config")):
+        with patch('management.services.knowledge_base.scheduler.get_vector_db_core', return_value=mock_vdb), \
+             patch('management.services.knowledge_base.scheduler.ElasticSearchService', return_value=mock_service), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final"), \
+             patch('management.services.knowledge_base.scheduler.tenant_config_manager.load_config', side_effect=Exception("No config")):
 
             _run_auto_summary_for_kb("test_index", "")
 
@@ -535,13 +537,13 @@ class TestRunAutoSummaryForKb:
         mock_vdb = MagicMock()
         mock_service = MagicMock()
 
-        with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
-             patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final"), \
-             patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', side_effect=Exception("No config")):
+        with patch('management.services.knowledge_base.scheduler.get_vector_db_core', return_value=mock_vdb), \
+             patch('management.services.knowledge_base.scheduler.ElasticSearchService', return_value=mock_service), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final"), \
+             patch('management.services.knowledge_base.scheduler.tenant_config_manager.load_config', side_effect=Exception("No config")):
 
             _run_auto_summary_for_kb("test_index", None)
 
@@ -553,13 +555,13 @@ class TestRunAutoSummaryForKb:
         mock_vdb = MagicMock()
         mock_service = MagicMock()
 
-        with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
-             patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final"), \
-             patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', return_value={}):
+        with patch('management.services.knowledge_base.scheduler.get_vector_db_core', return_value=mock_vdb), \
+             patch('management.services.knowledge_base.scheduler.ElasticSearchService', return_value=mock_service), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final"), \
+             patch('management.services.knowledge_base.scheduler.tenant_config_manager.load_config', return_value={}):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
 
@@ -571,13 +573,13 @@ class TestRunAutoSummaryForKb:
         mock_vdb = MagicMock()
         mock_service = MagicMock()
 
-        with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
-             patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final"), \
-             patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', side_effect=Exception("Config error")):
+        with patch('management.services.knowledge_base.scheduler.get_vector_db_core', return_value=mock_vdb), \
+             patch('management.services.knowledge_base.scheduler.ElasticSearchService', return_value=mock_service), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final"), \
+             patch('management.services.knowledge_base.scheduler.tenant_config_manager.load_config', side_effect=Exception("Config error")):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
 
@@ -588,8 +590,8 @@ class TestRunAutoSummaryForKb:
         """Should handle exceptions during document processing."""
         mock_vdb = MagicMock()
 
-        with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
-             patch('backend.services.auto_summary_scheduler.ElasticSearchService', side_effect=Exception("Processing error")):
+        with patch('management.services.knowledge_base.scheduler.get_vector_db_core', return_value=mock_vdb), \
+             patch('management.services.knowledge_base.scheduler.ElasticSearchService', side_effect=Exception("Processing error")):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
 
@@ -600,9 +602,9 @@ class TestRunAutoSummaryForKb:
         mock_vdb = MagicMock()
         mock_service = MagicMock()
 
-        with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
-             patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', side_effect=Exception("Clustering error")):
+        with patch('management.services.knowledge_base.scheduler.get_vector_db_core', return_value=mock_vdb), \
+             patch('management.services.knowledge_base.scheduler.ElasticSearchService', return_value=mock_service), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', side_effect=Exception("Clustering error")):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
 
@@ -629,10 +631,10 @@ class TestSchedulerLoop:
             "last_doc_update_time": None,
         }
 
-        with patch('backend.services.auto_summary_scheduler.get_knowledge_bases_for_auto_summary', return_value=[mock_kb]), \
-             patch('backend.services.auto_summary_scheduler._run_auto_summary_for_kb') as mock_run, \
-             patch('backend.services.auto_summary_scheduler.CHECK_INTERVAL_SECONDS', 0.01), \
-             patch('backend.services.auto_summary_scheduler.SCHEDULER_CHECK_INTERVAL_SECONDS', 0.01):
+        with patch('management.services.knowledge_base.scheduler.get_knowledge_bases_for_auto_summary', return_value=[mock_kb]), \
+             patch('management.services.knowledge_base.scheduler._run_auto_summary_for_kb') as mock_run, \
+             patch('management.services.knowledge_base.scheduler.CHECK_INTERVAL_SECONDS', 0.01), \
+             patch('management.services.knowledge_base.scheduler.SCHEDULER_CHECK_INTERVAL_SECONDS', 0.01):
 
             loop_thread = threading.Thread(target=_scheduler_loop, args=(stop_event,))
             loop_thread.start()
@@ -654,10 +656,10 @@ class TestSchedulerLoop:
             "last_doc_update_time": datetime.now() - timedelta(hours=2),
         }
 
-        with patch('backend.services.auto_summary_scheduler.get_knowledge_bases_for_auto_summary', return_value=[mock_kb]), \
-             patch('backend.services.auto_summary_scheduler._run_auto_summary_for_kb') as mock_run, \
-             patch('backend.services.auto_summary_scheduler.CHECK_INTERVAL_SECONDS', 0.01), \
-             patch('backend.services.auto_summary_scheduler.SCHEDULER_CHECK_INTERVAL_SECONDS', 0.01):
+        with patch('management.services.knowledge_base.scheduler.get_knowledge_bases_for_auto_summary', return_value=[mock_kb]), \
+             patch('management.services.knowledge_base.scheduler._run_auto_summary_for_kb') as mock_run, \
+             patch('management.services.knowledge_base.scheduler.CHECK_INTERVAL_SECONDS', 0.01), \
+             patch('management.services.knowledge_base.scheduler.SCHEDULER_CHECK_INTERVAL_SECONDS', 0.01):
 
             loop_thread = threading.Thread(target=_scheduler_loop, args=(stop_event,))
             loop_thread.start()
@@ -672,10 +674,10 @@ class TestSchedulerLoop:
 
         stop_event = threading.Event()
 
-        with patch('backend.services.auto_summary_scheduler.get_knowledge_bases_for_auto_summary', side_effect=Exception("DB error")), \
-             patch('backend.services.auto_summary_scheduler._run_auto_summary_for_kb') as mock_run, \
-             patch('backend.services.auto_summary_scheduler.CHECK_INTERVAL_SECONDS', 0.01), \
-             patch('backend.services.auto_summary_scheduler.SCHEDULER_CHECK_INTERVAL_SECONDS', 0.01):
+        with patch('management.services.knowledge_base.scheduler.get_knowledge_bases_for_auto_summary', side_effect=Exception("DB error")), \
+             patch('management.services.knowledge_base.scheduler._run_auto_summary_for_kb') as mock_run, \
+             patch('management.services.knowledge_base.scheduler.CHECK_INTERVAL_SECONDS', 0.01), \
+             patch('management.services.knowledge_base.scheduler.SCHEDULER_CHECK_INTERVAL_SECONDS', 0.01):
 
             loop_thread = threading.Thread(target=_scheduler_loop, args=(stop_event,))
             loop_thread.start()
@@ -691,9 +693,9 @@ class TestSchedulerLoop:
         stop_event = threading.Event()
         stop_event.set()
 
-        with patch('backend.services.auto_summary_scheduler.get_knowledge_bases_for_auto_summary') as mock_get, \
-             patch('backend.services.auto_summary_scheduler.CHECK_INTERVAL_SECONDS', 10), \
-             patch('backend.services.auto_summary_scheduler.SCHEDULER_CHECK_INTERVAL_SECONDS', 10):
+        with patch('management.services.knowledge_base.scheduler.get_knowledge_bases_for_auto_summary') as mock_get, \
+             patch('management.services.knowledge_base.scheduler.CHECK_INTERVAL_SECONDS', 10), \
+             patch('management.services.knowledge_base.scheduler.SCHEDULER_CHECK_INTERVAL_SECONDS', 10):
 
             loop_thread = threading.Thread(target=_scheduler_loop, args=(stop_event,))
             loop_thread.start()
@@ -722,10 +724,10 @@ class TestSchedulerLoop:
             if stop_event.is_set():
                 break_executed.append(True)
 
-        with patch('backend.services.auto_summary_scheduler.get_knowledge_bases_for_auto_summary', return_value=[mock_kb]), \
-             patch('backend.services.auto_summary_scheduler._run_auto_summary_for_kb', side_effect=mock_run_with_stop_check), \
-             patch('backend.services.auto_summary_scheduler.CHECK_INTERVAL_SECONDS', 0.001), \
-             patch('backend.services.auto_summary_scheduler.SCHEDULER_CHECK_INTERVAL_SECONDS', 0.001):
+        with patch('management.services.knowledge_base.scheduler.get_knowledge_bases_for_auto_summary', return_value=[mock_kb]), \
+             patch('management.services.knowledge_base.scheduler._run_auto_summary_for_kb', side_effect=mock_run_with_stop_check), \
+             patch('management.services.knowledge_base.scheduler.CHECK_INTERVAL_SECONDS', 0.001), \
+             patch('management.services.knowledge_base.scheduler.SCHEDULER_CHECK_INTERVAL_SECONDS', 0.001):
 
             loop_thread = threading.Thread(target=_scheduler_loop, args=(stop_event,))
             loop_thread.start()
@@ -752,7 +754,7 @@ class TestAutoSummaryScheduler:
         """Start should create a daemon thread."""
         scheduler = AutoSummaryScheduler()
 
-        with patch('backend.services.auto_summary_scheduler.threading.Thread') as mock_thread:
+        with patch('management.services.knowledge_base.scheduler.threading.Thread') as mock_thread:
             mock_thread_instance = MagicMock()
             mock_thread_instance.daemon = False
             mock_thread_instance.is_alive.return_value = False
@@ -789,7 +791,7 @@ class TestAutoSummaryScheduler:
         mock_thread.is_alive.return_value = True
         scheduler._thread = mock_thread
 
-        with patch('backend.services.auto_summary_scheduler.threading.Thread') as mock_thread_class:
+        with patch('management.services.knowledge_base.scheduler.threading.Thread') as mock_thread_class:
             scheduler.start()
             mock_thread_class.assert_not_called()
 
@@ -903,13 +905,13 @@ class TestAutoSummaryIntegration:
         mock_vdb = MagicMock()
         mock_service = MagicMock()
 
-        with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
-             patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering') as mock_process, \
-             patch('utils.document_vector_utils.kmeans_cluster_documents') as mock_kmeans, \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce') as mock_summarize, \
-             patch('utils.document_vector_utils.merge_cluster_summaries') as mock_merge, \
-             patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "3"}):
+        with patch('management.services.knowledge_base.scheduler.get_vector_db_core', return_value=mock_vdb), \
+             patch('management.services.knowledge_base.scheduler.ElasticSearchService', return_value=mock_service), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering') as mock_process, \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents') as mock_kmeans, \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce') as mock_summarize, \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries') as mock_merge, \
+             patch('management.services.knowledge_base.scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "3"}):
 
             mock_process.return_value = (
                 ["doc1", "doc2", "doc3"],
@@ -941,13 +943,13 @@ class TestAutoSummaryIntegration:
 
         mock_service.change_summary = track_calls
 
-        with patch('backend.services.auto_summary_scheduler.get_vector_db_core', return_value=mock_vdb), \
-             patch('backend.services.auto_summary_scheduler.ElasticSearchService', return_value=mock_service), \
-             patch('utils.document_vector_utils.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
-             patch('utils.document_vector_utils.kmeans_cluster_documents', return_value=[0]), \
-             patch('utils.document_vector_utils.summarize_clusters_map_reduce', return_value=["summary"]), \
-             patch('utils.document_vector_utils.merge_cluster_summaries', return_value="final"), \
-             patch('backend.services.auto_summary_scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "1"}):
+        with patch('management.services.knowledge_base.scheduler.get_vector_db_core', return_value=mock_vdb), \
+             patch('management.services.knowledge_base.scheduler.ElasticSearchService', return_value=mock_service), \
+             patch('management.services.knowledge_base.summary.process_documents_for_clustering', return_value=(["doc"], [[0.1]])), \
+             patch('management.services.knowledge_base.clustering.kmeans_cluster_documents', return_value=[0]), \
+             patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]), \
+             patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final"), \
+             patch('management.services.knowledge_base.scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "1"}):
 
             _run_auto_summary_for_kb("kb_1", "tenant_1")
             _run_auto_summary_for_kb("kb_2", "tenant_2")

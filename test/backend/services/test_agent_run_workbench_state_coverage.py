@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock
@@ -7,23 +9,23 @@ import pytest
 from test.backend.services import test_agent_run_workbench_coverage as base
 
 
-agent_run = base.agent_run
+agent_run = base.agent_subscription
 _request = base._request
 
 
 def _configure_early_workbench_run(monkeypatch, canonical, conversation):
     plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99)))
-    workbench_module = ModuleType("services.workbench_service")
+    workbench_module = ModuleType("management.services.agent.workbench")
     workbench_module.assert_workbench_version = MagicMock()
     workbench_module.resolve_workbench_config = MagicMock(return_value=(canonical, plan))
-    monkeypatch.setitem(sys.modules, "services.workbench_service", workbench_module)
+    monkeypatch.setitem(sys.modules, "management.services.agent.workbench", workbench_module)
     monkeypatch.setattr(agent_run, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(
         agent_run,
         "_resolve_user_tenant_language",
         lambda **_kwargs: ("user-a", "tenant-a", "en"),
     )
-    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone: query)
+    monkeypatch.setattr(agent_run, "prepend_current_time", lambda query, _timezone, *, language: query)
     monkeypatch.setattr(agent_run, "get_conversation_service", lambda **_kwargs: conversation)
     monkeypatch.setattr(
         agent_run,

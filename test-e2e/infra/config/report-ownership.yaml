@@ -1,0 +1,154 @@
+schema_version: 1
+# Routing contacts, not defect attribution. Counts do not participate in routing.
+domains:
+  skill:
+    label: Skill仓库
+    owner: '@马群'
+    feature_categories: [技能]
+    feature_id_patterns: ['^V5-PW-SKILL-', '^V5-UT-FE-023$']
+  mcp:
+    label: MCP仓库
+    owner: '@马群'
+    feature_categories: [MCP]
+    feature_id_patterns: ['^V5-PW-MCP-', '^V5-UT-BE-016$', '^V5-UT-FE-024$']
+  agent_repository:
+    label: Agent仓库
+    owner: '@马群'
+    feature_categories: []
+    feature_id_patterns: ['^V5-PW-MARKET-AGENT-', '^V5-UT-BE-014$', '^V5-UT-FE-022$']
+  knowledge:
+    label: Nexent知识库 & AIDP知识库
+    owner: '@曹杰'
+    feature_categories: [知识库与文件]
+    feature_id_patterns: ['^V5-PW-KB-', '^V5-UT-BE-01[012]$', '^V5-UT-FE-02[678]$']
+  model:
+    label: 模型管理
+    owner: '@武兆福'
+    feature_categories: [模型与多模态]
+    feature_id_patterns: ['^V5-PW-(MODEL|MEDIA)-', '^V5-UT-BE-009$', '^V5-REL-02$']
+  evaluation:
+    label: 智能体评估
+    owner: '@丁驰'
+    feature_categories: [评估]
+    feature_id_patterns: ['^V5-PW-EVAL-', '^V5-UT-BE-020$', '^V5-UT-FE-035$']
+  system:
+    label: 系统管理整体
+    owner: '@武兆福'
+    feature_categories: [身份认证与账号, 租户与资源权限, 系统管理, 全局前端, 前端与全局UI, 平台运维能力, 平台资源治理]
+    feature_id_patterns: ['^V5-PW-(AUTH|PROFILE|QUOTA|RESOURCE|UI)-', '^V5-UT-BE-00[678]$', '^V5-UT-FE-0(0[89]|1[012]|3[78])$']
+  memory:
+    label: 记忆系统
+    owner: '@王靖泷'
+    feature_categories: [记忆]
+    feature_id_patterns: ['^V5-PW-(MEM|MEMORY)-', '^V5-UT-BE-025$', '^V5-UT-FE-033$']
+  runtime:
+    label: 智能体运行
+    owner: '@潘业宏'
+    feature_categories: [智能体运行时与对话, 智能体运行与对话, 会话与分享, A2A, Northbound, Northbound API]
+    feature_id_patterns: ['^CMSR-', '^V5-PW-(CHAT|A2A|SHARE|HITL|PLAN|REACT|PARALLEL)-', '^V5-UT-BE-0(17|18|21|24)$', '^V5-UT-FE-0(25|29|30|31|32)$', '^V5-REL-(04|11)$']
+  context:
+    label: 上下文工程
+    owner: '@夏一辰'
+    feature_categories: [上下文工程]
+    feature_id_patterns: ['^V5-PW-(PROMPT|CONTEXT)-', '^V5-UT-FE-01[78]$']
+  task:
+    label: 定时任务
+    owner: '@董济宝'
+    feature_categories: [自动任务]
+    feature_id_patterns: ['^V5-PW-TASK-', '^V5-UT-BE-019$', '^V5-UT-FE-034$', '^V5-REL-01$']
+  agent_config:
+    label: 智能体开发配置
+    owner: '@徐雅琦'
+    feature_categories: [智能体配置]
+    feature_id_patterns: ['^V5-PW-(AGENT|NL2AGENT|VERSION)-', '^V5-UT-BE-0(13|15)$', '^V5-UT-FE-0(15|16|19|20|21)$']
+  sandbox:
+    label: 沙箱
+    owner: '@杜宇骁'
+    feature_categories: [沙箱]
+    feature_id_patterns: ['^V5-PW-SANDBOX-']
+  deployment:
+    label: 安装部署/升级
+    owner: '@贺思聪'
+    feature_categories: [安装部署与升级, 安装部署, 部署与升级]
+    feature_id_patterns: ['^V5-DEP-']
+# Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
+feature_overrides:
+  F-046: context
+  F-047: context
+  F-048: context
+  F-049: context
+  F-064: context
+  F-066: agent_config
+  F-067: agent_config
+  F-068: runtime
+  F-069: agent_repository
+  F-070: agent_repository
+  F-071: agent_repository
+  F-110: context
+  F-115: context
+  F-152: knowledge
+  F-158: sandbox
+  F-166: task
+  F-167: knowledge
+  F-168: knowledge
+  F-169: system
+  F-170: model
+  F-171: runtime
+  F-172: deployment
+  F-176: deployment
+  F-183: context
+  F-186: task
+  V5-PERF-01: runtime
+  V5-PERF-02: runtime
+  V5-PERF-03: knowledge
+  V5-PERF-05: task
+  V5-PERF-07: context
+  V5-PERF-08: mcp
+  V5-PERF-09: runtime
+  V5-PERF-10: knowledge
+  V5-PW-AUTO-37453582F1CFB11D: skill
+  V5-PW-CHART-01: runtime
+  V5-PW-FILE-01: knowledge
+  V5-REL-03: knowledge
+  V5-REL-05: system
+  V5-REL-12: system
+  V5-REL-AUTO-0420654CDB5C783B: runtime
+  V5-REL-AUTO-0ED11882BC558420: evaluation
+  V5-REL-AUTO-1FAFCA5A681580F5: runtime
+  V5-REL-AUTO-3CE643378A04EF53: knowledge
+  V5-REL-AUTO-4045B602F3B5254D: knowledge
+  V5-REL-AUTO-4CBD1BF08020ABF9: knowledge
+  V5-REL-AUTO-53457E34A331A3FF: task
+  V5-REL-AUTO-58D118DDC12E94CA: task
+  V5-REL-AUTO-80AA755E2436D269: system
+  V5-REL-AUTO-AF6CA560E762D682: system
+  V5-REL-AUTO-BCE0AAF43667C67B: runtime
+  V5-REL-AUTO-CCF3D3CB5D0FC268: evaluation
+  V5-REL-AUTO-D426EB1254C4E6BE: mcp
+  V5-REL-AUTO-D78B50240E78970B: knowledge
+  V5-REL-AUTO-D7FD61217390A8EE: model
+  V5-REL-AUTO-D8CA17756DF9BC52: agent_config
+  V5-REL-AUTO-DAED0399BC7F3CAB: evaluation
+  V5-REL-AUTO-DAF6A75DB19AEFBC: evaluation
+  V5-REL-AUTO-DD1A9CB3B544F39F: evaluation
+  V5-REL-AUTO-ECAC7A02C22B21FF: runtime
+  V5-SEC-02: knowledge
+  V5-SEC-03: runtime
+  V5-SEC-04: system
+  V5-SEC-09: context
+  V5-SEC-10: system
+  V5-SEC-11: runtime
+  V5-SEC-AUTO-223E157CE3543948: sandbox
+  V5-SEC-AUTO-54F2ABC236F8E944: memory
+  V5-SEC-AUTO-926FF16475B223A7: context
+  V5-UT-BE-022: model
+  V5-UT-BE-023: system
+  V5-UT-FE-039: runtime
+case_overrides:
+  UT-SDK-018: sandbox
+  UT-SDK-019: sandbox
+  UT-SDK-AUTO-AA4383E2E3B57AD8: sandbox
+  UT-SDK-AUTO-74430BEE8438F486: context
+  UT-SDK-AUTO-85A0FBE8116B9F9A: context
+  UT-SDK-AUTO-E6DDFB4661E0D8B4: mcp
+  UT-SDK-AUTO-F2FC05F0ACCC25B1: context

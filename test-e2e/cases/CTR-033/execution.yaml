@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: CTR-033
+timeout_seconds: 120
+implementations:
+- framework: pytest
+  file: test.py
+  selector: CTR-033
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01: [test_discovery_timeout_and_recovery]
+  AC-02: [test_discovery_timeout_and_recovery]

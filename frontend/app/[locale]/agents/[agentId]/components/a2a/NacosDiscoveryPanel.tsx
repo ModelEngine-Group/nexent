@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -235,6 +237,7 @@ export default function NacosDiscoveryPanel({
   };
 
   const handleDiscoverFromNacos = async () => {
+    if (scanning) return;
     if (!selectedNacosConfigId) {
       messageApi.error(t("a2a.discovery.selectNacosConfig"));
       return;
@@ -247,32 +250,38 @@ export default function NacosDiscoveryPanel({
 
     const selectedConfig = nacosConfigs.find(c => c.config_id === selectedNacosConfigId);
     setScanning(true);
-    const result = await a2aClientService.discoverFromNacos({
-      nacos_config_id: selectedNacosConfigId,
-      agent_names: agentNames.map(name => name.trim()).filter(name => name.length > 0),
-      namespace: selectedConfig?.namespace_id || "public",
-    });
-    setScanning(false);
+    try {
+      const result = await a2aClientService.discoverFromNacos({
+        nacos_config_id: selectedNacosConfigId,
+        agent_names: agentNames.map(name => name.trim()).filter(name => name.length > 0),
+        namespace: selectedConfig?.namespace_id || "public",
+      });
 
-    if (result.success && result.data) {
-      setDiscoveredAgents(result.data);
-      if (result.data.length === 0) {
-        messageApi.warning(t("a2a.discovery.noAgentsFound"));
-      } else {
-        messageApi.success(
-          t("a2a.discovery.foundAgents", { count: result.data.length })
-        );
-        result.data.forEach((agent) => {
-          if (onAgentDiscovered) {
-            onAgentDiscovered(agent);
+      if (result.success && result.data) {
+        setDiscoveredAgents(result.data);
+        if (result.data.length === 0) {
+          messageApi.warning(t("a2a.discovery.noAgentsFound"));
+        } else {
+          messageApi.success(
+            t("a2a.discovery.foundAgents", { count: result.data.length })
+          );
+          result.data.forEach((agent) => {
+            if (onAgentDiscovered) {
+              onAgentDiscovered(agent);
+            }
+          });
+          if (onDiscoverSuccess) {
+            onDiscoverSuccess();
           }
-        });
-        if (onDiscoverSuccess) {
-          onDiscoverSuccess();
         }
+      } else {
+        messageApi.error(result.message || t("a2a.discovery.scanFailed"));
       }
-    } else {
-      messageApi.error(result.message || t("a2a.discovery.scanFailed"));
+    } catch (error) {
+      log.error("Agent discovery failed:", error);
+      messageApi.error(t("a2a.discovery.failed"));
+    } finally {
+      setScanning(false);
     }
   };
 

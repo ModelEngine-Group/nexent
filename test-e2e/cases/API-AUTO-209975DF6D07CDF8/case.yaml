@@ -1,0 +1,88 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-AUTO-209975DF6D07CDF8
+  feature_id: F-177
+  business_rule_ids:
+  - F-177-RULE-01
+  title: 标签谓词筛选(filter)、文档批量状态(batch-status)与 deprecated flat-tags 兼容投影｜接口契约
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 标签谓词筛选(filter)、文档批量状态(batch-status)与 deprecated flat-tags 兼容投影｜接口契约
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
+  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录；SU/ADMIN 具备 RESOURCE/TAG_LIBRARY/MANAGE 权限，UserB 不具备；测试租户已预置统一标签库（default_resource
+    与 knowledge_content 桶、六类资源类型绑定、agent_category 预设）。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env'
+  steps:
+  - order: 1
+    action: 从 config/users.yaml 读取隔离测试账号（SU/Admin/UserA/UserB）与租户关系；密码/Token 仅从 secrets.env 注入，确认 SU/ADMIN 具备 RESOURCE/TAG_LIBRARY/MANAGE、UserB
+      不具备。
+    expected: filter 接口仅收窄调用者已授权 resource_ids，符合同定义 OR / 跨定义 AND；不传谓词时原集合回显不变；文档 resource_type 返回 400。
+  - order: 2
+    action: 通过 GET /tag-libraries 与 GET /tag-libraries/{bucket_id}/definitions 读取预置定义与值作为谓词的 definition_id/value_id 来源；必要时用管理接口创建带
+      run_id 前缀的测试定义与多个值（multi_select）。
+    expected: 文档 batch-status 强制 provider 与 knowledge_base_id 必填、最多 200 个去重文档，超出返回 400；每项返回 assignment_count 与 projection_status。
+  - order: 3
+    action: 对非文档资源（如 skill/agent），先由资源列表流取得调用者已授权的 resource_ids 集合；构造谓词后 POST /tag-libraries/assignments/{resource_type}/filter，断言
+      matched_resource_ids 只收窄不扩大，且同一定义多个 value_id 做 OR、跨定义做 AND；不传 predicates 时断言原集合回显不变。
+    expected: deprecated flat-tags 返回去重排序的 display_value，count≤limit 且 limit≤100，deprecated=true。
+  - order: 4
+    action: 以 knowledge_document 作为 resource_type 调用 filter 接口，断言返回 400（文档资源必须走 batch-status 端点）；使用非法 resource_type 断言返回 400。
+    expected: 失败路径返回明确状态码（400/403/404），不出现半写入、跨租户泄露或明文凭据。
+  - order: 5
+    action: 调用 POST /tag-libraries/documents/batch-status，携带 provider 与 knowledge_base_id 查询参数及 document_ids；断言每项返回 document_id、assignment_count
+      与 projection_status（状态取值 pending/synced/failed/unsupported/not_projected 之一或 null）。
+    expected: 失败路径返回明确状态码（400/403/404），不出现半写入、跨租户泄露或明文凭据。
+  - order: 6
+    action: 校验 batch-status 错误契约：缺失 provider 或 knowledge_base_id 断言 400；document_ids 去重后超过 200 断言 400；携带 predicates 时断言结果按谓词收窄。
+    expected: 失败路径返回明确状态码（400/403/404），不出现半写入、跨租户泄露或明文凭据。
+  - order: 7
+    action: 调用 GET /tag-libraries/assignments/{resource_type}/{resource_id}/compatibility/flat-tags，断言 tags 为去重排序的 display_value、count≤limit
+      且 limit≤100、deprecated=true。
+    expected: 失败路径返回明确状态码（400/403/404），不出现半写入、跨租户泄露或明文凭据。
+  - order: 8
+    action: 越权与隔离：用 UserB/OtherTenant 重放 filter/batch-status/flat-tags 请求，断言 403/404 与跨租户不泄露；确认日志与错误响应不含明文 password/token/API
+      key；清理 run_id 前缀测试资源。
+    expected: 失败路径返回明确状态码（400/403/404），不出现半写入、跨租户泄露或明文凭据。
+  expected_results:
+  - filter 接口仅收窄调用者已授权 resource_ids，符合同定义 OR / 跨定义 AND；不传谓词时原集合回显不变；文档 resource_type 返回 400。
+  - 文档 batch-status 强制 provider 与 knowledge_base_id 必填、最多 200 个去重文档，超出返回 400；每项返回 assignment_count 与 projection_status。
+  - deprecated flat-tags 返回去重排序的 display_value，count≤limit 且 limit≤100，deprecated=true。
+  - 失败路径返回明确状态码（400/403/404），不出现半写入、跨租户泄露或明文凭据。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 491
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 从 config/users.yaml 读取隔离测试账号（SU/Admin/UserA/UserB）与租户关系；密码/Token 仅从 secrets.env 注入，确认 SU/ADMIN 具备 RESOURCE/TAG_LIBRARY/MANAGE、UserB
+      不具备。
+    - 通过 GET /tag-libraries 与 GET /tag-libraries/{bucket_id}/definitions 读取预置定义与值作为谓词的 definition_id/value_id 来源；必要时用管理接口创建带
+      run_id 前缀的测试定义与多个值（multi_select）。
+    - 对非文档资源（如 skill/agent），先由资源列表流取得调用者已授权的 resource_ids 集合；构造谓词后 POST /tag-libraries/assignments/{resource_type}/filter，断言
+      matched_resource_ids 只收窄不扩大，且同一定义多个 value_id 做 OR、跨定义做 AND；不传 predicates 时断言原集合回显不变。
+    - 以 knowledge_document 作为 resource_type 调用 filter 接口，断言返回 400（文档资源必须走 batch-status 端点）；使用非法 resource_type 断言返回 400。
+    - 调用 POST /tag-libraries/documents/batch-status，携带 provider 与 knowledge_base_id 查询参数及 document_ids；断言每项返回 document_id、assignment_count
+      与 projection_status（状态取值 pending/synced/failed/unsupported/not_projected 之一或 null）。
+    - 校验 batch-status 错误契约：缺失 provider 或 knowledge_base_id 断言 400；document_ids 去重后超过 200 断言 400；携带 predicates 时断言结果按谓词收窄。
+    - 调用 GET /tag-libraries/assignments/{resource_type}/{resource_id}/compatibility/flat-tags，断言 tags 为去重排序的 display_value、count≤limit
+      且 limit≤100、deprecated=true。
+    - 越权与隔离：用 UserB/OtherTenant 重放 filter/batch-status/flat-tags 请求，断言 403/404 与跨租户不泄露；确认日志与错误响应不含明文 password/token/API key；清理
+      run_id 前缀测试资源。
+    response_expectations:
+    - filter 接口仅收窄调用者已授权 resource_ids，符合同定义 OR / 跨定义 AND；不传谓词时原集合回显不变；文档 resource_type 返回 400。
+    - 文档 batch-status 强制 provider 与 knowledge_base_id 必填、最多 200 个去重文档，超出返回 400；每项返回 assignment_count 与 projection_status。
+    - deprecated flat-tags 返回去重排序的 display_value，count≤limit 且 limit≤100，deprecated=true。
+    - 失败路径返回明确状态码（400/403/404），不出现半写入、跨租户泄露或明文凭据。

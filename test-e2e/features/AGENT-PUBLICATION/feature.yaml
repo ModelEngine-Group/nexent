@@ -1,0 +1,22 @@
+schema_version: '1.0'
+module:
+  id: AGENT-PUBLICATION
+  name: Agent publication
+feature:
+  feature_id: AGENT-PUBLICATION
+  name: Agent publication page and navigation
+  status: active
+  description: Publish access information inside the editor, with draft empty state, preserved editor context and
+    same-tab destination navigation.
+  business_rules:
+  - rule_id: AGENT-PUBLICATION-RULE-001
+    description: Draft agents show an empty publication page; switching workflow tabs preserves editor state. Published
+      access sections and the request example start expanded.
+  - rule_id: AGENT-PUBLICATION-RULE-002
+    description: Preview opens the selected agent in normal chat and API key settings opens the user page, both
+      in the current browser tab without running the agent or rotating keys.
+  required_test_stages:
+  - D4
+  source:
+    notes: Current user-approved publication page replaces post-publish warehouse navigation; component tests remain
+      separate.

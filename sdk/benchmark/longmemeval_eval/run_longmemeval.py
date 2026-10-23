@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Run the LongMemEval (S*) benchmark with the nexent agent.
 
 LongMemEval (S*) from MemoryAgentBench gives 5 long multi-session dialogues
@@ -79,8 +80,8 @@ INGEST_DUTY = (
     "an assistant. Earlier sessions are already in your conversation history "
     "in their original chronological order. The next message will simply ask "
     "you to acknowledge the latest batch of sessions you have just seen. "
-    "Do not analyze or summarize anything. Acknowledge by calling final_answer "
-    'with the single word: OK'
+    "Do not analyze or summarize anything. Acknowledge by returning exactly: "
+    '<final_answer>OK</final_answer>'
 )
 
 PROBE_DUTY = (
@@ -93,9 +94,8 @@ PROBE_DUTY = (
     "fact, not your reasoning.\n"
     "- If the user has updated some information over time, answer with the "
     "MOST RECENT value, not an older superseded one.\n"
-    "- Answer in a SINGLE step. Your first and only code block must call "
-    "final_answer directly.\n"
-    '<code>\nfinal_answer("<your concise answer here>")\n</code>'
+    "- Answer in a SINGLE step with exactly one final envelope.\n"
+    '<final_answer><your concise answer here></final_answer>'
 )
 
 
@@ -221,12 +221,12 @@ async def ingest_and_compress(dialogue: LongMemEvalDialogue,
             f"You have just been shown sessions {batch_idx * batch_size + 1}"
             f"-{batch_idx * batch_size + len(batch)} of {len(sessions)} in "
             f"the conversation history. Acknowledge by emitting exactly:\n"
-            f'<code>\nfinal_answer("OK")\n</code>'
+            f'<final_answer>OK</final_answer>'
         )
         run_info = build_agent_run_info(
             ack_query,
             conversation_history,
-            duty_prompt=INGEST_DUTY,
+            prompt=INGEST_DUTY,
             max_steps=args.ingest_max_steps,
             context_manager_config=cm_config,
             language="en",
@@ -277,7 +277,7 @@ async def run_probes(items, history: list[AgentHistory], args) -> tuple[list[dic
             run_info = build_agent_run_info(
                 it.question,
                 probe_history,
-                duty_prompt=PROBE_DUTY,
+                prompt=PROBE_DUTY,
                 max_steps=args.probe_max_steps,
                 context_manager_config=disabled_cm,
                 language="en",

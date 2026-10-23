@@ -1,4 +1,6 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for backend.apps.a2a_client_app runtime metadata chat flow."""
+import asyncio
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -28,18 +30,18 @@ client_service_mock = MagicMock()
 client_service_mock.a2a_client_service = MagicMock()
 client_service_mock.AgentCallError = _AgentCallError
 client_service_mock.AgentDiscoveryError = _AgentDiscoveryError
-sys.modules["services.a2a_client_service"] = client_service_mock
+sys.modules["management.services.agent.a2a.catalog"] = client_service_mock
 
 server_service_mock = MagicMock()
 server_service_mock.a2a_server_service = MagicMock()
-sys.modules["services.a2a_server_service"] = server_service_mock
+sys.modules["management.services.agent.a2a.service"] = server_service_mock
 
 sys.modules["database.a2a_agent_db"] = MagicMock()
 
 auth_utils_mock = MagicMock()
 auth_utils_mock.get_current_user_info = MagicMock(return_value=("user_1", "tenant_1", None))
-sys.modules["utils.auth_utils"] = auth_utils_mock
-sys.modules["backend.utils.auth_utils"] = auth_utils_mock
+sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mock
+sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mock
 
 from consts.error_code import RuntimeMetadataValidationCode  # noqa: E402
 from consts.exceptions import (  # noqa: E402
@@ -62,6 +64,25 @@ async def _app_exception_handler(_request, exc):
 client = TestClient(app)
 
 CHAT_URL = "/a2a/client/agents/7/chat"
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_url_discovery_forwards_ssl_preference(value):
+    target = "apps.a2a_client_app.a2a_client_service.discover_from_url"
+    with patch(target, new=AsyncMock(return_value={"id": 1})) as operation:
+        response = client.post("/a2a/client/discover/url", json={"url": "https://peer/card", "ssl_verify": value})
+    assert response.status_code == 200
+    assert operation.await_args.kwargs["ssl_verify"] is value
+
+
+def test_url_discovery_defaults_verification_and_rejects_null():
+    target = "apps.a2a_client_app.a2a_client_service.discover_from_url"
+    with patch(target, new=AsyncMock(return_value={"id": 1})) as operation:
+        assert client.post("/a2a/client/discover/url", json={"url": "https://peer/card"}).status_code == 200
+        assert operation.await_args.kwargs["ssl_verify"] is True
+        response = client.post("/a2a/client/discover/url", json={"url": "https://peer/card", "ssl_verify": None})
+    assert response.status_code == 422
+    assert operation.await_count == 1
 
 
 @pytest.fixture(autouse=True)
@@ -204,3 +225,52 @@ def test_chat_generic_error_returns_500():
     ):
         resp = _chat()
     assert resp.status_code == 500
+
+
+@pytest.mark.parametrize("mode,payload", [
+    ("url", {"url": "https://example.com/card"}),
+    ("nacos", {"nacos_config_id": "config", "agent_names": ["Agent"]}),
+])
+def test_discovery_deadline_cancels_service_and_allows_retry(mode, payload):
+    """Exercise real cancellation, HTTP error mapping and subsequent success."""
+    canceled = []
+
+    async def pending(**kwargs):
+        try:
+            await asyncio.Event().wait()
+        finally:
+            canceled.append(True)
+
+    target = f"apps.a2a_client_app.a2a_client_service.discover_from_{mode}"
+    with patch("apps.a2a_client_app.AGENT_CARD_TIMEOUT", 0.01), patch(target, new=AsyncMock(side_effect=pending)):
+        response = client.post(f"/a2a/client/discover/{mode}", json=payload)
+    assert response.status_code == 504
+    assert "timed out after 10 seconds" in response.json()["detail"]
+    assert "retry" in response.json()["detail"]
+    assert canceled == [True]
+
+    data = {"id": 1} if mode == "url" else [{"id": 1}]
+    with patch(target, new=AsyncMock(return_value=data)) as operation:
+        response = client.post(f"/a2a/client/discover/{mode}", json=payload)
+    assert response.status_code == 200
+    assert response.json() == {"status": "success", "data": data}
+    assert operation.await_args.kwargs["tenant_id"] == "tenant_1"
+
+
+@pytest.mark.parametrize("mode,payload", [
+    ("url", {"url": "https://example.com/card"}),
+    ("nacos", {"nacos_config_id": "config", "agent_names": ["Agent"]}),
+])
+@pytest.mark.parametrize("failure,status,detail", [
+    (_AgentDiscoveryError("Invalid Agent Card"), 400, "Invalid Agent Card"),
+    (RuntimeError("internal"), 500, None),
+])
+def test_discovery_retains_ordinary_failures(mode, payload, failure, status, detail):
+    target = f"apps.a2a_client_app.a2a_client_service.discover_from_{mode}"
+    with patch(target, new=AsyncMock(side_effect=failure)):
+        response = client.post(f"/a2a/client/discover/{mode}", json=payload)
+    assert response.status_code == status
+    if detail:
+        assert response.json()["detail"] == detail
+    else:
+        assert "internal" not in response.json()["detail"]

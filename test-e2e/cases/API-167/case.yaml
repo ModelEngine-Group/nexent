@@ -1,0 +1,53 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-167
+  feature_id: F-179
+  business_rule_ids:
+  - F-179-RULE-01
+  title: 运行 API 按租户身份拒绝已移除的 HITL 请求字段
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 运行 API 按租户身份拒绝已移除的 HITL 请求字段
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 使用两个租户的有效用户凭证。
+    expected: 两个租户的每种旧字段请求均返回 422。
+  - order: 2
+    action: 对 /agent/run 分别提交含 enable_hitl、hitl_run_id、hitl_after_event 的请求。
+    expected: 响应明确说明旧字段不再支持。
+  - order: 3
+    action: 核对每个响应的状态、拒绝原因和凭证脱敏。
+    expected: 响应不泄露用户凭证；旧运行不被启动。
+  expected_results:
+  - 两个租户的每种旧字段请求均返回 422。
+  - 响应明确说明旧字段不再支持。
+  - 响应不泄露用户凭证；旧运行不被启动。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 383
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 使用两个租户的有效用户凭证。
+    - 对 /agent/run 分别提交含 enable_hitl、hitl_run_id、hitl_after_event 的请求。
+    - 核对每个响应的状态、拒绝原因和凭证脱敏。
+    response_expectations:
+    - 两个租户的每种旧字段请求均返回 422。
+    - 响应明确说明旧字段不再支持。
+    - 响应不泄露用户凭证；旧运行不被启动。

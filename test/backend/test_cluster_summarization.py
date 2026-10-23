@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Test module for cluster summarization
 
@@ -35,28 +37,10 @@ consts_error_code_mock = MagicMock()
 consts_error_code_mock.ErrorCode = MagicMock()
 consts_exceptions_mock = MagicMock()
 consts_exceptions_mock.AppException = Exception
-consts_prompt_template_mock = MagicMock()
-consts_prompt_template_mock.PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP = {
-    "duty_system_prompt": "DUTY_SYSTEM_PROMPT",
-    "constraint_system_prompt": "CONSTRAINT_SYSTEM_PROMPT",
-    "few_shots_system_prompt": "FEW_SHOTS_SYSTEM_PROMPT",
-    "agent_variable_name_system_prompt": "AGENT_VARIABLE_NAME_SYSTEM_PROMPT",
-    "agent_display_name_system_prompt": "AGENT_DISPLAY_NAME_SYSTEM_PROMPT",
-    "agent_description_system_prompt": "AGENT_DESCRIPTION_SYSTEM_PROMPT",
-    "user_prompt": "USER_PROMPT",
-    "agent_name_regenerate_system_prompt": "AGENT_NAME_REGENERATE_SYSTEM_PROMPT",
-    "agent_name_regenerate_user_prompt": "AGENT_NAME_REGENERATE_USER_PROMPT",
-    "agent_display_name_regenerate_system_prompt": "AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT",
-    "agent_display_name_regenerate_user_prompt": "AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT",
-}
-consts_prompt_template_mock.PROMPT_GENERATE_TEMPLATE_FIELDS = tuple(
-    consts_prompt_template_mock.PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP.keys()
-)
 sys.modules['consts'] = consts_mock
 sys.modules['consts.const'] = consts_const_mock
 sys.modules['consts.error_code'] = consts_error_code_mock
 sys.modules['consts.exceptions'] = consts_exceptions_mock
-sys.modules['consts.prompt_template'] = consts_prompt_template_mock
 sys.modules['consts.model'] = consts_mock.model
 
 # Add backend to path before patching backend modules
@@ -72,10 +56,7 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
 patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
 
-from backend.utils.document_vector_utils import (
-    summarize_cluster,
-    merge_cluster_summaries
-)
+from backend.management.services.knowledge_base.summary import summarize_cluster, merge_cluster_summaries
 
 
 class TestClusterSummarization:

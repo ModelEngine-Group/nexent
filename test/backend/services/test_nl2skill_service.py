@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Tests for the ephemeral NL2Skill runtime stream."""
 
 import asyncio
@@ -27,11 +29,14 @@ from agents.nl2skill_agent import NL2SKILL_NAME, create_nl2skill_agent_config
 def test_create_nl2skill_agent_config_sets_ephemeral_runtime_options():
     config = create_nl2skill_agent_config("system", "model")
     assert config.name == NL2SKILL_NAME
+    assert config.name == "__skill_creator__"
+    assert config.display_name == "技能创建助手"
     assert config.model_name == "model"
-    assert config.instructions == "system"
+    assert config.instructions is None
+    assert config.context_items[0].content["text"] == "system"
     assert config.tools == []
     assert config.max_steps == 5
-    assert config.output_protocol == "final_answer_envelope"
+    assert config.output_protocol == "final_envelope"
     assert config.provide_run_summary is False
     assert config.enable_planning is False
 
@@ -51,7 +56,7 @@ def test_assemble_draft_content_handles_invalid_files_and_skill_fallback():
     assert _assemble_draft_content({"content": "fallback", "files": "invalid"}) == "fallback"
     assert _assemble_draft_content({"content": "", "files": [{"path": "notes.txt", "content": ""}]}) == ""
     assert _assemble_draft_content({"content": "fallback", "files": [{"path": "notes.txt", "content": "note"}]}) == (
-        "<SKILL>\nfallback\n</SKILL>\n\n<FILE path=\"notes.txt\">\nnote\n</FILE>"
+        "<skill>\nfallback\n</skill>\n\n<file path=\"notes.txt\">\nnote\n</file>"
     )
 
 
@@ -88,8 +93,8 @@ def test_normalize_draft_snapshot_assembles_all_files():
     )
 
     assert result is not None
-    assert "<SKILL>\n# Demo\n</SKILL>" in result["content"]
-    assert '<FILE path="scripts/run.py">' in result["content"]
+    assert "<skill>\n# Demo\n</skill>" in result["content"]
+    assert '<file path="scripts/run.py">' in result["content"]
 
 
 def test_normalize_draft_snapshot_keeps_empty_initial_draft_empty():
@@ -150,7 +155,7 @@ def test_resolve_model_for_nl2skill_selects_requested_configured_or_fallback(
 
 def test_resolve_model_for_nl2skill_rejects_missing_requested_or_any_model(mocker):
     mocker.patch.object(nl2skill_service, "get_model_by_model_id", return_value=None)
-    with pytest.raises(ValueError, match="Requested model_id"):
+    with pytest.raises(ValueError, match="model_not_available"):
         _resolve_model_for_nl2skill("tenant", 9, [])
 
     mocker.patch.object(nl2skill_service.tenant_config_manager, "get_model_config", return_value=None)
@@ -161,7 +166,7 @@ def test_resolve_model_for_nl2skill_rejects_missing_requested_or_any_model(mocke
 @pytest.mark.asyncio
 async def test_build_nl2skill_run_info_uses_template_and_request_history(mocker):
     model_config = {"cite_name": "main_model", "model_name": "primary"}
-    mocker.patch.object(nl2skill_service, "get_skill_creation_simple_prompt_template", return_value={
+    prompt_loader = mocker.patch.object(nl2skill_service, "get_nl2skill_prompt_template", return_value={
         "system_prompt": "system", "user_prompt": "rendered query"
     })
     mocker.patch.object(nl2skill_service, "create_model_config_list", new_callable=AsyncMock, return_value=[model_config])
@@ -177,6 +182,8 @@ async def test_build_nl2skill_run_info_uses_template_and_request_history(mocker)
     )
 
     assert result.query == "rendered query"
+    prompt_loader.assert_called_once()
+    assert "complexity" not in prompt_loader.call_args.kwargs
     assert result.agent_config is agent_config
     assert [(item.role, item.content) for item in result.history] == [("user", "old")]
     assert result.enable_planning is False
@@ -192,7 +199,7 @@ async def test_build_nl2skill_run_info_adds_uploaded_files_to_request(mocker):
 
     mocker.patch.object(
         nl2skill_service,
-        "get_skill_creation_simple_prompt_template",
+        "get_nl2skill_prompt_template",
         side_effect=fake_template,
     )
     mocker.patch.object(
@@ -234,7 +241,7 @@ async def test_build_nl2skill_run_info_adds_uploaded_files_to_request(mocker):
 
 @pytest.mark.asyncio
 async def test_build_nl2skill_run_info_requires_at_least_one_model(mocker):
-    mocker.patch.object(nl2skill_service, "get_skill_creation_simple_prompt_template", return_value={})
+    mocker.patch.object(nl2skill_service, "get_nl2skill_prompt_template", return_value={})
     mocker.patch.object(nl2skill_service, "create_model_config_list", new_callable=AsyncMock, return_value=[])
 
     with pytest.raises(ValueError, match="No LLM model"):
@@ -255,14 +262,14 @@ async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
     async def fake_agent_run(_run_info, *, thread_manager):
         assert thread_manager is not None
         chunks = [
-            {"type": "model_thinking_output", "content": "Preparing.\n<FINAL_"},
-            {"type": "model_output_thinking", "content": "ANSWER>\n<SK"},
+            {"type": "model_thinking_output", "content": "Preparing.\n<final_"},
+            {"type": "model_output_thinking", "content": "answer>\n<sk"},
             {
                 "type": "model_output_thinking",
-                "content": "ILL>\n---\nname: demo\ndescription: Demo\ntags: [demo]\n---\n# Demo\n</SKILL>\n",
+                "content": "ill>\n---\nname: demo\ndescription: Demo\ntags: [demo]\n---\n# Demo\n</skill>\n",
             },
-            {"type": "model_output_code", "content": '<FILE path="scripts/run.py">\nprint("ok")\n</FILE>\n'},
-            {"type": "model_output_thinking", "content": "<SUMMARY>\nReady.\n</SUMMARY>\n</FINAL_ANSWER>"},
+            {"type": "model_output_code", "content": '<file path="scripts/run.py">\nprint("ok")\n</file>\n'},
+            {"type": "model_output_thinking", "content": "<summary>\nReady.\n</summary>\n</final_answer>"},
             {"type": "final_answer", "content": "duplicate"},
         ]
         for chunk in chunks:
@@ -285,7 +292,7 @@ async def test_stream_preserves_raw_types_and_emits_semantic_events(mocker):
         for item in payloads
     )
     assert any(item["type"] == "summary" for item in payloads)
-    assert not any("FINAL_ANSWER" in item.get("content", "") for item in payloads)
+    assert not any("</final_answer>" in item.get("content", "") for item in payloads)
     assert not any(item.get("content") == "duplicate" for item in payloads)
     assert payloads[-1]["type"] == "done"
     assert stop_event.is_set()
@@ -318,7 +325,7 @@ async def test_stream_parses_skill_start_after_reasoning_without_newline(mocker)
         yield json.dumps(
             {
                 "type": "model_output_thinking",
-                "content": "SKILL>\n# Demo\n</SKILL>\n",
+                "content": "skill>\n# Demo\n</skill>\n",
             }
         )
 
@@ -357,10 +364,10 @@ async def test_stream_emits_targets_and_filters_non_target_file_updates(mocker):
             {
                 "type": "model_output_code",
                 "content": (
-                    "<SKILL>\n# Changed unexpectedly\n</SKILL>\n"
-                    '<FILE path="scripts/other.py">\nother\n</FILE>\n'
-                    '<FILE path="scripts/run.py">\nupdated\n</FILE>\n'
-                    "<SUMMARY>\nDone.\n</SUMMARY>\n"
+                    "<skill>\n# Changed unexpectedly\n</skill>\n"
+                    '<file path="scripts/other.py">\nother\n</file>\n'
+                    '<file path="scripts/run.py">\nupdated\n</file>\n'
+                    "<summary>\nDone.\n</summary>\n"
                 ),
             }
         )
@@ -418,7 +425,7 @@ async def test_stream_skips_malformed_chunks_and_emits_error_on_agent_failure(mo
 
 
 @pytest.mark.asyncio
-async def test_stream_classifies_final_answer_control_content_and_skips_later_tail(mocker):
+async def test_stream_classifies_final_answer_deltas_including_later_tail(mocker):
     stop_event = threading.Event()
     mocker.patch.object(
         nl2skill_service,
@@ -428,15 +435,15 @@ async def test_stream_classifies_final_answer_control_content_and_skips_later_ta
 
     async def fake_agent_run(_run_info, *, thread_manager):
         assert thread_manager is not None
-        yield json.dumps({"type": "final_answer", "content": "<SKILL>\n# Demo"})
-        yield json.dumps({"type": "final_answer", "content": "tail"})
+        yield json.dumps({"type": "final_answer", "content": "<skill>\n# Demo", "answer_phase": "delta"})
+        yield json.dumps({"type": "final_answer", "content": "tail\n</skill>", "answer_phase": "delta"})
 
     mocker.patch.object(nl2skill_service, "agent_run", fake_agent_run)
     stream = await create_nl2skill_stream(NL2SkillRunRequest(query="Create"), "tenant", "en")
     payloads = [json.loads(item.removeprefix("data: ").strip()) async for item in stream]
 
     assert any(item["type"] == "skill_body" and "# Demo" in item["content"] for item in payloads)
-    assert not any(item.get("content") == "tail" for item in payloads)
+    assert "".join(item["content"] for item in payloads if item["type"] == "skill_body") == "# Demotail\n"
     assert payloads[-1]["type"] == "done"
     assert stop_event.is_set()
 

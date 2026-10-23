@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: AIDP-KB-GRAPH-EDIT-20261014
+  change_type: requirement
+  requirement_id: AIDP-KB-GRAPH-EDIT-20261014
+  title: 知识库详情页签知识图谱展示、五字段编辑与一次性关闭
+  description: 详细信息页签中，图谱未开启（创建时关闭或已一次性关闭）的库在图谱区块展示"未开启知识图谱"提示（2026-10-15 调整：恢复旧版提示，去掉原设计的标题旁蓝色"关闭"字样与悬停提示）；创建时开启的库展示开关，关闭前展示两行后果确认文案；LLM 模型、子图扩展跳数、构图过程开启大模型思考、开启同义词检测合并、开启语义消歧五个字段支持铅笔行内编辑，编辑以原生类型单字段 graph_config 部分更新发送，后端合并为完整 AIDP 格式字符串；关闭为单向不可逆，图谱关闭后字段区隐藏。
+  affected_features:
+    existing:
+    - F-111
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - AIDP-FE-GRAPH-01
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    reason: 合并校验、单向锁定与详情归一化是隔离的后端单元契约，以受控响应即可完整证明成功、边界与错误路径；页面级弹窗/开关/确认交互链路在 UT 中无对应载体，由新增 D1 AIDP-FE-GRAPH-01 证明，不重复建 Case。
+    behaviors:
+    - merge_graph_config_update 将原生类型的部分编辑合并进已存 AIDP 图谱配置：布尔转"是"/"否"、跳数转字符串、未触碰字段原样保留（含种子遗留布尔与非模板语言）；拒绝越界跳数、布尔跳数、字符串开关、空白模型名与非可编辑键。
+    - 更新端点拒绝重开已关闭的图谱（is_exist_graph=true）、拒绝图谱已关闭时的任何 graph_config 编辑；is_exist_graph=false 原样转发，graph_config 合并当前缓存配置后以完整字符串转发。
+    - _normalize_kb_config_fields 解析 graph_config 字符串，"是"/"否"转布尔、数字字符串跳数转 int，嵌套图谱 LLM 仅在顶层缺失时提升，坏 JSON 容忍。
+    test_selectors:
+    - test/ext_components/aidp/test_aidp_service.py::TestMergeGraphConfigUpdate
+    - test/ext_components/aidp/test_aidp_mgmt_app.py::TestUpdateKbConfigurationFields
+    - test/ext_components/aidp/test_aidp_mgmt_app.py::TestNormalizeKbConfigFields
+  notes: 'Admission review: 现有 AIDP D1（AIDP-FE-LIST-01 列表、AIDP-FE-FILES-01 文件页、PW-KB-AIDP-01 服务路径）均不覆盖详细信息页签的图谱交互链路，按准入规则补一个组件级 D1（真实页面/查询/缓存/服务协作 + 受控 HTTP 边界），不建 D2/D3。mock 更新端点同步支持 is_exist_graph 单向拒绝与宽松键名校验（后端已严格校验值）。
+    D1 执行发现并修复真实缺陷：antd v6 hook confirm 的返回值未被消费时，onOk 拒绝会变成未处理 Promise 拒绝；disableGraph 改用与批量删除一致的 Promise.resolve 包装后消除，失败保留确认框可重试。
+    Verification: pytest test/ext_components/aidp/test_aidp_mgmt_app.py test/ext_components/aidp/test_aidp_service.py 共 422 通过、1 失败（TestGetKbFetchFailure::test_get_kb_marks_unavailable_on_aidp_error 为分支预存失败，stash 后在干净工作树复现，与本次改动无关）；前端 tsc、改动文件 eslint/prettier 与 npm run build 通过（全量 check-all 存在分支预存 lint 债）；AIDP-FE-GRAPH-01 经 run_cases.py 执行 PASS（5 collected tests，无未处理拒绝）。部署联调（真实 AIDP）不在本次范围内。'

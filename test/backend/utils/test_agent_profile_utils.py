@@ -1,4 +1,6 @@
-"""Unit tests for ``backend.utils.agent_profile_utils``.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Unit tests for ``backend.management.services.agent.profile``.
 
 Targets
 -------
@@ -116,6 +118,28 @@ def _install_stubs():
     sys.modules["management.services.skill.service"] = skill_service
     services_pkg.skill_service = skill_service
 
+    sdk_root = _REPO_ROOT / "sdk/nexent"
+    for package_name, package_path in (
+        ("nexent", sdk_root),
+        ("nexent.core", sdk_root / "core"),
+        ("nexent.core.prompts", sdk_root / "core/prompts"),
+    ):
+        package = types.ModuleType(package_name)
+        package.__path__ = [str(package_path)]
+        sys.modules[package_name] = package
+
+    def load_test_prompt(language, path):
+        import yaml
+        source = sdk_root / "core/prompts" / language / f"{path}.yaml"
+        return yaml.safe_load(source.read_text(encoding="utf-8"))
+
+    def render_test_prompt(source, parameters):
+        from jinja2 import Environment, StrictUndefined
+        return Environment(undefined=StrictUndefined).from_string(source).render(**parameters)
+
+    sys.modules["nexent.core.prompts"].load_prompt = load_test_prompt
+    sys.modules["nexent.core.prompts"].render_prompt_text = render_test_prompt
+
     return _StubBundle(agent_db, tool_db, knowledge_db, client, db_models, skill_service)
 
 
@@ -152,7 +176,7 @@ def profile_mod():
     if MODULE_UNDER_TEST in sys.modules:
         del sys.modules[MODULE_UNDER_TEST]
 
-    _src = _BACKEND_DIR / "utils" / "agent_profile_utils.py"
+    _src = _BACKEND_DIR / "management" / "services" / "agent" / "profile.py"
     _spec = _ilu.spec_from_file_location(MODULE_UNDER_TEST, str(_src))
     assert _spec is not None, f"cannot locate agent_profile_utils.py at {_src}"
     assert _spec.loader is not None, f"cannot locate agent_profile_utils.py at {_src}"
@@ -412,7 +436,7 @@ class TestFetchAgentProfile:
         agent = {
             "display_name": "AgentA",
             "description": "desc",
-            "duty_prompt": "duty",
+            "prompt": "duty",
             "constraint_prompt": "cons",
             "business_description": "biz",
         }
@@ -433,8 +457,8 @@ class TestFetchAgentProfile:
 
         assert profile["name"] == "AgentA"
         assert profile["description"] == "desc"
-        assert profile["duty_prompt"] == "duty"
-        assert profile["constraint_prompt"] == "cons"
+        assert profile["prompt"] == "duty"
+        assert "constraint_prompt" not in profile
         assert profile["business_description"] == "biz"
         assert profile["tools"] == [{"name": "weather", "description": "w", "source": "local"}]
         assert profile["skills"] == [{"name": "s1", "description": "d1"}]
@@ -445,7 +469,7 @@ class TestFetchAgentProfile:
         stubs.agent_db.search_agent_info_by_agent_id.return_value = {
             "name": "OnlyName",
             "description": "d" * (profile_mod._DESC_AGENT_MAX + 10),
-            "duty_prompt": "x" * (profile_mod._DUTY_PROMPT_MAX + 10),
+            "prompt": "x" * (profile_mod._PROMPT_MAX + 10),
         }
         stubs.tool_db.search_tools_for_sub_agent.return_value = []
         stubs.skill_service.SkillService.return_value.get_enabled_skills_for_agent.return_value = []
@@ -455,8 +479,8 @@ class TestFetchAgentProfile:
 
         assert profile["name"] == "OnlyName"
         assert len(profile["description"]) == profile_mod._DESC_AGENT_MAX
-        assert len(profile["duty_prompt"]) == profile_mod._DUTY_PROMPT_MAX
-        assert profile["constraint_prompt"] == ""
+        assert len(profile["prompt"]) == profile_mod._PROMPT_MAX
+        assert "constraint_prompt" not in profile
         assert profile["business_description"] == ""
         assert profile["tools"] == []
         assert profile["skills"] == []
@@ -537,7 +561,7 @@ class TestFormatAgentProfileContext:
         profile = {
             "name": "AgentA",
             "description": "desc",
-            "duty_prompt": "duty",
+            "prompt": "duty",
             "constraint_prompt": "cons",
             "business_description": "biz",
             "tools": [{"name": "t1", "source": "api", "description": "d1"}],
@@ -550,7 +574,6 @@ class TestFormatAgentProfileContext:
             "### Agent: AgentA",
             "Description: desc",
             "Duty: duty",
-            "Constraints: cons",
             "Business Context: biz",
             "Tools: t1 [API]: d1",
             "Skills: s1 (sd)",
@@ -563,7 +586,7 @@ class TestFormatAgentProfileContext:
         profile = {
             "name": "A",
             "description": "",
-            "duty_prompt": "",
+            "prompt": "",
             "constraint_prompt": "c",
             "business_description": "",
             "tools": [],
@@ -573,7 +596,6 @@ class TestFormatAgentProfileContext:
         expected = "\n".join([
             "## Agent Configuration",
             "### Agent: A",
-            "Constraints: c",
             "Skills: s",
         ])
         assert profile_mod.format_agent_profile_context(profile) == expected

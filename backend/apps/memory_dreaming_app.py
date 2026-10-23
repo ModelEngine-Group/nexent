@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Manual Dreaming run and audit endpoints."""
 
 from http import HTTPStatus
@@ -9,8 +10,8 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from pydantic import model_validator
 from nexent.scheduler import ScheduleMode, ScheduleRuleType
-from services.agent_automation.models import ScheduleTrigger
-from services.agent_automation.schedule_engine import (
+from contracts.automation import ScheduleTrigger
+from management.services.automation.scheduler import (
     compute_next_fire_at,
     is_valid_cron_expression,
 )
@@ -23,12 +24,12 @@ from consts.const import (
 from database import memory_dreaming_db
 from database.role_permission_db import check_role_permission
 from database.user_tenant_db import get_user_tenant_by_user_id
-from services.memory_dreaming_service import (
+from management.services.memory.dreaming.service import (
     DreamingConflictError,
     DreamingRunError,
     get_memory_dreaming_service,
 )
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 router = APIRouter(prefix="/memory/dreaming", tags=["memory-dreaming"])
 USER_DREAMING_SCOPE = "__user__"

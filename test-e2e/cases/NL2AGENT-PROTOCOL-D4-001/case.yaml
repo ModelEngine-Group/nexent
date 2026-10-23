@@ -1,0 +1,97 @@
+schema_version: '1.0'
+stage: D4
+module: AGENT-CREATION
+case:
+  case_id: NL2AGENT-PROTOCOL-D4-001
+  feature_id: NL2AGENT-PROTOCOL
+  requirement_ids:
+  - NL2AGENT-PROTOCOL-20261020
+  business_rule_ids:
+  - NL2AGENT-PROTOCOL-RULE-001
+  title: Both creator entries persist target protocol policy
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify actual model tool calls save and preserve target Agent policy
+    through both browser entries.
+  preconditions:
+  - Authorized tenant administrator, real generation model and Langfuse tracing are
+    configured. A second tenant administrator is configured for cross-tenant rejection.
+  test_data:
+    profile: real
+  steps:
+  - order: 1
+    action: Create an editable Agent; use NL2Agent to enable then disable strict protocol
+      repair. Reload editor. Then fully generate the same draft with protocol repair
+      enabled, submit clarification without repeating the policy.
+    expected: Shared endpoint and tool save exact booleans; persisted draft and the
+      labeled policy checkbox in More Configuration agree. Full generation preserves true through clarification and produces completed
+      configuration.
+  - order: 2
+    action: Use Workbench Agent creation to initialize draft and enable then disable
+      protocol repair; reopen conversation. Then fully generate the same draft with
+      protocol repair enabled and submit clarification without repeating the policy.
+    expected: Same endpoint persists booleans on target draft; no Workbench policy
+      or unrelated change. Full generation preserves true through clarification and
+      reload.
+  - order: 3
+    action: For both generated drafts, request an ambiguous retry change and inspect
+      clarification without persistence, configure the real test model if absent,
+      run the target Agent in Debug, then attempt cross-tenant creation access.
+    expected: Ambiguous retry does not alter the enabled policy; each target executes
+      a real formatting request; cross-tenant access returns404 without modifying
+      either draft.
+  expected_results:
+  - Both entries persist true and false through real model tool calls and survive
+    reload.
+  - Unrequested prompt and resource state remains unchanged; no false generation completion.
+  - Both full-generation entries save the enabled policy before clarification and
+    retain it through completion without repeated policy instructions.
+  - Ambiguous retry is clarified without mutation, both generated Agents execute successfully
+    with the saved policy, and cross-tenant access is rejected.
+  forbidden_side_effects:
+  - No changes to published versions, unrelated Agents or Workbench execution policy.
+  actor: Authorized tenant administrator
+  journey:
+  - Direct creator policy
+  - Workbench creator policy
+  - Persistence and isolation
+  final_business_result:
+  - Target policy configurable through both shared creator entries.
+  failure_evidence:
+  - Sanitized trace IDs, browser assertions and persisted values.
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services:
+      - model-provider
+      - mcp-server
+  acceptance:
+  - id: AC-01
+    description: Both entries save booleans and preserve unrelated state.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Explicit full-generation policy survives clarification and completion
+      through both entries.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 3
+  - id: AC-03
+    description: Real runtime execution, ambiguous intent and cross-tenant isolation
+      preserve the generated policy.
+    steps:
+    - 3
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1

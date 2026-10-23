@@ -26,13 +26,13 @@ def mock_vlm_model():
 def mock_prompt_loader(monkeypatch):
     calls = []
 
-    def _fake_get_prompt(template_type, language=None, **_):
-        calls.append((template_type, language))
+    def _fake_get_prompt(language, path):
+        calls.append((language, path))
         return {"system_prompt": "Describe {{ query }}"}
 
     monkeypatch.setattr(
         analyze_image_tool,
-        "get_prompt_template",
+        "load_prompt",
         _fake_get_prompt,
     )
     return calls
@@ -76,7 +76,7 @@ class TestAnalyzeImageTool:
         assert mock_vlm_model.invoke_sync.call_count == 2
         for call in mock_vlm_model.invoke_sync.call_args_list:
             assert hasattr(call.args[0].media_input, "read")
-        assert mock_prompt_loader == [("analyze_image", "en")]
+        assert mock_prompt_loader == [("en", "tool/analyze_image")]
 
     def test_forward_impl_zh_observer_messages(
         self, observer_zh, mock_vlm_model, mock_storage_client, mock_prompt_loader
@@ -92,7 +92,7 @@ class TestAnalyzeImageTool:
         result = tool._forward_impl([b"img"], "问题")
 
         assert result == ["描述"]
-        assert mock_prompt_loader == [("analyze_image", "zh")]
+        assert mock_prompt_loader == [("zh", "tool/analyze_image")]
 
     @pytest.mark.parametrize(
         "image_list,error_message",

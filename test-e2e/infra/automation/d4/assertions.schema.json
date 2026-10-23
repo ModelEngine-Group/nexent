@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.nexent.test/schemas/d4-assertions.schema.json",
+  "title": "Nexent D4 Journey assertion evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "case_id", "contract_hash", "started_at", "finished_at", "status", "preconditions", "steps", "assertions", "cleanup", "console_errors", "unexpected_5xx"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "case_id": {"type": "string", "pattern": "^PW-[A-Z0-9-]+-[0-9]{2}$"},
+    "contract_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": "string", "format": "date-time"},
+    "status": {"enum": ["PASS", "FAIL", "BLOCKED", "SKIPPED"]},
+    "browser": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "headless", "locale"],
+      "properties": {
+        "name": {"type": "string"},
+        "headless": {"type": "boolean"},
+        "locale": {"type": "string"}
+      }
+    },
+    "created_resources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "name"],
+        "properties": {
+          "kind": {"type": "string"},
+          "name": {"type": "string"},
+          "id_masked": {"type": "string"}
+        }
+      }
+    },
+    "preconditions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/check"}
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/check"}
+    },
+    "assertions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/check"}
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "details"],
+      "properties": {
+        "status": {"enum": ["PASS", "FAIL", "NOT_REQUIRED"]},
+        "details": {"type": "string"}
+      }
+    },
+    "console_errors": {"type": "array", "items": {"type": "string"}},
+    "unexpected_5xx": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": "string"}
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "status", "observed"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^(PRE|STEP|ASSERT)-[0-9]{2}$"},
+        "name": {"type": "string", "minLength": 1},
+        "status": {"enum": ["PASS", "FAIL", "BLOCKED", "NOT_RUN"]},
+        "observed": {"type": "string"},
+        "evidence": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

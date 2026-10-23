@@ -1,24 +1,33 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import {
+  ComposerAttachment,
+  ComposerDictation,
+} from "@/app/newchat/assistant-ui/composer-tools";
+import { DEFAULT_MODEL_PARAMETER_VALUES } from "@/const/modelParameterSettings";
 import { restoreKnowledgeDisplay } from "./knowledgeDisplay";
 
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type FC,
 } from "react";
 import { useAuiState } from "@assistant-ui/react";
-import { Sparkles } from "lucide-react";
 import { Chat } from "@/app/newchat/assistant-ui/chat";
-import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import type {
   Nl2AgentStateEvent,
   Nl2SkillStreamEvent,
 } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import type { ChatMode } from "@/app/newchat/assistant-ui/composer";
 import { ThreadListSidebar } from "@/app/newchat/assistant-ui/threadlist-sidebar";
+import { getWorkbenchPinStorageKey } from "@/app/newchat/assistant-ui/thread-pins";
 import {
   cacheHistoricalChatMode,
   generateConversationTitle,
@@ -27,13 +36,19 @@ import {
   setHistoricalChatModeListener,
   setServerConversationIdState,
 } from "@/app/newchat/adapter/conversation-thread-list-adapter";
+import { applyComposerRunConfig } from "@/app/newchat/adapter/composer-run-config";
 import { useConversationResume } from "./hooks/useConversationResume";
-import { SidebarProvider } from "@/components/ui/sidebar";
+import { useConversationScopedState } from "./hooks/useConversationScopedState";
+import { WorkbenchConversationLayout } from "./components/WorkbenchConversationLayout";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
 import { useModelList } from "@/hooks/model/useModelList";
+import { useConfig } from "@/hooks/useConfig";
 import { withDefaultWorkbenchModel } from "./modelOptions";
+import { WorkbenchLoadingBoundary } from "./components/WorkbenchLoadingBoundary";
+import { selectWorkbenchModel } from "@/features/model-controls/modelOptions";
 import log from "@/lib/logger";
+import { ConversationTitleGuard } from "@/lib/conversationTitle";
 import { conversationService } from "@/services/conversationService";
 import { ApiError } from "@/services/api";
 import {
@@ -44,8 +59,10 @@ import { AgentPicker } from "./components/AgentPicker";
 import {
   changeAgentTopology,
   changeCreationThread,
+  returnFromCreation,
 } from "./conversationTransitions";
 import { CreationActions } from "./components/CreationActions";
+import { WorkbenchGreeting } from "./components/WorkbenchGreeting";
 import { SkillCreationResultCard } from "./components/CreationResultCards";
 import {
   applySkillCreationEvent,
@@ -109,16 +126,24 @@ const HomeContent: FC = () => {
     isDictationConfigured,
     workbenchState,
     workbenchBootstrap,
+    isLoadingWorkbenchBootstrap,
     onWorkbenchModeChange,
     dispatchWorkbench,
+    conversationDetails,
   } = useWorkbenchSession();
   const { availableLlmModels, isLoading: isLoadingModels } = useModelList();
+  const { modelConfig } = useConfig();
   const effectiveWorkbenchConfig = useMemo(
-    () => withDefaultWorkbenchModel(workbenchState.config, availableLlmModels),
-    [workbenchState.config, availableLlmModels]
+    () =>
+      withDefaultWorkbenchModel(
+        workbenchState.config,
+        availableLlmModels,
+        modelConfig?.llm?.id
+      ),
+    [workbenchState.config, availableLlmModels, modelConfig?.llm?.id]
   );
   const { t, i18n } = useTranslation();
-  const { canAccessRoute, user } = useAuthorizationContext();
+  const { hasPermission, user } = useAuthorizationContext();
   const {
     resetFlow: resetNl2AgentFlow,
     markGenerationCompleted,
@@ -127,20 +152,13 @@ const HomeContent: FC = () => {
     isComposerDisabled: nl2AgentComposerDisabled,
   } = useNl2AgentFlow();
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
-  const [knowledgeScope, setKnowledgeScope] =
-    useState<ConversationKnowledgeScope | null>(null);
-  const [knowledgePreview, setKnowledgePreview] =
-    useState<KnowledgeScopeEffectivePreview | null>(null);
-  const [knowledgeCapabilities, setKnowledgeCapabilities] =
-    useState<KnowledgeCapabilities | null>(null);
-  const [runtimeMetadata, setRuntimeMetadata] = useState<
-    Record<string, unknown>
-  >({});
-  const [runtimeMetadataVersion, setRuntimeMetadataVersion] = useState(0);
-  const [runtimeMetadataDirty, setRuntimeMetadataDirty] = useState(false);
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
   const [agentPickerOpen, setAgentPickerOpen] = useState(false);
   const [isSavingModel, setIsSavingModel] = useState(false);
+  const [modelSettingsRevision, setModelSettingsRevision] = useState(0);
+  const rememberedModelControls = useRef(
+    new Map<string, typeof workbenchState.config.generation_config>()
+  );
   const [creationAgentsByThread, setCreationAgentsByThread] = useState<
     Record<string, CreatedAgentResult>
   >({});
@@ -150,35 +168,69 @@ const HomeContent: FC = () => {
   const [recoverableCreationThreads, setRecoverableCreationThreads] = useState<
     ReadonlySet<string>
   >(new Set());
+  const modelSavePending = useRef(false);
   const skillDraftRef = useRef(initialSkillCreationDraft);
   const [skillDraft, setSkillDraft] = useState(initialSkillCreationDraft);
   const [savedSkillName, setSavedSkillName] = useState<string | null>(null);
+  const creationReturnRef = useRef<string | null>(null);
+  const [localThreadSnapshots, setLocalThreadSnapshots] = useState(
+    new Map<
+      string,
+      {
+        state: typeof workbenchState;
+        skillDraft: typeof initialSkillCreationDraft;
+        savedSkillName: string | null;
+        selectedAgent: Agent | null;
+        scope: ConversationKnowledgeScope | null;
+        preview: KnowledgeScopeEffectivePreview | null;
+      }
+    >()
+  );
   const resumedConversationIdsRef = useRef(new Set<number>());
-  const knowledgeScopesRef = useRef<
-    Map<string, ConversationKnowledgeScope | null>
-  >(new Map());
-  const knowledgePreviewsRef = useRef<
-    Map<string, KnowledgeScopeEffectivePreview | null>
-  >(new Map());
+  const [knowledgeCache, setKnowledgeCache] = useState(
+    new Map<
+      string,
+      {
+        scope: ConversationKnowledgeScope | null;
+        preview: KnowledgeScopeEffectivePreview | null;
+      }
+    >()
+  );
+  const cacheKnowledge = useCallback(
+    (
+      threadId: string,
+      patch: Partial<{
+        scope: ConversationKnowledgeScope | null;
+        preview: KnowledgeScopeEffectivePreview | null;
+      }>
+    ) => {
+      setKnowledgeCache((cache) =>
+        new Map(cache).set(threadId, {
+          scope: null,
+          preview: null,
+          ...cache.get(threadId),
+          ...patch,
+        })
+      );
+    },
+    []
+  );
+  const readLocalSnapshot = useEffectEvent((threadId: string) =>
+    localThreadSnapshots.get(threadId)
+  );
+  const readKnowledgeCache = useEffectEvent((threadId: string) =>
+    knowledgeCache.get(threadId)
+  );
 
   // All hooks must be called before any early returns
   const runtimeMainThreadId = useAuiState((s) => s.threads.mainThreadId);
-  const isLoading = useAuiState((s) => s.threads.isLoading);
   const isThreadLoading = useAuiState((s) => s.thread.isLoading);
   const isThreadRunning = useAuiState((s) => s.thread.isRunning);
   const threadItems = useAuiState((s) => s.threads.threadItems);
-  const ready =
-    runtimeMainThreadId !== undefined && !isLoading && !isThreadLoading;
+  // Sidebar metadata reloads must not unmount the active chat and composer.
+  const ready = runtimeMainThreadId !== undefined && !isThreadLoading;
 
-  // Maintain thread ID state to pass conversation_id to the adapter reliably
-  const [activeThreadId, setActiveThreadId] = useState<string | undefined>(
-    runtimeMainThreadId
-  );
-
-  // Update local state when the runtime's active thread changes
-  useEffect(() => {
-    setActiveThreadId(runtimeMainThreadId);
-  }, [runtimeMainThreadId]);
+  const activeThreadId = runtimeMainThreadId;
 
   // Server-side conversation IDs, keyed by assistant-ui thread id.
   //
@@ -192,6 +244,7 @@ const HomeContent: FC = () => {
   //   2. Switching back and forth between threads keeps each thread bound to
   //      its own server-side conversation.
   const serverConversationIdsRef = useRef<Map<string, string>>(new Map());
+  const titleGuard = useRef(new ConversationTitleGuard());
   const [generatedTitles, setGeneratedTitles] = useState<Map<string, string>>(
     new Map()
   );
@@ -215,15 +268,19 @@ const HomeContent: FC = () => {
       }
 
       if (initialQuestion && previous !== numericId) {
+        const revision = titleGuard.current.capture(threadId);
         void generateConversationTitle(numericId, initialQuestion)
           .then((title) => {
             setGeneratedTitles((titles) => {
+              if (!titleGuard.current.isCurrent(threadId, revision))
+                return titles;
               const next = new Map(titles);
               next.set(threadId, title);
               return next;
             });
           })
           .catch((error) => {
+            if (!titleGuard.current.isCurrent(threadId, revision)) return;
             log.error(
               `[HomeContent] Failed to generate title for ${numericId}:`,
               error
@@ -233,9 +290,12 @@ const HomeContent: FC = () => {
             const fallbackTitle = initialQuestion.trim().slice(0, 40);
             if (!fallbackTitle) return;
             void conversationService
-              .rename(Number(numericId), fallbackTitle)
-              .then(() => {
+              .rename(Number(numericId), fallbackTitle, true)
+              .then((renamed) => {
+                if (!renamed) return;
                 setGeneratedTitles((titles) => {
+                  if (!titleGuard.current.isCurrent(threadId, revision))
+                    return titles;
                   const next = new Map(titles);
                   next.set(threadId, fallbackTitle);
                   return next;
@@ -251,6 +311,19 @@ const HomeContent: FC = () => {
       }
     },
     [chatMode, dispatchWorkbench, workbenchState.configVersion]
+  );
+
+  const handleConversationRenamed = useCallback(
+    (threadId: string, remoteId: string | undefined, title: string) => {
+      titleGuard.current.renamed(threadId);
+      setGeneratedTitles((titles) => {
+        const next = new Map(titles);
+        next.set(threadId, title);
+        if (remoteId) next.set(remoteId, title);
+        return next;
+      });
+    },
+    []
   );
 
   const handleGenerationStopped = useCallback((conversationId: number) => {
@@ -271,18 +344,84 @@ const HomeContent: FC = () => {
   );
   const activeAgentId = activeThread?.custom?.agentId;
   const serverConversationIdForActiveThread = activeThreadId
-    ? serverConversationIdsRef.current.get(activeThreadId)
+    ? serverConversationIds.get(activeThreadId)
     : undefined;
   // Prefer the server-issued id (set after the backend auto-creates the
   // conversation), then fall back to the thread's `remoteId` (used when the
   // user opens an existing conversation from the sidebar), then finally the
   // local assistant-ui thread id as a temporary placeholder.
-  const activeConversationId =
+  const rawConversationId =
     serverConversationIdForActiveThread ??
     activeThread?.remoteId ??
     activeThreadId;
+  const activeConversationId =
+    rawConversationId == null ? undefined : String(rawConversationId);
   const activeConversationIdRef = useRef(activeConversationId);
-  activeConversationIdRef.current = activeConversationId;
+  const historyRestoreOwnerRef = useRef({
+    threadId: undefined as string | undefined,
+    startedLocal: false,
+  });
+  useLayoutEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+    if (historyRestoreOwnerRef.current.threadId !== activeThreadId) {
+      const id = Number(activeConversationId);
+      historyRestoreOwnerRef.current = {
+        threadId: activeThreadId,
+        startedLocal: !Number.isInteger(id) || id <= 0,
+      };
+    }
+  }, [activeConversationId, activeThreadId]);
+
+  const numericConversationId = Number(activeConversationId);
+  const isPersistedConversation =
+    Number.isInteger(numericConversationId) && numericConversationId > 0;
+  const localSnapshot =
+    activeThreadId && !isPersistedConversation
+      ? localThreadSnapshots.get(activeThreadId)
+      : undefined;
+  const cachedKnowledge = activeThreadId
+    ? knowledgeCache.get(activeThreadId)
+    : undefined;
+  // A live thread keeps its UI state when the backend first assigns its ID.
+  const scopeKey = activeThreadId ?? "";
+  const [knowledgeScope, setKnowledgeScope] =
+    useConversationScopedState<ConversationKnowledgeScope | null>(
+      scopeKey,
+      (isPersistedConversation
+        ? cachedKnowledge?.scope
+        : localSnapshot?.scope) ?? null
+    );
+  const [knowledgePreview, setKnowledgePreview] =
+    useConversationScopedState<KnowledgeScopeEffectivePreview | null>(
+      scopeKey,
+      (isPersistedConversation
+        ? cachedKnowledge?.preview
+        : localSnapshot?.preview) ?? null
+    );
+  const [runtimeMetadata, setRuntimeMetadata] = useConversationScopedState<
+    Record<string, unknown>
+  >(scopeKey, {});
+  const [runtimeMetadataVersion, setRuntimeMetadataVersion] =
+    useConversationScopedState(scopeKey, 0);
+  const [runtimeMetadataDirty, setRuntimeMetadataDirty] =
+    useConversationScopedState(scopeKey, false);
+  const genericAgentId = workbenchBootstrap?.generic_agent?.agent_id;
+  const genericAgentVersion = workbenchBootstrap?.generic_agent?.version_no;
+  const [knowledgeCapabilities, setKnowledgeCapabilities] =
+    useConversationScopedState<KnowledgeCapabilities | null>(
+      JSON.stringify([genericAgentId, genericAgentVersion]),
+      null
+    );
+
+  const [restoredLocalSnapshot, setRestoredLocalSnapshot] =
+    useState(localSnapshot);
+  if (restoredLocalSnapshot !== localSnapshot) {
+    setRestoredLocalSnapshot(localSnapshot);
+    if (localSnapshot) {
+      setSkillDraft(localSnapshot.skillDraft);
+      setSavedSkillName(localSnapshot.savedSkillName);
+    }
+  }
   const creationAgent = activeThreadId
     ? creationAgentsByThread[activeThreadId]
     : undefined;
@@ -297,15 +436,17 @@ const HomeContent: FC = () => {
     }
   }, []);
 
+  const nl2AgentSnapshotRefresh = useRef<Promise<void>>(Promise.resolve());
   const handleNl2AgentState = useCallback(
     (event: Nl2AgentStateEvent) => {
       if (event.event === "prompt_generation_failed") {
         markPromptGenerationFailed(event.agent_id, event.failed_fields);
         return;
       }
-      if (event.event !== "agent_generation_completed") return;
-      markGenerationCompleted(event.agent_id);
-      void searchAgentInfo(event.agent_id, undefined, 0)
+      const completed = event.event === "agent_generation_completed";
+      if (completed) markGenerationCompleted(event.agent_id);
+      nl2AgentSnapshotRefresh.current = nl2AgentSnapshotRefresh.current
+        .then(() => searchAgentInfo(event.agent_id, undefined, 0))
         .then((result) => {
           if (!result.success || !result.data) {
             throw new Error(result.message || "Failed to refresh Agent draft");
@@ -317,26 +458,23 @@ const HomeContent: FC = () => {
           ) {
             throw new Error("Agent context changed during synchronization");
           }
-          markCompletionSynced(event.agent_id);
+          if (completed) markCompletionSynced(event.agent_id);
         })
         .catch((error) => {
           log.warn("[Workbench] Failed to refresh generated Agent", error);
           // The generated Agent remains available; do not permanently lock the composer.
-          markCompletionSynced(event.agent_id);
+          if (completed) markCompletionSynced(event.agent_id);
         });
     },
     [markCompletionSynced, markGenerationCompleted, markPromptGenerationFailed]
   );
 
   useEffect(() => {
-    const agentId = workbenchBootstrap?.generic_agent?.agent_id;
-    if (!agentId) {
-      setKnowledgeCapabilities(null);
-      return;
-    }
+    const agentId = genericAgentId;
+    if (!agentId) return;
 
     let cancelled = false;
-    const versionNo = workbenchBootstrap?.generic_agent?.version_no;
+    const versionNo = genericAgentVersion;
     void conversationService
       .getKnowledgeCapabilities(agentId, versionNo)
       .then((capabilities) => {
@@ -353,38 +491,47 @@ const HomeContent: FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [
-    workbenchBootstrap?.generic_agent?.agent_id,
-    workbenchBootstrap?.generic_agent?.version_no,
-  ]);
+  }, [genericAgentId, genericAgentVersion, setKnowledgeCapabilities]);
 
   useEffect(() => {
-    if (!activeThreadId) {
-      setKnowledgeScope(null);
-      setKnowledgePreview(null);
+    const numericConversationId = Number(activeConversationId);
+    if (!activeThreadId) return;
+
+    // First persistence updates the current live session; only a real thread
+    // switch should reload its saved configuration and enter restore loading.
+    if (
+      historyRestoreOwnerRef.current.startedLocal &&
+      serverConversationIdsRef.current.get(activeThreadId) ===
+        activeConversationId
+    ) {
       return;
     }
 
-    const numericConversationId = Number(activeConversationId);
     if (
       !Number.isInteger(numericConversationId) ||
       numericConversationId <= 0
     ) {
-      knowledgeScopesRef.current.set(activeThreadId, null);
-      knowledgePreviewsRef.current.set(activeThreadId, null);
-      setKnowledgeScope(null);
-      setKnowledgePreview(null);
+      const cached = readLocalSnapshot(activeThreadId);
+      if (cached) {
+        dispatchWorkbench({
+          type: "restore",
+          config: cached.state.config,
+          version: cached.state.configVersion,
+        });
+        dispatchWorkbench({
+          type: "set-skill-names",
+          names: cached.state.skillNames,
+        });
+        onRestoreAgent(cached.selectedAgent);
+        skillDraftRef.current = cached.skillDraft;
+      }
       return;
     }
 
     let cancelled = false;
     dispatchWorkbench({ type: "restore-start" });
-    setKnowledgeScope(knowledgeScopesRef.current.get(activeThreadId) ?? null);
-    setKnowledgePreview(
-      knowledgePreviewsRef.current.get(activeThreadId) ?? null
-    );
-    void conversationService
-      .getById(String(numericConversationId))
+    void conversationDetails
+      .load(String(numericConversationId))
       .then(async (conversation) => {
         if (cancelled) return;
         const restored = await resolveRestoredWorkbench(conversation);
@@ -415,8 +562,8 @@ const HomeContent: FC = () => {
             if (!result.success || !result.data) {
               // The historical Agent may have been deleted. Keep its messages,
               // but let the next send create a fresh draft in this conversation.
-              const { [activeThreadId]: _removed, ...remaining } =
-                creationAgentsByThreadRef.current;
+              const remaining = { ...creationAgentsByThreadRef.current };
+              delete remaining[activeThreadId];
               creationAgentsByThreadRef.current = remaining;
               setCreationAgentsByThread(remaining);
               setRecoverableCreationThreads((threads) =>
@@ -449,15 +596,17 @@ const HomeContent: FC = () => {
         }
         const restoredScope = restored.config.knowledge_scope ?? null;
         let restoredPreview =
-          knowledgePreviewsRef.current.get(activeThreadId) ?? null;
+          readKnowledgeCache(activeThreadId)?.preview ?? null;
         try {
           restoredPreview = await restoreKnowledgeDisplay(restoredScope);
         } catch (error) {
           log.warn("Knowledge display lookup failed", error);
         }
         if (cancelled) return;
-        knowledgeScopesRef.current.set(activeThreadId, restoredScope);
-        knowledgePreviewsRef.current.set(activeThreadId, restoredPreview);
+        cacheKnowledge(activeThreadId, {
+          scope: restoredScope,
+          preview: restoredPreview,
+        });
         setKnowledgeScope(restoredScope);
         setKnowledgePreview(restoredPreview);
       })
@@ -465,7 +614,7 @@ const HomeContent: FC = () => {
         if (!cancelled) {
           dispatchWorkbench({
             type: "resolve-agent-error",
-            message: "会话资源恢复失败，请重新打开会话",
+            message: t("ui.localization.resourceRestoreFailed"),
           });
           log.error("[HomeContent] Failed to restore knowledge scope:", error);
         }
@@ -479,13 +628,24 @@ const HomeContent: FC = () => {
     activeThreadId,
     dispatchWorkbench,
     resetNl2AgentFlow,
+    onRestoreAgent,
+    cacheKnowledge,
+    setKnowledgeScope,
+    setKnowledgePreview,
+    t,
+    conversationDetails,
   ]);
 
   useEffect(() => {
     const numericConversationId = Number(activeConversationId);
-    setRuntimeMetadata({});
-    setRuntimeMetadataVersion(0);
-    setRuntimeMetadataDirty(false);
+    if (
+      activeThreadId &&
+      historyRestoreOwnerRef.current.startedLocal &&
+      serverConversationIdsRef.current.get(activeThreadId) ===
+        activeConversationId
+    ) {
+      return;
+    }
     if (
       !Number.isInteger(numericConversationId) ||
       numericConversationId <= 0
@@ -494,8 +654,8 @@ const HomeContent: FC = () => {
     }
 
     let cancelled = false;
-    void conversationService
-      .getById(String(numericConversationId))
+    void conversationDetails
+      .load(String(numericConversationId))
       .then((conversation) => {
         if (cancelled) return;
         setRuntimeMetadata(conversation.runtime_metadata ?? {});
@@ -510,24 +670,33 @@ const HomeContent: FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [activeConversationId]);
+  }, [
+    activeConversationId,
+    activeThreadId,
+    setRuntimeMetadata,
+    setRuntimeMetadataVersion,
+    conversationDetails,
+  ]);
 
   const handleRuntimeMetadataChange = useCallback(
     (value: Record<string, unknown>) => {
       setRuntimeMetadata(value);
       setRuntimeMetadataDirty(true);
     },
-    []
+    [setRuntimeMetadata, setRuntimeMetadataDirty]
   );
 
-  const handleRuntimeMetadataSent = useCallback((version?: number) => {
-    setRuntimeMetadataDirty(false);
-    if (version !== undefined) {
-      setRuntimeMetadataVersion(version);
-    } else {
-      setRuntimeMetadataVersion((currentVersion) => currentVersion + 1);
-    }
-  }, []);
+  const handleRuntimeMetadataSent = useCallback(
+    (version?: number) => {
+      setRuntimeMetadataDirty(false);
+      if (version !== undefined) {
+        setRuntimeMetadataVersion(version);
+      } else {
+        setRuntimeMetadataVersion((currentVersion) => currentVersion + 1);
+      }
+    },
+    [setRuntimeMetadataDirty, setRuntimeMetadataVersion]
+  );
 
   const showKnowledgeScopeWarnings = useCallback(
     (warnings: KnowledgeScopeWarning[]) => {
@@ -570,8 +739,9 @@ const HomeContent: FC = () => {
           config,
           workbenchState.configVersion
         );
+        conversationDetails.invalidate(String(conversationId));
         if (Number(activeConversationIdRef.current) !== conversationId) {
-          throw new Error("原会话配置已保存；当前会话已切换，请重新打开选择器");
+          throw new Error(t("ui.localization.conversationChanged"));
         }
         dispatchWorkbench({
           type: "restore",
@@ -584,7 +754,7 @@ const HomeContent: FC = () => {
           error instanceof ApiError &&
           error.code === "WORKBENCH_CONFIG_VERSION_CONFLICT"
         ) {
-          const current = await conversationService.getById(
+          const current = await conversationDetails.refresh(
             String(conversationId)
           );
           if (Number(activeConversationIdRef.current) !== conversationId)
@@ -598,12 +768,19 @@ const HomeContent: FC = () => {
             setKnowledgeScope(current.workbench_config.knowledge_scope ?? null);
             setKnowledgePreview(null);
           }
-          message.warning("配置已在其他页面更新，已加载最新版本");
+          message.warning(t("ui.localization.configurationUpdated"));
         }
         throw error;
       }
     },
-    [dispatchWorkbench, workbenchState.configVersion]
+    [
+      dispatchWorkbench,
+      t,
+      workbenchState.configVersion,
+      setKnowledgeScope,
+      setKnowledgePreview,
+      conversationDetails,
+    ]
   );
 
   const handleKnowledgeScopeChange = useCallback(
@@ -635,11 +812,10 @@ const HomeContent: FC = () => {
             });
           }
         } else {
-          throw new Error("创建模式不支持挂载知识库");
+          throw new Error(t("ui.localization.creationKnowledgeUnavailable"));
         }
         if (activeThreadId) {
-          knowledgeScopesRef.current.set(activeThreadId, scope);
-          knowledgePreviewsRef.current.set(activeThreadId, nextPreview);
+          cacheKnowledge(activeThreadId, { scope, preview: nextPreview });
         }
         setKnowledgeScope(scope);
         setKnowledgePreview(nextPreview);
@@ -656,18 +832,26 @@ const HomeContent: FC = () => {
       saveWorkbenchConfig,
       t,
       workbenchState,
+      cacheKnowledge,
+      setKnowledgeScope,
+      setKnowledgePreview,
     ]
   );
 
   const handleKnowledgeScopeResolved = useCallback(
     (resolution: KnowledgeScopeResolution) => {
       if (activeThreadId) {
-        knowledgePreviewsRef.current.set(activeThreadId, resolution.effective);
+        cacheKnowledge(activeThreadId, { preview: resolution.effective });
       }
       setKnowledgePreview(resolution.effective);
       showKnowledgeScopeWarnings(resolution.warnings);
     },
-    [activeThreadId, showKnowledgeScopeWarnings]
+    [
+      activeThreadId,
+      showKnowledgeScopeWarnings,
+      cacheKnowledge,
+      setKnowledgePreview,
+    ]
   );
 
   const handleChatModeChange = useCallback((mode: ChatMode) => {
@@ -691,7 +875,9 @@ const HomeContent: FC = () => {
           });
         } catch (error) {
           message.error(
-            error instanceof Error ? error.message : "资源配置保存失败"
+            error instanceof Error
+              ? error.message
+              : t("workbench.resources.saveFailed")
           );
         }
         return;
@@ -701,6 +887,7 @@ const HomeContent: FC = () => {
     [
       activeConversationId,
       saveWorkbenchConfig,
+      t,
       workbenchState.config,
       dispatchWorkbench,
     ]
@@ -711,6 +898,10 @@ const HomeContent: FC = () => {
       mounts: import("@/features/workbench").WorkbenchSkillMount[],
       skills: Array<{ skill_id: string; name: string }>
     ) => {
+      if (runtime.thread.getState().isRunning)
+        throw new Error(
+          t("workbench.controls.waitForReply", "请等待当前回复完成")
+        );
       const nextConfig = { ...workbenchState.config, skill_mounts: mounts };
       const numericConversationId = Number(activeConversationId);
       if (
@@ -734,18 +925,44 @@ const HomeContent: FC = () => {
       dispatchWorkbench,
       saveWorkbenchConfig,
       workbenchState.config,
+      runtime.thread,
+      t,
     ]
   );
 
   const handleModelChange = async (modelId: string) => {
+    if (modelSavePending.current) return;
     const id = Number(modelId);
     if (!Number.isInteger(id) || id <= 0) return;
     if (workbenchState.config.model_id === id) return;
-    const config = { ...workbenchState.config, model_id: id };
+    const scope = `${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}`;
+    if (effectiveWorkbenchConfig.model_id != null) {
+      rememberedModelControls.current.set(
+        `${scope}:${effectiveWorkbenchConfig.model_id}`,
+        {
+          deep_thinking:
+            effectiveWorkbenchConfig.generation_config.deep_thinking,
+          thinking_effort:
+            effectiveWorkbenchConfig.generation_config.thinking_effort,
+          reasoning_budget_tokens:
+            effectiveWorkbenchConfig.generation_config.reasoning_budget_tokens,
+          temperature: effectiveWorkbenchConfig.generation_config.temperature,
+          top_p: effectiveWorkbenchConfig.generation_config.top_p,
+        }
+      );
+    }
+    const remembered = rememberedModelControls.current.get(`${scope}:${id}`);
+    const config = selectWorkbenchModel(
+      workbenchState.config,
+      availableLlmModels,
+      id,
+      remembered
+    );
     const conversationId = Number(activeConversationId);
     const isExistingConversation =
       Number.isInteger(conversationId) && conversationId > 0;
-    if (isExistingConversation) setIsSavingModel(true);
+    modelSavePending.current = true;
+    setIsSavingModel(true);
     try {
       if (isExistingConversation) {
         await saveWorkbenchConfig(conversationId, config);
@@ -758,10 +975,13 @@ const HomeContent: FC = () => {
       }
     } catch (error) {
       message.error(
-        error instanceof Error ? error.message : "模型配置保存失败"
+        error instanceof Error
+          ? error.message
+          : t("ui.localization.modelSaveFailed")
       );
     } finally {
-      if (isExistingConversation) setIsSavingModel(false);
+      modelSavePending.current = false;
+      setIsSavingModel(false);
     }
   };
 
@@ -770,13 +990,26 @@ const HomeContent: FC = () => {
       import("@/features/workbench").WorkbenchSessionConfig["generation_config"]
     >
   ) => {
+    if (modelSavePending.current) return;
+    const base =
+      patch.deep_thinking === true &&
+      !effectiveWorkbenchConfig.generation_config.deep_thinking &&
+      effectiveWorkbenchConfig.model_id != null
+        ? selectWorkbenchModel(
+            effectiveWorkbenchConfig,
+            availableLlmModels,
+            effectiveWorkbenchConfig.model_id
+          )
+        : effectiveWorkbenchConfig;
     const config = {
-      ...effectiveWorkbenchConfig,
+      ...base,
       generation_config: {
-        ...effectiveWorkbenchConfig.generation_config,
+        ...base.generation_config,
         ...patch,
       },
     };
+    modelSavePending.current = true;
+    setIsSavingModel(true);
     try {
       if (Number(activeConversationId) > 0) {
         await saveWorkbenchConfig(Number(activeConversationId), config);
@@ -789,8 +1022,15 @@ const HomeContent: FC = () => {
       }
     } catch (error) {
       message.error(
-        error instanceof Error ? error.message : "思考配置保存失败"
+        error instanceof Error
+          ? error.message
+          : t("ui.localization.reasoningSaveFailed")
       );
+      // Discard only the failed numeric edit; never display it as saved intent.
+      setModelSettingsRevision((current) => current + 1);
+    } finally {
+      modelSavePending.current = false;
+      setIsSavingModel(false);
     }
   };
 
@@ -852,112 +1092,108 @@ const HomeContent: FC = () => {
   // conversation_id returned in the response header, which we then reuse as
   // `threadId` for future runs in the same thread.
   useEffect(() => {
-    runtime.thread.composer.setRunConfig({
-      custom: {
-        ...(workbenchState.config.mode === "agent_create" && creationAgent
-          ? { agentId: creationAgent.agentId }
-          : {}),
-        ...(activeConversationId ? { threadId: activeConversationId } : {}),
-        ...(knowledgeScope ? { knowledgeScope } : {}),
-        ...(runtimeMetadataDirty ? { runtimeMetadata } : {}),
-        ...(runtimeMetadataDirty && Number(activeConversationId) > 0
-          ? { runtimeMetadataVersion }
-          : {}),
-        onRuntimeMetadataSent: handleRuntimeMetadataSent,
-        onWorkbenchConfigVersion: (version: number) =>
-          activeConversationIdRef.current === activeConversationId &&
-          dispatchWorkbench({ type: "set-version", version }),
-        onWorkbenchConfigConflict: async (query: string) => {
-          const current = await conversationService.getById(
-            String(activeConversationId)
-          );
-          if (activeConversationIdRef.current !== activeConversationId) return;
-          if (current.workbench_config) {
-            dispatchWorkbench({
-              type: "restore",
-              config: current.workbench_config,
-              version: current.workbench_config_version ?? 0,
-            });
-            setKnowledgeScope(current.workbench_config.knowledge_scope ?? null);
-            setKnowledgePreview(null);
-          }
-          if (!runtime.thread.composer.getState().text)
-            runtime.thread.composer.setText(query);
-          message.warning("配置已更新，已重新加载并保留输入；请确认后重新发送");
-        },
-        onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
-        onGenerationStopped: handleGenerationStopped,
-        enablePlan: chatMode === "planning",
-        ...(workbenchState.config.mode === "agent_create"
-          ? {
-              runtimeMode: "nl2agent" as const,
-              persistCreationHistory: true,
-              creationWorkbenchConfig: workbenchState.config,
-              autoCreateAgentDraft: shouldAutoCreateAgentDraft(
-                activeConversationId,
-                activeThreadId != null &&
-                  recoverableCreationThreads.has(activeThreadId)
-              ),
-              agentAuthor: user?.email || "",
-              onNl2AgentDraftCreated: async (created: CreatedAgentResult) => {
-                await prepareWorkbenchAgentDraft(created.agentId);
-                resetNl2AgentFlow(created.agentId);
-                const threadId = runtime.threads.getState().mainThreadId;
-                if (!threadId) return;
-                creationAgentsByThreadRef.current = {
-                  ...creationAgentsByThreadRef.current,
-                  [threadId]: created,
-                };
-                setCreationAgentsByThread(creationAgentsByThreadRef.current);
-                setRecoverableCreationThreads((threads) => {
-                  const next = new Set(threads);
-                  next.delete(threadId);
-                  return next;
-                });
-              },
-              onNl2AgentState: handleNl2AgentState,
-            }
-          : workbenchState.config.mode === "skill_create"
-            ? {
-                runtimeMode: "nl2skill" as const,
-                persistCreationHistory: true,
-                creationWorkbenchConfig: workbenchState.config,
-                complexity: "complicated" as const,
-                language: i18n.language?.startsWith("en")
-                  ? ("en" as const)
-                  : ("zh" as const),
-                modelId: workbenchState.config.model_id,
-                draftSnapshot: {
-                  ...(buildSkillSavePayload(skillDraftRef.current) ?? {}),
-                  files: Object.entries(skillDraftRef.current.files).map(
-                    ([path, content]) => ({ path, content })
-                  ),
-                },
-                onNl2SkillEvent: handleNl2SkillEvent,
-              }
-            : {}),
-        ...(!["agent_create", "skill_create"].includes(
-          workbenchState.config.mode
-        )
-          ? {
-              workbenchConfig: effectiveWorkbenchConfig,
-              workbenchConfigVersion: workbenchState.configVersion,
-            }
-          : {}),
-        ...(activeThreadId
-          ? {
-              onServerConversationId: (
-                serverId: string,
-                initialQuestion?: string
-              ) =>
-                handleServerConversationId(
-                  activeThreadId,
-                  serverId,
-                  initialQuestion
-                ),
-            }
-          : {}),
+    applyComposerRunConfig(runtime, activeThreadId, {
+      ...(workbenchState.config.mode === "agent_create" && creationAgent
+        ? { agentId: creationAgent.agentId }
+        : {}),
+      ...(activeConversationId ? { threadId: activeConversationId } : {}),
+      ...(knowledgeScope ? { knowledgeScope } : {}),
+      ...(runtimeMetadataDirty ? { runtimeMetadata } : {}),
+      ...(runtimeMetadataDirty && Number(activeConversationId) > 0
+        ? { runtimeMetadataVersion }
+        : {}),
+      onRuntimeMetadataSent: handleRuntimeMetadataSent,
+      onWorkbenchConfigVersion: (version: number) =>
+        activeConversationIdRef.current === activeConversationId &&
+        dispatchWorkbench({ type: "set-version", version }),
+      onWorkbenchConfigConflict: async (query: string) => {
+        const current = await conversationDetails.refresh(
+          String(activeConversationId)
+        );
+        if (activeConversationIdRef.current !== activeConversationId) return;
+        if (current.workbench_config) {
+          dispatchWorkbench({
+            type: "restore",
+            config: current.workbench_config,
+            version: current.workbench_config_version ?? 0,
+          });
+          setKnowledgeScope(current.workbench_config.knowledge_scope ?? null);
+          setKnowledgePreview(null);
+        }
+        if (!runtime.thread.composer.getState().text)
+          runtime.thread.composer.setText(query);
+        message.warning(t("ui.localization.reloadRetainedInput"));
       },
+      onKnowledgeScopeResolved: handleKnowledgeScopeResolved,
+      onGenerationStopped: handleGenerationStopped,
+      enablePlan: chatMode === "planning",
+      ...(workbenchState.config.mode === "agent_create"
+        ? {
+            runtimeMode: "nl2agent" as const,
+            persistCreationHistory: true,
+            creationWorkbenchConfig: effectiveWorkbenchConfig,
+            autoCreateAgentDraft: shouldAutoCreateAgentDraft(
+              activeConversationId,
+              activeThreadId != null &&
+                recoverableCreationThreads.has(activeThreadId)
+            ),
+            agentAuthor: user?.email || "",
+            onNl2AgentDraftCreated: async (created: CreatedAgentResult) => {
+              await prepareWorkbenchAgentDraft(created.agentId);
+              resetNl2AgentFlow(created.agentId);
+              const threadId = runtime.threads.getState().mainThreadId;
+              if (!threadId) return;
+              creationAgentsByThreadRef.current = {
+                ...creationAgentsByThreadRef.current,
+                [threadId]: created,
+              };
+              setCreationAgentsByThread(creationAgentsByThreadRef.current);
+              setRecoverableCreationThreads((threads) => {
+                const next = new Set(threads);
+                next.delete(threadId);
+                return next;
+              });
+            },
+            onNl2AgentState: handleNl2AgentState,
+          }
+        : workbenchState.config.mode === "skill_create"
+          ? {
+              runtimeMode: "nl2skill" as const,
+              persistCreationHistory: true,
+              creationWorkbenchConfig: effectiveWorkbenchConfig,
+              complexity: "complicated" as const,
+              language: i18n.language?.startsWith("en")
+                ? ("en" as const)
+                : ("zh" as const),
+              modelId: effectiveWorkbenchConfig.model_id,
+              draftSnapshot: {
+                ...(buildSkillSavePayload(skillDraftRef.current) ?? {}),
+                files: Object.entries(skillDraftRef.current.files).map(
+                  ([path, content]) => ({ path, content })
+                ),
+              },
+              onNl2SkillEvent: handleNl2SkillEvent,
+            }
+          : {}),
+      ...(!["agent_create", "skill_create"].includes(workbenchState.config.mode)
+        ? {
+            workbenchConfig: effectiveWorkbenchConfig,
+            workbenchConfigVersion: workbenchState.configVersion,
+          }
+        : {}),
+      ...(activeThreadId
+        ? {
+            onServerConversationId: (
+              serverId: string,
+              initialQuestion?: string
+            ) =>
+              handleServerConversationId(
+                activeThreadId,
+                serverId,
+                initialQuestion
+              ),
+          }
+        : {}),
     });
   }, [
     runtime,
@@ -984,6 +1220,10 @@ const HomeContent: FC = () => {
     workbenchState,
     effectiveWorkbenchConfig,
     dispatchWorkbench,
+    setKnowledgeScope,
+    setKnowledgePreview,
+    t,
+    conversationDetails,
   ]);
 
   // Restore historical plan and chat mode from the same conversation detail
@@ -1014,6 +1254,8 @@ const HomeContent: FC = () => {
     chatMode,
     resumedConversationIdsRef,
     handleGenerationStopped,
+    loadDetail: conversationDetails.load,
+    invalidateDetail: conversationDetails.invalidate,
   });
 
   // Publish the server conversation id registry to the thread-list adapter so
@@ -1039,6 +1281,11 @@ const HomeContent: FC = () => {
   const handleNewConversation = useCallback(async () => {
     handlePrepareNewConversation();
     await runtime.threads.switchToNewThread();
+    // Re-fetch the conversation list: the thread the user just left only
+    // became a server-side conversation when its first message was sent, and
+    // without a reload it would disappear from the sidebar until a manual
+    // page refresh (the newchat page already reloads at this point).
+    await runtime.threads.reload();
   }, [handlePrepareNewConversation, runtime]);
 
   const applyAgentMounts = useCallback(
@@ -1090,11 +1337,13 @@ const HomeContent: FC = () => {
         );
       } catch (error) {
         message.error(
-          error instanceof Error ? error.message : "智能体切换失败"
+          error instanceof Error
+            ? error.message
+            : t("ui.localization.agentSwitchFailed")
         );
       }
     },
-    [applyAgentMounts, runtime]
+    [applyAgentMounts, runtime, t]
   );
 
   const workbenchSendability = getWorkbenchSendability(
@@ -1108,7 +1357,11 @@ const HomeContent: FC = () => {
     try {
       await changeAgentTopology(runtime, () => applyAgentMounts(mounts));
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "智能体移除失败");
+      message.error(
+        error instanceof Error
+          ? error.message
+          : t("ui.localization.agentRemoveFailed")
+      );
     }
   };
   const isCreating =
@@ -1120,21 +1373,67 @@ const HomeContent: FC = () => {
     try {
       if (
         mode !== "generic_chat" &&
-        !canAccessRoute(mode === "agent_create" ? "/agents" : "/skill-space")
+        !hasPermission(
+          mode === "agent_create" ? "agent:create" : "skill:create"
+        )
       )
         return false;
       if (runtime.thread.getState().isRunning) {
-        message.warning("请等待当前回复完成后再开始创建");
+        message.warning(t("ui.localization.waitReplyCreation"));
         return false;
       }
+      if (mode === workbenchState.config.mode) return true;
+      const currentId = runtime.threads.getState().mainThreadId;
+      if (currentId) {
+        const snapshot = {
+          state: structuredClone(workbenchState),
+          skillDraft: structuredClone(skillDraftRef.current),
+          savedSkillName,
+          selectedAgent,
+          scope: knowledgeScope,
+          preview: knowledgePreview,
+        };
+        setLocalThreadSnapshots((snapshots) =>
+          new Map(snapshots).set(currentId, snapshot)
+        );
+      }
+      if (mode === "generic_chat" && creationReturnRef.current) {
+        const returnId = creationReturnRef.current;
+        await returnFromCreation(runtime, returnId, () => {
+          const cached = localThreadSnapshots.get(returnId);
+          if (cached) {
+            dispatchWorkbench({
+              type: "restore",
+              config: cached.state.config,
+              version: cached.state.configVersion,
+            });
+            dispatchWorkbench({
+              type: "set-skill-names",
+              names: cached.state.skillNames,
+            });
+            onRestoreAgent(cached.selectedAgent);
+            setKnowledgeScope(cached.scope);
+            setKnowledgePreview(cached.preview);
+          } else onWorkbenchModeChange("generic_chat");
+        });
+        creationReturnRef.current = null;
+        return true;
+      }
+      if (!isCreating) creationReturnRef.current = currentId ?? null;
       await changeCreationThread(runtime, () => onWorkbenchModeChange(mode));
+      setSkillPickerOpen(false);
+      setAgentPickerOpen(false);
       skillDraftRef.current = initialSkillCreationDraft;
       setSkillDraft(initialSkillCreationDraft);
       setSavedSkillName(null);
       resetNl2AgentFlow(null);
       return true;
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "创建会话失败");
+      message.error(
+        error instanceof Error
+          ? error.message
+          : t("ui.localization.conversationCreateFailed")
+      );
       return false;
     }
   };
@@ -1144,241 +1443,280 @@ const HomeContent: FC = () => {
   ) => {
     const result = await createSkill(payload);
     if (!result.success) {
-      message.error(result.message || "Skill 保存失败");
+      message.error(result.message || t("ui.localization.skillSaveFailed"));
       return;
     }
     setSavedSkillName(payload.name);
-    message.success("Skill 已保存到我的 Skills");
+    message.success(t("ui.localization.skillSaved"));
   };
 
-  // Conditional rendering must happen after all hooks
-  if (!ready) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        Loading conversation…
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex w-full h-full">
+  const content = (
+    <>
       <div className="shrink-0 h-full">
-        <SidebarProvider className="w-auto h-full">
-          <ThreadListSidebar
-            showLegacySwitch={false}
-            generatedTitles={generatedTitles}
-            serverConversationIds={serverConversationIds}
-            onPrepareNewConversation={handlePrepareNewConversation}
-            onNewConversation={handleNewConversation}
-          />
-        </SidebarProvider>
+        <ThreadListSidebar
+          collapseToFloatingButton
+          pinStorageKey={
+            user ? getWorkbenchPinStorageKey(user.id, user.tenantId) : null
+          }
+          generatedTitles={generatedTitles}
+          serverConversationIds={serverConversationIds}
+          onRenameSuccess={handleConversationRenamed}
+          onPrepareNewConversation={handlePrepareNewConversation}
+          onNewConversation={handleNewConversation}
+        />
       </div>
 
-      <div className="flex min-h-0 flex-1 min-w-0 flex-col">
-        <div className="min-h-0 flex-1">
-          <Chat
-            generatedTitle={
-              activeThreadId ? generatedTitles.get(activeThreadId) : undefined
-            }
-            conversationId={
-              activeConversationId && Number(activeConversationId) > 0
-                ? Number(activeConversationId)
-                : undefined
-            }
-            isLoadingAgents={isLoadingAgents}
-            interactionContent={
-              <>
-                {workbenchState.config.mode === "skill_create" &&
-                  skillDraft.complete && (
-                    <SkillCreationResultCard
-                      payload={buildSkillSavePayload(skillDraft)}
-                      saved={
-                        savedSkillName !== null &&
-                        savedSkillName ===
-                          buildSkillSavePayload(skillDraft)?.name
-                      }
-                      onSave={handleSaveSkill}
-                    />
-                  )}
-              </>
-            }
-            selectedAgent={null}
-            modelSelectionScope="tenant"
-            fallbackAgentName={t("workbench.genericAgentName", "智能体工作台")}
-            landingContent={
-              <div className="mx-auto flex w-full max-w-4xl flex-col items-center gap-6 text-center">
-                <div className="flex size-16 items-center justify-center rounded-full bg-primary/10 ring-4 ring-primary/10">
-                  <Sparkles className="size-8 text-primary" />
-                </div>
-                <h1 className="text-balance text-2xl font-semibold text-foreground md:text-3xl">
-                  {t(
-                    "workbench.landingGreeting",
-                    "你好，我是 Nexent，需要我帮你做什么？"
-                  )}
-                </h1>
-              </div>
-            }
-            selectedModelId={effectiveWorkbenchConfig.model_id?.toString()}
-            deepThinking={workbenchState.config.generation_config.deep_thinking}
-            onDeepThinkingChange={(enabled) =>
-              void handleThinkingChange({ deep_thinking: enabled })
-            }
-            thinkingEffort={
-              workbenchState.config.generation_config.thinking_effort
-            }
-            onThinkingEffortChange={(effort) =>
-              void handleThinkingChange({ thinking_effort: effort })
-            }
-            showModelSelector={!isCreating}
-            onModelChange={(id) => void handleModelChange(id)}
-            onAgentSelected={handleAgentSelectedFromLanding}
-            chatMode={chatMode}
-            onChatModeChange={handleChatModeChange}
-            isDictationConfigured={isDictationConfigured}
-            knowledgeScope={isCreating ? null : knowledgeScope}
-            knowledgePreview={isCreating ? null : knowledgePreview}
-            knowledgeCapabilities={isCreating ? null : knowledgeCapabilities}
-            onKnowledgeScopeChange={
-              isCreating ? undefined : handleKnowledgeScopeChange
-            }
-            runtimeMetadata={runtimeMetadata}
-            onRuntimeMetadataChange={handleRuntimeMetadataChange}
-            readOnly={
-              !workbenchSendability.canSend ||
-              (!isCreating && effectiveWorkbenchConfig.model_id == null) ||
-              isSavingModel ||
-              (workbenchState.config.mode === "agent_create" &&
-                isAgentCreationAwaitingDraft(
-                  activeThread?.remoteId,
-                  !!creationAgent,
-                  !!(
-                    activeThreadId &&
-                    recoverableCreationThreads.has(activeThreadId)
+      <WorkbenchLoadingBoundary
+        conversationReady={ready}
+        modelsLoading={isLoadingModels}
+        bootstrapLoading={isLoadingWorkbenchBootstrap}
+        resourcesResolving={workbenchState.resolving}
+      >
+        <div className="flex min-h-0 flex-1 min-w-0 flex-col">
+          <div className="min-h-0 flex-1">
+            <Chat
+              showConversationTitle={false}
+              generatedTitle={
+                activeThreadId ? generatedTitles.get(activeThreadId) : undefined
+              }
+              conversationId={
+                activeConversationId && Number(activeConversationId) > 0
+                  ? Number(activeConversationId)
+                  : undefined
+              }
+              isLoadingAgents={isLoadingAgents}
+              interactionContent={
+                <>
+                  {workbenchState.config.mode === "skill_create" &&
+                    skillDraft.complete && (
+                      <SkillCreationResultCard
+                        payload={buildSkillSavePayload(skillDraft)}
+                        saved={
+                          savedSkillName !== null &&
+                          savedSkillName ===
+                            buildSkillSavePayload(skillDraft)?.name
+                        }
+                        onSave={handleSaveSkill}
+                      />
+                    )}
+                </>
+              }
+              selectedAgent={null}
+              modelSelectionScope="tenant"
+              fallbackAgentName={t(
+                "workbench.genericAgentName",
+                "智能体工作台"
+              )}
+              landingContent={<WorkbenchGreeting />}
+              selectedModelId={effectiveWorkbenchConfig.model_id?.toString()}
+              deepThinking={
+                effectiveWorkbenchConfig.generation_config.deep_thinking
+              }
+              onDeepThinkingChange={(enabled) =>
+                void handleThinkingChange({ deep_thinking: enabled })
+              }
+              thinkingEffort={
+                effectiveWorkbenchConfig.generation_config.thinking_effort
+              }
+              onThinkingEffortChange={(effort) =>
+                void handleThinkingChange({ thinking_effort: effort })
+              }
+              showModelSelector={true}
+              reasoningBudgetTokens={
+                effectiveWorkbenchConfig.generation_config
+                  .reasoning_budget_tokens ?? 0
+              }
+              onReasoningBudgetTokensChange={(budget) =>
+                void handleThinkingChange({
+                  reasoning_budget_tokens: budget,
+                  thinking_effort: "auto",
+                })
+              }
+              modelParameterSettings={{
+                scopeKey: `${user?.tenantId ?? ""}:${user?.id ?? ""}:${activeThreadId ?? "new"}:${effectiveWorkbenchConfig.model_id ?? "default"}:${modelSettingsRevision}`,
+                value: {
+                  temperature:
+                    effectiveWorkbenchConfig.generation_config.temperature ??
+                    undefined,
+                  top_p:
+                    effectiveWorkbenchConfig.generation_config.top_p ??
+                    undefined,
+                },
+                defaultValue: DEFAULT_MODEL_PARAMETER_VALUES,
+                disabled: isThreadRunning || isSavingModel,
+                onChange: (value) =>
+                  void handleThinkingChange({
+                    temperature: value.temperature,
+                    top_p: value.top_p,
+                  }),
+              }}
+              onModelChange={(id) => void handleModelChange(id)}
+              onAgentSelected={handleAgentSelectedFromLanding}
+              chatMode={chatMode}
+              onChatModeChange={handleChatModeChange}
+              composerTools={
+                <>
+                  <ComposerAttachment />
+                  <ComposerDictation configured={isDictationConfigured} />
+                </>
+              }
+              knowledgeScope={isCreating ? null : knowledgeScope}
+              knowledgePreview={isCreating ? null : knowledgePreview}
+              knowledgeCapabilities={isCreating ? null : knowledgeCapabilities}
+              onKnowledgeScopeChange={
+                isCreating ? undefined : handleKnowledgeScopeChange
+              }
+              runtimeMetadata={runtimeMetadata}
+              onRuntimeMetadataChange={handleRuntimeMetadataChange}
+              readOnly={
+                !workbenchSendability.canSend ||
+                isSavingModel ||
+                (workbenchState.config.mode === "agent_create" &&
+                  isAgentCreationAwaitingDraft(
+                    activeThread?.remoteId,
+                    !!creationAgent,
+                    !!(
+                      activeThreadId &&
+                      recoverableCreationThreads.has(activeThreadId)
+                    )
+                  )) ||
+                (workbenchState.config.mode === "agent_create" &&
+                  nl2AgentComposerDisabled)
+              }
+              readOnlyReason={
+                isSavingModel
+                  ? t("ui.localization.savingModel")
+                  : !isCreating && effectiveWorkbenchConfig.model_id == null
+                    ? isLoadingModels
+                      ? t("ui.localization.loadingModels")
+                      : t("ui.localization.noModels")
+                    : workbenchSendability.reason
+              }
+              skillFiles={
+                workbenchState.config.mode === "skill_create" &&
+                Object.keys(skillDraft.files).length > 0
+                  ? Object.entries(skillDraft.files).map(([path, content]) => ({
+                      path,
+                      content,
+                    }))
+                  : undefined
+              }
+              workbenchResources={
+                isCreating
+                  ? undefined
+                  : {
+                      agentName:
+                        selectedAgent?.display_name || selectedAgent?.name,
+                      agents: workbenchState.config.agent_mounts.map(
+                        (mount) => {
+                          const agent = agents.find(
+                            (item) => Number(item.id) === mount.agent_id
+                          );
+                          return {
+                            id: mount.agent_id,
+                            name:
+                              agent?.display_name ||
+                              agent?.name ||
+                              `#${mount.agent_id}`,
+                            remove: () =>
+                              void removeMountedAgent(mount.agent_id),
+                          };
+                        }
+                      ),
+                      onSelectAgent: () => setAgentPickerOpen(true),
+                      onRemoveAgent: () =>
+                        void changeAgentTopology(runtime, () =>
+                          applyAgentMounts([])
+                        ).catch((error) => message.error(error.message)),
+                      skills: workbenchState.config.skill_mounts.map(
+                        (mount) => ({
+                          id: mount.skill_id,
+                          name:
+                            workbenchState.skillNames[mount.skill_id] ||
+                            `#${mount.skill_id}`,
+                        })
+                      ),
+                    }
+              }
+              onRemoveWorkbenchSkill={handleRemoveWorkbenchSkill}
+              onOpenWorkbenchSkillPicker={() => setSkillPickerOpen(true)}
+              workbenchPresentation={{
+                mode: workbenchState.config.mode,
+                onExitCreation: () => void changeCreationMode("generic_chat"),
+                actions: (
+                  <CreationActions
+                    canCreateAgent={hasPermission("agent:create")}
+                    canCreateSkill={hasPermission("skill:create")}
+                    mode={workbenchState.config.mode}
+                    onExit={() => void changeCreationMode("generic_chat")}
+                    disabled={isThreadRunning}
+                    onSelect={(mode) => void changeCreationMode(mode)}
+                  />
+                ),
+              }}
+            />
+          </div>
+          <SkillPicker
+            disabled={isThreadRunning}
+            open={skillPickerOpen}
+            selected={workbenchState.config.skill_mounts}
+            onCancel={() => setSkillPickerOpen(false)}
+            onConfirm={handleReplaceWorkbenchSkills}
+          />
+          <AgentPicker
+            disabled={isThreadRunning}
+            open={agentPickerOpen}
+            agents={agents}
+            selectedId={selectedAgent?.id}
+            selectedIds={workbenchState.config.agent_mounts.map((mount) =>
+              String(mount.agent_id)
+            )}
+            onCancel={() => setAgentPickerOpen(false)}
+            multiple={true}
+            onConfirm={async (selected) => {
+              if (runtime.thread.getState().isRunning)
+                throw new Error(
+                  t("workbench.controls.waitForReply", "请等待当前回复完成")
+                );
+              const current = workbenchState.config.agent_mounts;
+              if (
+                current.length === selected.length &&
+                selected.every((agent) =>
+                  current.some(
+                    (mount) =>
+                      mount.agent_id === Number(agent.id) &&
+                      mount.version_no === agent.current_version_no
                   )
-                )) ||
-              (workbenchState.config.mode === "agent_create" &&
-                nl2AgentComposerDisabled)
-            }
-            readOnlyReason={
-              isSavingModel
-                ? "正在保存模型配置"
-                : !isCreating && effectiveWorkbenchConfig.model_id == null
-                  ? isLoadingModels
-                    ? "正在加载模型"
-                    : "暂无可用模型"
-                  : workbenchSendability.reason
-            }
-            skillFiles={
-              workbenchState.config.mode === "skill_create" &&
-              Object.keys(skillDraft.files).length > 0
-                ? Object.entries(skillDraft.files).map(([path, content]) => ({
-                    path,
-                    content,
+                )
+              )
+                return;
+              if (selected.length > 8)
+                throw new Error(t("ui.localization.agentLimit"));
+              const previews = await Promise.all(
+                selected.map((agent) =>
+                  previewWorkbenchAgent(
+                    Number(agent.id),
+                    agent.current_version_no
+                  )
+                )
+              );
+              await changeAgentTopology(runtime, () =>
+                applyAgentMounts(
+                  previews.map((preview) => ({
+                    agent_id: preview.agent_id,
+                    version_no: preview.version_no,
                   }))
-                : undefined
-            }
-            workbenchResources={
-              isCreating
-                ? undefined
-                : {
-                    agentName:
-                      selectedAgent?.display_name || selectedAgent?.name,
-                    agents: workbenchState.config.agent_mounts.map((mount) => {
-                      const agent = agents.find(
-                        (item) => Number(item.id) === mount.agent_id
-                      );
-                      return {
-                        id: mount.agent_id,
-                        name:
-                          agent?.display_name ||
-                          agent?.name ||
-                          `#${mount.agent_id}`,
-                        remove: () => void removeMountedAgent(mount.agent_id),
-                      };
-                    }),
-                    onSelectAgent: () => setAgentPickerOpen(true),
-                    onRemoveAgent: () =>
-                      void changeAgentTopology(runtime, () =>
-                        applyAgentMounts([])
-                      ).catch((error) => message.error(error.message)),
-                    skills: workbenchState.config.skill_mounts.map((mount) => ({
-                      id: mount.skill_id,
-                      name:
-                        workbenchState.skillNames[mount.skill_id] ||
-                        `#${mount.skill_id}`,
-                    })),
-                  }
-            }
-            onRemoveWorkbenchSkill={handleRemoveWorkbenchSkill}
-            onOpenWorkbenchSkillPicker={() => setSkillPickerOpen(true)}
-            workbenchPresentation={{
-              mode: workbenchState.config.mode,
-              onExitCreation: () => void changeCreationMode("generic_chat"),
-              actions: (
-                <CreationActions
-                  canCreateAgent={canAccessRoute("/agents")}
-                  canCreateSkill={canAccessRoute("/skill-space")}
-                  disabled={isThreadRunning}
-                  onSelect={(mode) => void changeCreationMode(mode)}
-                />
-              ),
+                )
+              );
             }}
+            onSelect={(agent) => void handleAgentSelectedFromLanding(agent)}
           />
         </div>
-        <SkillPicker
-          open={skillPickerOpen}
-          selected={workbenchState.config.skill_mounts}
-          loadDefaults={async () =>
-            (
-              workbenchBootstrap?.generic_agent?.default_skill_resources ?? []
-            ).map((skill) => ({ skill_id: skill.skill_id, config_values: {} }))
-          }
-          onCancel={() => setSkillPickerOpen(false)}
-          onConfirm={handleReplaceWorkbenchSkills}
-        />
-        <AgentPicker
-          open={agentPickerOpen}
-          agents={agents}
-          selectedId={selectedAgent?.id}
-          selectedIds={workbenchState.config.agent_mounts.map((mount) =>
-            String(mount.agent_id)
-          )}
-          onCancel={() => setAgentPickerOpen(false)}
-          multiple={true}
-          onConfirm={async (selected) => {
-            const current = workbenchState.config.agent_mounts;
-            if (
-              current.length === selected.length &&
-              selected.every((agent) =>
-                current.some(
-                  (mount) =>
-                    mount.agent_id === Number(agent.id) &&
-                    mount.version_no === agent.current_version_no
-                )
-              )
-            )
-              return;
-            if (selected.length > 8) throw new Error("最多选择 8 个智能体");
-            const previews = await Promise.all(
-              selected.map((agent) =>
-                previewWorkbenchAgent(
-                  Number(agent.id),
-                  agent.current_version_no
-                )
-              )
-            );
-            await changeAgentTopology(runtime, () =>
-              applyAgentMounts(
-                previews.map((preview) => ({
-                  agent_id: preview.agent_id,
-                  version_no: preview.version_no,
-                }))
-              )
-            );
-          }}
-          onSelect={(agent) => void handleAgentSelectedFromLanding(agent)}
-        />
-      </div>
-    </div>
+      </WorkbenchLoadingBoundary>
+    </>
+  );
+
+  return (
+    <WorkbenchConversationLayout ready>{content}</WorkbenchConversationLayout>
   );
 };

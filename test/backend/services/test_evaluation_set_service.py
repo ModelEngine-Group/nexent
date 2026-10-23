@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for evaluation_set_service focusing on the new
 delete-with-reference-count behavior."""
 
@@ -44,6 +46,7 @@ def _register_package(name: str) -> types.ModuleType:
 _nexent_pkg = _register_package("nexent")
 _nexent_core = _register_package("nexent.core")
 _nexent_core_agents = _register_package("nexent.core.agents")
+sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
 _nexent_core_utils = _register_package("nexent.core.utils")
 _nexent_memory = _register_package("nexent.memory")
 _nexent_monitor = _register_package("nexent.monitor")
@@ -54,6 +57,19 @@ _nexent_pkg.monitor = _nexent_monitor
 _nexent_pkg.storage = _nexent_storage
 _nexent_core.agents = _nexent_core_agents
 _nexent_core.utils = _nexent_core_utils
+_nexent_core_prompts = types.ModuleType("nexent.core.prompts")
+def _load_test_prompt(language, path):
+    import yaml
+    source = _REPO_ROOT / "sdk/nexent/core/prompts" / language / f"{path}.yaml"
+    return yaml.safe_load(source.read_text(encoding="utf-8"))
+_nexent_core_prompts.load_prompt = _load_test_prompt
+_nexent_core_prompts.__path__ = [str(_REPO_ROOT / "sdk/nexent/core/prompts")]
+def _render_test_prompt(source, parameters):
+    from jinja2 import Environment, StrictUndefined
+    return Environment(undefined=StrictUndefined).from_string(source).render(**parameters)
+_nexent_core_prompts.render_prompt_text = _render_test_prompt
+sys.modules["nexent.core.prompts"] = _nexent_core_prompts
+_nexent_core.prompts = _nexent_core_prompts
 
 _agent_model_mock = MagicMock()
 
@@ -199,23 +215,23 @@ _db_pkg.knowledge_db = _knowledge_db_mock
 _utils_pkg = _register_package("utils")
 
 _utils_llm_mock = MagicMock()
-sys.modules["utils.llm_utils"] = _utils_llm_mock
+sys.modules["management.services.model.invocation"] = _utils_llm_mock
 _utils_pkg.llm_utils = _utils_llm_mock
 
 _utils_prompt_mock = MagicMock()
-sys.modules["utils.prompt_template_utils"] = _utils_prompt_mock
+sys.modules["management.services.agent.prompt"] = _utils_prompt_mock
 _utils_pkg.prompt_template_utils = _utils_prompt_mock
 
 # Function-body imports used by the KB / LLM / export helpers.
-sys.modules["utils.evaluation_set_excel_utils"] = MagicMock()
+sys.modules["management.services.evaluation.spreadsheet"] = MagicMock()
 sys.modules["management.services.knowledge_base.service"] = MagicMock()
-sys.modules["utils.agent_profile_utils"] = MagicMock()
+sys.modules["management.services.agent.profile"] = MagicMock()
 
 
 @pytest.fixture
 def service_module(monkeypatch):
-    if "services.evaluation_set_service" in sys.modules:
-        del sys.modules["services.evaluation_set_service"]
+    if "management.services.evaluation.sets" in sys.modules:
+        del sys.modules["management.services.evaluation.sets"]
     # Clear the package attribute so the ``from services`` below triggers a
     # fresh import (and therefore repopulates ``sys.modules``). Without this,
     # Python's attribute-on-package lookup returns the previous module object
@@ -246,7 +262,7 @@ def service_module(monkeypatch):
     sys.modules["database.client"] = db_client_mock
     _db_pkg.client = db_client_mock
 
-    from services import evaluation_set_service
+    from management.services.evaluation import sets as evaluation_set_service
 
     # Patch the names bound at module load time so the test exercises the
     # mocked implementations.
@@ -671,7 +687,7 @@ class TestExportEvaluationSet:
             MagicMock(return_value={"name": "my set"}),
         )
         monkeypatch.setattr(service, "get_evaluation_set_cases_all", MagicMock(return_value=[]))
-        excel_mock = sys.modules["utils.evaluation_set_excel_utils"]
+        excel_mock = sys.modules["management.services.evaluation.spreadsheet"]
         excel_mock.build_evaluation_set_export_bytes = MagicMock(return_value=b"xlsx")
 
         filename, payload = service.export_evaluation_set_impl(1, "t1")
@@ -1002,11 +1018,6 @@ class TestPlanSearchQueries:
         )
         monkeypatch.setattr(
             service,
-            "get_prompt_template",
-            MagicMock(return_value={"SYSTEM_PROMPT": "sp"}),
-        )
-        monkeypatch.setattr(
-            service,
             "call_llm_for_system_prompt",
             MagicMock(return_value='{"queries": ["q1", "q2"]}'),
         )
@@ -1017,9 +1028,6 @@ class TestPlanSearchQueries:
         service, _ = service_module
         monkeypatch.setattr(
             service, "_build_kb_descriptions", MagicMock(return_value="block")
-        )
-        monkeypatch.setattr(
-            service, "get_prompt_template", MagicMock(return_value={"SYSTEM_PROMPT": "sp"})
         )
         monkeypatch.setattr(
             service, "call_llm_for_system_prompt", MagicMock(side_effect=ValueError("x"))
@@ -1408,21 +1416,21 @@ class TestBuildAgentContextBlock:
 
     def test_returns_formatted_profile(self, service_module, monkeypatch):
         service, _ = service_module
-        profile_mock = sys.modules["utils.agent_profile_utils"]
+        profile_mock = sys.modules["management.services.agent.profile"]
         profile_mock.fetch_agent_profile = MagicMock(return_value="profile")
         profile_mock.format_agent_profile_context = MagicMock(return_value="agent ctx")
         assert service._build_agent_context_block(7, "t1") == "agent ctx"
 
     def test_returns_empty_when_profile_context_empty(self, service_module, monkeypatch):
         service, _ = service_module
-        profile_mock = sys.modules["utils.agent_profile_utils"]
+        profile_mock = sys.modules["management.services.agent.profile"]
         profile_mock.fetch_agent_profile = MagicMock(return_value="profile")
         profile_mock.format_agent_profile_context = MagicMock(return_value="")
         assert service._build_agent_context_block(7, "t1") == ""
 
     def test_returns_empty_on_error(self, service_module, monkeypatch):
         service, _ = service_module
-        profile_mock = sys.modules["utils.agent_profile_utils"]
+        profile_mock = sys.modules["management.services.agent.profile"]
         profile_mock.fetch_agent_profile = MagicMock(side_effect=RuntimeError("x"))
         assert service._build_agent_context_block(7, "t1") == ""
 
@@ -1523,13 +1531,11 @@ class TestBuildCaseGenUserPrompt:
     def test_appends_instruction_with_sources(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            service,
-            "get_prompt_template",
-            MagicMock(
-                return_value={
-                    "USER_PROMPT_INSTRUCTION": "use {{sources}} count {{count}} max {{max_turns}}"
-                }
-            ),
+            "nexent.core.agents.prompt.auxiliary.load_prompt",
+            MagicMock(return_value={
+                "SYSTEM_PROMPT": "sp {{max_turns}}",
+                "USER_PROMPT_INSTRUCTION": "use {{sources}} count {{count}} max {{max_turns}}",
+            }),
         )
         prompt = service._build_case_gen_user_prompt(
             ["ctx1", "ctx2"], 5, "kbctx", 7
@@ -1542,7 +1548,8 @@ class TestBuildCaseGenUserPrompt:
     def test_returns_context_when_no_instruction(self, service_module, monkeypatch):
         service, _ = service_module
         monkeypatch.setattr(
-            service, "get_prompt_template", MagicMock(return_value={})
+            "nexent.core.agents.prompt.auxiliary.load_prompt",
+            MagicMock(return_value={"SYSTEM_PROMPT": "sp", "USER_PROMPT_INSTRUCTION": ""}),
         )
         prompt = service._build_case_gen_user_prompt(["ctx1"], 1, "", None)
         assert prompt == "ctx1"
@@ -1618,11 +1625,6 @@ class TestCallLlmAndExtractCases:
         service, _ = service_module
         monkeypatch.setattr(
             service,
-            "get_prompt_template",
-            MagicMock(return_value={"SYSTEM_PROMPT": "sp {{max_turns}}"}),
-        )
-        monkeypatch.setattr(
-            service,
             "call_llm_for_system_prompt",
             MagicMock(
                 return_value='[{"inputs": {"query": "q1"}, "label": {"answer": "a1"}}, '
@@ -1635,11 +1637,6 @@ class TestCallLlmAndExtractCases:
 
     def test_raises_when_no_valid_cases(self, service_module, monkeypatch):
         service, _ = service_module
-        monkeypatch.setattr(
-            service,
-            "get_prompt_template",
-            MagicMock(return_value={"SYSTEM_PROMPT": "sp"}),
-        )
         monkeypatch.setattr(
             service, "call_llm_for_system_prompt", MagicMock(return_value="[]")
         )

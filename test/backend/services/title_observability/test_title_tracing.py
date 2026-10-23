@@ -1,7 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """BE-UT-012: verify full title lifecycle, ancestry and request isolation."""
 
 import asyncio
 import threading
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -33,7 +35,9 @@ async def test_http_title_lifecycle(runtime, path):
     assert operation.attributes["session.id"] == "42"
     assert operation.attributes["input.value"] == "hello"
     assert operation.attributes["output.value"] == "Title: hello"
-    runtime.save.assert_called_once_with(42, "Title: hello", "test-user")
+    runtime.save.assert_called_once_with(42, "Title: hello", "test-user", expected_snapshot={
+        "conversation_title": "New Conversation", "title_version": 0,
+    })
     assert not trace.get_current_span().get_span_context().is_valid
 
 
@@ -92,13 +96,15 @@ async def test_disabled_monitoring_preserves_behavior(runtime):
     """BE-UT-012-04: telemetry never becomes a requirement for title generation."""
     runtime.manager._config.enable_telemetry = False
     runtime.prepare.side_effect = None
-    runtime.prepare.return_value = {"SYSTEM_PROMPT": "Title", "USER_PROMPT": "{{ question }}"}
+    runtime.prepare.return_value = SimpleNamespace(system="Title", user="hello")
     runtime.adapter.side_effect = None
     runtime.adapter.return_value.content = "A title"
     runtime.save.side_effect = None
     title = await runtime.service.generate_conversation_title_service(1, "hello", "user", "tenant")
     assert title == "A title"
-    runtime.save.assert_called_once_with(1, "A title", "user")
+    runtime.save.assert_called_once_with(1, "A title", "user", expected_snapshot={
+        "conversation_title": "New Conversation", "title_version": 0,
+    })
     assert runtime.exporter.get_finished_spans() == ()
 
 

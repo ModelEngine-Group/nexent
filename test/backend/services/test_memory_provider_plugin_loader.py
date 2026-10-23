@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import shutil
 import sys
 import types
@@ -42,8 +43,8 @@ sys.modules["nexent.memory"] = memory_pkg
 sys.modules["nexent.memory.providers"] = providers_pkg
 sys.modules["nexent.memory.providers.base"] = providers_base
 
-from backend.services import memory_provider_plugin_loader as plugin_loader_module
-from backend.services.memory_provider_plugin_loader import PluginLoader
+from management.services.memory.providers import plugins as plugin_loader_module
+from management.services.memory.providers.plugins import PluginLoader
 
 
 @pytest.fixture

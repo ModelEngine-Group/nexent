@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for backend/apps/remote_mcp_app.py
 
@@ -27,18 +28,18 @@ sys.modules['elasticsearch'] = elasticsearch_module
 # These patches must be started before any imports that use MinioClient
 import services as _services_mod
 import types as _types
-_mcp_container_svc_stub = _types.ModuleType('services.mcp_container_service')
+_mcp_container_svc_stub = _types.ModuleType('management.services.mcp.containers')
 _mcp_container_svc_stub.create_container_client_from_config = MagicMock()
 _mcp_container_svc_stub.DockerContainerConfig = MagicMock()
 _mcp_container_svc_stub.MCPContainerManager = MagicMock()
 _services_mod.mcp_container_service = _mcp_container_svc_stub
-sys.modules['services.mcp_container_service'] = _mcp_container_svc_stub
+sys.modules['management.services.mcp.containers'] = _mcp_container_svc_stub
 
 # Pre-register stubs for service modules that remote_mcp_app.py imports at module
 # level but whose full import chain pulls in unavailable third-party packages
 # (docker SDK, jieba, mcpadapt, …).
-sys.modules['services.tool_configuration_service'] = MagicMock()
-sys.modules['services.file_management_service'] = MagicMock()
+sys.modules['management.services.tool.configuration'] = MagicMock()
+sys.modules['management.services.file.service'] = MagicMock()
 sys.modules['management.services.knowledge_base.service'] = MagicMock()
 storage_client_mock = MagicMock()
 minio_mock = MagicMock()
@@ -52,8 +53,8 @@ patch('database.client.MinioClient', return_value=minio_mock).start()
 patch('backend.database.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 patch('consts.const.ENABLE_UPLOAD_IMAGE', True).start()
-patch('services.mcp_container_service.create_container_client_from_config').start()
-patch('services.mcp_container_service.DockerContainerConfig').start()
+patch('management.services.mcp.containers.create_container_client_from_config').start()
+patch('management.services.mcp.containers.DockerContainerConfig').start()
 
 from backend.consts.exceptions import (
     MCPConnectionError, MCPNameIllegal, MCPContainerError,
@@ -956,6 +957,76 @@ class TestGetContainerLogs:
         mock_mgr_cls.side_effect = MCPContainerError("Docker unavailable")
         resp = client.get("/mcp/container/cid/logs", headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+
+
+# ============================================================================
+# Security audit entries
+# ============================================================================
+
+class TestMcpAuditEntries:
+    """Security audit entries emitted by MCP service management endpoints."""
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.add_mcp_service', new_callable=AsyncMock)
+    def test_add_emits_audit_entry_without_credentials(self, mock_add, mock_auth, caplog):
+        """Successful add records name/source/server_url, never credentials."""
+        import logging
+        mock_auth.return_value = ("uid", "tid", "en")
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            resp = client.post("/mcp/add", headers=AUTH_HEADER, json={
+                "name": "external-mcp",
+                "server_url": "https://external.example.com/sse",
+                "authorization_token": "sk-secret-token",
+                "custom_headers": {"X-Api-Key": "header-secret"},
+            })
+
+        assert resp.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=mcp_add" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=uid" in messages[0]
+        assert '"name":"external-mcp"' in messages[0]
+        assert '"server_url":"https://external.example.com/sse"' in messages[0]
+        assert "sk-secret-token" not in messages[0]
+        assert "header-secret" not in messages[0]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.delete_mcp_service', new_callable=AsyncMock)
+    def test_delete_emits_audit_entry(self, mock_delete, mock_auth, caplog):
+        """Successful delete records the removed mcp_id."""
+        import logging
+        mock_auth.return_value = ("uid", "tid", "en")
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            resp = client.delete("/mcp/9", headers=AUTH_HEADER)
+
+        assert resp.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=mcp_delete" in messages[0]
+        assert "user_id=uid" in messages[0]
+        assert '"mcp_id":9' in messages[0]
+
+    @patch('apps.remote_mcp_app.get_current_user_info')
+    @patch('apps.remote_mcp_app.update_mcp_service_enabled', new_callable=AsyncMock)
+    def test_disable_emits_audit_entry(self, mock_update, mock_auth, caplog):
+        """Successful disable records the toggled mcp_id."""
+        import logging
+        mock_auth.return_value = ("uid", "tid", "en")
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            resp = client.post("/mcp/disable", headers=AUTH_HEADER, json={"mcp_id": 4})
+
+        assert resp.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=mcp_disable" in messages[0]
+        assert '"mcp_id":4' in messages[0]
 
 
 if __name__ == "__main__":
