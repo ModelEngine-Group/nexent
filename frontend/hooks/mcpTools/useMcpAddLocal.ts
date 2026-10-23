@@ -57,7 +57,7 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
 
     // Parse custom headers JSON if provided
     let customHeaders: Record<string, string> | undefined;
-    if (draft.customHeaders?.trim() && (!isApi || draft.apiAuthEnabled)) {
+    if (draft.customHeaders?.trim()) {
       try {
         customHeaders = JSON.parse(draft.customHeaders.trim());
       } catch {
@@ -158,6 +158,7 @@ export function useMcpAddLocal({ onSuccess, onContainerStarted }: UseMcpAddLocal
           server_url: draft.serverUrl.trim(),
           authorization_token: draft.authorizationToken?.trim() || undefined,
           custom_headers: customHeaders,
+          ssl_verify: isApi ? draft.sslVerify ?? true : undefined,
           config_json: configJson,
           registry_json: registryJson,
           group_ids: draft.groupIds?.join(",") ?? undefined,

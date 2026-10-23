@@ -2448,6 +2448,7 @@ class AddMcpServiceRequest(BaseModel):
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
+    ssl_verify: bool = Field(default=True, description="Whether to verify TLS certificates for API-type MCP services")
     container_config: Optional[Dict[str, Any]] = Field(None, description="Container configuration")
     container_port: Optional[int] = Field(None, ge=1, le=65535, description="Container host port")
     registry_json: Optional[Dict[str, Any]] = Field(None, description="Registry metadata JSON")

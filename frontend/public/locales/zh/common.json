@@ -1980,6 +1980,7 @@
   "mcpConfig.openapiService.form.serverUrlPlaceholder": "请输入服务地址",
   "mcpConfig.openapiService.form.openapiJson": "OpenAPI JSON配置",
   "mcpConfig.openapiService.form.sslVerifyLabel": "校验 SSL 证书",
+  "mcpConfig.openapiService.form.sslVerifyHint": "已开启：将验证 HTTPS 服务端证书，建议保持开启。",
   "mcpConfig.openapiService.form.authEnabledLabel": "启用 API 认证",
   "mcpConfig.openapiService.form.authEnabledHint": "已开启：请填写认证请求头，例如 {\"Authorization\": \"Bearer your-token\"}。",
   "mcpConfig.openapiService.form.authDisabledHint": "已关闭：请求不会携带认证请求头，适用于公开 API。",

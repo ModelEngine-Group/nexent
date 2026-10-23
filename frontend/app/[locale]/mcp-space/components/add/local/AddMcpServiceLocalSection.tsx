@@ -101,7 +101,7 @@ const createInitialDraft = (): LocalAddMcpDraft => ({
   transportType: McpTransportType.URL,
   serverUrl: "",
   authorizationToken: "",
-  apiAuthEnabled: false,
+  sslVerify: true,
   customHeaders: "",
   openApiJson: "",
   containerConfigJson: "",
@@ -236,14 +236,6 @@ export default function AddMcpServiceLocalSection({
         VALIDATION_FIELDS_BY_DEPLOYMENT[deploymentType]
       );
     } catch {
-      return;
-    }
-    if (
-      deploymentType === McpDeploymentType.API &&
-      draft.apiAuthEnabled &&
-      !draft.customHeaders?.trim()
-    ) {
-      message.error(t("mcpConfig.openapiService.message.authHeadersRequired"));
       return;
     }
     const isContainerDeployment =
@@ -508,20 +500,18 @@ export default function AddMcpServiceLocalSection({
                       {renderDescriptionInput()}
                       <div className="flex items-center gap-2">
                         <Switch
-                          checked={Boolean(draft.apiAuthEnabled)}
-                          onChange={(checked) =>
-                            patchDraft({ apiAuthEnabled: checked })
-                          }
+                          checked={draft.sslVerify !== false}
+                          onChange={(checked) => patchDraft({ sslVerify: checked })}
                         />
-                        <span>{t("mcpConfig.openapiService.form.authEnabledLabel")}</span>
+                        <span>{t("mcpConfig.openapiService.form.sslVerifyLabel")}</span>
                       </div>
                       <Alert
-                        type={draft.apiAuthEnabled ? "info" : "success"}
+                        type={draft.sslVerify === false ? "warning" : "info"}
                         showIcon
                         message={t(
-                          draft.apiAuthEnabled
-                            ? "mcpConfig.openapiService.form.authEnabledHint"
-                            : "mcpConfig.openapiService.form.authDisabledHint"
+                          draft.sslVerify === false
+                            ? "mcpConfig.openapiService.form.sslVerifyWarning"
+                            : "mcpConfig.openapiService.form.sslVerifyHint"
                         )}
                       />
                       <Form.Item
@@ -535,7 +525,6 @@ export default function AddMcpServiceLocalSection({
                           )}
                           {...bindField("customHeaders")}
                           rows={2}
-                          disabled={!draft.apiAuthEnabled}
                         />
                       </Form.Item>
                       <Form.Item

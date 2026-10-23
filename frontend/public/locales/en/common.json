@@ -2085,6 +2085,7 @@
   "mcpConfig.openapiService.form.serverUrlPlaceholder": "Please enter server URL",
   "mcpConfig.openapiService.form.openapiJson": "OpenAPI JSON",
   "mcpConfig.openapiService.form.sslVerifyLabel": "Verify SSL certificate",
+  "mcpConfig.openapiService.form.sslVerifyHint": "Enabled: HTTPS server certificates will be verified. Keeping this enabled is recommended.",
   "mcpConfig.openapiService.form.authEnabledLabel": "Enable API authentication",
   "mcpConfig.openapiService.form.authEnabledHint": "Enabled: provide authentication headers, for example {\"Authorization\": \"Bearer your-token\"}.",
   "mcpConfig.openapiService.form.authDisabledHint": "Disabled: no authentication headers will be sent; use this for public APIs.",
