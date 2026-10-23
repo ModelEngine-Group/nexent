@@ -11,9 +11,9 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from consts.exceptions import AppException
+from contracts.errors.exceptions import AppException
 from contracts.clarification import ClarificationResponse
-from database import conversation_db as db
+from management.db.conversation import repository as db
 
 FORM = {
     'schema_version': 1,
@@ -194,7 +194,7 @@ def test_ambiguous_form_without_unit_index_is_rejected(storage):
 
 
 def test_agent_request_retains_structured_response():
-    from consts.model import AgentRequest
+    from contracts.agent import AgentRequest
 
     request = AgentRequest(query='Readable answers', conversation_id=1, clarification_response=RESPONSE)
     assert request.clarification_response.answers[1].value == 'b'
@@ -202,7 +202,7 @@ def test_agent_request_retains_structured_response():
 
 
 def test_service_passes_structured_answers_to_atomic_message_save(monkeypatch):
-    from consts.model import AgentRequest
+    from contracts.agent import AgentRequest
     from management.services.conversation import service
 
     captured = []

@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
-from consts.exceptions import McpNotFoundError
+from contracts.errors.exceptions import McpNotFoundError
 from management.services.agent import management as agent_service
 from management.services.skill.service import SkillService
 from management.services.mcp import service as remote_mcp_service

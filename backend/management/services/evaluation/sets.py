@@ -8,40 +8,16 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from consts.const import (
-    AIDP_API_KEY,
-    AIDP_SERVER_URL,
-    AIDP_TENANT_ID,
-    ENABLE_AIDP_KNOWLEDGE,
-)
-from consts.error_code import ErrorCode
-from consts.evaluation_limits import MAX_CASES_PER_SET
-from consts.evaluation_status import EvalRunStatus
-from consts.exceptions import AppException
-from database.agent_version_db import query_version_list
-from database.client import get_db_session
-from database.db_models import (
-    AgentEvaluation,
-    EvaluationSet,
-    EvaluationSetCase,
-    KnowledgeRecord,
-)
-from database.evaluation_set_db import (
-    batch_delete_evaluation_set_cases,
-    count_evaluation_set_cases,
-    count_evaluation_sets,
-    create_evaluation_set,
-    get_cases_by_ids,
-    get_evaluation_set,
-    get_evaluation_set_cases_all,
-    hard_delete_evaluation_set,
-    insert_evaluation_set_cases,
-    list_case_turn_orders_by_session,
-    list_evaluation_set_cases,
-    list_evaluation_sets,
-    update_evaluation_set_case_count,
-)
-from database.knowledge_db import get_index_name_by_knowledge_name
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, ENABLE_AIDP_KNOWLEDGE
+from contracts.errors.codes import ErrorCode
+from contracts.constants.constants import MAX_CASES_PER_SET
+from contracts.evaluation import EvalRunStatus
+from contracts.errors.exceptions import AppException
+from management.db.agent.version import query_version_list
+from management.db.client import get_db_session
+from management.db.models import AgentEvaluation, EvaluationSet, EvaluationSetCase, KnowledgeRecord
+from management.db.evaluation.sets import batch_delete_evaluation_set_cases, count_evaluation_set_cases, count_evaluation_sets, create_evaluation_set, get_cases_by_ids, get_evaluation_set, get_evaluation_set_cases_all, hard_delete_evaluation_set, insert_evaluation_set_cases, list_case_turn_orders_by_session, list_evaluation_set_cases, list_evaluation_sets, update_evaluation_set_case_count
+from management.db.knowledge_base.repository import get_index_name_by_knowledge_name
 from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.agents.prompt.evaluation import (

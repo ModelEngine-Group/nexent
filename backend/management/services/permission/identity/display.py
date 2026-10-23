@@ -9,14 +9,14 @@ logger = logging.getLogger(__name__)
 
 def get_cas_identities(user_ids: Iterable[str]) -> Dict[str, Dict[str, str]]:
     """Load optional storage dependencies only when enrichment is requested."""
-    from database.user_identity_db import get_cas_identities as load
+    from management.db.identity.user_identity import get_cas_identities as load
 
     return load(user_ids)
 
 
 def get_repository_agent_identity_ids(repository_ids: Iterable[int]) -> Dict[int, Dict[str, Optional[str]]]:
     """Resolve explicit versioned source records without guessing from emails."""
-    from database.user_identity_db import get_repository_agent_identity_ids as load
+    from management.db.identity.user_identity import get_repository_agent_identity_ids as load
 
     return load(repository_ids)
 

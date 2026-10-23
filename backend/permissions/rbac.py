@@ -1,10 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Role-based access control backed by role_permission_t."""
 
 import logging
 import threading
 from typing import Dict, Optional, Set
 
-from database.role_permission_db import get_all_role_permissions
+from management.db.identity.role_permission import get_all_role_permissions
 
 
 logger = logging.getLogger(__name__)

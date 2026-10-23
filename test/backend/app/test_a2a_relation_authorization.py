@@ -1,10 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """HTTP errors and mutation suppression for A2A relationship writes."""
 
 import pytest
 
 from test.backend.app import test_a2a_client_app as legacy
-from apps import a2a_client_app as app
-from consts.exceptions import AgentNotFoundError, ForbiddenError
+from management.api.a2a import a2a_client as app
+from contracts.errors.exceptions import AgentNotFoundError, ForbiddenError
 
 
 @pytest.mark.parametrize("method", ["post", "delete"])

@@ -10,23 +10,13 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from nexent.core.agents.agent_model import AgentConfig
 
-from agents.create_agent_info import _resolve_runtime_tool_records
-from consts.exceptions import ValidationError
-from consts.model import (
-    ConversationKnowledgeScopeRequest,
-    ToolParamsRequest,
-)
-from database.agent_db import (
-    query_sub_agent_relations,
-    resolve_sub_agent_version_no,
-    search_agent_info_by_agent_id,
-)
-from database.agent_version_db import query_current_version_no
-from database.knowledge_db import (
-    get_knowledge_info_by_ids_and_tenant,
-    get_knowledge_info_by_tenant_id,
-    get_knowledge_name_map_by_index_names,
-)
+from management.services.agent.resource_resolver import _resolve_runtime_tool_records
+from contracts.errors.exceptions import ValidationError
+from contracts.knowledge import ConversationKnowledgeScopeRequest
+from contracts.tool import ToolParamsRequest
+from management.db.agent.repository import query_sub_agent_relations, resolve_sub_agent_version_no, search_agent_info_by_agent_id
+from management.db.agent.version import query_current_version_no
+from management.db.knowledge_base.repository import get_knowledge_info_by_ids_and_tenant, get_knowledge_info_by_tenant_id, get_knowledge_name_map_by_index_names
 from management.services.knowledge_base.service import ElasticSearchService
 
 
@@ -101,7 +91,7 @@ def _filter_accessible_aidp_ids(
 
 def _resolve_aidp_access_snapshot(user_id: str, tenant_id: str):
     """Resolve AIDP access lazily so deployments without the extension still import."""
-    from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
+    from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
     from ext_components.aidp.services.aidp_access_service import (
         resolve_current_aidp_access,
     )

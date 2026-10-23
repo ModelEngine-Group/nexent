@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import logging
 import re
@@ -5,20 +7,9 @@ import threading
 import time
 from typing import Any, Dict, Mapping, Optional
 
-from consts.const import (
-    CAPACITY_SUGGESTION_ENABLED,
-    CAPACITY_VISIBILITY_ENABLED,
-    NEXENT_LITELLM_JSON,
-)
-from contracts.model import (
-    CapabilityProfileLike,
-    CapacitySuggestionConfidence,
-    CapacitySuggestionFields,
-    CapacitySuggestionMatchKind,
-    CapacitySuggestionResult,
-    ProfileKey,
-)
-from database.model_management_db import get_model_records
+from contracts.constants.environment import CAPACITY_SUGGESTION_ENABLED, CAPACITY_VISIBILITY_ENABLED, NEXENT_LITELLM_JSON
+from contracts.model import CapabilityProfileLike, CapacitySuggestionConfidence, CapacitySuggestionFields, CapacitySuggestionMatchKind, CapacitySuggestionResult, ProfileKey
+from management.db.model.repository import get_model_records
 from management.services.model.names import add_repo_to_name
 
 logger = logging.getLogger(__name__)
@@ -266,7 +257,7 @@ def pick_provider(
 
 
 def _get_default_catalog() -> Mapping[ProfileKey, CapabilityProfileLike]:
-    from consts.capability_profiles import CATALOG
+    from management.services.model.catalog import CATALOG
 
     return CATALOG
 
@@ -575,7 +566,7 @@ except Exception:  # pragma: no cover - OTel is optional at runtime
 # failure (no monitoring impact); only the log line is deduped, so a global
 # catalog bug surfaces once per (model_id, error_type) instead of flooding
 # logs on every endpoint call. Same pattern as
-# `_warn_missing_capacity_once` in `backend/agents/create_agent_info.py`.
+# `_warn_missing_capacity_once` in `backend/management/services/model/run_budget.py`.
 _CAPACITY_SUGGESTION_ERROR_EMITTED: set = set()
 _CAPACITY_SUGGESTION_ERROR_LOCK = threading.Lock()
 

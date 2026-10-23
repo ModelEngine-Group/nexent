@@ -58,7 +58,7 @@ def test_import_conversion_preserves_content_and_consumes_old_sections_once(fiel
 
 
 def test_current_request_and_export_schemas_expose_only_the_unified_prompt():
-    from consts.model import AgentInfoRequest, ExportAndImportAgentInfo
+    from contracts.agent import AgentInfoRequest, ExportAndImportAgentInfo
 
     for model in (AgentInfoRequest, ExportAndImportAgentInfo):
         properties = model.model_json_schema()["properties"]
@@ -68,7 +68,7 @@ def test_current_request_and_export_schemas_expose_only_the_unified_prompt():
 
 
 def test_external_import_consolidates_old_bundle_once_and_exports_only_prompt():
-    from consts.model import AgentImportRequest, ExportAndImportAgentInfo
+    from contracts.agent import AgentImportRequest, ExportAndImportAgentInfo
 
     fields = dict(
         agent_id=1, name="test", description="Description", max_steps=5,
@@ -108,7 +108,7 @@ async def test_verified_draft_context_exposes_only_the_unified_prompt(mocker):
 @pytest.mark.parametrize("field", ["prompt", "constraint_prompt", "few_shots_prompt"])
 @pytest.mark.parametrize("value", [[], {"text": "wrong type"}, 7])
 def test_import_rejects_invalid_prompt_types_with_validation_error(field, value):
-    from consts.model import AgentImportRequest, ExportAndImportAgentInfo
+    from contracts.agent import AgentImportRequest, ExportAndImportAgentInfo
 
     data = dict(agent_id=1, name="test", description="Description", max_steps=5,
                 provide_run_summary=False, enabled=True, tools=[], managed_agents=[],

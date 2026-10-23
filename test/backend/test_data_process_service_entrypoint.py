@@ -31,7 +31,7 @@ def service_module(monkeypatch):
     logging_utils = types.ModuleType("infrastructure.logging")
     logging_utils.configure_logging = MagicMock()
     logging_utils.get_uvicorn_logging_config = MagicMock(return_value={})
-    constants = types.ModuleType("consts.const")
+    constants = types.ModuleType("contracts.constants.environment")
     constants.REDIS_URL = "redis://test:6379/0"
     constants.REDIS_BACKEND_URL = "redis://test:6379/1"
     constants.REDIS_PORT = 6379
@@ -50,7 +50,7 @@ def service_module(monkeypatch):
         "dotenv": dotenv,
         "fastapi": fastapi,
         "infrastructure.logging": logging_utils,
-        "consts.const": constants,
+        "contracts.constants.environment": constants,
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
 
@@ -101,9 +101,9 @@ def test_parse_arguments_exposes_supported_service_flags(service_module, monkeyp
 
 
 def test_create_app_registers_data_process_router(service_module, monkeypatch):
-    app_module = types.ModuleType("apps.data_process_app")
+    app_module = types.ModuleType("data_process.api.tasks.routes")
     app_module.router = object()
-    monkeypatch.setitem(sys.modules, "apps.data_process_app", app_module)
+    monkeypatch.setitem(sys.modules, "data_process.api.tasks.routes", app_module)
 
     app = service_module.create_app()
 

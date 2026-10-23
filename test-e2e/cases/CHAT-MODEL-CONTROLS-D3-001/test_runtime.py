@@ -46,7 +46,7 @@ def test_selected_creator_runtime_wire(runtime, path, workbench):
     assert runtime.model_records() == before_models
     if workbench:
         from sqlalchemy import select
-        from database.db_models import ConversationRecord
+        from management.db.models import ConversationRecord
         with runtime.storage["sessions"]() as session:
             stored = session.scalar(select(ConversationRecord.workbench_config).where(
                 ConversationRecord.conversation_id == int(response.headers["conversation_id"])))
@@ -101,7 +101,7 @@ def test_reasoning_variants_preserve_independent_configuration(runtime):
     assert runtime.draft()["model_params_override"] == original["model_params_override"]
     assert runtime.model_records() == original_models
     from sqlalchemy import update
-    from database.db_models import ModelRecord
+    from management.db.models import ModelRecord
     with runtime.storage["sessions"]() as session:
         session.execute(update(ModelRecord).where(ModelRecord.model_id == runtime.models["selected-B"]).values(
             extra_params={"enable_thinking": True, "reasoning_effort": "auto", "__custom__": {"fixture_custom": "retained"}}))
@@ -138,7 +138,7 @@ def test_sampling_runtime_wire_and_persisted_intent(runtime, path, workbench):
     assert runtime.draft()["model_params_override"] == before_draft["model_params_override"]
     if workbench:
         from sqlalchemy import select
-        from database.db_models import ConversationRecord
+        from management.db.models import ConversationRecord
         with runtime.storage["sessions"]() as session:
             saved = session.scalar(select(ConversationRecord.workbench_config).where(
                 ConversationRecord.conversation_id == int(response.headers["conversation_id"])))
@@ -156,7 +156,7 @@ def test_null_sampling_inherits_shared_defaults_and_matches_display_metadata(run
 
     from sqlalchemy import update
 
-    from database.db_models import ModelRecord
+    from management.db.models import ModelRecord
     from management.services.model.management import list_models_for_tenant
 
     with runtime.storage["sessions"]() as session:
