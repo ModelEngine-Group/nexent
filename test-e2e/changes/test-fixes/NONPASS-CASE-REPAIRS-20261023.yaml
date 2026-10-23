@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: NONPASS-CASE-REPAIRS-20261023
+  change_type: test-fix
+  title: Repair unchanged October 22 test implementations without changing product behavior
+  description: >-
+    Remove the duplicate sidebar render helper while retaining its Provider across
+    rerenders and draining scheduled cleanup. Repair title migration SQL callable
+    shadowing and quota fixture imports after the policy split. Align name-check
+    fixture expectations with unique creation and self exclusion, adding an actual
+    route/service HTTP fallback/error regression. Own repository Agents, listings
+    and tag definitions instead of reading historical or official Agent assignments;
+    prove AND/OR/exact filtering and tenant isolation on known IDs. Authenticate by
+    protected content and current identity, not an optional Workbench menu. Navigation
+    HTTP fixtures use the actual group_ids wire field and need no real identity
+    anchors. Container probe evidence is host-owned and immutable; summaries replace
+    old files atomically and Docker failures retain credential-free structural data.
+  traditional_ut:
+    decision: exempt
+    behaviors: []
+    reason: No backend, SDK or frontend product changes; formal Cases and infrastructure regressions only.
+  affected_features:
+    existing: [CHAT-SIDEBAR, F-069, F-185, NAV-MENU-VISIBILITY, V5-PW-AUTH-01,
+      V5-REL-AUTO-80AA755E2436D269, SAI-001]
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [CHAT-SIDEBAR-D1-001, API-AUTO-D6C1BBC6199D63C0,
+      API-AUTO-DDE7582FFE405D54, NAV-MENU-D4-001, PW-AUTH-01,
+      CHAT-TITLE-D5-001, REL-AUTO-80AA755E2436D269, SAI-D3-001, SAI-D5-001]
+    added: []
+    retired: []
+  notes: >-
+    Preserve the failing product contracts UT-FE-AUTO-02FA904A1C3AD386 and
+    WB-CONTROLS-D4-001; the October 22 triage records identify those product gaps.
+    Do not change colleague-owned PW-EVAL-RUN-01 or EVAL-LEGACY-D5-001. Keep
+    MON-D3-TRACE-NAME-001 blocked and DEP-IMAGE-BASE-TOOLS manual; no fake automated
+    pass is introduced. SAI-D5-001 receives only shared evidence/diagnostic repairs:
+    its original Docker exit cause still requires real execution. Infrastructure
+    unit tests are not SAI runtime acceptance. Current test outcomes and evidence
+    are kept outside the checkout, separate from semantic completeness claims.

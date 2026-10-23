@@ -149,10 +149,12 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
     await agents.openAdvanced();
     await page.getByRole("button", { name: "更多配置", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "更多配置", exact: true });
-    const control = dialog
-      .locator(".ant-form-item")
-      .filter({ hasText: "严格输出协议与静默修复" })
-      .getByRole("switch");
+    // The current editor exposes this policy as an accessible checkbox.
+    // Keep the persisted-boolean assertions; do not infer state from CSS.
+    const control = dialog.getByRole("checkbox", {
+      name: "严格输出协议与静默修复",
+      exact: true,
+    });
     if (enabled) await expect(control).toBeChecked();
     else await expect(control).not.toBeChecked();
     if (screenshot)

@@ -10,6 +10,7 @@ import pytest
 
 from shared.http import assert_status, client, response_message
 from shared.factories.ownership import register_owned_http
+from shared.aidp import create_payload
 
 CASE_ID = 'API-AUTO-7513FEF9904B9F3F'
 
@@ -79,11 +80,7 @@ async def test_aidp_kb_update_delete_core_api_auto_7513fef9904b9f3f(
         async with client('config', token=tenant_a_admin.access_token) as api:
             create = await api.post(
                 '/aidp-mgmt/knowledge-bases',
-                json={
-                    'name': name,
-                    'description': '初始描述',
-                    'ingroup_permission': 'PRIVATE',
-                },
+                json=await create_payload(tenant_a_admin, name, description='初始描述', ingroup_permission='PRIVATE'),
             )
             assert_status(create, 200)
             created = create.json() or {}

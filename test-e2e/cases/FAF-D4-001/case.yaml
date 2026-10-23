@@ -15,6 +15,8 @@ case:
   automation: automated
   objective: Verify the approved final answer display contract at the declared stage.
   preconditions:
+  - Owned fixture instructions use the canonical prompt field; draft and published
+    instructions are verified before opening the browser conversation.
   - Local deployment running this branch, authenticated test tenant and configured real model.
   test_data:
     profile: real_smoke

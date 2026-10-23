@@ -1,5 +1,11 @@
 # Design — Kubernetes deployment environment injection
 
+> Scope update (2026-10-23): the user removed Kubernetes deployment D5 tests
+> from the formal baseline. K8S-ENV-D5-001 and its execution binding/script
+> no longer exist. Case references, commands and receipts below are historical
+> evidence, not current execution instructions or retained D5 coverage.
+> Kubernetes product behavior and traditional UT remain unchanged.
+
 ## K8S deployment version selection — K8S-VERSION-DEFAULT
 
 This follow-up reuses the existing deployment configuration design path and
