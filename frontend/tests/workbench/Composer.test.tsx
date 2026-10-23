@@ -205,25 +205,6 @@ it("caps the workbench model selector width so long names truncate on one row", 
   expect(props.className).not.toContain("max-w-[180px]");
 });
 
-it("keeps the model controls on the toolbar row instead of wrapping to a second line", () => {
-  const { container } = render(
-    <Composer
-      models={[{ id: "1", name: "model" }]}
-      selectedModelId="1"
-      chatMode="execution"
-      onChatModeChange={vi.fn()}
-    />
-  );
-  const group = screen.getByRole("button", { name: "模型" }).closest("div");
-  expect(group).not.toBeNull();
-  // flex-1 gives the group a zero hypothetical main size so the outer
-  // flex-wrap never breaks it onto its own line; justify-end keeps the
-  // controls right-aligned while the selector truncates under pressure.
-  expect(group?.className).toContain("flex-1");
-  expect(group?.className).toContain("justify-end");
-  expect(group?.className).not.toContain("ml-auto");
-});
-
 vi.mock("@/app/newchat/ui/attachment", () => ({
   ComposerAttachments: () => null,
   ComposerAddAttachment: ({

@@ -414,6 +414,7 @@
   "chat.modelSelector.noModels": "未找到模型。",
   "chat.modelSelector.reasoningEffort": "思考强度",
   "chat.modelSelector.deepThinking": "深度思考",
+  "chat.modelSelector.reasoningUnsupported": "当前模型不支持开启思考模式",
   "chat.modelSelector.effort.low": "低",
   "chat.modelSelector.effort.medium": "中",
   "chat.modelSelector.effort.high": "高",

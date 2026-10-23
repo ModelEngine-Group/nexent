@@ -414,6 +414,7 @@
   "chat.modelSelector.noModels": "No models found.",
   "chat.modelSelector.reasoningEffort": "Thinking intensity",
   "chat.modelSelector.deepThinking": "Deep thinking",
+  "chat.modelSelector.reasoningUnsupported": "The current model does not support enabling thinking mode.",
   "chat.modelSelector.effort.low": "Low",
   "chat.modelSelector.effort.medium": "Medium",
   "chat.modelSelector.effort.high": "High",
