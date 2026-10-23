@@ -14,28 +14,28 @@ case:
   objective: 验证当前Agent智能生成面板通过真实模型修订职责Prompt，回写配置后可手动微调且持久化；不假设独立Prompt优化弹窗或模板入口。
   preconditions:
   - 可编辑Draft Agent，作者、描述及真实LLM均已持久化。
-  - 智能生成面板可用，准备独立职责、使用要求和示例Prompt。
+  - 智能生成面板和统一职责Prompt编辑器可用，记录描述、模型及资源绑定等无关配置。
   - 使用run_id唯一标记限定本次职责Prompt修订。
   test_data:
     legacy_asset_declaration: config/models.yaml；expected/prompt_expected.json
   steps:
   - order: 1
-    action: 在Basic→Role & Model定位职责、使用要求、示例三个Prompt页签，并确认智能生成面板的“生成提示词”建议可见。
+    action: 在模型与提示词区定位统一职责Prompt编辑器，并确认智能生成面板的生成提示词建议可见。
     expected: 真实智能生成请求完成且职责Prompt发生预期修订。
   - order: 2
-    action: 录入固定基础Prompt、使用要求和示例，等待autosave。
-    expected: 未请求修改的使用要求、示例、描述和模型保持不变。
+    action: 录入固定基础Prompt，等待autosave并核对无关配置不变。
+    expected: 未请求修改的名称、作者、描述、模型、工具、技能、子智能体、开场白和示例问题保持不变。
   - order: 3
-    action: 点击“生成提示词”，在智能生成输入框明确要求只修订职责Prompt并保留run_id标记，其他配置不变。
-    expected: 手动微调后的Prompt在切换Agent和刷新后仍存在。
+    action: 点击生成提示词，在输入框要求只修订职责Prompt并保留run_id标记，其他配置不变。
+    expected: 未请求修改的名称、作者、描述、模型、工具、技能、子智能体、开场白和示例问题保持不变。
   - order: 4
-    action: 提交并确认真实POST /agent/nl2agent/run请求成功。
-    expected: 手动微调后的Prompt在切换Agent和刷新后仍存在。
+    action: 提交并确认真实POST /agent/nl2agent/run请求成功且流式响应完成。
+    expected: 真实智能生成请求完成且职责Prompt发生预期修订。
   - order: 5
-    action: 等待职责Prompt回写为非空新内容，含标记；核对使用要求和示例未被覆盖。
-    expected: 手动微调后的Prompt在切换Agent和刷新后仍存在。
+    action: 等待职责Prompt回写为非空新内容并含标记，核对描述、模型和资源绑定未被覆盖。
+    expected: 未请求修改的名称、作者、描述、模型、工具、技能、子智能体、开场白和示例问题保持不变。
   - order: 6
-    action: 在现有放大编辑器内手动追加固定标记并等待autosave。
+    action: 在当前统一Prompt编辑器内手动追加固定标记并等待autosave。
     expected: 手动微调后的Prompt在切换Agent和刷新后仍存在。
   - order: 7
     action: 切换至另一Agent再切回，核对最终职责Prompt。
@@ -45,26 +45,27 @@ case:
     expected: 手动微调后的Prompt在切换Agent和刷新后仍存在。
   expected_results:
   - 真实智能生成请求完成且职责Prompt发生预期修订。
-  - 未请求修改的使用要求、示例、描述和模型保持不变。
+  - 未请求修改的名称、作者、描述、模型、工具、技能、子智能体、开场白和示例问题保持不变。
   - 手动微调后的Prompt在切换Agent和刷新后仍存在。
-  forbidden_side_effects: []
+  forbidden_side_effects:
+  - 不得覆盖未请求修改的Agent配置及资源绑定。
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 03_Playwright_Journey
     legacy_row: 21
   actor: Nexent browser user
   journey:
-  - 在Basic→Role & Model定位职责、使用要求、示例三个Prompt页签，并确认智能生成面板的“生成提示词”建议可见。
-  - 录入固定基础Prompt、使用要求和示例，等待autosave。
-  - 点击“生成提示词”，在智能生成输入框明确要求只修订职责Prompt并保留run_id标记，其他配置不变。
-  - 提交并确认真实POST /agent/nl2agent/run请求成功。
-  - 等待职责Prompt回写为非空新内容，含标记；核对使用要求和示例未被覆盖。
-  - 在现有放大编辑器内手动追加固定标记并等待autosave。
+  - 在模型与提示词区定位统一职责Prompt编辑器，并确认智能生成面板的生成提示词建议可见。
+  - 录入固定基础Prompt，等待autosave并核对无关配置不变。
+  - 点击生成提示词，在输入框要求只修订职责Prompt并保留run_id标记，其他配置不变。
+  - 提交并确认真实POST /agent/nl2agent/run请求成功且流式响应完成。
+  - 等待职责Prompt回写为非空新内容并含标记，核对描述、模型和资源绑定未被覆盖。
+  - 在当前统一Prompt编辑器内手动追加固定标记并等待autosave。
   - 切换至另一Agent再切回，核对最终职责Prompt。
   - 刷新页面，核对最终职责Prompt仍为服务器持久化值。
   final_business_result:
   - 真实智能生成请求完成且职责Prompt发生预期修订。
-  - 未请求修改的使用要求、示例、描述和模型保持不变。
+  - 未请求修改的名称、作者、描述、模型、工具、技能、子智能体、开场白和示例问题保持不变。
   - 手动微调后的Prompt在切换Agent和刷新后仍存在。
   failure_evidence:
   - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-PROMPT-01/
@@ -74,3 +75,33 @@ case:
     - console.log / network.har / failure.json
 
     - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'
+  acceptance:
+  - id: AC-01
+    description: 真实智能生成完成且职责Prompt含唯一标记
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    - 5
+    expected_results:
+    - 1
+  - id: AC-02
+    description: 生成和微调保持无关配置不变
+    steps:
+    - 2
+    - 3
+    - 5
+    - 6
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: 手动微调经切换和刷新仍持久化
+    steps:
+    - 6
+    - 7
+    - 8
+    expected_results:
+    - 3
