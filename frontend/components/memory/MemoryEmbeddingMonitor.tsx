@@ -16,7 +16,7 @@ import {
   subscribeMemorySwitch,
 } from "@/services/memoryService";
 
-const MONITORED_PATHS = new Set(["/newchat", "/chat", "/memory"]);
+const MONITORED_PATHS = new Set(["/newchat", "/memory"]);
 
 export function MemoryEmbeddingMonitor() {
   const pathname = usePathname();

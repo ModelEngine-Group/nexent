@@ -87,7 +87,7 @@ Complete the environment setup first, then return here and choose the module you
 - **Directory**: `sdk/nexent/core/agents/`
 - **Core Functions**: Agent execution, tool invocation, multi-agent collaboration, memory, streaming output, and sandbox workspaces
 - **Configuration**: Backend services read platform configuration and pass it to the SDK as parameters; the SDK does not read deployment environment variables directly
-- **System Prompts**: Located in `backend/prompts/`
+- **System Prompts**: Built-in resources live in `sdk/nexent/core/prompts/`; Backend supplies runtime parameters
 - **Details**: See [Agent Module](../sdk/core/agents)
 
 ### 🛠️ Tool Development

@@ -2059,52 +2059,6 @@ description: Shell exception test
                 manager.run_skill_script("sh-except-skill", "scripts/except.sh", tenant_id=None)
 
 
-class TestSkillManagerWriteSkillFile:
-    """Test SkillManager._write_skill_file method."""
-
-    def test_write_skill_file_nested_path(self):
-        """Test writing file to nested directory."""
-        with TempSkillDir() as temp:
-            manager = SkillManager(base_skills_dir=temp.skills_dir)
-            manager._write_skill_file(
-                "test-skill",
-                "scripts/nested/deep/file.py",
-                "# nested file content", tenant_id=None)
-
-            skill_dir = os.path.join(temp.skills_dir, "test-skill")
-            expected_path = os.path.join(skill_dir, "scripts", "nested", "deep", "file.py")
-            assert os.path.exists(expected_path)
-            with open(expected_path, "r") as f:
-                assert f.read() == "# nested file content"
-
-    def test_write_skill_file_no_local_dir(self):
-        """Test writing file when local_skills_dir is None."""
-        manager = SkillManager(base_skills_dir=None)
-        manager._write_skill_file("any-skill", "file.txt", "content", tenant_id=None)
-
-    def test_write_skill_file_rechecks_containment_before_open(self, mocker, tmp_path):
-        """Reject a path redirected outside the skill directory before opening it."""
-        manager = SkillManager(base_skills_dir=str(tmp_path))
-        skill_dir = tmp_path / "safe-skill"
-        initial_path = skill_dir / "nested" / "file.txt"
-        outside_path = tmp_path.parent / "outside.txt"
-        mocker.patch.object(
-            manager,
-            "_resolve_skill_file_path",
-            side_effect=[str(initial_path), str(outside_path)],
-        )
-
-        with pytest.raises(ValueError, match="file_path resolves outside the skill directory"):
-            manager._write_skill_file(
-                "safe-skill",
-                "nested/file.txt",
-                "content",
-                tenant_id=None,
-            )
-
-        assert not outside_path.exists()
-
-
 class TestSkillManagerZipPathSecurity:
     """Regression tests for path traversal in SDK ZIP extraction."""
 
@@ -2339,6 +2293,31 @@ class TestSkillManagerSaveSkillExtraFiles:
 
             assert not os.path.exists(os.path.join(temp.skills_dir, "unsafe-skill"))
             assert not os.path.exists(os.path.join(temp.skills_dir, "outside.txt"))
+
+    def test_save_skill_rechecks_extra_file_containment_before_open(self, mocker, tmp_path):
+        """UT-SDK-DPR-011: Reject a redirected extra file during skill save."""
+        manager = SkillManager(base_skills_dir=str(tmp_path))
+        skill_dir = tmp_path / "safe-skill"
+        initial_path = skill_dir / "nested" / "file.txt"
+        outside_path = tmp_path.parent / "outside.txt"
+        mocker.patch.object(
+            manager,
+            "_resolve_skill_file_path",
+            side_effect=[str(initial_path), str(initial_path), str(outside_path)],
+        )
+
+        with pytest.raises(ValueError, match="file_path resolves outside the skill directory"):
+            manager.save_skill(
+                {
+                    "name": "safe-skill",
+                    "description": "safe",
+                    "content": "# Safe skill",
+                    "files": [{"path": "nested/file.txt", "content": "content"}],
+                },
+                tenant_id=None,
+            )
+
+        assert not outside_path.exists()
 
     def test_save_skill_skips_skill_md_in_files(self):
         """Test that SKILL.md in files list is skipped."""

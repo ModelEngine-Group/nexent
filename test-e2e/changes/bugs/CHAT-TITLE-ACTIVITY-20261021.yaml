@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-TITLE-ACTIVITY-20261021
+  change_type: bugfix
+  bug_id: CHAT-TITLE-ACTIVITY-20261021
+  title: Isolate automatic title concurrency from conversation activity
+  description: Add a title revision to the existing conversation table and use it for conditional title saves.
+  observed_behavior: Visible assistant completion changes audit update_time while the title model waits; the generated title is rejected and the API reports success with the default title.
+  expected_behavior: Message and unrelated audit writes cannot invalidate automatic titles; manual renames including same-title and rename-back changes remain protected.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_boundary
+    description: Existing title rename UT models all row changes as rename conflicts; activity and migration cases never combine pending title generation with real committed activity.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-SIDEBAR]
+    retired: []
+  affected_cases:
+    existing: [AUTO-QUOTA-D3-001, CHAT-PERSIST-D5-001, CHAT-ACTIVITY-D5-001]
+    added: [CHAT-TITLE-D5-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Title snapshots use the title revision and do not depend on unrelated update_time changes.
+    - Every successful stored rename increments title revision atomically; conditional saves check owner, live state, title and revision.
+    - Same-title manual changes and rename-back changes preserve the manual result; missing or deleted histories reject safely.
+    - Existing model, monitoring, fallback, quota, activity and deletion contracts remain intact.
+    reason: Strengthen existing title race and tracing UT; add one D5 real PostgreSQL contention and additive migration boundary. No additional D1 or browser behavior is introduced.
+    test_selectors:
+    - test/backend/services/title_observability/test_title_rename_race.py
+    - test/backend/services/title_observability/test_title_tracing.py
+    - test/backend/services/test_conversation_management_service.py
+    - test/backend/database/test_conversation_db.py
+    - test/backend/database/test_conversation_activity.py
+    - test/backend/database/test_conversation_lock_order.py
+    - test/backend/app/test_conversation_management_app.py
+  notes: >-
+    Baseline cf7a31b0b. Reuse the existing automation/activity design with a title-concurrency follow-up. PostgreSQL diagnostic already reproduces the successful default-title response. The reviewed activity field remains TIMESTAMPTZ by user decision. Verification: two regression UT fail on the baseline; all 343 relevant UT pass on the fix. CHAT-TITLE-D5-001 passes 11 PostgreSQL variants and four mapped obligations; three unchanged regression Cases pass 10 variants. Copyright, whitespace and strict formal validation pass. User authorized commit and push; deployment is not included.

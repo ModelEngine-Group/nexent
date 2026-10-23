@@ -1,7 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for A2A Client Service.
 
-Tests the A2AClientService class in backend/services/a2a_client_service.py.
+Tests the A2AClientService class in backend/management/services/agent/a2a/catalog.py.
 """
 import pytest
 import asyncio
@@ -15,21 +16,21 @@ class TestA2AClientServiceExceptions:
 
     def test_base_exception_exists(self):
         """Test A2AClientServiceError exception exists."""
-        from backend.services.a2a_client_service import A2AClientServiceError
+        from management.services.agent.a2a.catalog import A2AClientServiceError
 
         exc = A2AClientServiceError("Test error")
         assert str(exc) == "Test error"
 
     def test_agent_discovery_error_exists(self):
         """Test AgentDiscoveryError exception exists."""
-        from backend.services.a2a_client_service import AgentDiscoveryError
+        from management.services.agent.a2a.catalog import AgentDiscoveryError
 
         exc = AgentDiscoveryError("Discovery failed")
         assert str(exc) == "Discovery failed"
 
     def test_agent_call_error_exists(self):
         """Test AgentCallError exception exists."""
-        from backend.services.a2a_client_service import AgentCallError
+        from management.services.agent.a2a.catalog import AgentCallError
 
         exc = AgentCallError("Call failed")
         assert str(exc) == "Call failed"
@@ -40,7 +41,7 @@ class TestA2AClientServiceInit:
 
     def test_initialization(self):
         """Test service can be instantiated."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
         assert service is not None
@@ -51,7 +52,7 @@ class TestExtractAgentUrl:
 
     def test_extract_from_supported_interfaces_json_rpc(self):
         """Test extracting URL from supportedInterfaces with json-rpc."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -67,7 +68,7 @@ class TestExtractAgentUrl:
 
     def test_extract_from_supported_interfaces_fallback(self):
         """Test extracting URL from supportedInterfaces (no json-rpc)."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -82,7 +83,7 @@ class TestExtractAgentUrl:
 
     def test_extract_from_endpoints(self):
         """Test extracting URL from endpoints dict."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -98,7 +99,7 @@ class TestExtractAgentUrl:
 
     def test_extract_from_provider(self):
         """Test extracting URL from provider dict."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -114,7 +115,7 @@ class TestExtractAgentUrl:
 
     def test_extract_from_url_field(self):
         """Test extracting URL from url field."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -127,7 +128,7 @@ class TestExtractAgentUrl:
 
     def test_returns_empty_when_no_url(self):
         """Test returns empty string when no URL found."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -149,7 +150,7 @@ class TestFindUrlInInterfaces:
         The actual implementation returns the first interface's URL regardless
         of protocol type. This is the documented behavior.
         """
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -163,7 +164,7 @@ class TestFindUrlInInterfaces:
 
     def test_fallback_to_first_url(self):
         """Test fallback to first URL when no json-rpc."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -177,7 +178,7 @@ class TestFindUrlInInterfaces:
 
     def test_returns_empty_for_empty_interfaces(self):
         """Test returns empty string for empty interfaces."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -186,7 +187,7 @@ class TestFindUrlInInterfaces:
 
     def test_skips_interfaces_without_url(self):
         """Test skips interfaces without URL."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -204,7 +205,7 @@ class TestFindUrlInEndpoints:
 
     def test_prefers_streaming(self):
         """Test preferring http-streaming."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -218,7 +219,7 @@ class TestFindUrlInEndpoints:
 
     def test_fallback_to_polling(self):
         """Test fallback to http-polling."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -231,7 +232,7 @@ class TestFindUrlInEndpoints:
 
     def test_returns_first_key_if_no_preference_match(self):
         """Test returns first key when no preference matches."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -245,7 +246,7 @@ class TestFindUrlInEndpoints:
 
     def test_returns_empty_for_empty_endpoints(self):
         """Test returns empty string for empty endpoints."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -258,7 +259,7 @@ class TestBuildEndpointUrl:
 
     def test_uses_json_rpc_agent_card_url_as_complete_endpoint(self):
         """Test JSON-RPC calls preserve the exact Agent Card endpoint."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
         from database.a2a_agent_db import PROTOCOL_JSONRPC
 
         service = A2AClientService()
@@ -273,7 +274,7 @@ class TestBuildEndpointUrl:
 
     def test_build_http_json_streaming_url(self):
         """Test building HTTP+JSON streaming endpoint URL."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
         from database.a2a_agent_db import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
@@ -288,7 +289,7 @@ class TestBuildEndpointUrl:
 
     def test_build_http_json_non_streaming_url(self):
         """Test building HTTP+JSON non-streaming endpoint URL."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
         from database.a2a_agent_db import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
@@ -303,7 +304,7 @@ class TestBuildEndpointUrl:
 
     def test_does_not_duplicate_path(self):
         """Test URL path is not duplicated."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
         from database.a2a_agent_db import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
@@ -320,7 +321,7 @@ class TestBuildEndpointUrl:
 
     def test_handles_url_without_trailing_slash(self):
         """Test handles URL without trailing slash."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
         from database.a2a_agent_db import PROTOCOL_JSONRPC
 
         service = A2AClientService()
@@ -339,7 +340,7 @@ class TestGetProtocolPath:
 
     def test_http_json_streaming(self):
         """Test HTTP+JSON streaming path."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
         from database.a2a_agent_db import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
@@ -349,7 +350,7 @@ class TestGetProtocolPath:
 
     def test_http_json_non_streaming(self):
         """Test HTTP+JSON non-streaming path."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
         from database.a2a_agent_db import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
@@ -359,7 +360,7 @@ class TestGetProtocolPath:
 
     def test_json_rpc_has_no_operation_suffix(self):
         """Test JSON-RPC Agent Card URLs do not receive a path suffix."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
         from database.a2a_agent_db import PROTOCOL_JSONRPC
 
         service = A2AClientService()
@@ -369,7 +370,7 @@ class TestGetProtocolPath:
 
     def test_unknown_protocol(self):
         """Test unknown protocol returns empty path."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -382,7 +383,7 @@ class TestGetExternalAgent:
 
     def test_returns_agent_when_found(self):
         """Test returns agent when found."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -392,7 +393,7 @@ class TestGetExternalAgent:
             "agent_url": "https://example.com"
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
             result = service.get_external_agent(external_agent_id=1, tenant_id="tenant-1")
@@ -402,11 +403,11 @@ class TestGetExternalAgent:
 
     def test_returns_none_when_not_found(self):
         """Test returns None when agent not found."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = None
 
             result = service.get_external_agent(external_agent_id=999, tenant_id="tenant-1")
@@ -419,7 +420,7 @@ class TestListExternalAgents:
 
     def test_calls_db_with_filters(self):
         """Test calls database with filters."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -428,7 +429,7 @@ class TestListExternalAgents:
             {"id": 2, "name": "Agent 2"}
         ]
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.list_external_agents.return_value = mock_agents
 
             result = service.list_external_agents(
@@ -446,11 +447,11 @@ class TestListExternalAgents:
 
     def test_calls_db_without_filters(self):
         """Test calls database without filters."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.list_external_agents.return_value = []
 
             service.list_external_agents(tenant_id="tenant-1")
@@ -467,7 +468,7 @@ class TestUpdateAgentProtocol:
 
     def test_updates_protocol(self):
         """Test updating agent protocol."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -477,7 +478,7 @@ class TestUpdateAgentProtocol:
             "protocol_type": "JSONRPC"
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.update_external_agent_protocol.return_value = mock_result
 
             result = service.update_agent_protocol(
@@ -495,11 +496,11 @@ class TestUpdateAgentProtocol:
 
     def test_returns_none_when_not_found(self):
         """Test returns None when agent not found."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.update_external_agent_protocol.return_value = None
 
             result = service.update_agent_protocol(
@@ -516,11 +517,11 @@ class TestDeleteExternalAgent:
 
     def test_deletes_agent(self):
         """Test deleting external agent."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.delete_external_agent.return_value = True
 
             result = service.delete_external_agent(
@@ -533,11 +534,11 @@ class TestDeleteExternalAgent:
 
     def test_returns_false_when_not_found(self):
         """Test returns False when agent not found."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.delete_external_agent.return_value = False
 
             result = service.delete_external_agent(
@@ -554,7 +555,7 @@ class TestDiscoverFromUrl:
     @pytest.mark.asyncio
     async def test_discovers_agent_from_url(self):
         """Test discovering agent from URL without custom headers preserves existing headers."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentDiscoveryError
         )
@@ -562,22 +563,22 @@ class TestDiscoverFromUrl:
         service = A2AClientService()
 
         mock_card = {
-            "name": "Test Agent",
+            "name": "Test-Agent",
             "description": "A test agent",
             "capabilities": {"streaming": True}
         }
 
         mock_result = {
             "id": 1,
-            "name": "Test Agent",
+            "name": "Test-Agent",
             "agent_url": "https://example.com"
         }
 
-        with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+        with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
             mock_client = MockClient.return_value.__aenter__.return_value
             mock_client.get_json = AsyncMock(return_value=mock_card)
 
-            with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
                 mock_db.create_external_agent_from_url.return_value = mock_result
 
                 result = await service.discover_from_url(
@@ -586,6 +587,7 @@ class TestDiscoverFromUrl:
                     user_id="user-1"
                 )
 
+                MockClient.assert_called_once_with(timeout=10.0, max_retries=1, ssl_verify=True)
                 assert result == mock_result
                 mock_db.create_external_agent_from_url.assert_called_once()
                 # None means "preserve existing stored headers"; {} means "explicitly clear headers"
@@ -594,17 +596,17 @@ class TestDiscoverFromUrl:
     @pytest.mark.asyncio
     async def test_forwards_custom_headers_when_discovering_agent_card(self):
         """Test custom request headers are forwarded only to the Agent Card request."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
         custom_headers = {"Authorization": "Bearer secret", "X-Tenant-Key": "tenant-key"}
-        mock_card = {"name": "Authenticated Agent"}
+        mock_card = {"name": "Authenticated-Agent"}
 
-        with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+        with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
             mock_client = MockClient.return_value.__aenter__.return_value
             mock_client.get_json = AsyncMock(return_value=mock_card)
 
-            with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
                 mock_db.create_external_agent_from_url.return_value = {"id": 1}
 
                 await service.discover_from_url(
@@ -623,23 +625,23 @@ class TestDiscoverFromUrl:
     @pytest.mark.asyncio
     async def test_discovers_with_agent_id_field(self):
         """Test discovering agent with agent_id field in card."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
         mock_card = {
             "agent_id": "agent-123",
-            "name": "Test Agent",
+            "name": "Test-Agent",
             "description": "A test agent"
         }
 
-        mock_result = {"id": 1, "name": "Test Agent"}
+        mock_result = {"id": 1, "name": "Test-Agent"}
 
-        with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+        with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
             mock_client = MockClient.return_value.__aenter__.return_value
             mock_client.get_json = AsyncMock(return_value=mock_card)
 
-            with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
                 mock_db.create_external_agent_from_url.return_value = mock_result
 
                 await service.discover_from_url(
@@ -654,23 +656,23 @@ class TestDiscoverFromUrl:
     @pytest.mark.asyncio
     async def test_generates_hash_based_agent_id_when_no_id_field(self):
         """Test name is used when no hash-based ID generation is triggered."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
         mock_card = {
-            "name": "Test Agent",
+            "name": "Test-Agent",
             "description": "A test agent"
             # No agent_id, id, endpoint_id
         }
 
-        mock_result = {"id": 1, "name": "Test Agent"}
+        mock_result = {"id": 1, "name": "Test-Agent"}
 
-        with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+        with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
             mock_client = MockClient.return_value.__aenter__.return_value
             mock_client.get_json = AsyncMock(return_value=mock_card)
 
-            with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
                 mock_db.create_external_agent_from_url.return_value = mock_result
 
                 await service.discover_from_url(
@@ -680,13 +682,13 @@ class TestDiscoverFromUrl:
                 )
 
                 call_kwargs = mock_db.create_external_agent_from_url.call_args[1]
-                # The name "Test Agent" is used as fallback for agent_id
-                assert call_kwargs["name"] == "Test Agent"
+                # The name "Test-Agent" is used as fallback for agent_id
+                assert call_kwargs["name"] == "Test-Agent"
 
     @pytest.mark.asyncio
     async def test_raises_agent_discovery_error_on_http_error(self):
         """Test AgentDiscoveryError is raised on HTTP error with traceback."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentDiscoveryError
         )
@@ -695,7 +697,7 @@ class TestDiscoverFromUrl:
         service = A2AClientService()
         test_url = "https://example.com/agent.json"
 
-        with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+        with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
             mock_client = MockClient.return_value.__aenter__.return_value
             mock_client.get_json = AsyncMock(
                 side_effect=aiohttp.ClientError("Connection failed")
@@ -716,14 +718,14 @@ class TestDiscoverFromUrl:
     @pytest.mark.asyncio
     async def test_raises_agent_discovery_error_on_generic_exception(self):
         """Test AgentDiscoveryError is raised on generic exception."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentDiscoveryError
         )
 
         service = A2AClientService()
 
-        with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+        with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
             mock_client = MockClient.return_value.__aenter__.return_value
             mock_client.get_json = AsyncMock(side_effect=ValueError("Invalid JSON"))
 
@@ -746,14 +748,14 @@ class TestDiscoverFromNacos:
     @pytest.mark.asyncio
     async def test_raises_error_when_config_not_found(self):
         """Test raises error when Nacos config not found."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentDiscoveryError
         )
 
         service = A2AClientService()
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_nacos_config_by_id.return_value = None
 
             with pytest.raises(AgentDiscoveryError, match="not found"):
@@ -767,14 +769,14 @@ class TestDiscoverFromNacos:
     @pytest.mark.asyncio
     async def test_raises_error_when_config_inactive(self):
         """Test raises error when Nacos config is inactive."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentDiscoveryError
         )
 
         service = A2AClientService()
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_nacos_config_by_id.return_value = {
                 "config_id": "config-1",
                 "is_active": False
@@ -791,7 +793,7 @@ class TestDiscoverFromNacos:
     @pytest.mark.asyncio
     async def test_discovers_multiple_agents_from_nacos(self):
         """Test discovering multiple agents from Nacos."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -804,7 +806,7 @@ class TestDiscoverFromNacos:
         mock_agent_info_1 = {"id": 1, "name": "Agent 1"}
         mock_agent_info_2 = {"id": 2, "name": "Agent 2"}
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_nacos_config_by_id.return_value = mock_nacos_config
             mock_db.update_nacos_config_last_scan.return_value = None
 
@@ -830,7 +832,7 @@ class TestDiscoverFromNacos:
     @pytest.mark.asyncio
     async def test_handles_partial_discoveries(self):
         """Test handling partial discovery failures."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -842,7 +844,7 @@ class TestDiscoverFromNacos:
 
         mock_agent_info = {"id": 1, "name": "Agent 1"}
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_nacos_config_by_id.return_value = mock_nacos_config
             mock_db.update_nacos_config_last_scan.return_value = None
 
@@ -869,7 +871,7 @@ class TestDiscoverFromNacos:
     @pytest.mark.asyncio
     async def test_raises_error_when_all_discoveries_fail(self):
         """Test raises AgentDiscoveryError when all agent discoveries fail."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentDiscoveryError
         )
@@ -882,7 +884,7 @@ class TestDiscoverFromNacos:
             "namespace_id": "public"
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_nacos_config_by_id.return_value = mock_nacos_config
             mock_db.update_nacos_config_last_scan.return_value = None
 
@@ -906,7 +908,7 @@ class TestDiscoverFromNacos:
     @pytest.mark.asyncio
     async def test_uses_namespace_from_config(self):
         """Test uses namespace from config when not provided."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -916,7 +918,7 @@ class TestDiscoverFromNacos:
             "namespace_id": "custom-namespace"
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_nacos_config_by_id.return_value = mock_nacos_config
             mock_db.update_nacos_config_last_scan.return_value = None
 
@@ -939,7 +941,7 @@ class TestDiscoverFromNacos:
     @pytest.mark.asyncio
     async def test_overrides_namespace_when_provided(self):
         """Test provided namespace overrides config namespace."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -949,7 +951,7 @@ class TestDiscoverFromNacos:
             "namespace_id": "config-namespace"
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_nacos_config_by_id.return_value = mock_nacos_config
             mock_db.update_nacos_config_last_scan.return_value = None
 
@@ -980,7 +982,7 @@ class TestDiscoverSingleFromNacos:
     @pytest.mark.asyncio
     async def test_returns_none_when_nacos_client_import_fails(self):
         """Test returns None when NacosClient import fails."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -1006,7 +1008,7 @@ class TestDiscoverSingleFromNacos:
     @pytest.mark.asyncio
     async def test_calls_nacos_client_with_correct_params(self):
         """Test that Nacos client is initialized and called with correct parameters."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -1038,12 +1040,12 @@ class TestDiscoverSingleFromNacos:
         mock_nacos_module = MagicMock()
         mock_nacos_module.NacosClient.return_value = mock_client
 
-        with patch.dict(sys.modules, {"utils.nacos_client": mock_nacos_module}):
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+        with patch.dict(sys.modules, {"infrastructure.discovery.nacos": mock_nacos_module}):
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_http = MockClient.return_value.__aenter__.return_value
                 mock_http.get_json = AsyncMock(return_value=mock_card)
 
-                with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+                with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
                     mock_db.create_external_agent_from_nacos.return_value = {
                         "id": 1,
                         "name": "Test Agent"
@@ -1058,6 +1060,7 @@ class TestDiscoverSingleFromNacos:
                     )
 
                     assert result is not None
+                    MockClient.assert_called_once_with(timeout=10.0, max_retries=1)
                     # Verify NacosClient was instantiated with correct params
                     mock_nacos_module.NacosClient.assert_called_once_with(
                         "http://nacos:8848", "testuser", "testpass"
@@ -1066,7 +1069,7 @@ class TestDiscoverSingleFromNacos:
     @pytest.mark.asyncio
     async def test_handles_missing_instance_gracefully(self):
         """Test handles case when service instance is not found."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -1082,7 +1085,7 @@ class TestDiscoverSingleFromNacos:
         mock_nacos_module = MagicMock()
         mock_nacos_module.NacosClient.return_value = mock_client
 
-        with patch.dict(sys.modules, {"utils.nacos_client": mock_nacos_module}):
+        with patch.dict(sys.modules, {"infrastructure.discovery.nacos": mock_nacos_module}):
             result = await service._discover_single_from_nacos(
                 nacos_config=mock_nacos_config,
                 agent_name="test-agent",
@@ -1100,14 +1103,14 @@ class TestRefreshAgentCard:
     @pytest.mark.asyncio
     async def test_raises_error_when_agent_not_found(self):
         """Test raises error when agent not found."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentDiscoveryError
         )
 
         service = A2AClientService()
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = None
 
             with pytest.raises(AgentDiscoveryError, match="not found"):
@@ -1120,33 +1123,33 @@ class TestRefreshAgentCard:
     @pytest.mark.asyncio
     async def test_refreshes_agent_card(self):
         """Test refreshing agent card."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
         mock_agent = {
             "id": 1,
-            "name": "Old Name",
+            "name": "Old-Name",
             "source_url": "https://example.com/agent.json",
             "agent_card_headers": {"Authorization": "Bearer stored-card-token"},
         }
 
         mock_card = {
-            "name": "New Name",
+            "name": "New-Name",
             "description": "Updated description"
         }
 
         mock_result = {
             "id": 1,
-            "name": "New Name",
+            "name": "New-Name",
             "description": "Updated description"
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
             mock_db.refresh_external_agent_cache.return_value = mock_result
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.get_json = AsyncMock(return_value=mock_card)
 
@@ -1164,7 +1167,7 @@ class TestRefreshAgentCard:
     @pytest.mark.asyncio
     async def test_preserves_selected_protocol_when_card_default_changes(self):
         """Test refreshing does not overwrite the user's protocol selection."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
         agent = {
@@ -1174,7 +1177,7 @@ class TestRefreshAgentCard:
             "protocol_type": "HTTP+JSON",
         }
         card = {
-            "name": "Test Agent",
+            "name": "Test-Agent",
             "description": "Updated endpoint",
             "url": "https://example.com/rpc",
             "supportedInterfaces": [
@@ -1184,10 +1187,10 @@ class TestRefreshAgentCard:
         }
         refreshed_agent = {"id": 1, "agent_url": "https://example.com/rest"}
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = agent
             mock_db.refresh_external_agent_cache.return_value = refreshed_agent
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.get_json = AsyncMock(return_value=card)
 
@@ -1201,7 +1204,7 @@ class TestRefreshAgentCard:
     @pytest.mark.asyncio
     async def test_preserves_endpoint_when_card_has_no_protocol_interfaces(self):
         """Test refreshing does not use the Card root URL without a matching interface."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
         agent = {
@@ -1211,17 +1214,17 @@ class TestRefreshAgentCard:
             "protocol_type": "JSONRPC",
         }
         card = {
-            "name": "Test Agent",
+            "name": "Test-Agent",
             "description": "Updated endpoint",
             "url": "https://example.com/new",
             "supportedInterfaces": [],
         }
         refreshed_agent = {"id": 1, "agent_url": "https://example.com/old"}
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = agent
             mock_db.refresh_external_agent_cache.return_value = refreshed_agent
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.get_json = AsyncMock(return_value=card)
 
@@ -1234,7 +1237,7 @@ class TestRefreshAgentCard:
             user_id="user-1",
             new_raw_card=card,
             new_agent_url=None,
-            new_name="Test Agent",
+            new_name="Test-Agent",
             new_description="Updated endpoint",
             new_supported_interfaces=[],
             new_security_schemes={},
@@ -1248,7 +1251,7 @@ class TestCallAgent:
     @pytest.mark.asyncio
     async def test_does_not_send_card_headers_when_calling_agent(self):
         """Test Agent Card headers are not used for agent calls."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
         agent = {
@@ -1259,9 +1262,9 @@ class TestCallAgent:
             "agent_card_headers": {"Authorization": "Bearer card-token"},
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = agent
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_json = AsyncMock(return_value={"result": {}})
 
@@ -1273,7 +1276,7 @@ class TestCallAgent:
     @pytest.mark.asyncio
     async def test_forwards_security_credentials_by_declared_location(self):
         """Test required credentials are sent as header, query, and cookie values."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
         agent = {
@@ -1295,9 +1298,9 @@ class TestCallAgent:
                 "cookieAuth": "cookie-token",
             },
         }
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = agent
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_json = AsyncMock(return_value={"result": {}})
                 await service.call_agent(1, "tenant-1", {"role": "user", "parts": []})
@@ -1310,7 +1313,7 @@ class TestCallAgent:
     @pytest.mark.asyncio
     async def test_forwards_http_bearer_security_credential_as_authorization_header(self):
         """Test an HTTP Bearer scheme maps its credential to the Authorization header."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
         agent = {
@@ -1327,9 +1330,9 @@ class TestCallAgent:
             "security_credentials": {"jwtAuth": "eyJhbGciOiJIUzI1NiJ9"},
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = agent
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_json = AsyncMock(return_value={"result": {}})
 
@@ -1340,7 +1343,7 @@ class TestCallAgent:
 
     def test_forwards_http_basic_security_credential_as_authorization_header(self):
         """Test an HTTP Basic scheme maps its credential to the Authorization header."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
         agent = {
@@ -1357,7 +1360,7 @@ class TestCallAgent:
 
     def test_rejects_http_auth_scheme_without_scheme_value(self):
         """Test an HTTP authentication scheme without a scheme value is rejected."""
-        from backend.services.a2a_client_service import A2AClientService, AgentCallError
+        from management.services.agent.a2a.catalog import A2AClientService, AgentCallError
 
         service = A2AClientService()
         agent = {
@@ -1371,7 +1374,7 @@ class TestCallAgent:
 
     def test_uses_selected_security_requirement_instead_of_fallback(self):
         """Test the selected requirement is used even when another one is also satisfied."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
         agent = {
@@ -1397,7 +1400,7 @@ class TestCallAgent:
     @pytest.mark.asyncio
     async def test_rejects_unsatisfied_security_requirements(self):
         """Test calls fail before the external request when credentials are missing."""
-        from backend.services.a2a_client_service import A2AClientService, AgentCallError
+        from management.services.agent.a2a.catalog import A2AClientService, AgentCallError
 
         service = A2AClientService()
         agent = {
@@ -1412,9 +1415,9 @@ class TestCallAgent:
             "selected_security_requirement_index": 0,
             "security_credentials": {},
         }
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = agent
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_json = AsyncMock(return_value={"result": {}})
                 with pytest.raises(AgentCallError, match="do not satisfy"):
@@ -1424,14 +1427,14 @@ class TestCallAgent:
     @pytest.mark.asyncio
     async def test_raises_error_when_agent_not_found(self):
         """Test raises error when agent not found."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentCallError
         )
 
         service = A2AClientService()
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = None
 
             with pytest.raises(AgentCallError, match="not found"):
@@ -1444,7 +1447,7 @@ class TestCallAgent:
     @pytest.mark.asyncio
     async def test_raises_error_when_agent_unavailable(self):
         """Test raises error when agent is unavailable."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentCallError
         )
@@ -1458,7 +1461,7 @@ class TestCallAgent:
             "is_available": False
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
             with pytest.raises(AgentCallError, match="not available"):
@@ -1471,7 +1474,7 @@ class TestCallAgent:
     @pytest.mark.asyncio
     async def test_builds_json_rpc_payload_and_calls_agent(self):
         """Test builds JSON-RPC payload and calls agent."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentCallError
         )
@@ -1493,10 +1496,10 @@ class TestCallAgent:
             "result": {"status": "success"}
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_json = AsyncMock(return_value=mock_response)
                 # Mock __aexit__ for context manager
@@ -1513,7 +1516,7 @@ class TestCallAgent:
     @pytest.mark.asyncio
     async def test_builds_http_json_payload(self):
         """Test builds HTTP+JSON payload for non-JSONRPC protocol."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
         from database.a2a_agent_db import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
@@ -1528,10 +1531,10 @@ class TestCallAgent:
 
         mock_response = {"status": "success"}
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_json = AsyncMock(return_value=mock_response)
                 MockClient.return_value.__aexit__ = AsyncMock()
@@ -1547,7 +1550,7 @@ class TestCallAgent:
     @pytest.mark.asyncio
     async def test_raises_error_on_agent_error_response(self):
         """Test raises AgentCallError on agent error response."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentCallError
         )
@@ -1569,10 +1572,10 @@ class TestCallAgent:
             "error": {"code": -32600, "message": "Invalid Request"}
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_json = AsyncMock(return_value=mock_response)
                 MockClient.return_value.__aexit__ = AsyncMock()
@@ -1591,8 +1594,8 @@ class TestCallAgent:
     @pytest.mark.asyncio
     async def test_raises_authentication_error_on_unauthorized_response(self):
         """Test unauthorized responses explain that configured credentials failed."""
-        from backend.services.a2a_client_service import A2AClientService, AgentCallError
-        from utils.a2a_http_client import A2AHttpStatusError
+        from management.services.agent.a2a.catalog import A2AClientService, AgentCallError
+        from infrastructure.http.a2a import A2AHttpStatusError
 
         service = A2AClientService()
         mock_agent = {
@@ -1602,9 +1605,9 @@ class TestCallAgent:
             "is_available": True,
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_json = AsyncMock(
                     side_effect=A2AHttpStatusError("POST", "https://example.com/a2a", 401)
@@ -1621,7 +1624,7 @@ class TestCallAgent:
     @pytest.mark.asyncio
     async def test_raises_error_on_client_error(self):
         """Test raises AgentCallError on client error."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentCallError
         )
@@ -1639,10 +1642,10 @@ class TestCallAgent:
         async def mock_post_json(*args, **kwargs):
             raise aiohttp.ClientError("Connection refused")
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_json = mock_post_json
 
@@ -1660,7 +1663,7 @@ class TestCallAgent:
     @pytest.mark.asyncio
     async def test_returns_result_from_response(self):
         """Test returns result from response when no error."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -1675,10 +1678,10 @@ class TestCallAgent:
             "result": {"task_id": "123", "status": "completed"}
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_json = AsyncMock(return_value=mock_response)
                 MockClient.return_value.__aexit__ = AsyncMock()
@@ -1695,7 +1698,7 @@ class TestCallAgent:
     @pytest.mark.asyncio
     async def test_uses_default_protocol_when_not_specified(self):
         """Test uses JSON-RPC as default protocol when not specified."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -1709,10 +1712,10 @@ class TestCallAgent:
 
         mock_response = {"result": {"status": "ok"}}
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_json = AsyncMock(return_value=mock_response)
                 MockClient.return_value.__aexit__ = AsyncMock()
@@ -1733,7 +1736,7 @@ class TestCallAgentStreaming:
     @pytest.mark.asyncio
     async def test_forwards_http_bearer_security_credential_for_streaming(self):
         """Test streaming calls send HTTP Bearer credentials in the Authorization header."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
         agent = {
@@ -1753,9 +1756,9 @@ class TestCallAgentStreaming:
         async def mock_stream(*args, **kwargs):
             yield {"done": True}
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = agent
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_stream = MagicMock(side_effect=mock_stream)
 
@@ -1771,14 +1774,14 @@ class TestCallAgentStreaming:
     @pytest.mark.asyncio
     async def test_raises_error_when_agent_not_found(self):
         """Test raises error when agent not found."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentCallError
         )
 
         service = A2AClientService()
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = None
 
             with pytest.raises(AgentCallError, match="not found"):
@@ -1794,7 +1797,7 @@ class TestCallAgentStreaming:
     @pytest.mark.asyncio
     async def test_raises_error_when_agent_unavailable(self):
         """Test raises error when agent is unavailable."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentCallError
         )
@@ -1808,7 +1811,7 @@ class TestCallAgentStreaming:
             "is_available": False
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
             with pytest.raises(AgentCallError, match="not available"):
@@ -1823,7 +1826,7 @@ class TestCallAgentStreaming:
     @pytest.mark.asyncio
     async def test_builds_json_rpc_payload_for_streaming(self):
         """Test builds JSON-RPC payload for streaming call."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
         from database.a2a_agent_db import PROTOCOL_JSONRPC
 
         service = A2AClientService()
@@ -1840,10 +1843,10 @@ class TestCallAgentStreaming:
             yield {"type": "taskProgress", "data": {"status": "processing"}}
             yield {"type": "taskCompleted", "data": {"result": "done"}}
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_stream = mock_stream
 
@@ -1862,7 +1865,7 @@ class TestCallAgentStreaming:
     @pytest.mark.asyncio
     async def test_builds_http_json_payload_for_streaming(self):
         """Test builds HTTP+JSON payload for streaming with HTTP+JSON protocol."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
         from database.a2a_agent_db import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
@@ -1878,10 +1881,10 @@ class TestCallAgentStreaming:
         async def mock_stream(*args, **kwargs):
             yield {"data": "chunk1"}
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_stream = mock_stream
 
@@ -1899,7 +1902,7 @@ class TestCallAgentStreaming:
     @pytest.mark.asyncio
     async def test_uses_api_key_in_headers(self):
         """Test uses API key in headers when provided."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -1913,14 +1916,14 @@ class TestCallAgentStreaming:
         async def mock_stream(*args, **kwargs):
             yield {"data": "done"}
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_stream = mock_stream
 
-                with patch("backend.services.a2a_client_service.build_a2a_headers") as mock_headers:
+                with patch("management.services.agent.a2a.catalog.build_a2a_headers") as mock_headers:
                     mock_headers.return_value = {"Authorization": "Bearer test-key"}
 
                     result_gen = service.call_agent_streaming(
@@ -1937,7 +1940,7 @@ class TestCallAgentStreaming:
     @pytest.mark.asyncio
     async def test_raises_error_on_client_error(self):
         """Test raises AgentCallError on client error during streaming."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentCallError
         )
@@ -1956,10 +1959,10 @@ class TestCallAgentStreaming:
             raise aiohttp.ClientError("Stream failed")
             yield  # Make this an async generator
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_stream = mock_stream
 
@@ -1979,7 +1982,7 @@ class TestCallAgentStreaming:
     @pytest.mark.asyncio
     async def test_builds_streaming_url_with_message_stream_path(self):
         """Test builds streaming URL with /message:stream path."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
         from database.a2a_agent_db import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
@@ -1995,10 +1998,10 @@ class TestCallAgentStreaming:
         async def mock_stream(*args, **kwargs):
             yield {"done": True}
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_stream = mock_stream
 
@@ -2017,7 +2020,7 @@ class TestCallAgentStreaming:
     @pytest.mark.asyncio
     async def test_uses_default_protocol_for_streaming(self):
         """Test uses JSON-RPC as default protocol for streaming."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -2032,10 +2035,10 @@ class TestCallAgentStreaming:
         async def mock_stream(*args, **kwargs):
             yield {"done": True}
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_stream = mock_stream
 
@@ -2057,7 +2060,7 @@ class TestSingletonInstance:
 
     def test_singleton_exists(self):
         """Test that singleton instance exists."""
-        from backend.services.a2a_client_service import a2a_client_service
+        from management.services.agent.a2a.catalog import a2a_client_service
 
         assert a2a_client_service is not None
 
@@ -2068,7 +2071,7 @@ class TestDiscoverFromUrlHashGeneration:
     @pytest.mark.asyncio
     async def test_generates_hash_based_agent_id_with_no_name(self):
         """Test generates hash-based agent_id when card has no ID fields and no name."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -2079,11 +2082,11 @@ class TestDiscoverFromUrlHashGeneration:
 
         mock_result = {"id": 1, "name": "unknown-abc12345"}
 
-        with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+        with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
             mock_client = MockClient.return_value.__aenter__.return_value
             mock_client.get_json = AsyncMock(return_value=mock_card)
 
-            with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+            with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
                 mock_db.create_external_agent_from_url.return_value = mock_result
 
                 await service.discover_from_url(
@@ -2104,16 +2107,16 @@ class TestDiscoverFromUrlExceptionHandling:
     @pytest.mark.asyncio
     async def test_logs_traceback_on_exception(self):
         """Test that exceptions are logged with full traceback."""
-        from backend.services.a2a_client_service import A2AClientService, AgentDiscoveryError
+        from management.services.agent.a2a.catalog import A2AClientService, AgentDiscoveryError
         import traceback
 
         service = A2AClientService()
 
-        with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+        with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
             mock_client = MockClient.return_value.__aenter__.return_value
             mock_client.get_json = AsyncMock(side_effect=RuntimeError("Test error"))
 
-            with patch("backend.services.a2a_client_service.logger") as mock_logger:
+            with patch("management.services.agent.a2a.catalog.logger") as mock_logger:
                 with pytest.raises(AgentDiscoveryError) as exc_info:
                     await service.discover_from_url(
                         url="https://example.com/agent.json",
@@ -2135,7 +2138,7 @@ class TestDiscoverFromNacosErrors:
     @pytest.mark.asyncio
     async def test_collects_errors_from_failed_discoveries(self):
         """Test that errors from individual agent discoveries are collected."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -2145,7 +2148,7 @@ class TestDiscoverFromNacosErrors:
             "namespace_id": "public"
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_nacos_config_by_id.return_value = mock_nacos_config
             mock_db.update_nacos_config_last_scan.return_value = None
 
@@ -2175,7 +2178,7 @@ class TestDiscoverSingleFromNacosDetailed:
     @pytest.mark.asyncio
     async def test_returns_none_when_no_agent_url_in_response(self):
         """Test returns None when query_a2a_agent returns data without agent_url."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -2196,7 +2199,7 @@ class TestDiscoverSingleFromNacosDetailed:
         mock_nacos_module = MagicMock()
         mock_nacos_module.NacosClient.return_value = mock_client
 
-        with patch.dict(sys.modules, {"utils.nacos_client": mock_nacos_module}):
+        with patch.dict(sys.modules, {"infrastructure.discovery.nacos": mock_nacos_module}):
             result = await service._discover_single_from_nacos(
                 nacos_config=mock_nacos_config,
                 agent_name="test-agent",
@@ -2210,7 +2213,7 @@ class TestDiscoverSingleFromNacosDetailed:
     @pytest.mark.asyncio
     async def test_uses_agent_url_from_nacos_response(self):
         """Test uses agent_url from Nacos query_a2a_agent response."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -2240,12 +2243,12 @@ class TestDiscoverSingleFromNacosDetailed:
         mock_nacos_module = MagicMock()
         mock_nacos_module.NacosClient.return_value = mock_client
 
-        with patch.dict(sys.modules, {"utils.nacos_client": mock_nacos_module}):
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+        with patch.dict(sys.modules, {"infrastructure.discovery.nacos": mock_nacos_module}):
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_http = MockClient.return_value.__aenter__.return_value
                 mock_http.get_json = AsyncMock(return_value=mock_card)
 
-                with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+                with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
                     mock_db.create_external_agent_from_nacos.return_value = {"id": 1}
 
                     result = await service._discover_single_from_nacos(
@@ -2265,7 +2268,7 @@ class TestDiscoverSingleFromNacosDetailed:
     @pytest.mark.asyncio
     async def test_handles_client_close_error(self):
         """Test handles errors during Nacos client close gracefully."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
 
         service = A2AClientService()
 
@@ -2288,12 +2291,12 @@ class TestDiscoverSingleFromNacosDetailed:
         mock_nacos_module = MagicMock()
         mock_nacos_module.NacosClient.return_value = mock_client
 
-        with patch.dict(sys.modules, {"utils.nacos_client": mock_nacos_module}):
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+        with patch.dict(sys.modules, {"infrastructure.discovery.nacos": mock_nacos_module}):
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_http = MockClient.return_value.__aenter__.return_value
                 mock_http.get_json = AsyncMock(return_value=mock_card)
 
-                with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+                with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
                     mock_db.create_external_agent_from_nacos.return_value = {"id": 1}
 
                     # Should not raise even if close fails
@@ -2314,7 +2317,7 @@ class TestRefreshAgentCardErrors:
     @pytest.mark.asyncio
     async def test_updates_availability_on_client_error(self):
         """Test updates agent availability to False on ClientError."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentDiscoveryError
         )
@@ -2331,10 +2334,10 @@ class TestRefreshAgentCardErrors:
         async def mock_get_json(*args, **kwargs):
             raise aiohttp.ClientError("Network error")
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.get_json = mock_get_json
 
@@ -2358,7 +2361,7 @@ class TestRefreshAgentCardErrors:
     @pytest.mark.asyncio
     async def test_raises_error_when_source_url_missing(self):
         """Test raises error when agent has no source URL."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentDiscoveryError
         )
@@ -2371,7 +2374,7 @@ class TestRefreshAgentCardErrors:
             # No source_url
         }
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
             with pytest.raises(AgentDiscoveryError, match="No source URL"):
@@ -2388,7 +2391,7 @@ class TestCallAgentProtocolVariants:
     @pytest.mark.asyncio
     async def test_builds_http_json_non_streaming_url_without_duplicate(self):
         """Test HTTP+JSON non-streaming URL doesn't duplicate path."""
-        from backend.services.a2a_client_service import A2AClientService
+        from management.services.agent.a2a.catalog import A2AClientService
         from database.a2a_agent_db import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
@@ -2403,10 +2406,10 @@ class TestCallAgentProtocolVariants:
 
         mock_response = {"result": {"status": "ok"}}
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_json = AsyncMock(return_value=mock_response)
                 MockClient.return_value.__aexit__ = AsyncMock()
@@ -2429,7 +2432,7 @@ class TestCallAgentStreamingErrors:
     @pytest.mark.asyncio
     async def test_raises_error_on_streaming_client_error(self):
         """Test raises AgentCallError on aiohttp.ClientError during streaming."""
-        from backend.services.a2a_client_service import (
+        from management.services.agent.a2a.catalog import (
             A2AClientService,
             AgentCallError
         )
@@ -2456,10 +2459,10 @@ class TestCallAgentStreamingErrors:
             async def __anext__(self):
                 raise aiohttp.ClientError(self.error)
 
-        with patch("backend.services.a2a_client_service.a2a_agent_db") as mock_db:
+        with patch("management.services.agent.a2a.catalog.a2a_agent_db") as mock_db:
             mock_db.get_external_agent_by_id.return_value = mock_agent
 
-            with patch("backend.services.a2a_client_service.A2AHttpClient") as MockClient:
+            with patch("management.services.agent.a2a.catalog.A2AHttpClient") as MockClient:
                 mock_client = MockClient.return_value.__aenter__.return_value
                 mock_client.post_stream = lambda *args, **kwargs: FailingAsyncIterator("Stream connection failed")
 
@@ -2476,3 +2479,15 @@ class TestCallAgentStreamingErrors:
                 assert "Streaming call failed" in error_msg
                 assert "Stream connection failed" in error_msg
 
+
+@pytest.mark.asyncio
+async def test_url_discovery_timeout_propagates_without_database_write():
+    from management.services.agent.a2a.catalog import A2AClientService
+
+    with patch("management.services.agent.a2a.catalog.A2AHttpClient") as http, \
+            patch("management.services.agent.a2a.catalog.a2a_agent_db") as db:
+        http.return_value.__aenter__.return_value.get_json = AsyncMock(side_effect=asyncio.TimeoutError())
+        with pytest.raises(asyncio.TimeoutError):
+            await A2AClientService().discover_from_url("https://example.com/card", "tenant", "user")
+        http.assert_called_once_with(timeout=10.0, max_retries=1, ssl_verify=True)
+        db.create_external_agent_from_url.assert_not_called()

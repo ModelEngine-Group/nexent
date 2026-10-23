@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP API for versioned tenant and user Markdown long-term memory."""
 
 from http import HTTPStatus
@@ -7,10 +8,10 @@ from fastapi import APIRouter, Header, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from database.user_tenant_db import get_user_tenant_by_user_id
-from services.memory_long_term_service import (
+from management.services.memory.long_term import (
     LongTermMemoryConflict, LongTermMemoryError, get_memory_long_term_service,
 )
-from utils.auth_utils import get_current_user_id
+from management.services.permission.identity.authentication_helpers import get_current_user_id
 
 router = APIRouter(prefix="/memory/long-term", tags=["long-term-memory"])
 Scope = Literal["tenant", "user"]

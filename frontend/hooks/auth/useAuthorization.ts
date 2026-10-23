@@ -1,13 +1,21 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useMemo,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter, usePathname } from "next/navigation";
 import { User, AuthInfoResponse, AuthorizationContextType } from "@/types/auth";
 import { USER_ROLES } from "@/const/auth";
 import { authService } from "@/services/authService";
 import { authEvents, authzEventUtils } from "@/lib/authEvents";
-import { AUTH_EVENTS} from "@/const/auth";
+import { AUTH_EVENTS } from "@/const/auth";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import log from "@/lib/logger";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -36,16 +44,19 @@ export function useAuthorization(): AuthorizationContextType {
 
   // Query for current user authorization info
   const {
-    data: currentUserInfo,
-    isLoading,
+    isFetching: isLoading,
     error,
     refetch,
   } = useQuery({
     queryKey: ["currentUserInfo"],
     queryFn: async (): Promise<AuthInfoResponse> => {
       const result = await authService.getCurrentUserInfo();
-      if (!result) {
-        throw new Error("Failed to fetch user info");
+      if (
+        !result?.user ||
+        !Array.isArray(result.user.permissions) ||
+        !Array.isArray(result.user.accessibleRoutes)
+      ) {
+        throw new Error("Invalid authorization response");
       }
       return result;
     },
@@ -60,39 +71,36 @@ export function useAuthorization(): AuthorizationContextType {
   });
 
   // Apply authorization data to state
-  const applyAuthzData = useCallback(
-    (data: AuthInfoResponse) => {
-      const { user: userData } = data;
-      if (!userData) {
-        log.warn("No user data in authorization response");
-        return false;
-      }
+  const applyAuthzData = useCallback((data: AuthInfoResponse) => {
+    const { user: userData } = data;
+    if (!userData) {
+      log.warn("No user data in authorization response");
+      return false;
+    }
 
-      const { permissions, accessibleRoutes, groupIds, ...userInfo } = userData;
-      if (!permissions || !accessibleRoutes) {
-        log.warn("Missing permissions or accessibleRoutes", {
-          hasPermissions: !!permissions,
-          hasAccessibleRoutes: !!accessibleRoutes,
-        });
-        return false;
-      }
-
-      setUser(userInfo as User);
-      setGroupIds(groupIds);
-      setPermissions(permissions);
-      setAccessibleRoutes(accessibleRoutes);
-      setIsAuthzReady(true);
-
-      authzEventUtils.emitPermissionsReady({
-        ...userInfo,
-        permissions,
-        accessibleRoutes,
+    const { permissions, accessibleRoutes, groupIds, ...userInfo } = userData;
+    if (!permissions || !accessibleRoutes) {
+      log.warn("Missing permissions or accessibleRoutes", {
+        hasPermissions: !!permissions,
+        hasAccessibleRoutes: !!accessibleRoutes,
       });
+      return false;
+    }
 
-      return true;
-    },
-    []
-  );
+    setUser(userInfo as User);
+    setGroupIds(groupIds);
+    setPermissions(permissions);
+    setAccessibleRoutes(accessibleRoutes);
+    setIsAuthzReady(true);
+
+    authzEventUtils.emitPermissionsReady({
+      ...userInfo,
+      permissions,
+      accessibleRoutes,
+    });
+
+    return true;
+  }, []);
 
   // Clear authorization data from state
   const clearAuthzData = useCallback(() => {
@@ -105,11 +113,12 @@ export function useAuthorization(): AuthorizationContextType {
 
   // Fetch authorization data
   const fetchAuthzData = useCallback(() => {
-    refetch()
+    return refetch()
       .then((result) => {
-        if (result.data && (result.status === 'success' || result.isSuccess)) {
+        if (result.data && (result.status === "success" || result.isSuccess)) {
           applyAuthzData(result.data);
         }
+        return result;
       })
       .catch((err) => {
         log.error("Failed to fetch authorization data:", err);
@@ -118,7 +127,6 @@ export function useAuthorization(): AuthorizationContextType {
 
   // Initialize authorization on mount
   useEffect(() => {
-
     // In speed mode, fetch authorization data immediately
     if (isSpeedMode) {
       log.info("Speed mode: fetching authorization info...");
@@ -158,9 +166,15 @@ export function useAuthorization(): AuthorizationContextType {
       clearAuthzData();
     };
 
-    const cleanupLogin = authEvents.on(AUTH_EVENTS.LOGIN_SUCCESS, handleLoginSuccess);
+    const cleanupLogin = authEvents.on(
+      AUTH_EVENTS.LOGIN_SUCCESS,
+      handleLoginSuccess
+    );
     const cleanupLogout = authEvents.on(AUTH_EVENTS.LOGOUT, handleLogout);
-    const cleanupSessionExpired = authEvents.on(AUTH_EVENTS.SESSION_EXPIRED, handleSessionExpired);
+    const cleanupSessionExpired = authEvents.on(
+      AUTH_EVENTS.SESSION_EXPIRED,
+      handleSessionExpired
+    );
 
     return () => {
       cleanupLogin();
@@ -170,8 +184,14 @@ export function useAuthorization(): AuthorizationContextType {
   }, [isSpeedMode, fetchAuthzData, clearAuthzData]);
 
   // Authz prompt modal control functions
-  const openAuthzPromptModal = useCallback(() => setIsAuthzPromptModalOpen(true), []);
-  const closeAuthzPromptModal = useCallback(() => setIsAuthzPromptModalOpen(false), []);
+  const openAuthzPromptModal = useCallback(
+    () => setIsAuthzPromptModalOpen(true),
+    []
+  );
+  const closeAuthzPromptModal = useCallback(
+    () => setIsAuthzPromptModalOpen(false),
+    []
+  );
 
   // Check if current route has access
   const cleanPath = getEffectiveRoutePath(pathname);
@@ -188,7 +208,6 @@ export function useAuthorization(): AuthorizationContextType {
   const hasAccess =
     isSharePage ||
     accessibleRoutes.includes(cleanPath) ||
-    (cleanPath === "/workbench" && accessibleRoutes.includes("/chat")) ||
     isWithinAccessiblePrefix;
 
   // Route guard
@@ -197,12 +216,20 @@ export function useAuthorization(): AuthorizationContextType {
       return;
     }
 
-    if (isLoading || !user || accessibleRoutes.length === 0 || pathname === lastCheckedPath) {
+    if (
+      isLoading ||
+      !user ||
+      accessibleRoutes.length === 0 ||
+      pathname === lastCheckedPath
+    ) {
       return;
     }
 
     if (!hasAccess) {
-      log.warn("Access denied to route:", { pathname: cleanPath, accessibleRoutes });
+      log.warn("Access denied to route:", {
+        pathname: cleanPath,
+        accessibleRoutes,
+      });
       if (user) {
         openAuthzPromptModal();
       }
@@ -213,20 +240,40 @@ export function useAuthorization(): AuthorizationContextType {
     }
 
     setLastCheckedPath(pathname);
-  }, [pathname, isLoading, user, accessibleRoutes, lastCheckedPath, hasAccess, cleanPath, isSharePage, router, openAuthzPromptModal]);
+  }, [
+    pathname,
+    isLoading,
+    user,
+    accessibleRoutes,
+    lastCheckedPath,
+    hasAccess,
+    cleanPath,
+    isSharePage,
+    router,
+    openAuthzPromptModal,
+  ]);
 
   // Permission checking utilities
-  const hasPermission = useCallback((permission: string): boolean => {
-    return permissions.includes(permission);
-  }, [permissions]);
+  const hasPermission = useCallback(
+    (permission: string): boolean => {
+      return permissions.includes(permission);
+    },
+    [permissions]
+  );
 
-  const hasAnyPermission = useCallback((requiredPermissions: string[]): boolean => {
-    return requiredPermissions.some((p) => permissions.includes(p));
-  }, [permissions]);
+  const hasAnyPermission = useCallback(
+    (requiredPermissions: string[]): boolean => {
+      return requiredPermissions.some((p) => permissions.includes(p));
+    },
+    [permissions]
+  );
 
-  const canAccessRoute = useCallback((route: string): boolean => {
-    return accessibleRoutes.includes(route);
-  }, [accessibleRoutes]);
+  const canAccessRoute = useCallback(
+    (route: string): boolean => {
+      return accessibleRoutes.includes(route);
+    },
+    [accessibleRoutes]
+  );
 
   // Internal group list query - fetches all groups for the user's tenant
   const { data: allGroupsData } = useGroupList(user?.tenantId ?? null);
@@ -236,8 +283,13 @@ export function useAuthorization(): AuthorizationContextType {
   );
 
   const getAccessibleGroupIds = useCallback((): number[] => {
-    const canSelectAllGroups = user?.role === USER_ROLES.SU || user?.role === USER_ROLES.ADMIN || user?.role === USER_ROLES.SPEED
-    return canSelectAllGroups ? allGroupIds : allGroupIds.filter((id) => groupIds.includes(id));
+    const canSelectAllGroups =
+      user?.role === USER_ROLES.SU ||
+      user?.role === USER_ROLES.ADMIN ||
+      user?.role === USER_ROLES.SPEED;
+    return canSelectAllGroups
+      ? allGroupIds
+      : allGroupIds.filter((id) => groupIds.includes(id));
   }, [allGroupIds, groupIds, user?.role]);
 
   return {
@@ -247,9 +299,10 @@ export function useAuthorization(): AuthorizationContextType {
     accessibleRoutes,
     isLoading,
     error: error as Error | null,
-    isAuthorized: !isLoading && !!user && hasAccess,
+    // Background permission refreshes retain the established route access.
+    isAuthorized: !!user && hasAccess,
     isAuthzReady,
-    refetch,
+    refetch: fetchAuthzData,
     hasPermission,
     hasAnyPermission,
     canAccessRoute,

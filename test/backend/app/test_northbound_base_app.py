@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for northbound_base_app module.
 
@@ -45,16 +47,16 @@ northbound_service_module = types.ModuleType("services.northbound_service")
 northbound_service_module.NorthboundContext = NorthboundContext
 sys.modules['services.northbound_service'] = northbound_service_module
 
-# services.a2a_server_service - stub with a2a_server_service object and exceptions
+# management.services.agent.a2a.service - stub with a2a_server_service object and exceptions
 from unittest.mock import AsyncMock, MagicMock
 
-a2a_service_module = types.ModuleType("services.a2a_server_service")
+a2a_service_module = types.ModuleType("management.services.agent.a2a.service")
 a2a_service_module.EndpointNotFoundError = type("EndpointNotFoundError", (Exception,), {})
 a2a_service_module.AgentNotEnabledError = type("AgentNotEnabledError", (Exception,), {})
 a2a_service_module.TaskNotFoundError = type("TaskNotFoundError", (Exception,), {})
 a2a_service_module.UnsupportedOperationError = type("UnsupportedOperationError", (Exception,), {})
 a2a_service_module.A2AServerServiceError = type("A2AServerServiceError", (Exception,), {})
-sys.modules['services.a2a_server_service'] = a2a_service_module
+sys.modules['management.services.agent.a2a.service'] = a2a_service_module
 
 # Create a proper mock service instance with all methods
 a2a_server_service_mock = MagicMock()
@@ -64,8 +66,8 @@ a2a_server_service_mock.get_agent_card = MagicMock()
 a2a_server_service_mock.get_task = MagicMock()
 a2a_service_module.a2a_server_service = a2a_server_service_mock
 
-# services.file_management_service - stub used by northbound_knowledge_app
-file_mgmt_module = types.ModuleType("services.file_management_service")
+# management.services.file.service - stub used by northbound_knowledge_app
+file_mgmt_module = types.ModuleType("management.services.file.service")
 file_mgmt_module.upload_to_minio = AsyncMock()
 file_mgmt_module.upload_files_impl = AsyncMock()
 file_mgmt_module.get_file_url_impl = AsyncMock()
@@ -77,12 +79,12 @@ file_mgmt_module.check_file_access_batch = MagicMock(return_value={})
 file_mgmt_module.resolve_preview_file = AsyncMock()
 file_mgmt_module.get_preview_stream = MagicMock()
 file_mgmt_module.resolve_minio_upload_folder = MagicMock(return_value="attachments")
-sys.modules["services.file_management_service"] = file_mgmt_module
+sys.modules["management.services.file.service"] = file_mgmt_module
 
-# services.redis_service - stub to avoid importing redis dependency
-redis_service_module = types.ModuleType("services.redis_service")
+# management.services.knowledge_base.task_state - stub to avoid importing redis dependency
+redis_service_module = types.ModuleType("management.services.knowledge_base.task_state")
 redis_service_module.get_redis_service = MagicMock()
-sys.modules["services.redis_service"] = redis_service_module
+sys.modules["management.services.knowledge_base.task_state"] = redis_service_module
 
 # management.services.knowledge_base.service - stub to avoid heavy SDK imports
 vectordb_service_module = types.ModuleType("management.services.knowledge_base.service")
@@ -205,13 +207,13 @@ concurrency_module.set_default_thread_manager = MagicMock()
 concurrency_module.clear_default_thread_manager = MagicMock()
 sys.modules["nexent.core.concurrency"] = concurrency_module
 
-thread_lifecycle_module = types.ModuleType("services.thread_lifecycle_service")
+thread_lifecycle_module = types.ModuleType("infrastructure.concurrency")
 thread_lifecycle_module.northbound_thread_manager = _NorthboundThreadManager()
-sys.modules["services.thread_lifecycle_service"] = thread_lifecycle_module
+sys.modules["infrastructure.concurrency"] = thread_lifecycle_module
 
-runtime_state_module = types.ModuleType("services.runtime_state_service")
+runtime_state_module = types.ModuleType("management.services.agent.run_state")
 runtime_state_module.runtime_state_service = MagicMock()
-sys.modules["services.runtime_state_service"] = runtime_state_module
+sys.modules["management.services.agent.run_state"] = runtime_state_module
 
 # ---------------------------------------------------------------------------
 # BLOCK 3: Mock remaining dependencies referenced by northbound_app
@@ -314,17 +316,17 @@ database_a2a_module.PROTOCOL_HTTP_JSON = "http+json"
 database_a2a_module.PROTOCOL_JSONRPC = "jsonrpc"
 sys.modules['database.a2a_agent_db'] = database_a2a_module
 
-# Mock utils.auth_utils (referenced by northbound_app._get_northbound_context)
-auth_utils_module = types.ModuleType("utils.auth_utils")
+# Mock management.services.permission.identity.authentication_helpers (referenced by northbound_app._get_northbound_context)
+auth_utils_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
 auth_utils_module.validate_bearer_token = MagicMock(return_value=(True, {"user_id": "test", "tenant_id": "test"}))
 auth_utils_module.generate_session_jwt = MagicMock(return_value="jwt-token")
 auth_utils_module.get_current_user_id = MagicMock(return_value=("test", "test"))
-sys.modules['utils.auth_utils'] = auth_utils_module
+sys.modules['management.services.permission.identity.authentication_helpers'] = auth_utils_module
 
-# Mock utils.file_management_utils to avoid database/storage imports
-file_management_utils_module = types.ModuleType("utils.file_management_utils")
+# Mock management.services.knowledge_base.ingestion to avoid database/storage imports
+file_management_utils_module = types.ModuleType("management.services.knowledge_base.ingestion")
 file_management_utils_module.trigger_data_process = AsyncMock(return_value=[])
-sys.modules["utils.file_management_utils"] = file_management_utils_module
+sys.modules["management.services.knowledge_base.ingestion"] = file_management_utils_module
 
 # ---------------------------------------------------------------------------
 # Helper to build async iterators without passing keyword args through mock
@@ -354,7 +356,7 @@ class TestNorthboundBaseApp(unittest.TestCase):
         recover_northbound_tasks = MagicMock()
         schedule_upload_cleanup = AsyncMock()
         startup_recovery_module = types.ModuleType(
-            "services.startup_recovery_service"
+            "management.recovery"
         )
         startup_recovery_module.recover_northbound_tasks = recover_northbound_tasks
         startup_recovery_module.schedule_interrupted_upload_cleanup = (
@@ -363,7 +365,7 @@ class TestNorthboundBaseApp(unittest.TestCase):
 
         with patch.dict(
             sys.modules,
-            {"services.startup_recovery_service": startup_recovery_module},
+            {"management.recovery": startup_recovery_module},
         ):
             asyncio.run(
                 northbound_base_app_module.recover_northbound_tasks_on_startup()

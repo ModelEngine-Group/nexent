@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Tests for northbound-to-runtime HTTP forwarding."""
 
 import json
@@ -11,7 +12,7 @@ from consts.exceptions import (
     RuntimeUpstreamError,
 )
 from consts.model import AgentRequest
-from services import runtime_proxy_service as proxy
+from management.services.agent import runtime_client as proxy
 
 
 class TrackingStream(httpx.AsyncByteStream):
@@ -271,7 +272,8 @@ async def test_forward_agent_evaluation_trial_run_rejects_invalid_success_payloa
 
 
 @pytest.mark.asyncio
-async def test_forward_agent_run_streams_body_and_closes_resources(monkeypatch):
+@pytest.mark.parametrize("metadata", [None, {}, {"source": "a2a-regression"}])
+async def test_forward_agent_run_streams_body_and_closes_resources(monkeypatch, metadata):
     stream = TrackingStream([b"data: one\n\n", b"data: two\n\n"])
     captured = {}
 
@@ -303,6 +305,7 @@ async def test_forward_agent_run_streams_body_and_closes_resources(monkeypatch):
             query="hello",
             conversation_id=123,
             agent_id=7,
+            metadata=metadata,
             minio_files=[
                 {
                     "object_name": "attachments/user-a/report.pdf",
@@ -322,6 +325,9 @@ async def test_forward_agent_run_streams_body_and_closes_resources(monkeypatch):
     assert request.headers["authorization"] == "Bearer jwt"
     request_payload = json.loads(request.content)
     assert request_payload["agent_id"] == 7
+    assert request_payload["metadata"] == metadata
+    # The real proxy wire payload must not invent a metadata update when absent.
+    assert AgentRequest.model_validate(request_payload).metadata == metadata
     assert request_payload["minio_files"] == [
         {
             "object_name": "attachments/user-a/report.pdf",

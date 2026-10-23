@@ -1,59 +1,66 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { useTranslation } from "react-i18next";
-import { useRouter, usePathname } from "next/navigation";
-import { Menu, ConfigProvider } from "antd";
 import {
-  Bot,
-  Globe,
-  Settings,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+} from "react";
+import { useTranslation } from "react-i18next";
+import { useParams, usePathname, useRouter } from "next/navigation";
+import Link from "next/link";
+import { Button, Tooltip } from "antd";
+import {
+  Bell,
   BookOpen,
-  Database,
-  Code,
-  Home,
-  Puzzle,
+  Blocks,
+  Bot,
   Building2,
-  Zap,
   CalendarClock,
+  Code,
+  Database,
+  Globe,
+  Home,
   LineChart,
+  Puzzle,
+  Pin,
+  PinOff,
+  Sparkles,
+  FolderCog,
+  Settings,
+  Zap,
 } from "lucide-react";
-import type { MenuProps } from "antd";
+
+import { AvatarDropdown } from "@/components/auth/avatarDropdown";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
-import { SIDER_CONFIG } from "@/const/layoutConstants";
+import { NotificationBell } from "@/components/navigation/NotificationBell";
+import { NavigationRailLabel } from "@/components/navigation/NavigationRailLabel";
+import { useGlobalConfigStore } from "@/stores/global";
 import { AUTH_EVENTS } from "@/const/auth";
+import {
+  useMarkAllNotificationsRead,
+  useMarkNotificationRead,
+  useNotifications,
+} from "@/hooks/useNotifications";
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { authEvents } from "@/lib/authEvents";
+import { publicAsset } from "@/lib/publicAsset";
 
-interface SideNavigationProps {
-  collapsed?: boolean;
-}
-
-/**
- * Route configuration interface for menu items
- */
 interface RouteConfig {
   path: string;
-  Icon: React.ComponentType<{ className?: string }>;
+  Icon: ComponentType<{ className?: string }>;
   labelKey: string;
   order: number;
   parentKey?: string | null;
   navigationPath?: string;
+  isSection?: boolean;
 }
 
-/**
- * Processed route with children for nested menus
- */
-interface ProcessedRoute extends RouteConfig {
-  children: RouteConfig[];
-}
-
-/**
- * Static route configuration mapping
- * All available routes with their metadata
- */
 const ROUTE_CONFIG: RouteConfig[] = [
   {
     path: "/",
@@ -63,18 +70,17 @@ const ROUTE_CONFIG: RouteConfig[] = [
     parentKey: null,
   },
   {
-    path: "/chat",
-    Icon: Bot,
+    path: "/newchat",
+    Icon: Blocks,
     labelKey: "sidebar.startChat",
     order: 1.5,
     parentKey: null,
-    navigationPath: "/newchat",
   },
   {
     path: "/workbench",
     Icon: Zap,
     labelKey: "sidebar.agentWorkbench",
-    order: 1,
+    order: 0.5,
     parentKey: null,
   },
   {
@@ -84,13 +90,13 @@ const ROUTE_CONFIG: RouteConfig[] = [
     order: 2,
     parentKey: null,
   },
-  // Agent Development submenu
   {
     path: "/agent-dev",
     Icon: Code,
     labelKey: "sidebar.agentDev",
     order: 3,
     parentKey: null,
+    isSection: true,
   },
   {
     path: "/models",
@@ -127,13 +133,13 @@ const ROUTE_CONFIG: RouteConfig[] = [
     order: 8,
     parentKey: "/agent-dev",
   },
-  // Resource Space submenu
   {
     path: "/resource-space",
     Icon: Globe,
     labelKey: "sidebar.resourceSpace",
     order: 9,
     parentKey: null,
+    isSection: true,
   },
   {
     path: "/agent-space",
@@ -151,15 +157,14 @@ const ROUTE_CONFIG: RouteConfig[] = [
   },
   {
     path: "/skill-space",
-    Icon: Zap,
+    Icon: Sparkles,
     labelKey: "sidebar.skillSpace",
     order: 12,
     parentKey: "/resource-space",
   },
-  // Management menus
   {
     path: "/resource-manage",
-    Icon: Building2,
+    Icon: FolderCog,
     labelKey: "sidebar.resourceManage",
     order: 13,
     parentKey: null,
@@ -173,208 +178,351 @@ const ROUTE_CONFIG: RouteConfig[] = [
   },
 ];
 
-/**
- * Extract all available route paths from ROUTE_CONFIG
- */
-const ROUTE_PATHS = ROUTE_CONFIG.map((route) => route.path);
+const RAIL_ITEM_CLASS =
+  "group flex h-11 w-full shrink-0 cursor-pointer items-center overflow-hidden rounded-lg border-0 bg-transparent p-0 pr-2 text-left text-[var(--navigation-muted)] transition-colors duration-150 ease-out hover:bg-[var(--navigation-hover)] hover:text-[var(--navigation-foreground)] focus-visible:text-[var(--navigation-foreground)]";
+const RAIL_ICON_CLASS = "h-5 w-5 shrink-0";
+const SELECTED_ITEM_CLASS = "!bg-[var(--navigation-selected)]";
+const ROUTE_PREFETCH_DELAY_MS = 50;
 
-/**
- * Side navigation component with collapsible menu
- * Displays main navigation items for the application based on user's accessible routes
- */
-export function SideNavigation({ collapsed }: SideNavigationProps) {
+function isRouteAccessible(
+  route: RouteConfig,
+  accessibleRoutes: string[],
+  enableAgentWorkbench: boolean
+) {
+  if (route.path === "/workbench" && !enableAgentWorkbench) {
+    return false;
+  }
+
+  return accessibleRoutes.includes(route.path);
+}
+
+interface SideNavigationProps {
+  onPinnedChange?: (pinned: boolean) => void;
+  onNavigate?: (path: string) => void;
+  isNavigating?: boolean;
+}
+
+export function SideNavigation({
+  onPinnedChange,
+  onNavigate,
+  isNavigating = false,
+}: SideNavigationProps = {}) {
   const { t } = useTranslation("common");
   const { accessibleRoutes } = useAuthorizationContext();
   const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
   const { isSpeedMode, enableAgentWorkbench, hideHomePage } = useDeployment();
   const router = useRouter();
   const pathname = usePathname();
+  const params = useParams<{ locale: string }>();
+  const locale = params.locale === "en" ? "en" : "zh";
+  const { config } = useGlobalConfigStore();
+  const [expanded, setExpanded] = useState(false);
+  const [pinned, setPinned] = useState(false);
+  const suppressExpansion = useRef(false);
+  const hovered = useRef(false);
+  const popups = useRef({ account: false, notification: false });
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const routePrefetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const expand = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    if (suppressExpansion.current) return;
+    setExpanded(true);
+  };
+  const collapseLater = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    if (pinned || popups.current.account || popups.current.notification) return;
+    closeTimer.current = setTimeout(() => setExpanded(false), 160);
+  };
+  const handlePopupChange = (
+    key: "account" | "notification",
+    open: boolean
+  ) => {
+    popups.current[key] = open;
+    if (open) {
+      suppressExpansion.current = false;
+      expand();
+    } else if (!hovered.current) collapseLater();
+  };
+  const togglePinned = () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    const nextPinned = !pinned;
+    suppressExpansion.current = !nextPinned;
+    setPinned(nextPinned);
+    setExpanded(nextPinned);
+    onPinnedChange?.(nextPinned);
+  };
+  useEffect(
+    () => () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+      if (routePrefetchTimer.current) clearTimeout(routePrefetchTimer.current);
+      onPinnedChange?.(false);
+    },
+    [onPinnedChange]
+  );
 
-  const [selectedKey, setSelectedKey] = useState("/");
-  const [openKeys, setOpenKeys] = useState<string[]>([]);
   const [pendingNavigationPath, setPendingNavigationPath] = useState<
     string | null
   >(null);
-  const isCollapsed = typeof collapsed === "boolean" ? collapsed : false;
+  const [optimisticSelectedKey, setOptimisticSelectedKey] = useState<
+    string | null
+  >(null);
 
-  // Find parent key for a given path
-  const findParentKey = (path: string): string | null => {
-    const route = ROUTE_CONFIG.find((r) => r.path === path);
-    return route?.parentKey || null;
-  };
+  const {
+    unreadCount,
+    items,
+    isLoading: isNotificationsLoading,
+  } = useNotifications(!isSpeedMode && isAuthenticated);
+  const markNotificationReadMutation = useMarkNotificationRead();
+  const markAllNotificationsReadMutation = useMarkAllNotificationsRead();
 
-  // Update selected key and expand parent menu when pathname changes
-  useEffect(() => {
+  const selectedKey = useMemo(() => {
     const currentPath = getEffectiveRoutePath(pathname);
-    const routePath = currentPath.startsWith("/agents/")
-      ? "/agents"
-      : currentPath;
-    const matchedKey =
-      routePath === "/newchat"
-        ? "/chat"
-        : ROUTE_PATHS.includes(routePath)
-          ? routePath
-          : null;
-    setSelectedKey(matchedKey || "");
+    const matchedRoute = [...ROUTE_CONFIG]
+      .sort((a, b) => b.path.length - a.path.length)
+      .find(
+        (route) =>
+          currentPath === route.path ||
+          currentPath.startsWith(`${route.path}/`) ||
+          (route.navigationPath != null &&
+            (currentPath === route.navigationPath ||
+              currentPath.startsWith(`${route.navigationPath}/`)))
+      );
 
-    // Auto-expand parent menu when visiting child page
-    const parentKey = findParentKey(routePath);
-    setOpenKeys(parentKey ? [parentKey] : []);
+    return matchedRoute?.isSection ? "" : matchedRoute?.path || "";
   }, [pathname]);
 
-  // Listen for login success event and navigate to pending path
+  useEffect(() => {
+    if (optimisticSelectedKey && selectedKey === optimisticSelectedKey) {
+      const timeout = setTimeout(() => setOptimisticSelectedKey(null), 0);
+      return () => clearTimeout(timeout);
+    }
+  }, [optimisticSelectedKey, selectedKey]);
+
+  useEffect(() => {
+    if (!optimisticSelectedKey || isNavigating) return;
+
+    const timeout = setTimeout(() => setOptimisticSelectedKey(null), 10000);
+    return () => clearTimeout(timeout);
+  }, [optimisticSelectedKey, isNavigating]);
+
   useEffect(() => {
     const handleLoginSuccess = () => {
       if (pendingNavigationPath && isAuthenticated) {
-        // Small delay to ensure authentication state is fully updated
         setTimeout(() => {
-          router.push(pendingNavigationPath);
+          if (onNavigate) onNavigate(pendingNavigationPath);
+          else router.push(pendingNavigationPath);
           setPendingNavigationPath(null);
         }, 200);
       }
     };
 
-    const cleanup = authEvents.on(
-      AUTH_EVENTS.LOGIN_SUCCESS,
-      handleLoginSuccess
-    );
-    return cleanup;
-  }, [pendingNavigationPath, isAuthenticated, router]);
+    return authEvents.on(AUTH_EVENTS.LOGIN_SUCCESS, handleLoginSuccess);
+  }, [isAuthenticated, pendingNavigationPath, router, onNavigate]);
 
-  // Listen for back-to-home event and reset selected key
-  useEffect(() => {
-    const handleBackToHome = () => {
-      setSelectedKey("/");
-    };
-
-    const cleanup = authEvents.on(AUTH_EVENTS.BACK_TO_HOME, handleBackToHome);
-    return cleanup;
-  }, []);
-
-  // Filter and sort routes based on accessibleRoutes from authorization context
-  // Build nested menu structure with parent-child relationships
-  const accessibleMenuItems = useMemo((): ProcessedRoute[] => {
+  const accessibleMenuItems = useMemo(() => {
     if (!accessibleRoutes || accessibleRoutes.length === 0) {
       return [];
     }
 
-    const filtered = ROUTE_CONFIG.filter((route) => {
-      if (route.path === "/" && hideHomePage) return false;
-      if (route.path === "/workbench" && !enableAgentWorkbench) return false;
-      return (
-        accessibleRoutes.includes(route.path) ||
-        (route.path === "/workbench" && accessibleRoutes.includes("/chat"))
-      );
-    });
-
-    // Separate root items and children
-    const rootItems = filtered
-      .filter((route) => !route.parentKey || route.parentKey === null)
-      .sort((a, b) => a.order - b.order);
-
-    const childrenByParent = new Map<string, RouteConfig[]>();
-    filtered
-      .filter((route) => route.parentKey && route.parentKey !== null)
-      .sort((a, b) => a.order - b.order)
-      .forEach((route) => {
-        const parent = route.parentKey!;
-        if (!childrenByParent.has(parent)) {
-          childrenByParent.set(parent, []);
-        }
-        childrenByParent.get(parent)!.push(route);
-      });
-
-    // Build nested structure
-    return rootItems.map((root) => ({
-      ...root,
-      children: childrenByParent.get(root.path) || [],
-    }));
+    return ROUTE_CONFIG.filter(
+      (route) =>
+        !route.isSection &&
+        !(route.path === "/" && hideHomePage) &&
+        isRouteAccessible(route, accessibleRoutes, enableAgentWorkbench)
+    ).sort((a, b) => a.order - b.order);
   }, [accessibleRoutes, enableAgentWorkbench, hideHomePage]);
 
-  /**
-   * Create a menu item from route configuration
-   * Pre-check authentication before navigation to avoid unnecessary route changes
-   */
-  const createMenuItem = (
-    route: RouteConfig
-  ): NonNullable<MenuProps["items"]>[number] => {
-    return {
-      key: route.path,
-      icon: <route.Icon className="w-4 h-4" />,
-      label: t(route.labelKey),
-      onClick: () => {
-        const navigationPath = route.navigationPath || route.path;
-        setSelectedKey(route.path);
+  const getRouteNavigationPath = (route: RouteConfig) => {
+    const routePath = route.navigationPath || route.path;
+    return `/${locale}${routePath === "/" ? "" : routePath}`;
+  };
 
-        // Pre-check authentication - show auth prompt if user is not authenticated
-        if (!isAuthenticated && !isSpeedMode && route.path !== "/") {
-          setPendingNavigationPath(navigationPath);
-          openAuthPromptModal(navigationPath);
-          return; // Prevent navigation
+  const prefetchRoute = (route: RouteConfig) => {
+    if (selectedKey === route.path) return;
+    if (!isAuthenticated && !isSpeedMode && route.path !== "/") return;
+
+    router.prefetch(getRouteNavigationPath(route));
+  };
+
+  const cancelRoutePrefetch = () => {
+    if (routePrefetchTimer.current) {
+      clearTimeout(routePrefetchTimer.current);
+      routePrefetchTimer.current = null;
+    }
+  };
+
+  const scheduleRoutePrefetch = (route: RouteConfig) => {
+    cancelRoutePrefetch();
+    routePrefetchTimer.current = setTimeout(() => {
+      routePrefetchTimer.current = null;
+      prefetchRoute(route);
+    }, ROUTE_PREFETCH_DELAY_MS);
+  };
+
+  const handleRouteClick = (route: RouteConfig) => {
+    if (route.isSection) {
+      return;
+    }
+
+    const navigationPath = getRouteNavigationPath(route);
+
+    if (!isAuthenticated && !isSpeedMode && route.path !== "/") {
+      setPendingNavigationPath(navigationPath);
+      openAuthPromptModal(navigationPath);
+      return;
+    }
+
+    setOptimisticSelectedKey(route.path);
+    if (onNavigate) onNavigate(navigationPath);
+    else router.push(navigationPath);
+  };
+
+  const notificationAction = isSpeedMode ? null : isAuthenticated ? (
+    <NotificationBell
+      rail
+      expanded={expanded}
+      onOpenChange={(open) => handlePopupChange("notification", open)}
+      unreadCount={unreadCount}
+      items={items}
+      isLoading={isNotificationsLoading}
+      isMarkingAllRead={markAllNotificationsReadMutation.isPending}
+      onMarkRead={async (receiverId) => {
+        await markNotificationReadMutation.mutateAsync(receiverId);
+      }}
+      onMarkAllRead={async () => {
+        await markAllNotificationsReadMutation.mutateAsync();
+      }}
+    />
+  ) : (
+    <button
+      type="button"
+      aria-label={t("notifications.bell.label")}
+      className={RAIL_ITEM_CLASS}
+      onClick={() => {
+        if (!isAuthenticated && !isSpeedMode) {
+          openAuthPromptModal("/");
         }
-
-        router.push(navigationPath);
-      },
-    };
-  };
-
-  // Build menu items from accessible routes with nested submenus
-  const buildMenuItems = (): MenuProps["items"] => {
-    return accessibleMenuItems.map((item) => {
-      // If this item has children, create a submenu
-      if (item.children && item.children.length > 0) {
-        return {
-          key: item.path,
-          icon: <item.Icon className="w-4 h-4" />,
-          label: t(item.labelKey),
-          children: item.children.map((child) => ({
-            key: child.path,
-            icon: <child.Icon className="w-4 h-4" />,
-            label: t(child.labelKey),
-            onClick: () => {
-              setSelectedKey(child.path);
-              if (!isAuthenticated && !isSpeedMode && child.path !== "/") {
-                setPendingNavigationPath(child.path);
-                openAuthPromptModal(child.path);
-                return;
-              }
-              router.push(child.path);
-            },
-          })),
-        };
-      }
-
-      // Regular menu item
-      return createMenuItem(item);
-    });
-  };
-
-  const menuItems: MenuProps["items"] = buildMenuItems();
+      }}
+    >
+      <span className="flex h-11 w-12 shrink-0 items-center justify-center">
+        <Bell className={RAIL_ICON_CLASS} />
+      </span>
+      <NavigationRailLabel
+        expanded={expanded}
+        label={t("notifications.bell.label")}
+      />
+    </button>
+  );
 
   return (
-    <ConfigProvider>
-      <div className="relative">
-        <div
-          className="flex-shrink-0"
-          style={{
-            width: isCollapsed
-              ? SIDER_CONFIG.COLLAPSED_WIDTH
-              : SIDER_CONFIG.EXPANDED_WIDTH,
-          }}
+    <div
+      data-sidebar-expanded={expanded}
+      data-sidebar-pinned={pinned}
+      className={`relative flex h-full flex-col bg-[var(--navigation-surface)] [--navigation-hover:color-mix(in_oklab,lab(92.4476%_-0.214785_-1.49835)_70%,transparent)] [--navigation-selected:lab(92.4476%_-0.214785_-1.49835)] [--navigation-muted:lab(47.7049%_-1.02875_-9.20491)] [--navigation-foreground:lab(11.6682%_-0.113927_-10.842)] p-2 transition-[width,box-shadow] duration-[180ms] ease-out motion-reduce:transition-none ${expanded ? "w-[240px]" : "w-16"} ${expanded && !pinned ? "shadow-[8px_0_24px_rgba(0,0,0,0.16)]" : ""}`}
+      onMouseEnter={() => {
+        hovered.current = true;
+        expand();
+      }}
+      onMouseLeave={() => {
+        hovered.current = false;
+        suppressExpansion.current = false;
+        collapseLater();
+      }}
+      onFocusCapture={expand}
+      onBlurCapture={(event) => {
+        if (
+          !event.currentTarget.contains(event.relatedTarget) &&
+          !hovered.current
+        ) {
+          suppressExpansion.current = false;
+          collapseLater();
+        }
+      }}
+    >
+      <span
+        aria-hidden="true"
+        data-sidebar-divider
+        className="pointer-events-none absolute inset-y-0 right-0 w-[0.5px] bg-[rgba(25,25,25,0.15)]"
+      />
+      <div className="mb-2 flex h-12 w-full shrink-0 items-center">
+        <Link
+          href="/"
+          aria-label={t("sidebar.homePage")}
+          className="flex h-12 min-w-0 flex-1 items-center overflow-hidden rounded-[4px] pr-2"
         >
-          <div className="py-2 h-full">
-            <Menu
-              mode="inline"
-              inlineCollapsed={isCollapsed}
-              selectedKeys={[selectedKey]}
-              openKeys={openKeys}
-              onOpenChange={setOpenKeys}
-              items={menuItems}
-              className="bg-transparent border-r-0 h-full"
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center">
+            <img
+              src={publicAsset("/modelengine-logo.png")}
+              alt="logo"
+              className="h-10 w-10 object-contain"
             />
-          </div>
-        </div>
+          </span>
+          <NavigationRailLabel
+            expanded={expanded}
+            label={config.productName || "Nexent"}
+            variant="title"
+          />
+        </Link>
+        {expanded && (
+          <Tooltip title={t(pinned ? "sidebar.unpin" : "sidebar.pin")}>
+            <Button
+              type="text"
+              aria-label={t(pinned ? "sidebar.unpin" : "sidebar.pin")}
+              aria-pressed={pinned}
+              onClick={togglePinned}
+              className={`!h-8 !w-8 shrink-0 !p-0 ${pinned ? "!text-[#2673e5] !bg-transparent" : "!text-[#777777]"}`}
+              icon={pinned ? <PinOff size={16} /> : <Pin size={16} />}
+            />
+          </Tooltip>
+        )}
       </div>
-    </ConfigProvider>
+
+      <nav className="min-h-0 w-full flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="flex flex-col gap-2">
+          {accessibleMenuItems.map((route) => {
+            const Icon = route.Icon;
+            const isSelected =
+              (optimisticSelectedKey ?? selectedKey) === route.path;
+
+            return (
+              <button
+                key={route.path}
+                type="button"
+                aria-current={isSelected ? "page" : undefined}
+                aria-busy={optimisticSelectedKey === route.path || undefined}
+                aria-label={t(route.labelKey)}
+                className={`${RAIL_ITEM_CLASS} ${isSelected ? SELECTED_ITEM_CLASS : ""}`}
+                onClick={() => handleRouteClick(route)}
+                onMouseEnter={() => scheduleRoutePrefetch(route)}
+                onMouseLeave={cancelRoutePrefetch}
+                onFocus={() => scheduleRoutePrefetch(route)}
+                onBlur={cancelRoutePrefetch}
+              >
+                <span className="flex h-11 w-12 shrink-0 items-center justify-center">
+                  <Icon
+                    className={`${RAIL_ICON_CLASS} ${isSelected ? "text-[#2673e5]" : ""}`}
+                  />
+                </span>
+                <NavigationRailLabel
+                  expanded={expanded}
+                  label={t(route.labelKey)}
+                  selected={isSelected}
+                />
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+
+      <div className="flex w-full shrink-0 flex-col gap-1">
+        {notificationAction}
+        <AvatarDropdown
+          rail
+          onNavigate={onNavigate}
+          expanded={expanded}
+          onOpenChange={(open) => handlePopupChange("account", open)}
+        />
+      </div>
+    </div>
   );
 }

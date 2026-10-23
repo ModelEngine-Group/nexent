@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import io
 import os
 import uuid
@@ -9,7 +11,12 @@ from consts.const import S3_URL_PREFIX
 from consts.const import NORTHBOUND_EXTERNAL_URL
 from urllib.parse import quote
 
-from utils.knowledge_telemetry import set_span_attributes, trace_knowledge_operation
+from infrastructure.observability.knowledge import set_span_attributes, trace_knowledge_operation
+
+
+def upload_file_bytes(content: bytes, object_name: str) -> Tuple[bool, str]:
+    """Upload bytes to an exact object key without generating attachment metadata."""
+    return minio_client.upload_fileobj(io.BytesIO(content), object_name)
 
 
 def _normalize_object_and_bucket(object_name: str, bucket: Optional[str] = None) -> Tuple[str, Optional[str]]:

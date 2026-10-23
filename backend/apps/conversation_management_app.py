@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, Optional
@@ -25,7 +26,7 @@ from consts.exceptions import (
     WorkbenchError,
 )
 from database.conversation_db import get_conversation_list_page
-from services.conversation_management_service import (
+from management.services.conversation.service import (
     create_new_conversation,
     delete_conversation_service,
     delete_conversations_batch_service,
@@ -37,7 +38,7 @@ from services.conversation_management_service import (
     update_conversation_workbench_config_service,
     update_message_opinion_service, get_message_id_by_index_impl,
 )
-from utils.auth_utils import get_current_user_id, get_current_user_info
+from management.services.permission.identity.authentication_helpers import get_current_user_id, get_current_user_info
 
 router = APIRouter(prefix="/conversation")
 
@@ -81,6 +82,7 @@ async def list_conversations_endpoint(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[Optional[int], Query(ge=1, le=100)] = None,
     conversation_type: Annotated[Optional[str], Query(pattern="^(agent_chat|workbench)$")] = None,
+    cursor: Annotated[Optional[str], Query(max_length=512)] = None,
 ):
     """
     Get all conversation list
@@ -102,8 +104,11 @@ async def list_conversations_endpoint(
             limit=limit,
             offset=offset,
             **({"conversation_type": conversation_type} if conversation_type is not None else {}),
+            **({"cursor": cursor} if cursor is not None else {}),
         )
         return ConversationResponse(code=0, message="success", data=conversations)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
@@ -129,9 +134,10 @@ async def rename_conversation_endpoint(request: RenameRequest, authorization: Op
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        rename_conversation_service(
-            request.conversation_id, request.name, user_id)
-        return ConversationResponse(code=0, message="success", data=True)
+        kwargs = {"only_if_default_title": True} if request.only_if_default_title else {}
+        renamed = rename_conversation_service(
+            request.conversation_id, request.name, user_id, **kwargs)
+        return ConversationResponse(code=0, message="success", data=renamed)
     except TokenExpiredError as e:
         logging.warning("Session expired")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
@@ -381,6 +387,8 @@ async def update_opinion_endpoint(request: OpinionRequest, authorization: Option
     try:
         update_message_opinion_service(request.message_id, request.opinion)
         return ConversationResponse(code=0, message="success", data=True)
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
     except Exception as e:
         logging.error(f"Failed to update message like/dislike: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
@@ -402,6 +410,8 @@ async def get_message_id_endpoint(request: MessageIdRequest):
     try:
         message_id = await get_message_id_by_index_impl(request.conversation_id, request.message_index)
         return ConversationResponse(code=0, message="success", data=message_id)
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail=str(exc)) from exc
     except Exception as e:
         logging.error(f"Failed to get message ID: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))

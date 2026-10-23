@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import type React from "react";
@@ -21,17 +23,14 @@ import {
 import {
   DOCUMENT_ACTION_TYPES,
   KNOWLEDGE_BASE_ACTION_TYPES,
-  KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
 } from "@/const/knowledgeBase";
 import { ErrorCode } from "@/const/errorCode";
 import { getKnowledgeResourceLimitMessage } from "@/const/errorMessageI18n";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import log from "@/lib/logger";
 import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
-import { createKnowledgeBaseFilterKey } from "@/lib/knowledgeBaseViewport";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import knowledgeBasePollingService from "@/services/knowledgeBasePollingService";
-import { isKnowledgeBaseFileSizeValid } from "@/services/uploadService";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import { useConfig } from "@/hooks/useConfig";
 import { useModelList } from "@/hooks/model/useModelList";
@@ -40,9 +39,11 @@ import { SETUP_PAGE_CONTAINER, STANDARD_CARD } from "@/const/layoutConstants";
 import { QUOTA_USAGE_CHANGED_EVENT } from "@/lib/quotaEvents";
 import quotaService from "@/services/quotaService";
 import type { KBQuotaStatus, QuotaUsageResponse } from "@/types/quota";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 
 import KnowledgeBaseList from "./components/knowledge/KnowledgeBaseList";
 import DocumentList from "./components/document/DocumentList";
+import KnowledgeBaseDeleteNotice from "@/components/knowledge-base/KnowledgeBaseDeleteNotice";
 import {
   useKnowledgeBaseContext,
   KnowledgeBaseProvider,
@@ -221,9 +222,6 @@ function DataConfig({ isActive }: DataConfigProps) {
       );
   }, [loadQuotaUsage]);
 
-  // Get available embedding models for knowledge base creation
-  const { models } = useModelList({ enabled: true });
-
   // Clear cache when component initializes
   useEffect(() => {
     localStorage.removeItem("preloaded_kb_data");
@@ -253,9 +251,7 @@ function DataConfig({ isActive }: DataConfigProps) {
   const {
     state: kbState,
     fetchKnowledgeBases,
-    loadMoreKnowledgeBases,
     listPagination,
-    isLoadingMore,
     createKnowledgeBase,
     deleteKnowledgeBase,
     setActiveKnowledgeBase,
@@ -281,7 +277,6 @@ function DataConfig({ isActive }: DataConfigProps) {
   // Create mode state
   const [isCreatingMode, setIsCreatingMode] = useState(false);
   const [newKbName, setNewKbName] = useState("");
-  const [newKbDescription, setNewKbDescription] = useState("");
   const [newKbIngroupPermission, setNewKbIngroupPermission] =
     useState<string>("READ_ONLY");
   const [newKbGroupIds, setNewKbGroupIds] = useState<number[]>([]);
@@ -291,89 +286,83 @@ function DataConfig({ isActive }: DataConfigProps) {
   const [newKbEmbeddingModel, setNewKbEmbeddingModel] = useState<string>(""); // Selected embedding model for new KB
   // v2.6.0: per-KB embedding model params override
   const [newKbEmbeddingParamsOverride, setNewKbEmbeddingParamsOverride] =
-    useState<Record<string, { temperature?: number | null; top_p?: number | null; extra_params?: Record<string, unknown> | null }>>({});
+    useState<
+      Record<
+        string,
+        {
+          temperature?: number | null;
+          top_p?: number | null;
+          extra_params?: Record<string, unknown> | null;
+        }
+      >
+    >({});
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [hasClickedUpload, setHasClickedUpload] = useState(false);
   const [showEmbeddingWarning, setShowEmbeddingWarning] = useState(false);
   const [showAutoDeselectModal, setShowAutoDeselectModal] = useState(false);
   const [newlyCreatedKbId, setNewlyCreatedKbId] = useState<string | null>(null); // Track newly created KB waiting for documents
 
+  // Embedding models are only needed once the create dialog is open.
+  const { models, isSuccess: modelsLoaded } = useModelList({
+    enabled: isCreatingMode,
+  });
+
   // Search and filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<string[]>([]);
   const [modelFilter, setModelFilter] = useState<string[]>([]);
-  const lastRequestedFilterKeyRef = useRef(
-    createKnowledgeBaseFilterKey(searchQuery, sourceFilter, modelFilter)
-  );
+  const [tagFilter, setTagFilter] = useState<TagResourcePredicate[]>([]);
+  const [listPage, setListPage] = useState(1);
+  const [listPageSize, setListPageSize] = useState(12);
   const initialLoadStartedRef = useRef(false);
-  const initialCapacityRequestRef = useRef(false);
-  const initialPageSizeRef = useRef(1);
-  const [initialListPending, setInitialListPending] = useState(true);
+  const listRequestKey = JSON.stringify([
+    listPage,
+    listPageSize,
+    searchQuery,
+    sourceFilter,
+    modelFilter,
+  ]);
+  const [completedListRequestKey, setCompletedListRequestKey] = useState<
+    string | null
+  >(null);
+  const initialListPending = completedListRequestKey !== listRequestKey;
   const contentRef = useRef<HTMLDivElement | null>(null);
 
-  const handleViewportCapacityChange = useCallback(
-    (capacity: number, hasMeasuredRows: boolean) => {
-      const pageSize = Math.max(1, Math.ceil(capacity));
-      initialPageSizeRef.current = pageSize;
-      const loadedCount = kbState.knowledgeBases.length;
-      if (initialLoadStartedRef.current && !listPagination.hasMore) {
-        setInitialListPending(false);
-        return;
-      }
-      if (
-        kbState.isLoading ||
-        isLoadingMore ||
-        initialCapacityRequestRef.current ||
-        (initialLoadStartedRef.current &&
-          (!hasMeasuredRows || loadedCount >= pageSize))
-      ) {
-        return;
-      }
-
-      initialLoadStartedRef.current = true;
-      initialCapacityRequestRef.current = true;
-      setInitialListPending(true);
-      void fetchKnowledgeBases(false, true, true, {
-        keyword: searchQuery,
-        sources: sourceFilter,
-        models: modelFilter,
-        limit: pageSize,
-      }).finally(() => {
-        initialCapacityRequestRef.current = false;
-        setInitialListPending(false);
-      });
-    },
-    [
-      fetchKnowledgeBases,
-      kbState.isLoading,
-      kbState.knowledgeBases.length,
-      isLoadingMore,
-      listPagination.hasMore,
-      modelFilter,
-      searchQuery,
-      sourceFilter,
-    ]
-  );
-
   useEffect(() => {
-    const filterKey = createKnowledgeBaseFilterKey(
-      searchQuery,
-      sourceFilter,
-      modelFilter
+    let cancelled = false;
+    const initial = !initialLoadStartedRef.current;
+    const timer = window.setTimeout(
+      () => {
+        initialLoadStartedRef.current = true;
+        void fetchKnowledgeBases(!initial, false, initial, {
+          keyword: searchQuery,
+          sources: sourceFilter,
+          models: modelFilter,
+          offset: (listPage - 1) * listPageSize,
+          limit: listPageSize,
+        })
+          .catch((error) => {
+            log.error("Failed to load the knowledge catalog page", error);
+          })
+          .finally(() => {
+            if (!cancelled) setCompletedListRequestKey(listRequestKey);
+          });
+      },
+      initial ? 0 : 250
     );
-    if (filterKey === lastRequestedFilterKeyRef.current) return;
-
-    const timer = window.setTimeout(() => {
-      lastRequestedFilterKeyRef.current = filterKey;
-      fetchKnowledgeBases(true, false, false, {
-        keyword: searchQuery,
-        sources: sourceFilter,
-        models: modelFilter,
-        limit: initialPageSizeRef.current,
-      });
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [fetchKnowledgeBases, modelFilter, searchQuery, sourceFilter]);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [
+    fetchKnowledgeBases,
+    listRequestKey,
+    listPage,
+    listPageSize,
+    modelFilter,
+    searchQuery,
+    sourceFilter,
+  ]);
 
   const availableEmbeddingModels = useMemo(() => {
     const embeddingRelatedModels = models.filter(
@@ -400,6 +389,49 @@ function DataConfig({ isActive }: DataConfigProps) {
       return false;
     });
   }, [models]);
+
+  // Select the default embedding model only while creating and only when the
+  // user has not picked one, so closing the dialog never rewrites a draft.
+  useEffect(() => {
+    if (!isCreatingMode || !modelsLoaded || newKbEmbeddingModel) return;
+
+    const configEmbeddingModel =
+      modelConfig?.embedding?.displayName?.trim() || "";
+    const configMultiEmbeddingModel =
+      modelConfig?.multiEmbedding?.displayName?.trim() || "";
+    const preferredModel = [
+      { modelName: configEmbeddingModel, type: "embedding" },
+      { modelName: configMultiEmbeddingModel, type: "multi_embedding" },
+    ].find(
+      ({ modelName, type }) =>
+        !!modelName &&
+        availableEmbeddingModels.some(
+          (model) => model.displayName === modelName && model.type === type
+        )
+    );
+    const defaultModel =
+      (preferredModel &&
+        toEmbeddingModelOptionValue(
+          preferredModel.modelName,
+          preferredModel.type
+        )) ||
+      (availableEmbeddingModels[0]
+        ? toEmbeddingModelOptionValue(
+            availableEmbeddingModels[0].displayName,
+            availableEmbeddingModels[0].type
+          )
+        : "");
+    if (defaultModel) {
+      setNewKbEmbeddingModel(defaultModel);
+    }
+  }, [
+    isCreatingMode,
+    modelsLoaded,
+    newKbEmbeddingModel,
+    availableEmbeddingModels,
+    modelConfig?.embedding?.displayName,
+    modelConfig?.multiEmbedding?.displayName,
+  ]);
 
   const resolveEmbeddingModelId = useCallback(
     ({
@@ -575,7 +607,8 @@ function DataConfig({ isActive }: DataConfigProps) {
     e.preventDefault();
     setDragging(false);
 
-    // If in creation mode or has active knowledge base, process files
+    // Only the upload drop zone accepts files. A drop anywhere else keeps the
+    // browser from navigating, but never queues an upload.
     // Do not allow uploads when active KB source is datamate
     if (
       kbState.activeKnowledgeBase &&
@@ -583,32 +616,11 @@ function DataConfig({ isActive }: DataConfigProps) {
       !isCreatingMode
     ) {
       message.warning(t("document.message.uploadDisabledForDataMate"));
-      return;
-    }
-
-    if (isCreatingMode || kbState.activeKnowledgeBase) {
-      const files = Array.from(e.dataTransfer.files);
-      const validFiles = files.filter(isKnowledgeBaseFileSizeValid);
-      if (validFiles.length !== files.length) {
-        message.error(
-          t("knowledgeBase.upload.fileTooLarge", {
-            limit: KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
-          })
-        );
-      }
-      if (validFiles.length > 0) {
-        setUploadFiles(validFiles);
-        if (!isCreatingMode) {
-          void handleFileUpload(validFiles);
-        }
-      }
-    } else {
-      message.warning(t("knowledgeBase.message.selectFirst"));
     }
   };
 
   // Handle knowledge base deletion
-  const handleDelete = (id: string) => {
+  const handleDelete = async (id: string) => {
     // Find the knowledge base to check its source
     const kb = kbState.knowledgeBases.find((kb) => kb.id === id);
 
@@ -623,11 +635,22 @@ function DataConfig({ isActive }: DataConfigProps) {
       return;
     }
 
+    // Deletion cascades: the dialog lists the agents that lose their binding,
+    // plus a fixed notice for conversations.
+    const preview = await knowledgeBaseService.previewBoundAgents(id);
+
     // Normal delete confirmation for local knowledge bases
     confirm({
-      title: t("knowledgeBase.modal.deleteConfirm.title"),
-      content: t("knowledgeBase.modal.deleteConfirm.content"),
-      okText: t("common.confirm"),
+      title: t("knowledgeBase.modal.deleteConfirm.title", {
+        name: kb?.name ?? id,
+      }),
+      content: (
+        <div>
+          <div>{t("knowledgeBase.modal.deleteConfirm.content")}</div>
+          <KnowledgeBaseDeleteNotice preview={preview} />
+        </div>
+      ),
+      okText: t("knowledgeBase.modal.deleteConfirm.confirm"),
       cancelText: t("common.cancel"),
       danger: true,
       onOk: async () => {
@@ -802,6 +825,32 @@ function DataConfig({ isActive }: DataConfigProps) {
     }
   };
 
+  // Reuse the page-level quota snapshot for upload blocking; the document
+  // view must not issue a second quota request.
+  const uploadStorageBlocked = quotaUsage?.tenant_warning_level === "blocked";
+  const uploadStorageBlockedMessage = uploadStorageBlocked
+    ? `Storage full — ${quotaUsage?.total_readable || "0"} / ${quotaUsage?.hard_limit_readable || "?"}. Uploads are blocked.`
+    : undefined;
+
+  // Refresh the catalog page after card tags change, keeping the current
+  // keyword, filters and page.
+  const refreshKnowledgeBaseCatalog = useCallback(() => {
+    void fetchKnowledgeBases(false, true, false, {
+      keyword: searchQuery,
+      sources: sourceFilter,
+      models: modelFilter,
+      offset: (listPage - 1) * listPageSize,
+      limit: listPageSize,
+    });
+  }, [
+    fetchKnowledgeBases,
+    listPage,
+    listPageSize,
+    modelFilter,
+    searchQuery,
+    sourceFilter,
+  ]);
+
   // Handle new knowledge base creation
   const handleCreateNew = () => {
     // Clear active knowledge base selection when entering create mode
@@ -811,40 +860,12 @@ function DataConfig({ isActive }: DataConfigProps) {
     // Generate the default name without probing hidden tenant knowledge bases.
     const defaultName = generateVisibleKbName(kbState.knowledgeBases);
     setNewKbName(defaultName);
-    setNewKbDescription("");
     setNewKbIngroupPermission("READ_ONLY");
     setNewKbGroupIds([]);
     setNewKbPreserveSourceFile(true);
-    // Set default embedding model:
-    // 1) configured embedding model, 2) configured multimodal model, 3) first available option.
-    // Use displayName to match availableEmbeddingModels and KB embeddingModel.
-    const configEmbeddingModel =
-      modelConfig?.embedding?.displayName?.trim() || "";
-    const configMultiEmbeddingModel =
-      modelConfig?.multiEmbedding?.displayName?.trim() || "";
-    const preferredModel = [
-      { modelName: configEmbeddingModel, type: "embedding" },
-      { modelName: configMultiEmbeddingModel, type: "multi_embedding" },
-    ].find(
-      ({ modelName, type }) =>
-        !!modelName &&
-        availableEmbeddingModels.some(
-          (model) => model.displayName === modelName && model.type === type
-        )
-    );
-    const defaultModel =
-      (preferredModel &&
-        toEmbeddingModelOptionValue(
-          preferredModel.modelName,
-          preferredModel.type
-        )) ||
-      (availableEmbeddingModels[0]
-        ? toEmbeddingModelOptionValue(
-            availableEmbeddingModels[0].displayName,
-            availableEmbeddingModels[0].type
-          )
-        : "");
-    setNewKbEmbeddingModel(defaultModel);
+    // Clear the previous choice; the load effect picks the default once the
+    // embedding models have actually arrived.
+    setNewKbEmbeddingModel("");
     // v2.6.0: reset embedding model params override when entering create mode
     setNewKbEmbeddingParamsOverride({});
     setIsCreatingMode(true);
@@ -935,7 +956,7 @@ function DataConfig({ isActive }: DataConfigProps) {
 
         const newKB = await createKnowledgeBase(
           newKbName.trim(),
-          newKbDescription.trim() || t("knowledgeBase.description.default"),
+          t("knowledgeBase.description.default"),
           "elasticsearch",
           newKbIngroupPermission,
           newKbGroupIds,
@@ -1110,8 +1131,12 @@ function DataConfig({ isActive }: DataConfigProps) {
       <div
         className="w-full h-full mx-auto relative"
         style={{
-          maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
-          padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
+          maxWidth: kbState.activeKnowledgeBase
+            ? SETUP_PAGE_CONTAINER.MAX_WIDTH
+            : undefined,
+          padding: kbState.activeKnowledgeBase
+            ? `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`
+            : undefined,
         }}
       >
         <div
@@ -1143,8 +1168,12 @@ function DataConfig({ isActive }: DataConfigProps) {
       <div
         className="w-full h-full mx-auto relative"
         style={{
-          maxWidth: SETUP_PAGE_CONTAINER.MAX_WIDTH,
-          padding: `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`,
+          maxWidth: kbState.activeKnowledgeBase
+            ? SETUP_PAGE_CONTAINER.MAX_WIDTH
+            : undefined,
+          padding: kbState.activeKnowledgeBase
+            ? `0 ${SETUP_PAGE_CONTAINER.HORIZONTAL_PADDING}`
+            : undefined,
         }}
         ref={contentRef}
         onDragOver={handleDragOver}
@@ -1158,19 +1187,24 @@ function DataConfig({ isActive }: DataConfigProps) {
                 knowledgeBases={kbState.knowledgeBases}
                 activeKnowledgeBase={kbState.activeKnowledgeBase}
                 isLoading={kbState.isLoading}
-                isLoadingMore={isLoadingMore}
                 syncLoading={kbState.syncLoading}
                 totalCount={listPagination.total}
-                hasMore={listPagination.hasMore}
-                estimatedRowHeight={listPagination.estimatedRowHeight}
-                estimatedItemHeights={listPagination.estimatedItemHeights}
+                page={listPage}
+                pageSize={listPageSize}
+                onPageChange={setListPage}
+                onPageSizeChange={(size) => {
+                  setListPageSize(size);
+                  setListPage(1);
+                }}
+                error={kbState.error}
+                onRetry={() => {
+                  void fetchKnowledgeBases(true, false, false);
+                }}
                 availableSources={listPagination.facets.sources}
                 availableModels={listPagination.facets.models}
                 quotaUsage={quotaUsage}
-                onLoadMore={loadMoreKnowledgeBases}
                 serverFiltered
                 initialLoadPending={initialListPending}
-                onViewportCapacityChange={handleViewportCapacityChange}
                 onClick={handleKnowledgeBaseClick}
                 onDelete={handleDelete}
                 onSync={handleSync}
@@ -1180,6 +1214,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                 getModelDisplayName={(modelId) => modelId}
                 containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
                 onKnowledgeBaseChange={() => {}} // No need to trigger repeatedly here as it's already handled in handleKnowledgeBaseClick
+                onCatalogRefresh={refreshKnowledgeBaseCatalog}
                 onKnowledgeBaseUpdate={(updatedKnowledgeBase) => {
                   // Update knowledge base in list and active knowledge base
                   updateKnowledgeBase(updatedKnowledgeBase);
@@ -1191,20 +1226,30 @@ function DataConfig({ isActive }: DataConfigProps) {
                   }
                 }}
                 // Search and filter props
+                tagFilter={tagFilter}
+                onTagFilterChange={(values) => {
+                  setTagFilter(values);
+                  setListPage(1);
+                }}
                 searchQuery={searchQuery}
-                onSearchChange={setSearchQuery}
+                onSearchChange={(value) => {
+                  setSearchQuery(value);
+                  setListPage(1);
+                }}
                 sourceFilter={sourceFilter}
-                onSourceFilterChange={(values) =>
+                onSourceFilterChange={(values) => {
                   setSourceFilter(
                     Array.isArray(values) ? values : values ? [values] : []
-                  )
-                }
+                  );
+                  setListPage(1);
+                }}
                 modelFilter={modelFilter}
-                onModelFilterChange={(values) =>
+                onModelFilterChange={(values) => {
                   setModelFilter(
                     Array.isArray(values) ? values : values ? [values] : []
-                  )
-                }
+                  );
+                  setListPage(1);
+                }}
               />
               <Modal
                 open={isCreatingMode}
@@ -1235,7 +1280,7 @@ function DataConfig({ isActive }: DataConfigProps) {
                 }
                 width={640}
                 centered
-                maskClosable={false}
+                mask={{ closable: false }}
                 destroyOnHidden
                 onCancel={handleCloseCreateModal}
                 styles={{
@@ -1259,8 +1304,6 @@ function DataConfig({ isActive }: DataConfigProps) {
                     knowledgeBaseId=""
                     knowledgeBaseName={newKbName}
                     onNameChange={handleNameChange}
-                    knowledgeBaseDescription={newKbDescription}
-                    onDescriptionChange={setNewKbDescription}
                     selectedFiles={uploadFiles}
                     containerHeight={SETUP_PAGE_CONTAINER.MAIN_CONTENT_HEIGHT}
                     hasDocuments={hasClickedUpload || docState.isUploading}
@@ -1290,6 +1333,8 @@ function DataConfig({ isActive }: DataConfigProps) {
                     onFileSelect={handleFileSelect}
                     onUpload={handleFileUpload}
                     isUploading={docState.isUploading}
+                    uploadStorageBlocked={uploadStorageBlocked}
+                    uploadStorageBlockedMessage={uploadStorageBlockedMessage}
                   />
                 </div>
               </Modal>
@@ -1376,6 +1421,8 @@ function DataConfig({ isActive }: DataConfigProps) {
                   onFileSelect={handleFileSelect}
                   onUpload={handleFileUpload}
                   isUploading={docState.isUploading}
+                  uploadStorageBlocked={uploadStorageBlocked}
+                  uploadStorageBlockedMessage={uploadStorageBlockedMessage}
                 />
               </div>
             </div>

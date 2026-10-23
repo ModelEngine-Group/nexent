@@ -1,0 +1,76 @@
+schema_version: '1.0'
+stage: D4
+module: V5-BASELINE
+case:
+  case_id: PW-MEDIA-VLM-01
+  feature_id: V5-PW-MEDIA-VLM-01
+  business_rule_ids:
+  - V5-PW-MEDIA-VLM-01-RULE-01
+  title: 真实VLM→图片附件→多模态回答
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: 验证图片上传、附件上下文和真实多模态链路。
+  preconditions:
+  - 真实VLM通过预检
+  - 测试Agent使用该模型
+  - 图片marker=7429
+  test_data:
+    legacy_asset_declaration: config/models.yaml；assets/images/vlm_number_7429.png；expected/vlm_expected.json
+  steps:
+  - order: 1
+    action: 确认/models目标多模态模型通过Connectivity。
+    expected: 图片真实上传绑定当前消息。
+  - order: 2
+    action: 打开/newchat选择对应Agent。
+    expected: VLM真实调用且marker正确。
+  - order: 3
+    action: 点击附件入口，setInputFiles上传vlm_number_7429.png。
+    expected: 新会话不泄露旧附件上下文。
+  - order: 4
+    action: 等待附件上传成功并出现卡片。
+    expected: 新会话不泄露旧附件上下文。
+  - order: 5
+    action: 输入固定问题“图片中的测试编号是什么？”并发送。
+    expected: 新会话不泄露旧附件上下文。
+  - order: 6
+    action: 等待真实多模态streaming完成。
+    expected: 新会话不泄露旧附件上下文。
+  - order: 7
+    action: 确认回答含7429。
+    expected: 新会话不泄露旧附件上下文。
+  - order: 8
+    action: 新建无附件会话问同一文本，确认不会沿用上一会话图片上下文。
+    expected: 新会话不泄露旧附件上下文。
+  expected_results:
+  - 图片真实上传绑定当前消息。
+  - VLM真实调用且marker正确。
+  - 新会话不泄露旧附件上下文。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 03_Playwright_Journey
+    legacy_row: 16
+  actor: Nexent browser user
+  journey:
+  - 确认/models目标多模态模型通过Connectivity。
+  - 打开/newchat选择对应Agent。
+  - 点击附件入口，setInputFiles上传vlm_number_7429.png。
+  - 等待附件上传成功并出现卡片。
+  - 输入固定问题“图片中的测试编号是什么？”并发送。
+  - 等待真实多模态streaming完成。
+  - 确认回答含7429。
+  - 新建无附件会话问同一文本，确认不会沿用上一会话图片上下文。
+  final_business_result:
+  - 图片真实上传绑定当前消息。
+  - VLM真实调用且marker正确。
+  - 新会话不泄露旧附件上下文。
+  failure_evidence:
+  - '${NEXENT_TEST_HOME}/runs/{run_id}/playwright/PW-MEDIA-VLM-01/
+
+    - screenshot.png / trace.zip / video.webm
+
+    - console.log / network.har / failure.json
+
+    - 涉及协议时关联 wire/*.jsonl；涉及下载时保留 downloads/'

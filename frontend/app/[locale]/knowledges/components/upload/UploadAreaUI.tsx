@@ -1,8 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
+import { KNOWLEDGE_BASE_MAX_FILE_SIZE_MB } from "@/const/knowledgeBase";
 import { Upload, Progress } from "antd";
 import { WarningFilled } from "@ant-design/icons";
 import { Inbox } from "lucide-react";
@@ -330,7 +333,9 @@ const UploadDropZone = ({
                 isCreatingMode ? "!mt-0 text-xs" : "!mt-1"
               }`}
             >
-              {t("knowledgeBase.upload.fileSizeLimit")}
+              {t("knowledgeBase.upload.fileSizeLimit", {
+                limit: KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+              })}
             </p>
           </div>
         </Dragger>

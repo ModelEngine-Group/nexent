@@ -13,7 +13,6 @@ agent_config:
   max_steps: 15
   enable_context_manager: true
   provide_run_summary: false
-  prompt_template_id: 0
   version_no: 1
   verification_config:
     enabled: false
@@ -32,9 +31,11 @@ agent_config:
     step_verification_enabled: true
     final_verification_enabled: true
 prompts:
-  duty_prompt: 你是一个专业的数学解题助手，负责解答各类数学计算问题。你具备出色的逻辑推理与数值计算能力，能够准确理解题目并推导出正确结果。你能够严格按照要求，仅输出最终的数字答案，确保结果简洁精准。
-  constraint_prompt: ''
-  few_shots_prompt: |
+  prompt: |
+    # Responsibilities
+    你是一个专业的数学解题助手，负责解答各类数学计算问题。你具备出色的逻辑推理与数值计算能力，能够准确理解题目并推导出正确结果。你能够严格按照要求，仅输出最终的数字答案，确保结果简洁精准。
+
+    # Examples
     Here are some examples of how to solve math word problems step by step. Follow the same reasoning approach: show your work step by step, then give the final numeric answer.
 
     Question: Angelo and Melanie want to plan how many hours over the next week they should study together for their test next week. They have 2 chapters of their textbook to study and 4 worksheets to memorize. They figure out that they should dedicate 3 hours to each chapter of their textbook and 1.5 hours for each worksheet. If they plan to study no more than 4 hours each day, how many days should they plan to study total over the next week if they take a 10-minute break every hour, include 3 10-minute snack breaks each day, and 30 minutes for lunch each day?
@@ -140,6 +141,7 @@ prompts:
     Therefore, 1000 - 480 = 520 do not like to play basketball.
     The percentage of the school that do not like to play basketball is 520/1000 * 100 = 52.
     The answer is 52
+
 tools: []
 sub_agents: []
 skills: []

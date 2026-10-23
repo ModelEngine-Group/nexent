@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   createConversationTitleRequest,
+  ConversationTitleGuard,
   // @ts-expect-error -- Node's built-in TypeScript runner needs the extension.
 } from "../lib/conversationTitle.ts";
 
@@ -26,4 +27,15 @@ test("omits model_id for legacy default-model behavior", () => {
     conversation_id: 42,
     question: "Question",
   });
+});
+
+test("late automatic results are rejected after a manual rename", () => {
+  const guard = new ConversationTitleGuard();
+  const revision = guard.capture("thread-a");
+  assert.equal(guard.isCurrent("thread-a", revision), true);
+  guard.renamed("thread-a");
+  assert.equal(guard.isCurrent("thread-a", revision), false);
+  // Another conversation and a subsequent request remain independent.
+  assert.equal(guard.isCurrent("thread-b", 0), true);
+  assert.equal(guard.isCurrent("thread-a", guard.capture("thread-a")), true);
 });

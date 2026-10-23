@@ -1,0 +1,7 @@
+apiVersion: v2
+name: nexent-nginx
+description: Nginx HTTPS reverse proxy for the Nexent web entry
+type: application
+version: 0.1.0
+appVersion: "latest"
+

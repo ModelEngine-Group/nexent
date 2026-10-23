@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-MEM-01
+  name: Base配置→User长期记忆版本保存/预览/激活→权限隔离与恢复
+  status: active
+  description: 验证当前版本化长期Markdown记忆：保存与编辑生成版本、历史预览及激活、刷新持久化和跨租户隔离。
+  business_rules:
+  - rule_id: V5-PW-MEM-01-RULE-01
+    description: Base配置→User长期记忆版本保存/预览/激活→权限隔离与恢复
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

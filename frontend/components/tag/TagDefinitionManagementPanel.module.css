@@ -1,0 +1,12 @@
+/*
+ * The table body is only as tall as the rows it currently holds, so a search
+ * that filters rows out also shrinks it and drags the height of the dialog
+ * around it along. `scroll.y` already asks for a 500px body, so pinning the
+ * body to that height keeps the dialog the same size for a full page, a single
+ * match and no match at all. Only the dialog asks for it; the panel keeps its
+ * natural height on the resource management page, where it is embedded without
+ * the flag.
+ */
+.stableTableHeight :global(.ant-table-body) {
+  min-height: 500px;
+}

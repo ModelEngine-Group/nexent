@@ -1,0 +1,60 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: PERF-10
+  feature_id: V5-PERF-10
+  business_rule_ids:
+  - V5-PERF-10-RULE-01
+  title: Range流式预览大文件
+  type: PERFORMANCE
+  priority: P2
+  status: active
+  automation: automated
+  objective: 部分内容传输性能与连接释放
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/assets/documents/
+
+    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/assets/documents/
+
+      - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  steps:
+  - order: 1
+    action: 从 performance.yaml 读取本用例并发量/数据规模/阈值，启动本地真实测试栈并记录机器资源信息。
+    expected: 206/416正确；不加载全文件到内存；断连释放stream。
+  - order: 2
+    action: 准备“Range流式预览大文件”所需固定测试数据和真实模型/向量服务（如涉及）。
+    expected: 206/416正确；不加载全文件到内存；断连释放stream。
+  - order: 3
+    action: 并发Range请求、取消连接、尾部range、非法range。
+    expected: 206/416正确；不加载全文件到内存；断连释放stream。
+  - order: 4
+    action: 预热一次后再正式测量；记录 P50/P95/P99、吞吐、错误率和资源占用。
+    expected: 206/416正确；不加载全文件到内存；断连释放stream。
+  - order: 5
+    action: 性能场景仍要验证业务正确性，不能以返回快作为唯一通过条件。
+    expected: 206/416正确；不加载全文件到内存；断连释放stream。
+  - order: 6
+    action: 保存原始测量 JSON/CSV、服务日志和环境快照；P2 大型场景失败默认记录但不掩盖 P0/P1结果。
+    expected: 206/416正确；不加载全文件到内存；断连释放stream。
+  expected_results:
+  - 206/416正确；不加载全文件到内存；断连释放stream。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 21
+  risk_type: PERFORMANCE
+  risk: 部分内容传输性能与连接释放
+  condition:
+  - '- ${NEXENT_TEST_HOME}/assets/documents/
+
+    - ${NEXENT_TEST_HOME}/config/performance.yaml'
+  metrics:
+  - 206/416正确；不加载全文件到内存；断连释放stream。
+  thresholds:
+  - 206/416正确；不加载全文件到内存；断连释放stream。
+  recovery_expectations:
+  - 206/416正确；不加载全文件到内存；断连释放stream。

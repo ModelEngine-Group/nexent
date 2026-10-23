@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Tests for FastAPI authentication and permission dependencies."""
 
 import pytest
@@ -89,3 +90,25 @@ def test_require_bypasses_seeded_permission_for_speed_role(mocker, monkeypatch):
 
     assert depends.require("kb.capacity:read")(current_user) is current_user
     has_permission.assert_not_called()
+
+
+def test_user_model_read_grant_does_not_authorize_model_writes(mocker, monkeypatch):
+    from permissions import rbac
+
+    monkeypatch.setattr(depends, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(rbac, "_INITIALIZED", False)
+    monkeypatch.setattr(rbac, "_ROLE_PERMISSIONS", {})
+    mocker.patch("permissions.rbac.get_all_role_permissions", return_value=[{
+        "user_role": "USER",
+        "permission_category": "RESOURCE",
+        "permission_type": "MODEL",
+        "permission_subtype": "READ",
+    }])
+    current_user = depends.CurrentUser("user-1", "tenant-1", "USER")
+
+    assert depends.require("model:read")(current_user) is current_user
+    for operation in ("create", "update", "delete"):
+        with pytest.raises(HTTPException) as raised:
+            depends.require(f"model:{operation}")(current_user)
+        assert raised.value.status_code == 403
+        assert raised.value.detail == f"Missing required permission: model:{operation}"

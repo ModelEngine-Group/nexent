@@ -13,13 +13,9 @@ logger = logging.getLogger("read_file_tool")
 class ReadFileTool(Tool):
     """File reading tool for reading file contents"""
     name = "read_file"
-    description = "Read content from a file at the specified path. " \
-                  "Path should be relative to the workspace (e.g., 'documents/file.txt'). " \
-                  "Absolute paths are not allowed for security reasons. " \
-                  "Supports custom encoding, defaults to utf-8. " \
-                  "Returns the file content as a string along with file metadata."
+    description = "Read a workspace file and return its content with file metadata."
 
-    description_zh = "读取指定文件的内容，路径需为工作区相对路径（例如，'documents/file.txt'），出于安全考虑，不支持绝对路径。支持自定义编码，默认为 utf-8 ，文件内容以字符串形式返回，同时返回文件元数据。"
+    description_zh = "读取工作区文件，返回内容和文件元数据。"
 
     inputs = {
         "file_path": {
@@ -64,6 +60,7 @@ class ReadFileTool(Tool):
             raise ValueError("init_path cannot be empty. Use a non-empty path or omit to use the default '/mnt/nexent'.")
         self.init_path = os.path.abspath(init_path if init_path else "/mnt/nexent")
         self.observer = observer
+        self.workspace_mapping = None
 
     def _validate_path(self, file_path: str) -> str:
         """Validate and resolve file path within the workspace.
@@ -77,6 +74,8 @@ class ReadFileTool(Tool):
         Raises:
             Exception: If path is outside workspace or invalid
         """
+        if self.workspace_mapping is not None:
+            return str(self.workspace_mapping.resolve_file(file_path, self.init_path))
         # Check for absolute path
         if os.path.isabs(file_path):
             abs_path = os.path.abspath(file_path)
@@ -142,7 +141,9 @@ class ReadFileTool(Tool):
             success_msg = {
                 "status": "success",
                 "file_path": relative_path,
-                "absolute_path": abs_path,
+                "absolute_path": (
+                    str(self.workspace_mapping.to_container(abs_path)) if self.workspace_mapping else abs_path
+                ),
                 "content": content,
                 "content_length": len(content),
                 "file_size_bytes": file_size,

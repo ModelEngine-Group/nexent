@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import asyncio
 import sys
@@ -7,9 +8,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from consts.exceptions import TagManagementNotFoundError, ValidationError
-import services.tag_management_service as service_module
-from services.tag_management_service import TagManagementService
-from services.tag_resource_adapters import (
+import management.services.tag.library as service_module
+from management.services.tag.library import TagManagementService
+from management.services.tag.resources import (
     AuthenticatedCaller,
     ResolvedTagResource,
     ResourceCapabilities,
@@ -72,13 +73,13 @@ def test_document_batch_status_is_read_scoped_and_applies_predicates(monkeypatch
         }
     }
     sys.modules["database.document_tag_projection_db"].list_projection_states_for_knowledge_base.return_value = states
-    fake_projection_module = types.ModuleType("services.tag_document_projection")
+    fake_projection_module = types.ModuleType("management.services.knowledge_base.tag_projection")
     fake_projection_module.document_projection_status_dict = lambda state: {
         "status": state["status"],
         "version": state["version"],
         "tag_count": 1,
     }
-    monkeypatch.setitem(sys.modules, "services.tag_document_projection", fake_projection_module)
+    monkeypatch.setitem(sys.modules, "management.services.knowledge_base.tag_projection", fake_projection_module)
 
     results = asyncio.run(
         TagManagementService.get_document_tag_batch_status(

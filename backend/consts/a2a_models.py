@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Pydantic models for A2A protocol.
 """
@@ -135,6 +137,7 @@ class A2AAgentCard(BaseModel):
 class DiscoverFromUrlRequest(BaseModel):
     """Request to discover an external A2A agent from an Agent Card URL."""
     url: str = Field(description="Direct URL to the Agent Card")
+    ssl_verify: bool = Field(default=True, description="Verify the peer TLS certificate")
     name: Optional[str] = Field(default=None, description="Optional display name override")
     custom_headers: Optional[Dict[str, str]] = Field(
         default=None,

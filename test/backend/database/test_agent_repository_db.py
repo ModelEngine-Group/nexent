@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for backend.database.agent_repository_db."""
 
 import sys
@@ -175,6 +177,7 @@ class MockSummaryRow:
             "icon_url": "icon_url",
             "downloads": 0,
             "content": None,
+            "create_time": datetime(2024, 1, 1),
         }
         defaults.update(kwargs)
         for key, value in defaults.items():
@@ -508,6 +511,7 @@ def test_list_agent_repository_summaries_returns_expected_shape(monkeypatch, moc
     assert len(result) == 1
     assert result[0]["agent_repository_id"] == 2
     assert result[0]["agent_id"] == 20
+    assert result[0]["create_time"] == datetime(2024, 1, 1)
     assert set(result[0].keys()) == {
         "agent_repository_id",
         "agent_id",
@@ -523,6 +527,7 @@ def test_list_agent_repository_summaries_returns_expected_shape(monkeypatch, moc
         "icon_url",
         "downloads",
         "content",
+        "create_time",
     }
 
 

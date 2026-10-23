@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-150
+  name: conversation history/list、agents/detail/agent KB、models
+  status: active
+  description: 'Northbound API / 查询: conversation history/list、agents/detail/agent KB、models'
+  business_rules:
+  - rule_id: F-150-RULE-01
+    description: conversation history/list、agents/detail/agent KB、models
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

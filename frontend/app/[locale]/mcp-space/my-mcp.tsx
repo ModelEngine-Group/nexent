@@ -1,8 +1,10 @@
-﻿"use client";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { App, Button, Grid, Popover, Spin } from "antd";
+import { App, Button, Popover, Spin } from "antd";
 import { useTranslation } from "react-i18next";
 import { Tag } from "lucide-react";
 import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
@@ -35,6 +37,7 @@ import {
   McpTransportType,
 } from "@/const/mcpTools";
 import TagFilterControls from "@/components/tag/TagFilterControls";
+import { REPOSITORY_PAGE_SIZE } from "@/const/resource";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
 import AddMcpServiceCard from "./components/AddMcpServiceCard";
 import McpToolsSearchFilterBar from "./components/McpToolsSearchFilterBar";
@@ -46,10 +49,6 @@ import MineApplyListingModal from "./components/MineApplyListingModal";
 import MineMcpReviewStatusModal from "./components/MineMcpReviewStatusModal";
 import { getDeploymentTypeLabelKey } from "@/lib/mcpTools";
 
-const CARD_GAP = 20;
-const MIN_CARD_HEIGHT = 240;
-const PAGINATION_HEIGHT = 60;
-
 export function MyMcp({
   localList,
   myPublished,
@@ -60,6 +59,7 @@ export function MyMcp({
   onEditLocal,
   onEditCommunity,
   onToggled,
+  tagRefreshKeys,
 }: {
   localList: ReturnType<typeof useMcpServicesList>;
   myPublished: ReturnType<typeof useMyCommunityMcp>;
@@ -70,6 +70,7 @@ export function MyMcp({
   onEditLocal: (service: McpServiceItem) => void;
   onEditCommunity: (service: CommunityMcpCard) => void;
   onToggled: (mcpId: number) => Promise<void>;
+  tagRefreshKeys?: Record<number, number>;
 }) {
   const { t } = useTranslation("common");
   const { message, modal } = App.useApp();
@@ -110,51 +111,6 @@ export function MyMcp({
     onlineService?: CommunityMcpCard;
   } | null>(null);
   const deepLinkHandledRef = useRef<string | null>(null);
-  const screens = Grid.useBreakpoint();
-  const gridRegionRef = useRef<HTMLDivElement>(null);
-  const [availableGridHeight, setAvailableGridHeight] = useState<number | null>(
-    null
-  );
-  const columns = screens.xxl
-    ? 4
-    : screens.xl
-      ? 3
-      : screens.lg || screens.md || screens.sm
-        ? 2
-        : screens.xs
-          ? 1
-          : 4;
-  const pageBottomPadding = screens.sm ? 40 : 32;
-  const rows = getRowCount(
-    Math.max(0, (availableGridHeight ?? 0) - PAGINATION_HEIGHT)
-  );
-  const pageSize = columns * rows;
-  const measureGridHeight = useCallback(() => {
-    if (!gridRegionRef.current) return;
-
-    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
-    const { top } = gridRegionRef.current.getBoundingClientRect();
-    setAvailableGridHeight(
-      Math.max(0, Math.floor(viewportHeight - top - pageBottomPadding - 8))
-    );
-  }, [pageBottomPadding]);
-
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(measureGridHeight);
-    const observer = new ResizeObserver(measureGridHeight);
-    const visualViewport = window.visualViewport;
-    if (gridRegionRef.current) observer.observe(gridRegionRef.current);
-    window.addEventListener("resize", measureGridHeight);
-    visualViewport?.addEventListener("resize", measureGridHeight);
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      observer.disconnect();
-      window.removeEventListener("resize", measureGridHeight);
-      visualViewport?.removeEventListener("resize", measureGridHeight);
-    };
-  }, [measureGridHeight]);
-
   const items = useMemo<MineMcpCardItem[]>(() => {
     return getDeduplicatedMineItems(localList.services, myPublished.items);
   }, [localList.services, myPublished.items]);
@@ -351,22 +307,13 @@ export function MyMcp({
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [search, tag, deploymentType, tagPredicates]);
 
-  const itemsPerPage = Math.max(1, pageSize - 1);
+  const itemsPerPage = REPOSITORY_PAGE_SIZE - 1;
   const totalPages = Math.max(
     1,
     Math.ceil(filteredItems.length / itemsPerPage)
   );
-  const gridHeight =
-    availableGridHeight === null
-      ? undefined
-      : Math.max(
-          0,
-          availableGridHeight -
-            (filteredItems.length > 0 ? PAGINATION_HEIGHT : 0)
-        );
-
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect -- Resize can reduce the number of available cards per page. */
+    /* eslint-disable react-hooks/set-state-in-effect -- Filtering or deleting items can reduce the last page. */
     if (page > totalPages) setPage(totalPages);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [page, totalPages]);
@@ -669,7 +616,7 @@ export function MyMcp({
         onDeploymentTypeChange={setDeploymentType}
       />
 
-      <div ref={gridRegionRef} className="min-h-0">
+      <div className="min-h-0">
         {loading ? (
           <PlaceholderBox>
             <Spin />
@@ -680,9 +627,7 @@ export function MyMcp({
             page={page}
             total={filteredItems.length}
             onPageChange={setPage}
-            columns={columns}
-            rows={rows}
-            gridHeight={gridHeight}
+            pageSize={REPOSITORY_PAGE_SIZE}
             createCard={<AddMcpServiceCard onClick={onAdd} />}
             paginateItems
             showToolbar={false}
@@ -721,6 +666,11 @@ export function MyMcp({
                   onHealthCheck={handleHealthCheck}
                   healthChecking={refreshingMineKey === getMineItemKey(item)}
                   connectionStatus={connectionStatuses[key] ?? "unchecked"}
+                  tagRefreshKey={
+                    item.kind === "local"
+                      ? tagRefreshKeys?.[item.service.mcpId]
+                      : undefined
+                  }
                 />
               );
             }}
@@ -876,17 +826,6 @@ export function resolveOnlineService(
     }
   }
   return undefined;
-}
-
-function getRowCount(availableHeight: number) {
-  if (availableHeight <= 0) return 3;
-  return Math.min(
-    3,
-    Math.max(
-      1,
-      Math.floor((availableHeight + CARD_GAP) / (MIN_CARD_HEIGHT + CARD_GAP))
-    )
-  );
 }
 
 export function PlaceholderBox({ children }: { children: React.ReactNode }) {

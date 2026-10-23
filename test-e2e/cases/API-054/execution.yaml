@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: API-054
+implementations:
+- framework: pytest
+  file: test.py
+  selector: API-054
+notes: Current model-management connectivity contract; legacy voice-route defect remains separately recorded.
+timeout_seconds: 900
+acceptance_bindings:
+  AC-01: [test_configured_voice_model_connectivity]
+  AC-02: [test_configured_voice_model_connectivity]
+  AC-03: [test_configured_voice_model_connectivity]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

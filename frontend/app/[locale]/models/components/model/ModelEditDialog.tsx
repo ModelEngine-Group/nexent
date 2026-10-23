@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -37,10 +39,16 @@ import log from "@/lib/logger";
 import {
   ModelAdvancedSettingsValue,
   buildInferenceParamsPayload,
+  buildVoiceCredentialParams,
   formatCustomValueForEditing,
 } from "./ModelAdvancedSettings";
 import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
-import { TYPE_BADGE_CLASS, useTypeOptions } from "./modelTypeUi";
+import {
+  isEmbeddingModelType,
+  supportsMaxTokensField,
+  TYPE_BADGE_CLASS,
+  useTypeOptions,
+} from "./modelTypeUi";
 
 /**
  * v2.6.1 redesign (v0 design): the per-model edit dialog.
@@ -56,12 +64,15 @@ import { TYPE_BADGE_CLASS, useTypeOptions } from "./modelTypeUi";
 
 export interface ModelEditDialogProps {
   model: ModelOption | null;
+  /** When set, the update is routed to the tenant-manage endpoint (resource-manage). */
+  tenantId?: string;
   onClose: () => void;
   onSuccess: () => void;
 }
 
 export const ModelEditDialog = ({
   model,
+  tenantId,
   onClose,
   onSuccess,
 }: ModelEditDialogProps) => {
@@ -135,6 +146,34 @@ export const ModelEditDialog = ({
         ([k, v]) => [k, formatCustomValueForEditing(v)] as [string, string]
       );
     }
+    // Type-specific dedicated fields (edit parity with the add-dialog gear
+    // panel): embedding chunk fields, voice credentials, rerank/tts max
+    // tokens.
+    if (
+      model.type === MODEL_TYPES.EMBEDDING ||
+      model.type === MODEL_TYPES.MULTI_EMBEDDING
+    ) {
+      if (model.expectedChunkSize != null)
+        next.expected_chunk_size = model.expectedChunkSize;
+      if (model.maximumChunkSize != null)
+        next.maximum_chunk_size = model.maximumChunkSize;
+      if (model.chunkingBatchSize != null)
+        next.chunk_batch = model.chunkingBatchSize;
+    }
+    if (model.type === MODEL_TYPES.STT || model.type === MODEL_TYPES.TTS) {
+      // getAllModels maps the API's model_factory into `source` only
+      // (model.modelFactory is never populated by the list mapper), so fall
+      // back to source for the provider prefill.
+      const voiceFactory = model.modelFactory || model.source;
+      if (voiceFactory) next.model_factory = voiceFactory;
+      if (model.modelAppid) next.model_appid = model.modelAppid;
+      if (model.accessToken) next.access_token = model.accessToken;
+    }
+    if (model.type === MODEL_TYPES.RERANK || model.type === MODEL_TYPES.TTS) {
+      // > 0: the list mapper falls back to 0 for an unset max_tokens, and a
+      // literal 0 in the field reads worse than the empty default.
+      if (model.maxTokens > 0) next.max_tokens = model.maxTokens;
+    }
     setAdvanced(next);
   }, [model]);
 
@@ -201,6 +240,8 @@ export const ModelEditDialog = ({
         modelId: model.id,
         modelFactory: model.source || "OpenAI-API-Compatible",
         ...buildInferenceParamsPayload(advanced, reasoningCapability),
+        // voice 凭证随探测透传，按当前类型门控防止类型切换后过期值泄漏
+        ...buildVoiceCredentialParams(type, advanced),
       });
       setProbe(result.connectivity ? "available" : "unavailable");
     } catch {
@@ -260,8 +301,38 @@ export const ModelEditDialog = ({
       ) {
         params.capacitySource = "operator";
       }
+      // Type-specific dedicated fields (chunk / voice credentials / max
+      // tokens) — updateSingleModel reads camelCase keys, while the payload
+      // builder only emits the snake_case ones. Gated by the CURRENT type:
+      // prefills for the original type must not leak when the operator
+      // retypes the model (chunk → embedding family, credentials → stt/tts,
+      // max tokens → rerank/tts).
+      if (isEmbeddingModelType(type)) {
+        if (advanced.expected_chunk_size != null)
+          params.expectedChunkSize = advanced.expected_chunk_size;
+        if (advanced.maximum_chunk_size != null)
+          params.maximumChunkSize = advanced.maximum_chunk_size;
+        if (advanced.chunk_batch != null)
+          params.chunkingBatchSize = advanced.chunk_batch;
+      }
+      Object.assign(params, buildVoiceCredentialParams(type, advanced));
+      if (supportsMaxTokensField(type) && advanced.max_tokens != null) {
+        params.maxTokens = advanced.max_tokens;
+      }
 
-      await modelService.updateSingleModel(params as any);
+      // Tenant admins edit through the manage endpoint (resource-manage).
+      // model_type is accepted there and written through for non-multi-
+      // embedding records; connect_status is not part of the manage request
+      // model, so the row-level healthcheck refreshes the status after
+      // identity changes instead of this save.
+      if (tenantId) {
+        await modelService.updateManageTenantModel({
+          tenantId,
+          ...params,
+        } as any);
+      } else {
+        await modelService.updateSingleModel(params as any);
+      }
       onSuccess();
       onClose();
     } catch (error: any) {

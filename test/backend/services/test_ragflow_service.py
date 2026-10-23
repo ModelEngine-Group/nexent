@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for RAGFlow Service.
 """
@@ -24,7 +25,7 @@ _MODULE_STUBS = {
 for _k, _v in _MODULE_STUBS.items():
     sys.modules.setdefault(_k, _v)
 
-from backend.services.ragflow_service import (  # noqa: E402
+from management.services.knowledge_base.providers.ragflow import (  # noqa: E402
     _validate_ragflow_config,
     _format_dataset_item,
     fetch_ragflow_datasets_impl,

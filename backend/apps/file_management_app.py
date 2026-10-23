@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import base64
 import logging
 import re
@@ -7,7 +9,7 @@ from typing import Annotated, List, Literal, Optional
 from urllib.parse import quote, unquote, urlparse, urlunparse
 
 import httpx
-from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Body, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi import Path as PathParam
 from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from starlette.background import BackgroundTask
@@ -23,7 +25,7 @@ from consts.exceptions import (
 )
 from consts.model import ProcessParams
 from consts.task_recovery import CONFIG_SERVICE_NAME
-from services.file_management_service import (
+from management.services.file.service import (
     check_file_access,
     delete_file_impl,
     get_file_stream_impl,
@@ -35,9 +37,10 @@ from services.file_management_service import (
     upload_files_impl,
     upload_to_minio,
 )
-from utils.auth_utils import get_current_user_id
-from utils.file_management_utils import trigger_data_process
-from utils.knowledge_ingestion_errors import classify_ingestion_exception
+from management.services.monitor.audit import AUDIT_DETAIL_LIST_LIMIT, record_security_event
+from management.services.permission.identity.authentication_helpers import get_current_user_id
+from management.services.knowledge_base.ingestion import trigger_data_process
+from infrastructure.ingestion.errors import classify_ingestion_exception
 
 
 logger = logging.getLogger("file_management_app")
@@ -114,6 +117,7 @@ async def options_route(full_path: str):
 
 @file_management_config_router.post("/upload")
 async def upload_files(
+        http_request: Request,
         file: List[UploadFile] = File(..., alias="file"),
         destination: Literal["local", "minio"] = Form(...,
                                 description="Upload destination: 'local' or 'minio'"),
@@ -171,6 +175,15 @@ async def upload_files(
             }
             if quota_status:
                 response_content["quota_status"] = quota_status.get("quota_status")
+            # Audit the successful upload with identifiers only (names, count,
+            # target index); file content never reaches the log. This is the
+            # KB source-file path where storage-quota abuse would show up.
+            record_security_event("file_upload", request=http_request,
+                                  user_id=user_id, tenant_id=tenant_id,
+                                  details={"destination": destination,
+                                           "index_name": index_name,
+                                           "files_count": len(uploaded_filenames),
+                                           "filenames": uploaded_filenames[:AUDIT_DETAIL_LIST_LIMIT]})
             return JSONResponse(
                 status_code=HTTPStatus.OK,
                 content=response_content,
@@ -477,6 +490,8 @@ async def get_storage_file(
         raise
     except UnauthorizedError as e:
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except NotFoundException as e:
+        raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail="File not found.") from e
     except Exception as e:
         logger.error(f"Failed to get file: object_name={object_name}, error={str(e)}")
         raise HTTPException(
@@ -487,6 +502,7 @@ async def get_storage_file(
 
 @file_management_runtime_router.post("/storage")
 async def storage_upload_files(
+    http_request: Request,
     files: List[UploadFile] = File(..., description="List of files to upload"),
     folder: str = Form(
         "attachments", description="Storage folder path (optional)"),
@@ -517,6 +533,13 @@ async def storage_upload_files(
 
         actual_folder = resolve_minio_upload_folder(folder, user_id, tenant_id)
         results = await upload_to_minio(files=files, folder=actual_folder)
+
+        # Chat-attachment upload path; identifiers only, content never logged.
+        record_security_event("file_storage_upload", request=http_request,
+                              user_id=user_id, tenant_id=tenant_id,
+                              details={"folder": folder,
+                                       "files_count": len(files),
+                                       "filenames": [f.filename for f in files][:AUDIT_DETAIL_LIST_LIMIT]})
 
         return {
             "message": f"Processed {len(results)} files",

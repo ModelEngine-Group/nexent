@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import os
 import importlib
 import logging
@@ -154,6 +156,7 @@ consts_const_mod.LOCALHOST_NAME = "localhost"
 consts_const_mod.DOCKER_INTERNAL_HOST = "host.docker.internal"
 consts_const_mod.CAPACITY_SUGGESTION_ENABLED = True
 consts_const_mod.CAPACITY_VISIBILITY_ENABLED = True
+consts_const_mod.NEXENT_LITELLM_JSON = "/opt/nexent/litellm_models.json"
 consts_const_mod.DATA_PROCESS_SERVICE = "http://data-process"
 consts_const_mod.FILE_PREVIEW_SIZE_LIMIT = 100 * 1024 * 1024
 consts_const_mod.MAX_CONCURRENT_UPLOADS = 5
@@ -183,7 +186,7 @@ consts_const_mod.ES_USERNAME = ""
 consts_const_mod.ES_PASSWORD = ""
 sys.modules["consts.const"] = consts_const_mod
 
-# Stub sqlalchemy.sql.func used by utils.config_utils
+# Stub sqlalchemy.sql.func used by management.services.configuration.tenant.settings
 sqlalchemy_sql_mod = types.ModuleType("sqlalchemy.sql")
 
 
@@ -214,8 +217,8 @@ consts_provider_mod.TOKENPONY_BASE_URL = "https://api.tokenpony.cn/v1/"
 consts_provider_mod.MODEL_ENGINE_URL_MARKER = "open/router"
 sys.modules["consts.provider"] = consts_provider_mod
 
-# Stub services.model_provider_service used by service
-services_provider_mod = types.ModuleType("services.model_provider_service")
+# Stub management.services.model.provider used by service
+services_provider_mod = types.ModuleType("management.services.model.provider")
 
 
 async def _prepare_model_dict(**kwargs):
@@ -236,10 +239,10 @@ services_provider_mod.prepare_model_dict = _prepare_model_dict
 services_provider_mod.merge_existing_model_attributes = _merge_existing_model_attributes
 services_provider_mod.merge_existing_model_tokens = _merge_existing_model_tokens
 services_provider_mod.get_provider_models = _get_provider_models
-sys.modules["services.model_provider_service"] = services_provider_mod
+sys.modules["management.services.model.provider"] = services_provider_mod
 
-# Stub services.model_health_service used by service
-services_health_mod = types.ModuleType("services.model_health_service")
+# Stub management.services.model.health used by service
+services_health_mod = types.ModuleType("management.services.model.health")
 
 
 async def _embedding_dimension_check(model_config):
@@ -273,7 +276,7 @@ services_health_mod.embedding_dimension_check = _embedding_dimension_check
 services_health_mod._infer_model_factory = _infer_model_factory
 services_health_mod._normalize_embedding_url = _normalize_embedding_url
 services_health_mod._embedding_url_candidates = _embedding_url_candidates
-sys.modules["services.model_health_service"] = services_health_mod
+sys.modules["management.services.model.adapter"] = mock.MagicMock()
 
 # Stub parent utils package and memory helpers used by service imports. Some
 # test modules replace `utils` with a plain mock during collection, so keep this
@@ -286,8 +289,12 @@ utils_memory_mod = types.ModuleType("utils.memory_utils")
 utils_memory_mod.build_memory_config = lambda *args, **kwargs: {}
 sys.modules["utils.memory_utils"] = utils_memory_mod
 
-# Stub utils.model_name_utils used by service
-utils_name_mod = types.ModuleType("utils.model_name_utils")
+# Stub management.services.model.names used by service
+utils_name_mod = types.ModuleType("management.services.model.names")
+utils_name_mod.get_model_name_from_config = lambda cfg: (
+    f"{cfg['model_repo']}/{cfg['model_name']}" if cfg.get("model_repo")
+    else cfg.get("model_name", cfg.get("modelName", ""))
+)
 
 
 def _add_repo_to_name(model_repo, model_name):
@@ -314,11 +321,11 @@ utils_name_mod.add_repo_to_name = _add_repo_to_name
 utils_name_mod.split_display_name = _split_display_name
 utils_name_mod.split_repo_name = _split_repo_name
 utils_name_mod.sort_models_by_id = _sort_models_by_id
-sys.modules["utils.model_name_utils"] = utils_name_mod
+sys.modules["management.services.model.names"] = utils_name_mod
 
-# Stub utils.file_management_utils so file_management_service can be imported
+# Stub management.services.file.upload so file_management_service can be imported
 # by other tests in the same pytest process without pulling auth/database deps.
-utils_file_mgmt_mod = types.ModuleType("utils.file_management_utils")
+utils_file_mgmt_mod = types.ModuleType("management.services.file.upload")
 
 
 async def _save_upload_file(*args, **kwargs):
@@ -326,7 +333,7 @@ async def _save_upload_file(*args, **kwargs):
 
 
 utils_file_mgmt_mod.save_upload_file = _save_upload_file
-sys.modules["utils.file_management_utils"] = utils_file_mgmt_mod
+sys.modules["management.services.file.upload"] = utils_file_mgmt_mod
 
 # Stub database.model_management_db to avoid importing heavy DB client
 database_mod = types.ModuleType("database")
@@ -367,7 +374,7 @@ db_mm_mod.get_models_by_tenant_factory_type = _get_models_by_tenant_factory_type
 
 
 def _get_model_by_model_id(model_id: int, tenant_id: str):
-    # Minimal model config stub for utils.config_utils.get_model_name_from_config usage
+    # Minimal model config stub for management.services.model.names.get_model_name_from_config usage
     return {
         "model_id": model_id,
         "model_repo": "openai",
@@ -399,7 +406,7 @@ for _attachment_func in [
 sys.modules["database.attachment_db"] = db_attachment_mod
 setattr(database_mod, "attachment_db", db_attachment_mod)
 
-# Stub database.tenant_config_db required by utils.config_utils
+# Stub database.tenant_config_db required by management.services.configuration.tenant.settings
 db_tenant_cfg_mod = types.ModuleType("database.tenant_config_db")
 
 
@@ -460,8 +467,8 @@ async def _clear_model_memories(**kwargs):
 nexent_memory_mod.clear_model_memories = _clear_model_memories
 sys.modules["nexent.memory.memory_service"] = nexent_memory_mod
 
-# Stub services.tenant_service required by list_models_for_admin BEFORE any imports
-services_tenant_mod = types.ModuleType("services.tenant_service")
+# Stub management.services.permission.identity.tenants required by list_models_for_admin BEFORE any imports
+services_tenant_mod = types.ModuleType("management.services.permission.identity.tenants")
 
 
 def _get_tenant_info(tenant_id):
@@ -473,7 +480,7 @@ def _get_tenant_info(tenant_id):
 
 
 services_tenant_mod.get_tenant_info = _get_tenant_info
-sys.modules["services.tenant_service"] = services_tenant_mod
+sys.modules["management.services.permission.identity.tenants"] = services_tenant_mod
 
 
 def _add_repo_to_name(model_repo, model_name):
@@ -481,21 +488,39 @@ def _add_repo_to_name(model_repo, model_name):
     return f"{model_repo}/{model_name}" if model_repo else model_name
 
 
-def import_svc():
+@pytest.fixture(autouse=True)
+def isolate_embedding_probe():
+    """Keep real URL resolution while isolating external dimension requests."""
+    with mock.patch(
+        "management.services.model.probe.embedding_dimension_check",
+        new=mock.AsyncMock(return_value=0),
+    ):
+        yield
+
+
+def import_svc(module="management"):
     """Import service under MinioClient patch to avoid real initialization."""
     minio_client_mock = mock.MagicMock()
     sys.modules["database"] = database_mod
     sys.modules["database.model_management_db"] = db_mm_mod
     setattr(database_mod, "model_management_db", db_mm_mod)
-    sys.modules.pop("backend.services.model_management_service", None)
-    sys.modules.pop("services.model_management_service", None)
+    sys.modules.pop("management.services.model.management", None)
+    sys.modules.pop("management.services.model.management", None)
+    # Keep the new pure SDK default resolver real inside the isolated SDK shell.
+    sampling_spec = importlib.util.spec_from_file_location(
+        "nexent.core.models.sampling",
+        os.path.abspath(os.path.join(current_dir, "../../../sdk/nexent/core/models/sampling.py")),
+    )
+    sampling_module = importlib.util.module_from_spec(sampling_spec)
+    sampling_spec.loader.exec_module(sampling_module)
+    sys.modules["nexent.core.models.sampling"] = sampling_module
     with mock.patch("backend.database.client.MinioClient", return_value=minio_client_mock):
-        from backend.services import model_management_service as svc  # type: ignore
+        svc = importlib.import_module("management.services.model." + module)
     return svc
 
 
 def test_reasoning_capability_enrichment_only_applies_to_chat_models():
-    svc = import_svc()
+    svc = import_svc("reasoning")
     assert svc.resolve_reasoning_capability("unknown-model") is None
 
     embedding = {"model_type": "embedding", "model_name": "bge", "model_repo": ""}
@@ -522,7 +547,7 @@ def test_reasoning_capability_enrichment_only_applies_to_chat_models():
 
 
 def test_discovered_model_reasoning_enrichment_skips_non_llm_and_empty_ids():
-    svc = import_svc()
+    svc = import_svc("reasoning")
 
     embedding = {"model_type": "embedding", "id": "embed"}
     svc._enrich_discovered_model_reasoning_capability(
@@ -538,7 +563,7 @@ def test_discovered_model_reasoning_enrichment_skips_non_llm_and_empty_ids():
 
 
 def test_apply_model_reasoning_default_handles_disabled_and_supported_profiles():
-    svc = import_svc()
+    svc = import_svc("reasoning")
 
     disabled = {
         "model_type": "llm",
@@ -575,7 +600,7 @@ def test_apply_model_reasoning_default_handles_disabled_and_supported_profiles()
 
 
 def test_apply_model_reasoning_default_preserves_auto_effort():
-    svc = import_svc()
+    svc = import_svc("reasoning")
     model = {
         "model_type": "llm",
         "model_repo": "openai",
@@ -602,7 +627,7 @@ def test_apply_model_reasoning_default_preserves_auto_effort():
     ],
 )
 def test_apply_model_reasoning_default_uses_a_safe_default_for_unknown_profiles(capability):
-    svc = import_svc()
+    svc = import_svc("reasoning")
     model = {
         "model_type": "llm",
         "model_repo": "custom",
@@ -788,7 +813,7 @@ async def test_create_model_for_tenant_embedding_sets_dimension():
     svc = import_svc()
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=1536)) as mock_dim, \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=1536)) as mock_dim, \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-ada-002")):
 
@@ -814,7 +839,7 @@ async def test_create_model_for_tenant_embedding_sets_default_chunk_batch():
     svc = import_svc()
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=512)) as mock_dim, \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=512)) as mock_dim, \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-3-small")):
 
@@ -843,7 +868,7 @@ async def test_create_model_for_tenant_multi_embedding_sets_default_chunk_batch(
     svc = import_svc()
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=512)) as mock_dim, \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=512)) as mock_dim, \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "clip")):
 
@@ -912,7 +937,7 @@ async def test_create_provider_models_attaches_models_dev_reasoning_capability()
 
     with mock.patch.object(svc, "get_provider_models", new=mock.AsyncMock(return_value=models)), \
             mock.patch.object(svc, "merge_existing_model_attributes", return_value=models), \
-            mock.patch.object(svc, "resolve_reasoning_capability", return_value=capability), \
+            mock.patch("management.services.model.reasoning.resolve_reasoning_capability", return_value=capability), \
             mock.patch.object(svc, "sort_models_by_id", side_effect=lambda m: m):
         out = await svc.create_provider_models_for_tenant("t1", req)
 
@@ -928,6 +953,30 @@ async def test_create_provider_models_for_tenant_exception():
         with pytest.raises(Exception) as exc:
             await svc.create_provider_models_for_tenant("t1", req)
         assert "Failed to create provider models" in str(exc.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [401, 403, 502, None])
+async def test_provider_catalog_error_preserves_upstream_status(status_code):
+    """Preserve develop's classified provider failure through a domain error."""
+    svc = import_svc()
+    error = {
+        "_error": "authentication_failed",
+        "_message": "Provider denied access",
+        "_http_code": status_code,
+    }
+    with mock.patch.object(
+        svc, "get_provider_models", new=mock.AsyncMock(return_value=[error])
+    ), mock.patch.object(svc, "create_model_record") as persist:
+        with pytest.raises(svc.ModelProviderError) as raised:
+            await svc.create_provider_models_for_tenant("tenant", {"provider": "custom"})
+    assert str(raised.value) == (
+        f"{status_code or 502}: "
+        "authentication_failed: Provider denied access"
+    )
+    assert raised.value.upstream_status == (status_code or 502)
+    assert raised.value.message == "authentication_failed: Provider denied access"
+    persist.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -1662,7 +1711,7 @@ async def test_list_models_for_tenant_type_mapping():
     with mock.patch.object(svc, "get_model_records", return_value=records), \
             mock.patch.object(svc, "add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
             mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"), \
-            mock.patch.object(svc, "resolve_reasoning_capability", return_value=None):
+            mock.patch("management.services.model.reasoning.resolve_reasoning_capability", return_value=None):
 
         result = await svc.list_models_for_tenant("t1")
 
@@ -1743,7 +1792,7 @@ async def test_list_models_for_admin_with_pagination():
     ]
 
     with mock.patch.object(svc, "get_model_records", return_value=records), \
-            mock.patch("backend.utils.model_name_utils.add_repo_to_name", side_effect=_add_repo_to_name), \
+            mock.patch("management.services.model.names.add_repo_to_name", side_effect=_add_repo_to_name), \
             mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
         # Page 1, page_size 10
         out = await svc.list_models_for_admin("t1", page=1, page_size=10)
@@ -1776,7 +1825,7 @@ async def test_list_models_for_admin_with_model_type_filter():
     ]
 
     with mock.patch.object(svc, "get_model_records", return_value=records) as mock_get_records, \
-            mock.patch("backend.utils.model_name_utils.add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
+            mock.patch("management.services.model.names.add_repo_to_name", side_effect=lambda model_repo, model_name: f"{model_repo}/{model_name}" if model_repo else model_name), \
             mock.patch.object(svc.ModelConnectStatusEnum, "get_value", side_effect=lambda s: s or "not_detected"):
         # Filter by llm
         out = await svc.list_models_for_admin("t1", model_type="llm")
@@ -1843,7 +1892,7 @@ async def test_create_model_for_tenant_embedding_dimension_none():
     svc = import_svc()
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=None)), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=None)), \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-ada-002")):
 
         model_data = {
@@ -2050,7 +2099,7 @@ async def test_create_model_for_tenant_embedding_with_api_key_sets_ssl_verify_tr
     svc = import_svc()
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock.AsyncMock(return_value=1536)), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock.AsyncMock(return_value=1536)), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("openai", "text-embedding-ada-002")):
 
@@ -2187,7 +2236,7 @@ async def test_batch_create_models_for_tenant_update_branch_skips_provider_candi
 
 
 def test_get_capacity_coverage_filters_bare_llm_vlm_rows():
-    svc = import_svc()
+    svc = import_svc("capacity")
 
     records = [
         {
@@ -2260,7 +2309,7 @@ def test_get_capacity_coverage_filters_bare_llm_vlm_rows():
 
 
 def test_get_capacity_coverage_visibility_flag_off():
-    svc = import_svc()
+    svc = import_svc("capacity")
 
     with mock.patch.object(svc, "CAPACITY_VISIBILITY_ENABLED", False), \
             mock.patch.object(svc, "get_model_records") as mock_get_records:
@@ -2271,7 +2320,7 @@ def test_get_capacity_coverage_visibility_flag_off():
 
 
 def test_capacity_suggestion_available_uses_catalog_matcher():
-    svc = import_svc()
+    svc = import_svc("capacity")
 
     model = {
         "model_id": 10,
@@ -2301,7 +2350,7 @@ def test_capacity_suggestion_available_records_error_on_exception():
     coverage-error counter. Without the counter a corrupt catalog entry would
     silently flip every row's suggestion_available to False with zero signal.
     """
-    svc = import_svc()
+    svc = import_svc("capacity")
 
     model = {
         "model_id": 42,
@@ -2327,7 +2376,7 @@ def test_record_capacity_coverage_error_no_op_when_counter_disabled():
     counter is None and the call becomes a no-op so coverage scans keep
     working in deployments without telemetry installed.
     """
-    svc = import_svc()
+    svc = import_svc("capacity")
 
     with mock.patch.object(svc, "_capacity_suggestion_coverage_errors_total", None):
         # Should not raise.
@@ -2346,7 +2395,7 @@ def test_get_capacity_coverage_cross_tenant_isolation():
     tenant_id at the mock boundary and asserting both tenants see only their
     own bare rows.
     """
-    svc = import_svc()
+    svc = import_svc("capacity")
 
     tenant_a_rows = [
         {
@@ -2403,7 +2452,7 @@ def test_pop_capacity_accept_signal_extracts_and_strips():
     DB write, and return the popped values so the recorder can label the
     counter.
     """
-    svc = import_svc()
+    svc = import_svc("capacity")
 
     payload = {
         "model_name": "gpt-4o",
@@ -2430,7 +2479,7 @@ def test_pop_capacity_accept_signal_extracts_and_strips():
 
 
 def test_pop_capacity_accept_signal_returns_none_without_match_kind():
-    svc = import_svc()
+    svc = import_svc("capacity")
 
     # Plain save: no accept fields at all.
     assert svc.pop_capacity_accept_signal({"model_name": "x"}) is None
@@ -2445,7 +2494,7 @@ def test_pop_capacity_accept_signal_returns_none_without_match_kind():
 
 def test_record_capacity_suggestion_accept_no_op_when_counter_disabled():
     """Same OTel-optional guard as the coverage-errors recorder."""
-    svc = import_svc()
+    svc = import_svc("capacity")
 
     with mock.patch.object(svc, "_capacity_suggestion_accept_total", None):
         # Should not raise.
@@ -2457,7 +2506,7 @@ def test_record_capacity_suggestion_accept_labels_counter():
     lower-cased provider label so dashboards can compute per-provider
     accept rates without inconsistent casing.
     """
-    svc = import_svc()
+    svc = import_svc("capacity")
     counter = mock.MagicMock()
 
     with mock.patch.object(svc, "_capacity_suggestion_accept_total", counter):
@@ -2505,7 +2554,7 @@ async def test_cmt_embedding_persists_normalized_endpoint_url():
     mock_dim = mock.AsyncMock(return_value=768)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2529,7 +2578,7 @@ async def test_cmt_embedding_falls_back_to_bare_url_when_endpoint_fails():
     mock_dim = mock.AsyncMock(side_effect=[None, 768])
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2552,7 +2601,7 @@ async def test_cmt_embedding_prefers_endpoint_when_both_candidates_work():
     mock_dim = mock.AsyncMock(return_value=768)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2571,7 +2620,7 @@ async def test_cmt_embedding_url_already_has_embeddings_probes_once():
     mock_dim = mock.AsyncMock(return_value=512)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2590,7 +2639,7 @@ async def test_cmt_embedding_all_candidates_fail_raises():
     mock_dim = mock.AsyncMock(return_value=None)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2611,7 +2660,7 @@ async def test_cmt_multi_embedding_persists_resolved_url_on_both_records():
     mock_dim = mock.AsyncMock(return_value=2048)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "clip-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2635,7 +2684,7 @@ async def test_cmt_embedding_infers_factory_from_resolved_url():
     mock_dim = mock.AsyncMock(return_value=1536)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value="dashscope") as mock_infer:
@@ -2655,7 +2704,7 @@ async def test_cmt_embedding_localhost_replaced_before_url_resolution():
     mock_dim = mock.AsyncMock(return_value=1024)
 
     with mock.patch.object(svc, "get_models_by_display_name", return_value=[]), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "create_model_record") as mock_create, \
             mock.patch.object(svc, "split_repo_name", return_value=("", "test-emb")), \
             mock.patch.object(svc, "_infer_model_factory", return_value=None):
@@ -2675,7 +2724,7 @@ async def test_usm_embedding_reprobes_changed_base_url():
 
     with mock.patch.object(svc, "get_models_by_display_name",
                            return_value=_existing_embedding_record("https://old.example/v1/embeddings")), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "update_model_record") as mock_update:
 
         await svc.update_single_model_for_tenant(
@@ -2698,7 +2747,7 @@ async def test_usm_embedding_skips_probe_when_url_unchanged():
 
     with mock.patch.object(svc, "get_models_by_display_name",
                            return_value=_existing_embedding_record(stored)), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "update_model_record") as mock_update:
 
         await svc.update_single_model_for_tenant("u1", "t1", "Test Emb", {"base_url": stored})
@@ -2716,7 +2765,7 @@ async def test_usm_embedding_raises_when_new_url_unreachable():
 
     with mock.patch.object(svc, "get_models_by_display_name",
                            return_value=_existing_embedding_record("https://old.example/v1/embeddings")), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "update_model_record") as mock_update:
 
         with pytest.raises(ValueError) as exc:
@@ -2736,7 +2785,7 @@ async def test_usm_non_embedding_base_url_is_not_resolved():
 
     with mock.patch.object(svc, "get_models_by_display_name",
                            return_value=_existing_embedding_record("https://api.openai.com/v1", "llm")), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "update_model_record") as mock_update:
 
         await svc.update_single_model_for_tenant(
@@ -2755,7 +2804,7 @@ async def test_usm_embedding_localhost_replaced_before_url_resolution():
 
     with mock.patch.object(svc, "get_models_by_display_name",
                            return_value=_existing_embedding_record("https://old.example/v1/embeddings")), \
-            mock.patch.object(svc, "embedding_dimension_check", new=mock_dim), \
+            mock.patch("management.services.model.probe.embedding_dimension_check", new=mock_dim), \
             mock.patch.object(svc, "update_model_record") as mock_update:
 
         await svc.update_single_model_for_tenant(

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for backend/database/a2a_agent_db.py
 Tests all public functions including external agent operations,
@@ -12,6 +14,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
 
+from consts.exceptions import AgentNotFoundError
 
 # ---------------------------------------------------------------------------
 # Mock consts module
@@ -124,7 +127,7 @@ def _make_cls(name, col_names, bases=(MockOrmObject,)):
 def _make_ext_agent_cls():
     return _make_cls('A2AExternalAgent', [
         'id', 'source_url', 'name', 'description', 'version', 'agent_url',
-        'protocol_type', 'streaming', 'supported_interfaces', 'source_type',
+        'protocol_type', 'streaming', 'ssl_verify', 'supported_interfaces', 'source_type',
         'nacos_config_id', 'nacos_agent_name', 'base_url', 'agent_card_headers', 'security_schemes',
         'security_requirements', 'security_credentials', 'selected_security_requirement_index', 'raw_card', 'is_available',
         'last_check_at', 'last_check_result', 'cached_at', 'cache_expires_at',
@@ -183,6 +186,7 @@ def _make_artifact_cls():
 # Build mock db_models module
 # ---------------------------------------------------------------------------
 db_models_mock = MagicMock()
+db_models_mock.AgentInfo = _make_cls('AgentInfo', ['agent_id', 'tenant_id', 'version_no', 'delete_flag'])
 db_models_mock.A2AExternalAgent = _make_ext_agent_cls()
 db_models_mock.A2AExternalAgentRelation = _make_ext_rel_cls()
 db_models_mock.A2AServerAgent = _make_server_agent_cls()
@@ -210,7 +214,7 @@ def factory_external_agent(**kw):
         'nacos_config_id': None, 'nacos_agent_name': None, 'agent_card_headers': None,
         'security_schemes': None, 'security_requirements': None, 'security_credentials': None,
         'selected_security_requirement_index': None, 'raw_card': None,
-        'is_available': True, 'last_check_at': None, 'last_check_result': None,
+        'is_available': True, 'ssl_verify': True, 'last_check_at': None, 'last_check_result': None,
         'cached_at': datetime(2024, 1, 1, tzinfo=timezone.utc),
         'cache_expires_at': datetime(2024, 1, 2, tzinfo=timezone.utc),
         'create_time': datetime(2024, 1, 1, tzinfo=timezone.utc),
@@ -599,6 +603,36 @@ class TestFindInterfaceByProtocolType:
 # ===========================================================================
 
 class TestCreateExternalAgentFromUrl:
+    @pytest.mark.parametrize('value', [True, False])
+    def test_ssl_preference_survives_create_read_list_and_rediscovery(self, value):
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            session = MockSession()
+            mk.return_value = session
+            args = dict(source_url='https://peer/card', name='Peer', description='',
+                        agent_url='https://peer', tenant_id='tenant-1', user_id='user-1')
+            created = a2a_db.create_external_agent_from_url(**args, ssl_verify=value)
+            agent = session.added[0]
+            assert agent.ssl_verify is value
+            assert created['ssl_verify'] is value
+            agent.last_check_at = None
+            agent.last_check_result = None
+            agent.create_time = None
+            agent.nacos_config_id = None
+            agent.nacos_agent_name = None
+            agent.is_available = True
+            session._qr[a2a_db.A2AExternalAgent] = [agent]
+            assert a2a_db.get_external_agent_by_id(agent.id, 'tenant-1')['ssl_verify'] is value
+            assert a2a_db.list_external_agents('tenant-1')[0]['ssl_verify'] is value
+            updated = a2a_db.create_external_agent_from_url(**args, ssl_verify=not value)
+            assert updated['ssl_verify'] is not value
+            assert len(session.added) == 1
+
+    def test_verification_defaults_on(self):
+        with patch.object(a2a_db, '_get_db_session', return_value=MockSession()):
+            result = a2a_db.create_external_agent_from_url(
+                'https://peer/card', 'Peer', '', 'https://peer', 'tenant-1', 'user-1')
+        assert result['ssl_verify'] is True
+
     def test_creates_new_agent(self):
         with patch.object(a2a_db, '_get_db_session') as mk:
             mk.return_value = MockSession()
@@ -1152,6 +1186,21 @@ class TestUpdateAgentAvailability:
 # ===========================================================================
 
 class TestAddExternalAgentRelation:
+    @pytest.fixture(autouse=True)
+    def owned_references(self):
+        original_query = MockSession.query
+
+        def query(session, model, *others):
+            if model is db_models_mock.AgentInfo:
+                return MockQuery([db_models_mock.AgentInfo(
+                    agent_id=100, tenant_id='tenant-1', version_no=0, delete_flag='N')])
+            if model is db_models_mock.A2AExternalAgent:
+                return MockQuery([factory_external_agent(id=1)])
+            return original_query(session, model, *others)
+
+        with patch.object(MockSession, 'query', query):
+            yield
+
     def test_creates_new_relation(self):
         with patch.object(a2a_db, '_get_db_session') as mk:
             mk.return_value = MockSession()

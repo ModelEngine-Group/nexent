@@ -1,9 +1,24 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 from types import SimpleNamespace
 
 import pytest
 
 from sdk.benchmark import agent_runner
+
+
+def test_ut_sdk_dpr_002_benchmark_templates_use_single_compatibility_adapter():
+    """UT-SDK-DPR-002: benchmark construction needs the same stage adapter."""
+    for is_manager in (False, True):
+        for language in ("zh", "en"):
+            templates = agent_runner.build_prompt_templates(language=language, is_manager=is_manager)
+            assert templates["system_prompt"] == ""
+            assert "planning" in templates
+            assert "managed_agent" in templates
+            if is_manager:
+                assert "manager_agent" in templates
+            assert "verification" not in templates
 
 
 @pytest.mark.asyncio
@@ -231,6 +246,7 @@ def test_builtin_skill_tools_are_passively_injected_with_runtime_scope():
         tenant_id="tenant-a",
         version_no=2,
         local_skills_dir="/skills",
+        has_enabled_skills=True,
     )
 
     assert [tool.name for tool in tools] == [
@@ -239,7 +255,6 @@ def test_builtin_skill_tools_are_passively_injected_with_runtime_scope():
         "run_skill_script",
         "read_skill_md",
         "read_skill_config",
-        "write_skill_file",
     ]
     injected = tools[2]
     assert injected.source == "builtin"
@@ -247,6 +262,41 @@ def test_builtin_skill_tools_are_passively_injected_with_runtime_scope():
     assert injected.metadata["tenant_id"] == "tenant-a"
     assert injected.metadata["version_no"] == 2
     assert injected.params["local_skills_dir"] == "/skills"
+
+
+def test_builtin_skill_tools_are_omitted_without_enabled_skills():
+    tools = agent_runner.inject_production_managed_tools(
+        [],
+        agent_id=8,
+        tenant_id="tenant-a",
+        version_no=2,
+        local_skills_dir="/skills",
+        has_enabled_skills=False,
+    )
+
+    assert [tool.name for tool in tools] == ["parallel_executor"]
+
+
+def test_ut_sdk_dpr_010_parallel_executor_localizes_rendered_resources():
+    """UT-SDK-DPR-010: benchmark injection retains both tool languages."""
+    from nexent.core.agents.context.formatting import _format_tools_description
+    from nexent.core.tools.parallel_executor import ParallelExecutorTool
+
+    tools = agent_runner.inject_production_managed_tools(
+        [], agent_id=8, tenant_id="tenant-a", version_no=2,
+        local_skills_dir="/skills", has_enabled_skills=False,
+    )
+    parallel_tool = tools[0]
+    assert parallel_tool.description_zh == ParallelExecutorTool.description_zh
+
+    zh_text = _format_tools_description({parallel_tool.name: parallel_tool}, language="zh")
+    en_text = _format_tools_description({parallel_tool.name: parallel_tool}, language="en")
+    assert "并行执行多个互不依赖的可用工具或子智能体调用" in zh_text
+    assert "单个任务超时秒数" in zh_text
+    assert "Run independent available tools or sub-agents in parallel" not in zh_text
+    assert "Per-task timeout in seconds" not in zh_text
+    assert "Run independent available tools or sub-agents in parallel" in en_text
+    assert "Per-task timeout in seconds" in en_text
 
 
 def _context_item(item_id, text):
@@ -299,9 +349,7 @@ def test_build_agent_run_info_maps_prompts_model_and_context_components(monkeypa
     run_info = agent_runner.build_agent_run_info(
         query="question",
         history=[],
-        duty_prompt="duty",
-        constraint_prompt="constraint",
-        few_shots_prompt="few shots",
+        prompt="duty\nconstraint\nfew shots",
         tools=[tool],
         max_steps=7,
         temperature=0,
@@ -311,7 +359,7 @@ def test_build_agent_run_info_maps_prompts_model_and_context_components(monkeypa
         model_factory="openai",
         prompt_components={
             "basic_information": {"content": "custom header"},
-            "duty_prompt": "custom duty",
+            "prompt": "custom duty",
             "final_answer_contract": {"content": {"suffix": "FINAL ANSWER"}},
         },
     )
@@ -331,6 +379,8 @@ def test_build_agent_run_info_maps_prompts_model_and_context_components(monkeypa
         "suffix": "FINAL ANSWER"
     }
     assert captured_context["tools"] == {"search": tool}
+    assert captured_context["prompt"] == "duty\nconstraint\nfew shots"
+    assert "constraint" not in captured_context and "few_shots" not in captured_context
 
 
 def test_build_agent_run_info_uses_fallback_context_when_segments_are_empty(

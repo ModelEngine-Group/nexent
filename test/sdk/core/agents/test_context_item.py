@@ -11,7 +11,7 @@ from nexent.core.agents.context import (
 def test_context_item_types_match_runtime_regions():
     assert {kind.value for kind in ContextItemType} == {
         "system", "tool", "skill", "memory", "knowledge_base",
-        "managed_agent", "external_agent", "history_summary",
+        "worker_agent", "external_agent", "history_summary",
         "conversation_turn", "current_task", "current_planning", "current_action",
     }
 

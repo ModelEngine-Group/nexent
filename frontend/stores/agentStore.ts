@@ -1,6 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { create } from "zustand";
 
 import { safeStringify } from "@/lib/utils";
+import { queryClient } from "@/lib/queryClient";
 import {
   searchToolConfig,
   updateAgentInfo,
@@ -35,13 +38,9 @@ export type AgentDraft = Pick<
   | "is_a2a"
   | "verification_config"
   | "tools"
-  | "duty_prompt"
-  | "constraint_prompt"
-  | "few_shots_prompt"
+  | "prompt"
   | "business_logic_model_name"
   | "business_logic_model_id"
-  | "prompt_template_id"
-  | "prompt_template_name"
   | "sub_agent_id_list"
   | "sub_agent_relations"
   | "external_sub_agent_id_list"
@@ -71,6 +70,7 @@ interface AgentStoreState {
   isReadOnly: boolean;
   editedAgent: AgentDraft | null;
   savedAgent: AgentDraft | null;
+  lastSavedAt: number | null;
   serverSnapshotRevision: number;
   queue: AgentSaveTask[];
   isGenerating: boolean;
@@ -129,13 +129,9 @@ const toDraft = (agent: Agent): AgentDraft => ({
   verification_config: agent.verification_config,
   tools: [...(agent.tools || [])],
   skills: [...(agent.skills || [])],
-  duty_prompt: agent.duty_prompt || "",
-  constraint_prompt: agent.constraint_prompt || "",
-  few_shots_prompt: agent.few_shots_prompt || "",
+  prompt: agent.prompt || "",
   business_logic_model_name: agent.business_logic_model_name || "",
   business_logic_model_id: agent.business_logic_model_id || 0,
-  prompt_template_id: agent.prompt_template_id ?? 0,
-  prompt_template_name: agent.prompt_template_name || "system_default",
   sub_agent_id_list: agent.sub_agent_id_list || [],
   sub_agent_relations: agent.sub_agent_relations || [],
   external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
@@ -313,20 +309,8 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.business_logic_model_id !== undefined
     ? { business_logic_model_id: patch.business_logic_model_id }
     : {}),
-  ...(patch.prompt_template_id !== undefined
-    ? { prompt_template_id: patch.prompt_template_id }
-    : {}),
-  ...(patch.prompt_template_name !== undefined
-    ? { prompt_template_name: patch.prompt_template_name }
-    : {}),
-  ...(patch.duty_prompt !== undefined
-    ? { duty_prompt: patch.duty_prompt }
-    : {}),
-  ...(patch.constraint_prompt !== undefined
-    ? { constraint_prompt: patch.constraint_prompt }
-    : {}),
-  ...(patch.few_shots_prompt !== undefined
-    ? { few_shots_prompt: patch.few_shots_prompt }
+  ...(patch.prompt !== undefined
+    ? { prompt: patch.prompt }
     : {}),
   ...(patch.tools !== undefined
     ? {
@@ -490,6 +474,7 @@ async function processSaveQueue(): Promise<void> {
         if (!result.success) {
           throw result.error ?? new Error(result.message);
         }
+        void queryClient.invalidateQueries({ queryKey: ["agents"] });
 
         const savedAgent = useAgentStore.getState().savedAgent;
         if (task.patch.tools !== undefined) {
@@ -508,6 +493,7 @@ async function processSaveQueue(): Promise<void> {
         saveQueue = saveQueue.slice(1);
         useAgentStore.setState((state) => ({
           savedAgent: mergeDraft(state.savedAgent, task.patch),
+          lastSavedAt: Date.now(),
           lastSaveFailed:
             drainHadFailure || saveQueue.length > 0
               ? state.lastSaveFailed
@@ -535,9 +521,7 @@ async function processSaveQueue(): Promise<void> {
           ),
           lastSaveFailed: true,
           saveError:
-            error instanceof Error
-              ? error
-              : "Failed to save agent changes",
+            error instanceof Error ? error : "Failed to save agent changes",
         }));
       }
     }
@@ -593,6 +577,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
     isReadOnly: true,
     editedAgent: null,
     savedAgent: null,
+    lastSavedAt: null,
     serverSnapshotRevision: 0,
     queue: [],
     isGenerating: false,
@@ -611,6 +596,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
         isReadOnly: agent.permission === "READ_ONLY",
         editedAgent: cloneDraft(draft),
         savedAgent: cloneDraft(draft),
+        lastSavedAt: null,
         serverSnapshotRevision: state.serverSnapshotRevision + 1,
         isGenerating: false,
         saveError: null,
@@ -741,6 +727,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
         isReadOnly: true,
         editedAgent: null,
         savedAgent: null,
+        lastSavedAt: null,
         serverSnapshotRevision: state.serverSnapshotRevision + 1,
         isGenerating: false,
         saveError: null,

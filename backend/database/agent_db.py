@@ -1,13 +1,17 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
-from typing import List, Optional
-from sqlalchemy import or_, text, update
+from typing import List, Optional, Sequence
+from sqlalchemy import String, and_, cast, func, or_, text, tuple_, update
+from sqlalchemy.orm import aliased
 
 from database.client import get_db_session, as_dict, filter_property
-from database.db_models import AgentInfo, ToolInstance, AgentRelation
+from database.db_models import AgentInfo, ToolInstance, AgentRelation, AgentVersion
 from database.agent_version_db import query_current_version_no
+from database.tool_db import query_tool_knowledge_references
 from consts.const import ASSET_OWNER_TENANT_ID, MAX_AGENTS_PER_TENANT
-from consts.exceptions import TenantResourceLimitError
-from utils.str_utils import convert_list_to_string
+from consts.exceptions import AgentNotFoundError, TenantResourceLimitError
+from management.db.serialization import convert_list_to_string
 
 logger = logging.getLogger("agent_db")
 
@@ -59,7 +63,7 @@ def search_agent_info_by_agent_id(agent_id: int, tenant_id: str, version_no: int
         ).first()
 
         if not agent:
-            raise ValueError("agent not found")
+            raise AgentNotFoundError("agent not found")
 
         agent_dict = as_dict(agent)
 
@@ -83,7 +87,7 @@ def search_agent_id_by_agent_name(agent_name: str, tenant_id: str, version_no: i
             AgentInfo.version_no == version_no,
             AgentInfo.delete_flag != 'Y').first()
         if not agent:
-            raise ValueError("agent not found")
+            raise AgentNotFoundError("agent not found")
         return agent.agent_id
 
 
@@ -302,9 +306,7 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "description": new_agent.description,
             "author": new_agent.author,
             "max_steps": new_agent.max_steps,
-            "duty_prompt": new_agent.duty_prompt,
-            "constraint_prompt": new_agent.constraint_prompt,
-            "few_shots_prompt": new_agent.few_shots_prompt,
+            "prompt": new_agent.prompt,
             "parent_agent_id": new_agent.parent_agent_id,
             "enabled": new_agent.enabled,
             "is_main_agent": new_agent.is_main_agent,
@@ -314,8 +316,6 @@ def create_agent(agent_info, tenant_id: str, user_id: str):
             "business_description": new_agent.business_description,
             "business_logic_model_id": new_agent.business_logic_model_id,
             "business_logic_model_name": new_agent.business_logic_model_name,
-            "prompt_template_id": new_agent.prompt_template_id,
-            "prompt_template_name": new_agent.prompt_template_name,
             "group_ids": new_agent.group_ids,
             "is_new": new_agent.is_new,
             "enable_context_manager": new_agent.enable_context_manager,
@@ -537,6 +537,7 @@ def query_agent_list_candidates_by_tenant_id(
         AgentInfo.create_time,
         AgentInfo.group_ids,
         AgentInfo.ingroup_permission,
+        AgentInfo.current_version_no,
     ]
     if include_description:
         columns.append(AgentInfo.description)
@@ -598,6 +599,33 @@ def batch_search_agent_display_names(agent_ids: List[int], tenant_id: str) -> di
             AgentInfo.delete_flag != 'Y'
         ).all()
         return {a.agent_id: (a.display_name or a.name) for a in agents}
+
+
+def batch_get_agent_main_flags(agent_ids: List[int]) -> dict:
+    """
+    Batch query the main-agent flag by agent IDs.
+    Returns a dict mapping agent_id -> is_main_agent.
+
+    Agent IDs are globally unique (the primary key is ``(agent_id, version_no)``),
+    so no tenant filter is applied; this lets the lookup resolve both caller-tenant
+    listings and official listings published under the system tenant.
+
+    Args:
+        agent_ids: List of agent IDs to query
+    """
+    unique_ids = {int(agent_id) for agent_id in agent_ids if agent_id is not None}
+    if not unique_ids:
+        return {}
+    with get_db_session() as session:
+        agents = session.query(
+            AgentInfo.agent_id,
+            AgentInfo.is_main_agent,
+        ).filter(
+            AgentInfo.agent_id.in_(list(unique_ids)),
+            AgentInfo.version_no == 0,
+            AgentInfo.delete_flag != 'Y',
+        ).all()
+        return {a.agent_id: a.is_main_agent for a in agents}
 
 
 def _ensure_system_relation_mutation_allowed(
@@ -829,3 +857,47 @@ def delete_agent_relationship(
             AgentRelation.version_no == version_no
         ).update(
             {AgentRelation.delete_flag: 'Y', 'updated_by': user_id})
+
+
+def query_knowledge_binding_agents(
+    *, tenant_id: str, index_names: Sequence[str] = (), kds_ids: Sequence[str] = (),
+) -> list[dict]:
+    """Return the names of bound agents whose draft and referenced version exist."""
+    with get_db_session() as session:
+        bindings = []
+        for param_name, ids in (("index_names", index_names), ("kds_list", kds_ids)):
+            if ids:
+                bindings.extend(query_tool_knowledge_references(session, param_name, set(ids)))
+        if not bindings:
+            return []
+
+        snapshot = aliased(AgentInfo)
+        display_name = func.coalesce(
+            func.nullif(AgentInfo.display_name, ""), func.nullif(AgentInfo.name, ""),
+            cast(AgentInfo.agent_id, String),
+        ).label("display_name")
+        rows = (
+            session.query(AgentInfo.agent_id, display_name)
+            .join(snapshot, and_(
+                snapshot.agent_id == AgentInfo.agent_id,
+                tuple_(snapshot.agent_id, snapshot.version_no).in_(
+                    [(row["agent_id"], row["version_no"]) for row in bindings]
+                ),
+                snapshot.delete_flag != "Y",
+            ))
+            .outerjoin(AgentVersion, and_(
+                AgentVersion.agent_id == snapshot.agent_id,
+                AgentVersion.version_no == snapshot.version_no,
+                AgentVersion.delete_flag != "Y",
+            ))
+            .filter(
+                AgentInfo.tenant_id.in_((tenant_id, ASSET_OWNER_TENANT_ID)),
+                AgentInfo.version_no == 0,
+                AgentInfo.delete_flag != "Y",
+                or_(snapshot.version_no == 0, AgentVersion.id.isnot(None)),
+            )
+            .distinct()
+            .order_by(display_name, AgentInfo.agent_id)
+            .all()
+        )
+        return [dict(row._mapping) for row in rows]

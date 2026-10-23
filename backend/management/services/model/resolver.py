@@ -1,21 +1,28 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Shared model records, capabilities and uncached modality adapters."""
 
 import logging
-from dataclasses import dataclass
 from typing import Any, Optional
 
 from consts.model import ModelConnectStatusEnum
+from contracts.model import ModelDescriptor
 from database.model_management_db import get_model_by_model_id, get_model_records
-from services.model_gateway_service import build_adapter_fresh
-from utils.config_utils import tenant_config_manager
+from management.services.model.adapter import build_adapter_fresh
+from management.services.configuration.tenant.settings import tenant_config_manager
 
 logger = logging.getLogger(__name__)
 
 
-def resolve_model_record(model_id: int, tenant_id: str | None = None, cache: dict | None = None):
+def resolve_model_record(
+    model_id: int, tenant_id: str | None = None, cache: dict | None = None
+):
     """Cache lookups only within the caller's tenant-scoped request."""
     if cache is None:
-        return get_model_by_model_id(model_id, tenant_id) if tenant_id is not None else get_model_by_model_id(model_id)
+        return (
+            get_model_by_model_id(model_id, tenant_id)
+            if tenant_id is not None
+            else get_model_by_model_id(model_id)
+        )
     if model_id not in cache:
         cache[model_id] = get_model_by_model_id(model_id, tenant_id)
     return cache[model_id]
@@ -29,12 +36,6 @@ def is_model_available(model: dict | None) -> bool:
     )
 
 
-@dataclass(frozen=True)
-class ModelDescriptor:
-    display_name: str = ""
-    is_multimodal: bool = False
-
-
 def get_model_descriptor(model_id: int | None, tenant_id: str) -> ModelDescriptor:
     """Resolve display name and capabilities in one best-effort catalog query."""
     if model_id is not None:
@@ -42,7 +43,8 @@ def get_model_descriptor(model_id: int | None, tenant_id: str) -> ModelDescripto
             record = resolve_model_record(model_id, tenant_id)
             if record:
                 return ModelDescriptor(
-                    record.get("display_name", ""), record.get("model_type") == "multi_embedding"
+                    record.get("display_name", ""),
+                    record.get("model_type") == "multi_embedding",
                 )
         except Exception as exc:
             logger.warning("Failed to resolve model %s: %s", model_id, exc)
@@ -65,6 +67,7 @@ def _build_model_config(model: dict) -> dict:
         config["model_factory"] = model["model_factory"]
     return config
 
+
 def create_embedding_model(model: dict) -> Any:
     model_config = _build_model_config(model)
     model_type = model_config.get("model_type", "embedding")
@@ -86,13 +89,18 @@ def create_embedding_model(model: dict) -> Any:
     # callers use adapter.get_embeddings / adapter.dimension_check unchanged.
     return build_adapter_fresh(model_config, modality, slot, None)
 
-def get_embedding_model_by_id(tenant_id: str, model_id: int) -> tuple[Optional[Any], Optional[int]]:
+
+def get_embedding_model_by_id(
+    tenant_id: str, model_id: int
+) -> tuple[Optional[Any], Optional[int]]:
     """Resolve only the explicitly configured embedding model."""
     try:
         model = resolve_model_record(model_id, tenant_id)
         if model and model.get("model_type") in ("embedding", "multi_embedding"):
             return create_embedding_model(model), model.get("model_id")
-        logger.warning("Model with id %s not found or is not an embedding model", model_id)
+        logger.warning(
+            "Model with id %s not found or is not an embedding model", model_id
+        )
     except Exception as exc:
         logger.warning("Failed to get embedding model by id %s: %s", model_id, exc)
     return None, None
@@ -115,26 +123,46 @@ def get_rerank_model(tenant_id: str, model_name: Optional[str] = None):
         try:
             models = get_model_records({"model_type": "rerank"}, tenant_id)
             for model in models:
-                model_display_name = model.get("model_repo") + "/" + model["model_name"] if model.get("model_repo") else model["model_name"]
+                model_display_name = (
+                    model.get("model_repo") + "/" + model["model_name"]
+                    if model.get("model_repo")
+                    else model["model_name"]
+                )
                 if model_display_name == model_name:
                     # Found the model; vendor dispatch via the adapter registry.
                     # The adapter IS the rerank implementation (protocol sunk in
                     # 67a628cad) — return it directly, not a wrapped _inner.
-                    return build_adapter_fresh(
-                        model, "rerank", "rerank", tenant_id
-                    )
+                    return build_adapter_fresh(model, "rerank", "rerank", tenant_id)
         except Exception as e:
             logger.warning(f"Failed to get rerank model by name {model_name}: {e}")
 
     # Fall back to default rerank model
     model_config = tenant_config_manager.get_model_config(
-        key="RERANK_ID", tenant_id=tenant_id)
+        key="RERANK_ID", tenant_id=tenant_id
+    )
 
     model_type = model_config.get("model_type", "")
 
     if model_type == "rerank":
-        return build_adapter_fresh(
-            model_config, "rerank", "rerank", tenant_id
-        )
+        return build_adapter_fresh(model_config, "rerank", "rerank", tenant_id)
     else:
         return None
+
+from typing import Optional
+from database.model_management_db import get_model_by_model_id
+from management.services.configuration.tenant.settings import tenant_config_manager
+
+
+
+
+
+
+
+
+
+
+
+
+from typing import Optional
+from database.model_management_db import get_model_by_model_id
+from management.services.configuration.tenant.settings import tenant_config_manager
