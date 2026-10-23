@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import re
 import time
 from typing import Any, Dict, List
 
@@ -155,11 +156,39 @@ def get_openapi_service_tool_map(tenant_id: str) -> Dict[str, int]:
             timeout=30,
         )
         response.raise_for_status()
-        return {
+        tool_map = {
             item["name"]: int(item["service_id"])
             for item in response.json().get("data", [])
             if item.get("name") and item.get("service_id") is not None
         }
+        # Older MCP runtimes may expose the mounted tools but not the child
+        # service tools through ``get_tools()``. In that case the internal
+        # endpoint returns an empty map even though the OpenAPI tools are
+        # available. FastMCP prefixes mounted tool names with the sanitized
+        # service name, so reconstruct the association from the persisted
+        # service records as a compatibility fallback.
+        services = query_openapi_services_by_tenant(tenant_id)
+        fallback_map: Dict[str, int] = dict(tool_map)
+        for service in sorted(
+            services,
+            key=lambda item: len(str(item.get("mcp_service_name") or "")),
+            reverse=True,
+        ):
+            service_name = str(service.get("mcp_service_name") or "")
+            service_id = service.get("id")
+            if not service_name or service_id is None:
+                continue
+            sanitized_name = re.sub(r"[^a-zA-Z0-9_]", "_", service_name)
+            sanitized_name = re.sub(r"^[^a-zA-Z]+", "", sanitized_name)
+            if sanitized_name:
+                fallback_map.setdefault(f"{sanitized_name}_", int(service_id))
+
+        if not tool_map and fallback_map:
+            logger.warning(
+                "OpenAPI tool map was empty for tenant %s; using persisted service-name fallback",
+                tenant_id,
+            )
+        return fallback_map
     except (requests.RequestException, ValueError, TypeError, KeyError) as exc:
         logger.warning("Failed to load OpenAPI service tool map: %s", exc)
         return {}

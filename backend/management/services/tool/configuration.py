@@ -5,6 +5,7 @@ import importlib
 import inspect
 import json
 import logging
+import re
 import time
 from contextlib import AsyncExitStack
 from typing import Any, Dict, List, Optional
@@ -361,9 +362,21 @@ async def update_tool_list(tenant_id: str, user_id: str):
         )
         for tool in mcp_tools:
             if tool.usage == "outer-apis":
-                tool.outer_api_service_id = service_ids.get(
-                    tool.origin_name or tool.name
-                )
+                tool_name = tool.origin_name or tool.name
+                tool.outer_api_service_id = service_ids.get(tool_name)
+                if tool.outer_api_service_id is None:
+                    # The OpenAPI mapping fallback may use a sanitized service
+                    # name prefix when the MCP runtime cannot enumerate child
+                    # service tools directly.
+                    normalized_tool_name = re.sub(r"[^a-zA-Z0-9_]", "_", tool_name)
+                    tool.outer_api_service_id = next(
+                        (
+                            service_id
+                            for service_prefix, service_id in service_ids.items()
+                            if normalized_tool_name.startswith(service_prefix)
+                        ),
+                        None,
+                    )
     except Exception as e:
         logger.error(f"failed to get all mcp tools, detail: {e}")
         # Don't block local/langchain tool update when MCP is unavailable.
