@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Run the LongMemEval (S*) benchmark with the nexent agent.
 
 LongMemEval (S*) from MemoryAgentBench gives 5 long multi-session dialogues
@@ -225,7 +226,7 @@ async def ingest_and_compress(dialogue: LongMemEvalDialogue,
         run_info = build_agent_run_info(
             ack_query,
             conversation_history,
-            duty_prompt=INGEST_DUTY,
+            prompt=INGEST_DUTY,
             max_steps=args.ingest_max_steps,
             context_manager_config=cm_config,
             language="en",
@@ -276,7 +277,7 @@ async def run_probes(items, history: list[AgentHistory], args) -> tuple[list[dic
             run_info = build_agent_run_info(
                 it.question,
                 probe_history,
-                duty_prompt=PROBE_DUTY,
+                prompt=PROBE_DUTY,
                 max_steps=args.probe_max_steps,
                 context_manager_config=disabled_cm,
                 language="en",

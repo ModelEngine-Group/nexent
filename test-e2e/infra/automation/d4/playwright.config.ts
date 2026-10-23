@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { defineConfig } from "playwright/test";
 import { join } from "node:path";
 
@@ -16,6 +18,9 @@ export default defineConfig({
   use: {
     baseURL: process.env.NEXENT_BASE_URL || "http://localhost:3000",
     locale: "zh-CN",
+    // Use the full Chromium binary rather than the headless shell: the shell
+    // cancels blob-backed attachment downloads, which PW-FILE-01 exercises.
+    channel: "chromium",
     actionTimeout: Number(process.env.D4_ACTION_TIMEOUT_MS || "30000"),
     navigationTimeout: Number(process.env.D4_NAVIGATION_TIMEOUT_MS || "60000"),
     screenshot: "off",

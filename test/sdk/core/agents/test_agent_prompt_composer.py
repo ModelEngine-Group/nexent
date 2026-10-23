@@ -43,7 +43,7 @@ def _template(role: str = "managed") -> dict:
                     "Call run_skill_script(skill_name=\"skill-name\", "
                     "script_path=\"scripts/example.py\", params=\"\", source=\"skill\")."
                 ),
-                "duty": "### Duty\n{{duty_prompt}}",
+                "duty": "### Duty\n{{prompt}}",
                 "knowledge_guidance_scoped": "Use only scoped knowledge.",
                 "knowledge_guidance_unscoped": "Use available knowledge.",
             },

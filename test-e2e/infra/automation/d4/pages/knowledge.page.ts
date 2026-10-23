@@ -42,9 +42,11 @@ export class KnowledgePage {
   }
 
   private createButton(): Locator {
-    // Knowledge cards also have role=button and include a creation date.
-    // Only the native toolbar action can start the creation journey.
-    return this.page.locator("button").filter({ hasText: /^\s*创\s*建\s*$/ });
+    // The catalog toolbar owns the sole create entry. Cards also expose
+    // role=button but are navigation targets, not creation actions.
+    return this.page
+      .getByTestId("knowledge-catalog-toolbar")
+      .getByRole("button", { name: "新建知识库", exact: true });
   }
 
   private uploadInput(): Locator {

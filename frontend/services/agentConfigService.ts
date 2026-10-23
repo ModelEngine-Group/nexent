@@ -616,7 +616,7 @@ export interface UpdateAgentInfoPayload {
   description?: string;
   author?: string;
   author_cas_username?: string | null;
-  duty_prompt?: string;
+  prompt?: string;
   group_ids?: number[];
   model_ids?: number[];
   max_steps?: number;
@@ -1134,7 +1134,7 @@ export const searchAgentInfo = async (
       // v2.6.0: per-agent model params override (model_id -> { temperature, top_p, extra_params })
       model_params_override: data.model_params_override ?? null,
       is_main_agent: data.is_main_agent ?? true,
-      duty_prompt: data.duty_prompt,
+      prompt: data.prompt,
       business_description: data.business_description,
       business_logic_model_name: data.business_logic_model_name,
       business_logic_model_id: data.business_logic_model_id,

@@ -66,8 +66,8 @@ function resolveDraftFocusTarget(
   ) {
     return { section: "conversation_guide" };
   }
-  if (updatedFields.includes("duty_prompt")) {
-    return { section: "role_model", promptTab: "duty" };
+  if (updatedFields.includes("prompt")) {
+    return { section: "role_model" };
   }
   if (updatedFields.includes("name") || updatedFields.includes("description")) {
     return { section: "display_info" };

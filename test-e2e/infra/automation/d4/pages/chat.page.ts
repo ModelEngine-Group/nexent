@@ -11,6 +11,7 @@ type AttachmentPayload = string | Parameters<FileChooser["setFiles"]>[0];
 export class ChatPage {
   private lastServerConversationId?: number;
   private stoppedConversationId?: number;
+  private lastRunResponse?: Response;
 
   constructor(readonly page: Page) {}
 
@@ -135,6 +136,7 @@ export class ChatPage {
       error.name = "ProductFailure";
       throw error;
     }
+    this.lastRunResponse = response;
     const headers = await response.allHeaders();
     let rawConversationId = headers["conversation_id"];
     if (!rawConversationId) {
@@ -182,9 +184,19 @@ export class ChatPage {
   }
 
   async waitForCompletion(timeout = 300_000): Promise<void> {
+    // Wait for the SSE response body to end, not just for an early completion
+    // badge: a new conversation can expose the stop-less placeholder before
+    // the final answer has rendered.
+    const run = this.lastRunResponse;
+    if (run) {
+      const failure = await run.finished();
+      if (failure) throw new Error(`agent run stream failed: ${failure.message}`);
+    }
     const last = this.assistantMessages().last();
     await expect(last).toContainText(/已完成|Completed|失败|Error/i, { timeout });
     await expect(this.page.locator("button:has(svg.lucide-square)")).toHaveCount(0, { timeout });
+    await expect.poll(async () => (await last.innerText()).trim(), { timeout })
+      .not.toMatch(/Thinking\.\.\.|思考中/);
   }
 
   async sendAndWait(prompt: string, timeout = 300_000): Promise<Locator> {
@@ -402,12 +414,17 @@ export class ChatPage {
     await expect(dialog).toBeHidden();
   }
 
+
   async uploadAttachment(payload: AttachmentPayload): Promise<void> {
-    // No `[data-composer-action-trigger]` any more; the tooltip gives it a name.
-    const attachButton = this.page.getByRole("button", { name: "添加附件", exact: true });
-    await expect(attachButton).toBeVisible();
+    // The workbench composer exposes the file chooser directly through the
+    // attachment button. Older layouts used 上传附件; the current label is
+    // 添加附件. Both open the native file chooser.
+    const attach = this.page
+      .getByRole("button", { name: /上传附件|添加附件/ })
+      .first();
+    await expect(attach).toBeVisible();
     const chooser = this.page.waitForEvent("filechooser");
-    await attachButton.click();
+    await attach.click();
     await (await chooser).setFiles(payload);
     await expect(this.page.locator("[data-workbench-composer], .aui-lexical-input")).toBeVisible();
   }

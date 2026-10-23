@@ -33,7 +33,7 @@ export interface Agent {
   model_names?: string[];
   model_name?: string;
   max_steps: number;
-  duty_prompt?: string;
+  prompt?: string;
   parent_agent_id?: number;
   tenant_id: string;
   enabled: boolean;

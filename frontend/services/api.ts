@@ -179,7 +179,6 @@ export const API_ENDPOINTS = {
     updateLabels: `${API_BASE_URL}/tool/labels`,
   },
   prompt: {
-    generate: `${API_BASE_URL}/prompt/generate`,
     optimize: `${API_BASE_URL}/prompt/optimize`,
     optimizeFromDebug: `${API_BASE_URL}/prompt/optimize/from_debug`,
   },

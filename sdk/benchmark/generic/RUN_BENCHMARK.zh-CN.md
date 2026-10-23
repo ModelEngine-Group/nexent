@@ -56,7 +56,7 @@
 | `--max-steps`          | 最大执行步数                  |
 | `--temperature`        | LLM 温度；标准导出 YAML 不含该字段，不传时通常使用 `0.1` |
 | `--language`           | 提示语言（`en` / `zh`）       |
-| `--duty-prompt`        | 角色描述 prompt             |
+| `--prompt`        | 角色描述 prompt             |
 | `--system-prompt-file` | 自定义系统 prompt 文件（跳过模板引擎） |
 | `--tenant-id` | builtin skill tools 的运行范围；默认依次取 CLI、YAML `agent_info.tenant_id`、`tenant_id` |
 | `--skills-path` | builtin skill tools 使用的本地 Skill 根目录；未传时读取 `SKILLS_PATH` |
@@ -69,7 +69,7 @@ zh -> Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，�
 en -> Nexent is an open-source agent platform built on the MCP tool ecosystem, providing flexible multimodal Q&A, retrieval, data analysis, and processing capabilities.
 ```
 
-`--language` 不会翻译 YAML 中的完整 `duty_prompt`；该字段包含职责、约束和示例，必须来自待测生产版本。切换语言后应重新生成对应
+`--language` 不会翻译 YAML 中的完整 `prompt`；该字段包含职责、约束和示例，必须来自待测生产版本。切换语言后应重新生成对应
 snapshot，不能把 `en` snapshot 用于 `zh` run。
 
 ### 上下文管理
@@ -181,7 +181,7 @@ python run_benchmark.py \
 python run_benchmark.py \
   --dataset gsm8k-n10 \
   --evaluators numeric_answer \
-  --duty-prompt "你是一个专业的数学解题助手，仅输出最终数字答案。" \
+  --prompt "你是一个专业的数学解题助手，仅输出最终数字答案。" \
   --max-steps 15 \
   --run-name gsm8k-custom-prompt
 ```
@@ -276,7 +276,7 @@ python run_benchmark.py \
 **CLI 参数 > YAML 配置 > 默认值**
 
 ```
---duty-prompt "..."           → 覆盖 YAML 中的 duty_prompt
+--prompt "..."           → 覆盖 YAML 中的 prompt
 --max-steps 20                → 覆盖 YAML 中的 max_steps
 --context-processing-mode adaptive_compact → 覆盖 YAML policy
 --temperature 0.5             → 覆盖默认值 0.1

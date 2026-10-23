@@ -90,7 +90,7 @@ def _composer(language: str, is_manager: bool, prompt_bundle):
 
 
 def build_context_inputs(
-    duty_prompt: Optional[str] = None,
+    prompt: Optional[str] = None,
     language: str = "zh",
     is_manager: bool = True,
     enable_planning: bool = False,

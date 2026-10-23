@@ -1,7 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 #!/usr/bin/env python3
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """
 Export Nexent Agent configuration from PostgreSQL database to YAML file.
@@ -107,7 +106,7 @@ def export_agent_config(agent_id: int = None, agent_name: str = None,
         cursor.execute("""
             SELECT
                 agent_id, name, display_name, description,
-                duty_prompt,
+                prompt,
                 max_steps, enable_context_manager, provide_run_summary,
                 verification_config, greeting_message, example_questions,
                 version_no
@@ -120,7 +119,7 @@ def export_agent_config(agent_id: int = None, agent_name: str = None,
             raise ValueError(f"Agent version not found: id={agent_id}, version={target_version}")
 
         (agent_id, name, display_name, description,
-         duty_prompt,
+         prompt,
          max_steps, enable_context_manager, provide_run_summary,
          verification_config, greeting_message, example_questions,
          version_no) = agent_row
@@ -218,7 +217,7 @@ def export_agent_config(agent_id: int = None, agent_name: str = None,
                 "verification_config": verification_config or {}
             },
             "prompts": {
-                "duty_prompt": duty_prompt or "",
+                "prompt": prompt or "",
             },
             "tools": tools,
             "sub_agents": sub_agents,

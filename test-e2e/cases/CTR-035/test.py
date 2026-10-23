@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """A real Nacos network timeout is rejected and discovery recovers after fault removal."""
 import time
 import pytest
@@ -17,8 +18,9 @@ async def test_nacos_timeout_and_recovery(tenant_a_admin):
                 start = time.monotonic()
                 failed = await discover()
                 elapsed = time.monotonic() - start
-                assert_status(failed, 400)
-                assert 25 <= elapsed < 85, 'the product must reach its Nacos timeout, not the test client timeout'
+                assert_status(failed, 504)
+                assert "timed out after 10 seconds" in failed.json()["detail"]
+                assert 9 <= elapsed < 15, 'the product must reach its Nacos timeout, not the test client timeout'
             after = await api.get('/a2a/client/agents')
             assert_status(after, 200)
             assert {row['id'] for row in after.json()['data']} == ids

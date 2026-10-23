@@ -35,6 +35,12 @@ async function menu(action: string) {
 }
 const confirm = () =>
   fireEvent.click(screen.getByRole("button", { name: /确\s*定/ }));
+const confirmDeleteKb = () =>
+  fireEvent.click(
+    screen.getByRole("button", {
+      name: t("knowledgeBase.modal.deleteConfirm.confirm"),
+    }),
+  );
 
 describe("AIDP-FE-LIST-01", () => {
   it("card/table, guide and columns persist while only the name enters files", async () => {
@@ -208,9 +214,11 @@ describe("AIDP-FE-LIST-01", () => {
     await settle();
     expect(matching(base + "/kb-a", "DELETE")).toHaveLength(0);
     await menu("common.delete");
-    await screen.findByRole("button", { name: /确\s*定/ });
+    await screen.findByRole("button", {
+      name: t("knowledgeBase.modal.deleteConfirm.confirm"),
+    });
     const before = matching(base).length;
-    confirm();
+    confirmDeleteKb();
     await screen.findByText(t("aidpKnowledge.listEmpty"));
     expect(matching(base + "/kb-a", "DELETE")).toHaveLength(1);
     expect(matching(base)).toHaveLength(before + 1);

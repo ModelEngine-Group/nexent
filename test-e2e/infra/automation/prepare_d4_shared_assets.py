@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Prepare stable, non-secret D4 assets through current Nexent APIs.
 
 This is an asset bootstrap, not a test executor.  It creates the external state
@@ -60,7 +62,7 @@ async def _create_agent(
     enabled_tool_ids: list[int] | None = None,
     related_agent_ids: list[int] | None = None,
     allow_chat_metadata: bool = False,
-    duty_prompt: str | None = None,
+    prompt: str | None = None,
     model_id_override: int | None = None,
 ) -> tuple[int, str, str]:
     token = uuid4().hex[:10]
@@ -82,7 +84,7 @@ async def _create_agent(
         "allow_chat_metadata": allow_chat_metadata,
         "is_a2a": False,
         "related_agent_ids": related_agent_ids or [],
-        "duty_prompt": duty_prompt or "Complete the assigned task accurately and preserve requested markers.",
+        "prompt": prompt or "Complete the assigned task accurately and preserve requested markers.",
     }
     # Current Nexent creates the draft through POST /agent/update when
     # agent_id is absent and returns the allocated ID in that response.
@@ -448,7 +450,7 @@ async def prepare_tool_chat(identity) -> dict:
     tool_chat_id, tool_chat_name, _ = await _create_agent(
         identity, prefix="D4 Tool Chat Agent", model_type="llm",
         enabled_tool_ids=[get_test_code_id],
-        duty_prompt=(
+        prompt=(
             "When the user explicitly requests get_test_code, call that exact tool and "
             "return its result verbatim. Do not substitute another tool."
         ),
@@ -471,7 +473,7 @@ async def prepare_file_chat(identity) -> dict:
     tool_id = int(matches[0].get('tool_id') or matches[0]['id'])
     agent_id, name, _ = await _create_agent(
         identity, prefix='D4 File Agent', model_type='llm', enabled_tool_ids=[tool_id],
-        duty_prompt='Use analyze_text_file to read attached documents before answering. Preserve requested markers.',
+        prompt='Use analyze_text_file to read attached documents before answering. Preserve requested markers.',
     )
     _register_agent('d4_file', agent_id, name)
     return {'NEXENT_TEST_FILE_AGENT': name}
@@ -481,14 +483,14 @@ async def prepare_multi(identity) -> dict:
     always_fail_id = await _controlled_tool_id(identity, "always_fail")
     child_a_id, child_a_name, _ = await _create_agent(
         identity, prefix="D4 Multi Child A", model_type="llm",
-        duty_prompt="Complete every delegated task and include CHILD_A_OK in the result.",
+        prompt="Complete every delegated task and include CHILD_A_OK in the result.",
     )
     _register_agent("d4_multi_child_a", child_a_id, child_a_name)
     register_asset("agents", "d4_multi_child_a_runtime_name", _runtime_agent_name(child_a_name), owner_case_id="D4-PREP")
     child_b_id, child_b_name, _ = await _create_agent(
         identity, prefix="D4 Multi Child B", model_type="llm",
         enabled_tool_ids=[always_fail_id],
-        duty_prompt=(
+        prompt=(
             "Complete delegated tasks and include CHILD_B_OK. When the task explicitly "
             "requests a controlled failure, call always_fail and report its error verbatim."
         ),
@@ -498,7 +500,7 @@ async def prepare_multi(identity) -> dict:
     multi_id, multi_name, _ = await _create_agent(
         identity, prefix="D4 Multi Parent", model_type="llm",
         related_agent_ids=[child_a_id, child_b_id],
-        duty_prompt=(
+        prompt=(
             "For every request, delegate one concrete subtask to each of the two configured "
             "related agents, wait for both, then summarize both results and preserve the "
             "exact marker requested by the user."

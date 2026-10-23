@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   models: [] as unknown[],
   specs: [] as unknown[],
   agent: {
-    duty_prompt: "Complete prompt with constraints and examples",
+    prompt: "Complete prompt with constraints and examples",
     constraint_prompt: "LEGACY_RULE_POISON",
     few_shots_prompt: "LEGACY_EXAMPLE_POISON",
     model_ids: [],
@@ -71,20 +71,20 @@ test("edits only the complete prompt and renders no legacy fields or tabs", () =
       <AgentPrompt highFidelity />
     </Form>
   );
-  const input = screen.getByDisplayValue(mocks.agent.duty_prompt);
+  const input = screen.getByDisplayValue(mocks.agent.prompt);
   expect(screen.queryByDisplayValue("LEGACY_RULE_POISON")).toBeNull();
   expect(screen.queryByDisplayValue("LEGACY_EXAMPLE_POISON")).toBeNull();
   expect(screen.queryByRole("tab")).toBeNull();
   fireEvent.change(input, { target: { value: "Updated complete prompt" } });
   expect(mocks.updateDraft).toHaveBeenCalledExactlyOnceWith({
-    duty_prompt: "Updated complete prompt",
+    prompt: "Updated complete prompt",
   });
 });
 
 test("saved prompt focus targets the complete editor without opening a legacy modal", async () => {
   mocks.focus = {
     agentId: 157,
-    target: { section: "role_model", promptTab: "duty" },
+    target: { section: "role_model" },
     id: 1,
   };
   render(
@@ -93,7 +93,7 @@ test("saved prompt focus targets the complete editor without opening a legacy mo
     </Form>
   );
   await waitFor(() =>
-    expect(screen.getByDisplayValue(mocks.agent.duty_prompt)).toHaveFocus()
+    expect(screen.getByDisplayValue(mocks.agent.prompt)).toHaveFocus()
   );
   expect(screen.queryByRole("dialog")).toBeNull();
 });

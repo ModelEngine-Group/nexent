@@ -43,7 +43,7 @@ case:
   - order: 6
     action: 图片安全：构造 chunk_type=="image" 且 file_url 为相对路径的 result（multi_modal=True），断言返回的 model 文本不包含拼接后的完整图片 URL 或原始 file_url，仅出现
       `![AIDP image](/__aidp_image__/{tool_sign}{cite_index})` marker；mock 观察者收到 ProcessType.PICTURE_WEB 消息，images_url 为经
-      _build_image_url 拼接的完整 URL，且该 URL 不出现在 SEARCH_CONTENT 文本中。
+      _build_image_url 拼接的完整 URL；SEARCH_CONTENT 的 url 字段为该完整 URL（供前端预览/下载），text 字段不包含该 URL。
     expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
   - order: 7
     action: text/table 剥离：构造 text 含 `<img …>` 标签的 text/table 块，断言返回的 model 文本与 ui 文本中 `<img>` 标签均被剥离、其余文字保留。
@@ -60,7 +60,7 @@ case:
   - 503 连续 3 次失败后抛 AidpSearchError，消息为面向用户的友好说明（提示 KB 可能无内容/待索引）；502/504 失败抛含“after 3 attempts”的 AidpSearchError，均不泄漏原始 httpx
     异常细节。
   - 图片块完整 URL 不进入 model 文本，仅出现 `![AIDP image](/__aidp_image__/{tool_sign}{cite_index})` marker；真实图片 URL 仅经 PICTURE_WEB observer
-    通道（由 image_service 代理补 Bearer）传递。
+    通道（由 image_service 代理补 Bearer）传递；SEARCH_CONTENT 的 url 字段保留该完整 URL 供前端预览/下载，text 字段不得包含该 URL。
   - text/table 块 `<img>` 标签被剥离且其余文字保留，ui 与 model 两路文本一致。
   - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
   forbidden_side_effects: []
@@ -77,6 +77,6 @@ case:
   - 503 连续 3 次失败后抛 AidpSearchError，消息为面向用户的友好说明（提示 KB 可能无内容/待索引）；502/504 失败抛含“after 3 attempts”的 AidpSearchError，均不泄漏原始 httpx
     异常细节。
   - 图片块完整 URL 不进入 model 文本，仅出现 `![AIDP image](/__aidp_image__/{tool_sign}{cite_index})` marker；真实图片 URL 仅经 PICTURE_WEB observer
-    通道（由 image_service 代理补 Bearer）传递。
+    通道（由 image_service 代理补 Bearer）传递；SEARCH_CONTENT 的 url 字段保留该完整 URL 供前端预览/下载，text 字段不得包含该 URL。
   - text/table 块 `<img>` 标签被剥离且其余文字保留，ui 与 model 两路文本一致。
   - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

@@ -500,7 +500,7 @@ agent_config:
   max_steps: 8
   version_no: 3
 prompts:
-  duty_prompt: Solve carefully
+  prompt: Solve carefully
 tools:
   - name: search
 skills: []
