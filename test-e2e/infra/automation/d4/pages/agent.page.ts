@@ -193,13 +193,13 @@ export class AgentPage {
     const drawer = this.page.getByRole("dialog");
     await expect(drawer.getByPlaceholder("搜索知识库名称及描述")).toBeVisible();
     await drawer.getByPlaceholder("搜索知识库名称及描述").fill(knowledgeBaseName);
-    const item = drawer.getByText(knowledgeBaseName, { exact: true }).last();
+    const item = drawer.getByRole("option", { name: knowledgeBaseName, exact: true });
     await expect(item).toBeVisible();
-    // KnowledgeRow: name span -> header flex -> text column -> row div whose
-    // only button is the CheckMark selector.
-    const checkMark = item.locator("xpath=ancestor::div[3]").getByRole("button").first();
-    await checkMark.click();
-    await expect(checkMark).toHaveAttribute("aria-pressed", "true");
+    // The current AddKnowledgeDrawer renders each row as a role=option button
+    // whose aria-label is the knowledge-base name. Clicking that row toggles
+    // selection (the old CheckMark button/aria-pressed shape was replaced).
+    await item.click();
+    await expect(item).toHaveAttribute("aria-selected", "true");
     const toolSaves: Record<string, unknown>[] = [];
     const captureToolSave = (response: Response) => {
       const request = response.request();
@@ -245,7 +245,9 @@ export class AgentPage {
       { timeout: 60_000 },
     );
     await this.page.getByRole("button", { name: "发布", exact: true }).click();
-    const modal = this.page.getByRole("dialog", { name: "发布", exact: true });
+    // The publish modal title is plain text, so the dialog has no accessible
+    // name; identify the visible modal by its version field.
+    const modal = this.page.locator("[role='dialog']:visible").filter({ hasText: /版本名称/ });
     await expect(modal).toBeVisible();
     await modal.getByPlaceholder("请输入版本名称").fill(versionName);
     await modal.getByPlaceholder("请输入发布说明（可选）").fill(releaseNote);

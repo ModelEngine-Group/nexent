@@ -26,7 +26,9 @@ const ORACLE = {
   kbName: "AIDP Product Handbook",
   kbId: "aidp-kb-product",
   query: "AIDP Search 提供了什么能力？请引用原文回答。",
-  expectedText: "AIDP Search provides low-latency retrieval",
+  // The model may translate around the sentence; this seed-only phrase is
+  // preserved in both the debug recall and the released conversation.
+  expectedText: "low-latency retrieval",
   expectedSource: "AIDP产品介绍.pdf",
 };
 

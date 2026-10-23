@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Per-case controlled service lifecycle, adapted from the original run-case entrypoint."""
 from contextlib import contextmanager
 import socket
@@ -6,6 +8,8 @@ import sys
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import build_opener, ProxyHandler
+
+from ext_attach import EXT_LOGICAL_SERVICES
 
 
 def free_port():
@@ -35,36 +39,76 @@ def wait_ready(url, process, timeout=20, *, accepted_statuses=(200,)):
 
 
 @contextmanager
-def controlled_services(repo, directory, env, enabled):
-    if not enabled:
+def controlled_services(repo, directory, env, enabled, required_mock_services=()):
+    ext_required = [
+        service for service in (required_mock_services or [])
+        if service in EXT_LOGICAL_SERVICES
+    ]
+    if not enabled and not ext_required:
         yield
         return
-    host = env.get("NEXENT_TEST_ASSETS_CONTAINER_HOST", "").strip()
-    mcp_host = env.get("NEXENT_TEST_MCP_CONTAINER_HOST", "").strip() or host
-    if not host or not mcp_host:
-        raise RuntimeError("Configure container-reachable controlled service hosts explicitly")
     processes, handles = [], []
     try:
         (directory / "runtime").mkdir(parents=True, exist_ok=True)
-        for name, suffix, ready_path in (("test-assets", "ASSETS", "/health"), ("test-mcp", "MCP", "/mcp")):
-            port = free_port()
-            log_path = directory / "logs" / f"{name}.log"
+        if ext_required:
+            # The ext-knowledge mock is a suite-owned process, exactly like
+            # the controlled test-assets/test-mcp servers below. It binds the
+            # conventional 30090 port (the same default the product's
+            # AIDP_SERVER_URL uses) and is stopped with this case; no
+            # machine-local attach YAML, identity or cross-batch lock is
+            # involved.
+            host = env.get("NEXENT_TEST_ASSETS_CONTAINER_HOST", "").strip() or "127.0.0.1"
+            port = int(env.get("NEXENT_EXT_KNOWLEDGE_MOCK_PORT") or "30090")
+            probe = socket.socket()
+            probe.settimeout(0.2)
+            in_use = probe.connect_ex(("127.0.0.1", port)) == 0
+            probe.close()
+            if in_use:
+                raise RuntimeError(
+                    f"ext-knowledge mock port {port} is already in use; "
+                    "stop the external mock before running suite-owned ext cases"
+                )
+            log_path = directory / "logs" / "ext-knowledge.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             output = log_path.open("w", encoding="utf-8")
             handles.append(output)
-            variable = "NEXENT_TEST_API_WIRE_LOG" if suffix == "ASSETS" else "NEXENT_TEST_MCP_WIRE_LOG"
-            env[variable] = str(directory / "runtime" / f"{name}-wire.jsonl")
-            # Inherit the worker process group so its timeout kills all services too.
-            process = subprocess.Popen([sys.executable, str(repo / "test-e2e/infra/environment/services" / name / "server.py"),
-                                        "--host", "0.0.0.0", "--port", str(port)],
-                                       cwd=repo, env=env, stdout=output, stderr=subprocess.STDOUT)
+            env["EXT_KNOWLEDGE_MOCK_RUN_ID"] = directory.name
+            process = subprocess.Popen(
+                [sys.executable,
+                 str(repo / "test-e2e/infra/mock-services/ext-knowledge-mock/server.py"),
+                 "--host", "0.0.0.0", "--port", str(port)],
+                cwd=repo, env=env, stdout=output, stderr=subprocess.STDOUT,
+            )
             processes.append(process)
-            wait_ready(f"http://127.0.0.1:{port}{ready_path}", process,
-                       accepted_statuses=(200, 400, 405, 406) if suffix == "MCP" else (200,))
-            endpoint = "/mcp" if suffix == "MCP" else ""
-            advertised_host = mcp_host if suffix == "MCP" else host
-            env[f"NEXENT_TEST_{suffix}_URL"] = f"http://{advertised_host}:{port}{endpoint}"
-            env[f"NEXENT_TEST_{suffix}_LOCAL_URL"] = f"http://127.0.0.1:{port}{endpoint}"
+            wait_ready(f"http://127.0.0.1:{port}/health", process)
+            env["NEXENT_EXT_KNOWLEDGE_OWNED"] = "1"
+            env["NEXENT_EXT_KNOWLEDGE_OWNER_RUN_ID"] = directory.name
+            env["NEXENT_EXT_KNOWLEDGE_RUNNER_URL"] = f"http://127.0.0.1:{port}"
+            env["NEXENT_EXT_KNOWLEDGE_PRODUCT_URL"] = f"http://{host}:{port}"
+        if enabled:
+            host = env.get("NEXENT_TEST_ASSETS_CONTAINER_HOST", "").strip()
+            mcp_host = env.get("NEXENT_TEST_MCP_CONTAINER_HOST", "").strip() or host
+            if not host or not mcp_host:
+                raise RuntimeError("Configure container-reachable controlled service hosts explicitly")
+            for name, suffix, ready_path in (("test-assets", "ASSETS", "/health"), ("test-mcp", "MCP", "/mcp")):
+                port = free_port()
+                log_path = directory / "logs" / f"{name}.log"
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                output = log_path.open("w", encoding="utf-8")
+                handles.append(output)
+                variable = "NEXENT_TEST_API_WIRE_LOG" if suffix == "ASSETS" else "NEXENT_TEST_MCP_WIRE_LOG"
+                env[variable] = str(directory / "runtime" / f"{name}-wire.jsonl")
+                # Inherit the worker process group so its timeout kills all services too.
+                process = subprocess.Popen([sys.executable, str(repo / "test-e2e/infra/environment/services" / name / "server.py"),
+                                            "--host", "0.0.0.0", "--port", str(port)],
+                                           cwd=repo, env=env, stdout=output, stderr=subprocess.STDOUT)
+                processes.append(process)
+                wait_ready(f"http://127.0.0.1:{port}{ready_path}", process,
+                           accepted_statuses=(200, 400, 405, 406) if suffix == "MCP" else (200,))
+                endpoint = "/mcp" if suffix == "MCP" else ""
+                advertised_host = mcp_host if suffix == "MCP" else host
+                env[f"NEXENT_TEST_{suffix}_URL"] = f"http://{advertised_host}:{port}{endpoint}"
+                env[f"NEXENT_TEST_{suffix}_LOCAL_URL"] = f"http://127.0.0.1:{port}{endpoint}"
         yield
     finally:
         errors = []
