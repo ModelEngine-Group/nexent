@@ -251,6 +251,30 @@ it("uses the first available tenant model as Workbench default without replacing
     initialWorkbenchState.config
   );
 });
+it("prefers the tenant default LLM as the Workbench fallback model", () => {
+  const available = [{ id: 11 }, { id: 12 }, { id: 13 }];
+  // A configured, selectable tenant default wins over the first catalog entry.
+  expect(
+    withDefaultWorkbenchModel(initialWorkbenchState.config, available, 13)
+      .model_id
+  ).toBe(13);
+  // A tenant default that is missing or unavailable falls back to the first.
+  expect(
+    withDefaultWorkbenchModel(initialWorkbenchState.config, available, 99)
+      .model_id
+  ).toBe(11);
+  // Unset (undefined) and zero ("not configured") ids also fall back.
+  expect(
+    withDefaultWorkbenchModel(initialWorkbenchState.config, available).model_id
+  ).toBe(11);
+  expect(
+    withDefaultWorkbenchModel(initialWorkbenchState.config, available, 0)
+      .model_id
+  ).toBe(11);
+  // An explicit session choice still wins over the tenant default.
+  const explicit = { ...initialWorkbenchState.config, model_id: 12 };
+  expect(withDefaultWorkbenchModel(explicit, available, 13).model_id).toBe(12);
+});
 it("does not replace the Workbench model with the mounted Agent model", () => {
   const next = workbenchReducer(initialWorkbenchState, {
     type: "resolve-agent-success",

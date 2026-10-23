@@ -9,6 +9,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { WorkbenchPinHistorySync } from "./workbench-pin-history-sync";
+import { getWorkbenchPinStorageKey } from "./thread-pins";
 import { useConversationActivitySync } from "@/hooks/chat/useConversationActivitySync";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useEffect, useRef, useState } from "react";
@@ -62,7 +63,7 @@ interface ThreadListSidebarProps extends SidebarProps {
   collapseToFloatingButton?: boolean;
   /** Accepted for backward compatibility; the design removed the legacy switch. */
   showLegacySwitch?: boolean;
-  /** Workbench uses user-scoped server IDs; undefined retains Agent-chat pins. */
+  /** Optional explicit user scope; otherwise use the authenticated user's server pins. */
   pinStorageKey?: string | null;
 }
 
@@ -83,6 +84,12 @@ export function ThreadListSidebar({
   ...props
 }: ThreadListSidebarProps) {
   const { user } = useAuthorizationContext();
+  const effectivePinScope =
+    pinStorageKey !== undefined
+      ? pinStorageKey
+      : user
+        ? getWorkbenchPinStorageKey(user.id, user.tenantId)
+        : null;
   useConversationActivitySync(
     user ? `${user.id}:${user.tenantId}` : null,
     newChatDesign ? "agent_chat" : "workbench"
@@ -249,17 +256,20 @@ export function ThreadListSidebar({
         style={{ backgroundColor: sidebarBackground }}
       >
         <PinnedThreadsProvider
-          storageKey={pinStorageKey}
-          serverBacked={pinStorageKey !== undefined}
-          persistedConversationIds={pinStorageKey !== undefined}
+          storageKey={effectivePinScope}
+          serverBacked
+          persistedConversationIds
+          conversationType={newChatDesign ? "agent_chat" : "workbench"}
           serverConversationIds={serverConversationIds}
           onStorageError={
-            pinStorageKey !== undefined
+            effectivePinScope
               ? () => message.error(t("chat.threadList.pinServerFailed"))
               : undefined
           }
         >
-          {pinStorageKey && <WorkbenchPinHistorySync key={pinStorageKey} />}
+          {effectivePinScope && (
+            <WorkbenchPinHistorySync key={effectivePinScope} />
+          )}
           <BatchSelectionProvider
             key={selectedAgentId ?? "discovery"}
             onNewConversation={onNewConversation}

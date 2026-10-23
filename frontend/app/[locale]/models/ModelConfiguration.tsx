@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -84,6 +86,7 @@ export default function AppModelConfig({
                 <div
                   style={{
                     padding: CARD_HEADER.PADDING,
+                    marginBottom: CARD_HEADER.MARGIN_BOTTOM,
                     flexShrink: 0,
                   }}
                 >
