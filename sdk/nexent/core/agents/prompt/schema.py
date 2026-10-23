@@ -7,7 +7,7 @@ from types import MappingProxyType
 
 FIELD_VARIABLES = MappingProxyType({
     "system_sections": MappingProxyType({
-        "duty": frozenset({"duty_prompt"}),
+        "duty": frozenset({"prompt"}),
         "restricted_python_execution": frozenset({"authorized_imports"}),
     }),
     "manager_agent": MappingProxyType({

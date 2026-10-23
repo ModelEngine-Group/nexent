@@ -32,8 +32,8 @@ def require_prompt_sdk(response, receipt):
 def snapshot(body):
     body = body.get('data') or body
     assert body.get('agent_id') or body.get('id'), 'Draft read-back must contain the owned Agent identity'
-    fields = ('name', 'display_name', 'description', 'duty_prompt', 'constraint_prompt',
-              'few_shots_prompt', 'greeting_message', 'example_questions', 'model_ids',
+    fields = ('name', 'display_name', 'description', 'prompt',
+              'greeting_message', 'example_questions', 'model_ids',
               'tools', 'skills', 'related_agent_ids')
     return {field: body.get(field) for field in fields}
 
@@ -61,12 +61,12 @@ async def exercise_provider_fault(identity, mode):
                 # drafts no longer receive one from retired prompt templates.
                 initialized = await api.post('/agent/update', json={
                     **draft, 'agent_id': agent_id,
-                    'duty_prompt': 'Answer questions using verified facts.',
+                    'prompt': 'Answer questions using verified facts.',
                 })
                 assert_status(initialized, 200)
                 before = await api.post('/agent/search_info', json={'agent_id': agent_id, 'version_no': 0})
                 assert_status(before, 200)
-                assert (snapshot(before.json()).get('duty_prompt') or '').strip(), 'Owned draft requires a saved prompt'
+                assert (snapshot(before.json()).get('prompt') or '').strip(), 'Owned draft requires a saved prompt'
                 started = time.monotonic()
                 response = await api.post('/prompt/optimize/from_debug', json=payload)
                 elapsed = time.monotonic() - started

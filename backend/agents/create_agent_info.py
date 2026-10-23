@@ -987,6 +987,7 @@ def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgen
         protocol_version=agent.get("protocol_version", "1.0"),
         protocol_type=agent.get("protocol_type", PROTOCOL_JSONRPC),
         timeout=300.0,
+        ssl_verify=agent.get("ssl_verify", True),
         raw_card=agent.get("raw_card"),
         custom_headers=_build_security_headers(agent) or None,
     )
@@ -1494,8 +1495,8 @@ async def create_agent_config(
             )
         )
 
-    # Build system prompt: prioritize segmented fields, fallback to original prompt field if not available
-    duty_prompt = agent_info.get("duty_prompt", "")
+    # Build the system prompt from the single stored Agent instruction field
+    prompt = agent_info.get("prompt", "")
 
     is_manager = len(worker_agents) > 0 or len(external_a2a_agents) > 0
 
@@ -1859,7 +1860,7 @@ async def create_agent_config(
     )
 
     context_items = build_context_inputs(
-        duty_prompt=duty_prompt,
+        prompt=prompt,
         language=language,
         is_manager=is_manager,
         enable_planning=enable_planning,

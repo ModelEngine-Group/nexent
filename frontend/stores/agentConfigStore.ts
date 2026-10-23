@@ -20,7 +20,6 @@ import {
   DEFAULT_AGENT_VERIFICATION_CONFIG,
   DEFAULT_GUARDRAIL_CONFIG,
 } from "@/types/agentConfig";
-import { getAgentGenerationCache } from "@/lib/agentGenerationCache";
 
 /**
  * Fields we need to track for dirty detection and editing.
@@ -45,7 +44,7 @@ export type EditableAgent = Pick<
   | "allow_chat_metadata"
   | "enable_protocol_repair_retry"
   | "tools"
-  | "duty_prompt"
+  | "prompt"
   | "business_description"
   | "business_logic_model_name"
   | "business_logic_model_id"
@@ -213,7 +212,7 @@ function createEmptyEditableAgent(llmConfig?: {
     enable_protocol_repair_retry: false,
     tools: [],
     skills: [],
-    duty_prompt: "",
+    prompt: "",
     business_description: "",
     business_logic_model_name: llmConfig?.name || "",
     business_logic_model_id: llmConfig?.id || 0,
@@ -252,7 +251,7 @@ const toEditable = (agent: Agent | null): EditableAgent =>
           agent.enable_protocol_repair_retry ?? false,
         tools: [...(agent.tools || [])],
         skills: [...(agent.skills || [])],
-        duty_prompt: agent.duty_prompt || "",
+        prompt: agent.prompt || "",
         business_description: agent.business_description || "",
         business_logic_model_name: agent.business_logic_model_name || "",
         business_logic_model_id: agent.business_logic_model_id || 0,
@@ -387,7 +386,7 @@ const isDirty = (
       editedAgent.provide_run_summary !== false ||
       editedAgent.allow_chat_metadata !== false ||
       editedAgent.enable_protocol_repair_retry !== false ||
-      editedAgent.duty_prompt !== "" ||
+      editedAgent.prompt !== "" ||
       editedAgent.business_description !== "" ||
       editedAgent.business_logic_model_name !== "" ||
       editedAgent.business_logic_model_id !== 0 ||
@@ -425,7 +424,7 @@ const isDirty = (
       (editedAgent.allow_chat_metadata ?? false) ||
     (baselineAgent.enable_protocol_repair_retry ?? false) !==
       (editedAgent.enable_protocol_repair_retry ?? false) ||
-    baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
+    baselineAgent.prompt !== editedAgent.prompt ||
     baselineAgent.business_description !== editedAgent.business_description ||
     baselineAgent.business_logic_model_name !==
       editedAgent.business_logic_model_name ||
@@ -480,43 +479,10 @@ export const useAgentConfigStore = create<AgentConfigStoreState>(
       const agentId = agent ? parseInt(agent.id) : null;
       const baselineAgent = agent ? toEditable(agent) : null;
       const { defaultLlmConfig } = get();
-      let editedAgent = baselineAgent
+      const editedAgent = baselineAgent
         ? { ...baselineAgent }
         : createEmptyEditableAgent(defaultLlmConfig ?? undefined);
 
-      // Check if there's a pending generation cache to restore
-      if (agentId !== null && baselineAgent) {
-        const cached = getAgentGenerationCache(agentId);
-        if (cached && !cached.isGenerating) {
-          // Generation completed while user was away, restore the cached data to editedAgent
-          const cacheUpdates: Partial<EditableAgent> = {};
-
-          if (cached.dutyPrompt) cacheUpdates.duty_prompt = cached.dutyPrompt;
-          if (cached.greetingMessage)
-            cacheUpdates.greeting_message = cached.greetingMessage;
-          if (cached.exampleQuestions) {
-            cacheUpdates.example_questions =
-              typeof cached.exampleQuestions === "string"
-                ? (() => {
-                    try {
-                      return JSON.parse(cached.exampleQuestions);
-                    } catch {
-                      return [];
-                    }
-                  })()
-                : cached.exampleQuestions;
-          }
-
-          // Only restore agent metadata if not already set in baseline
-          if (cached.agentName && !editedAgent.name)
-            cacheUpdates.name = cached.agentName;
-          if (cached.agentDisplayName && !editedAgent.display_name)
-            cacheUpdates.display_name = cached.agentDisplayName;
-          if (cached.agentDescription && !editedAgent.description)
-            cacheUpdates.description = cached.agentDescription;
-          editedAgent = { ...editedAgent, ...cacheUpdates };
-        }
-      }
 
       set({
         currentAgentId: agentId,

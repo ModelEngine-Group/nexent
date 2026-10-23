@@ -712,13 +712,13 @@ def compare_versions_impl(
             'value_b': version_b.get('description'),
         })
 
-    # Compare duty_prompt
-    if version_a.get('duty_prompt') != version_b.get('duty_prompt'):
+    # Compare prompt
+    if version_a.get('prompt') != version_b.get('prompt'):
         differences.append({
-            'field': 'duty_prompt',
-            'label': 'Duty Prompt',
-            'value_a': version_a.get('duty_prompt'),
-            'value_b': version_b.get('duty_prompt'),
+            'field': 'prompt',
+            'label': 'Prompt',
+            'value_a': version_a.get('prompt'),
+            'value_b': version_b.get('prompt'),
         })
 
     # Compare tools count

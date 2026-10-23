@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Owned HTTP fixtures and assertions for deployed TFP D3/D4 acceptance."""
 
 import asyncio
@@ -155,7 +156,7 @@ async def setup(case_id):
                     "business_description": "Deferred executor acceptance",
                     "max_steps": 5,
                     "requested_output_tokens": 4096,
-                    "duty_prompt": "TFP_AGENT_SCENARIO_" + nonce,
+                    "prompt": "TFP_AGENT_SCENARIO_" + nonce,
                     "provide_run_summary": False,
                     "model_ids": [model_id],
                     "enabled_tool_ids": [],

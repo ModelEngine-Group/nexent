@@ -97,7 +97,7 @@ class AgentPromptComposer:
 
     def compose_context_inputs(
         self,
-        duty_prompt: Optional[str] = None,
+        prompt: Optional[str] = None,
         language: str = "zh",
         is_manager: bool = True,
         enable_planning: bool = False,
@@ -203,8 +203,8 @@ class AgentPromptComposer:
                     },
                 ))
 
-        if duty_prompt:
-            duty_text = composer.render_system_section("duty", duty_prompt=duty_prompt)
+        if prompt:
+            duty_text = composer.render_system_section("duty", prompt=prompt)
             if not include_app_context:
                 duty_text = composer.render_system_section("outline_identity") + "\n" + duty_text
             add_system("duty", duty_text, 80, 10)

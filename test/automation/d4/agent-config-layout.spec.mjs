@@ -169,9 +169,7 @@ function makeDraft(permission = "EDIT", populated = false) {
       enabled: false,
       guardrail_config: { enabled: false, rules: [], default_action: "pass" },
     },
-    duty_prompt: "",
-    constraint_prompt: "",
-    few_shots_prompt: "",
+    prompt: "",
     current_version_no: null,
   };
 }
