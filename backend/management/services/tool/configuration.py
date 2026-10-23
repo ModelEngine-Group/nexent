@@ -348,7 +348,7 @@ async def update_tool_list(tenant_id: str, user_id: str):
     local_tools = get_local_tools()
     langchain_tools = get_langchain_tools()
 
-    _refresh_openapi_services_in_mcp(tenant_id)
+    refresh_result = _refresh_openapi_services_in_mcp(tenant_id)
 
     try:
         mcp_tools = await get_all_mcp_tools(tenant_id)
