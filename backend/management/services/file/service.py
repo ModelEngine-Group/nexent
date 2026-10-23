@@ -22,7 +22,7 @@ from contracts.constants.constants import FILE_PREVIEW_SIZE_LIMIT, MAX_CONCURREN
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, OfficeConversionException, UnsupportedFileTypeException
-from management.db.file.attachment import copy_file, delete_file, file_exists, generate_object_name, get_content_type, get_file_range, get_file_size_from_minio, get_file_stream, get_file_stream_raw, get_file_url, list_files, upload_fileobj
+from management.db.file.attachment import copy_file, delete_file, file_exists, generate_object_name, get_content_type, get_file_range, get_file_size_from_minio, get_file_size_from_minio_strict, get_file_stream, get_file_stream_raw, get_file_url, list_files, upload_fileobj
 from management.db.knowledge_base.file_lifecycle import create_file_records, transition_file_record
 from management.db.model.repository import get_model_by_model_id
 from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
@@ -619,6 +619,10 @@ async def get_file_url_impl(object_name: str, expires: int):
 async def get_file_stream_impl(object_name: str):
     file_stream = get_file_stream(object_name=object_name)
     if file_stream is None:
+        # The legacy read helper collapses missing keys and operational errors.
+        # Confirm absence without treating denied/unavailable storage as a 404.
+        if get_file_size_from_minio_strict(object_name) is None:
+            raise NotFoundException("Storage object does not exist")
         raise Exception("File not found or failed to read from storage")
     content_type = get_content_type(object_name)
     return file_stream, content_type

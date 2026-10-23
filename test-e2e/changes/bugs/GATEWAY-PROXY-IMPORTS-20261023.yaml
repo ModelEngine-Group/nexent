@@ -13,14 +13,14 @@ change:
     description: Existing route UT lacks origin and redirect assertions; SEC-06 exercises MCP endpoints rather than the file proxy.
   feature_contract_changed: false
   affected_features:
-    existing: [V5-SEC-06]
+    existing: [V5-SEC-06, V5-REL-AUTO-80AA755E2436D269]
     added: []
     modified: []
     retired: []
   affected_cases:
     existing: []
     added: []
-    modified: []
+    modified: [REL-AUTO-80AA755E2436D269]
     retired: []
   traditional_ut:
     decision: strengthen
@@ -39,3 +39,4 @@ change:
     Design nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/contracts-business-layout/proxy-security-fix.md.
     No new formal Cases; the existing MCP D5 cannot detect this isolated route defect.
     Real MinIO and deployed security journeys are not covered by the controlled transport tests.
+    Develop merge retains REL-AUTO-80AA755E2436D269 assertions and repairs mock lookup sites in extracted usage and tenant configuration modules; its acceptance contract is unchanged.

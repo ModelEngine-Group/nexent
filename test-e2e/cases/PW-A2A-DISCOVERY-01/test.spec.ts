@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
 import { configuredModel, runToken } from "../../infra/automation/d4/runner/runtime-config";
@@ -51,10 +53,10 @@ journey("PW-A2A-DISCOVERY-01", async (context) => {
         await agents.selectModel(configuredModel("llm").displayName);
         await agents.setDescription(`A2A journey ${nonce}`);
         await agents.setPrompts({ duty: "必须委派已绑定的外部 A2A 智能体查询 pedestrian flow；禁止猜测统计值，原样保留外部结果的 total 字段。" });
-        await agents.openAdvanced(); await agents.openSection("协作智能体");
+        await agents.openAdvanced(); await agents.openSection("协作智能体管理");
         return "created and configured one owned main Draft; opened Advanced collaborators";
       },
-      async () => { await page.getByRole("button", { name: "A2A发现", exact: true }).click(); await expect(modal()).toBeVisible(); return "opened the real discovery modal"; },
+      async () => { await page.getByRole("button", { name: "接入第三方智能体", exact: true }).click(); await expect(modal()).toBeVisible(); return "opened the real discovery modal"; },
       async () => {
         await modal().getByPlaceholder("https://example.com/.well-known/agent-xxx.json").fill(`${settings.product_url}/basic/.well-known/agent-card.json?test_run=${nonce}`);
         await modal().getByPlaceholder('{"Authorization": "Bearer <token>"}').fill(JSON.stringify({ "X-Nexent-Test-Run": nonce }));
@@ -88,7 +90,7 @@ journey("PW-A2A-DISCOVERY-01", async (context) => {
       async () => {
         await modal().getByRole("button", { name: "Close", exact: true }).click();
         await page.reload({ waitUntil: "domcontentloaded" }); await agents.select(display);
-        await agents.openAdvanced(); await agents.openSection("协作智能体");
+        await agents.openAdvanced(); await agents.openSection("协作智能体管理");
         await expect(page.getByText(externalName, { exact: true }).first()).toBeVisible();
         const response = await page.request.get(`/api/a2a/client/relations/${localId}`);
         expect(response.status()).toBe(200);
@@ -103,12 +105,12 @@ journey("PW-A2A-DISCOVERY-01", async (context) => {
         return "redacted discovery header and actual runtime invocation wire were archived";
       },
       async () => {
-        await agents.select(display); await agents.openAdvanced(); await agents.openSection("协作智能体");
+        await agents.select(display); await agents.openAdvanced(); await agents.openSection("协作智能体管理");
         const removal = page.waitForResponse((r) => r.request().method() === "DELETE" && r.url().includes("/a2a/client/relations"));
         await page.getByRole("button", { name: `移除 ${externalName}`, exact: true }).click();
         expect((await removal).status()).toBe(200);
         await page.reload({ waitUntil: "domcontentloaded" }); await agents.select(display);
-        await agents.openAdvanced(); await agents.openSection("协作智能体");
+        await agents.openAdvanced(); await agents.openSection("协作智能体管理");
         await expect(page.getByText(externalName, { exact: true })).toHaveCount(0);
         return "removed the relation through UI and confirmed its absence after reload";
       },

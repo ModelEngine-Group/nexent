@@ -1,6 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // @ts-nocheck
 // @vitest-environment jsdom
-import { render } from '@testing-library/react';
+import { act, render } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { Thread } from '@/app/[locale]/newchat/assistant-ui/thread';
@@ -105,12 +107,14 @@ const mAvailable = (id: number, name: string) => ({
   id,
   name,
   displayName: name,
+  type: 'llm',
   connect_status: 'available',
 });
 const mUnavailable = (id: number, name: string) => ({
   id,
   name,
   displayName: name,
+  type: 'llm',
   connect_status: 'unavailable',
 });
 
@@ -141,21 +145,34 @@ function renderThread(agent: any, extra: Record<string, unknown> = {}) {
   return result;
 }
 
-describe('latest selectable-model fallback contract', () => {
-  it('UT-FE-AUTO-ED44D96A53903DD0 keeps an available selection and falls back when it becomes unavailable', () => {
+describe('explicit model invalidation contract', () => {
+  it('UT-FE-AUTO-ED44D96A53903DD0 keeps an available selection and blocks sending when it becomes unavailable', () => {
     const agent = baseAgent({
       model_ids: [1, 2, 3],
       model_names: ['模型A', '模型B', '模型C'],
     });
     modelList.models = [m1, mAvailable(2, 'm2'), m3];
     const { rerender } = renderThread(agent);
-    composerProps.props.onModelChange('2');
+    act(() => composerProps.props.onModelChange('2'));
     rerender(<Thread agent={agent} chatMode='planning' onChatModeChange={noop} />);
     expect(composerProps.props.selectedModelId).toBe('2');
 
     modelList.models = [m1, mUnavailable(2, 'm2'), m3];
     rerender(<Thread agent={agent} chatMode='planning' onChatModeChange={noop} />);
     expect(composerProps.props.models.map((model: any) => model.id)).toEqual(['1', '3']);
-    expect(composerProps.props.selectedModelId).toBe('1');
+    expect(composerProps.props.selectedModelId).toBe('');
+    expect(composerProps.props.disabled).toBe(true);
+    modelList.models = [mUnavailable(1, 'm1'), mUnavailable(2, 'm2'), mUnavailable(3, 'm3')];
+    rerender(<Thread agent={agent} chatMode='planning' onChatModeChange={noop} />);
+    expect(composerProps.props.models).toEqual([]);
+    expect(composerProps.props.selectedModelId).toBe('');
+    expect(composerProps.props.disabled).toBe(true);
   });
 });
+
+// Document preview is outside this case's component contract.
+vi.mock("@/components/common/rawStreamPreviewViewer", () => ({ RawStreamPreviewViewer: () => null }));
+
+vi.mock("@/components/providers/AuthorizationProvider", () => ({
+  useAuthorizationContext: () => ({ user: { id: "component-user", tenantId: "component-tenant" } }),
+}));

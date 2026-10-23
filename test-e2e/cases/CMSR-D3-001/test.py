@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Real Agent/observer/SSE/persistence, with only the provider controlled."""
 import asyncio
 import json
@@ -9,6 +11,7 @@ from shared.cmsr import control, setup, verify_history, verify_rejected_history,
 from shared.case_evidence import write_case_evidence
 from shared.factories.conversation import owned_conversation
 from shared.http import client, assert_status, MODEL_TIMEOUT
+from shared.final_answers import final_answer_text
 
 pytestmark = [pytest.mark.case_id('CMSR-D3-001'), pytest.mark.stage('D3')]
 
@@ -73,15 +76,14 @@ async def test_cmsr_d3_001():
                     assert sum(e.get('type') == 'step_count' for e in events) == 1
                     await control(nonce, 'success')
                     await asyncio.wait_for(task, 60)
-                    # Only executable code is committed as raw model output.
-                    # The explicit final-answer envelope closes separately;
-                    # its attempt is rolled back and its answer persisted.
-                    assert sum(e.get('phase') == 'commit' for e in events) == 1
+                    # The repaired code action and accepted final envelope each
+                    # commit; only the failed first attempt rolls back.
+                    assert sum(e.get('phase') == 'commit' for e in events) == 2
                     assert sum(e.get('type') == 'parse' for e in events) == 1
                     controls = [e['phase'] for e in events if e.get('type') == 'model_attempt_control']
-                    assert controls == ['begin', 'rollback', 'begin', 'commit', 'begin', 'rollback']
+                    assert controls == ['begin', 'rollback', 'begin', 'commit', 'begin', 'commit']
                     assert sum(e.get('type') == 'step_count' for e in events) == 2
-                    assert sum(e.get('type') == 'final_answer' for e in events) == 1
+                    assert final_answer_text(events).strip() == 'CMSR_FINAL_' + nonce
                     executions = [e for e in events if e.get('type') == 'execution_logs'
                                   and 'CMSR_OK_' + nonce in str(e.get('content', ''))]
                     assert len(executions) == 1
@@ -95,6 +97,7 @@ async def test_cmsr_d3_001():
                     })
                     verify_history(history.json(), nonce)
                 finally:
+                    write_case_evidence('cmsr-' + mode + '-protocol', events)
                     write_case_evidence('cmsr-' + mode + '-events', [
                         {'type': e.get('type'), 'phase': e.get('phase'),
                          'has_success_marker': 'CMSR_OK_' + nonce in str(e.get('content', '')),

@@ -2,13 +2,22 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { createInstance } from "i18next";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import { describe, expect, it, vi } from "vitest";
 
 import { buildModelSlots } from "../../app/[locale]/models/components/model/ModelSlotSelect";
 import { ParamDialog } from "@/components/resource-picker/ParamDialog";
+import { ModelParamsModal } from "@/components/resource-picker/ModelParamsModal";
 import { SearchRow } from "@/components/resource-picker/ResourceDrawer";
 
 const catalogs = Object.fromEntries(
@@ -39,6 +48,54 @@ async function locale(language: string) {
 }
 
 describe("resource picker localization", () => {
+  it.each([
+    ["zh", "hover", false],
+    ["en", "hover", true],
+    ["zh", "focus", true],
+    ["en", "focus", false],
+  ] as const)(
+    "shows sampling help in %s on %s (readonly=%s) without changing the draft",
+    async (language, trigger, disabled) => {
+      const instance = await locale(language);
+      const onChange = vi.fn();
+      const onClose = vi.fn();
+      const onConfirm = vi.fn();
+      render(
+        <I18nextProvider i18n={instance}>
+          <ModelParamsModal
+            open
+            modelOptions={[{ value: 1, label: "Model" }]}
+            selectedModelId={1}
+            onSelectModel={vi.fn()}
+            value={{ temperature: 0, top_p: 1 }}
+            onChange={onChange}
+            onClose={onClose}
+            onConfirm={onConfirm}
+            disabled={disabled}
+          />
+        </I18nextProvider>
+      );
+      for (const field of ["temperature", "topP"]) {
+        const label = screen.getByText(instance.t(`modelParams.${field}`));
+        const icon = within(label.closest("[data-config-label]")!).getByRole(
+          "img",
+          { name: "question-circle" }
+        );
+        if (trigger === "hover") await userEvent.hover(icon);
+        else fireEvent.focus(icon);
+        expect(await screen.findByRole("tooltip")).toHaveTextContent(
+          instance.t(`modelParams.${field}Info`)
+        );
+        if (trigger === "hover") await userEvent.unhover(icon);
+        else fireEvent.blur(icon);
+        await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
+      }
+      expect(onChange).not.toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
+      expect(onConfirm).not.toHaveBeenCalled();
+    }
+  );
+
   it.each(["zh", "en"])(
     "resolves all ten model hints in %s",
     async (language) => {

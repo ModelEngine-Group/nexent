@@ -91,7 +91,7 @@ def database_fixture(monkeypatch, provider):
                 tenant_id=tenant, enabled=True, provide_run_summary=False, is_main_agent=True,
                 group_ids="[]", ingroup_permission="PRIVATE", created_by=owner, updated_by=owner,
                 duty_prompt="Complete the fixture task.", allow_chat_metadata=False,
-                constraint_prompt="", few_shots_prompt="", example_questions=[], greeting_message="",
+                example_questions=[], greeting_message="",
                 model_params_override={str(value): {"extra_params": {}, **({"temperature": 0.56} if key == "selected-B" else {})}
                                        for key, value in list(models.items())[:3]},
             )
@@ -104,7 +104,7 @@ def database_fixture(monkeypatch, provider):
                 tenant_id=tenant, model_ids=[models["business-C"]], max_steps=1, enabled=True,
                 is_main_agent=False, provide_run_summary=False, group_ids="[]", ingroup_permission="PRIVATE",
                 created_by=owner, updated_by=owner, duty_prompt="Return the fixture result.",
-                constraint_prompt="", few_shots_prompt="", example_questions=[], greeting_message="",
+                example_questions=[], greeting_message="",
             )
             session.add(child)
             session.flush()
@@ -120,7 +120,7 @@ def database_fixture(monkeypatch, provider):
                     model_ids=[models["default-A"]], max_steps=3, enabled=True, tenant_id=tenant,
                     is_main_agent=True, provide_run_summary=False, group_ids="[]", ingroup_permission="READ_ONLY",
                     created_by=owner, updated_by=owner, duty_prompt="Complete fixture tasks.",
-                    constraint_prompt="", few_shots_prompt="", example_questions=[], greeting_message="",
+                    example_questions=[], greeting_message="",
                 ))
                 session.flush()
             for typ, sub in [("agent", "create"), ("skill", "create"), ("agent", "read"), ("agent", "use")]:

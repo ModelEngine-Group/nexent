@@ -607,14 +607,17 @@ def test_publish_time_sort_key_parses_strings_and_collapses_unusable_values():
 def test_normalize_listing_tags_trims_dedupes_and_limits():
     assert ars._normalize_listing_tags([" 营销 ", "营销", "数据"]) == ["营销", "数据"]
 
-    with pytest.raises(ValueError, match="at least one"):
-        ars._normalize_listing_tags([" ", ""])
+    # Tags are optional for listing submission: an empty or blank-only list
+    # normalizes to no tags instead of failing validation.
+    assert ars._normalize_listing_tags([]) == []
+    assert ars._normalize_listing_tags([" ", ""]) == []
+    assert ars._normalize_listing_tags([" 营销 ", " ", "营销"]) == ["营销"]
 
     with pytest.raises(ValueError, match="at most 5"):
         ars._normalize_listing_tags(["a", "b", "c", "d", "e", "f"])
 
 
-def test_validate_card_fields_requires_structural_values():
+def test_validate_card_fields_accepts_listing_without_tags():
     base = {
         "agent_id": 1,
         "version_no": 1,
@@ -626,8 +629,22 @@ def test_validate_card_fields_requires_structural_values():
         },
     }
 
-    with pytest.raises(ValueError, match="tags is required"):
-        ars._validate_create_payload({**base, "icon_url": None})
+    # Missing, None and empty tags all pass and are normalized to an empty list.
+    missing_tags = {**base, "icon_url": None}
+    assert ars._validate_create_payload(missing_tags) is None
+    assert missing_tags["tags"] == []
+
+    none_tags = {**base, "icon_url": None, "tags": None}
+    assert ars._validate_create_payload(none_tags) is None
+    assert none_tags["tags"] == []
+
+    empty_tags = {**base, "icon_url": None, "tags": []}
+    assert ars._validate_create_payload(empty_tags) is None
+    assert empty_tags["tags"] == []
+
+    tagged = {**base, "icon_url": None, "tags": ["marketing"]}
+    assert ars._validate_create_payload(tagged) is None
+    assert tagged["tags"] == ["marketing"]
 
     with pytest.raises(ValueError, match="non-empty URL"):
         ars._validate_create_payload({
@@ -636,11 +653,15 @@ def test_validate_card_fields_requires_structural_values():
             "tags": ["marketing"],
         })
 
-    ars._validate_create_payload({
-        **base,
-        "icon_url": None,
-        "tags": ["marketing"],
-    })
+    with pytest.raises(ValueError, match="tags must be a list of strings"):
+        ars._validate_create_payload({**base, "icon_url": None, "tags": "marketing"})
+
+    with pytest.raises(ValueError, match="at most 5"):
+        ars._validate_create_payload({
+            **base,
+            "icon_url": None,
+            "tags": ["a", "b", "c", "d", "e", "f"],
+        })
 
 
 def test_repository_icon_urls_are_scoped_to_agent_version_and_upload():

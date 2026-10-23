@@ -233,3 +233,29 @@ ALTER TABLE nexent.conversation_record_t
 
 COMMENT ON COLUMN nexent.conversation_record_t.title_version IS
     'Monotonic title revision; every stored rename advances it independently of activity';
+
+
+-- Source migration: v2.8.0_009_restore_user_model_read.sql
+
+-- Ordinary users consume tenant models in Agent chat and Workbench. Model
+-- management writes and navigation remain restricted to their existing roles.
+-- Historical permission reseeding omitted this read-only grant.
+BEGIN;
+
+-- Serialize the semantic grant check with concurrent permission writers.
+LOCK TABLE nexent.role_permission_t IN SHARE ROW EXCLUSIVE MODE;
+
+INSERT INTO nexent.role_permission_t (
+    role_permission_id, user_role, permission_category, permission_type, permission_subtype
+)
+SELECT 143, 'USER', 'RESOURCE', 'MODEL', 'READ'
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM nexent.role_permission_t
+    WHERE user_role = 'USER'
+      AND permission_category = 'RESOURCE'
+      AND permission_type = 'MODEL'
+      AND permission_subtype = 'READ'
+);
+
+COMMIT;

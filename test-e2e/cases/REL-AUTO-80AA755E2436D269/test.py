@@ -35,10 +35,11 @@ ES_STORE_SIZE_BYTES = int(1.5 * GB)
 @pytest.mark.stage('D5')
 def test_es_stats_fail_open_source_ledger_quota(monkeypatch, caplog):
     from management.services.knowledge_base import service as kb_service
-    from management.services.knowledge_base import quota as quota_service
+    from management.services.configuration.tenant import quotas as tenant_quota_service
+    from management.services.knowledge_base import usage as usage_service
     from management.services.knowledge_base.quota import QuotaService
 
-    quota_service._usage_cache.clear()
+    usage_service._usage_cache.clear()
     caplog.set_level(logging.WARNING)
 
     state = {'es_error': None, 'es_detail': None, 'ledger_error': None}
@@ -83,12 +84,13 @@ def test_es_stats_fail_open_source_ledger_quota(monkeypatch, caplog):
 
         return _Core()
 
-    monkeypatch.setattr(quota_service, 'get_single_config_info', single_config)
-    monkeypatch.setattr(quota_service, 'get_knowledge_info_by_tenant_id', lambda tenant_id, ordered=False: kb_list())
-    monkeypatch.setattr(quota_service, 'get_private_knowledge_info_by_creator', lambda tenant_id, created_by: kb_list())
-    monkeypatch.setattr(quota_service, 'get_private_knowledge_info_by_tenant_id', lambda tenant_id: kb_list())
-    monkeypatch.setattr(quota_service, 'get_committed_bytes_by_kb', committed_bytes_by_kb)
-    monkeypatch.setattr(quota_service, 'get_tenant_committed_source_bytes', tenant_committed)
+    # Patch the lookup sites in the extracted configuration and usage implementations.
+    monkeypatch.setattr(tenant_quota_service, 'get_single_config_info', single_config)
+    monkeypatch.setattr(usage_service, 'get_knowledge_info_by_tenant_id', lambda tenant_id, ordered=False: kb_list())
+    monkeypatch.setattr(usage_service, 'get_private_knowledge_info_by_creator', lambda tenant_id, created_by: kb_list())
+    monkeypatch.setattr(usage_service, 'get_private_knowledge_info_by_tenant_id', lambda tenant_id: kb_list())
+    monkeypatch.setattr(usage_service, 'get_committed_bytes_by_kb', committed_bytes_by_kb)
+    monkeypatch.setattr(usage_service, 'get_tenant_committed_source_bytes', tenant_committed)
     monkeypatch.setattr(kb_service, 'get_vector_db_core', get_vector_db_core)
 
     service = QuotaService(TENANT_ID, USER_ID)

@@ -7,3 +7,8 @@ implementations:
 timeout_seconds: 300
 acceptance_bindings:
   AC-01: [WB-CONTROLS-D4-005]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
