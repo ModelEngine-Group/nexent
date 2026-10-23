@@ -926,8 +926,10 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
   if (selectedAgentId !== undefined) {
     const entries = visibleAgentGroups.flatMap((group) => group.entries);
     const orderedEntries = pinned
-      ? hoistPinnedThreads([{ label: "", entries }], (entry) =>
-          pinned.isPinned({ id: entry.id })
+      ? hoistPinnedThreads(
+          [{ label: "", entries }],
+          (entry) => pinned.isPinned(entry),
+          pinned.getPinOrder
         ).flatMap((group) => group.entries)
       : entries;
 
@@ -936,8 +938,8 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
         {orderedEntries.map(({ id, index }, entryIndex) => (
           <Fragment key={id}>
             {entryIndex > 0 &&
-              pinned?.isPinned({ id: orderedEntries[entryIndex - 1].id }) &&
-              !pinned.isPinned({ id }) && (
+              pinned?.isPinned(orderedEntries[entryIndex - 1]) &&
+              !pinned.isPinned(orderedEntries[entryIndex]) && (
                 <div
                   role="separator"
                   className="ml-8 mr-3 my-2 border-t border-dashed border-gray-400/60 dark:border-gray-500/70"
@@ -965,8 +967,12 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
         const entries = pinned
           ? [...group.entries].sort(
               (left, right) =>
-                Number(pinned.pinnedIds.has(right.id)) -
-                Number(pinned.pinnedIds.has(left.id))
+                Number(pinned.isPinned(right)) -
+                  Number(pinned.isPinned(left)) ||
+                (pinned.isPinned(left) && pinned.isPinned(right)
+                  ? (pinned.getPinOrder?.(right) ?? 0) -
+                    (pinned.getPinOrder?.(left) ?? 0)
+                  : 0)
             )
           : group.entries;
         const isExpanded = group.hasMatchingConversation
@@ -1070,8 +1076,8 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
             {visibleEntries.map(({ id, index }, entryIndex) => (
               <Fragment key={id}>
                 {entryIndex > 0 &&
-                  pinned?.pinnedIds.has(visibleEntries[entryIndex - 1].id) &&
-                  !pinned.pinnedIds.has(id) && (
+                  pinned?.isPinned(visibleEntries[entryIndex - 1]) &&
+                  !pinned.isPinned(visibleEntries[entryIndex]) && (
                     <div
                       role="separator"
                       className="ml-8 mr-3 my-2 border-t border-dashed border-gray-400/60 dark:border-gray-500/70"
@@ -1092,6 +1098,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
 
 type ThreadListGroupEntry = {
   id: string;
+  remoteId?: string;
   index: number;
   hasRemoteId: boolean;
   isRunning: boolean;
@@ -1199,6 +1206,7 @@ const useThreadListAgentGroups = (
       }
       group.entries.push({
         id: threadIds[index],
+        remoteId: item?.remoteId,
         index,
         hasRemoteId: Boolean(itemsById.get(threadIds[index])?.remoteId),
         isRunning: item?.isRunning === true,

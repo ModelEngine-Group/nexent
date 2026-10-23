@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useId, useMemo, useState, type ReactNode } from "react";
@@ -77,6 +79,8 @@ export function ClarificationCard({
   footerHint,
   onSubmit,
   dataSlot,
+  initialAnswers = [],
+  submitted = false,
 }: {
   title: string;
   description: string;
@@ -90,12 +94,26 @@ export function ClarificationCard({
   footerHint?: ReactNode;
   onSubmit: (answers: ClarificationAnswer[]) => void | Promise<void>;
   dataSlot?: string;
+  initialAnswers?: ClarificationAnswer[];
+  submitted?: boolean;
 }) {
   const reactId = useId();
-  const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
-  const [otherAnswers, setOtherAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, string | string[]>>(
+    () =>
+      Object.fromEntries(
+        initialAnswers.map((answer) => [answer.questionId, answer.value])
+      )
+  );
+  const [otherAnswers, setOtherAnswers] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      initialAnswers.map((answer) => [
+        answer.questionId,
+        answer.otherText ?? "",
+      ])
+    )
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isSubmitted, setIsSubmitted] = useState(submitted);
   const [error, setError] = useState("");
   const isLocked = disabled || readOnly || isSubmitting || isSubmitted;
 
