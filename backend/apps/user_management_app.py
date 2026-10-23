@@ -403,7 +403,10 @@ async def list_tokens_endpoint(
 ):
     """List all tokens for the specified user.
 
-    Returns token information with masked access keys (middle part replaced with *).
+    Each item carries ``masked_access_key`` for display and ``access_key``
+    for copying, together with ``can_copy``. The real key is present in
+    ``access_key`` only when ``can_copy`` is true, so a client can render a
+    masked key while still copying the complete one.
     """
     try:
         if not authorization:
