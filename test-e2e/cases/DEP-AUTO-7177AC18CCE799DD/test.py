@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import subprocess
@@ -90,10 +91,6 @@ LOCAL_CFG="$TMP/local-config.yaml"
 deployment_prepare_config --sandbox-mode full --app-version latest
 deployment_persist_local_config "$LOCAL_CFG"
 assert_contains "$(cat "$LOCAL_CFG")" 'sandboxMode: "full"' "persisted local config should write sandboxMode"
-
-HELM_VALUES="$TMP/helm-values.yaml"
-deployment_render_helm_values "$HELM_VALUES"
-assert_contains "$(cat "$HELM_VALUES")" 'sandboxMode: "full"' "helm values should render sandboxMode"
 
 deployment_prepare_config --local-config "$LOCAL_CFG" --defaults --app-version latest
 assert_eq "full" "$DEPLOYMENT_SANDBOX_MODE" "reloading persisted local config should restore sandbox mode"

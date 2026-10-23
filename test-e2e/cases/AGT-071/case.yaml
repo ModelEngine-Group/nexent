@@ -70,6 +70,7 @@ case:
   - Mock 通过不代表第三方 Mem0 生产服务或语义检索质量通过。
   observations:
   - test-ingest/search、Agent 最终回答、组织/用户隔离 wire 计数、故障码、本地版本激活及故障期间上下文准备证据、清理记录。
+  - 最终回答按 invocation/step/attempt 及 rollback/complete 协议还原；允许完成帧重分类此前正文，不把工具回显、深度思考或子调用当作根回答。
   cleanup:
   - 上下文管理器清理独占资源；Mock 仅按本次组织/用户清理，不执行全局 reset。
   - 独占身份删除不等于物理擦除长期记忆历史版本；当前产品身份删除未清除版本，需在验证报告保留此限制，不改变共享记忆或伪报物理清除。

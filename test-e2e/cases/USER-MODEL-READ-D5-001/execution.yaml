@@ -1,5 +1,9 @@
 schema_version: '1.0'
 case_id: USER-MODEL-READ-D5-001
+preparation:
+  anchors: false
+  families: []
+notes: The script owns its no-network PostgreSQL container, synthetic grants and checked finally cleanup; the current product migration must be present.
 implementations:
 - framework: pytest
   file: test_migration.py

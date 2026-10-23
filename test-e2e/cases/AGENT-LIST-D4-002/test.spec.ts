@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { expect } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
+import { DEFAULT_AGENT_VERIFICATION_CONFIG } from "../../../frontend/types/agentConfig";
 const scenarios: Array<{ name: string; run: (fixture: any) => Promise<void> }> = [];
 const scenario = (name: string, run: (fixture: any) => Promise<void>) => scenarios.push({ name, run });
 
@@ -56,6 +57,7 @@ async function mockList(page, rows = agentRows()) {
   const readOnlyPostPaths = new Set([
     "/api/agent/search_info",
     "/api/groups/list",
+    "/api/agent/check_name",
   ]);
   page.on("request", (request) => {
     const url = new URL(request.url());
@@ -111,6 +113,12 @@ async function mockList(page, rows = agentRows()) {
   // The page resolves the default resource tag library before it renders the
   // list, so the catch-all stub above must be narrowed here.
   await page.route("**/api/tag-libraries**", (route) => json(route, []));
+  await page.route("**/api/agent/check_name", (route) =>
+    json(route, route.request().postDataJSON().items.map(() => ({
+      name_conflict: false,
+      display_name_conflict: false,
+    }))),
+  );
   await page.route("**/api/agent/search_info", (route) => {
     const { agent_id } = route.request().postDataJSON();
     const agent = fixture.rows.find((row) => row.agent_id === agent_id);
@@ -122,6 +130,7 @@ async function mockList(page, rows = agentRows()) {
       model_ids: [],
       enabled: true,
       provide_run_summary: false,
+      verification_config: structuredClone(DEFAULT_AGENT_VERIFICATION_CONFIG),
     });
   });
   await page.route("**/api/agent/list/page?*", (route) => {
@@ -312,7 +321,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   const secondBox = await bounds(cards.nth(1));
   const fifthBox = await bounds(cards.nth(4));
   pixel(cardBox.width, 440, "card width");
-  pixel(cardBox.height, 148, "card height");
+  pixel(cardBox.height, 180, "card height");
   const scrollport = page.getByTestId("agent-list-content");
   const scrollportBox = await bounds(scrollport);
   await expect(scrollport).toHaveCSS("overflow-y", "auto");
@@ -344,7 +353,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   const body = first.getByTestId("agent-card-body");
   const bodyBox = await bounds(body);
   pixel(bodyBox.width, 392, "card inner width");
-  pixel(bodyBox.height, 86, "card body height");
+  pixel(bodyBox.height, 112, "card body height");
   pixel(bodyBox.x - cardBox.x, 24, "card horizontal padding");
   pixel(bodyBox.y - cardBox.y, 16, "card vertical padding");
   const title = first.getByText("健康小助手", { exact: true });
@@ -364,18 +373,21 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   pixel((await bounds(description)).height, 42, "card description text bounds");
   pixel(
     (await bounds(description)).y -
-      (await bounds(body.locator(":scope > div"))).y -
+      (await bounds(body.locator(":scope > div").first())).y -
       40,
     4,
     "card header/description gap",
   );
   const footer = first.getByTestId("agent-card-footer");
   const footerBox = await bounds(footer);
-  pixel(footerBox.height, 18, "card footer height");
-  pixel(footerBox.y - bodyBox.y, 98, "card footer inner top");
+  const category = body.locator(":scope > div").last();
+  pixel((await bounds(category)).height, 22, "reserved category row height");
+  await expect(category).toContainText("医疗");
+  pixel(footerBox.height, 32, "card footer height");
+  pixel(footerBox.y - bodyBox.y, 116, "card footer inner top");
   pixel(
     footerBox.y - bodyBox.y - bodyBox.height,
-    12,
+    4,
     "derived body/footer gap",
   );
   const status = first.getByTestId("agent-card-status");
@@ -474,6 +486,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
     }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
   await cards.nth(1).hover();
   await cards
     .nth(1)
@@ -488,6 +501,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
     }),
   ).toBeDisabled();
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
 
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -517,17 +531,21 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   await page
     .getByRole("button", { name: label("zh", "agentConfig.list.listView") })
     .click();
-  await expect(page.getByRole("table")).toBeVisible();
-  await expect(page.getByRole("table")).toHaveCSS(
+  // Fixed-header Ant tables render a header table and a data table.
+  // Bind the unique data body, not an arbitrary first/last table.
+  const table = page.getByRole("table").filter({ has: page.locator("tbody") });
+  const dataRows = table.locator("tbody tr[data-row-key]");
+  await expect(table).toBeVisible();
+  await expect(table).toHaveCSS(
     "font-family",
     expectedFontFamily,
   );
-  await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(8);
+  await expect(dataRows).toHaveCount(8);
   await expect(
-    page.getByRole("table").locator("tbody tr").first(),
+    dataRows.first(),
   ).toContainText("2026-02-04");
   await expect(
-    page.getByRole("table").locator("tbody tr").nth(1),
+    dataRows.nth(1),
   ).not.toContainText("2026-01-23");
   await page
     .getByRole("button", { name: label("zh", "agentConfig.list.gridView") })
@@ -537,6 +555,9 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
 
   fixture.rows = agentRows(20);
   await page.reload();
+  // Exercise an explicit page size instead of relying on a changing default.
+  await page.getByRole("combobox", { name: label("zh", "agentConfig.list.pageSize") }).click();
+  await page.getByText("10条/页", { exact: true }).click();
   await expect(cards).toHaveCount(10);
   await page.getByRole("listitem", { name: "2", exact: true }).click();
   await expect(
@@ -602,12 +623,9 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
   await narrowBody.scrollIntoViewIfNeeded();
   await expect(narrowBody).toBeInViewport();
   await narrowBody.click();
-  await expect(
-    page
-      .getByRole("dialog")
-      .getByRole("heading", { name: "健康小助手", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("dialog").locator(".ant-modal-close").click();
+  await expect(page).toHaveURL(/\/zh\/agents\/1$/);
+  await page.goto(`${baseUrl}/zh/agents`);
+  await expect(page.locator("article")).toHaveCount(8);
   const narrowFirstCard = page.locator("article").first();
   await narrowFirstCard.scrollIntoViewIfNeeded();
   await narrowFirstCard.hover();
@@ -626,6 +644,7 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
   await expect(narrowConfigure).toBeInViewport();
   await narrowConfigure.click({ trial: true });
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
   const narrowLastBody = page
     .locator("article")
     .last()

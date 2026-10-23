@@ -1,5 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { test, expect, Page } from "playwright/test";
-import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { atomicJson } from "./atomic-file";
 import { dirname, join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 
@@ -36,13 +39,6 @@ function required(name: string): string {
   const value = process.env[name];
   if (!value) throw new Error(`missing required environment variable ${name}`);
   return value;
-}
-
-function atomicJson(path: string, value: object): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const temporary = `${path}.next`;
-  writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-  renameSync(temporary, path);
 }
 
 function control(args: string[]): void {

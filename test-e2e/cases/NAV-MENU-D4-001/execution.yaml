@@ -7,7 +7,7 @@ implementations:
 timeout_seconds: 300
 preparation:
   families: []
-  anchors: true
+  anchors: false
   special_assets: false
   d4_groups: []
 acceptance_bindings:

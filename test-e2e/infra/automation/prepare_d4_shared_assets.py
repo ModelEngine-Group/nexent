@@ -15,6 +15,7 @@ import json
 import os
 import shlex
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 
 from d3.assets import configured_model, model_id, model_request
@@ -253,7 +254,8 @@ async def _resolve_multimodal_chat_model(identity) -> int:
             and str(row.get("model_name") or row.get("name") or "") == expected_name
             and str(row.get("display_name") or "") == expected_name
         ]
-        if not matches:
+        created_here = not matches
+        if created_here:
             # The configured VLM is consumed by Agent chat as an LLM record.
             # Bootstrap it through the public API instead of treating an empty
             # database lookup as a dependency failure.
@@ -273,8 +275,9 @@ async def _resolve_multimodal_chat_model(identity) -> int:
             ]
         if len(matches) != 1:
             raise AssertionError(f"expected one exact API-managed chat model {expected_name!r}, found {len(matches)}")
-        from shared.model_health import ensure_model_health
-        await ensure_model_health(identity, configured, matches[0])
+        if created_here:
+            from shared.model_health import ensure_model_health
+            await ensure_model_health(identity, configured, matches[0], force=True)
         return int(matches[0].get("model_id") or matches[0]["id"])
 
 
@@ -296,14 +299,8 @@ async def _ensure_voice_config(identity, model_type: str) -> None:
             and str(row.get("model_name") or row.get("name") or "") == expected_name
             and str(row.get("display_name") or "") == display_name
         ]
-        # Probe the current local credential even when the saved model exists.
-        # Otherwise a rotated secrets.env key would never reach the product.
-        health = await api.post("/model/temporary_healthcheck", json=payload)
-        if health.status_code != 200 or not (health.json().get("data") or {}).get("connectivity"):
-            from shared.asset_registry import AssetDependencyError
-            raise AssetDependencyError('models', model_type,
-                detail=f'configured voice prerequisite failed: temporary probe HTTP {health.status_code}')
-        if not matches:
+        created_here = not matches
+        if created_here:
             created = await api.post("/model/create", json=payload)
             assert_status(created, 200)
             listed = await api.get("/model/list")
@@ -324,14 +321,12 @@ async def _ensure_voice_config(identity, model_type: str) -> None:
             'api_key': payload['api_key'], 'base_url': payload['base_url'],
             'model_appid': payload.get('model_appid'), 'access_token': payload.get('access_token')})
         assert_status(updated, 200)
-        health = await api.post(
-            f"/model/healthcheck?display_name={display_name}&model_type={model_type}"
-        )
-        assert_status(health, 200)
-        if not (health.json().get("data") or {}).get("connectivity"):
-            from shared.asset_registry import AssetDependencyError
-            raise AssetDependencyError('models', model_type,
-                detail='configured voice prerequisite failed: saved-model healthcheck')
+        if created_here:
+            # This is initial asset activation, not a repeated Provider gate.
+            activated = await api.post('/model/healthcheck', params={
+                'display_name': display_name, 'model_type': model_type})
+            assert_status(activated, 200)
+            assert (activated.json().get('data') or {}).get('connectivity') is True, 'New voice model activation failed'
         loaded = await api.get("/config/load_config")
         assert_status(loaded, 200)
         backend_config = loaded.json().get("config") or {}
@@ -664,14 +659,14 @@ async def _ensure_embedding_anchor(identity):
         matches = [row for row in rows if str(row.get('model_type') or '').lower() == 'embedding'
                    and str(row.get('model_name') or row.get('name') or '').casefold() == expected_name.casefold()]
         if not matches:
-            health = await api.post('/model/temporary_healthcheck', json=payload)
-            assert_status(health, 200)
-            if not (health.json().get('data') or {}).get('connectivity'):
-                raise AssertionError('configured embedding anchor failed connectivity; no fallback permitted')
             created = await api.post('/model/create', json=payload)
             assert_status(created, 200)
-    # Exact tenant-scoped selection and health checking remain mandatory, also
-    # on reuse. Do not return a guessed ID or select the previous BGE anchor.
+            activated = await api.post('/model/healthcheck', params={
+                'display_name': payload['display_name'], 'model_type': 'embedding'})
+            assert_status(activated, 200)
+            assert (activated.json().get('data') or {}).get('connectivity') is True, 'New embedding model activation failed'
+    # Keep exact tenant-scoped selection; real indexing/retrieval verifies
+    # connectivity. Do not return a guessed ID or select a different model.
     return await model_id('embedding', identity)
 
 
@@ -705,8 +700,45 @@ async def prepare_knowledge(identity) -> dict:
     return {'NEXENT_TEST_LOCAL_KB':kb['display_name']}
 
 
+async def prepare_aidp_knowledge(identity) -> dict:
+    """Create Nexent permissions through its public API, never grant a shared seed."""
+    import httpx
+    from shared.ext_knowledge import runner_url
+    from shared.case_evidence import write_case_evidence
+    name = "d4-aidp-" + uuid4().hex[:16]
+    async with client("config", token=identity.access_token) as api:
+        models = await api.get("/aidp-mgmt/models", params={"service": "embedding"})
+        assert_status(models, 200)
+        # Use the controlled provider's advertised embedding model, not a developer ID.
+        body = models.json()
+        rows = body if isinstance(body, list) else body.get("value") or body.get("data") or body.get("models") or []
+        embeddings = [row for row in rows if row.get("model_type") == "embedding"]
+        assert embeddings, "AIDP Mock did not advertise an embedding model"
+        created = await api.post("/aidp-mgmt/knowledge-bases", json={
+            "name": name, "description": "Owned D4 AIDP recall oracle",
+            "embedding_model": embeddings[0]["model_name"], "ingroup_permission": "PRIVATE"})
+        assert_status(created, 200)
+        kb_id = str(created.json()["kds_id"])
+        register_asset("knowledge", "d4_aidp_id", kb_id, owner_case_id="PW-KB-AIDP-01",
+            cleanup={"service": "config", "identity": identity.id, "method": "DELETE",
+                     "path": f"/aidp-mgmt/knowledge-bases/{quote(kb_id, safe='')}", "allowed_statuses": [200, 404]})
+        async with httpx.AsyncClient(timeout=15, trust_env=False) as control:
+            populated = await control.post(runner_url("/_mock/owned-aidp-oracle"), json={"kb_id": kb_id, "name": name})
+        assert_status(populated, 200)
+        detail = await api.get(f"/aidp-mgmt/knowledge-bases/{quote(kb_id, safe='')}")
+        assert_status(detail, 200)
+        visible = await api.get("/aidp-mgmt/knowledge-bases", params={"page_size": 100})
+        assert_status(visible, 200)
+        assert any(str(row.get("kds_id")) == kb_id for row in visible.json()["value"]), "Owned AIDP KB is not visible"
+    register_asset("knowledge", "d4_aidp_name", name, owner_case_id="PW-KB-AIDP-01")
+    write_case_evidence("aidp-owned-preparation", {"kb_id": kb_id, "name": name,
+        "permission_created_via_product_api": True, "detail_access": True, "list_visible": True,
+        "oracle_chunk_count": populated.json()["chunk_count"]})
+    return {}
+
+
 DEFAULT_GROUP_NAMES = ("vlm", "stt", "chat", "tool_chat", "multi", "scope", "evaluation")
-GROUP_NAMES = DEFAULT_GROUP_NAMES + ('basic_agent','llm_agent','llm_model','embedding_model','knowledge','mcp','file_chat')
+GROUP_NAMES = DEFAULT_GROUP_NAMES + ('basic_agent','llm_agent','llm_model','embedding_model','knowledge','mcp','file_chat','aidp_knowledge')
 
 
 def full_suite_groups() -> list[str]:

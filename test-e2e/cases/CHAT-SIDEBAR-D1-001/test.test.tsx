@@ -10,7 +10,9 @@ const queryClients: QueryClient[] = [];
 const render = (ui: React.ReactNode) => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   queryClients.push(client);
-  return renderComponent(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return renderComponent(ui, {
+    wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  });
 };
 afterEach(async () => {
   await act(async () => {
@@ -21,6 +23,8 @@ afterEach(async () => {
     }
     queryClients.length = 0;
   });
+  // Drain queued React scheduler work before jsdom is disposed.
+  await act(async () => { await new Promise<void>((resolve) => setTimeout(resolve, 0)); });
 });
 const fixture = vi.hoisted(() => ({
   items: [{ id: "saved", remoteId: "42", title: "Saved conversation", custom: { agentId: 7 } }, { id: "draft", title: "Unsent draft", custom: { agentId: 7 } }],
@@ -32,12 +36,6 @@ const fixture = vi.hoisted(() => ({
   confirm: vi.fn(),
   mainThreadId: "saved",
 }));
-const render = (ui: React.ReactElement) => {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return renderComponent(ui, {
-    wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
-  });
-};
 vi.mock("@assistant-ui/react", async () => {
   const React = await import("react");
   const Context = React.createContext(0);
