@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Dify App Layer
 FastAPI endpoints for Dify knowledge base operations.
@@ -16,8 +15,8 @@ from fastapi.responses import JSONResponse
 
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
-from management.services.knowledge_base.providers.dify import fetch_dify_datasets_impl
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from services.dify_service import fetch_dify_datasets_impl
+from utils.auth_utils import get_current_user_id
 
 router = APIRouter(prefix="/dify")
 logger = logging.getLogger("dify_app")

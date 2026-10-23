@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """
 Elasticsearch Application Interface Module
 
@@ -11,11 +9,14 @@ Main features include:
 3. Support for multiple search methods: exact search, semantic search, and hybrid search
 4. Health check interface
 """
-
 import json
 import logging
 from contextvars import ContextVar
 from typing import Any, Optional
+
+from nexent.vector_database.base import VectorDatabaseCore
+from nexent.vector_database.elasticsearch_core import ElasticSearchCore
+from nexent.vector_database.datamate_core import DataMateCore
 
 from consts.const import (
     DATAMATE_URL,
@@ -26,14 +27,11 @@ from consts.const import (
 from database.knowledge_db import (
     get_knowledge_record,
 )
+from services.redis_service import get_redis_service
+from utils.config_utils import tenant_config_manager
 from management.services.model.resolver import (
     get_embedding_model_by_id,
 )
-from nexent.vector_database.base import VectorDatabaseCore
-from nexent.vector_database.datamate_core import DataMateCore
-from nexent.vector_database.elasticsearch_core import ElasticSearchCore
-from management.services.knowledge_base.task_state import get_redis_service
-from management.services.configuration.tenant.settings import tenant_config_manager
 
 
 def _update_progress(task_id: str, processed: int, total: int):
@@ -49,40 +47,32 @@ def _update_progress(task_id: str, processed: int, total: int):
                 f"stopping further indexing work at {processed}/{total}."
             )
             raise RuntimeError(
-                "Indexing cancelled because the task was marked as cancelled."
-            )
+                "Indexing cancelled because the task was marked as cancelled.")
 
         success = redis_service.save_progress_info(task_id, processed, total)
         if success:
             percentage = processed * 100 // total if total > 0 else 0
             logger.debug(
-                f"[PROGRESS CALLBACK] Updated progress for task {task_id}: {processed}/{total} ({percentage}%)"
-            )
+                f"[PROGRESS CALLBACK] Updated progress for task {task_id}: {processed}/{total} ({percentage}%)")
         else:
             logger.warning(
-                f"[PROGRESS CALLBACK] Failed to save progress for task {task_id}: {processed}/{total}"
-            )
+                f"[PROGRESS CALLBACK] Failed to save progress for task {task_id}: {processed}/{total}")
     except Exception as e:
         logger.warning(
-            f"[PROGRESS CALLBACK] Exception updating progress for task {task_id}: {str(e)}"
-        )
+            f"[PROGRESS CALLBACK] Exception updating progress for task {task_id}: {str(e)}")
+
+
 
 
 class KnowledgeBaseNeedsModelConfigError(Exception):
     """Exception raised when a knowledge base needs an embedding model to be configured."""
-
     def __init__(self, index_name: str, message: str = None):
         self.index_name = index_name
-        self.message = (
-            message
-            or f"Knowledge base '{index_name}' needs an embedding model to be configured"
-        )
+        self.message = message or f"Knowledge base '{index_name}' needs an embedding model to be configured"
         super().__init__(self.message)
 
 
-def get_embedding_model_by_index_name(
-    tenant_id: str, index_name: str
-) -> tuple[Optional[Any], Optional[int], dict]:
+def get_embedding_model_by_index_name(tenant_id: str, index_name: str) -> tuple[Optional[Any], Optional[int], dict]:
     """
     Get the embedding model for a knowledge base by its index_name.
 
@@ -105,24 +95,18 @@ def get_embedding_model_by_index_name(
         - Clear error guidance: return needs_config status for user action
     """
     try:
-        knowledge_record = get_knowledge_record(
-            {
-                "index_name": index_name,
-                "tenant_id": tenant_id,
-                "include_asset_owner_assets": True,
-            }
-        )
+        knowledge_record = get_knowledge_record({
+            "index_name": index_name,
+            "tenant_id": tenant_id,
+            "include_asset_owner_assets": True,
+        })
 
         if not knowledge_record:
-            return (
-                None,
-                None,
-                {
-                    "status": "error",
-                    "needs_update": False,
-                    "message": f"Knowledge base '{index_name}' not found",
-                },
-            )
+            return None, None, {
+                "status": "error",
+                "needs_update": False,
+                "message": f"Knowledge base '{index_name}' not found"
+            }
 
         model_id = knowledge_record.get("embedding_model_id")
 
@@ -130,19 +114,13 @@ def get_embedding_model_by_index_name(
         if model_id:
             model, _ = get_embedding_model_by_id(tenant_id, model_id)
             if model:
-                return (
-                    model,
-                    model_id,
-                    {
-                        "status": "ok",
-                        "needs_update": False,
-                        "message": "Embedding model found",
-                    },
-                )
+                return model, model_id, {
+                    "status": "ok",
+                    "needs_update": False,
+                    "message": "Embedding model found"
+                }
             # Model ID exists but model not found - fall through to error
-            logger.warning(
-                f"Model ID {model_id} specified for index '{index_name}' but model not found"
-            )
+            logger.warning(f"Model ID {model_id} specified for index '{index_name}' but model not found")
 
         # Case 2: model_id does not exist or is invalid
         # Design principle: Force explicit configuration, no auto-fix
@@ -150,26 +128,24 @@ def get_embedding_model_by_index_name(
         embedding_model_name = knowledge_record.get("embedding_model_name")
         if embedding_model_name:
             # Has model_name but no valid model_id (legacy data)
-            logger.warning(
-                f"Index '{index_name}' has embedding_model_name but no valid model_id, needs explicit configuration"
-            )
+            logger.warning(f"Index '{index_name}' has embedding_model_name but no valid model_id, needs explicit configuration")
         else:
             # No model configured at all
             logger.error(f"Index '{index_name}' has no embedding model configured")
 
-        return (
-            None,
-            None,
-            {
-                "status": "needs_config",
-                "needs_update": False,
-                "message": f"No embedding model configured for knowledge base '{index_name}'. Please select a model.",
-            },
-        )
+        return None, None, {
+            "status": "needs_config",
+            "needs_update": False,
+            "message": f"No embedding model configured for knowledge base '{index_name}'. Please select a model."
+        }
 
     except Exception as e:
         logger.warning(f"Failed to get embedding model for index {index_name}: {e}")
-        return None, None, {"status": "error", "needs_update": False, "message": str(e)}
+        return None, None, {
+            "status": "error",
+            "needs_update": False,
+            "message": str(e)
+        }
 
 
 ALLOWED_CHUNK_FIELDS = {
@@ -194,8 +170,7 @@ _SKIP_INDEX_SOURCE_CLEANUP: ContextVar[bool] = ContextVar(
 
 
 def get_vector_db_core(
-    db_type: VectorDatabaseType = VectorDatabaseType.ELASTICSEARCH,
-    tenant_id: Optional[str] = None,
+    db_type: VectorDatabaseType = VectorDatabaseType.ELASTICSEARCH, tenant_id: Optional[str] = None,
 ) -> VectorDatabaseCore:
     """
     Return a VectorDatabaseCore implementation based on the requested type.
@@ -221,10 +196,10 @@ def get_vector_db_core(
     if db_type == VectorDatabaseType.DATAMATE:
         if tenant_id:
             datamate_url = tenant_config_manager.get_app_config(
-                DATAMATE_URL, tenant_id=tenant_id
-            )
+                DATAMATE_URL, tenant_id=tenant_id)
             if not datamate_url:
-                raise ValueError(f"DataMate URL not configured for tenant {tenant_id}")
+                raise ValueError(
+                    f"DataMate URL not configured for tenant {tenant_id}")
             return DataMateCore(base_url=datamate_url)
         else:
             raise ValueError("tenant_id must be provided for DataMate")
@@ -249,13 +224,7 @@ def _rethrow_or_plain(exc: Exception) -> None:
     raise Exception(msg)
 
 
-def check_knowledge_base_exist_impl(
-    knowledge_name: str,
-    vdb_core: VectorDatabaseCore,
-    user_id: str,
-    tenant_id: str,
-    exclude_index_name: Optional[str] = None,
-) -> dict:
+def check_knowledge_base_exist_impl(knowledge_name: str, vdb_core: VectorDatabaseCore, user_id: str, tenant_id: str, exclude_index_name: Optional[str] = None) -> dict:
     """
     Check knowledge base existence and handle orphan cases
 
@@ -271,8 +240,7 @@ def check_knowledge_base_exist_impl(
     """
     # 1. Check if knowledge_name exists in PG for the current tenant
     pg_record = get_knowledge_record(
-        {"knowledge_name": knowledge_name, "tenant_id": tenant_id}
-    )
+        {"knowledge_name": knowledge_name, "tenant_id": tenant_id})
 
     # Case A: Knowledge base name already exists in the same tenant
     if pg_record:

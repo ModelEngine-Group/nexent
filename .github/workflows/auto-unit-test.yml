@@ -1,8 +1,5 @@
 name: Run Automated Unit Tests
 
-permissions:
-  contents: read
-
 concurrency:
   group: automated-unit-test-${{ github.ref }}
   cancel-in-progress: true
@@ -11,9 +8,9 @@ on:
   workflow_dispatch:
     inputs:
       runner_label_json:
-        description: 'JSON runner labels; blank uses self-hosted, or use ["ubuntu-24.04"] for GitHub-hosted'
+        description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
         required: false
-        default: ''
+        default: '["ubuntu-24.04-arm"]'
       pytest_workers:
         description: 'parallel test workers (auto=CPU count, 0=serial, N=fixed count)'
         required: false
@@ -23,9 +20,9 @@ on:
         required: false
         default: '300'
       codecov_os:
-        description: 'Optional Codecov OS override; blank detects the executing runner architecture'
+        description: 'Codecov uploader OS override (e.g. linux-arm64, linux, macos, windows)'
         required: false
-        default: ''
+        default: 'linux-arm64'
   pull_request:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
@@ -53,7 +50,7 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ fromJson(inputs.runner_label_json || '["self-hosted", "linux", "x64"]') }}
+    runs-on: ${{ fromJson(github.event.inputs.runner_label_json || '["ubuntu-24.04-arm"]') }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -113,5 +110,5 @@ jobs:
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: true
-          os: ${{ inputs.codecov_os || (runner.arch == 'ARM64' && 'linux-arm64' || 'linux') }}
+          os: ${{ github.event.inputs.codecov_os || 'linux-arm64' }}
           verbose: true

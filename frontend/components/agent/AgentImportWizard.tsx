@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
@@ -37,7 +35,7 @@ export interface AgentImportWizardProps {
 interface ConfigField {
   agentKey: string; // key in agent_info, e.g. "1"
   agentDisplayName: string; // display name for grouping / hint
-  fieldPath: string; // e.g., "prompt", "tools[0].params.api_key"
+  fieldPath: string; // e.g., "duty_prompt", "tools[0].params.api_key"
   fieldLabel: string; // User-friendly label
   promptHint?: string; // Hint from <TO_CONFIG:XXXX>
   currentValue: string;
@@ -54,15 +52,15 @@ interface McpServerToInstall {
 
 const needsConfig = (value: any): boolean => {
   if (typeof value === "string") {
-    return /<TO_CONFIG(?::[^>]+)?>/.test(value);
+    return value.trim() === "<TO_CONFIG>" || value.trim().startsWith("<TO_CONFIG:");
   }
   return false;
 };
 
 const extractPromptHint = (value: string): string | undefined => {
   if (typeof value !== "string") return undefined;
-  const hints = [...value.matchAll(/<TO_CONFIG:([^>]+)>/g)].map((match) => match[1]);
-  return hints.length ? hints.join("; ") : undefined;
+  const match = value.trim().match(/^<TO_CONFIG:(.+)>$/);
+  return match ? match[1] : undefined;
 };
 
 // Parse Markdown links in text and convert to React elements
@@ -563,8 +561,16 @@ export default function AgentImportWizard({
           label: t("market.detail.businessDescription", "Business Description"),
         },
         {
-          key: "prompt",
-          label: t("market.detail.prompt", "Prompt"),
+          key: "duty_prompt",
+          label: t("market.detail.dutyPrompt", "Duty Prompt"),
+        },
+        {
+          key: "constraint_prompt",
+          label: t("market.detail.constraintPrompt", "Constraint Prompt"),
+        },
+        {
+          key: "few_shots_prompt",
+          label: t("market.detail.fewShotsPrompt", "Few Shots Prompt"),
         },
       ];
 

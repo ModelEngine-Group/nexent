@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """
 Custom exception classes for the application.
 
@@ -25,14 +23,6 @@ The exception handler automatically maps legacy exception class names to ErrorCo
 from .error_code import ErrorCode, ERROR_CODE_HTTP_STATUS, RuntimeMetadataValidationCode
 from .error_message import ErrorMessage
 from typing import Dict, List, Optional
-
-
-class RunModelControlsError(ValueError):
-    """A safe preflight failure for request-scoped model controls."""
-
-    def __init__(self, code: str):
-        self.code = code
-        super().__init__(code)
 
 
 # ==================== New Framework: AppException with ErrorCode ====================
@@ -315,18 +305,6 @@ class NotFoundException(Exception):
     pass
 
 
-class AgentRelationValidationError(ValueError):
-    """Raised when submitted Agent relationships violate the graph contract."""
-
-    pass
-
-
-class AgentNotFoundError(NotFoundException, ValueError):
-    """Raised when an Agent is absent from the caller's visible query scope."""
-
-    pass
-
-
 class MEConnectionException(Exception):
     """Raised when ME connection fails."""
 
@@ -415,6 +393,21 @@ class WorkbenchAgentError(Exception):
         self.resource_type = "agent"
 
 
+class RuntimeSubAgentError(ValueError):
+    """Stable validation and authorization error for runtime adapters."""
+
+    def __init__(
+        self,
+        code: str,
+        *,
+        retryable: bool = False,
+        message: Optional[str] = None,
+    ):
+        super().__init__(message or code)
+        self.code = code
+        self.message_key = code
+        self.retryable = retryable
+        self.resource_type = "runtime_sub_agent"
 
 
 class QuotaExceededError(Exception):
@@ -491,6 +484,7 @@ InvalidCredentialsError = UnauthorizedError
 TenantNotFoundError = NotFoundException
 TenantDisabledError = Exception  # Generic fallback
 
+AgentNotFoundError = NotFoundException
 AgentDisabledError = Exception  # Generic fallback
 
 ToolNotFoundError = NotFoundException
@@ -520,15 +514,6 @@ OAuthAccountNotFoundError = NotFoundException
 # SignatureValidationError already defined above
 
 
-class ModelProviderError(Exception):
-    """A classified provider discovery failure with its upstream status."""
-
-    def __init__(self, upstream_status: int, message: str):
-        self.upstream_status = upstream_status
-        self.message = message
-        super().__init__(f"{upstream_status}: {message}")
-
-
 class RuntimeCapacityExceededError(RuntimeError):
     """Raised when Runtime agent worker and queue capacity is full."""
 
@@ -542,59 +527,3 @@ class RuntimeQueueTimeoutError(RuntimeError):
         self.timeout_seconds = timeout_seconds
         self.retry_after_seconds = max(1, int(timeout_seconds + 0.999))
         super().__init__("Agent runtime queue wait timed out")
-
-
-class AgentToolImportError(ValueError):
-    """An exported tool is incompatible with the destination catalog."""
-
-
-class AgentAutomationError(Exception):
-    """Base domain exception for agent automation."""
-
-    error_code = "AUTOMATION_ERROR"
-
-    def __init__(self, message: str, details: dict | None = None):
-        super().__init__(message)
-        self.message = message
-        self.details = details or {}
-
-
-class AutomationCapabilityNotReadyError(AgentAutomationError):
-    error_code = "AUTOMATION_CAPABILITY_NOT_READY"
-
-
-class AutomationCapabilityUnavailableError(AgentAutomationError):
-    error_code = "AUTOMATION_CAPABILITY_UNAVAILABLE"
-
-
-class AutomationCapabilityBindingInvalidError(AgentAutomationError):
-    error_code = "AUTOMATION_CAPABILITY_BINDING_INVALID"
-
-
-class AutomationScheduleInvalidError(AgentAutomationError):
-    error_code = "AUTOMATION_SCHEDULE_INVALID"
-
-
-class AutomationNotFoundError(AgentAutomationError):
-    error_code = "AUTOMATION_TASK_NOT_FOUND"
-
-
-class AutomationConversationAlreadyBoundError(AgentAutomationError):
-    error_code = "AUTOMATION_CONVERSATION_ALREADY_BOUND"
-
-
-
-class AgentDraftEditError(Exception):
-    """Stable authorization error shared by draft and resource writes."""
-
-    def __init__(self, code: str):
-        super().__init__(code)
-        self.code = code
-
-
-class ResourceBindingError(Exception):
-    """Stable resource validation error used by Tool and Skill writes."""
-
-    def __init__(self, code: str):
-        super().__init__(code)
-        self.code = code

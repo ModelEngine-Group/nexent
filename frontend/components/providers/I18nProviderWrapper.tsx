@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { ReactNode, useEffect, useState } from "react";
@@ -18,40 +16,35 @@ export default function I18nProviderWrapper({
   children,
   locale: initialLocale,
 }: I18nProviderWrapperProps) {
+  const [mounted, setMounted] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const pathname = usePathname();
   const { setConfig } = useGlobalConfigStore();
   const { setAllConfig } = useGlobalConfigStoreAllLanguage();
-  const targetLocale =
-    initialLocale || pathname.split("/").filter(Boolean)[0] || "zh";
-
   useEffect(() => {
-    let isCurrentEffect = true;
+    setMounted(true);
+  }, []);
+
+  // Initialize i18n language from props or URL
+  useEffect(() => {
+    if (!mounted) return;
+
+    const targetLocale = initialLocale || pathname.split('/').filter(Boolean)[0] || 'zh';
 
     const initI18n = async () => {
-      const { resourcesCustom } = await loadLocaleMessages(targetLocale);
-      if (!isCurrentEffect) return;
-
-      const localeKey = targetLocale.toLowerCase().startsWith("zh")
-        ? "zh"
-        : "en";
-      setConfig(resourcesCustom[localeKey].custom);
+      const { resourcesCustom } = await loadLocaleMessages(targetLocale)
+      setConfig(resourcesCustom[targetLocale as 'zh'].custom);
       setAllConfig(resourcesCustom);
-      await i18n.changeLanguage(localeKey);
-      if (!isCurrentEffect) return;
-
+      i18n.changeLanguage(targetLocale);
       document.cookie = `NEXT_LOCALE=${targetLocale}; path=/; max-age=31536000`;
-      setLoaded(true);
-    };
+      setLoaded(true)
+    }
+    initI18n();
 
-    void initI18n();
+    // Fallback: synchronize i18n language according to the URL
+  }, [initialLocale, pathname, mounted]);
 
-    return () => {
-      isCurrentEffect = false;
-    };
-  }, [targetLocale, setAllConfig, setConfig]);
-
-  if (!loaded) {
+  if (!mounted || !loaded) {
     return null;
   }
 

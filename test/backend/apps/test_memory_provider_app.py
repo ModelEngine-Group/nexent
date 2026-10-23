@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import sys
 import types
 from contextlib import contextmanager
@@ -117,20 +116,20 @@ retry_mod.DegradableProviderError = DegradableProviderError
 sys.modules["nexent.memory.providers.retry"] = retry_mod
 
 services_pkg = types.ModuleType("services")
-ext_provider_svc_mod = types.ModuleType("management.services.memory.providers.service")
-config_svc_mod = types.ModuleType("management.services.memory.providers.configuration")
-plugin_loader_mod = types.ModuleType("management.services.memory.providers.plugins")
+ext_provider_svc_mod = types.ModuleType("services.memory_external_provider_service")
+config_svc_mod = types.ModuleType("services.memory_provider_config_service")
+plugin_loader_mod = types.ModuleType("services.memory_provider_plugin_loader")
 ext_provider_svc_mod.MemoryExternalProviderService = MagicMock
 config_svc_mod.MemoryProviderConfigService = MagicMock
 plugin_loader_mod.PluginLoader = MagicMock
 sys.modules["services"] = services_pkg
-sys.modules["management.services.memory.providers.service"] = ext_provider_svc_mod
-sys.modules["management.services.memory.providers.configuration"] = config_svc_mod
-sys.modules["management.services.memory.providers.plugins"] = plugin_loader_mod
+sys.modules["services.memory_external_provider_service"] = ext_provider_svc_mod
+sys.modules["services.memory_provider_config_service"] = config_svc_mod
+sys.modules["services.memory_provider_plugin_loader"] = plugin_loader_mod
 
-auth_utils_mod = types.ModuleType("management.services.permission.identity.authentication_helpers")
+auth_utils_mod = types.ModuleType("utils.auth_utils")
 auth_utils_mod.get_current_user_id = MagicMock(return_value=("u1", "t1"))
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_mod
+sys.modules["utils.auth_utils"] = auth_utils_mod
 
 from apps import memory_provider_app
 

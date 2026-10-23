@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import { API_ENDPOINTS } from "./api";
 import log from "@/lib/logger";
 import { getAuthHeaders } from "@/lib/auth";
@@ -28,12 +26,13 @@ export interface Agent {
   display_name?: string;
   description: string;
   author?: string;
-  author_cas_username?: string | null;
   model_ids?: number[];
   model_names?: string[];
   model_name?: string;
   max_steps: number;
-  prompt?: string;
+  duty_prompt?: string;
+  constraint_prompt?: string;
+  few_shots_prompt?: string;
   parent_agent_id?: number;
   tenant_id: string;
   enabled: boolean;
@@ -54,7 +53,7 @@ export interface Agent {
   sub_agent_relations?: Array<{ agent_id: number; agent_name?: string }>;
 }
 
-export interface AgentVersion {
+export interface AgentVersion { 
   version_no: number;
   version_name: string;
   release_note: string;
@@ -169,10 +168,7 @@ export interface A2AAgentCard {
 export interface VersionPublishResponse {
   success: boolean;
   message: string;
-  data?: AgentVersion & {
-    a2a_agent?: A2AAgentInfo;
-    a2a_agent_card?: A2AAgentCard;
-  };
+  data?: AgentVersion & { a2a_agent?: A2AAgentInfo; a2a_agent_card?: A2AAgentCard };
 }
 
 /**
@@ -253,13 +249,10 @@ export async function fetchAgentVersion(
   versionNo: number
 ): Promise<FetchAgentVersionResult> {
   try {
-    const response = await fetch(
-      API_ENDPOINTS.agent.versions.version(agentId, versionNo),
-      {
-        method: "GET",
-        headers: getAuthHeaders(),
-      }
-    );
+    const response = await fetch(API_ENDPOINTS.agent.versions.version(agentId, versionNo), {
+      method: "GET",
+      headers: getAuthHeaders(),
+    });
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status}`);
     }
@@ -392,8 +385,7 @@ export async function publishVersion(
     log.error("Failed to publish agent version:", error);
     return {
       success: false,
-      message:
-        error instanceof Error ? error.message : "Failed to publish version",
+      message: error instanceof Error ? error.message : "Failed to publish version",
     };
   }
 }
@@ -433,8 +425,7 @@ export async function rollbackVersion(
     log.error("Failed to rollback agent version:", error);
     return {
       success: false,
-      message:
-        error instanceof Error ? error.message : "Failed to rollback version",
+      message: error instanceof Error ? error.message : "Failed to rollback version",
     };
   }
 }
@@ -452,20 +443,17 @@ export async function compareVersions(
   versionNoB: number
 ): Promise<VersionCompareResponse> {
   try {
-    const response = await fetch(
-      API_ENDPOINTS.agent.versions.compare(agentId),
-      {
-        method: "POST",
-        headers: {
-          ...getAuthHeaders(),
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          version_no_a: versionNoA,
-          version_no_b: versionNoB,
-        }),
-      }
-    );
+    const response = await fetch(API_ENDPOINTS.agent.versions.compare(agentId), {
+      method: "POST",
+      headers: {
+        ...getAuthHeaders(),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        version_no_a: versionNoA,
+        version_no_b: versionNoB,
+      }),
+    });
 
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status}`);
@@ -481,8 +469,7 @@ export async function compareVersions(
     log.error("Failed to compare agent versions:", error);
     return {
       success: false,
-      message:
-        error instanceof Error ? error.message : "Failed to compare versions",
+      message: error instanceof Error ? error.message : "Failed to compare versions",
     };
   }
 }
@@ -518,8 +505,7 @@ export async function deleteVersion(
     log.error("Failed to delete agent version:", error);
     return {
       success: false,
-      message:
-        error instanceof Error ? error.message : "Failed to delete version",
+      message: error instanceof Error ? error.message : "Failed to delete version",
     };
   }
 }
@@ -563,8 +549,7 @@ export async function updateVersion(
     log.error("Failed to update agent version:", error);
     return {
       success: false,
-      message:
-        error instanceof Error ? error.message : "Failed to update version",
+      message: error instanceof Error ? error.message : "Failed to update version",
     };
   }
 }

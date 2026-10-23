@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Quota management API endpoints.
 
@@ -22,9 +21,9 @@ from database.user_tenant_db import get_user_tenant_by_user_id
 from permissions.depends import authenticate, require
 from permissions.models import CurrentUser
 from permissions.tenant_scope import resolve_personal_target_tenant
-from management.services.knowledge_base.quota import QuotaService
-from management.services.permission.identity.authentication_helpers import get_current_user_id
-from infrastructure.formatting import bytes_to_readable
+from services.quota_service import QuotaService
+from utils.auth_utils import get_current_user_id
+from utils.bytes_utils import bytes_to_readable
 
 logger = logging.getLogger(__name__)
 

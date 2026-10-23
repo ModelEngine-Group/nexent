@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from http import HTTPStatus
 from typing import Optional
@@ -8,35 +7,20 @@ from fastapi.responses import JSONResponse
 
 from consts.model import GlobalConfig
 from consts.exceptions import TokenExpiredError
-from management.services.monitor.audit import record_security_event
-from management.services.configuration.tenant.service import save_config_impl, load_config_impl
-from management.services.permission.identity.authentication_helpers import get_current_user_id, get_current_user_info
+from services.config_sync_service import save_config_impl, load_config_impl
+from utils.auth_utils import get_current_user_id, get_current_user_info
 
 router = APIRouter(prefix="/config")
 logger = logging.getLogger("config_sync_app")
 
 
 @router.post("/save_config")
-async def save_config(
-    config: GlobalConfig,
-    http_request: Request,
-    authorization: Optional[str] = Header(None)
-):
+async def save_config(config: GlobalConfig, authorization: Optional[str] = Header(None)):
     try:
         user_id, tenant_id = get_current_user_id(authorization)
         logger.info(
             f"Start to save config, user_id: {user_id}, tenant_id: {tenant_id}")
         await save_config_impl(config, tenant_id, user_id)
-        # Record which config fields were saved, never their values: the
-        # global config drives platform-wide behaviour and its change history
-        # must be traceable without copying potentially sensitive settings.
-        record_security_event("global_config_save", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"field_keys": sorted(
-                                  f"{section}.{key}"
-                                  for section, values in config.model_dump().items()
-                                  if isinstance(values, dict)
-                                  for key in values.keys())})
         return JSONResponse(
             status_code=HTTPStatus.OK,
             content={"message": "Configuration saved successfully",

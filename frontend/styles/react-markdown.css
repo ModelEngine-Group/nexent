@@ -384,7 +384,7 @@
 /* Scrollbar helpers */
 .tooltip-content-scroll {
   scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-color: rgb(209 213 219) transparent;
 }
 
 .tooltip-content-scroll::-webkit-scrollbar {
@@ -546,12 +546,12 @@
 }
 
 .code-block-content pre::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
+  background: #ccc;
   border-radius: 3px;
 }
 
 .code-block-content pre::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
+  background: #aaa;
 }
 
 /* Mermaid Diagram Styles */

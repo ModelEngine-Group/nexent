@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import { useEffect, useState } from "react";
 import {
   Button,
@@ -398,11 +396,7 @@ export default function AddMcpServiceLocalSection({
                             )}
                             {...bindField("containerConfigJson")}
                             rows={6}
-                            style={{
-                              fontFamily:
-                                "'HarmonyOS Sans SC', 'Huawei Sans', sans-serif",
-                              fontSize: 12,
-                            }}
+                            style={{ fontFamily: "monospace", fontSize: 12 }}
                           />
                         </Form.Item>
                       </div>

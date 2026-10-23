@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useState, useEffect, useRef } from "react";
@@ -16,7 +14,6 @@ import {
 } from "antd";
 import { Settings, PenLine, X } from "lucide-react";
 
-import { ParamLabel, TestRunLink } from "@/components/resource-picker/ParamDialog";
 import { Tool, ToolParam } from "@/types/agentConfig";
 import { KnowledgeBase } from "@/types/knowledgeBase";
 import {
@@ -151,7 +148,7 @@ export default function ToolTestPanel({
   configInvalid = false,
   toolKbType = null,
 }: ToolTestPanelProps) {
-  const { t, i18n } = useTranslation("common");
+  const { t } = useTranslation("common");
   const [form] = Form.useForm();
 
   // Track if form has been initialized (to avoid resetting user input)
@@ -763,8 +760,7 @@ export default function ToolTestPanel({
         toolSource, // Tool source
         tool.usage || "", // Tool usage
         toolParams, // tool input parameters
-        finalConfigs, // tool configuration parameters
-        i18n.language.toLowerCase().startsWith("en") ? "en" : "zh"
+        finalConfigs // tool configuration parameters
       );
 
       // Format the JSON string response
@@ -789,7 +785,7 @@ export default function ToolTestPanel({
   if (!tool) return null;
 
   return (
-    <div data-config-part="test-panel" className="flex flex-col gap-2">
+    <div className="mb-4">
       <div>
         {/* Input parameters section with conditional toggle */}
         {Object.keys(parameterValues).length > 0 && (
@@ -802,7 +798,7 @@ export default function ToolTestPanel({
                 marginBottom: 8,
               }}
             >
-              <Text strong style={{ display: "block", marginBottom: 0, fontSize: 14, lineHeight: "22px" }}>
+              <Text strong style={{ display: "block", marginBottom: 8 }}>
                 {t("toolConfig.toolTest.inputParams")}
               </Text>
               {/* Only show toggle button if parsing was successful */}
@@ -965,10 +961,16 @@ export default function ToolTestPanel({
               )}
             </div>
 
-            <Form form={form} layout="vertical">
+            <Form
+              form={form}
+              layout="horizontal"
+              labelAlign="left"
+              labelCol={{ span: 6 }}
+              wrapperCol={{ span: 18 }}
+            >
               {isManualInputMode ? (
                 // Manual JSON input mode
-                <Form.Item style={{ marginBottom: 16 }}>
+                <Form.Item className="w-full" wrapperCol={{ span: 24 }}>
                   <Input.TextArea
                     value={manualJsonInput}
                     onChange={(e) => setManualJsonInput(e.target.value)}
@@ -1083,27 +1085,21 @@ export default function ToolTestPanel({
                       return (
                         <Form.Item
                           key={paramName}
-                          required={false}
-                          colon={false}
                           label={
-                            <ParamLabel
-                              label={paramName}
-                              info={Boolean(
-                                getLocalizedDescription(
-                                  description,
-                                  description_zh
-                                )
-                              )}
-                              infoText={getLocalizedDescription(
-                                description,
-                                description_zh
-                              )}
-                              size="md"
-                            />
+                            <span style={{ width: "100%" }} title={paramName}>
+                              {paramName}
+                            </span>
                           }
                           name={fieldName}
                           rules={rules}
-                          style={{ marginBottom: 16 }}
+                          tooltip={{
+                            title: getLocalizedDescription(
+                              description,
+                              description_zh
+                            ),
+                            placement: "topLeft",
+                            styles: { root: { maxWidth: 400 } },
+                          }}
                         >
                           {/* KB selector for knowledge_base_search tool */}
                           {isKnowledgeBaseSearchTool &&
@@ -1142,17 +1138,21 @@ export default function ToolTestPanel({
           </>
         )}
 
-        <TestRunLink
-          label={
-            testExecuting ? t("toolConfig.toolTest.executing") : undefined
-          }
+        <Button
+          type="primary"
           onClick={executeTest}
+          loading={testExecuting}
           disabled={testExecuting || configInvalid}
-        />
+          style={{ width: "100%" }}
+        >
+          {testExecuting
+            ? t("toolConfig.toolTest.executing")
+            : t("toolConfig.toolTest.execute")}
+        </Button>
       </div>
       {/* Test result */}
-      <div data-config-part="test-result" className="flex flex-col gap-2">
-        <Text strong style={{ display: "block", marginBottom: 0, fontSize: 14, lineHeight: "22px" }}>
+      <div className="mt-3">
+        <Text strong style={{ display: "block", marginBottom: 8 }}>
           {t("toolConfig.toolTest.result")}
         </Text>
         <Input.TextArea

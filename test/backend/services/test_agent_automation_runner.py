@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import importlib
 import sys
@@ -29,7 +28,7 @@ def _load_runner_with_stubs(monkeypatch):
     agent_service.stop_agent_tasks = lambda conversation_id, user_id: None
     agent_service.is_agent_running = lambda conversation_id, user_id: False
 
-    conversation_service = types.ModuleType("management.services.conversation.service")
+    conversation_service = types.ModuleType("services.conversation_management_service")
     conversation_service.get_conversation_history_service = lambda conversation_id, user_id: [{"message": []}]
     conversation_service.save_message = lambda request, user_id, tenant_id: 1
     conversation_service.save_message_unit = lambda **kwargs: None
@@ -37,9 +36,9 @@ def _load_runner_with_stubs(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "consts.model", consts_model)
     monkeypatch.setitem(sys.modules, "management.services.agent.service", agent_service)
-    monkeypatch.setitem(sys.modules, "management.services.conversation.service", conversation_service)
-    sys.modules.pop("management.services.automation.runner", None)
-    runner_module = importlib.import_module("management.services.automation.runner")
+    monkeypatch.setitem(sys.modules, "services.conversation_management_service", conversation_service)
+    sys.modules.pop("services.agent_automation.runner", None)
+    runner_module = importlib.import_module("services.agent_automation.runner")
     monkeypatch.setattr(runner_module.agent_automation_db, "get_task", lambda *args: None)
     monkeypatch.setattr(
         runner_module,

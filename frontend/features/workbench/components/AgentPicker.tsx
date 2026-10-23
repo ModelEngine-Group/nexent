@@ -1,20 +1,13 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
-import { WorkbenchResourceDrawer } from "./WorkbenchResourceDrawer";
-import { ResourceTagFilter } from "./ResourceTagFilter";
-import { useResourceTags } from "../hooks/useResourceTags";
-import { Bot } from "lucide-react";
-import {
-  AgentSelectionCard,
-  AgentSelectionGrid,
-  toLocalCard,
-} from "@/components/resource-picker/AgentSelectionCard";
+import { ResourceSelectionGrid } from "@/features/workbench/components/ResourceSelectionGrid";
+import { ResourceSelectionActions } from "./ResourceSelectionActions";
+import { SelectedResourceTags } from "./SelectedResourceTags";
+import { useRouter } from "next/navigation";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Alert, Button, Empty, Modal, Spin, message } from "antd";
+import { Alert, Button, Input, Modal, Spin, Tabs, message } from "antd";
 import type {
   AgentRepositoryListingItem,
   RepositoryImportPrecheckResponse,
@@ -26,7 +19,12 @@ import {
 } from "@/services/agentRepositoryService";
 import { fetchPublishedAgentList } from "@/services/agentConfigService";
 import type { Agent } from "@/types/agentConfig";
-import { RESOURCE_PAGE_SIZE, resourcePage } from "./ResourcePagination";
+import { ResourceCard } from "./ResourceCard";
+import {
+  ResourcePagination,
+  RESOURCE_PAGE_SIZE,
+  resourcePage,
+} from "./ResourcePagination";
 import { useTranslation } from "react-i18next";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
 
@@ -39,7 +37,6 @@ export function AgentPicker({
   onSelect,
   onConfirm,
   multiple = false,
-  disabled = false,
 }: {
   open: boolean;
   agents: Agent[];
@@ -49,30 +46,19 @@ export function AgentPicker({
   onSelect: (agent: Agent) => void;
   onConfirm?: (agents: Agent[]) => Promise<void> | void;
   multiple?: boolean;
-  disabled?: boolean;
 }) {
-  const [draft, setDraft] = useState<Agent[]>(() => {
-    const ids = selectedIds ?? (selectedId ? [selectedId] : []);
-    return open
-      ? ids
-          .map((id) => agents.find((agent) => String(agent.id) === id))
-          .filter((agent): agent is Agent => Boolean(agent))
-      : [];
-  });
+  const router = useRouter();
+  const [draft, setDraft] = useState<Agent[]>([]);
   const [saving, setSaving] = useState(false);
-  const [previousOpen, setPreviousOpen] = useState(open);
-  const toggle = (agent: Agent) => {
-    if (disabled || saving) return;
-    if (
-      !draft.some((item) => item.id === agent.id) &&
-      multiple &&
-      draft.length >= 8
-    ) {
-      message.warning(
-        t("workbench.controls.agentLimit", "最多选择 8 个智能体")
-      );
-      return;
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      const ids = selectedIds ?? (selectedId ? [selectedId] : []);
+      setDraft(agents.filter((agent) => ids.includes(String(agent.id))));
     }
+    wasOpen.current = open;
+  }, [open, agents, selectedId, selectedIds]);
+  const toggle = (agent: Agent) =>
     setDraft((current) =>
       current.some((item) => item.id === agent.id)
         ? current.filter((item) => item.id !== agent.id)
@@ -80,19 +66,19 @@ export function AgentPicker({
           ? [...current, agent]
           : [agent]
     );
-  };
   const [search, setSearch] = useState("");
-  const [pageSize, setPageSize] = useState(RESOURCE_PAGE_SIZE);
-  const [refreshRevision, setRefreshRevision] = useState(0);
   const queryClient = useQueryClient();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const locale = (i18n.resolvedLanguage || i18n.language).startsWith("en")
+    ? "en"
+    : "zh";
   const [tab, setTab] = useState("mine");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [repository, setRepository] = useState<AgentRepositoryListingItem[]>(
     []
   );
-  const [operationLoading, setOperationLoading] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [precheck, setPrecheck] =
     useState<RepositoryImportPrecheckResponse | null>(null);
@@ -100,73 +86,25 @@ export function AgentPicker({
     Record<string, "rename" | "use_existing">
   >({});
   const operationRef = useRef(0);
-  const mineTags = useResourceTags(
-    open,
-    "agent",
-    agents.map((agent) => String(agent.id)),
-    tab !== "mine"
-  );
-  const repositoryTags = useResourceTags(open, "agent", [], true);
-  const tags = tab === "mine" ? mineTags : repositoryTags;
-  const repositoryRequest = useMemo(
-    () => ({
-      open,
-      tab,
-      search,
-      page,
-      pageSize,
-      refreshRevision,
-      predicates: repositoryTags.predicates,
-    }),
-    [
-      open,
-      tab,
-      search,
-      page,
-      pageSize,
-      refreshRevision,
-      repositoryTags.predicates,
-    ]
-  );
-  const [settledRepositoryRequest, setSettledRepositoryRequest] = useState<
-    typeof repositoryRequest | null
-  >(null);
-  const loading =
-    operationLoading ||
-    (open &&
-      tab === "repository" &&
-      settledRepositoryRequest !== repositoryRequest);
-  // Reset session state before children render, rather than after commit.
-  if (previousOpen !== open) {
-    setPreviousOpen(open);
-    if (open) {
-      const ids = selectedIds ?? (selectedId ? [selectedId] : []);
-      setDraft(
-        ids
-          .map((id) => agents.find((agent) => String(agent.id) === id))
-          .filter((agent): agent is Agent => Boolean(agent))
-      );
-    } else {
+  useEffect(() => {
+    if (!open) {
+      operationRef.current += 1;
       setPrecheck(null);
       setSkillResolutions({});
       setImporting(false);
-      setOperationLoading(false);
       setSearch("");
       setPage(1);
     }
-  }
-  useEffect(() => {
-    if (!open) operationRef.current += 1;
   }, [open]);
   useEffect(() => {
     if (!open || tab !== "repository") return;
     let cancelled = false;
+    setLoading(true);
     void fetchAgentRepositoryListings({
       status: "shared",
-      search: repositoryRequest.search,
-      page: repositoryRequest.page,
-      page_size: repositoryRequest.pageSize,
-      tag_predicates: repositoryRequest.predicates,
+      search,
+      page,
+      page_size: RESOURCE_PAGE_SIZE,
     })
       .then((result) => {
         if (!cancelled) {
@@ -175,19 +113,18 @@ export function AgentPicker({
         }
       })
       .catch(() => {
-        if (!cancelled)
-          message.error(t("workbench.controls.repositoryLoadFailed"));
+        if (!cancelled) message.error("仓库加载失败");
       })
       .finally(() => {
-        if (!cancelled) setSettledRepositoryRequest(repositoryRequest);
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [open, tab, repositoryRequest, t]);
+  }, [open, tab, search, page]);
   const check = async (item: AgentRepositoryListingItem) => {
     const operation = ++operationRef.current;
-    setOperationLoading(true);
+    setLoading(true);
     try {
       const result = await fetchRepositoryImportPrecheck(
         item.agent_repository_id
@@ -207,9 +144,9 @@ export function AgentPicker({
       );
     } catch {
       if (operation === operationRef.current)
-        message.error(t("ui.localization.importPrecheckFailed"));
+        message.error("导入预检失败，请重试");
     } finally {
-      if (operation === operationRef.current) setOperationLoading(false);
+      if (operation === operationRef.current) setLoading(false);
     }
   };
   const unresolvedDependencies =
@@ -242,11 +179,11 @@ export function AgentPicker({
         : await importAgentFromRepository(precheck.agent_repository_id);
       if (operation !== operationRef.current) return;
       if (!Number.isInteger(result.agent_id) || result.agent_id <= 0)
-        throw new Error(t("ui.localization.importMissingAgent"));
+        throw new Error("导入响应缺少根 Agent ID，请刷新列表检查结果");
       const refreshed = await fetchPublishedAgentList();
       if (operation !== operationRef.current) return;
       if (!refreshed.success)
-        throw new Error(t("ui.localization.importRefreshFailed"));
+        throw new Error("导入成功，刷新资源失败，请重新打开选择器");
       const freshAgents = (refreshed.data ?? []) as Agent[];
       queryClient.setQueryData(["publishedAgentsList"], freshAgents);
       const imported = freshAgents.find(
@@ -259,16 +196,8 @@ export function AgentPicker({
         imported.is_available === false ||
         !imported.current_version_no
       ) {
-        message.warning(t("ui.localization.importAgentNotReady"));
-        return;
-      }
-      if (
-        multiple &&
-        draft.length >= 8 &&
-        !draft.some((item) => item.id === imported.id)
-      ) {
         message.warning(
-          t("workbench.controls.agentLimit", "最多选择 8 个智能体")
+          "智能体已导入，但尚未发布或依赖不完整；完善后才能选择运行"
         );
         return;
       }
@@ -279,263 +208,221 @@ export function AgentPicker({
       );
     } catch (error) {
       if (operation === operationRef.current)
-        message.error(
-          error instanceof Error
-            ? error.message
-            : t("ui.localization.importFailed")
-        );
+        message.error(error instanceof Error ? error.message : "导入失败");
     } finally {
       if (operation === operationRef.current) setImporting(false);
     }
   };
   const visible = useMemo(
     () =>
-      agents.filter(
-        (agent) =>
-          (!mineTags.visibleIds || mineTags.visibleIds.has(String(agent.id))) &&
-          [agent.name, agent.display_name, agent.description].some((value) =>
-            value?.toLowerCase().includes(search.trim().toLowerCase())
-          )
+      agents.filter((agent) =>
+        [agent.name, agent.display_name, agent.description].some((value) =>
+          value?.toLowerCase().includes(search.trim().toLowerCase())
+        )
       ),
-    [agents, search, mineTags.visibleIds]
+    [agents, search]
   );
-  const visiblePageAgents = resourcePage(visible, page, pageSize);
-  const selectablePageAgents = visiblePageAgents.filter(
-    (agent) => agent.is_available !== false
-  );
-  const allSelected =
-    selectablePageAgents.length > 0 &&
-    selectablePageAgents.every((agent) =>
-      draft.some((item) => item.id === agent.id)
-    );
   return (
-    <WorkbenchResourceDrawer
-      listContent={
-        <Spin
-          spinning={loading}
-          className="h-full [&>.ant-spin-container]:min-h-full"
-        >
-          <AgentSelectionGrid aria-label={t("ui.localization.agentResources")}>
-            {(tab === "mine" ? visible.length : repository.length) === 0 && (
-              <Empty className="py-12" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-            )}
-            {tab === "mine"
-              ? visiblePageAgents.map((agent) => (
-                  <AgentSelectionCard
-                    key={agent.id}
-                    item={toLocalCard(agent)}
-                    icon={<Bot size={20} />}
-                    assignments={[]}
-                    selected={draft.some((item) => item.id === agent.id)}
-                    disabled={agent.is_available === false}
-                    disabledReason={
-                      agent.is_available === false
-                        ? getUnavailableReasonLabels(
-                            agent.unavailable_reasons || [],
-                            t
-                          ).join("；") ||
-                          t("ui.localization.agentUnavailableWithoutReason")
-                        : undefined
-                    }
-                    onToggle={() => toggle(agent)}
-                  />
-                ))
-              : repository.map((item) => (
-                  <AgentSelectionCard
-                    key={item.agent_repository_id}
-                    item={{
-                      id: `repository:${item.agent_repository_id}`,
-                      agentId: item.agent_id,
-                      name: item.display_name || item.name,
-                      description: item.description || "",
-                      tags: item.tags,
-                      version:
-                        item.version_label ||
-                        (item.version_no != null
-                          ? String(item.version_no)
-                          : undefined),
-                      iconUrl: item.icon_url || undefined,
-                    }}
-                    icon={<Bot size={20} />}
-                    selected={false}
-                    disabled={loading || importing}
-                    actions={
-                      <Button
-                        size="small"
-                        disabled={loading || importing}
-                        onClick={() => void check(item)}
-                      >
-                        {t("ui.localization.precheckImport")}
-                      </Button>
-                    }
-                    onToggle={() => void check(item)}
-                  />
-                ))}
-          </AgentSelectionGrid>
-        </Spin>
-      }
-      picker={{
-        searchPlaceholder: t(
-          "agent.collaborative.selector.searchPlaceholder",
-          "搜索智能体名称或描述"
-        ),
-        keyword: search,
-        onSearch: (value) => {
-          setSearch(value);
-          setPage(1);
-        },
-        tagFilter: (
-          <ResourceTagFilter filter={tags} onChange={() => setPage(1)} />
-        ),
-        listTitle: t("resourcePicker.list.agent", "智能体列表"),
-        selected: draft.map((agent) => ({
-          id: String(agent.id),
-          label: agent.display_name || agent.name,
-        })),
-        onRemoveSelected: (id) =>
-          setDraft((current) =>
-            current.filter((agent) => String(agent.id) !== id)
-          ),
-        tabs: [
-          { key: "mine", label: t("workbench.controls.mineTab", "我的") },
-          {
-            key: "repository",
-            label: t("workbench.controls.repositoryTab", "仓库"),
-          },
-        ],
-        activeTab: tab,
-        onTabChange: (value) => {
-          operationRef.current += 1;
-          setPrecheck(null);
-          setSkillResolutions({});
-          setOperationLoading(false);
-          setImporting(false);
-          setTab(value);
-          setPage(1);
-        },
-        total: tab === "repository" ? total : visible.length,
-        page,
-        pageSize,
-        onPageSizeChange: (size) => {
-          setPageSize(size);
-          setPage(1);
-        },
-        onPageChange: setPage,
-        onRefresh: () => {
-          tags.retry?.();
-          if (tab === "mine")
-            void queryClient.invalidateQueries({
-              queryKey: ["publishedAgentsList"],
-            });
-          else setRefreshRevision((value) => value + 1);
-        },
-        onSelectAll: (checked) => {
-          const candidates = selectablePageAgents;
-          const merged = [
-            ...draft,
-            ...candidates.filter(
-              (agent) => !draft.some((item) => item.id === agent.id)
-            ),
-          ];
-          if (checked && merged.length > (multiple ? 8 : 1)) {
-            message.warning(
-              t("workbench.controls.agentLimit", "最多选择 8 个智能体")
-            );
-            return;
-          }
-          setDraft((current) =>
-            checked
-              ? merged
-              : current.filter(
-                  (item) => !candidates.some((agent) => agent.id === item.id)
-                )
-          );
-        },
-        allSelected,
-        partiallySelected:
-          !allSelected &&
-          selectablePageAgents.some((agent) =>
-            draft.some((item) => item.id === agent.id)
-          ),
-        selectAllDisabled:
-          loading ||
-          saving ||
-          tab !== "mine" ||
-          selectablePageAgents.length === 0 ||
-          (!multiple && selectablePageAgents.length > 1),
-        refreshDisabled: loading || saving,
-      }}
-
+    <Modal
       open={open}
-      title={t("workbench.controls.agents", "智能体")}
-      saving={saving}
-      disabled={disabled}
-      confirmDisabled={
-        loading || importing || (!!tags.predicates.length && tags.loading)
-      }
-      onCancel={() => {
-        operationRef.current += 1;
-        setPrecheck(null);
-        setSkillResolutions({});
-        setOperationLoading(false);
-        setImporting(false);
-        onCancel();
-      }}
-      onConfirm={async () => {
-        if (disabled || saving || loading || importing) return;
-        if (draft.length > (multiple ? 8 : 1)) {
-          message.warning(
-            t("workbench.controls.agentLimit", "最多选择 8 个智能体")
-          );
-          return;
-        }
+      title="选择智能体"
+      okText="确定"
+      cancelText="取消"
+      confirmLoading={saving}
+      okButtonProps={{ disabled: loading || importing, "aria-label": "确定" }}
+      onOk={async () => {
         setSaving(true);
         try {
           if (onConfirm) await onConfirm(draft);
           else draft.forEach((agent) => onSelect(agent));
           onCancel();
         } catch (error) {
-          message.error(
-            error instanceof Error
-              ? error.message
-              : t("workbench.controls.selectionFailed", "选择失败")
-          );
+          message.error(error instanceof Error ? error.message : "选择失败");
         } finally {
           setSaving(false);
         }
       }}
+      onCancel={() => {
+        operationRef.current += 1;
+        setPrecheck(null);
+        setSkillResolutions({});
+        setLoading(false);
+        setImporting(false);
+        onCancel();
+      }}
+      width={920}
+      centered
     >
+      <Tabs
+        activeKey={tab}
+        onChange={(value) => {
+          operationRef.current += 1;
+          setPrecheck(null);
+          setSkillResolutions({});
+          setLoading(false);
+          setImporting(false);
+          setTab(value);
+          setPage(1);
+        }}
+        items={[
+          { key: "mine", label: "我的" },
+          { key: "repository", label: "仓库" },
+        ]}
+      />
+      <Input.Search
+        value={search}
+        onChange={(event) => {
+          setSearch(event.target.value);
+          setPage(1);
+        }}
+        placeholder="搜索智能体名称或描述"
+        allowClear
+      />
+      <Spin spinning={loading}>
+        {tab === "mine" && (
+          <div className="my-3 flex items-center gap-3 rounded bg-blue-50 px-4 py-3">
+            <SelectedResourceTags
+              items={draft.map((agent) => ({
+                id: String(agent.id),
+                name: agent.display_name || agent.name,
+              }))}
+              onRemove={(id) =>
+                setDraft((current) =>
+                  current.filter((agent) => String(agent.id) !== id)
+                )
+              }
+            />
+            <ResourceSelectionActions
+              toggleAllDisabled={
+                !multiple &&
+                visible.filter((agent) => agent.is_available !== false).length >
+                  1
+              }
+              allSelected={
+                visible.filter((agent) => agent.is_available !== false).length >
+                  0 &&
+                visible
+                  .filter((agent) => agent.is_available !== false)
+                  .every((agent) => draft.some((item) => item.id === agent.id))
+              }
+              hasSelection={draft.length > 0}
+              disabled={loading || saving}
+              empty={!visible.some((agent) => agent.is_available !== false)}
+              onClear={() => setDraft([])}
+              onToggleAll={() => {
+                const candidates = visible.filter(
+                  (agent) => agent.is_available !== false
+                );
+                setDraft((current) =>
+                  candidates.every((agent) =>
+                    current.some((item) => item.id === agent.id)
+                  )
+                    ? current.filter(
+                        (item) =>
+                          !candidates.some((agent) => agent.id === item.id)
+                      )
+                    : [
+                        ...current,
+                        ...candidates.filter(
+                          (agent) =>
+                            !current.some((item) => item.id === agent.id)
+                        ),
+                      ]
+                );
+              }}
+            />
+          </div>
+        )}
+        <ResourceSelectionGrid
+          role="listbox"
+          aria-label="智能体资源"
+          className="mt-4 p-1"
+        >
+          {tab === "mine"
+            ? resourcePage(visible, page).map((agent) => (
+                <ResourceCard
+                  key={agent.id}
+                  title={agent.display_name || agent.name}
+                  description={agent.description}
+                  tags={agent.tags || []}
+                  selected={draft.some((item) => item.id === agent.id)}
+                  disabled={agent.is_available === false}
+                  disabledReason={
+                    agent.is_available === false
+                      ? getUnavailableReasonLabels(
+                          agent.unavailable_reasons || [],
+                          t
+                        ).join("；") || "智能体不可用，服务端未提供具体原因"
+                      : undefined
+                  }
+                  badges={[`v${agent.current_version_no ?? "-"}`]}
+                  onClick={() => toggle(agent)}
+                  actions={
+                    <Button
+                      size="small"
+                      aria-label="编辑"
+                      onClick={() =>
+                        router.push(`/${locale}/agents/${agent.id}`)
+                      }
+                    >
+                      编辑
+                    </Button>
+                  }
+                />
+              ))
+            : repository.map((item) => (
+                <ResourceCard
+                  key={item.agent_repository_id}
+                  title={item.display_name || item.name}
+                  description={item.description ?? undefined}
+                  tags={item.tags}
+                  badges={[item.version_label ?? "仓库"]}
+                  disabled={loading || importing}
+                  actions={
+                    <Button
+                      size="small"
+                      disabled={loading || importing}
+                      onClick={() => void check(item)}
+                    >
+                      预检并导入
+                    </Button>
+                  }
+                  onClick={() => void check(item)}
+                />
+              ))}
+        </ResourceSelectionGrid>
+      </Spin>
+      <ResourcePagination
+        current={page}
+        total={tab === "repository" ? total : visible.length}
+        onChange={setPage}
+        disabled={loading || importing}
+      />
       <Modal
         open={!!precheck}
-        title={t("workbench.import.precheckTitle", "导入预检")}
+        title="导入预检"
         onCancel={() => {
           operationRef.current += 1;
           setPrecheck(null);
           setSkillResolutions({});
-          setOperationLoading(false);
+          setLoading(false);
           setImporting(false);
         }}
         onOk={() => void importAgent()}
         confirmLoading={importing}
-        cancelText={t("common.cancel", "取消")}
-        okText={t("workbench.import.importAndSelect", "导入并选择")}
+        okText="导入并选择"
         okButtonProps={{
           disabled: !precheck || unresolvedDependencies.length > 0,
         }}
       >
         {unresolvedDependencies.length > 0 && (
-          <Alert
-            type="warning"
-            title={t("ui.localization.importDependenciesMissing")}
-          />
+          <Alert type="warning" title="依赖不完整，暂不能导入运行" />
         )}
         <ul>
           {precheck?.items.map((item) => (
             <li key={`${item.type}:${item.key}`}>
               {item.name}：
-              {item.available
-                ? t("ui.localization.available")
-                : item.reason_code || t("ui.localization.unavailable")}
+              {item.available ? "可用" : item.reason_code || "不可用"}
               {item.type === "skill" &&
                 item.reason_code === "skill_duplicate" && (
                   <span className="ml-3 inline-flex gap-3">
@@ -553,8 +440,7 @@ export function AgentPicker({
                           }))
                         }
                       />
-                      {t("ui.localization.renameTo")}{" "}
-                      {item.suggested_new_name || `${item.name} 副本`}
+                      重命名为 {item.suggested_new_name || `${item.name} 副本`}
                     </label>
                     <label>
                       <input
@@ -568,7 +454,7 @@ export function AgentPicker({
                           }))
                         }
                       />
-                      {t("ui.localization.reuseSkill")}
+                      使用已有 Skill
                     </label>
                   </span>
                 )}
@@ -576,6 +462,6 @@ export function AgentPicker({
           ))}
         </ul>
       </Modal>
-    </WorkbenchResourceDrawer>
+    </Modal>
   );
 }

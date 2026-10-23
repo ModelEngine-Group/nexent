@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 
 from dotenv import load_dotenv
@@ -22,14 +21,14 @@ from consts.exceptions import (
     tenant_resource_limit_error_payload,
 )
 from consts.error_code import ErrorCode
-from management.services.permission.identity.cas import build_logout_url, CasAuthenticationError
-from management.services.permission.identity.authentication import get_authorized_client, validate_token, \
+from services.cas_service import build_logout_url, CasAuthenticationError
+from services.user_management_service import get_authorized_client, validate_token, \
     check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
     get_session_by_authorization, get_user_info, create_token, list_tokens_by_user, delete_token, \
     update_password, get_provider_username
-from management.services.permission.identity.users import delete_user_and_cleanup
-from management.services.monitor.audit import record_security_event
-from management.services.permission.identity.authentication_helpers import (
+from services.user_service import delete_user_and_cleanup
+from services.audit_service import record_security_event
+from utils.auth_utils import (
     extract_session_id_from_authorization,
     get_current_user_context,
     get_current_user_id,

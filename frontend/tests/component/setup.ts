@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import { afterEach, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
@@ -37,10 +35,6 @@ Object.defineProperty(navigator, "clipboard", {
 });
 
 window.HTMLElement.prototype.scrollIntoView = vi.fn();
-// Radix Select (shadcn) opens via pointer capture; jsdom lacks the APIs.
-// Mirrors tests/workbench/setup.ts.
-window.HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
-window.HTMLElement.prototype.setPointerCapture = vi.fn();
 
 const getComputedStyle = window.getComputedStyle.bind(window);
 window.getComputedStyle = ((element: Element) =>

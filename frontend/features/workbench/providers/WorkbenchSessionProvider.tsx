@@ -1,15 +1,5 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
-import { conversationService } from "@/services/conversationService";
-import { createConversationDetailLoader } from "@/lib/conversationDetails";
-import type { ConversationDetailLoader } from "@/types/conversation";
-import {
-  removeDeletedWorkbenchPins,
-  workbenchPinsQueryKey,
-} from "@/lib/workbenchPins";
 import {
   createContext,
   useContext,
@@ -17,7 +7,6 @@ import {
   useEffect,
   useMemo,
   useReducer,
-  useRef,
   useState,
   type Dispatch,
   type ReactNode,
@@ -29,9 +18,7 @@ import {
   type AssistantRuntime,
 } from "@assistant-ui/react";
 import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
-import { createConversationThreadListAdapter } from "@/app/newchat/adapter/conversation-thread-list-adapter";
-import { getWorkbenchPinStorageKey } from "@/app/newchat/assistant-ui/thread-pins";
-import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { workbenchConversationThreadListAdapter } from "@/app/newchat/adapter/conversation-thread-list-adapter";
 import { createNewChatAttachmentAdapter } from "@/app/newchat/adapter/attachment-adapter";
 import { ServerDictationAdapter } from "@/app/newchat/adapter/server-dictation-adapter";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -50,7 +37,6 @@ import type { WorkbenchBootstrap } from "../types";
 import { useConversationRouteGuard } from "../hooks/useConversationRouteGuard";
 
 export type WorkbenchSession = {
-  conversationDetails: ConversationDetailLoader;
   runtime: AssistantRuntime;
   selectedAgent: Agent | null;
   isLoadingAgents: boolean;
@@ -60,7 +46,6 @@ export type WorkbenchSession = {
   isDictationConfigured: boolean;
   workbenchState: WorkbenchState;
   workbenchBootstrap: WorkbenchBootstrap | null;
-  isLoadingWorkbenchBootstrap: boolean;
   onWorkbenchModeChange: (
     mode: "agent_create" | "skill_create" | "generic_chat"
   ) => void;
@@ -101,53 +86,7 @@ export function WorkbenchSessionProvider({
 }: {
   children: ReactNode;
 }) {
-  const { user } = useAuthorizationContext();
-  const queryClient = useQueryClient();
-  const identity = JSON.stringify([user?.tenantId, user?.id]);
-  const conversationDetails = useMemo(
-    () => createConversationDetailLoader(queryClient, identity),
-    [queryClient, identity]
-  );
-  useConversationRouteGuard("workbench", conversationDetails.load);
-  const detailLeases = useRef(new Map<ConversationDetailLoader, number>());
-  useEffect(() => {
-    const leases = detailLeases.current;
-    leases.set(conversationDetails, (leases.get(conversationDetails) ?? 0) + 1);
-    return () => {
-      leases.set(
-        conversationDetails,
-        (leases.get(conversationDetails) ?? 1) - 1
-      );
-      // Strict Mode replays setup synchronously; do not discard its shared read.
-      queueMicrotask(() => {
-        if (leases.get(conversationDetails) === 0) {
-          conversationDetails.clear();
-          leases.delete(conversationDetails);
-        }
-      });
-    };
-  }, [conversationDetails]);
-  const pinStorageKey = user
-    ? getWorkbenchPinStorageKey(user.id, user.tenantId)
-    : undefined;
-  const threadListAdapter = useMemo(
-    () =>
-      createConversationThreadListAdapter(
-        "workbench",
-        pinStorageKey,
-        () =>
-          queryClient.ensureQueryData({
-            queryKey: workbenchPinsQueryKey(pinStorageKey),
-            queryFn: () => conversationService.getWorkbenchPins(),
-          }),
-        (conversationId) => {
-          conversationDetails.invalidate(String(conversationId));
-          return removeDeletedWorkbenchPins(queryClient, [conversationId]);
-        },
-        conversationDetails
-      ),
-    [pinStorageKey, queryClient, conversationDetails]
-  );
+  useConversationRouteGuard("workbench");
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [workbenchState, dispatchWorkbench] = useReducer(
     workbenchReducer,
@@ -155,8 +94,6 @@ export function WorkbenchSessionProvider({
   );
   const [workbenchBootstrap, setWorkbenchBootstrap] =
     useState<WorkbenchBootstrap | null>(null);
-  const [isLoadingWorkbenchBootstrap, setIsLoadingWorkbenchBootstrap] =
-    useState(true);
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
   >(undefined);
@@ -170,31 +107,8 @@ export function WorkbenchSessionProvider({
     const searchParams = new URLSearchParams(window.location.search);
     const threadId =
       searchParams.get("thread_id") ?? searchParams.get("conversation_id");
-    conversationDetails.activate(threadId || undefined);
     setRequestedThreadId(threadId || undefined);
-  }, [conversationDetails]);
-
-  const handleThreadIdChange = useCallback(
-    (threadId: string | undefined) => {
-      conversationDetails.activate(threadId);
-      setRequestedThreadId(threadId);
-      const url = new URL(window.location.href);
-      url.searchParams.delete("thread_id");
-      url.searchParams.delete("conversation_id");
-      if (threadId && /^[1-9]\d*$/.test(threadId)) {
-        url.searchParams.set("conversation_id", threadId);
-      }
-      const nextUrl = `${url.pathname}${url.search}${url.hash}`;
-      if (
-        nextUrl !==
-        `${window.location.pathname}${window.location.search}${window.location.hash}`
-      ) {
-        // Keep the current document and its per-thread composer state mounted.
-        window.history.replaceState(window.history.state, "", nextUrl);
-      }
-    },
-    [conversationDetails]
-  );
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -204,9 +118,6 @@ export function WorkbenchSessionProvider({
       })
       .catch((error) => {
         log.error("[Home] Failed to load Workbench capabilities:", error);
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoadingWorkbenchBootstrap(false);
       });
     return () => {
       cancelled = true;
@@ -217,9 +128,8 @@ export function WorkbenchSessionProvider({
     runtimeHook: function useWorkbenchRuntime() {
       return useLocalChatRuntime(dictationAdapter);
     },
-    adapter: threadListAdapter,
+    adapter: workbenchConversationThreadListAdapter,
     threadId: requestedThreadId,
-    onThreadIdChange: handleThreadIdChange,
   });
 
   const { isLoading: isLoadingAgents, agents } = usePublishedAgentList();
@@ -243,7 +153,6 @@ export function WorkbenchSessionProvider({
   }, []);
 
   const value: WorkbenchSession = {
-    conversationDetails,
     runtime,
     selectedAgent,
     isLoadingAgents,
@@ -252,7 +161,6 @@ export function WorkbenchSessionProvider({
     onBack: handleBack,
     workbenchState,
     workbenchBootstrap,
-    isLoadingWorkbenchBootstrap,
     onWorkbenchModeChange: handleWorkbenchModeChange,
     dispatchWorkbench,
     isDictationConfigured: isDictationConfigured(modelConfig?.stt),

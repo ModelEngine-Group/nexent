@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 RAGFlow App Layer
 FastAPI endpoints for RAGFlow knowledge base operations.
@@ -12,7 +11,7 @@ from fastapi.responses import JSONResponse
 
 from consts.error_code import ErrorCode
 from consts.exceptions import AppException
-from management.services.knowledge_base.providers.ragflow import fetch_ragflow_datasets_impl
+from services.ragflow_service import fetch_ragflow_datasets_impl
 
 router = APIRouter(prefix="/ragflow")
 logger = logging.getLogger("ragflow_app")

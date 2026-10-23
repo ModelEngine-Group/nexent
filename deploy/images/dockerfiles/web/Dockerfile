@@ -58,7 +58,6 @@ ARG APK_MIRROR
 ARG TARGETARCH
 ARG CONFIGURED_BASE_PATH=/
 LABEL authors="nexent"
-ENV TZ=Asia/Shanghai
 
 # Configure Alpine mirrors if specified
 RUN if [ "$APK_MIRROR" = "tsinghua" ]; then \
@@ -66,13 +65,13 @@ RUN if [ "$APK_MIRROR" = "tsinghua" ]; then \
         echo "https://mirrors.tuna.tsinghua.edu.cn/alpine/latest-stable/community" >> /etc/apk/repositories; \
     fi
 
-# Update package index, upgrade busybox first, then install runtime utilities
+# Update package index, upgrade busybox first, then install curl
 # This avoids trigger script issues in cross-platform builds with QEMU emulation
 RUN --mount=type=cache,id=nexent-web-apk-${TARGETARCH},target=/var/cache/apk,sharing=locked \
     mkdir -p /var/cache/apk && \
     apk update && \
     (apk upgrade busybox || true) && \
-    apk add --no-scripts curl vim procps-ng wget less tzdata
+    apk add --no-scripts curl vim
 
 WORKDIR /opt/frontend-dist
 

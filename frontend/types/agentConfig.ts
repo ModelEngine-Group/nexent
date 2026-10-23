@@ -1,11 +1,11 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 // Agent Configuration Types
 import type { Dispatch, SetStateAction } from "react";
 import type { MyAgentRepositoryInfoItem } from "@/types/agentRepository";
 
 import { ChatMessageType } from "./chat";
 import { ModelOption } from "@/types/modelConfig";
+import { GENERATE_PROMPT_STREAM_TYPES } from "../const/agentConfig";
+import type { PromptTemplateFieldKey } from "../const/promptTemplate";
 
 export type AgentConfigUpdate = Partial<
   Pick<
@@ -22,10 +22,14 @@ export type AgentConfigUpdate = Partial<
     | "allow_chat_metadata"
     | "enable_protocol_repair_retry"
     | "description"
-    | "prompt"
+    | "duty_prompt"
+    | "constraint_prompt"
+    | "few_shots_prompt"
     | "business_description"
     | "business_logic_model_id"
     | "business_logic_model_name"
+    | "prompt_template_id"
+    | "prompt_template_name"
     | "verification_config"
     | "group_ids"
     | "ingroup_permission"
@@ -117,7 +121,6 @@ export interface PublishedAgent {
   display_name?: string;
   description: string;
   author?: string;
-  author_cas_username?: string | null;
   unavailable_reasons?: string[];
   model_ids?: number[];
   model_names?: string[];
@@ -151,11 +154,9 @@ export interface Agent {
   description: string;
   tags?: string[];
   author?: string;
-  author_cas_username?: string | null;
   /** Nexent user_id of the agent creator (owner). */
   created_by?: string | null;
   create_time?: string;
-  update_time?: string;
   version_label?: string | null;
   version_create_time?: string | null;
   unavailable_reasons?: string[];
@@ -179,10 +180,14 @@ export interface Agent {
   verification_config?: AgentVerificationConfig;
   tools: Tool[];
   skills?: Skill[]; // Skills configured for this agent
-  prompt?: string;
+  duty_prompt?: string;
+  constraint_prompt?: string;
+  few_shots_prompt?: string;
   business_description?: string;
   business_logic_model_name?: string;
   business_logic_model_id?: number;
+  prompt_template_id?: number;
+  prompt_template_name?: string;
   is_available?: boolean;
   is_new?: boolean;
   sub_agent_id_list?: number[];
@@ -212,7 +217,6 @@ export interface Agent {
 }
 
 export interface Tool {
-  updated_by_cas_username?: string | null;
   id: string;
   name: string;
   origin_name?: string;
@@ -415,6 +419,12 @@ export interface AgentSetupOrchestratorProps {
   setEnabledAgentIds: (ids: number[]) => void;
   onEditingStateChange?: (isEditing: boolean, agent: any) => void;
   onToolsRefresh: (showSuccessMessage?: boolean) => void | Promise<any>;
+  dutyContent: string;
+  setDutyContent: (value: string) => void;
+  constraintContent: string;
+  setConstraintContent: (value: string) => void;
+  fewShotsContent: string;
+  setFewShotsContent: (value: string) => void;
   agentName?: string;
   setAgentName?: (value: string) => void;
   agentDescription?: string;
@@ -423,8 +433,10 @@ export interface AgentSetupOrchestratorProps {
   setAgentDisplayName?: (value: string) => void;
   agentAuthor?: string;
   setAgentAuthor?: (value: string) => void;
+  isGeneratingAgent?: boolean;
   onDebug?: () => void;
   getCurrentAgentId?: () => number | undefined;
+  onGenerateAgent?: (selectedModel?: ModelOption) => void;
   onExportAgent?: () => void;
   onDeleteAgent?: () => void;
   editingAgent?: any;
@@ -447,6 +459,7 @@ export interface SubAgentPoolProps {
   subAgentList?: Agent[];
   loadingAgents?: boolean;
   isImporting?: boolean;
+  isGeneratingAgent?: boolean;
   editingAgent?: Agent | null;
   isCreatingNewAgent?: boolean;
   onCopyAgent?: (agent: Agent) => void;
@@ -465,6 +478,7 @@ export interface ToolPoolProps {
   localIsGenerating?: boolean;
   onToolsRefresh?: (showSuccessMessage?: boolean) => void | Promise<any>;
   isEditingMode?: boolean;
+  isGeneratingAgent?: boolean;
   isEmbeddingConfigured?: boolean;
   agentUnavailableReasons?: string[];
   toolConfigDrafts?: Record<string, ToolParam[]>;
@@ -630,6 +644,30 @@ export interface McpContainer {
 
 // ========== Prompt Service Interfaces ==========
 
+/**
+ * Prompt Generation Request Parameters
+ */
+export interface GeneratePromptParams {
+  agent_id: number;
+  task_description: string;
+  model_id: number;
+  prompt_template_id?: number;
+  tool_ids?: number[]; // Optional: tool IDs selected in frontend (takes precedence over database query)
+  sub_agent_ids?: number[]; // Optional: sub-agent IDs selected in frontend (takes precedence over database query)
+  /**
+   * Optional: Knowledge base display names for few-shot examples.
+   * If provided, the backend will use these instead of querying the database.
+   * This allows the frontend to pass the latest configured knowledge base names
+   * without waiting for tool config to be saved first.
+   */
+  knowledge_base_display_names?: string[];
+  /**
+   * Whether tools or sub-agents are selected.
+   * When false, the backend skips generating constraint and few_shots sections.
+   */
+  has_selected_resources?: boolean;
+}
+
 export interface OptimizePromptSectionParams {
   agent_id: number;
   task_description: string;
@@ -677,4 +715,35 @@ export interface OptimizePromptBadCaseResponse {
   section_title: string;
   original_content: string;
   optimized_content: string;
+}
+
+/**
+ * Stream Response Data Structure
+ */
+export interface StreamResponseData {
+  type: (typeof GENERATE_PROMPT_STREAM_TYPES)[keyof typeof GENERATE_PROMPT_STREAM_TYPES];
+  content: string;
+  is_complete: boolean;
+}
+
+export type PromptTemplateContent = Record<PromptTemplateFieldKey, string>;
+
+export interface PromptTemplate {
+  template_id: number;
+  template_name: string;
+  description?: string | null;
+  template_type: string;
+  template_content_zh: PromptTemplateContent;
+  template_content_en?: PromptTemplateContent | null;
+  is_system_default?: boolean;
+  create_time?: string;
+  update_time?: string;
+}
+
+export interface PromptTemplatePayload {
+  template_name: string;
+  description?: string;
+  template_type?: string;
+  template_content_zh: PromptTemplateContent;
+  template_content_en?: PromptTemplateContent | null;
 }

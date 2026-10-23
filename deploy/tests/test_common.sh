@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -euo pipefail
 
@@ -8,8 +7,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../common/common.sh"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/../common/version.sh"
-# shellcheck source=/dev/null
-source "$SCRIPT_DIR/../k8s/env.sh"
 
 TMP_DIR="${TMPDIR:-/tmp}/nexent-deployment-test-$$"
 mkdir -p "$TMP_DIR"
@@ -420,13 +417,10 @@ assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/depl
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/deployment.yaml")" "checksum/nexent-backend:" "data-process deployment should not keep removed backend rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_DEFAULT_TENANT_ID" "common configmap should expose the CAS default tenant"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/values.yaml")" "defaultTenantId: \"tenant_id\"" "common values should preserve the CAS default tenant"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/deploy.sh")" "CAS_DEFAULT_TENANT_ID" "k8s deploy should render the CAS default tenant from environment configuration"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_DEFAULT_ROLE" "common configmap should expose the CAS default role"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/values.yaml")" "defaultRole: \"USER\"" "common values should preserve the CAS default role"
-CAS_ENV_FILE="$TMP_DIR/cas.env"
-printf 'CAS_DEFAULT_TENANT_ID=synthetic-tenant\nCAS_DEFAULT_ROLE=ADMIN\n' > "$CAS_ENV_FILE"
-CAS_ENV_DATA="$(k8s_env_file_data "$CAS_ENV_FILE")"
-assert_contains "$CAS_ENV_DATA" "CAS_DEFAULT_TENANT_ID: \"$(printf '%s' synthetic-tenant | base64 | tr -d '\r\n')\"" "k8s env Secret should preserve the configured CAS default tenant"
-assert_contains "$CAS_ENV_DATA" "CAS_DEFAULT_ROLE: \"$(printf '%s' ADMIN | base64 | tr -d '\r\n')\"" "k8s env Secret should preserve the configured CAS default role"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/deploy.sh")" "CAS_DEFAULT_ROLE" "k8s deploy should render the CAS default role from environment configuration"
 assert_contains "$(cat "$SCRIPT_DIR/../env/.env.example")" "CAS_DEFAULT_ROLE=USER" "docker environment example should preserve the CAS default role"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_HEARTBEAT_URL" "common configmap should expose the CAS heartbeat URL"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_HEARTBEAT_INTERVAL_SECONDS" "common configmap should expose the CAS heartbeat interval"
@@ -909,7 +903,7 @@ deployment_tui_step_should_run() {
 }
 assert_eq "1" "$(deployment_tui_next_step 0)" "TUI next step should advance to the next runnable step"
 assert_eq "3" "$(deployment_tui_next_step 2)" "TUI should select Sandbox mode immediately after image source"
-assert_eq "6" "$(deployment_tui_next_step 3)" "TUI next step should skip non-runnable monitoring and HTTPS steps"
+assert_eq "5" "$(deployment_tui_next_step 3)" "TUI next step should skip non-runnable monitoring provider"
 assert_eq "3" "$(deployment_tui_previous_step 4)" "TUI previous step should return to Sandbox mode"
 
 assert_eq "$(sed -n '1p' "$SCRIPT_DIR/../../VERSION")" "$(deployment_read_version "")" "deployment version should come from root VERSION"
@@ -1147,218 +1141,4 @@ if [ -f "$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/deploy/env/.env" ]; then
   echo "FAIL: generate_env should not create deploy/env/.env from docker/.env.example"
   exit 1
 fi
-# ---------------------------------------------------------------------------
-# HTTPS option tests
-# ---------------------------------------------------------------------------
-
-HTTPS_TEST_DIR="$TMP_DIR/https"
-mkdir -p "$HTTPS_TEST_DIR/certs" "$HTTPS_TEST_DIR/ssl-root/nginx/ssl"
-
-# Fixture: valid cert/key pair (unencrypted)
-openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 365 \
-  -keyout "$HTTPS_TEST_DIR/certs/valid.key" -out "$HTTPS_TEST_DIR/certs/valid.pem" \
-  -subj "/CN=localhost" >/dev/null 2>&1
-
-# Fixture: encrypted key (correct passphrase: secret123)
-openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 365 \
-  -keyout "$HTTPS_TEST_DIR/certs/plain.key" -out "$HTTPS_TEST_DIR/certs/plain.pem" \
-  -subj "/CN=encrypted" >/dev/null 2>&1
-openssl rsa -aes256 -in "$HTTPS_TEST_DIR/certs/plain.key" -out "$HTTPS_TEST_DIR/certs/enc.key" \
-  -passout pass:secret123 >/dev/null 2>&1
-
-# Fixture: another cert (for mismatch test)
-openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 365 \
-  -keyout "$HTTPS_TEST_DIR/certs/other.key" -out "$HTTPS_TEST_DIR/certs/other.pem" \
-  -subj "/CN=other" >/dev/null 2>&1
-
-deployment_prepare_config --components infrastructure,application --port-policy development --app-version latest
-assert_eq "disabled" "$DEPLOYMENT_HTTPS_MODE" "HTTPS mode should default to disabled"
-
-# Invalid mode must be rejected
-if deployment_prepare_config --components infrastructure --https-mode invalid --app-version latest >/dev/null 2>&1; then
-  echo "FAIL: invalid HTTPS mode should be rejected"
-  exit 1
-fi
-
-# SAN entry classification: IP vs DNS
-assert_eq "10.0.0.5|IP:10.0.0.5,DNS:example.com" \
-  "$(deployment_https_build_san_entries "10.0.0.5, example.com")" \
-  "SAN builder should classify IPv4/DNS and strip spaces"
-assert_eq "example.com|DNS:example.com,DNS:api.example.com" \
-  "$(deployment_https_build_san_entries "example.com,api.example.com")" \
-  "SAN builder should use the first entry as CN"
-
-# Cert validation: valid pair
-DEPLOYMENT_HTTPS_CERT_FILE="$HTTPS_TEST_DIR/certs/valid.pem"
-DEPLOYMENT_HTTPS_KEY_FILE="$HTTPS_TEST_DIR/certs/valid.key"
-DEPLOYMENT_HTTPS_KEY_PASSPHRASE=""
-deployment_https_validate_cert_pair || {
-  echo "FAIL: valid cert pair should pass validation"
-  exit 1
-}
-
-# Cert validation: mismatched pair
-DEPLOYMENT_HTTPS_CERT_FILE="$HTTPS_TEST_DIR/certs/other.pem"
-DEPLOYMENT_HTTPS_KEY_FILE="$HTTPS_TEST_DIR/certs/valid.key"
-if deployment_https_validate_cert_pair >/dev/null 2>&1; then
-  echo "FAIL: mismatched cert pair should fail validation"
-  exit 1
-fi
-
-# Cert validation: invalid PEM content
-printf 'not a certificate\n' > "$HTTPS_TEST_DIR/certs/bad.pem"
-DEPLOYMENT_HTTPS_CERT_FILE="$HTTPS_TEST_DIR/certs/bad.pem"
-DEPLOYMENT_HTTPS_KEY_FILE="$HTTPS_TEST_DIR/certs/valid.key"
-if deployment_https_validate_cert_pair >/dev/null 2>&1; then
-  echo "FAIL: invalid PEM certificate should fail validation"
-  exit 1
-fi
-
-# Cert validation: encrypted key with correct passphrase
-DEPLOYMENT_HTTPS_CERT_FILE="$HTTPS_TEST_DIR/certs/plain.pem"
-DEPLOYMENT_HTTPS_KEY_FILE="$HTTPS_TEST_DIR/certs/enc.key"
-DEPLOYMENT_HTTPS_KEY_PASSPHRASE="secret123"
-deployment_https_validate_cert_pair || {
-  echo "FAIL: encrypted key with correct passphrase should pass validation"
-  exit 1
-}
-
-# Cert validation: encrypted key with wrong passphrase
-DEPLOYMENT_HTTPS_KEY_PASSPHRASE="wrong"
-if deployment_https_validate_cert_pair >/dev/null 2>&1; then
-  echo "FAIL: wrong passphrase should fail validation"
-  exit 1
-fi
-
-# Cert validation: encrypted key without passphrase should demand one
-DEPLOYMENT_HTTPS_KEY_PASSPHRASE=""
-if deployment_https_validate_cert_pair >/dev/null 2>&1; then
-  echo "FAIL: encrypted key without passphrase should fail validation"
-  exit 1
-fi
-
-# Custom mode: missing cert file must fail with a clear error
-if deployment_prepare_config --components infrastructure --https-mode custom \
-  --https-cert-file "$HTTPS_TEST_DIR/certs/missing.pem" \
-  --https-key-file "$HTTPS_TEST_DIR/certs/valid.key" --app-version latest >/dev/null 2>&1; then
-  echo "FAIL: custom mode with missing cert file should fail"
-  exit 1
-fi
-
-# Self-signed cert generation: explicit SAN, first run creates the pair
-DEPLOYMENT_HTTPS_MODE="self-signed"
-DEPLOYMENT_HTTPS_SAN="10.1.2.3,example.internal"
-ROOT_DIR="$HTTPS_TEST_DIR/ssl-root"
-deployment_https_ensure_self_signed_cert "$ROOT_DIR/nginx/ssl" || {
-  echo "FAIL: self-signed cert generation should succeed"
-  exit 1
-}
-assert_contains "$(openssl x509 -in "$ROOT_DIR/nginx/ssl/server.pem" -noout -text 2>/dev/null)" \
-  "IP Address:10.1.2.3" "generated cert should include the explicit IP SAN"
-assert_contains "$(openssl x509 -in "$ROOT_DIR/nginx/ssl/server.pem" -noout -text 2>/dev/null)" \
-  "DNS:example.internal" "generated cert should include the explicit DNS SAN"
-
-# Self-signed cert reuse: a second run must not change the certificate
-HTTPS_CERT_BEFORE="$(openssl x509 -in "$ROOT_DIR/nginx/ssl/server.pem" -noout -fingerprint -sha256 2>/dev/null)"
-DEPLOYMENT_HTTPS_SAN=""  # force re-detection path; existing pair must still be reused
-deployment_https_ensure_self_signed_cert "$ROOT_DIR/nginx/ssl" || {
-  echo "FAIL: self-signed cert reuse should succeed"
-  exit 1
-}
-assert_eq "$HTTPS_CERT_BEFORE" \
-  "$(openssl x509 -in "$ROOT_DIR/nginx/ssl/server.pem" -noout -fingerprint -sha256 2>/dev/null)" \
-  "existing valid cert pair should be reused without regeneration"
-
-# Self-signed cert regeneration: a corrupted cert must trigger regeneration
-printf 'broken' > "$ROOT_DIR/nginx/ssl/server.pem"
-deployment_https_ensure_self_signed_cert "$ROOT_DIR/nginx/ssl" || {
-  echo "FAIL: self-signed cert regeneration should succeed"
-  exit 1
-}
-if openssl x509 -in "$ROOT_DIR/nginx/ssl/server.pem" -noout >/dev/null 2>&1; then
-  assert_not_eq "$HTTPS_CERT_BEFORE" \
-    "$(openssl x509 -in "$ROOT_DIR/nginx/ssl/server.pem" -noout -fingerprint -sha256 2>/dev/null)" \
-    "corrupted cert should be regenerated"
-else
-  echo "FAIL: regenerated cert should be valid PEM"
-  exit 1
-fi
-unset ROOT_DIR
-
-# K8s port values: disabled keeps web on NodePort 30000
-deployment_prepare_config --components infrastructure,application --port-policy production --app-version latest
-HTTPS_DISABLED_PORTS="$(deployment_render_k8s_port_values)"
-assert_contains "$HTTPS_DISABLED_PORTS" 'type: "NodePort"' "disabled HTTPS should keep web as NodePort"
-if [[ "$HTTPS_DISABLED_PORTS" == *"nexent-nginx"* ]]; then
-  echo "FAIL: disabled HTTPS should not render the nginx service block"
-  exit 1
-fi
-
-# K8s port values: enabled keeps web on NodePort 30000 and adds nginx NodePort 31000
-deployment_prepare_config --components infrastructure,application --port-policy production --https-mode self-signed --app-version latest
-HTTPS_ENABLED_PORTS="$(deployment_render_k8s_port_values)"
-assert_contains "$HTTPS_ENABLED_PORTS" $'nexent-web:\n  services:\n    web:\n      type: "NodePort"\n      nodePort: 30000' "enabled HTTPS should keep web on NodePort 30000"
-assert_contains "$HTTPS_ENABLED_PORTS" $'nexent-nginx:\n  enabled: true\n  services:\n    nginx:\n      type: "NodePort"\n      entryPort: 31000\n      nodePort: 31000' "enabled HTTPS should render nginx NodePort 31000"
-
-
-# Custom mode with an encrypted key: prepare must materialize a decrypted copy
-deployment_prepare_config --components infrastructure --https-mode custom \
-  --https-cert-file "$HTTPS_TEST_DIR/certs/plain.pem" \
-  --https-key-file "$HTTPS_TEST_DIR/certs/enc.key" \
-  --https-key-passphrase secret123 --app-version latest >/dev/null 2>&1 || {
-  echo "FAIL: custom mode with encrypted key should pass prepare config"
-  exit 1
-}
-ROOT_DIR="$HTTPS_TEST_DIR/custom-root"
-deployment_https_prepare || {
-  echo "FAIL: deployment_https_prepare should succeed with an encrypted custom key"
-  exit 1
-}
-assert_contains "$DEPLOYMENT_HTTPS_KEY_PATH" "$HTTPS_TEST_DIR/custom-root/nginx/ssl/server.key" \
-  "custom key path should point at the materialized copy"
-if ! openssl pkey -in "$DEPLOYMENT_HTTPS_KEY_PATH" -noout >/dev/null 2>&1; then
-  echo "FAIL: materialized key should load without a passphrase"
-  exit 1
-fi
-if grep -q "ENCRYPTED" "$DEPLOYMENT_HTTPS_KEY_PATH" 2>/dev/null; then
-  echo "FAIL: materialized key should be unencrypted"
-  exit 1
-fi
-if ! grep -q "ENCRYPTED" "$HTTPS_TEST_DIR/certs/enc.key"; then
-  echo "FAIL: original encrypted key file must not be modified"
-  exit 1
-fi
-if [ "$(openssl x509 -in "$DEPLOYMENT_HTTPS_CERT_PATH" -noout -fingerprint -sha256 2>/dev/null)" != \
-     "$(openssl x509 -in "$HTTPS_TEST_DIR/certs/plain.pem" -noout -fingerprint -sha256 2>/dev/null)" ]; then
-  echo "FAIL: materialized cert should match the source cert"
-  exit 1
-fi
-unset ROOT_DIR
-
-# Custom mode with a wrong passphrase: config validation must reject it
-if deployment_prepare_config --components infrastructure --https-mode custom \
-  --https-cert-file "$HTTPS_TEST_DIR/certs/plain.pem" \
-  --https-key-file "$HTTPS_TEST_DIR/certs/enc.key" \
-  --https-key-passphrase wrongpass --app-version latest >/dev/null 2>&1; then
-  echo "FAIL: wrong passphrase should fail config validation"
-  exit 1
-fi
-
-HTTPS_HELM_VALUES="$TMP_DIR/https-generated-values.yaml"
-# Helm chart values: enabled renders the nginx block with certificate content
-deployment_prepare_config --components infrastructure,application --port-policy production --https-mode self-signed --app-version latest >/dev/null 2>&1
-ROOT_DIR="$HTTPS_TEST_DIR/ssl-root"
-deployment_https_prepare || {
-  echo "FAIL: deployment_https_prepare should succeed for self-signed mode"
-  exit 1
-}
-deployment_render_helm_chart_values > "$HTTPS_HELM_VALUES"
-assert_contains "$(cat "$HTTPS_HELM_VALUES")" $'nexent-nginx:\n  enabled: true' "helm values should enable the nginx subchart"
-assert_contains "$(cat "$HTTPS_HELM_VALUES")" $'nexent-nginx:\n  enabled: true\n  images:\n    nginx:\n      repository: "registry.local/nexent/nginx"\n      tag: "alpine"\n      pullPolicy: "IfNotPresent"\n  services:\n    nginx:\n      type: "NodePort"\n      entryPort: 31000\n      nodePort: 31000' "helm values should render the nginx NodePort from NEXENT_HTTPS_PORT"
-assert_contains "$(cat "$HTTPS_HELM_VALUES")" "BEGIN CERTIFICATE" "helm values should embed the certificate content"
-
-# Reset to disabled for the summary path
-deployment_prepare_config --components infrastructure,application --port-policy production --app-version latest
-assert_eq "disabled" "$DEPLOYMENT_HTTPS_MODE" "HTTPS mode should reset to disabled after re-prepare"
-
 echo "All deployment common tests passed."

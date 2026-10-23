@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import os
 import sys
 import unittest
@@ -16,10 +14,10 @@ _MODULES_TO_RESTORE = [
     "database.cas_session_db",
     "database.oauth_account_db",
     "database.user_tenant_db",
-    "management.services.permission.identity.oauth",
-    "management.services.skill.transfer",
-    "management.services.tool.configuration",
-    "management.services.permission.identity.authentication_helpers",
+    "services.oauth_service",
+    "management.services.skill.service",
+    "services.tool_configuration_service",
+    "utils.auth_utils",
 ]
 _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in _MODULES_TO_RESTORE}
 
@@ -56,12 +54,12 @@ sys.modules["consts.const"] = consts_mock.const
 sys.modules["database.cas_session_db"] = MagicMock()
 sys.modules["database.oauth_account_db"] = MagicMock()
 sys.modules["database.user_tenant_db"] = MagicMock()
-sys.modules["management.services.permission.identity.oauth"] = MagicMock()
-sys.modules["management.services.skill.transfer"] = MagicMock()
-sys.modules["management.services.tool.configuration"] = MagicMock()
-sys.modules["management.services.permission.identity.authentication_helpers"] = MagicMock()
+sys.modules["services.oauth_service"] = MagicMock()
+sys.modules["management.services.skill.service"] = MagicMock()
+sys.modules["services.tool_configuration_service"] = MagicMock()
+sys.modules["utils.auth_utils"] = MagicMock()
 
-from management.services.permission.identity.cas import (  # noqa: E402
+from services.cas_service import (  # noqa: E402
     CasAuthenticationError,
     build_login_url,
     build_logout_url,
@@ -77,7 +75,7 @@ for _name, _module in _ORIGINAL_MODULES.items():
         sys.modules.pop(_name, None)
     else:
         sys.modules[_name] = _module
-sys.modules.pop("management.services.permission.identity.cas", None)
+sys.modules.pop("services.cas_service", None)
 
 
 class TestCasServiceParsing(unittest.TestCase):

@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useEffect, useState } from "react";
@@ -24,13 +22,10 @@ interface ProviderRow {
   account?: OAuthAccount;
 }
 
-interface OAuthAccountsSectionProps {
-  providers: OAuthProvider[];
-}
-
-export function OAuthAccountsSection({ providers }: OAuthAccountsSectionProps) {
+export function OAuthAccountsSection() {
   const { t } = useTranslation("common");
   const [accounts, setAccounts] = useState<OAuthAccount[]>([]);
+  const [enabledProviders, setEnabledProviders] = useState<OAuthProvider[]>([]);
   const [loading, setLoading] = useState(false);
   const [unlinkTarget, setUnlinkTarget] = useState<OAuthAccount | null>(null);
 
@@ -40,8 +35,12 @@ export function OAuthAccountsSection({ providers }: OAuthAccountsSectionProps) {
 
   const loadData = async () => {
     setLoading(true);
-    const linked = await oauthService.getLinkedAccounts();
+    const [linked, providers] = await Promise.all([
+      oauthService.getLinkedAccounts(),
+      oauthService.getEnabledProviders(),
+    ]);
     setAccounts(linked);
+    setEnabledProviders(providers);
     setLoading(false);
   };
 
@@ -62,7 +61,7 @@ export function OAuthAccountsSection({ providers }: OAuthAccountsSectionProps) {
   };
 
   const accountMap = new Map(accounts.map((a) => [a.provider, a]));
-  const rows: ProviderRow[] = providers.map((p) => {
+  const rows: ProviderRow[] = enabledProviders.map((p) => {
     const account = accountMap.get(p.name);
     return {
       name: p.name,

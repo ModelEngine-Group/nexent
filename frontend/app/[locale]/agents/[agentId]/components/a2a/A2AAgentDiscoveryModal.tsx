@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useState, useEffect } from "react";
@@ -20,7 +18,6 @@ import {
   Select,
   Popover,
   Radio,
-  Checkbox,
 } from "antd";
 import {
   Globe,
@@ -369,7 +366,6 @@ export default function A2AAgentDiscoveryModal({
   // URL mode state
   const [url, setUrl] = useState("");
   const [customHeaders, setCustomHeaders] = useState("");
-  const [sslVerify, setSslVerify] = useState(true);
   const [selectedAgent, setSelectedAgent] = useState<A2AExternalAgent | null>(null);
 
   // List mode state
@@ -389,7 +385,6 @@ export default function A2AAgentDiscoveryModal({
 
   // Discover from URL
   const handleDiscoverFromUrl = async () => {
-    if (loading) return;
     if (!url.trim()) {
       messageApi.error(t("a2a.discovery.urlRequired"));
       return;
@@ -423,28 +418,21 @@ export default function A2AAgentDiscoveryModal({
     }
 
     setLoading(true);
-    try {
-      const result = await a2aClientService.discoverFromUrl({
-        url: url.trim(),
-        custom_headers: parsedCustomHeaders,
-        ssl_verify: sslVerify,
-      });
+    const result = await a2aClientService.discoverFromUrl({
+      url: url.trim(),
+      custom_headers: parsedCustomHeaders,
+    });
+    setLoading(false);
 
-      if (result.success && result.data) {
-        setSelectedAgent(result.data);
-        setDiscoveredAgents([result.data]);
-        if (onDiscoverSuccess) {
-          onDiscoverSuccess();
-        }
-        messageApi.success(t("a2a.discovery.success"));
-      } else {
-        messageApi.error(result.message || t("a2a.discovery.failed"));
+    if (result.success && result.data) {
+      setSelectedAgent(result.data);
+      setDiscoveredAgents([result.data]);
+      if (onDiscoverSuccess) {
+        onDiscoverSuccess();
       }
-    } catch (error) {
-      log.error("Agent discovery failed:", error);
-      messageApi.error(t("a2a.discovery.failed"));
-    } finally {
-      setLoading(false);
+      messageApi.success(t("a2a.discovery.success"));
+    } else {
+      messageApi.error(result.message || t("a2a.discovery.failed"));
     }
   };
 
@@ -695,15 +683,6 @@ export default function A2AAgentDiscoveryModal({
                                 {t("a2a.discovery.button")}
                               </Button>
                             </div>
-                          </Form.Item>
-                          <Form.Item extra={t("a2a.discovery.sslVerifyHelp")}>
-                            <Checkbox
-                              checked={sslVerify}
-                              disabled={loading}
-                              onChange={(e) => setSslVerify(e.target.checked)}
-                            >
-                              {t("a2a.discovery.sslVerify")}
-                            </Checkbox>
                           </Form.Item>
                           <Form.Item
                             label={t("a2a.discovery.customHeadersLabel")}

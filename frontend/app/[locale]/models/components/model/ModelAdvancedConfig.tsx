@@ -1,11 +1,9 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2 } from "lucide-react";
 
-import { SliderStepper } from "@/components/common/SliderStepper";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,32 +23,13 @@ import {
   resolveReasoningControls,
   useReasoningFormEffects,
 } from "./ModelAdvancedSettings";
-import type {
-  ModelType,
-  ReasoningCapability,
-  ReasoningEffort,
-} from "@/types/modelConfig";
-import { MODEL_TYPES } from "@/const/modelConfig";
-import {
-  DEFAULT_CHUNKING_BATCH_SIZE,
-  DEFAULT_EXPECTED_CHUNK_SIZE,
-  DEFAULT_MAXIMUM_CHUNK_SIZE,
-  ModelChunkSizeSlider,
-} from "./ModelChunkSizeSlider";
-import {
-  isEmbeddingModelType,
-  isVoiceModelType,
-  supportsCapacityGrid,
-} from "./modelTypeUi";
+import type { ReasoningCapability, ReasoningEffort } from "@/types/modelConfig";
 
 /**
- * v2.6.1 redesign (v0 design): the shared advanced-config section, type-aware
- * like the old dialog's spec-driven form:
- *  - LLM family (llm / vlm / vlm2 / vlm3): capacity fields + temperature /
- *    top_p + deep-thinking controls + custom params.
- *  - Embedding family: multimodal switch + chunk-size slider + chunk batch.
- *  - rerank: max-tokens field.
- *  - stt / tts: provider select + App ID + Access Token (tts adds max tokens).
+ * v2.6.1 redesign (v0 design): the shared advanced-config section — capacity
+ * fields, numeric inference params (temperature / top_p), the deep-thinking
+ * toggle with reasoning effort / budget controls, and custom key/value
+ * params, rendered as the fixed v0-style grid.
  *
  * Used by the model edit dialog (高级配置) and the add-dialog advanced
  * settings (RowSettingsDialog) so the two stay visually identical. The value
@@ -86,7 +65,6 @@ export function ModelAdvancedConfig({
   onChange,
   modelType,
   reasoningCapability,
-  onModelTypeChange,
 }: {
   value: ModelAdvancedSettingsValue;
   onChange: (next: ModelAdvancedSettingsValue) => void;
@@ -94,11 +72,6 @@ export function ModelAdvancedConfig({
   modelType?: string;
   /** Catalog-driven capability metadata; without it only the toggle shows. */
   reasoningCapability?: ReasoningCapability;
-  /** Live type updates for the multimodal switch (embedding ↔
-   *  multi_embedding), mirroring the old dialog where the switch edits the
-   *  row's type immediately. When absent (e.g. the edit dialog locks the
-   *  embedding pair's type) the switch is hidden. */
-  onModelTypeChange?: (next: ModelType) => void;
 }) {
   const { t } = useTranslation();
 
@@ -116,8 +89,6 @@ export function ModelAdvancedConfig({
 
   const setNumberField = (key: string, raw: string) =>
     onChange({ ...value, [key]: raw === "" ? undefined : Number(raw) });
-  const setStringField = (key: string, raw: string) =>
-    onChange({ ...value, [key]: raw === "" ? undefined : raw });
 
   const customs: [string, string][] = Array.isArray(value.__custom__)
     ? (value.__custom__ as [string, string][])
@@ -136,233 +107,46 @@ export function ModelAdvancedConfig({
     budgetControl,
     value.reasoning_budget_tokens
   );
-  const showCapacityGrid = supportsCapacityGrid(modelType);
-  const isEmbedding = isEmbeddingModelType(modelType);
-  const isVoice = isVoiceModelType(modelType);
-  const multimodalOn = modelType === MODEL_TYPES.MULTI_EMBEDDING;
-  const chunkRange: [number, number] = [
-    typeof value.expected_chunk_size === "number"
-      ? value.expected_chunk_size
-      : DEFAULT_EXPECTED_CHUNK_SIZE,
-    typeof value.maximum_chunk_size === "number"
-      ? value.maximum_chunk_size
-      : DEFAULT_MAXIMUM_CHUNK_SIZE,
-  ];
 
   return (
     <>
-      {/* Capacity + numeric inference params (LLM-family only — the other
-          types render their dedicated fields below instead) */}
-      {showCapacityGrid && (
-        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
-          <AdvField
-            label={t("model.dialog.capacity.contextWindowTokens")}
-            value={value.context_window_tokens?.toString() ?? ""}
-            onChange={(v) => setNumberField("context_window_tokens", v)}
-          />
-          <AdvField
-            label={t("model.dialog.capacity.maxInputTokens")}
-            value={value.max_input_tokens?.toString() ?? ""}
-            onChange={(v) => setNumberField("max_input_tokens", v)}
-          />
-          <AdvField
-            label={t("model.dialog.capacity.maxOutputTokens")}
-            value={value.max_output_tokens?.toString() ?? ""}
-            onChange={(v) => setNumberField("max_output_tokens", v)}
-          />
-          <AdvField
-            label={t("model.dialog.capacity.defaultOutputReserveTokens")}
-            value={value.default_output_reserve_tokens?.toString() ?? ""}
-            onChange={(v) => setNumberField("default_output_reserve_tokens", v)}
-          />
-          {(["temperature", "top_p"] as const).map((key) => {
-            const label =
-              key === "temperature"
-                ? t("modelConfig.advancedConfig.temperature", {
-                    defaultValue: "温度",
-                  })
-                : t("modelConfig.advancedConfig.topP", {
-                    defaultValue: "Top P",
-                  });
-            return (
-              <div key={key} className="min-w-0 space-y-1.5">
-                <Label className="text-sm">{label}</Label>
-                <SliderStepper
-                  compact
-                  label={label}
-                  value={
-                    typeof value[key] === "number" ? value[key] : undefined
-                  }
-                  fallback={1}
-                  showFallbackValue={false}
-                  min={0}
-                  max={key === "temperature" ? 2 : 1}
-                  step={0.1}
-                  onChange={(next) => onChange({ ...value, [key]: next })}
-                />
-              </div>
-            );
+      {/* Capacity + numeric inference params */}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+        <AdvField
+          label={t("model.dialog.capacity.contextWindowTokens")}
+          value={value.context_window_tokens?.toString() ?? ""}
+          onChange={(v) => setNumberField("context_window_tokens", v)}
+        />
+        <AdvField
+          label={t("model.dialog.capacity.maxInputTokens")}
+          value={value.max_input_tokens?.toString() ?? ""}
+          onChange={(v) => setNumberField("max_input_tokens", v)}
+        />
+        <AdvField
+          label={t("model.dialog.capacity.maxOutputTokens")}
+          value={value.max_output_tokens?.toString() ?? ""}
+          onChange={(v) => setNumberField("max_output_tokens", v)}
+        />
+        <AdvField
+          label={t("model.dialog.capacity.defaultOutputReserveTokens")}
+          value={value.default_output_reserve_tokens?.toString() ?? ""}
+          onChange={(v) => setNumberField("default_output_reserve_tokens", v)}
+        />
+        <AdvField
+          label={t("modelConfig.advancedConfig.temperature", {
+            defaultValue: "温度",
           })}
-        </div>
-      )}
-
-      {/* Embedding-family: multimodal switch + chunk-size slider + chunk
-          batch (old-dialog parameter set) */}
-      {isEmbedding && (
-        <div className="space-y-4 rounded-lg border px-4 py-4">
-          {onModelTypeChange && (
-            <div className="flex items-center justify-between">
-              <div>
-                <Label className="text-sm">
-                  {t("model.dialog.label.multimodal", {
-                    defaultValue: "多模态",
-                  })}
-                </Label>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  {multimodalOn
-                    ? t("model.dialog.hint.multimodalEnabled", {
-                        defaultValue:
-                          "多模态向量模型可处理图片与文本，将使用 multi_embedding 类型",
-                      })
-                    : t("model.dialog.hint.multimodalDisabled", {
-                        defaultValue: "文本向量模型仅处理文本",
-                      })}
-                </p>
-              </div>
-              <Switch
-                checked={multimodalOn}
-                onCheckedChange={(checked) =>
-                  onModelTypeChange(
-                    checked
-                      ? (MODEL_TYPES.MULTI_EMBEDDING as ModelType)
-                      : (MODEL_TYPES.EMBEDDING as ModelType)
-                  )
-                }
-              />
-            </div>
-          )}
-          <div>
-            <Label className="mb-2 block text-sm">
-              {t("modelConfig.slider.chunkingSize", {
-                defaultValue: "文档切片大小",
-              })}
-            </Label>
-            <ModelChunkSizeSlider
-              value={chunkRange}
-              onChange={(range) =>
-                onChange({
-                  ...value,
-                  expected_chunk_size: range[0],
-                  maximum_chunk_size: range[1],
-                })
-              }
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-sm">
-              {t("modelConfig.input.chunkingBatchSize", {
-                defaultValue: "单次请求切片量",
-              })}
-            </Label>
-            <Input
-              type="number"
-              min="1"
-              placeholder={String(DEFAULT_CHUNKING_BATCH_SIZE)}
-              value={
-                typeof value.chunk_batch === "number" ? value.chunk_batch : ""
-              }
-              onChange={(e) => setNumberField("chunk_batch", e.target.value)}
-              className="[appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-            />
-          </div>
-        </div>
-      )}
-
-      {/* rerank: max tokens only (old spec field set) */}
-      {modelType === MODEL_TYPES.RERANK && (
-        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
-          <AdvField
-            label={t("model.dialog.label.maxTokens", {
-              defaultValue: "最大Token数",
-            })}
-            value={value.max_tokens?.toString() ?? ""}
-            onChange={(v) => setNumberField("max_tokens", v)}
-          />
-        </div>
-      )}
-
-      {/* stt / tts: provider select + Volcano credentials (old spec field
-          set; tts adds max tokens) */}
-      {isVoice && (
-        <div className="space-y-4 rounded-lg border px-4 py-4">
-          <div className="space-y-1.5">
-            <Label className="text-sm">
-              {t(
-                modelType === MODEL_TYPES.STT
-                  ? "model.dialog.label.sttProvider"
-                  : "model.dialog.label.ttsProvider",
-                { defaultValue: "服务商" }
-              )}
-            </Label>
-            <Select
-              value={String(value.model_factory ?? "dashscope")}
-              onValueChange={(next) =>
-                onChange({ ...value, model_factory: next })
-              }
-            >
-              <SelectTrigger className="h-8 w-full bg-card text-sm font-normal">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="dashscope" className="text-xs">
-                  dashscope
-                </SelectItem>
-                <SelectItem value="volcengine" className="text-xs">
-                  volcengine
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-sm">
-              {t("model.dialog.label.modelAppid", { defaultValue: "App ID" })}
-            </Label>
-            <Input
-              value={String(value.model_appid ?? "")}
-              onChange={(e) => setStringField("model_appid", e.target.value)}
-              placeholder={t("model.dialog.placeholder.modelAppid", {
-                defaultValue: "输入火山引擎 App ID",
-              })}
-              autoComplete="off"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-sm">
-              {t("model.dialog.label.accessToken", {
-                defaultValue: "Access Token",
-              })}
-            </Label>
-            <Input
-              type="password"
-              value={String(value.access_token ?? "")}
-              onChange={(e) => setStringField("access_token", e.target.value)}
-              placeholder={t("model.dialog.placeholder.accessToken", {
-                defaultValue: "输入火山引擎 Access Token",
-              })}
-              autoComplete="new-password"
-            />
-          </div>
-          {modelType === MODEL_TYPES.TTS && (
-            <AdvField
-              label={t("model.dialog.label.maxTokens", {
-                defaultValue: "最大Token数",
-              })}
-              value={value.max_tokens?.toString() ?? ""}
-              onChange={(v) => setNumberField("max_tokens", v)}
-            />
-          )}
-        </div>
-      )}
+          value={value.temperature?.toString() ?? ""}
+          onChange={(v) => setNumberField("temperature", v)}
+        />
+        <AdvField
+          label={t("modelConfig.advancedConfig.topP", {
+            defaultValue: "Top P",
+          })}
+          value={value.top_p?.toString() ?? ""}
+          onChange={(v) => setNumberField("top_p", v)}
+        />
+      </div>
 
       {/* Deep thinking toggle + reasoning controls (capability-gated, #4009) */}
       {reasoningControlVisible && (

@@ -1,5 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Unit tests for ``management.services.memory.provider`` (Phase 2).
+"""Unit tests for ``backend.services.memory_backend_adapter`` (Phase 2).
 
 These tests exercise the async bridge between the SDK ``MemoryService``
 facade and the backend services. Both sides are stubbed, so the tests
@@ -173,10 +172,10 @@ memory_service.MemoryService = MemoryService
 # ---------------------------------------------------------------------------
 # Stub services modules
 # ---------------------------------------------------------------------------
-record_service_mod = types.ModuleType("management.services.memory.records")
-retrieval_service_mod = types.ModuleType("management.services.memory.retrieval")
-external_provider_service_mod = types.ModuleType("management.services.memory.providers.service")
-ingestion_event_service_mod = types.ModuleType("management.services.memory.ingestion")
+record_service_mod = types.ModuleType("services.memory_record_service")
+retrieval_service_mod = types.ModuleType("services.memory_retrieval_service")
+external_provider_service_mod = types.ModuleType("services.memory_external_provider_service")
+ingestion_event_service_mod = types.ModuleType("services.memory_ingestion_event_service")
 
 record_service_mod.get_memory_record_service = MagicMock(
     name="get_memory_record_service"
@@ -196,17 +195,17 @@ ingestion_event_service_mod.MemoryIngestionEventService = MagicMock(
     name="MemoryIngestionEventService"
 )
 
-sys.modules["management.services.memory.records"] = record_service_mod
-sys.modules["management.services.memory.retrieval"] = retrieval_service_mod
-sys.modules["management.services.memory.records"] = record_service_mod
-sys.modules["management.services.memory.retrieval"] = retrieval_service_mod
-sys.modules["management.services.memory.providers.service"] = external_provider_service_mod
-sys.modules["management.services.memory.providers.service"] = external_provider_service_mod
-sys.modules["management.services.memory.ingestion"] = ingestion_event_service_mod
-sys.modules["management.services.memory.ingestion"] = ingestion_event_service_mod
+sys.modules["services.memory_record_service"] = record_service_mod
+sys.modules["services.memory_retrieval_service"] = retrieval_service_mod
+sys.modules["backend.services.memory_record_service"] = record_service_mod
+sys.modules["backend.services.memory_retrieval_service"] = retrieval_service_mod
+sys.modules["services.memory_external_provider_service"] = external_provider_service_mod
+sys.modules["backend.services.memory_external_provider_service"] = external_provider_service_mod
+sys.modules["services.memory_ingestion_event_service"] = ingestion_event_service_mod
+sys.modules["backend.services.memory_ingestion_event_service"] = ingestion_event_service_mod
 
 
-from management.services.memory import provider as memory_backend_adapter
+from backend.services import memory_backend_adapter
 
 
 @pytest.fixture

@@ -1,0 +1,114 @@
+/* Chat module global styles - extracted from component inline styles */
+
+/* TaskWindow animations */
+@keyframes blinkingDot {
+  0% {
+    background-color: rgba(59, 130, 246, 0.5);
+  }
+  50% {
+    background-color: rgba(79, 70, 229, 1);
+  }
+  100% {
+    background-color: rgba(59, 130, 246, 0.5);
+  }
+}
+
+.blinkingDot {
+  animation: blinkingDot 1.5s infinite ease-in-out;
+  background-color: rgba(79, 70, 229, 1);
+  box-shadow: 0 0 5px rgba(79, 70, 229, 0.5);
+}
+
+@keyframes taskWindowEnter {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-task-window {
+  animation: taskWindowEnter 0.5s ease-out forwards;
+}
+
+/* TaskWindow content styles */
+.task-message-content .code-block-container {
+  max-width: 100% !important;
+  margin: 8px 0 !important;
+  overflow: visible !important;
+}
+
+.task-message-content .code-block-content pre {
+  white-space: pre-wrap !important;
+  word-wrap: break-word !important;
+  word-break: break-word !important;
+  overflow-wrap: break-word !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.task-message-content code:not(.code-block-content code) {
+  white-space: pre-wrap !important;
+  word-wrap: break-word !important;
+  word-break: break-word !important;
+  overflow-wrap: break-word !important;
+  max-width: 100% !important;
+}
+
+.task-message-content .react-syntax-highlighter-line-number {
+  white-space: nowrap !important;
+}
+
+.task-message-content {
+  max-width: 100% !important;
+  word-wrap: break-word !important;
+  word-break: break-word !important;
+}
+
+.task-message-content * {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.task-message-content .code-block-container * {
+  max-width: none !important;
+}
+
+/* Diagram size overrides in task window */
+.task-message-content .my-4 {
+  max-width: 200px !important;
+  margin: 0 auto !important;
+  display: flex !important;
+  justify-content: center !important;
+}
+
+.task-message-content .my-4 img {
+  max-width: 200px !important;
+  width: 200px !important;
+  margin: 0 auto !important;
+  display: block !important;
+}
+
+.task-message-content .task-message-content .my-4 {
+  max-width: 200px !important;
+  margin: 0 auto !important;
+  display: flex !important;
+  justify-content: center !important;
+}
+
+.task-message-content .task-message-content .my-4 img {
+  max-width: 200px !important;
+  width: 200px !important;
+  margin: 0 auto !important;
+  display: block !important;
+}
+
+/* Paragraph spacing */
+.task-message-content p {
+  margin-bottom: 0.5rem !important;
+  margin-top: 0.25rem !important;
+}
+
+.task-message-content .markdown-body p {
+  margin-bottom: 0.5rem !important;
+  margin-top: 0.25rem !important;
+}

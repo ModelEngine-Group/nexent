@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import type { AgentVersionDetail } from "@/services/agentVersionService";
 import type {
   AgentRepositoryListingDetail,
@@ -11,7 +9,6 @@ export interface MyAgentDetailView {
   title: string;
   description: string;
   author: string | null;
-  authorCasUsername?: string | null;
   modelName: string | null;
   versionLabel: string | null;
   tools: string[];
@@ -58,7 +55,6 @@ export function mapMyAgentDetail(
     title: detail.display_name?.trim() || detail.name?.trim() || "",
     description: detail.description?.trim() || "",
     author: detail.author?.trim() || null,
-    authorCasUsername: detail.author_cas_username,
     modelName:
       detail.model_names?.filter(Boolean).join(", ") ||
       detail.model_name?.trim() ||
@@ -96,7 +92,6 @@ export function mapAgentInfoDetail(agent: Agent): MyAgentDetailView {
     title: agent.display_name?.trim() || agent.name?.trim() || "",
     description: agent.description?.trim() || "",
     author: agent.author?.trim() || null,
-    authorCasUsername: agent.author_cas_username,
     modelName: agent.model_names?.filter(Boolean).join(", ") || null,
     versionLabel:
       agent.version_name?.trim() ||
@@ -126,11 +121,6 @@ export function mapRepositoryAgentDetail(
 ): MyAgentDetailView {
   return {
     ...mapMyAgentDetail(versionDetail, { tags }, resources),
-    authorCasUsername:
-      versionDetail.author_cas_username ??
-      (versionDetail.author?.trim() === listingDetail.author?.trim()
-        ? listingDetail.author_cas_username
-        : undefined),
     repositoryInfo: {
       downloads: listingDetail.downloads ?? 0,
       createdAt: listingDetail.created_at ?? null,

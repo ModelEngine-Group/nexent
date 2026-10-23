@@ -893,54 +893,6 @@ class TestChangeCommunityStatus:
         assert resp.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
 
 
-# ============================================================================
-# Security audit entries
-# ============================================================================
-
-class TestMcpMarketAuditEntries:
-    """Security audit entries emitted by MCP marketplace endpoints."""
-
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.change_mcp_market_status', new_callable=AsyncMock)
-    def test_status_update_emits_audit_entry_without_content(self, mock_change, mock_auth, caplog):
-        """Successful status change records market_id/status, not review text."""
-        import logging
-        mock_auth.return_value = ("uid", "tid", "en")
-
-        with caplog.at_level(logging.INFO, logger="audit.security"):
-            resp = client.patch("/mcp-tools/community/3/status", headers=AUTH_HEADER,
-                                json={"status": "approved", "content": "secret review text"})
-
-        assert resp.status_code == HTTPStatus.OK
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=mcp_market_status_update" in messages[0]
-        assert "result=success" in messages[0]
-        assert "user_id=uid" in messages[0]
-        assert '"market_id":3' in messages[0]
-        assert '"status":"approved"' in messages[0]
-        assert "secret review text" not in messages[0]
-
-    @patch('apps.mcp_management_app.get_current_user_info')
-    @patch('apps.mcp_management_app.increment_mcp_market_download_count')
-    def test_download_emits_audit_entry(self, mock_incr, mock_auth, caplog):
-        """Successful install records who downloaded which market listing."""
-        import logging
-        mock_auth.return_value = ("uid", "tid", "en")
-
-        with caplog.at_level(logging.INFO, logger="audit.security"):
-            resp = client.post("/mcp-tools/community/3/download", headers=AUTH_HEADER)
-
-        assert resp.status_code == HTTPStatus.OK
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=mcp_market_download" in messages[0]
-        assert "user_id=uid" in messages[0]
-        assert '"market_id":3' in messages[0]
-
-
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__, "-v"])

@@ -1,10 +1,8 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { App, Form, Input } from "antd";
+import { App, Modal, Form, Input, Button } from "antd";
 import { useQueryClient } from "@tanstack/react-query";
 
 const { TextArea } = Input;
@@ -16,10 +14,6 @@ import {
   getAgentPublishCompletion,
 } from "@/lib/agentUsageGuide";
 import log from "@/lib/logger";
-import {
-  ParamDialog,
-  ParamLabel,
-} from "@/components/resource-picker/ParamDialog";
 
 export interface AgentVersionPubulishModalProps {
   open: boolean;
@@ -179,26 +173,17 @@ export default function AgentVersionPubulishModal({
 
   return (
     <>
-      <ParamDialog
-        variant="publish"
+      <Modal
+        centered
         title={isEdit ? t("common.edit") : t("agent.version.publish")}
         open={open}
-        onClose={onClose}
-        onConfirm={() => publishForm.submit()}
-        confirmText={isEdit ? t("common.confirm") : t("agent.version.publish")}
-        cancelText={t("common.cancel")}
-        confirmDisabled={isLoading}
-        confirmLoading={isLoading}
-        cancelDisabled={isLoading}
-        maskClosable
+        onCancel={onClose}
+        footer={null}
         destroyOnHidden
       >
         <Form form={publishForm} layout="vertical" onFinish={handleSubmit}>
           <Form.Item
-            required={false}
-            label={
-              <ParamLabel label={t("agent.version.versionName")} required />
-            }
+            label={t("agent.version.versionName")}
             name="version_name"
             rules={[
               {
@@ -210,17 +195,29 @@ export default function AgentVersionPubulishModal({
           >
             <Input placeholder={t("agent.version.versionNamePlaceholder")} />
           </Form.Item>
-          <Form.Item
-            label={<ParamLabel label={t("agent.version.releaseNote")} />}
-            name="release_note"
-          >
+          <Form.Item label={t("agent.version.releaseNote")} name="release_note">
             <TextArea
               rows={4}
               placeholder={t("agent.version.releaseNotePlaceholder")}
             />
           </Form.Item>
+          <Form.Item className="mb-0">
+            <div className="flex justify-end gap-2">
+              <Button onClick={onClose} disabled={isLoading}>
+                {t("common.cancel")}
+              </Button>
+              <Button
+                type="primary"
+                htmlType="submit"
+                loading={isLoading}
+                disabled={isLoading}
+              >
+                {isEdit ? t("common.confirm") : t("agent.version.publish")}
+              </Button>
+            </div>
+          </Form.Item>
         </Form>
-      </ParamDialog>
+      </Modal>
     </>
   );
 }

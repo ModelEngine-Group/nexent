@@ -1,20 +1,29 @@
 "use client";
 
 import { Button, Tooltip } from "antd";
+import { AvatarDropdown } from "@/components/auth/avatarDropdown";
 import { useTranslation } from "react-i18next";
 import { Activity, ChevronDown, Globe } from "lucide-react";
 import { Dropdown } from "antd";
 import Link from "next/link";
-import { HEADER_CONFIG } from "@/const/layoutConstants";
+import { HEADER_CONFIG, SIDER_CONFIG } from "@/const/layoutConstants";
 import { languageOptions } from "@/const/constants";
 import { useLanguageSwitch } from "@/lib/language";
 import React, { useEffect, useState } from "react";
 import { Flex, Layout } from "antd";
+import { ChatTopNavContent } from "./ChatTopNavContent";
+import { NotificationBell } from "./NotificationBell";
 import { useAuthorizationContext } from "../providers/AuthorizationProvider";
 import { useDeployment } from "../providers/deploymentProvider";
 import { monitoringService } from "@/services/monitoringService";
+import {
+  useMarkAllNotificationsRead,
+  useMarkNotificationRead,
+  useNotifications,
+} from "@/hooks/useNotifications";
 import type { MonitoringStatus } from "@/types/monitoring";
 import { useGlobalConfigStore } from "@/stores/global";
+import { publicAsset } from "@/lib/publicAsset";
 import { canViewMonitoringDashboard } from "@/lib/monitoringAccess";
 
 const { Header } = Layout;
@@ -25,9 +34,9 @@ function buildMonitoringUrl(status: MonitoringStatus | null): string | null {
   return status.dashboard_url || null;
 }
 
-export function TopNavbar() {
+export function TopNavbar({ isChatPage }: { isChatPage: boolean }) {
   const { t } = useTranslation("common");
-  const { user } = useAuthorizationContext();
+  const { user, isLoading } = useAuthorizationContext();
   const { isSpeedMode } = useDeployment();
   const { currentLanguage, handleLanguageChange } = useLanguageSwitch();
   const [monitoringStatus, setMonitoringStatus] =
@@ -40,8 +49,18 @@ export function TopNavbar() {
     monitoringStatus?.dashboard_allowed_roles
   );
 
+  const showNotificationBell = !isSpeedMode && !!user;
+  const {
+    unreadCount,
+    items,
+    isLoading: isNotificationsLoading,
+  } = useNotifications(showNotificationBell);
+  const markNotificationReadMutation = useMarkNotificationRead();
+  const markAllNotificationsReadMutation = useMarkAllNotificationsRead();
+
   useEffect(() => {
     if (!shouldFetchMonitoringStatus) {
+      setMonitoringStatus(null);
       return;
     }
 
@@ -58,15 +77,54 @@ export function TopNavbar() {
     };
   }, [shouldFetchMonitoringStatus]);
 
-  const monitoringUrl =
-    shouldFetchMonitoringStatus && canViewMonitoring
-      ? buildMonitoringUrl(monitoringStatus)
-      : null;
+  const monitoringUrl = canViewMonitoring
+    ? buildMonitoringUrl(monitoringStatus)
+    : null;
 
   const openMonitoringDashboard = () => {
     if (!monitoringUrl) return;
     window.open(monitoringUrl, "_blank", "noopener,noreferrer");
   };
+
+  // Left content - Logo + optional additional title (aligned with sidebar width)
+  const leftContent = (
+    <Flex align="center">
+      {/* Logo section - matches sidebar width */}
+      <Link
+        href="/"
+        className="cursor-pointer hover:opacity-80 transition-opacity flex-shrink-0 "
+        // style={{ width: SIDER_CONFIG.EXPANDED_WIDTH - 17 }}
+      >
+        <Flex align="center" gap={8}>
+          <img
+            src={publicAsset("/modelengine-logo.png")}
+            alt="logo"
+            className="h-7"
+          />
+          <span
+            className="text-blue-600 dark:text-blue-500 font-bold"
+            style={{
+              fontSize: "20px",
+              lineHeight: "24px",
+              height: "22px",
+            }}
+          >
+            {t("assistant.name")}
+          </span>
+        </Flex>
+      </Link>
+
+      {/* Additional title with separator - outside of sidebar width */}
+      {isChatPage && (
+        <Flex align="center" gap={12}>
+          <div className="h-6 border-l border-slate-300 dark:border-slate-600"></div>
+          <div className="text-slate-600 dark:text-slate-400">
+            <ChatTopNavContent />
+          </div>
+        </Flex>
+      )}
+    </Flex>
+  );
 
   // Right content - Additional content + default navigation items
   const rightContent = (
@@ -138,12 +196,43 @@ export function TopNavbar() {
           </Flex>
         </a>
       </Dropdown>
+
+      {showNotificationBell && (
+        <NotificationBell
+          unreadCount={unreadCount}
+          items={items}
+          isLoading={isNotificationsLoading}
+          isMarkingAllRead={markAllNotificationsReadMutation.isPending}
+          onMarkRead={async (receiverId) => {
+            await markNotificationReadMutation.mutateAsync(receiverId);
+          }}
+          onMarkAllRead={async () => {
+            await markAllNotificationsReadMutation.mutateAsync();
+          }}
+        />
+      )}
+
+      {/* User status - only shown in full version */}
+      {!isSpeedMode && (
+        <Flex align="center" gap={8}>
+          {isLoading ? (
+            <span className="text-xs font-medium text-slate-600">
+              {t("common.loading")}...
+            </span>
+          ) : user ? (
+            <span className="text-xs font-medium text-slate-600 max-w-[150px] truncate">
+              {user.username?.trim() || user.email?.trim() || "-"}
+            </span>
+          ) : null}
+          <AvatarDropdown />
+        </Flex>
+      )}
     </Flex>
   );
 
   return (
     <Header
-      className="w-full py-3 border-b border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm"
+      className="w-full py-3 border-b border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm fixed top-0 z-50"
       style={{
         height: HEADER_CONFIG.DISPLAY_HEIGHT,
         background: "#ffffff",
@@ -151,6 +240,9 @@ export function TopNavbar() {
       }}
     >
       <div className="h-full flex items-center justify-between">
+        {/* Left section - Logo + additional title */}
+        {leftContent}
+
         {/* Right section - Additional content + default navigation */}
         {rightContent}
       </div>

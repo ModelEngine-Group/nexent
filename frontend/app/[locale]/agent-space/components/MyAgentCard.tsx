@@ -1,11 +1,8 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { Button, Dropdown, Tooltip } from "antd";
 import type { MenuProps } from "antd";
 import {
-  Bot,
   ClipboardCheck,
   Clock,
   Eye,
@@ -85,7 +82,6 @@ export function MyAgentCard({
   });
   const footerDate = formatMineDate(agent.version_create_time);
   const versionLabel = agent.version_label;
-  const isMainAgent = agent.is_main_agent !== false;
   const canEdit = agent.permission !== "READ_ONLY";
   const canView = (agent.current_version_no ?? 0) > 0;
   const canEvaluate = canView;
@@ -178,14 +174,6 @@ export function MyAgentCard({
         ) : undefined
       }
       icon={<MyAgentIcon agent={agent} size={44} iconSize={20} />}
-      badge={
-        isMainAgent ? (
-          <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-            <Bot className="size-3" aria-hidden />
-            {t("agentRepository.card.mainAgent")}
-          </span>
-        ) : undefined
-      }
       description={description}
       descriptionLines={2}
       tags={

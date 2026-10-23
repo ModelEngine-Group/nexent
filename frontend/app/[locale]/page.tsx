@@ -1,8 +1,6 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import {
@@ -14,7 +12,7 @@ import {
   TextQuote,
   AlertTriangle,
 } from "lucide-react";
-import { Button, Row, Col, Card, Result } from "antd";
+import { Button, Row, Col, Card } from "antd";
 import { motion } from "framer-motion";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
@@ -28,42 +26,16 @@ export default function Homepage() {
   const { t } = useTranslation("common");
   const { isSpeedMode, isDeploymentReady, enableAgentWorkbench, hideHomePage } =
     useDeployment();
-  const { isAuthenticated, isAuthChecking, openAuthPromptModal } =
-    useAuthenticationContext();
-  const {
-    isAuthzReady,
-    accessibleRoutes,
-    canAccessRoute,
-    openAuthzPromptModal,
-    isLoading: isAuthzLoading,
-    error: authzError,
-    refetch: retryAuthorization,
-  } = useAuthorizationContext();
+  const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
+  const { canAccessRoute, openAuthzPromptModal } = useAuthorizationContext();
   const router = useRouter();
   const { config } = useGlobalConfigStore();
-  const [isRetrying, setIsRetrying] = useState(false);
-
-  const needsAuthorization = isAuthenticated || isSpeedMode;
-  const isEntryReady =
-    isDeploymentReady &&
-    (isSpeedMode || !isAuthChecking) &&
-    (!needsAuthorization ||
-      (isAuthzReady && !isAuthzLoading && !authzError && !isRetrying));
-  const defaultEntry = !needsAuthorization
-    ? enableAgentWorkbench
-      ? "/workbench"
-      : "/newchat"
-    : enableAgentWorkbench && canAccessRoute("/workbench")
-      ? "/workbench"
-      : canAccessRoute("/newchat")
-        ? "/newchat"
-        : accessibleRoutes.find((route) => route !== "/");
 
   useEffect(() => {
-    if (isEntryReady && hideHomePage && defaultEntry) {
-      router.replace(defaultEntry);
+    if (isDeploymentReady && hideHomePage) {
+      router.replace(enableAgentWorkbench ? "/workbench" : "/chat");
     }
-  }, [isEntryReady, hideHomePage, defaultEntry, router]);
+  }, [isDeploymentReady, hideHomePage, enableAgentWorkbench, router]);
 
   /**
    * Navigate to a route with permission pre-check
@@ -94,42 +66,7 @@ export default function Homepage() {
   const canShowQuickAction = (route: string) =>
     !isAuthenticated || canAccessRoute(route);
 
-  if (!isDeploymentReady) {
-    return null;
-  }
-
-  if (needsAuthorization && (authzError || isRetrying)) {
-    return (
-      <div className="flex min-h-full items-center justify-center" role="alert">
-        <Result
-          status="error"
-          title={t("page.authorizationError")}
-          subTitle={t("page.authorizationErrorDescription")}
-          extra={
-            <Button
-              type="primary"
-              loading={isRetrying || isAuthzLoading}
-              disabled={isRetrying || isAuthzLoading}
-              onClick={async () => {
-                setIsRetrying(true);
-                try {
-                  await retryAuthorization();
-                } finally {
-                  setIsRetrying(false);
-                }
-              }}
-            >
-              {t("page.retryAuthorization")}
-            </Button>
-          }
-        />
-      </div>
-    );
-  }
-
-  if (hideHomePage && (!isEntryReady || defaultEntry)) {
-    return null;
-  }
+  if (!isDeploymentReady || hideHomePage) return null;
 
   return (
     <div className="w-full min-h-full flex flex-col items-center justify-center pt-6 pb-8">
@@ -164,7 +101,7 @@ export default function Homepage() {
           transition={{ duration: 0.8, delay: 0.4 }}
         >
           <Row gutter={[16, 16]} justify="center">
-            {canShowQuickAction("/newchat") && (
+            {canShowQuickAction("/chat") && (
               <Col xs={24} sm={24} md={8}>
                 <div style={{ display: "flex", justifyContent: "center" }}>
                   <Button type="primary" size="large" onClick={navigateToChat}>

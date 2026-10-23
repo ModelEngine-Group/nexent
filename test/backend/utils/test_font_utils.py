@@ -1,5 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""UT for backend/management/services/evaluation/reporting/fonts.py — CJK font discovery & registration."""
+"""UT for backend/utils/font_utils.py — CJK font discovery & registration."""
 
 import importlib.util as _ilu
 import sys
@@ -23,7 +22,7 @@ def _load_module(name, rel_path):
     return mod
 
 
-font_utils = _load_module("font_utils", "management/services/evaluation/reporting/fonts.py")
+font_utils = _load_module("font_utils", "utils/font_utils.py")
 
 
 @pytest.fixture(autouse=True)

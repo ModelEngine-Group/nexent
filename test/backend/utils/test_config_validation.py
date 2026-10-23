@@ -1,7 +1,6 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import pytest
 
-from infrastructure.config_validation import parse_positive_float, parse_positive_int
+from backend.utils.config_validation import parse_positive_float, parse_positive_int
 
 
 @pytest.mark.parametrize(

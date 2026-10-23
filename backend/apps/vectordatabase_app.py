@@ -1,20 +1,12 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
-import json
 import logging
-import re
+import json
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query, Request
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Path, Query
 from fastapi.responses import JSONResponse
-from nexent.core.concurrency import run_blocking
-from nexent.vector_database.base import VectorDatabaseCore
+import re
 
-from apps.permission_utils import (
-    require_knowledge_base_edit_permission,
-    require_knowledge_base_read_permission,
-)
 from consts.const import ASSET_OWNER_TENANT_ID
 from consts.error_code import ErrorCode
 from consts.exceptions import (
@@ -23,23 +15,26 @@ from consts.exceptions import (
     TokenExpiredError,
 )
 from consts.model import ChunkCreateRequest, ChunkUpdateRequest, HybridSearchRequest, IndexingResponse
-from consts.scheduler import SUMMARY_FREQUENCY_OPTIONS_FOR_API, VALID_SUMMARY_FREQUENCIES
-from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
-from database.model_management_db import get_model_by_model_id
+from consts.scheduler import VALID_SUMMARY_FREQUENCIES, SUMMARY_FREQUENCY_OPTIONS_FOR_API
+from nexent.vector_database.base import VectorDatabaseCore
+from management.services.model.resolver import get_embedding_model_by_id
 from management.services.knowledge_base.service import (
     ElasticSearchService,
-    KnowledgeBaseNeedsModelConfigError,
-    check_knowledge_base_exist_impl,
     get_vector_db_core,
+    check_knowledge_base_exist_impl,
+    KnowledgeBaseNeedsModelConfigError,
 )
-from management.services.knowledge_base.status import get_all_files_status
-from management.services.model.resolver import get_embedding_model_by_id
-from management.services.monitor.audit import record_security_event
-from management.services.file.service import check_file_access
-from management.services.knowledge_base.quota import QuotaService
-from management.services.knowledge_base.task_state import get_redis_service
-from management.services.permission.identity.authentication_helpers import get_current_user_context, get_current_user_id
-
+from services.file_management_service import check_file_access
+from services.quota_service import QuotaService
+from services.redis_service import get_redis_service
+from utils.auth_utils import get_current_user_context, get_current_user_id
+from utils.file_management_utils import get_all_files_status
+from database.knowledge_db import get_index_name_by_knowledge_name, get_knowledge_record
+from database.model_management_db import get_model_by_model_id
+from apps.permission_utils import (
+    require_knowledge_base_edit_permission,
+    require_knowledge_base_read_permission,
+)
 
 router = APIRouter(prefix="/indices")
 service = ElasticSearchService()
@@ -91,7 +86,6 @@ async def check_knowledge_base_exist(
 
 @router.post("/{index_name}")
 def create_new_index(
-        http_request: Request,
         index_name: str = Path(..., description="Name of the index to create"),
         embedding_dim: Optional[int] = Query(
             None, description="Dimension of the embedding vectors"),
@@ -121,7 +115,7 @@ def create_new_index(
             raise ValueError("embedding_model_id must be an integer")
 
         # Treat path parameter as user-facing knowledge base name for new creations
-        result = ElasticSearchService.create_knowledge_base(
+        return ElasticSearchService.create_knowledge_base(
             knowledge_name=index_name,
             embedding_dim=embedding_dim,
             vdb_core=vdb_core,
@@ -134,12 +128,6 @@ def create_new_index(
             quota_limit_bytes=quota_limit_bytes,
             user_role=user_role,
         )
-        record_security_event("kb_index_create", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"knowledge_name": index_name,
-                                       "embedding_model_id": embedding_model_id,
-                                       "quota_limit_bytes": quota_limit_bytes})
-        return result
     except HTTPException:
         raise
     except AppException:
@@ -161,37 +149,8 @@ def create_new_index(
             status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=f"Error creating index: {str(e)}")
 
 
-@router.get("/{index_name}/bound_agents")
-async def get_knowledge_base_bound_agents(
-    index_name: str = Path(..., min_length=1, pattern=r".*\S.*"),
-    authorization: Optional[str] = Header(None),
-    tenant_id: Optional[str] = Query(None, description="Tenant ID for filtering (uses auth if not provided)"),
-):
-    """List agents bound to this knowledge base for deletion confirmation."""
-    try:
-        user_id, auth_tenant_id, role = get_current_user_context(authorization)
-    except TokenExpiredError as exc:
-        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
-    target_tenant_id = tenant_id or auth_tenant_id
-    if target_tenant_id != auth_tenant_id and role != "SU":
-        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail="Not authorized to access this tenant")
-    try:
-        require_knowledge_base_read_permission(index_name, user_id, target_tenant_id)
-    except HTTPException as exc:
-        if exc.status_code != HTTPStatus.NOT_FOUND:
-            raise
-        return JSONResponse(status_code=HTTPStatus.OK, content={"agents": []})
-    preview = await run_blocking(
-        "preview-kb-deletion", ElasticSearchService.get_bound_agents, [index_name],
-        tenant_id=target_tenant_id,
-        lane="control-io", owner="apps.vectordatabase_app",
-    )
-    return JSONResponse(status_code=HTTPStatus.OK, content=preview)
-
-
 @router.delete("/{index_name}")
 async def delete_index(
-        http_request: Request,
         index_name: str = Path(..., description="Name of the index to delete"),
         vdb_core: VectorDatabaseCore = Depends(get_vector_db_core),
         authorization: Optional[str] = Header(None)
@@ -203,7 +162,7 @@ async def delete_index(
         require_knowledge_base_edit_permission(index_name, user_id, tenant_id)
         # Call the centralized full deletion service
         result = await ElasticSearchService.full_delete_knowledge_base(index_name, vdb_core, user_id)
-        from management.services.tag.library import TagManagementService
+        from services.tag_management_service import TagManagementService
 
         TagManagementService.cleanup_resource_assignments(
             tenant_id, "knowledge_base", index_name, user_id
@@ -211,9 +170,6 @@ async def delete_index(
         TagManagementService.cleanup_document_assignments_for_knowledge_base(
             tenant_id, "local", index_name, user_id
         )
-        record_security_event("kb_index_delete", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"index_name": index_name})
         return result
     except AppException:
         # Preserve the EDS code/details for the common application handler.
@@ -435,7 +391,6 @@ def get_embedding_model_status(
 
 @router.put("/{index_name}/embedding-model")
 def update_embedding_model(
-        http_request: Request,
         index_name: str = Path(
             ..., description="Internal index name of the knowledge base to update"),
         request: Dict[str, Any] = Body(...,
@@ -464,11 +419,6 @@ def update_embedding_model(
             tenant_id=tenant_id,
             user_id=user_id,
         )
-
-        record_security_event("kb_embedding_model_change", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"index_name": index_name,
-                                       "model_id": model_id})
 
         return JSONResponse(
             status_code=HTTPStatus.OK,
@@ -668,21 +618,10 @@ async def get_index_files(
         user_id, tenant_id = get_current_user_id(authorization)
         require_knowledge_base_read_permission(index_name, user_id, tenant_id)
         result = await ElasticSearchService.list_files(index_name, include_chunks=False, vdb_core=vdb_core)
-        from management.services.tag.projection import (
-            project_authorized_document_tags,
-        )
-
-        # The read permission check above authorized this page; project tags in
-        # one batch so each row never issues its own assignment request.
-        files = project_authorized_document_tags(
-            result.get("files", []),
-            index_name=index_name,
-            tenant_id=tenant_id,
-        )
         # Transform result to match frontend expectations
         return {
             "status": "success",
-            "files": files
+            "files": result.get("files", [])
         }
     except HTTPException:
         raise
@@ -698,7 +637,6 @@ async def get_index_files(
 
 @router.delete("/{index_name}/documents")
 async def delete_documents(
-        http_request: Request,
         index_name: str = Path(..., description="Name of the index"),
         path_or_url: Optional[str] = Query(None,
                                            description="Legacy object path to delete"),
@@ -739,11 +677,6 @@ async def delete_documents(
                         status_code=HTTPStatus.BAD_REQUEST,
                         detail="A file without a storage object can only use full deletion",
                     )
-                record_security_event("kb_document_delete", request=http_request,
-                                      user_id=user_id, tenant_id=tenant_id,
-                                      details={"index_name": index_name,
-                                               "file_id": file_id,
-                                               "scope": scope})
                 return ElasticSearchService.delete_lifecycle_record_without_object(
                     lifecycle_record,
                     requested_by=user_id,
@@ -764,7 +697,7 @@ async def delete_documents(
         )
 
         if scope == "full":
-            from management.services.tag.library import TagManagementService
+            from services.tag_management_service import TagManagementService
 
             TagManagementService.cleanup_document_assignments(
                 tenant_id, "local", index_name, path_or_url, user_id
@@ -812,12 +745,6 @@ async def delete_documents(
                         f"{redis_cleanup.get('cache_keys_deleted', 0)} cache keys)."
                     )
 
-        record_security_event("kb_document_delete", request=http_request,
-                              user_id=user_id, tenant_id=tenant_id,
-                              details={"index_name": index_name,
-                                       "path_or_url": path_or_url,
-                                       "file_id": file_id,
-                                       "scope": scope})
         return result
 
     except ValueError as exc:

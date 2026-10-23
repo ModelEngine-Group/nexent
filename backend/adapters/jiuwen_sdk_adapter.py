@@ -313,7 +313,7 @@ def _lazy_import_jiuwen():
 def build_jiuwen_model_configs(model_id: int, tenant_id: str):
     """将 nexent 模型配置转换为 Jiuwen 配置对象"""
     from database.model_management_db import get_model_by_model_id
-    from management.services.model.names import get_model_name_from_config
+    from utils.config_utils import get_model_name_from_config
 
     ModelRequestConfig, ModelClientConfig, ProviderType, _, _, _, _, _ = _lazy_import_jiuwen()
 

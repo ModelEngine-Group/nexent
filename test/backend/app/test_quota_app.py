@@ -796,7 +796,6 @@ class TestQuotaEnforcementAPI:
         ):
             with pytest.raises(QuotaExceededError) as raised:
                 await upload_files(
-                    http_request=None,
                     file=[upload_file],
                     destination="minio",
                     folder="knowledge_base",

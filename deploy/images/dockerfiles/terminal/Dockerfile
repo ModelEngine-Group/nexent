@@ -19,15 +19,12 @@ RUN --mount=type=cache,id=nexent-terminal-apt-cache-${TARGETARCH},target=/var/ca
         openssh-server \
         curl \
         wget \
-        vim \
-        procps \
-        less \
         git \
         python3 \
         python3-pip \
         python3-venv && \
     if [ "$TERMINAL_VARIANT" = "conda" ]; then \
-        apt-get install -y --no-install-recommends build-essential; \
+        apt-get install -y --no-install-recommends vim build-essential; \
     fi
 
 # Configure SSH - enable root login + enable password authentication.

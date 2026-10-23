@@ -1,10 +1,9 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from types import SimpleNamespace
 
 import pytest
 
-from management.services.automation import prompt as prompt_generator
-from management.services.automation.prompt import (
+from services.agent_automation import prompt_generator
+from services.agent_automation.prompt_generator import (
     AutomationPromptStrategy,
     AutomationPromptStrategyFactory,
     AutomationPromptContext,
@@ -276,13 +275,14 @@ def test_llm_strategy_builds_model_request_from_tenant_configuration(monkeypatch
             return SimpleNamespace(content='{"title":"A","instruction":"B"}')
 
     monkeypatch.setattr("nexent.core.models.OpenAIModel", FakeModel)
-    monkeypatch.setattr("management.services.model.names.get_model_name_from_config", lambda config: "resolved-model")
+    monkeypatch.setattr("utils.config_utils.get_model_name_from_config", lambda config: "resolved-model")
     monkeypatch.setattr(
         prompt_generator,
-        "compose_auxiliary_prompt",
-        lambda language, operation, values: SimpleNamespace(
-            system="system", user=f"Instruction: {values['instruction']}"
-        ),
+        "get_prompt_template",
+        lambda name, language: {
+            "TASK_CONTENT_SYSTEM_PROMPT": "system",
+            "TASK_CONTENT_USER_PROMPT": "Instruction: {{ instruction }}",
+        },
     )
     strategy = LLMAutomationPromptStrategy(
         {
@@ -298,6 +298,8 @@ def test_llm_strategy_builds_model_request_from_tenant_configuration(monkeypatch
 
     result = strategy._generate_sync(
         AutomationPromptContext(tenant_id="tenant", instruction="  do work  ", language="en"),
+        "TASK_CONTENT_SYSTEM_PROMPT",
+        "TASK_CONTENT_USER_PROMPT",
     )
 
     assert result == '{"title":"A","instruction":"B"}'
@@ -312,13 +314,13 @@ def test_llm_strategy_builds_model_request_from_tenant_configuration(monkeypatch
 def test_prompt_strategy_factory_selects_llm_and_falls_back_on_config_error(monkeypatch):
     factory = AutomationPromptStrategyFactory()
     monkeypatch.setattr(
-        "management.services.configuration.tenant.settings.tenant_config_manager.get_model_config",
+        "utils.config_utils.tenant_config_manager.get_model_config",
         lambda **kwargs: {"model_name": "configured"},
     )
     assert isinstance(factory.create("tenant"), LLMAutomationPromptStrategy)
 
     monkeypatch.setattr(
-        "management.services.configuration.tenant.settings.tenant_config_manager.get_model_config",
+        "utils.config_utils.tenant_config_manager.get_model_config",
         lambda **kwargs: (_ for _ in ()).throw(RuntimeError("config unavailable")),
     )
     assert isinstance(factory.create("tenant"), TemplateAutomationPromptStrategy)

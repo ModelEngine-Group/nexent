@@ -1,11 +1,9 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from management.services.repository.agent import sync as sync_service
+from services import official_agent_sync_service as sync_service
 
 
 def _agent(agent_id: int = 101, managed_agents=None, **overrides):
@@ -20,11 +18,15 @@ def _agent(agent_id: int = 101, managed_agents=None, **overrides):
         "allow_chat_metadata": False,
         "verification_config": {"enabled": False},
         "context_policy": "default",
-        "prompt": "duty",
+        "duty_prompt": "duty",
+        "constraint_prompt": "constraint",
+        "few_shots_prompt": [],
         "enabled": True,
         "model_ids": [1],
         "business_logic_model_id": 2,
         "business_logic_model_name": "model",
+        "prompt_template_id": 3,
+        "prompt_template_name": "template",
         "greeting_message": "hello",
         "example_questions": ["question"],
         "managed_agents": managed_agents or [],
@@ -50,11 +52,15 @@ def test_source_agent_payload_copies_agent_fields():
         "allow_chat_metadata": False,
         "verification_config": {"enabled": False},
         "context_policy": "default",
-        "prompt": "duty",
+        "duty_prompt": "duty",
+        "constraint_prompt": "constraint",
+        "few_shots_prompt": [],
         "enabled": True,
         "model_ids": [1],
         "business_logic_model_id": 2,
         "business_logic_model_name": "model",
+        "prompt_template_id": 3,
+        "prompt_template_name": "template",
         "greeting_message": "hello",
         "example_questions": ["question"],
     }

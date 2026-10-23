@@ -1,7 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 #!/usr/bin/env python3
-
 """
 Unified benchmark runner for Nexent Agent evaluation.
 
@@ -50,8 +47,10 @@ YAML config file structure (see export_agent_config.py):
       enable_context_manager: true
       ...
     prompts:
-      prompt: |
+      duty_prompt: |
         You are a professional mathematics assistant...
+      constraint_prompt: ""
+      few_shots_prompt: ""
     tools: [...]
     sub_agents: [...]
     skills: [...]
@@ -645,10 +644,12 @@ def main():
     )
     parser.add_argument("--language", type=str, choices=["en", "zh"],
                         help="Prompt language (overrides YAML)")
-    parser.add_argument("--prompt", type=str,
-                        help="Complete business prompt including constraints and examples (overrides YAML)")
-
-
+    parser.add_argument("--duty-prompt", type=str,
+                        help="Custom duty prompt (overrides YAML)")
+    parser.add_argument("--constraint-prompt", type=str,
+                        help="Custom constraint prompt (overrides YAML)")
+    parser.add_argument("--few-shots-prompt", type=str,
+                        help="Custom few shots prompt (overrides YAML)")
     parser.add_argument("--system-prompt-file", type=str,
                         help="Path to custom system prompt file (bypasses template)")
     parser.add_argument(
@@ -795,11 +796,11 @@ def main():
 
     # Merge config: CLI args override YAML
     prompts = agent_config.get("prompts", {})
-    if set(prompts) - {"prompt"}:
-        raise ValueError("Agent prompts only supports prompt; migrate legacy configuration first")
     agent_cfg = agent_config.get("agent_config", {})
 
-    prompt = args.prompt or prompts.get("prompt", "")
+    duty_prompt = args.duty_prompt or prompts.get("duty_prompt", "")
+    constraint_prompt = args.constraint_prompt or prompts.get("constraint_prompt", "")
+    few_shots_prompt = args.few_shots_prompt or prompts.get("few_shots_prompt", "")
     max_steps = args.max_steps or agent_cfg.get("max_steps", 10)
     temperature = args.temperature if args.temperature is not None else agent_cfg.get("temperature", 0.1)
     language = args.language or "en"
@@ -903,7 +904,6 @@ def main():
         tenant_id=str(tenant_id),
         version_no=int(agent_cfg.get("version_no", 0) or 0),
         local_skills_dir=skills_path,
-        has_enabled_skills=bool(agent_config.get("skills")),
     )
     exa_cache_controller = None
     if args.exa_cache_mode != "off":
@@ -934,7 +934,9 @@ def main():
 
     task_fn = make_nexent_task(
         system_prompt=system_prompt,
-        prompt=prompt,
+        duty_prompt=duty_prompt,
+        constraint_prompt=constraint_prompt,
+        few_shots_prompt=few_shots_prompt,
         max_steps=max_steps,
         temperature=temperature,
         language=language,
@@ -944,6 +946,7 @@ def main():
         tools=tools,
         model_factory=model_factory,
         user_id="user_id",
+        prompt_template_version=str(agent_cfg.get("prompt_template_id", "")),
         prompt_template_source=(
             str(Path(args.agent_config).resolve()) if args.agent_config else "benchmark_cli"
         ),
@@ -976,8 +979,8 @@ def main():
           f"hard_budget={cm_config.hard_input_budget_tokens or int(cm_config.token_threshold * 1.1)}, "
           f"keep_steps={cm_config.keep_recent_steps}")
     print(f"  Tools:        {len(tools)} ({', '.join(t.name for t in tools) if tools else 'none'})")
-    if prompt:
-        print(f"  Prompt:       {prompt[:60]}...")
+    if duty_prompt:
+        print(f"  Duty prompt:  {duty_prompt[:60]}...")
 
     run_experiment(
         dataset_name=args.dataset,

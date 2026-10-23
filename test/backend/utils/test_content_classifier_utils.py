@@ -1,34 +1,24 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """Tests for content_classifier_utils."""
 
 import pytest
 
-from management.services.skill.classifier import (
-    ContentClassifier,
-)
+from utils.content_classifier_utils import ContentClassifier
 
 
 class TestContentClassifier:
     """Test cases for ContentClassifier."""
 
-    def test_uppercase_control_tag_is_not_consumed(self):
-        classifier = ContentClassifier()
-        events = classifier.classify("<SKILL>old</SKILL>")
-        events.extend(classifier.flush())
-        assert not any(event["type"] == "skill_body" for event in events)
-
     def test_ac_010_final_answer_envelope_is_consumed(self):
         classifier = ContentClassifier()
 
         events = classifier.classify(
-            "<final_answer>\n<skill>\n# Demo\n</skill>\n"
-            "<summary>\nCreated.\n</summary>\n</final_answer>",
+            "<FINAL_ANSWER>\n<SKILL>\n# Demo\n</SKILL>\n"
+            "<SUMMARY>\nCreated.\n</SUMMARY>\n</FINAL_ANSWER>",
             origin_type="model_output",
         )
         events.extend(classifier.flush())
 
-        assert all("<final_answer>" not in event.get("content", "") for event in events)
+        assert all("FINAL_ANSWER" not in event.get("content", "") for event in events)
         assert any(event["type"] == "skill_body" and "# Demo" in event["content"] for event in events)
         assert any(event["type"] == "summary" and "Created." in event["content"] for event in events)
         assert classifier.saw_control_tag is True
@@ -37,7 +27,7 @@ class TestContentClassifier:
         classifier = ContentClassifier()
 
         events = classifier.classify(
-            "<final_answer>clarification?</final_answer>",
+            "<FINAL_ANSWER>clarification?</FINAL_ANSWER>",
             origin_type="model_output",
         )
         events.extend(classifier.flush())
@@ -48,7 +38,7 @@ class TestContentClassifier:
         """Test basic content classification."""
         classifier = ContentClassifier()
 
-        results = classifier.classify("<skill>\n")
+        results = classifier.classify("<SKILL>\n")
         assert len(results) == 0
         assert classifier.state == "skill_body"
 
@@ -56,7 +46,7 @@ class TestContentClassifier:
         """Test skill body content classification."""
         classifier = ContentClassifier()
 
-        classifier.classify("<skill>\n")
+        classifier.classify("<SKILL>\n")
         results = classifier.classify("some skill content")
 
         assert len(results) == 1
@@ -64,10 +54,10 @@ class TestContentClassifier:
         assert results[0]["content"] == "some skill content"
 
     def test_summary_tag(self):
-        """Test <summary> tag matching."""
+        """Test <SUMMARY> tag matching."""
         classifier = ContentClassifier()
 
-        classifier.classify("<summary>\n")
+        classifier.classify("<SUMMARY>\n")
         assert classifier.state == "summary"
 
         results = classifier.classify("summary text here")
@@ -76,11 +66,11 @@ class TestContentClassifier:
         assert "summary text here" in results[0]["content"]
 
     def test_summary_with_content_chunk(self):
-        """Test <summary>content</summary> in single chunk."""
+        """Test <SUMMARY>content</SUMMARY> in single chunk."""
         classifier = ContentClassifier()
 
         # Simulate receiving full content in one chunk
-        results = classifier.classify("<summary>\nmy summary\n</summary>\n")
+        results = classifier.classify("<SUMMARY>\nmy summary\n</SUMMARY>\n")
 
         # Should have at least the summary content event
         summary_events = [r for r in results if r.get("type") == "summary"]
@@ -88,13 +78,13 @@ class TestContentClassifier:
         assert "my summary" in summary_events[0]["content"]
 
     def test_summary_close_tag_split_after_text(self):
-        """Test split </summary> tag after normal text is parsed as a tag."""
+        """Test split </SUMMARY> tag after normal text is parsed as a tag."""
         classifier = ContentClassifier()
 
-        classifier.classify("<summary>\n")
+        classifier.classify("<SUMMARY>\n")
         results = []
         results.extend(classifier.classify("summary...\n</"))
-        results.extend(classifier.classify("summary"))
+        results.extend(classifier.classify("SUMMARY"))
         results.extend(classifier.classify(">\n"))
         results.extend(classifier.classify("ignored"))
 
@@ -115,11 +105,11 @@ class TestContentClassifier:
         assert classifier.buffer == "<"
 
     def test_full_skill_flow(self):
-        """Test full SKILL -> body -> </skill> -> summary flow."""
+        """Test full SKILL -> body -> </SKILL> -> summary flow."""
         classifier = ContentClassifier()
 
         # Start SKILL
-        classifier.classify("<skill>\n")
+        classifier.classify("<SKILL>\n")
         assert classifier.state == "skill_body"
 
         # Add skill body content
@@ -128,7 +118,7 @@ class TestContentClassifier:
         assert results[0]["type"] == "skill_body"
 
         # End SKILL
-        classifier.classify("\n</skill>\n")
+        classifier.classify("\n</SKILL>\n")
         assert classifier.state == "summary"
 
         # Add summary content
@@ -138,10 +128,10 @@ class TestContentClassifier:
         assert "This is a summary" in summary_events[0]["content"]
 
     def test_file_tag(self):
-        """Test <file path="..."> tag matching."""
+        """Test <FILE path="..."> tag matching."""
         classifier = ContentClassifier()
 
-        classifier.classify('<file path="test.py">\n')
+        classifier.classify('<FILE path="test.py">\n')
         assert classifier.state == "file"
 
         results = classifier.classify("file content")
@@ -154,9 +144,9 @@ class TestContentClassifier:
         classifier = ContentClassifier()
 
         results = []
-        results.extend(classifier.classify('Use <file path="...">'))
+        results.extend(classifier.classify('Use <FILE path="...">'))
         results.extend(classifier.classify("wrapped content"))
-        results.extend(classifier.classify("</file>"))
+        results.extend(classifier.classify("</FILE>"))
         results.extend(classifier.classify(" after"))
 
         assert not any(r.get("type") == "file_content" for r in results)
@@ -165,12 +155,12 @@ class TestContentClassifier:
     def test_file_path_rejects_parent_traversal(self):
         """Test parent traversal paths are not treated as generated files."""
         classifier = ContentClassifier()
-        classifier.classify("<skill>\n")
+        classifier.classify("<SKILL>\n")
 
         results = []
-        results.extend(classifier.classify('<file path="../secret.md">'))
+        results.extend(classifier.classify('<FILE path="../secret.md">'))
         results.extend(classifier.classify("hidden"))
-        results.extend(classifier.classify("</file>"))
+        results.extend(classifier.classify("</FILE>"))
         results.extend(classifier.classify(" body"))
 
         assert not any(r.get("type") == "file_content" for r in results)
@@ -180,7 +170,7 @@ class TestContentClassifier:
         """Test nested relative file paths are treated as generated files."""
         classifier = ContentClassifier()
 
-        results = classifier.classify('<file path="references/zodiac_data.md">\n')
+        results = classifier.classify('<FILE path="references/zodiac_data.md">\n')
 
         assert classifier.state == "file"
         assert results == [
@@ -206,7 +196,7 @@ class TestContentClassifier:
         """Test unsafe file paths are not treated as generated files."""
         classifier = ContentClassifier()
 
-        results = classifier.classify(f'<file path="{path}">')
+        results = classifier.classify(f'<FILE path="{path}">')
         results.extend(classifier.classify("content"))
 
         assert not any(r.get("type") == "file_content" for r in results)
@@ -219,11 +209,11 @@ class TestContentClassifier:
         assert classifier._is_valid_file_path(" ") is False
 
     def test_end_file_tag_outside_file_state_does_not_change_state(self):
-        """Test </file> outside file state does not leave the current state."""
+        """Test </FILE> outside file state does not leave the current state."""
         classifier = ContentClassifier()
-        classifier.classify("<skill>\n")
+        classifier.classify("<SKILL>\n")
 
-        classifier.classify("</file>\n")
+        classifier.classify("</FILE>\n")
 
         assert classifier.state == "skill_body"
         assert classifier.current_file_path is None
@@ -246,7 +236,7 @@ class TestContentClassifier:
         """Test streaming character-by-character classification."""
         classifier = ContentClassifier()
 
-        classifier.classify("<skill>\n")
+        classifier.classify("<SKILL>\n")
         results = classifier.classify("a")
 
         assert len(results) == 1
@@ -259,8 +249,8 @@ class TestContentClassifier:
 
         # Stream character by character
         classifier.classify("<")
-        classifier.classify("s")
-        classifier.classify("kill")
+        classifier.classify("S")
+        classifier.classify("KILL")
         results = classifier.classify(">\n")
 
         assert classifier.state == "skill_body"
@@ -273,27 +263,27 @@ class TestContentClassifier:
         # Set max tag count to 3 for testing
         classifier.MAX_TAG_COUNT = 3
 
-        classifier.classify("<skill>\n")
+        classifier.classify("<SKILL>\n")
         assert classifier.tag_count == 1
-        classifier.classify("</skill>\n")
+        classifier.classify("</SKILL>\n")
         assert classifier.tag_count == 2
-        classifier.classify("<skill>\n")
+        classifier.classify("<SKILL>\n")
         assert classifier.tag_count == 3
 
         # 4th tag should be blocked
-        results = classifier.classify("</skill>\n")
+        results = classifier.classify("</SKILL>\n")
         assert classifier.tag_count == 3
         # Content after 4th tag should not be processed
         assert len(results) == 0
 
     def test_reset_state_after_summary_end(self):
-        """Test state resets to 'others' after </summary>."""
+        """Test state resets to 'others' after </SUMMARY>."""
         classifier = ContentClassifier()
 
-        classifier.classify("<summary>\n")
+        classifier.classify("<SUMMARY>\n")
         assert classifier.state == "summary"
 
-        classifier.classify("\n</summary>\n")
+        classifier.classify("\n</SUMMARY>\n")
         assert classifier.state == "others"
 
         results = classifier.classify("final content")
@@ -305,7 +295,7 @@ class TestContentClassifier:
         classifier = ContentClassifier()
 
         # Start skill
-        classifier.classify("<skill>\n")
+        classifier.classify("<SKILL>\n")
         assert classifier.state == "skill_body"
 
         # Add body content
@@ -313,7 +303,7 @@ class TestContentClassifier:
         assert results[0]["type"] == "skill_body"
 
         # Start file
-        classifier.classify('\n<file path="test.py">\n')
+        classifier.classify('\n<FILE path="test.py">\n')
         assert classifier.state == "file"
 
         # Add file content
@@ -321,7 +311,7 @@ class TestContentClassifier:
         assert results[0]["type"] == "file_content"
 
         # End file
-        classifier.classify("\n</file>\n")
+        classifier.classify("\n</FILE>\n")
         assert classifier.state == "skill_body"
 
         # More body content
@@ -329,7 +319,7 @@ class TestContentClassifier:
         assert results[0]["type"] == "skill_body"
 
         # End skill
-        classifier.classify("\n</skill>\n")
+        classifier.classify("\n</SKILL>\n")
         assert classifier.state == "summary"
 
         # Summary content
@@ -356,7 +346,7 @@ class TestContentClassifier:
         classifier = ContentClassifier()
 
         results = []
-        for chunk in ["存量技能内容实际上是空的（`", "<skill>", "` 和 `", "</skill>", "` 之间没有内容）。"]:
+        for chunk in ["存量技能内容实际上是空的（`", "<SKILL>", "` 和 `", "</SKILL>", "` 之间没有内容）。"]:
             results.extend(
                 classifier.classify(
                     chunk,
@@ -367,7 +357,7 @@ class TestContentClassifier:
 
         assert not any(event["type"] in {"skill_body", "summary"} for event in results)
         assert "".join(event["content"] for event in results) == (
-            "存量技能内容实际上是空的（`<skill>` 和 `</skill>` 之间没有内容）。"
+            "存量技能内容实际上是空的（`<SKILL>` 和 `</SKILL>` 之间没有内容）。"
         )
         assert classifier.saw_control_tag is False
 
@@ -375,7 +365,7 @@ class TestContentClassifier:
         classifier = ContentClassifier()
 
         results = []
-        for chunk in ["<sk", "ill>", "\n---\nname: demo\n---\n", "</skill>", "\n"]:
+        for chunk in ["<SK", "ILL>", "\n---\nname: demo\n---\n", "</SKILL>", "\n"]:
             results.extend(classifier.classify(chunk, origin_type="model_output_code"))
 
         assert "".join(event["content"] for event in results if event["type"] == "skill_body") == (
@@ -398,7 +388,7 @@ class TestContentClassifier:
         )
         results.extend(
             classifier.classify(
-                "skill>\n---\nname: demo\n---\n",
+                "SKILL>\n---\nname: demo\n---\n",
                 origin_type="model_output_thinking",
             )
         )
@@ -409,7 +399,7 @@ class TestContentClassifier:
         ) == "---\nname: demo\n---\n"
         assert not any(
             event["type"] == "model_output_thinking"
-            and "skill" in event["content"]
+            and "SKILL" in event["content"]
             for event in results
         )
         assert classifier.state == "skill_body"
@@ -418,7 +408,7 @@ class TestContentClassifier:
         classifier = ContentClassifier()
 
         results = classifier.classify(
-            "<skill>\nbody\n</skill>\n",
+            "<SKILL>\nbody\n</SKILL>\n",
             origin_type="model_output_code",
         )
 
@@ -461,7 +451,7 @@ class TestContentClassifier:
 
     def test_flush_parses_a_complete_tag_at_the_end(self):
         classifier = ContentClassifier()
-        classifier.buffer = "<skill>"
+        classifier.buffer = "<SKILL>"
 
         assert classifier.flush() == []
         assert classifier.state == "skill_body"
@@ -469,7 +459,7 @@ class TestContentClassifier:
     def test_file_tag_accepts_crlf_after_tag(self):
         classifier = ContentClassifier()
 
-        results = classifier.classify('<file path="notes.txt">\r\nnote')
+        results = classifier.classify('<FILE path="notes.txt">\r\nnote')
 
         assert results[0]["is_new_file"] is True
         assert results[-1]["content"] == "note"
@@ -477,9 +467,9 @@ class TestContentClassifier:
     def test_tag_count_limit_discards_remaining_content_after_limit(self):
         classifier = ContentClassifier()
         classifier.MAX_TAG_COUNT = 1
-        classifier.classify("<skill>\n")
+        classifier.classify("<SKILL>\n")
 
-        assert classifier.classify("</skill>\n") == []
+        assert classifier.classify("</SKILL>\n") == []
         assert classifier.state == "skill_body"
         assert classifier.buffer == ""
 
@@ -521,9 +511,9 @@ class TestContentClassifier:
 
     def test_file_close_restores_previous_summary_state(self):
         classifier = ContentClassifier()
-        classifier.classify("<summary>\n")
-        classifier.classify('<file path="notes.txt">\n')
+        classifier.classify("<SUMMARY>\n")
+        classifier.classify('<FILE path="notes.txt">\n')
         classifier.classify("note\n")
-        classifier.classify("</file>\n")
+        classifier.classify("</FILE>\n")
         assert classifier.state == "summary"
         assert classifier.classify("done")[-1]["type"] == "summary"

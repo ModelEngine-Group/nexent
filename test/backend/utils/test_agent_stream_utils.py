@@ -1,6 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
-import backend.management.services.agent.artifacts as agent_artifacts_backend
 """Unit tests for agent stream skill-file helpers."""
 
 import json
@@ -19,58 +16,22 @@ attachment_db.get_file_url = MagicMock()
 attachment_db.upload_fileobj = MagicMock()
 sys.modules["database.attachment_db"] = attachment_db
 
-file_management_service = types.ModuleType("management.services.file.service")
+file_management_service = types.ModuleType("services.file_management_service")
 file_management_service.is_allowed_skill_upload_path = MagicMock(return_value=True)
-sys.modules["management.services.file.service"] = file_management_service
+sys.modules["services.file_management_service"] = file_management_service
 
-from backend.management.services.agent import stream as agent_stream_utils
-from backend.management.services.agent import artifacts as agent_artifacts
-
-
-def test_rollback_removes_only_failed_attempt_and_preserves_list_identity():
-    accepted = {"type": "final_answer", "_attempt_id": "accepted", "content": "Result"}
-    sibling = {"type": "model_output_thinking", "content": "Unrelated"}
-    units = [accepted, {"type": "final_answer", "_attempt_id": "failed", "content": "Rejected"}, sibling]
-    reference = units
-    assert agent_stream_utils.rollback_model_attempt_units(units, "failed") == 1
-    assert units is reference and units == [accepted, sibling]
-    assert agent_stream_utils.rollback_model_attempt_units(units, "missing") == 0
-    assert units == [accepted, sibling]
-
-
-@pytest.mark.parametrize("changed_field,value", [
-    ("type", "model_output_thinking"),
-    ("_attempt_id", "retry"),
-    ("invocation_id", "sibling"),
-    ("_step_id", "next"),
-])
-def test_answer_fragments_do_not_merge_across_type_attempt_invocation_or_step(changed_field, value):
-    current = {"type": "final_answer", "_attempt_id": "attempt", "invocation_id": "child", "_step_id": "step"}
-    data = {"attempt_id": "attempt", "invocation_id": "child", "step_id": "step"}
-    assert agent_stream_utils.is_stream_unit_continuation(current, True, "final_answer", data)
-    current[changed_field] = value
-    assert not agent_stream_utils.is_stream_unit_continuation(current, True, "final_answer", data)
-
-
-def test_failed_presigned_url_lookup_keeps_uploaded_file_metadata(mocker):
-    uploads = [{"object_name": "outputs/result.txt", "url": "stored", "size": 10}]
-    mocker.patch.object(agent_artifacts_backend, "get_file_url", side_effect=RuntimeError("Storage unavailable"))
-    log = mocker.patch.object(agent_artifacts_backend.logger, "exception")
-    result = agent_artifacts_backend.enrich_file_uploads_with_presigned_urls(uploads)
-    assert result == uploads and result[0] is not uploads[0]
-    assert "presigned_url" not in result[0]
-    log.assert_called_once()
+from backend.utils import agent_stream_utils
 
 
 class TestJsonExtraction:
     @pytest.mark.parametrize("text", ["", "plain text without JSON"])
     def test_returns_empty_when_no_json_object_exists(self, text):
-        assert agent_artifacts_backend.extract_json_objects_from_text(text) == []
+        assert agent_stream_utils.extract_json_objects_from_text(text) == []
 
     def test_extracts_nested_objects_and_skips_invalid_fragments(self):
         text = 'prefix {"outer":{"value":1}} broken {not-json} [1,2] {"ok":true}'
 
-        assert agent_artifacts_backend.extract_json_objects_from_text(text) == [
+        assert agent_stream_utils.extract_json_objects_from_text(text) == [
             {"outer": {"value": 1}},
             {"ok": True},
         ]
@@ -78,7 +39,7 @@ class TestJsonExtraction:
     def test_extract_skill_payloads_requires_absolute_path(self):
         content = '{"file_name":"ignored"} {"absolute_path":"/tmp/a.txt"}'
 
-        assert agent_artifacts_backend.extract_skill_file_upload_payloads(content) == [
+        assert agent_stream_utils.extract_skill_file_upload_payloads(content) == [
             {"absolute_path": "/tmp/a.txt"}
         ]
 
@@ -109,7 +70,7 @@ class TestSerialization:
         }
 
     def test_transforms_only_permanent_file_fields(self):
-        assert agent_artifacts_backend.transform_skill_files_to_standard_format(
+        assert agent_stream_utils.transform_skill_files_to_standard_format(
             [{"name": "a.txt", "size": 3, "preview_url": "/preview"}]
         ) == [
             {
@@ -126,15 +87,15 @@ class TestSerialization:
         uploads = [{"object_name": "outputs/chart.png", "url": "s3://nexent/outputs/chart.png"}]
 
         with patch.object(
-            agent_artifacts_backend,
+            agent_stream_utils,
             "get_file_url",
             return_value={"success": True, "url": "https://minio/signed"},
         ), patch.object(
-            agent_artifacts_backend,
+            agent_stream_utils,
             "_build_mcp_presigned_url",
             return_value="https://api/file/fetch?signed",
         ):
-            result = agent_artifacts_backend.enrich_file_uploads_with_presigned_urls(uploads)
+            result = agent_stream_utils.enrich_file_uploads_with_presigned_urls(uploads)
 
         assert "presigned_url" not in uploads[0]
         assert result[0]["presigned_url"] == "https://api/file/fetch?signed"
@@ -142,8 +103,8 @@ class TestSerialization:
     def test_preserves_existing_presigned_url(self):
         uploads = [{"object_name": "outputs/chart.png", "presigned_url": "existing"}]
 
-        with patch.object(agent_artifacts_backend, "get_file_url") as get_file_url:
-            result = agent_artifacts_backend.enrich_file_uploads_with_presigned_urls(uploads)
+        with patch.object(agent_stream_utils, "get_file_url") as get_file_url:
+            result = agent_stream_utils.enrich_file_uploads_with_presigned_urls(uploads)
 
         assert result[0]["presigned_url"] == "existing"
         get_file_url.assert_not_called()
@@ -162,9 +123,9 @@ async def test_process_uploads_skips_unsafe_missing_and_failed_files(tmp_path):
     ]
     upload = MagicMock(return_value={"success": False, "error": "storage unavailable"})
 
-    with patch.object(agent_artifacts_backend, "is_allowed_skill_upload_path", side_effect=[False, True, True]), \
-            patch.object(agent_artifacts_backend, "upload_fileobj", upload):
-        result = await agent_artifacts_backend.process_skill_file_uploads(
+    with patch.object(agent_stream_utils, "is_allowed_skill_upload_path", side_effect=[False, True, True]), \
+            patch.object(agent_stream_utils, "upload_fileobj", upload):
+        result = await agent_stream_utils.process_skill_file_uploads(
             payloads, user_id="user-1", tenant_id="tenant-1"
         )
 
@@ -189,9 +150,9 @@ async def test_process_uploads_success_and_string_payload(tmp_path):
         "file_size": 6,
     }
 
-    with patch.object(agent_artifacts_backend, "is_allowed_skill_upload_path", return_value=True), \
-            patch.object(agent_artifacts_backend, "upload_fileobj", return_value=upload_result) as upload:
-        result = await agent_artifacts_backend.process_skill_file_uploads(
+    with patch.object(agent_stream_utils, "is_allowed_skill_upload_path", return_value=True), \
+            patch.object(agent_stream_utils, "upload_fileobj", return_value=upload_result) as upload:
+        result = await agent_stream_utils.process_skill_file_uploads(
             payload, user_id="user-1", tenant_id="tenant-1"
         )
 
@@ -214,9 +175,9 @@ def test_process_uploads_handles_storage_exception(tmp_path):
     file_path.write_text("error", encoding="utf-8")
 
     async def run_test():
-        with patch.object(agent_artifacts_backend, "is_allowed_skill_upload_path", return_value=True), \
-                patch.object(agent_artifacts_backend, "upload_fileobj", side_effect=RuntimeError("storage")):
-            return await agent_artifacts_backend.process_skill_file_uploads(
+        with patch.object(agent_stream_utils, "is_allowed_skill_upload_path", return_value=True), \
+                patch.object(agent_stream_utils, "upload_fileobj", side_effect=RuntimeError("storage")):
+            return await agent_stream_utils.process_skill_file_uploads(
                 [{"absolute_path": str(file_path)}], user_id="", tenant_id="tenant-1"
             )
 
@@ -230,11 +191,11 @@ async def test_process_uploads_skips_empty_path_and_logs_cleanup_failure(tmp_pat
     file_path = tmp_path / "cleanup.txt"
     file_path.write_text("cleanup", encoding="utf-8")
 
-    with patch.object(agent_artifacts_backend, "is_allowed_skill_upload_path", return_value=True), \
-            patch.object(agent_artifacts_backend, "upload_fileobj", return_value={"success": False}), \
-            patch.object(agent_artifacts_backend.os, "remove", side_effect=OSError("locked")), \
-            patch.object(agent_artifacts_backend.logger, "exception") as log_exception:
-        result = await agent_artifacts_backend.process_skill_file_uploads(
+    with patch.object(agent_stream_utils, "is_allowed_skill_upload_path", return_value=True), \
+            patch.object(agent_stream_utils, "upload_fileobj", return_value={"success": False}), \
+            patch.object(agent_stream_utils.os, "remove", side_effect=OSError("locked")), \
+            patch.object(agent_stream_utils.logger, "exception") as log_exception:
+        result = await agent_stream_utils.process_skill_file_uploads(
             [{"absolute_path": ""}, {"absolute_path": str(file_path)}],
             user_id="user-1",
             tenant_id="tenant-1",
@@ -252,14 +213,14 @@ async def test_process_uploads_recovers_empty_derived_file_name(tmp_path):
     file_path = tmp_path / "fallback.txt"
     file_path.write_text("fallback", encoding="utf-8")
 
-    with patch.object(agent_artifacts_backend, "is_allowed_skill_upload_path", return_value=True), \
-            patch.object(agent_artifacts_backend.os.path, "basename", side_effect=["", "fallback.txt"]), \
+    with patch.object(agent_stream_utils, "is_allowed_skill_upload_path", return_value=True), \
+            patch.object(agent_stream_utils.os.path, "basename", side_effect=["", "fallback.txt"]), \
             patch.object(
-                agent_artifacts_backend,
+                agent_stream_utils,
                 "upload_fileobj",
                 return_value={"success": True, "object_name": "fallback"},
             ) as upload:
-        await agent_artifacts_backend.process_skill_file_uploads(
+        await agent_stream_utils.process_skill_file_uploads(
             [{"absolute_path": str(file_path)}],
             user_id="user-1",
             tenant_id="tenant-1",

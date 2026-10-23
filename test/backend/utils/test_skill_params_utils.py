@@ -1,8 +1,6 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """Unit tests for skill params helper functions."""
 
-from backend.management.db.skill_params import split_string_inline_comment
+from backend.utils.skill_params_utils import split_string_inline_comment
 
 
 def test_split_string_inline_comment_strips_display_and_comment():

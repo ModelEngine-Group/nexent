@@ -1,10 +1,9 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 import pytest
-from management.services.memory.dreaming.service import (
+from services.memory_dreaming_service import (
     DreamingConflictError,
     DreamingRunError,
     MemoryDreamingService,
@@ -18,16 +17,16 @@ def lock(value):
 
 def test_ac007_lock_busy_skips(monkeypatch):
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.create_audit",
+        "services.memory_dreaming_service.memory_dreaming_db.create_audit",
         lambda *_: 41,
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.try_scope_lock",
+        "services.memory_dreaming_service.memory_dreaming_db.try_scope_lock",
         lambda *_: lock(False),
     )
     finish = MagicMock()
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.finish_audit", finish
+        "services.memory_dreaming_service.memory_dreaming_db.finish_audit", finish
     )
     result = MemoryDreamingService(record_service=MagicMock()).run(
         tenant_id="t", user_id="u", agent_id="a"
@@ -61,28 +60,28 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
         "concept_tags": [],
     }
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.create_audit",
+        "services.memory_dreaming_service.memory_dreaming_db.create_audit",
         lambda *_: 42,
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.try_scope_lock",
+        "services.memory_dreaming_service.memory_dreaming_db.try_scope_lock",
         lambda *_: lock(True),
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.update_audit",
+        "services.memory_dreaming_service.memory_dreaming_db.update_audit",
         lambda *_args, **_kwargs: True,
     )
     finish = MagicMock(return_value=True)
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.finish_audit",
+        "services.memory_dreaming_service.memory_dreaming_db.finish_audit",
         finish,
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.get_thresholds",
+        "services.memory_dreaming_service.memory_dreaming_db.get_thresholds",
         lambda *_args: {},
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_retrieval_hit_db.aggregate_dreaming_stats",
+        "services.memory_dreaming_service.memory_retrieval_hit_db.aggregate_dreaming_stats",
         lambda *_args, **_kwargs: [
             {
                 "memory_id": 7,
@@ -96,32 +95,32 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
         ],
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_record_db.list_memory_records",
+        "services.memory_dreaming_service.memory_record_db.list_memory_records",
         lambda *_args, **_kwargs: [record],
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_record_db.find_by_idempotency",
+        "services.memory_dreaming_service.memory_record_db.find_by_idempotency",
         lambda *_args, **_kwargs: None,
     )
     update_record = MagicMock(return_value=True)
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_record_db.update_memory_record",
+        "services.memory_dreaming_service.memory_record_db.update_memory_record",
         update_record,
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_record_db.apply_dreaming_phase",
+        "services.memory_dreaming_service.memory_record_db.apply_dreaming_phase",
         lambda *_args, **_kwargs: True,
     )
     record_service = MagicMock()
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_long_term_db.get_active",
+        "services.memory_dreaming_service.memory_long_term_db.get_active",
         lambda *_args: None,
     )
     create_version = MagicMock(
         return_value={"version_id": 1, "version_no": 1, "is_active": True}
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_long_term_db.create_and_activate",
+        "services.memory_dreaming_service.memory_long_term_db.create_and_activate",
         create_version,
     )
     result = MemoryDreamingService(
@@ -161,20 +160,20 @@ def test_ac001_ac006_full_run_and_idempotency_key(monkeypatch):
 
 def test_ac008_failure_is_audited(monkeypatch):
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.create_audit",
+        "services.memory_dreaming_service.memory_dreaming_db.create_audit",
         lambda *_: 43,
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.try_scope_lock",
+        "services.memory_dreaming_service.memory_dreaming_db.try_scope_lock",
         lambda *_: lock(True),
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_retrieval_hit_db.aggregate_dreaming_stats",
+        "services.memory_dreaming_service.memory_retrieval_hit_db.aggregate_dreaming_stats",
         MagicMock(side_effect=ValueError("bad data")),
     )
     finish = MagicMock()
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.finish_audit", finish
+        "services.memory_dreaming_service.memory_dreaming_db.finish_audit", finish
     )
     service = MemoryDreamingService(record_service=MagicMock())
     with pytest.raises(DreamingRunError):
@@ -197,14 +196,14 @@ def test_run_rejects_empty_ids():
 def test_run_with_preexisting_run_id(monkeypatch):
     update = MagicMock(return_value=True)
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.update_audit", update
+        "services.memory_dreaming_service.memory_dreaming_db.update_audit", update
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.try_scope_lock",
+        "services.memory_dreaming_service.memory_dreaming_db.try_scope_lock",
         lambda *_: lock(False),
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.finish_audit",
+        "services.memory_dreaming_service.memory_dreaming_db.finish_audit",
         lambda *_args, **_kwargs: True,
     )
 
@@ -222,15 +221,15 @@ def test_run_with_preexisting_run_id(monkeypatch):
 def test_run_non_manual_trigger_creates_audit(monkeypatch):
     create_audit = MagicMock(return_value=55)
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.create_audit",
+        "services.memory_dreaming_service.memory_dreaming_db.create_audit",
         create_audit,
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.try_scope_lock",
+        "services.memory_dreaming_service.memory_dreaming_db.try_scope_lock",
         lambda *_: lock(False),
     )
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.finish_audit",
+        "services.memory_dreaming_service.memory_dreaming_db.finish_audit",
         lambda *_args, **_kwargs: True,
     )
 
@@ -247,7 +246,7 @@ def test_run_non_manual_trigger_creates_audit(monkeypatch):
 def test_list_audits_delegates(monkeypatch):
     mock_list = MagicMock(return_value=[{"run_id": 1}])
     monkeypatch.setattr(
-        "management.services.memory.dreaming.service.memory_dreaming_db.list_audits", mock_list
+        "services.memory_dreaming_service.memory_dreaming_db.list_audits", mock_list
     )
 
     service = MemoryDreamingService(record_service=MagicMock())
@@ -261,7 +260,7 @@ def test_list_audits_delegates(monkeypatch):
 
 
 def test_get_memory_dreaming_service_singleton(monkeypatch):
-    import management.services.memory.dreaming.service as mod
+    import services.memory_dreaming_service as mod
     monkeypatch.setattr(mod, "_service", None)
 
     svc1 = mod.get_memory_dreaming_service()

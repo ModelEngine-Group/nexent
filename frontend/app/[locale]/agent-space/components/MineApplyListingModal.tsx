@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { createElement, useEffect, useMemo, useState } from "react";
@@ -246,6 +244,10 @@ export function MineApplyListingModal({
       return;
     }
 
+    if (selectedListingTags.length === 0) {
+      message.warning(t("agentRepository.mine.applyModal.validation.tags"));
+      return;
+    }
     if (selectedListingTags.length > MAX_TAGS) {
       message.warning(
         t("agentRepository.mine.applyModal.validation.tagsMax", {

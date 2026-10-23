@@ -9,12 +9,12 @@ adapter falls back to the model's own default. These tests pin that behavior.
 import os
 import sys
 
-# backend/ on path so `management.services.model.adapter` imports cleanly.
+# backend/ on path so `services.model_gateway_service` imports cleanly.
 _BACKEND = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "backend"))
 if _BACKEND not in sys.path:
     sys.path.insert(0, _BACKEND)
 
-from management.services.model.adapter import _config_to_context  # noqa: E402
+from services.model_gateway_service import _config_to_context  # noqa: E402
 
 
 def _cfg(**over):

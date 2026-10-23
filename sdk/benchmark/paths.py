@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """Robust path resolution for benchmark scripts.
 
 Finds the project root by searching upward for a .git entry (directory
@@ -39,7 +37,7 @@ def setup_paths() -> dict:
     Adds the following to sys.path (idempotent):
         - sdk_dir        (for ``from nexent import ...``)
         - project_root   (for ``from backend.utils import ...``)
-        - backend_dir    (for ``from management.services.agent.prompt import ...``)
+        - backend_dir    (for ``from utils.prompt_template_utils import ...``)
     """
     project_root = _find_project_root()
     sdk_dir = os.path.join(project_root, "sdk")

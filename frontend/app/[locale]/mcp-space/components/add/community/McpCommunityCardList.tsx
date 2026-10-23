@@ -1,15 +1,10 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import { Button } from "antd";
 import { useTranslation } from "react-i18next";
 import type { CommunityMcpCard } from "@/types/mcpTools";
 import McpCommunityCard from "./McpCommunityCard";
-import McpCommunityRequestError from "./McpCommunityRequestError";
 
 interface McpCommunityCardListProps {
   loading: boolean;
-  error: Error | null;
-  onRetry: () => void;
   services: CommunityMcpCard[];
   hasPrevPage: boolean;
   hasNextPage: boolean;
@@ -21,8 +16,6 @@ interface McpCommunityCardListProps {
 
 export default function McpCommunityCardList({
   loading,
-  error,
-  onRetry,
   services,
   hasPrevPage,
   hasNextPage,
@@ -39,10 +32,6 @@ export default function McpCommunityCardList({
         {t("mcpTools.community.loading")}
       </div>
     );
-  }
-
-  if (error) {
-    return <McpCommunityRequestError onRetry={onRetry} />;
   }
 
   if (services.length === 0) {

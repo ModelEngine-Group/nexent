@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import sys
 import os
 import importlib.machinery
@@ -33,7 +32,7 @@ from consts.exceptions import (
     TenantResourceLimitError,
     ValidationError,
 )
-from management.services.permission.identity.tenants import (
+from backend.services.tenant_service import (
     backfill_workbench_main_agents,
     get_tenant_info,
     get_tenant_info_for_user,
@@ -51,7 +50,7 @@ class TestTenantAuthorization:
 
     def test_su_can_list_all_tenants(self):
         with patch(
-            "management.services.permission.identity.tenants.get_tenants_paginated",
+            "backend.services.tenant_service.get_tenants_paginated",
             return_value={"data": [], "total": 0},
         ) as mock_list:
             result = get_tenants_paginated_for_user(requester_role="SU")
@@ -66,7 +65,7 @@ class TestTenantAuthorization:
 
     def test_non_su_can_only_read_own_tenant(self):
         with patch(
-            "management.services.permission.identity.tenants.get_tenant_info",
+            "backend.services.tenant_service.get_tenant_info",
             return_value={"tenant_id": "tenant-1"},
         ) as mock_get:
             result = get_tenant_info_for_user(
@@ -90,11 +89,11 @@ class TestTenantAuthorization:
 @pytest.fixture
 def service_mocks():
     """Create mocks for service layer dependencies"""
-    with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_single_config, \
-            patch('management.services.permission.identity.tenants.insert_config') as mock_insert_config, \
-            patch('management.services.permission.identity.tenants.create_tenant_with_default_group') as mock_create_tenant_with_default_group, \
-            patch('management.services.permission.identity.tenants.update_config_by_tenant_config_id') as mock_update_config, \
-            patch('management.services.permission.identity.tenants.get_all_tenant_ids') as mock_get_all_tenant_ids:
+    with patch('backend.services.tenant_service.get_single_config_info') as mock_get_single_config, \
+            patch('backend.services.tenant_service.insert_config') as mock_insert_config, \
+            patch('backend.services.tenant_service.create_tenant_with_default_group') as mock_create_tenant_with_default_group, \
+            patch('backend.services.tenant_service.update_config_by_tenant_config_id') as mock_update_config, \
+            patch('backend.services.tenant_service.get_all_tenant_ids') as mock_get_all_tenant_ids:
 
         yield {
             'get_single_config_info': mock_get_single_config,
@@ -247,8 +246,8 @@ class TestGetTenantsPaginated:
         ]
 
         # Mock dependencies
-        with patch('management.services.permission.identity.tenants.get_all_tenant_ids', return_value=tenant_ids), \
-             patch('management.services.permission.identity.tenants.get_tenant_info', side_effect=tenant_infos):
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_tenant_info', side_effect=tenant_infos):
 
             # Execute
             result = get_tenants_paginated(page=1, page_size=20)
@@ -271,8 +270,8 @@ class TestGetTenantsPaginated:
             {"tenant_id": "tenant2", "tenant_name": "Tenant 2", "default_group_id": "g2"},
         ]
 
-        with patch("management.services.permission.identity.tenants.get_all_tenant_ids", return_value=tenant_ids), \
-             patch("management.services.permission.identity.tenants.get_tenant_info", side_effect=tenant_infos):
+        with patch("backend.services.tenant_service.get_all_tenant_ids", return_value=tenant_ids), \
+             patch("backend.services.tenant_service.get_tenant_info", side_effect=tenant_infos):
             result = get_tenants_paginated(page=1, page_size=20)
 
         assert result["total"] == 2
@@ -303,8 +302,8 @@ class TestGetTenantsPaginated:
             }
 
         # Mock dependencies
-        with patch('management.services.permission.identity.tenants.get_all_tenant_ids', return_value=tenant_ids), \
-             patch('management.services.permission.identity.tenants.get_tenant_info', side_effect=mock_get_tenant_info):
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_tenant_info', side_effect=mock_get_tenant_info):
 
             # Execute
             result = get_tenants_paginated(page=1, page_size=20)
@@ -326,7 +325,7 @@ class TestGetTenantsPaginated:
     def test_get_tenants_paginated_empty_list(self, service_mocks):
         """Test get_tenants_paginated when no tenants exist"""
         # Mock dependencies
-        with patch('management.services.permission.identity.tenants.get_all_tenant_ids', return_value=[]) as mock_get_tenant_ids:
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=[]) as mock_get_tenant_ids:
 
             # Execute
             result = get_tenants_paginated(page=1, page_size=20)
@@ -340,7 +339,7 @@ class TestGetTenantsPaginated:
     def test_get_tenants_paginated_get_all_tenant_ids_exception(self, service_mocks):
         """Test get_tenants_paginated when get_all_tenant_ids raises exception"""
         # Mock dependencies
-        with patch('management.services.permission.identity.tenants.get_all_tenant_ids', side_effect=Exception("Database error")) as mock_get_tenant_ids:
+        with patch('backend.services.tenant_service.get_all_tenant_ids', side_effect=Exception("Database error")) as mock_get_tenant_ids:
 
             # Execute & Assert
             with pytest.raises(Exception, match="Database error"):
@@ -357,8 +356,8 @@ class TestGetTenantsPaginated:
             return {"tenant_id": tenant_id, "tenant_name": f"Tenant {idx}", "default_group_id": f"group{idx}"}
 
         # Mock dependencies
-        with patch('management.services.permission.identity.tenants.get_all_tenant_ids', return_value=tenant_ids), \
-             patch('management.services.permission.identity.tenants.get_tenant_info', side_effect=mock_get_tenant_info):
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_tenant_info', side_effect=mock_get_tenant_info):
 
             # Execute - page 2 with page_size 2 should return tenants 3 and 4
             result = get_tenants_paginated(page=2, page_size=2)
@@ -383,8 +382,8 @@ class TestGetTenantsPaginated:
             return {"tenant_id": tenant_id, "tenant_name": f"Tenant {idx}", "default_group_id": f"group{idx}"}
 
         # Mock dependencies
-        with patch('management.services.permission.identity.tenants.get_all_tenant_ids', return_value=tenant_ids), \
-             patch('management.services.permission.identity.tenants.get_tenant_info', side_effect=mock_get_tenant_info):
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_tenant_info', side_effect=mock_get_tenant_info):
 
             # Execute - page 3 with page_size 2 should return only tenant5
             result = get_tenants_paginated(page=3, page_size=2)
@@ -409,9 +408,9 @@ class TestCreateTenant:
         group_id = 123
 
         service_mocks['create_tenant_with_default_group'].return_value = group_id
-        with patch('management.services.permission.identity.tenants.ENABLE_AGENT_WORKBENCH', True), \
-                patch('management.services.permission.identity.tenants.check_tenant_name_exists', return_value=False), \
-                patch('management.services.permission.identity.tenants.ensure_workbench_main_agent') as ensure:
+        with patch('backend.services.tenant_service.ENABLE_AGENT_WORKBENCH', True), \
+                patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False), \
+                patch('backend.services.tenant_service.ensure_workbench_main_agent') as ensure:
             result = create_tenant(tenant_name, user_id, locale="zh")
 
         assert result["tenant_name"] == tenant_name
@@ -431,7 +430,7 @@ class TestCreateTenant:
         user_id = "creator_user"
 
         # Mock check_tenant_name_exists to return True (name already taken)
-        with patch('management.services.permission.identity.tenants.check_tenant_name_exists', return_value=True):
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=True):
 
             # Execute & Assert
             with pytest.raises(ValidationError, match="already exists"):
@@ -444,7 +443,7 @@ class TestCreateTenant:
         user_id = "creator_user"
 
         # Mock check_tenant_name_exists (won't be called due to empty name validation)
-        with patch('management.services.permission.identity.tenants.check_tenant_name_exists', return_value=False):
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
 
             # Execute & Assert
             with pytest.raises(ValidationError, match="Tenant name cannot be empty"):
@@ -456,7 +455,7 @@ class TestCreateTenant:
         user_id = "creator_user"
         service_mocks['create_tenant_with_default_group'].side_effect = RuntimeError("Database error")
 
-        with patch('management.services.permission.identity.tenants.check_tenant_name_exists', return_value=False):
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
             with pytest.raises(ValidationError, match="Failed to create tenant: Database error"):
                 create_tenant(tenant_name, user_id)
 
@@ -467,7 +466,7 @@ class TestCreateTenant:
         user_id = "creator_user"
 
         # Mock check_tenant_name_exists (won't be called due to whitespace validation)
-        with patch('management.services.permission.identity.tenants.check_tenant_name_exists', return_value=False):
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
 
             # Execute & Assert
             with pytest.raises(ValidationError, match="Tenant name cannot be empty"):
@@ -481,7 +480,7 @@ class TestCreateTenant:
             "Tenant limit reached: maximum 1 tenants"
         )
 
-        with patch('management.services.permission.identity.tenants.check_tenant_name_exists', return_value=False):
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
             with pytest.raises(ValidationError, match="maximum 1 tenants"):
                 create_tenant(tenant_name, user_id)
 
@@ -496,7 +495,7 @@ class TestCreateTenant:
         )
         service_mocks['create_tenant_with_default_group'].side_effect = limit_error
 
-        with patch('management.services.permission.identity.tenants.check_tenant_name_exists', return_value=False):
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=False):
             with pytest.raises(TenantResourceLimitError) as exc_info:
                 create_tenant("New Tenant", "creator_user")
 
@@ -530,11 +529,11 @@ class TestWorkbenchMainBackfill:
             "tenant-b",
         ]
 
-        with patch('management.services.permission.identity.tenants.ENABLE_AGENT_WORKBENCH', True), patch(
-            "management.services.permission.identity.tenants.get_all_tenant_ids",
+        with patch('backend.services.tenant_service.ENABLE_AGENT_WORKBENCH', True), patch(
+            "backend.services.tenant_service.get_all_tenant_ids",
             return_value=tenant_ids,
         ), patch(
-            "management.services.permission.identity.tenants.ensure_workbench_main_agent",
+            "backend.services.tenant_service.ensure_workbench_main_agent",
             side_effect=[MagicMock(), RuntimeError("tenant bootstrap failed")],
         ) as ensure:
             result = backfill_workbench_main_agents()
@@ -547,8 +546,8 @@ class TestWorkbenchMainBackfill:
         assert all(call.kwargs["user_id"] == "system" for call in ensure.call_args_list)
 
     def test_workbench_backfill_skipped_when_disabled(self):
-        with patch('management.services.permission.identity.tenants.ENABLE_AGENT_WORKBENCH', False), patch(
-            'management.services.permission.identity.tenants.get_all_tenant_ids'
+        with patch('backend.services.tenant_service.ENABLE_AGENT_WORKBENCH', False), patch(
+            'backend.services.tenant_service.get_all_tenant_ids'
         ) as tenants:
             result = backfill_workbench_main_agents()
 
@@ -570,7 +569,7 @@ class TestUpdateTenantInfo:
         config_info = {"tenant_config_id": 123, "config_value": "Old Name"}
 
         # Mock dependencies
-        with patch('management.services.permission.identity.tenants.get_tenant_info') as mock_get_tenant_info:
+        with patch('backend.services.tenant_service.get_tenant_info') as mock_get_tenant_info:
 
             service_mocks['get_single_config_info'].return_value = config_info
             service_mocks['update_config_by_tenant_config_id'].return_value = True
@@ -604,7 +603,7 @@ class TestUpdateTenantInfo:
         service_mocks['insert_config'].return_value = True
 
         # Mock get_tenant_info to return updated info
-        with patch('management.services.permission.identity.tenants.get_tenant_info') as mock_get_tenant_info:
+        with patch('backend.services.tenant_service.get_tenant_info') as mock_get_tenant_info:
             mock_get_tenant_info.return_value = {
                 "tenant_id": tenant_id,
                 "tenant_name": new_tenant_name,
@@ -681,7 +680,7 @@ class TestUpdateTenantInfo:
         user_id = "updater_user"
 
         # Mock check_tenant_name_exists to return True (name already taken by another tenant)
-        with patch('management.services.permission.identity.tenants.check_tenant_name_exists', return_value=True) as mock_check:
+        with patch('backend.services.tenant_service.check_tenant_name_exists', return_value=True) as mock_check:
             # Execute & Assert
             with pytest.raises(ValidationError, match="already exists"):
                 update_tenant_info(tenant_id, new_tenant_name, user_id)
@@ -701,25 +700,25 @@ class TestDeleteTenant:
         deleted_by = "admin_user"
 
         # Mock dependencies
-        with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config, \
-             patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
-             patch('management.services.permission.identity.tenants.delete_user_and_cleanup') as mock_delete_user, \
-             patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
-             patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
-             patch('management.services.permission.identity.tenants.delete_model_record') as mock_delete_model, \
-             patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
-             patch('management.services.permission.identity.tenants.delete_knowledge_record') as mock_delete_knowledge, \
-             patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
-             patch('management.services.permission.identity.tenants.delete_tools_by_agent_id') as mock_delete_tools, \
-             patch('management.services.permission.identity.tenants.delete_agent_relationship') as mock_delete_rel, \
-             patch('management.services.permission.identity.tenants.delete_agent_by_id') as mock_delete_agent, \
-             patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
-             patch('management.services.permission.identity.tenants.delete_mcp_record_by_name_and_url') as mock_delete_mcp, \
-             patch('management.services.permission.identity.tenants.query_invitations_by_tenant') as mock_get_invitations, \
-             patch('management.services.permission.identity.tenants.remove_invitation') as mock_remove_invitation, \
-             patch('management.services.permission.identity.tenants.get_all_configs_by_tenant_id') as mock_get_all_configs, \
-             patch('management.services.permission.identity.tenants.delete_config_by_tenant_config_id') as mock_delete_config:
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
+             patch('backend.services.tenant_service.delete_user_and_cleanup') as mock_delete_user, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.delete_model_record') as mock_delete_model, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.delete_knowledge_record') as mock_delete_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.delete_tools_by_agent_id') as mock_delete_tools, \
+             patch('backend.services.tenant_service.delete_agent_relationship') as mock_delete_rel, \
+             patch('backend.services.tenant_service.delete_agent_by_id') as mock_delete_agent, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.delete_mcp_record_by_name_and_url') as mock_delete_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.remove_invitation') as mock_remove_invitation, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
 
             # Configure mocks
             mock_get_config.return_value = {"tenant_config_id": 1, "config_value": "Test Tenant"}
@@ -764,7 +763,7 @@ class TestDeleteTenant:
         deleted_by = "admin_user"
 
         # Mock get_single_config_info to return None (tenant not found)
-        with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config:
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config:
             mock_get_config.return_value = None
 
         # Execute & Assert
@@ -779,8 +778,8 @@ class TestDeleteTenant:
         deleted_by = "admin_user"
 
         # Mock dependencies to raise ValidationError during deletion
-        with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config, \
-             patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users:
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users:
             mock_get_config.return_value = {"tenant_config_id": 1}
             mock_get_users.side_effect = ValidationError("Database error")
 
@@ -795,17 +794,17 @@ class TestDeleteTenant:
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
-        with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config, \
-             patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
-             patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
-             patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
-             patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
-             patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
-             patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
-             patch('management.services.permission.identity.tenants.query_invitations_by_tenant') as mock_get_invitations, \
-             patch('management.services.permission.identity.tenants.get_all_configs_by_tenant_id') as mock_get_all_configs, \
-             patch('management.services.permission.identity.tenants.delete_config_by_tenant_config_id') as mock_delete_config:
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
 
             mock_get_config.return_value = {"tenant_config_id": 1}
 
@@ -841,17 +840,17 @@ class TestDeleteTenant:
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
-        with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config, \
-             patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
-             patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
-             patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
-             patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
-             patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
-             patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
-             patch('management.services.permission.identity.tenants.query_invitations_by_tenant') as mock_get_invitations, \
-             patch('management.services.permission.identity.tenants.get_all_configs_by_tenant_id') as mock_get_all_configs, \
-             patch('management.services.permission.identity.tenants.delete_config_by_tenant_config_id') as mock_delete_config:
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
 
             mock_get_config.return_value = {"tenant_config_id": 1}
 
@@ -890,18 +889,18 @@ class TestDeleteTenant:
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
-        with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config, \
-             patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
-             patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
-             patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
-             patch('management.services.permission.identity.tenants.delete_model_record') as mock_delete_model, \
-             patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
-             patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
-             patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
-             patch('management.services.permission.identity.tenants.query_invitations_by_tenant') as mock_get_invitations, \
-             patch('management.services.permission.identity.tenants.get_all_configs_by_tenant_id') as mock_get_all_configs, \
-             patch('management.services.permission.identity.tenants.delete_config_by_tenant_config_id') as mock_delete_config:
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.delete_model_record') as mock_delete_model, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
 
             mock_get_config.return_value = {"tenant_config_id": 1}
             mock_query_groups.return_value = {"data": []}
@@ -932,18 +931,18 @@ class TestDeleteTenant:
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
-        with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config, \
-             patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
-             patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
-             patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
-             patch('management.services.permission.identity.tenants.delete_model_record') as mock_delete_model, \
-             patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
-             patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
-             patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
-             patch('management.services.permission.identity.tenants.query_invitations_by_tenant') as mock_get_invitations, \
-             patch('management.services.permission.identity.tenants.get_all_configs_by_tenant_id') as mock_get_all_configs, \
-             patch('management.services.permission.identity.tenants.delete_config_by_tenant_config_id') as mock_delete_config:
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.delete_model_record') as mock_delete_model, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
 
             mock_get_config.return_value = {"tenant_config_id": 1}
             mock_query_groups.return_value = {"data": []}
@@ -973,20 +972,20 @@ class TestDeleteTenant:
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
-        with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config, \
-             patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
-             patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
-             patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
-             patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
-             patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
-             patch('management.services.permission.identity.tenants.delete_tools_by_agent_id') as mock_delete_tools, \
-             patch('management.services.permission.identity.tenants.delete_agent_relationship') as mock_delete_rel, \
-             patch('management.services.permission.identity.tenants.delete_agent_by_id') as mock_delete_agent, \
-             patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
-             patch('management.services.permission.identity.tenants.query_invitations_by_tenant') as mock_get_invitations, \
-             patch('management.services.permission.identity.tenants.get_all_configs_by_tenant_id') as mock_get_all_configs, \
-             patch('management.services.permission.identity.tenants.delete_config_by_tenant_config_id') as mock_delete_config:
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.delete_tools_by_agent_id') as mock_delete_tools, \
+             patch('backend.services.tenant_service.delete_agent_relationship') as mock_delete_rel, \
+             patch('backend.services.tenant_service.delete_agent_by_id') as mock_delete_agent, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
 
             mock_get_config.return_value = {"tenant_config_id": 1}
             mock_query_groups.return_value = {"data": []}
@@ -1019,18 +1018,18 @@ class TestDeleteTenant:
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
-        with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config, \
-             patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
-             patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
-             patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
-             patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
-             patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
-             patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
-             patch('management.services.permission.identity.tenants.delete_mcp_record_by_name_and_url') as mock_delete_mcp, \
-             patch('management.services.permission.identity.tenants.query_invitations_by_tenant') as mock_get_invitations, \
-             patch('management.services.permission.identity.tenants.get_all_configs_by_tenant_id') as mock_get_all_configs, \
-             patch('management.services.permission.identity.tenants.delete_config_by_tenant_config_id') as mock_delete_config:
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.delete_mcp_record_by_name_and_url') as mock_delete_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
 
             mock_get_config.return_value = {"tenant_config_id": 1}
             mock_query_groups.return_value = {"data": []}
@@ -1061,18 +1060,18 @@ class TestDeleteTenant:
         tenant_id = "test_tenant"
         deleted_by = "admin_user"
 
-        with patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config, \
-             patch('management.services.permission.identity.tenants.get_users_by_tenant_id') as mock_get_users, \
-             patch('management.services.permission.identity.tenants.query_groups_by_tenant') as mock_query_groups, \
-             patch('management.services.permission.identity.tenants.remove_group') as mock_remove_group, \
-             patch('management.services.permission.identity.tenants.get_model_records') as mock_get_models, \
-             patch('management.services.permission.identity.tenants.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
-             patch('management.services.permission.identity.tenants.query_all_agent_info_by_tenant_id') as mock_get_agents, \
-             patch('management.services.permission.identity.tenants.get_mcp_records_by_tenant') as mock_get_mcp, \
-             patch('management.services.permission.identity.tenants.query_invitations_by_tenant') as mock_get_invitations, \
-             patch('management.services.permission.identity.tenants.remove_invitation') as mock_remove_invitation, \
-             patch('management.services.permission.identity.tenants.get_all_configs_by_tenant_id') as mock_get_all_configs, \
-             patch('management.services.permission.identity.tenants.delete_config_by_tenant_config_id') as mock_delete_config:
+        with patch('backend.services.tenant_service.get_single_config_info') as mock_get_config, \
+             patch('backend.services.tenant_service.get_users_by_tenant_id') as mock_get_users, \
+             patch('backend.services.tenant_service.query_groups_by_tenant') as mock_query_groups, \
+             patch('backend.services.tenant_service.remove_group') as mock_remove_group, \
+             patch('backend.services.tenant_service.get_model_records') as mock_get_models, \
+             patch('backend.services.tenant_service.get_knowledge_info_by_tenant_id') as mock_get_knowledge, \
+             patch('backend.services.tenant_service.query_all_agent_info_by_tenant_id') as mock_get_agents, \
+             patch('backend.services.tenant_service.get_mcp_records_by_tenant') as mock_get_mcp, \
+             patch('backend.services.tenant_service.query_invitations_by_tenant') as mock_get_invitations, \
+             patch('backend.services.tenant_service.remove_invitation') as mock_remove_invitation, \
+             patch('backend.services.tenant_service.get_all_configs_by_tenant_id') as mock_get_all_configs, \
+             patch('backend.services.tenant_service.delete_config_by_tenant_config_id') as mock_delete_config:
 
             mock_get_config.return_value = {"tenant_config_id": 1}
             mock_query_groups.return_value = {"data": []}
@@ -1107,8 +1106,8 @@ class TestCheckTenantNameExists:
         tenant_ids = ["tenant1", "tenant2", "tenant3"]
 
         # Mock with fresh mocks to avoid fixture conflicts
-        with patch('management.services.permission.identity.tenants.get_all_tenant_ids', return_value=tenant_ids), \
-             patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config:
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_single_config_info') as mock_get_config:
             # Each tenant has a different name
             mock_get_config.side_effect = [
                 {"config_value": "Tenant 1"},  # tenant1
@@ -1129,8 +1128,8 @@ class TestCheckTenantNameExists:
         tenant_ids = ["tenant1", "tenant2", "tenant3"]
 
         # Mock with fresh mocks
-        with patch('management.services.permission.identity.tenants.get_all_tenant_ids', return_value=tenant_ids), \
-             patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config:
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_single_config_info') as mock_get_config:
             # tenant2 has the name we're looking for
             mock_get_config.side_effect = [
                 {"config_value": "Tenant 1"},  # tenant1
@@ -1152,8 +1151,8 @@ class TestCheckTenantNameExists:
         tenant_ids = ["tenant1", "tenant2", "tenant3"]
 
         # Mock with fresh mocks
-        with patch('management.services.permission.identity.tenants.get_all_tenant_ids', return_value=tenant_ids), \
-             patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config:
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_single_config_info') as mock_get_config:
             # tenant2 has the name, but should be excluded
             mock_get_config.side_effect = [
                 {"config_value": "My Tenant"},  # tenant1 - match (not excluded)
@@ -1173,7 +1172,7 @@ class TestCheckTenantNameExists:
         tenant_name = "Any Tenant"
 
         # Mock dependencies - no tenants
-        with patch('management.services.permission.identity.tenants.get_all_tenant_ids', return_value=[]):
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=[]):
 
             # Execute
             result = check_tenant_name_exists(tenant_name)
@@ -1188,8 +1187,8 @@ class TestCheckTenantNameExists:
         tenant_ids = ["tenant1"]
 
         # Mock with fresh mock
-        with patch('management.services.permission.identity.tenants.get_all_tenant_ids', return_value=tenant_ids), \
-             patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config:
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_single_config_info') as mock_get_config:
             mock_get_config.return_value = {"config_value": "My Tenant"}  # different case
 
             # Execute
@@ -1205,8 +1204,8 @@ class TestCheckTenantNameExists:
         tenant_ids = ["tenant1", "tenant2"]
 
         # Mock with fresh mocks
-        with patch('management.services.permission.identity.tenants.get_all_tenant_ids', return_value=tenant_ids), \
-             patch('management.services.permission.identity.tenants.get_single_config_info') as mock_get_config:
+        with patch('backend.services.tenant_service.get_all_tenant_ids', return_value=tenant_ids), \
+             patch('backend.services.tenant_service.get_single_config_info') as mock_get_config:
             # tenant1 has empty name config (empty dict is falsy), tenant2 has different name
             mock_get_config.side_effect = [
                 None,  # tenant1 - empty/falsy config

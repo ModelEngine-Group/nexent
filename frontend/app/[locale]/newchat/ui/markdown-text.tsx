@@ -1,9 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-
 "use client";
-
-import type { SourceAttributes } from "@/types/source";
-import { getSourceLabel } from "@/lib/source";
 
 import "@assistant-ui/react-markdown/styles/dot.css";
 
@@ -35,10 +30,6 @@ import {
   isLocalStorageObjectUrl,
 } from "@/services/storageService";
 import { useSourcesPanel } from "./sources-panel-context";
-import {
-  buildCitationDisplayIndexMap,
-  withCitationDisplayIndices,
-} from "@/lib/citationDisplay";
 import { getCitationKey, getCitationLabel, type PanelSourceItem } from "./sources-panel";
 import {
   searchSourcesRegistry,
@@ -52,7 +43,7 @@ import {
  * Checks searchSourcesRegistry first (streaming messages), then
  * conversationSourcesRegistry (historical messages).
  */
-interface MessageSourcePart extends SourceAttributes {
+interface MessageSourcePart {
   type?: string;
   sourceType?: string;
   publishedDate?: string;
@@ -107,9 +98,6 @@ function resolveCiteSources(
       isImage: part.isImage,
       imageKey: part.imageKey,
       retrievalHighlightTerms: part.retrievalHighlightTerms,
-      searchType: part.searchType,
-      sourceMetadata: part.sourceMetadata,
-      sourceReference: part.sourceReference,
     }];
   });
 
@@ -144,6 +132,41 @@ function findCiteSource(sources: SearchSource[], citekey: string): SearchSource 
     : undefined;
 }
 
+const extractDomain = (url: string): string => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return url;
+  }
+};
+
+function getSourceLabel(source: PanelSourceItem | undefined): string | undefined {
+  if (!source) return undefined;
+  if (source.sourceType === "document" || !source.url) {
+    return "来源: Nexent";
+  }
+  return `来源: ${extractDomain(source.url)}`;
+}
+
+function buildCitationDisplayIndexMap(
+  content: readonly MessageSourcePart[]
+): Map<string, number> {
+  const displayIndexMap = new Map<string, number>();
+
+  for (const part of content) {
+    if (part.type !== "text" || typeof part.text !== "string") continue;
+
+    for (const match of part.text.matchAll(/\[\[([^\]]+)\]\]/g)) {
+      const citekey = match[1];
+      if (!displayIndexMap.has(citekey)) {
+        displayIndexMap.set(citekey, displayIndexMap.size + 1);
+      }
+    }
+  }
+
+  return displayIndexMap;
+}
+
 function toPanelSource(source: SearchSource): PanelSourceItem {
   return {
     sourceType:
@@ -161,9 +184,6 @@ function toPanelSource(source: SearchSource): PanelSourceItem {
     toolSign: source.toolSign,
     isImage: source.isImage,
     retrievalHighlightTerms: source.retrievalHighlightTerms,
-    searchType: source.searchType,
-    sourceMetadata: source.sourceMetadata,
-    sourceReference: source.sourceReference,
   };
 }
 
@@ -272,24 +292,15 @@ const CiteComponent: FC<
 
   const messageSources = resolveCiteSources(messageId, content);
   const source = findCiteSource(messageSources, citekey);
+  const panelSource = source ? toPanelSource(source) : undefined;
   const citeIndex = getCiteIndex(citekey);
   const sourceIndex = source?.citeIndex ?? citeIndex ?? 0;
   const citationKey = source
     ? getCitationKey({ citeIndex: source.citeIndex, toolSign: source.toolSign })
     : citekey.trim().toLowerCase();
-  const citationDisplayIndexMap = buildCitationDisplayIndexMap(
-    content,
-    messageSources
-  );
-  const displayIndex =
-    citationDisplayIndexMap.get(citekey.trim().toLowerCase()) ?? sourceIndex;
-  const panelItems = withCitationDisplayIndices(
-    messageSources.map(toPanelSource),
-    citationDisplayIndexMap
-  );
-  const panelSource = source
-    ? panelItems.find((item) => getCitationKey(item) === citationKey)
-    : undefined;
+  const citationDisplayIndexMap = buildCitationDisplayIndexMap(content);
+  const displayIndex = citationDisplayIndexMap.get(citekey) ?? sourceIndex;
+  const panelItems = messageSources.map(toPanelSource);
   const sources = panelItems.filter((item) => !item.isImage);
   const images = panelItems.filter((item) => item.isImage);
 
@@ -298,7 +309,7 @@ const CiteComponent: FC<
       citekey={citekey}
       displayIndex={displayIndex}
       sourceIndex={sourceIndex}
-      label={panelSource ? getCitationLabel(panelSource, {
+      label={source ? getCitationLabel(toPanelSource(source), {
         knowledgeBase: t("chat.sources.knowledgeBase"),
         web: t("chat.sources.web"),
         source: t("chat.sources.source"),
@@ -308,12 +319,7 @@ const CiteComponent: FC<
       filename={panelSource?.filename}
       url={panelSource?.url}
       sourceType={panelSource?.sourceType}
-      sourceLabel={panelSource ? getSourceLabel(panelSource, {
-        knowledgeBase: t("chat.sources.knowledgeBase"),
-        web: t("chat.sources.web"),
-        document: t("chat.sources.document"),
-        source: t("chat.sources.source"),
-      }) : undefined}
+      sourceLabel={getSourceLabel(panelSource)}
       loading={!source}
       onClick={
         source && messageId
@@ -354,11 +360,8 @@ const MarkdownTextImpl = () => {
     );
   });
   const citationDisplayIndexMap = useMemo(
-    () => buildCitationDisplayIndexMap(
-      content,
-      resolveCiteSources(messageId, content)
-    ),
-    [content, messageId]
+    () => buildCitationDisplayIndexMap(content),
+    [content]
   );
   const citationIndexMapAttribute = useMemo(
     () => JSON.stringify(Object.fromEntries(citationDisplayIndexMap)),

@@ -100,7 +100,7 @@ class SqlDatabaseBaseTool(Tool):
         self,
         sql: str,
         parameters: Optional[List[Any]] = None,
-        max_rows: Optional[int] = 0,
+        max_rows: Optional[int] = 100,
         timeout: Optional[int] = 10,
     ) -> str:
         """
@@ -109,7 +109,7 @@ class SqlDatabaseBaseTool(Tool):
         Args:
             sql: SQL query to execute (supports standard ANSI SQL)
             parameters: Optional list of parameter values for parameterized queries
-            max_rows: Maximum number of rows to return (default 0; non-positive or None means unlimited)
+            max_rows: Maximum number of rows to return (default 100)
             timeout: Query timeout in seconds (default 10)
 
         Returns:
@@ -131,7 +131,7 @@ class SqlDatabaseBaseTool(Tool):
                 self.observer.add_message("", ProcessType.TOOL, running_prompt)
 
             if max_rows is None:
-                max_rows = 0
+                max_rows = 100
             if timeout is None:
                 timeout = 10
 

@@ -1,11 +1,10 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 import threading
 import uuid
 from typing import Dict, Union
 
 from nexent.core.agents.agent_model import AgentRunInfo
-from management.services.agent.run_state import runtime_state_service
+from services.runtime_state_service import runtime_state_service
 
 logger = logging.getLogger("agent_run_manager")
 

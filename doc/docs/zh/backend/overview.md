@@ -32,6 +32,7 @@ backend/
 │   ├── a2a_server_app.py        # A2A 服务端 API（本地 Agent 发布为 A2A）
 │   ├── northbound_app.py / northbound_base_app.py / northbound_knowledge_app.py  # 北向开放 API（/nb/v1、/nb/a2a）
 │   ├── skill_app.py             # 技能管理与 NL2Skill API
+│   ├── prompt_template_app.py   # 提示词模板管理 API
 │   ├── agent_repository_app.py / skill_repository_app.py  # Agent/技能市场仓库 API
 │   ├── agent_evaluation_app.py / evaluation_set_app.py / evaluator_app.py  # 评测 API
 │   ├── agent_automation_app.py  # 智能体自动化定时任务 API
