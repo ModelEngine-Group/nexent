@@ -141,3 +141,59 @@ def test_naming_prompt_is_self_contained_and_keeps_meaningful_example(language):
     assert AgentInfoRequest(name=names[0]).name == tools.AgentDraftFields(name=names[0]).name
     assert CoreAgent._validate_name(None, names[0]) == names[0]
     assert len(names[0]) <= 100
+
+
+@pytest.mark.asyncio
+async def test_duplicate_name_can_be_regenerated_until_saved_then_is_immutable(draft_boundary):
+    authorize, catalog, update = draft_boundary
+    catalog.return_value = [{"agent_id": 99, "name": "research_assistant"}]
+    failed = json.loads(await tools.save_agent_draft_fields(170, {"name": "research_assistant"}))
+    assert failed["code"] == "agent_name_duplicate"
+    assert failed["retryable"] is True
+    assert authorize.return_value["name"] is None
+    update.assert_not_called()
+
+    def persist_name(*, agent_id, tenant_id, fields):
+        assert agent_id == 170
+        assert tenant_id == "tenant-a"
+        authorize.return_value.update(fields)
+        return 1
+
+    update.side_effect = persist_name
+    saved = await tools.save_agent_draft_fields(170, {"name": "research_helper"})
+    payload, _state = saved.split("\n", 1)
+    assert json.loads(payload)["status"] == "success"
+    assert authorize.return_value["name"] == "research_helper"
+    update.assert_called_once_with(
+        agent_id=170, tenant_id="tenant-a", fields={"name": "research_helper"},
+    )
+
+    rejected = json.loads(await tools.save_agent_draft_fields(170, {"name": "another_helper"}))
+    assert rejected["code"] == "agent_name_already_set"
+    assert rejected["retryable"] is False
+    assert authorize.return_value["name"] == "research_helper"
+    assert update.call_count == 1
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_naming_prompt_distinguishes_failed_candidates_from_saved_names(language):
+    prompt = build_nl2agent_system_prompt(language)
+    heading = "### 变量名初始化" if language == "zh" else "### Variable Name Initialization"
+    initialization = prompt.split(heading, 1)[1].split("\n### ", 1)[0]
+    assert "agent_name_duplicate" in initialization
+    assert "retryable=true" in initialization
+    assert "agent_name_already_set" in initialization
+    if language == "zh":
+        assert "每次模型回复只执行一个保存动作" in initialization
+        assert "重新生成" in initialization and "重试一次" in initialization
+        assert "同一 `agent_id`" in initialization
+        assert "保存成功后才禁止覆盖" in initialization
+        assert "第二次失败" in initialization
+        assert "执行唯一一个保存动作" not in prompt
+    else:
+        assert "one save action per model response" in initialization
+        assert "regenerate" in initialization and "retry once" in initialization
+        assert "same `agent_id`" in initialization
+        assert "Only after a successful save" in initialization
+        assert "second failure" in initialization
+        assert "perform exactly one save action" not in prompt

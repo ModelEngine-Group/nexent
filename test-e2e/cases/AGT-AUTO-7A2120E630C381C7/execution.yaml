@@ -1,5 +1,7 @@
 schema_version: '1.0'
 case_id: AGT-AUTO-7A2120E630C381C7
+required_mock_services:
+- knowledge-provider
 implementations:
 - framework: pytest
   file: test.py

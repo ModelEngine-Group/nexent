@@ -1,4 +1,5 @@
-"""V5 DEP-06 independently collected scenario."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Docker-only DEP-06 backup contract."""
 
 import pytest
 from d5.scenarios import scenario_reliability_deployment_special as scenario

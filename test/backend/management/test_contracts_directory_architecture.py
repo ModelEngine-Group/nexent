@@ -72,6 +72,7 @@ def test_contracts_use_business_files_and_two_shared_subdirectories():
         "agent",
         "authentication",
         "automation",
+        "clarification",
         "configuration",
         "conversation",
         "evaluation",

@@ -40,9 +40,11 @@ feature:
       Longer translated step copy may grow naturally above its 156px minimum while retaining
       readable text and usable controls.
   - rule_id: AGENT-LIST-RULE-007
-    description: Desktop cards are 440x148px with 24px horizontal and 16px vertical padding,
-      a 12px radius, white background and 1px outside stroke; card dates and publication
-      status align at opposite ends of the footer.
+    description: Desktop cards are 440x180px with 24px horizontal and 16px vertical padding,
+      a 12px radius, white background and 1px outside stroke. The 148px inner area
+      contains a 112px body with a reserved 22px category row, a 4px derived gap
+      and a 32px footer; card dates and publication status align at opposite ends
+      of the footer. The 180px design was confirmed on 2026-10-23.
   - rule_id: AGENT-LIST-RULE-008
     description: Visual refinement preserves real list metadata and existing search, pagination,
       creation, details, configuration, publication, import and more-menu actions; guide/card

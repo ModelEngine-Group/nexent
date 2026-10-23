@@ -106,6 +106,7 @@ async def test_owned_model_uses_configuration_in_current_tenant_and_cleans_on_fa
     assert posts[0][1]['json']['model_name'] == 'configured-model'
     assert register.call_args.kwargs['cleanup']['identity'] == identity.id
     assert health.await_args.args[0] is identity
+    assert health.await_args.kwargs == {'force': True}
     assert posts[-1][0] == '/model/delete'
     assert posts[-1][1]['params']['display_name'] == posts[0][1]['json']['display_name']
     assert state.call_args.args[-1] == 'DELETED'
@@ -124,12 +125,29 @@ async def test_memory_embedding_dependency_fails_before_memory_is_created(monkey
 
 
 def test_external_memory_final_answer_not_query_or_tool_echo():
-    with pytest.raises(AssertionError, match='Missing actual final answer'):
+    with pytest.raises(AssertionError, match='no completed final answer'):
         memory_case.final_text([{'data': {'type': 'execution_logs', 'content': 'EXTMEM-fixture'}}])
     with pytest.raises(AssertionError, match='runtime error'):
         memory_case.final_text([{'data': {'type': 'error', 'content': 'failure'}},
                                 {'data': {'type': 'final_answer', 'content': 'EXTMEM-fixture'}}])
     assert memory_case.final_text([{'data': {'type': 'final_answer', 'content': 'EXTMEM-fixture'}}]) == 'EXTMEM-fixture'
+
+
+def test_external_memory_accepts_only_its_committed_reclassified_body():
+    events = [
+        {'data': {'type': 'model_output_thinking', 'content': 'stale answer', 'step_id': 'old', 'attempt_id': 'a'}},
+        {'data': {'type': 'model_attempt_control', 'phase': 'rollback', 'step_id': 'old', 'attempt_id': 'a'}},
+        {'data': {'type': 'model_output_deep_thinking', 'content': 'private reasoning', 'step_id': 's', 'attempt_id': 'b'}},
+        {'data': {'type': 'model_output_thinking', 'content': 'NOT_', 'step_id': 's', 'attempt_id': 'b'}},
+        {'data': {'type': 'model_output_thinking', 'content': 'FOUND', 'step_id': 's', 'attempt_id': 'b'}},
+        {'data': {'type': 'final_answer', 'content': '', 'answer_phase': 'complete',
+                  'reclassify_step': True, 'step_id': 's'}},
+        {'data': {'type': 'final_answer', 'content': 'wrong child', 'invocation_id': 'child'}},
+    ]
+    assert memory_case.final_text(events) == 'NOT_FOUND'
+    events[5]['data']['reclassify_step'] = False
+    with pytest.raises(AssertionError, match='without a nonempty answer'):
+        memory_case.final_text(events)
 
 
 @pytest.mark.parametrize('text', ['', '请确认其他字段是否同步'])
@@ -190,12 +208,16 @@ async def test_external_memory_workflow_requires_each_independent_proof(monkeypa
         org = 'owned-org'
         count, status, delay = 0, 200, 0
 
+        def __init__(self):
+            self.current_org = self.org
+            self.searches = {}
+
         def provider_params(self, org=None):
             return {'plugin.name': 'mem0', 'plugin.base_url': 'http://fixture',
                     'plugin.api_key': self.settings['api_key'], 'plugin.org_id': org or self.org}
 
-        async def counts(self):
-            return {'search': self.count}
+        async def counts(self, org=None):
+            return {'search': self.searches.get(org or self.org, 0)}
 
         async def fault(self, status=200, delay=0):
             self.status, self.delay = status, delay
@@ -204,6 +226,9 @@ async def test_external_memory_workflow_requires_each_independent_proof(monkeypa
 
     class API:
         marker, local_marker, published = '', '', False
+
+        def __init__(self):
+            self.seeds = {}
 
         async def post(self, path, json):
             if path.endswith('/publish'):
@@ -220,17 +245,26 @@ async def test_external_memory_workflow_requires_each_independent_proof(monkeypa
                 unit = json['units'][0]
                 assert unit['event_type'] == 'memory_stored' and unit['unit_type'] == 'text'
                 self.marker = unit['unit_content'].split()[-1]
+                self.seeds.setdefault(mock.current_org, []).append((unit['unit_content'].split()[2], self.marker))
                 return response(200, {'accepted_count': 1, 'rejected_count': 0})
             if path.endswith('/test-search'):
                 if mock.status != 200 or mock.delay:
                     return response(400, {'detail': 'controlled Provider error'})
-                return response(200, {'items': [{'content': self.marker, 'is_external': True}] if self.marker else []})
+                return response(200, {'items': [{'content': answer, 'is_external': True}
+                    for lookup, answer in self.seeds.get(mock.current_org, []) if lookup in json['query']]})
             return response(200, {})
 
         async def put(self, path, json):
+            if 'params' in json:
+                mock.current_org = json['params']['plugin.org_id']
             return response(200, {})
 
-        async def get(self, path):
+        async def get(self, path, **kwargs):
+            if path == '/memory/long-term/user':
+                return response(200, {'empty': not bool(self.local_marker),
+                                      'version': {'content': self.local_marker}})
+            if path == '/memory/context':
+                return response(200, {'user_long_term': [{'content': self.local_marker}] if self.local_marker else []})
             code = 'timeout' if mock.delay else 'provider_error'
             if break_proof == 'error_code':
                 code = 'unknown'
@@ -247,11 +281,12 @@ async def test_external_memory_workflow_requires_each_independent_proof(monkeypa
         assert kwargs['model_ids'] == [88]
         yield 77, {'agent_id': 77, 'name': 'owned'}
 
-    async def run(identity, agent_id, query, phase):
+    async def run(identity, agent_id, query, phase, *, expected_external=None):
         assert api.published, 'Normal memory chat requires the owned published Agent'
-        assert api.marker not in query and api.local_marker not in query, 'Answer leaked into input'
+        assert not api.marker or api.marker not in query, 'Answer leaked into input'
+        assert not api.local_marker or api.local_marker not in query, 'Local answer leaked into input'
         if break_proof != 'wire':
-            mock.count += 1
+            mock.searches[mock.current_org] = mock.searches.get(mock.current_org, 0) + 1
         if phase.startswith('local-'):
             return api.local_marker
         if phase == 'hot-update':

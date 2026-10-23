@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Check case-local Chromium audio bindings without contacting providers."""
 
 from __future__ import annotations
@@ -37,6 +38,7 @@ class AudioPreparationTests(unittest.TestCase):
                 return response({'config': {'models': {}, 'app': {}}})
 
             async def post(self, path, json=None, params=None):
+                assert 'temporary_healthcheck' not in path, 'No probe before creating the voice record'
                 posted.append((path, json))
                 if path == '/model/create':
                     assert json['display_name'] != 'daily-text'
@@ -56,7 +58,7 @@ class AudioPreparationTests(unittest.TestCase):
                 patch.object(preparation, 'model_request', side_effect=lambda *a, **k: dict(payload)):
             asyncio.run(exercise())
         self.assertEqual(sum(path == '/model/create' for path, _ in posted), 1)
-        self.assertEqual(sum(path == '/model/temporary_healthcheck' for path, _ in posted), 2)
+        self.assertEqual(sum(path == '/model/healthcheck' for path, _ in posted), 1)
         updates = [body for path, body in posted if path == '/model/update']
         self.assertEqual(len(updates), 2)
         self.assertTrue(all(body['api_key'] == 'fixture-only' for body in updates))

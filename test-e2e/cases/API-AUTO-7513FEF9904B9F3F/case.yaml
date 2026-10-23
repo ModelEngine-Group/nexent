@@ -15,13 +15,15 @@ case:
   objective: AIDP 知识库更新(name/description 同步 kds_name 到权限表并失效目录/详情缓存)与删除(软删除权限、清理 TagManagement 文档分配、失效目录/详情/计数缓存)、更新空 payload
     返回400｜核心流程
   preconditions:
+  - 创建前从当前 AIDP 模型目录解析 embedding_model，并提供非空 description；不依赖隐式模型默认值。
   - Nexent 本地测试全栈已启动，health check 通过。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
   - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env
   - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
-  - ENABLE_AIDP_KNOWLEDGE 已开启，consts.const 的 AIDP_SERVER_URL 与 AIDP_API_KEY 已配置且 AIDP 服务真实可达，预检连通性通过。
+  - 在 aidp 部署例外组执行；ENABLE_AIDP_KNOWLEDGE 与测试侧 aidp_knowledge 同时开启，外部 AIDP 边界由本用例所属 knowledge-provider Mock 提供，后端与 SDK 使用容器可达地址。
   test_data:
+    empty_update_error: At least one supported knowledge base field must be provided for update
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
 
       - ${NEXENT_TEST_HOME}/config/secrets.env'
@@ -71,7 +73,7 @@ case:
     legacy_sheet: 02_测试用例基线
     legacy_row: 528
   integration_boundary:
-  - REAL_REQUIRED：使用真实 AIDP 服务（AIDP_SERVER_URL/AIDP_API_KEY）与本地真实 PostgreSQL/Redis；不得以纯 Mock 代替 AIDP 更新/删除调用、权限表/缓存/文档分配清理链路。
+  - 使用受控 AIDP 协议 Mock 与真实 Nexent HTTP、PostgreSQL/Redis；只替换外部 Provider，不替换产品更新/删除、权限落库、缓存失效或文档分配清理链路；不宣称真实 AIDP Provider 兼容性验收通过。
   observations:
   - 更新后 API 返回、权限表 kds_name 与目录/详情读取三者一致，name→id 映射同步为“新名”。
   - 更新空 payload 返回 400，不产生半写入，权限表 kds_name 不被覆盖为空。

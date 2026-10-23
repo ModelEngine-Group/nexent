@@ -31,6 +31,7 @@ import { toMessageCreatedAt } from "@/lib/messageDate";
 import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
 import {
   appendClarificationPart,
+  parseClarificationResponse,
   isClarificationFallback,
 } from "@/lib/clarification";
 import { stripAnsiControlSequences } from "@/lib/ansi";
@@ -384,6 +385,25 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
     let assistantIdx = 0;
 
     const historyMessages = collapseRefreshUserMessages(detail.message);
+    const clarificationResponses = new Map<
+      string,
+      NonNullable<ReturnType<typeof parseClarificationResponse>>
+    >(
+      historyMessages.flatMap((message) => {
+        const response =
+          message.role === "user"
+            ? parseClarificationResponse(message.clarification_response)
+            : null;
+        return response
+          ? [
+              [
+                `${response.source_message_id}:${response.unit_index}`,
+                response,
+              ] as const,
+            ]
+          : [];
+      })
+    );
 
     for (const [messageIndex, msg] of historyMessages.entries()) {
       // Resolve a stable messageId first — every per-message side store
@@ -1146,7 +1166,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               content,
               part.content,
               part.unit_index,
-              msg.status === "completed"
+              msg.status === "completed",
+              clarificationResponses.get(`${msg.message_id}:${part.unit_index}`)
             );
             continue;
           }
@@ -1784,7 +1805,7 @@ export const createConversationThreadListAdapter = (
       let pinnedMetadata: RemoteThreadMetadata[] = [];
       if (after === undefined) {
         prefetchedConversationIds.clear();
-        if (conversationType === "workbench" && pinStorageKey) {
+        if (pinStorageKey) {
           const loadedIds = new Set(
             items.map((item) => String(item.conversation_id))
           );
@@ -1792,6 +1813,10 @@ export const createConversationThreadListAdapter = (
             const pins = await loadPins();
             if (currentGeneration !== generation) return { threads: [] };
             pinnedMetadata = pins.items
+              .filter(
+                (item) =>
+                  (item.conversation_type ?? "workbench") === conversationType
+              )
               .filter((item) => !loadedIds.has(String(item.conversation_id)))
               .map(toRemoteThreadMetadata);
             for (const item of pinnedMetadata)

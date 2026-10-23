@@ -80,6 +80,10 @@ def static_config_problems(home: Path, records: list[dict], *, repo: Path) -> li
             problems.append("secrets.env must not be readable by group or others")
 
     online = [record for record in records if record["stage"] != "D1" and record["status"] == "active"]
+    for record in online:
+        execution = record.get("execution")
+        if execution and "preparation" not in execution:
+            problems.append(f"{record.get('case_id', 'Selected case')} requires a per-case preparation declaration")
     if online:
         loaded = {}
         for name in ("users.yaml", "models.yaml", "test-assets.yaml", "asset-policy.yaml", "anchor-assets.yaml"):
@@ -111,6 +115,11 @@ def static_config_problems(home: Path, records: list[dict], *, repo: Path) -> li
     # machine-local attach config to validate. The optional external YAML is
     # only consumed by the operator CLI, never by the suite run.
     return sorted(set(problems))
+
+
+def required_mock_services(records: list[dict]) -> set[str]:
+    return {service for record in records if record.get("status") == "active"
+            for service in (record.get("execution") or {}).get("required_mock_services", [])}
 
 
 def live_service_problems(home: Path) -> list[str]:

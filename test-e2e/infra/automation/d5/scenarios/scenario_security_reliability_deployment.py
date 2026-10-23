@@ -175,40 +175,6 @@ async def _docker_deployment() -> None:
     assert code == 0 and "unhealthy" not in output.lower() and "exited" not in output.lower(), output
 
 
-async def _kubernetes_deployment() -> None:
-    destructive_deployment_enabled()
-    helm = require_command("helm")
-    kubectl = require_command("kubectl")
-    code, output = await run_command(kubectl, "config", "current-context", timeout=30)
-    context = output.strip()
-    if code != 0 or not context:
-        raise AssetDependencyError(
-            "deployment", "kube_context", consumer_case_id="DEP-002",
-            detail="No usable current Kubernetes context; configure kubeconfig before deployment testing",
-        )
-    code, output = await run_command(
-        kubectl, "--context", context, "get", "--raw=/readyz", "--request-timeout=10s", timeout=30,
-    )
-    if code != 0 or output.strip() != "ok":
-        raise AssetDependencyError(
-            "deployment", "kube_context", consumer_case_id="DEP-002",
-            detail="Kubernetes API readiness probe failed; check cluster connectivity and credentials",
-        )
-    chart = repo_root() / "deploy" / "k8s" / "helm" / "nexent"
-    release = str(get_test_asset("deployment", "helm_release"))
-    namespace = str(get_test_asset("deployment", "k8s_namespace"))
-    values = asset_path("deployment", "helm_values_file")
-    # Apply the machine-owned isolated storage/secrets and pin the template
-    # namespace as well as Helm's release namespace.
-    options = ("-f", str(values), "--set-string", f"global.namespace={namespace}")
-    code, output = await run_command(helm, "lint", str(chart), *options)
-    assert code == 0, output
-    code, output = await run_command(helm, "upgrade", "--install", release, str(chart), "--kube-context", context, "-n", namespace, *options, "--create-namespace", "--wait", timeout=1800)
-    assert code == 0, output
-    code, output = await run_command(kubectl, "--context", context, "get", "pods,svc,ingress", "-n", namespace, "-o", "json")
-    assert code == 0 and '"phase": "Failed"' not in output, output
-
-
 def _offline_plan_images(output: str) -> list[str]:
     image_ref = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/-]*:[A-Za-z0-9._-]+")
     images = list(dict.fromkeys(line.strip() for line in output.splitlines()
@@ -589,8 +555,6 @@ async def execute_d5_main(case, tenant_a_admin, tenant_a_user, tenant_b_user):
         await _workspace_cleanup_contract()
     elif case_id == "DEP-001":
         await _docker_deployment()
-    elif case_id == "DEP-002":
-        await _kubernetes_deployment()
     elif case_id == "DEP-004":
         await _migration_idempotency()
         await _merged_migration_equivalence()

@@ -284,7 +284,13 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             message_source=message_source,
         )
 
-        minio_files = message_data.get("minio_files")
+        response = None
+        if message_data.get('clarification_response') is not None:
+            response = _resolve_clarification_response(
+                session, conversation_id, user_id, message_role, message_data['clarification_response'],
+            )
+
+        minio_files = message_data.get('minio_files')
         # Convert minio_files to JSON string for storage
         if minio_files is not None:
             # If minio_files is already a string, use it directly; otherwise convert to JSON string
@@ -302,6 +308,16 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         stmt = insert(ConversationMessage).values(**data).returning(ConversationMessage.message_id)
         result = session.execute(stmt)
         message_id = result.scalar()
+        if response is not None:
+            unit_data = {
+                'conversation_id': conversation_id, 'message_id': message_id,
+                'unit_index': 0, 'unit_type': 'clarification_response',
+                'unit_content': json.dumps(response, ensure_ascii=False),
+                'unit_status': 'completed', 'delete_flag': 'N',
+            }
+            if user_id:
+                unit_data = add_creation_tracking(unit_data, user_id)
+            session.execute(insert(ConversationMessageUnit).values(**unit_data))
         if message_role == MESSAGE_ROLE["USER"] or (
             message_role == MESSAGE_ROLE["ASSISTANT"] and message_data["content"] and status != "streaming"
         ):
@@ -309,9 +325,52 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         return message_id
 
 
-def create_message_units(
-    message_units: List[Dict[str, Any]], message_id: int, conversation_id: int, user_id: Optional[str] = None
-) -> List[int]:
+def _resolve_clarification_response(session, conversation_id, user_id, role, raw):
+    """Resolve an owned latest form before writing either side of the response."""
+    from contracts.clarification import ClarificationResponse, normalize_form
+
+    response = ClarificationResponse.model_validate(raw)
+    if role != MESSAGE_ROLE['USER'] or not user_id:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification requires an owned user message")
+    owned = session.scalar(select(ConversationRecord.conversation_id).where(
+        ConversationRecord.conversation_id == conversation_id,
+        ConversationRecord.created_by == user_id,
+        ConversationRecord.delete_flag == 'N',
+    ).with_for_update())
+    if owned is None:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification conversation is not accessible")
+    source = session.execute(select(
+        ConversationMessage.message_id, ConversationMessage.message_role, ConversationMessage.status,
+    ).where(
+        ConversationMessage.conversation_id == conversation_id,
+        ConversationMessage.delete_flag == 'N',
+    ).order_by(desc(ConversationMessage.message_index), desc(ConversationMessage.message_id)).limit(1)).first()
+    if source is None or source.message_role != 'assistant' or source.status != 'completed':
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification is no longer available")
+    units = session.execute(select(
+        ConversationMessageUnit.unit_content, ConversationMessageUnit.unit_index,
+    ).where(
+        ConversationMessageUnit.conversation_id == conversation_id,
+        ConversationMessageUnit.message_id == source.message_id,
+        ConversationMessageUnit.unit_type.in_(['human_interaction', 'clarification']),
+        ConversationMessageUnit.delete_flag == 'N',
+    )).all()
+    matches = []
+    for unit in units:
+        if response.unit_index is not None and unit.unit_index != response.unit_index:
+            continue
+        try:
+            if normalize_form(json.loads(unit.unit_content)) == response.form:
+                matches.append(unit)
+        except (TypeError, ValueError):
+            continue
+    if len(matches) != 1:
+        raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Clarification form does not match the latest question")
+    return {**response.model_dump(), 'source_message_id': source.message_id, 'unit_index': matches[0].unit_index}
+
+
+def create_message_units(message_units: List[Dict[str, Any]], message_id: int, conversation_id: int,
+                         user_id: Optional[str] = None) -> List[int]:
     """
     Batch create message unit records
 

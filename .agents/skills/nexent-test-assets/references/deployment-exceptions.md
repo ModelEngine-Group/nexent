@@ -1,0 +1,15 @@
+# Default execution and deployment exceptions
+
+Do not relabel, move or bulk modify ordinary D1-D5 Cases. Keep `case.yaml` as the behavioral contract and `execution.yaml` as the script/Mock/preparation binding. Mock versus real-smoke is independent of product deployment mode.
+
+During requirement design, bugfix or test backfill, inspect whether acceptance needs a product startup flag or mutually exclusive deployment mode. Ordinary Cases require no new metadata. Only true exceptions go in `test-e2e/infra/config/deployment-exceptions.yaml`: Case ID to named profile, allowed existing product env overrides, and a small Local recovery selection. Do not copy Case content, script paths or machine configuration into this catalog. Reuse profiles where appropriate. Unknown Case/profile IDs, duplicate keys and unsupported settings must fail validation; never infer profiles from titles or stages.
+
+Keep deployment prerequisites explicit in the exceptional Case's existing preconditions. Design validation checks the catalog; implementation validation also checks script bindings. Implementing a deployment exception includes checking preparation, cleanup and Local recovery. A mock dependency by itself is not an exception. Do not add routine model health gates.
+
+The repository runner partitions a selected plan from this catalog, runs ordinary Cases once, redeploys only for selected exceptions, then restores the original Local deployment and runs the recovery selection. It requires explicit machine-local opt-in (`config/deployment-switch.yaml`, see the tracked example/schema), uses existing pipeline deploy/preflight argv hooks, and never changes data roots or deletes volumes. Build updated source once; runtime flag changes need redeployment, not repeated uncached builds or additional image tags.
+
+Backups live outside config and Git. Keep raw environment backups private. Each subgroup has a frozen source/config fingerprint. The outer campaign owns switching between subgroups and aggregates results once; only a completed campaign with successful Local restoration/recovery may notify or publish. Missing execution, restore failures and cleanup failures cannot become PASS. A pending mode-recovery marker blocks subsequent launches before code synchronization; inspect the saved backup/index and restore the deployment rather than deleting the marker blindly.
+
+Individual tests must not silently redeploy a developer's stack. Without opt-in, selecting an exception stops with an actionable prerequisite message. Ubuntu uses the same repository assets with its own local opt-in and existing data paths. Do not claim that structural validation certifies all semantic deployment requirements; compare actual product runtime configuration and run the affected tests.
+
+The existing `run_cases.py <Case-ID> --test-home <home>` entry routes exception selections through `infra/scripts/run-suite.py run --case <Case-ID> --test-home <home> --execute`, preserving the same opt-in and recovery policy. A dry-run `run-suite.py plan` prints the derived deployment groups without changing the environment.

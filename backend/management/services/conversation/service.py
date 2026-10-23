@@ -84,6 +84,8 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
         'content': string_content or "",
         'minio_files': message_data.get('minio_files'),
     }
+    if message_data.get('clarification_response') is not None:
+        message_data_copy['clarification_response'] = message_data['clarification_response']
     return create_conversation_message(
         message_data_copy, user_id, status=status, message_source=message_source,
     )
@@ -247,11 +249,7 @@ def save_source_search(search_data: Dict[str, Any], user_id: Optional[str] = Non
 
 
 def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) -> None:
-    """Persist the user-side message (one message row only).
-
-    Note: conversation_message_unit_t only stores assistant message content.
-    User messages do not need unit records.
-    """
+    """Persist readable user text and any structured clarification response atomically."""
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
@@ -266,6 +264,8 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
         role=MESSAGE_ROLE["USER"],
         message=[MessageUnit(type="string", content=raw_query)],
         minio_files=request.minio_files,
+        **({'clarification_response': request.clarification_response}
+           if getattr(request, 'clarification_response', None) is not None else {}),
     )
     save_message(
         conversation_req, user_id=user_id, tenant_id=tenant_id,
@@ -861,6 +861,14 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     'create_time': msg.get('create_time'),
                     'opinion_flag': None
                 }
+                for unit in message_units:
+                    if unit.get('unit_type') == 'clarification_response':
+                        try:
+                            response = json.loads(unit['unit_content'])
+                            if isinstance(response, dict):
+                                message_item['clarification_response'] = response
+                        except (ValueError, TypeError):
+                            logger.warning("Skipping invalid clarification response message_id=%s", message_id)
 
                 # Add minio_files field (if any)
                 if 'minio_files' in msg and msg['minio_files']:

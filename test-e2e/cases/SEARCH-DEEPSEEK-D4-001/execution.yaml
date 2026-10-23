@@ -1,5 +1,6 @@
 schema_version: '1.0'
 case_id: SEARCH-DEEPSEEK-D4-001
+notes: Browser fixtures intercept API traffic with synthetic state; no live tenant, Agent or Provider assets are created.
 implementations:
   - framework: playwright
     file: test.spec.ts

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 from typing import Optional as Opt
 
+from contracts.clarification import ClarificationResponse
 from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
 from contracts.conversation import HistoryItem
 from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
@@ -211,6 +212,7 @@ class AgentRequest(BaseModel):
     # Internal provenance is never accepted from serialized client requests.
     _message_source: str = PrivateAttr(default="CHAT")
     query: str
+    clarification_response: Optional[ClarificationResponse] = None
     conversation_id: Optional[int] = None
     history: Optional[List[HistoryItem]] = None
     # Complete list of attachment information

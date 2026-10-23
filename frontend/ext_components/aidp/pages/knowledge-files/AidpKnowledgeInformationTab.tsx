@@ -12,10 +12,13 @@ import { QuestionCircleOutlined } from "@ant-design/icons";
 import type {
   AidpGraphConfigUpdate,
   AidpKbDetail,
-  AidpModelItem,
 } from "@/ext_components/aidp/shared/types/management";
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
 import { getAidpErrorMessage } from "@/ext_components/aidp/shared/utils/aidpErrorUtils";
+import {
+  aidpModelLabel,
+  aidpModelOptions,
+} from "@/ext_components/aidp/shared/utils/aidpModelDisplay";
 import log from "@/lib/logger";
 import AidpChunkModeChoices from "@/ext_components/aidp/shared/components/AidpChunkModeChoices";
 import AidpSliderNumberField from "@/ext_components/aidp/pages/knowledge-create/AidpSliderNumberField";
@@ -134,6 +137,11 @@ const AidpKnowledgeInformationTab: React.FC<
   const { message, modal } = App.useApp();
   const canEdit = detail.permission === "EDIT";
   const graphConfig = useMemo(() => graphConfigOf(detail), [detail]);
+  const graphLlmModelName =
+    detail.llm_model_name ||
+    (typeof graphConfig.llm_model_name === "string"
+      ? graphConfig.llm_model_name
+      : undefined);
   const [savingSetting, setSavingSetting] = useState(false);
   const [settingModal, setSettingModal] = useState<AidpDetailSetting | null>(
     null
@@ -150,15 +158,10 @@ const AidpKnowledgeInformationTab: React.FC<
     queryKey: ["aidp-models", "vlm", "KnowledgeBase"],
     queryFn: () => aidpKnowledgeService.listModels("vlm", "KnowledgeBase"),
     staleTime: 5 * 60 * 1000,
-    enabled: canEdit,
+    enabled: canEdit || Boolean(detail.vlm_model),
   });
   const vlmModelOptions = useMemo(() => {
-    const models: AidpModelItem[] = vlmModelsData?.models ?? [];
-    return models
-      .map((m) => m.model_name)
-      .filter(
-        (name): name is string => typeof name === "string" && name.length > 0
-      );
+    return aidpModelOptions(vlmModelsData?.models);
   }, [vlmModelsData]);
   const captionEditEnabled = Form.useWatch("caption_enable", vlmForm);
 
@@ -167,19 +170,13 @@ const AidpKnowledgeInformationTab: React.FC<
     queryKey: ["aidp-models", "llm", "KnowledgeBase"],
     queryFn: () => aidpKnowledgeService.listModels("llm", "KnowledgeBase"),
     staleTime: 5 * 60 * 1000,
-    enabled: canEdit,
+    enabled: canEdit || Boolean(graphLlmModelName),
   });
   const llmModelOptions = useMemo(() => {
-    const models: AidpModelItem[] = llmModelsData?.models ?? [];
-    return models
-      .map((m) => m.model_name)
-      .filter(
-        (name): name is string => typeof name === "string" && name.length > 0
-      );
+    return aidpModelOptions(llmModelsData?.models);
   }, [llmModelsData]);
 
-  // Display-only lookup: the live detail returns the embedding model as a
-  // canonical path, while ModelService exposes the user-facing display_name.
+  // Detail fields and selectors use ModelService labels for every model type.
   const { data: embeddingModelsData } = useQuery({
     queryKey: ["aidp-models", "embedding", "KnowledgeBase"],
     queryFn: () =>
@@ -187,14 +184,15 @@ const AidpKnowledgeInformationTab: React.FC<
     staleTime: 5 * 60 * 1000,
     enabled: Boolean(detail.embedding_model),
   });
-  const embeddingModelLabel = useMemo(() => {
-    const models: AidpModelItem[] = embeddingModelsData?.models ?? [];
-    const match = models.find((m) => m.model_name === detail.embedding_model);
-    if (match?.display_name) return match.display_name;
-    if (!detail.embedding_model) return undefined;
-    const segments = detail.embedding_model.split("/").filter(Boolean);
-    return segments[segments.length - 1] || detail.embedding_model;
-  }, [detail.embedding_model, embeddingModelsData]);
+  const embeddingModelLabel = aidpModelLabel(
+    detail.embedding_model,
+    embeddingModelsData?.models
+  );
+  const llmModelLabel = aidpModelLabel(
+    graphLlmModelName,
+    llmModelsData?.models
+  );
+  const vlmModelLabel = aidpModelLabel(detail.vlm_model, vlmModelsData?.models);
 
   useEffect(() => {
     if (!settingModal) return;
@@ -456,6 +454,8 @@ const AidpKnowledgeInformationTab: React.FC<
           groupNames={groupNames}
           canConfigureGroupPermissions={canConfigureGroupPermissions}
           embeddingModelLabel={embeddingModelLabel}
+          llmModelLabel={llmModelLabel}
+          vlmModelLabel={vlmModelLabel}
           formatDateTime={formatDetailDateTime}
           onEditPermissions={onEditPermissions}
           onEditSetting={setSettingModal}
@@ -512,6 +512,7 @@ const AidpKnowledgeInformationTab: React.FC<
                 >
                   <Select
                     showSearch
+                    optionFilterProp="label"
                     allowClear
                     loading={vlmModelsLoading}
                     notFoundContent={
@@ -520,10 +521,7 @@ const AidpKnowledgeInformationTab: React.FC<
                         : t("aidpKnowledge.createModelNone")
                     }
                     placeholder={t("aidpKnowledge.createModelSearch")}
-                    options={vlmModelOptions.map((name) => ({
-                      label: name,
-                      value: name,
-                    }))}
+                    options={vlmModelOptions}
                   />
                 </Form.Item>
               )}
@@ -544,6 +542,7 @@ const AidpKnowledgeInformationTab: React.FC<
               {settingModal === "graph_llm" ? (
                 <Select
                   showSearch
+                  optionFilterProp="label"
                   allowClear
                   loading={llmModelsLoading}
                   notFoundContent={
@@ -552,10 +551,7 @@ const AidpKnowledgeInformationTab: React.FC<
                       : t("aidpKnowledge.createModelNone")
                   }
                   placeholder={t("aidpKnowledge.createModelSearch")}
-                  options={llmModelOptions.map((name) => ({
-                    label: name,
-                    value: name,
-                  }))}
+                  options={llmModelOptions}
                 />
               ) : settingModal === "graph_hop" ? (
                 <AidpSliderNumberField

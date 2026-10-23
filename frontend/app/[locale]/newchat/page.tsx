@@ -28,7 +28,7 @@ import toolbarStyles from "@/components/common/ConversationToolbar.module.css";
 import { useRecentAgentIds } from "./assistant-ui/use-recent-agent-ids";
 import {
   cacheHistoricalChatMode,
-  conversationThreadListAdapter,
+  createConversationThreadListAdapter,
   generateConversationTitle,
   restoreHistoricalChatMode,
   restoreHistoricalPlan,
@@ -66,6 +66,12 @@ import { useConfig } from "@/hooks/useConfig";
 import { ServerDictationAdapter } from "./adapter/server-dictation-adapter";
 import type { STTModelConfig } from "@/types/modelConfig";
 import { conversationService } from "@/services/conversationService";
+import { useQueryClient } from "@tanstack/react-query";
+import { getWorkbenchPinStorageKey } from "./assistant-ui/thread-pins";
+import {
+  removeDeletedWorkbenchPins,
+  workbenchPinsQueryKey,
+} from "@/lib/workbenchPins";
 import { useTranslation } from "react-i18next";
 import { useConversationRouteGuard } from "@/features/workbench/hooks/useConversationRouteGuard";
 import type {
@@ -104,6 +110,24 @@ export default function Home() {
 const PersistentChatHome: FC = () => {
   const { user } = useAuthorizationContext();
   useConversationRouteGuard("agent_chat");
+  const queryClient = useQueryClient();
+  const pinScope = user
+    ? getWorkbenchPinStorageKey(user.id, user.tenantId)
+    : undefined;
+  const threadListAdapter = useMemo(
+    () =>
+      createConversationThreadListAdapter(
+        "agent_chat",
+        pinScope,
+        () =>
+          queryClient.ensureQueryData({
+            queryKey: workbenchPinsQueryKey(pinScope),
+            queryFn: () => conversationService.getWorkbenchPins(),
+          }),
+        (id) => removeDeletedWorkbenchPins(queryClient, [id])
+      ),
+    [pinScope, queryClient]
+  );
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
   const [requestedThreadId, setRequestedThreadId] = useState<
     string | undefined
@@ -141,7 +165,7 @@ const PersistentChatHome: FC = () => {
     runtimeHook: function useChatRuntime() {
       return useLocalChatRuntime(dictationAdapter);
     },
-    adapter: conversationThreadListAdapter,
+    adapter: threadListAdapter,
     threadId: requestedThreadId,
     // Return to the conversation the user was viewing before the refresh.
     // The runtime switches to it once the adapter is ready; when the stored

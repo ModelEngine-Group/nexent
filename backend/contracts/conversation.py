@@ -10,6 +10,8 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from pydantic import BaseModel, Field
 
+from contracts.clarification import ClarificationResponse
+
 
 class MessageSource(str, Enum):
     CHAT = "CHAT"
@@ -68,6 +70,7 @@ class MessageRequest(BaseModel):
     message_idx: int  # Modified to integer type
     role: str
     message: List[MessageUnit]
+    clarification_response: Optional[ClarificationResponse] = None
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
 

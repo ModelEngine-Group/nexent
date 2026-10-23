@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import uuid
+import re
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -12,6 +14,49 @@ from shared.http import MODEL_TIMEOUT, assert_status, client
 
 CASE_ID = 'API-AUTO-DDE7582FFE405D54'
 NO_MODEL_DETAIL = 'No available model for regeneration. Please configure an LLM model first.'
+
+
+@pytest.mark.asyncio
+@pytest.mark.stage('D2')
+@pytest.mark.case_id(CASE_ID)
+async def test_name_fallback_http_contract(monkeypatch):
+    """Inject provider failure at its boundary, preserving route and service."""
+    import httpx
+    from fastapi import FastAPI
+    with patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=MagicMock()), \
+            patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None):
+        from management.api.agent import agent as agent_app
+        from management.services.agent import service
+    app = FastAPI()
+    app.include_router(agent_app.agent_config_router)
+    agents = [{'agent_id': 1, 'name': 'occupied', 'display_name': 'Occupied'},
+              {'agent_id': 2, 'name': 'occupied_1', 'display_name': 'Occupied_1'}]
+    monkeypatch.setattr(agent_app, 'get_current_user_id', lambda authorization: ('owner', 'isolated'))
+    monkeypatch.setattr(service, 'query_all_agent_info_by_tenant_id', lambda tenant_id: agents)
+    monkeypatch.setattr(service.tenant_config_manager, 'get_model_config', lambda **kwargs: {'model_id': 1})
+    provider = AsyncMock(side_effect=RuntimeError('Controlled provider outage'))
+    monkeypatch.setattr(service, 'run_blocking', provider)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://fixture.test') as api:
+        checked = await api.post('/agent/check_name', json={'items': [{'name': 'occupied', 'agent_id': 1}]})
+        assert_status(checked, 200)
+        assert checked.json()[0]['name_conflict'] is False
+        response = await api.post('/agent/regenerate_name', json={
+            'items': [{'name': 'occupied', 'display_name': 'Occupied'}]})
+        assert_status(response, 200)
+        generated = response.json()[0]
+        assert re.fullmatch(r'occupied_\d+', generated['name'])
+        assert re.fullmatch(r'Occupied_\d+', generated['display_name'])
+        assert generated['name'] not in {a['name'] for a in agents}
+        assert generated['display_name'] not in {a['display_name'] for a in agents}
+        assert provider.await_count == 2
+        monkeypatch.setattr(service.tenant_config_manager, 'get_model_config', lambda **kwargs: {})
+        response = await api.post('/agent/regenerate_name', json={'items': [{'name': 'occupied'}]})
+        assert_status(response, 400)
+        assert NO_MODEL_DETAIL in response.json()['detail']
+        assert provider.await_count == 2
+        broken = AsyncMock(side_effect=RuntimeError('Controlled repository outage'))
+        monkeypatch.setattr(agent_app, 'check_agent_name_conflict_batch_impl', broken)
+        assert_status(await api.post('/agent/check_name', json={'items': [{'name': 'occupied'}]}), 500)
 
 
 def _suffix() -> str:
@@ -124,9 +169,20 @@ async def test_api_auto_dde7582ffe405d54(tenant_a_admin, tenant_b_admin):
 
             result = await _check_name(api, [{'name': dup_name, 'agent_id': agent_a}])
             assert len(result) == 1
+            assert result[0]['name_conflict'] is False
+            assert result[0]['conflict_agents'] == []
+
+            # Excluding the renamed Agent must still find the original owner.
+            result = await _check_name(api, [{'name': dup_name, 'agent_id': agent_b}])
+            assert len(result) == 1
             assert result[0]['name_conflict'] is True
             assert len(result[0]['conflict_agents']) == 1
             assert result[0]['conflict_agents'][0]['name'] == dup_name
+
+            result = await _check_name(api, [{'name': f'free_name_{suffix}'}])
+            assert result[0]['name_conflict'] is False
+            assert result[0]['display_name_conflict'] is False
+            assert result[0]['conflict_agents'] == []
 
             result = await _check_name(api, [])
             assert result == []

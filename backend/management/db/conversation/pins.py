@@ -1,11 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Personal Workbench pin timestamps, independent of conversation activity."""
+"""Personal conversation pin timestamps, independent of conversation activity."""
 
 import json
 from typing import Any
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import case, func, select, text, update
 
 from contracts.errors.exceptions import ConversationNotFoundError
 from contracts.conversation import conversation_time_as_utc
@@ -13,12 +13,10 @@ from management.db.client import get_db_session
 from management.db.models import ConversationRecord
 
 
-def _owned_workbench(user_id: str):
+def _owned_conversations(user_id: str):
     return (
         ConversationRecord.created_by == user_id,
         ConversationRecord.delete_flag == "N",
-        ConversationRecord.workbench_config.is_not(None),
-        ConversationRecord.workbench_config != text("'null'::jsonb"),
     )
 
 
@@ -28,8 +26,12 @@ def _list_pins(session, user_id: str) -> list[dict[str, Any]]:
             ConversationRecord,
             func.extract("epoch", ConversationRecord.create_time) * 1000,
             func.extract("epoch", ConversationRecord.update_time) * 1000,
+            case(
+                (ConversationRecord.workbench_config.is_(None), "agent_chat"),
+                else_="workbench",
+            ),
         )
-        .where(*_owned_workbench(user_id), ConversationRecord.workbench_pinned_at.is_not(None))
+        .where(*_owned_conversations(user_id), ConversationRecord.workbench_pinned_at.is_not(None))
         .order_by(ConversationRecord.workbench_pinned_at.desc(), ConversationRecord.conversation_id.desc())
     )
     return [
@@ -37,6 +39,7 @@ def _list_pins(session, user_id: str) -> list[dict[str, Any]]:
             "conversation_id": conversation.conversation_id,
             "conversation_title": conversation.conversation_title,
             "agent_id": conversation.agent_id,
+            "conversation_type": conversation_type,
             "create_time": int(created_ms),
             "update_time": int(updated_ms),
             "last_activity_time": (
@@ -45,7 +48,7 @@ def _list_pins(session, user_id: str) -> list[dict[str, Any]]:
             ),
             "pinned_at": conversation_time_as_utc(conversation.workbench_pinned_at).isoformat(),
         }
-        for conversation, created_ms, updated_ms in rows
+        for conversation, created_ms, updated_ms, conversation_type in rows
     ]
 
 
@@ -67,18 +70,17 @@ def set_workbench_pin(conversation_id: int, pinned: bool, user_id: str, tenant_i
             select(ConversationRecord)
             .where(
                 ConversationRecord.conversation_id == conversation_id,
-                *_owned_workbench(user_id),
-            )
-            .with_for_update()
+                *_owned_conversations(user_id),
+            ).with_for_update()
         )
         if conversation is None:
-            raise ConversationNotFoundError("Workbench conversation not found")
+            raise ConversationNotFoundError("Conversation not found")
 
         if pinned != (conversation.workbench_pinned_at is not None):
             pinned_at = None
             if pinned:
                 newest = select(func.max(ConversationRecord.workbench_pinned_at)).where(
-                    *_owned_workbench(user_id),
+                    *_owned_conversations(user_id),
                 ).scalar_subquery()
                 pinned_at = session.scalar(select(func.greatest(
                     func.timezone("UTC", func.clock_timestamp()), newest + text("INTERVAL '1 microsecond'"),
@@ -87,9 +89,8 @@ def set_workbench_pin(conversation_id: int, pinned: bool, user_id: str, tenant_i
                 update(ConversationRecord)
                 .where(
                     ConversationRecord.conversation_id == conversation_id,
-                    *_owned_workbench(user_id),
-                )
-                .values(
+                    *_owned_conversations(user_id),
+                ).values(
                     workbench_pinned_at=pinned_at,
                     # Explicitly suppress TableBase.onupdate for a personal preference.
                     update_time=ConversationRecord.update_time,

@@ -26,6 +26,8 @@ change:
     decision: strengthen
     behaviors:
     - Valid Python identifiers including Unicode and suffix-free names of 1–100 characters pass unchanged; empty, whitespace, punctuation, digit-leading, keyword and overlong names fail without writes
+    - Bilingual prompts allow one regenerated-name retry after a retryable duplicate failure; successful persisted names cannot be overwritten
+    - Duplicate failure followed by an alternate name succeeds on the same draft; a later overwrite performs no write
     - Non-string names, forbidden fields and invalid patches remain rejected
     - Actual MCP-to-save-service orchestration retains target, authorization, duplicate and write behavior
     - Tool schema exposes the 1–100-character bounds; rendered zh/en prompts and examples match runtime naming rules
@@ -45,3 +47,4 @@ change:
     Earlier frontend transport patch and dedicated artifacts were withdrawn; unrelated changes are preserved.
 
     Follow-up 2026-10-23 restores explicit constraints per user request, superseding request-DTO-only parity; ordinary edit DTO and frontend guards remain unchanged.
+    Follow-up clarifies one save per response rather than one attempt ever; existing F-045/AGT-003 duplicate and immutability contracts are retained.

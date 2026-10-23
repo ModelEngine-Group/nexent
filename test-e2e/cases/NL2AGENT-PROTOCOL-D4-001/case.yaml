@@ -25,8 +25,8 @@ case:
     action: Create an editable Agent; use NL2Agent to enable then disable strict protocol
       repair. Reload editor. Then fully generate the same draft with protocol repair
       enabled, submit clarification without repeating the policy.
-    expected: Shared endpoint and tool save exact booleans; persisted draft and editor
-      agree. Full generation preserves true through clarification and produces completed
+    expected: Shared endpoint and tool save exact booleans; persisted draft and the
+      labeled policy checkbox in More Configuration agree. Full generation preserves true through clarification and produces completed
       configuration.
   - order: 2
     action: Use Workbench Agent creation to initialize draft and enable then disable
