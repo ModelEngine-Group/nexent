@@ -97,6 +97,12 @@ class OuterApiService(TableBase):
         default=True,
         doc="Whether to verify TLS certificates for the target API",
     )
+    auth_enabled = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        doc="Whether authentication headers are enabled for the target API",
+    )
     tenant_id = Column(String(100), nullable=False,
                        doc="Tenant ID for multi-tenancy")
     is_available = Column(Boolean, default=True,

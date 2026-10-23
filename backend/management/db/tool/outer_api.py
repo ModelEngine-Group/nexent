@@ -23,6 +23,7 @@ def create_openapi_service(
     tenant_id: str,
     user_id: str,
     description: str = None,
+    auth_enabled: bool = False,
     headers_template: Dict[str, Any] = None,
     ssl_verify: bool = True,
 ) -> Dict[str, Any]:
@@ -49,12 +50,12 @@ def create_openapi_service(
         "created_by": user_id,
         "updated_by": user_id,
         "is_available": True,
+        "auth_enabled": auth_enabled,
         "ssl_verify": ssl_verify,
     }
     if description:
         service_dict["description"] = description
-    if headers_template:
-        service_dict["headers_template"] = headers_template
+    service_dict["headers_template"] = headers_template
 
     with get_db_session() as session:
         new_service = OuterApiService(**filter_property(service_dict, OuterApiService))
@@ -70,6 +71,7 @@ def upsert_openapi_service(
     tenant_id: str,
     user_id: str,
     description: str = None,
+    auth_enabled: bool = False,
     headers_template: Dict[str, Any] = None,
     ssl_verify: bool = True,
 ) -> Dict[str, Any]:
@@ -95,12 +97,12 @@ def upsert_openapi_service(
         "tenant_id": tenant_id,
         "updated_by": user_id,
         "is_available": True,
+        "auth_enabled": auth_enabled,
         "ssl_verify": ssl_verify,
     }
     if description:
         service_dict["description"] = description
-    if headers_template:
-        service_dict["headers_template"] = headers_template
+    service_dict["headers_template"] = headers_template
 
     with get_db_session() as session:
         existing = (

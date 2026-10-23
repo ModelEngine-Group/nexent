@@ -7,8 +7,11 @@ import {
   Form,
   Input,
   InputNumber,
+  Alert,
+  App,
   Select,
   Space,
+  Switch,
   Tabs,
   Upload,
 } from "antd";
@@ -98,6 +101,7 @@ const createInitialDraft = (): LocalAddMcpDraft => ({
   transportType: McpTransportType.URL,
   serverUrl: "",
   authorizationToken: "",
+  apiAuthEnabled: false,
   customHeaders: "",
   openApiJson: "",
   containerConfigJson: "",
@@ -122,6 +126,7 @@ export default function AddMcpServiceLocalSection({
   onSubmittingChange,
 }: AddMcpServiceLocalSectionProps) {
   const { t } = useTranslation("common");
+  const { message } = App.useApp();
   const rules = useMcpFormRules();
   const [form] = Form.useForm();
   const [draft, setDraft] = useState<LocalAddMcpDraft>(() =>
@@ -231,6 +236,14 @@ export default function AddMcpServiceLocalSection({
         VALIDATION_FIELDS_BY_DEPLOYMENT[deploymentType]
       );
     } catch {
+      return;
+    }
+    if (
+      deploymentType === McpDeploymentType.API &&
+      draft.apiAuthEnabled &&
+      !draft.customHeaders?.trim()
+    ) {
+      message.error(t("mcpConfig.openapiService.message.authHeadersRequired"));
       return;
     }
     const isContainerDeployment =
@@ -493,6 +506,24 @@ export default function AddMcpServiceLocalSection({
                         </Form.Item>
                       </div>
                       {renderDescriptionInput()}
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={Boolean(draft.apiAuthEnabled)}
+                          onChange={(checked) =>
+                            patchDraft({ apiAuthEnabled: checked })
+                          }
+                        />
+                        <span>{t("mcpConfig.openapiService.form.authEnabledLabel")}</span>
+                      </div>
+                      <Alert
+                        type={draft.apiAuthEnabled ? "info" : "success"}
+                        showIcon
+                        message={t(
+                          draft.apiAuthEnabled
+                            ? "mcpConfig.openapiService.form.authEnabledHint"
+                            : "mcpConfig.openapiService.form.authDisabledHint"
+                        )}
+                      />
                       <Form.Item
                         name="customHeaders"
                         className="mb-0"
@@ -504,6 +535,7 @@ export default function AddMcpServiceLocalSection({
                           )}
                           {...bindField("customHeaders")}
                           rows={2}
+                          disabled={!draft.apiAuthEnabled}
                         />
                       </Form.Item>
                       <Form.Item
