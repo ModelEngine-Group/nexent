@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, Page } from "playwright/test";
 import type { TestUser } from "../runner/runtime-config";
 import { appPath } from "../runner/runtime-config";
@@ -43,5 +45,20 @@ export class AuthPage {
     ]);
     await this.expectLoggedOut();
     return response.status();
+  }
+
+  /** Language options sit in a second-level submenu, so expand it before clicking. */
+  async switchLanguageTo(option: string): Promise<void> {
+    const accountButton = this.page.getByRole("button", { name: "用户设置", exact: true }).last();
+    await expect(accountButton).toBeVisible();
+    await accountButton.click();
+
+    const languageEntry = this.page.getByRole("menuitem", { name: /语言设置|Language/ }).last();
+    await expect(languageEntry).toBeVisible();
+    await languageEntry.hover();
+
+    const target = this.page.getByRole("menuitem", { name: new RegExp(`^${option}$`) }).last();
+    await expect(target).toBeVisible();
+    await target.click();
   }
 }

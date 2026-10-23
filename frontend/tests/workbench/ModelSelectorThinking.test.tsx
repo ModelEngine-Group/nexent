@@ -1,7 +1,13 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { createInstance } from "i18next";
@@ -80,6 +86,185 @@ it("does not fabricate options when the selected model has no supported effort c
     config: Record<string, unknown>;
   };
   expect(config.config).not.toHaveProperty("reasoningEffort");
+});
+
+it.each([undefined, "unknown", "unsupported"] as const)(
+  "uses the same message for %s reasoning and never changes unavailable controls",
+  async (status) => {
+    const i18n = createInstance();
+    await i18n.init({
+      lng: "zh",
+      keySeparator: false,
+      resources: { zh: { translation: zh } },
+    });
+    const changed = vi.fn();
+    render(
+      <I18nextProvider i18n={i18n}>
+        <ModelSelector
+          models={[
+            {
+              id: "12",
+              name: "Unconfigured model",
+              ...(status
+                ? {
+                    reasoningCapability: {
+                      status,
+                      control: "toggle" as const,
+                      levels: [],
+                      source: "catalog" as const,
+                    },
+                  }
+                : {}),
+            },
+          ]}
+          value="12"
+          deepThinking={false}
+          onDeepThinkingChange={changed}
+        />
+      </I18nextProvider>
+    );
+    const toggle = screen.getByRole("switch", { name: "深度思考" });
+    expect(toggle).toHaveAttribute("aria-disabled", "true");
+    const reason = "当前模型不支持开启思考模式";
+    expect(toggle).toHaveAccessibleDescription(reason);
+    expect(screen.getByText(reason)).toHaveClass("sr-only");
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    const before = register.mock.lastCall?.[0].getModelContext();
+    const user = userEvent.setup();
+    await user.click(toggle);
+    await user.keyboard("{Enter} ");
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(reason);
+    expect(changed).not.toHaveBeenCalled();
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(register.mock.lastCall?.[0].getModelContext()).toEqual(before);
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  }
+);
+
+it("only explains unavailable thinking on hover or explicit activation, never focus alone", async () => {
+  const changed = vi.fn();
+  const { container } = render(
+    <ModelSelector
+      models={[{ id: "12", name: "Unknown model" }]}
+      value="12"
+      onDeepThinkingChange={changed}
+    />
+  );
+  const toggle = screen.getByRole("switch");
+  const user = userEvent.setup();
+  toggle.focus();
+  // Allow the real Tooltip's delayed focus/hover trigger to settle.
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  expect(
+    container.querySelector('[data-slot="model-selector-effort"] > p')
+  ).toBeNull();
+  await user.hover(toggle);
+  await waitFor(() => expect(screen.getByRole("tooltip")).toBeVisible());
+  await user.unhover(toggle);
+  await waitFor(() =>
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+  );
+  await user.keyboard("{Enter}");
+  await waitFor(() => expect(screen.getByRole("tooltip")).toBeVisible());
+  expect(changed).not.toHaveBeenCalled();
+  expect(toggle).toHaveAttribute("aria-checked", "false");
+});
+
+it("discards an open explanation when switching models, including switching back", async () => {
+  const choices = [
+    { id: "12", name: "First unknown" },
+    { id: "13", name: "Second unknown" },
+  ];
+  const view = (value: string) => (
+    <ModelSelector models={choices} value={value} />
+  );
+  const { rerender } = render(view("12"));
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("switch"));
+  await waitFor(() => expect(screen.getByRole("tooltip")).toBeVisible());
+  await user.pointer({ target: document.body });
+  rerender(view("13"));
+  await waitFor(() =>
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+  );
+  rerender(view("12"));
+  screen.getByRole("switch").focus();
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  await user.keyboard(" ");
+  await waitFor(() => expect(screen.getByRole("tooltip")).toBeVisible());
+});
+
+it("toggle-only models never render an empty effort selector or change other model parameters", async () => {
+  render(
+    <ModelSelector
+      value="toggle"
+      models={[
+        {
+          id: "toggle",
+          name: "Toggle only",
+          reasoningCapability: {
+            status: "supported",
+            control: "toggle",
+            levels: [],
+            source: "catalog",
+          },
+        },
+      ]}
+      parameterSettings={{
+        value: { temperature: 0.43, top_p: 0 },
+        defaultValue: {},
+        onChange: vi.fn(),
+      }}
+    />
+  );
+  const toggle = screen.getByRole("switch");
+  await userEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-checked", "true");
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  expect(screen.queryByRole("slider")).not.toBeInTheDocument();
+  const enabled = register.mock.lastCall?.[0].getModelContext() as {
+    config: Record<string, unknown>;
+  };
+  expect(enabled.config).toMatchObject({
+    deepThinking: true,
+    temperature: 0.43,
+    top_p: 0,
+  });
+  expect(enabled.config).not.toHaveProperty("reasoningEffort");
+  expect(enabled.config).not.toHaveProperty("reasoningBudgetTokens");
+  await userEvent.click(toggle);
+  expect(register.mock.lastCall?.[0].getModelContext()).toMatchObject({
+    config: { deepThinking: false, temperature: 0.43, top_p: 0 },
+  });
+});
+
+it("retains supported budget controls and callbacks without adding effort", async () => {
+  const changed = vi.fn();
+  render(
+    <ModelSelector
+      value="budget"
+      models={[
+        {
+          id: "budget",
+          name: "Budget",
+          budgetTokens: { min: 1024, max: 8192 },
+        },
+      ]}
+      defaultBudgetTokens={2048}
+      onBudgetTokensChange={changed}
+    />
+  );
+  await userEvent.click(screen.getByRole("switch"));
+  const budget = screen.getByRole("slider");
+  expect(budget).toHaveValue("2048");
+  fireEvent.change(budget, { target: { value: "4096" } });
+  expect(changed).toHaveBeenLastCalledWith(4096);
+  expect(register.mock.lastCall?.[0].getModelContext()).toMatchObject({
+    config: { deepThinking: true, reasoningBudgetTokens: 4096 },
+  });
+  expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
 });
 
 const localizedEfforts = [

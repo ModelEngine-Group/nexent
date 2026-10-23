@@ -482,6 +482,13 @@ export class AgentPage {
     return this.page.locator("[data-testid='agent-debug-panel']");
   }
 
+  /** Resolve the visible composer while normal and Compare panes stay mounted. */
+  private debugComposer(): Locator {
+    return this.debugPanel()
+      .getByRole("textbox", { name: "对话输入", exact: true })
+      .filter({ visible: true });
+  }
+
   async openDebug(): Promise<void> {
     const debugButton = this.page.getByRole("button", { name: "智能体调试", exact: true });
     await expect(debugButton).toBeVisible();
@@ -498,13 +505,14 @@ export class AgentPage {
       throw new Error(`Cannot open Debug: Agent form validation failed: ${validationErrors.join("; ")}`);
     }
     await expect(this.debugPanel()).toBeVisible({ timeout: 30000 });
-    await expect(this.debugPanel().getByRole("textbox", { name: "对话输入", exact: true })).toBeVisible({ timeout: 120000 });
+    await expect(this.debugComposer()).toBeVisible({ timeout: 120000 });
   }
 
   async sendDebug(prompt: string, expectedMarker?: string): Promise<string> {
     const debugPanel = this.debugPanel();
     await expect(debugPanel).toBeVisible();
-    const input = debugPanel.getByRole("textbox", { name: "对话输入", exact: true });
+    const input = this.debugComposer();
+    await expect(input).toBeVisible({ timeout: 120000 });
     // Empty completed replies can have zero layout height. Count their DOM
     // unit too; visibility must not turn an empty answer into a five-minute wait.
     // Compare and normal histories stay mounted together. Exclude hidden
@@ -674,7 +682,7 @@ export class AgentPage {
     // A selected Ant Select no longer exposes its placeholder. The two
     // comboboxes inside the visible Debug panel are the real compare columns.
     await expect(debugPanel.getByRole("combobox")).toHaveCount(2);
-    await expect(debugPanel.getByRole("textbox", { name: "对话输入", exact: true }).filter({ visible: true })).toHaveCount(1);
+    await expect(this.debugComposer()).toHaveCount(1);
   }
 
   async sendDebugCompare(prompt: string, expectedMarker?: string): Promise<string[]> {
@@ -688,7 +696,7 @@ export class AgentPage {
     ));
     const histories = columns.map((column) => column.locator("[data-slot='aui_assistant-message-root']:visible"));
     const before = await Promise.all(histories.map((history) => history.count()));
-    const composer = debugPanel.getByRole("textbox", { name: "对话输入", exact: true }).filter({ visible: true });
+    const composer = this.debugComposer();
     await composer.fill(prompt);
     await debugPanel.getByRole("button", { name: "发送", exact: true }).click();
     await Promise.all(histories.map((history, index) => expect(history).toHaveCount(before[index] + 1, { timeout: 300000 })));
@@ -719,7 +727,7 @@ export class AgentPage {
 
   async closeDebugCompare(): Promise<void> {
     await this.setDebugCompareMode(false);
-    await expect(this.debugPanel().getByRole("textbox", { name: "对话输入", exact: true }).filter({ visible: true })).toHaveCount(1);
+    await expect(this.debugComposer()).toHaveCount(1);
   }
 
   async publish(): Promise<Locator> {

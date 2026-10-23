@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, Locator, Page } from "playwright/test";
 import { appPath } from "../runner/runtime-config";
 import { knowledgeRetrievalFailure } from "../runner/knowledge-diagnostics";
@@ -13,13 +15,16 @@ export class KnowledgePage {
 
   async open(requireConfiguredEmbedding = true): Promise<void> {
     await this.page.goto(appPath("/knowledges"), { waitUntil: "domcontentloaded" });
+    // No role=heading title here; assert one of the two mutually exclusive states.
     if (requireConfiguredEmbedding) {
-      await expect(this.page.getByRole("heading", { name: "知识库", exact: true })).toBeVisible();
       await expect(this.createButton()).toBeVisible();
       return;
     }
-    await expect(this.page.getByRole("heading", { name: "知识库", exact: true })
-      .or(this.page.getByText(/尚未配置向量模型|需要配置向量化模型/)).first()).toBeVisible();
+    await expect(
+      this.createButton()
+        .or(this.page.getByText(/尚未配置向量模型|需要配置向量化模型/))
+        .first()
+    ).toBeVisible();
   }
 
   async beginCreate(name: string, embeddingDisplayName: string): Promise<void> {

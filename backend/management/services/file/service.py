@@ -43,6 +43,7 @@ from database.attachment_db import (
     get_content_type,
     get_file_range,
     get_file_size_from_minio,
+    get_file_size_from_minio_strict,
     get_file_stream,
     get_file_stream_raw,
     get_file_url,
@@ -645,6 +646,10 @@ async def get_file_url_impl(object_name: str, expires: int):
 async def get_file_stream_impl(object_name: str):
     file_stream = get_file_stream(object_name=object_name)
     if file_stream is None:
+        # The legacy read helper collapses missing keys and operational errors.
+        # Confirm absence without treating denied/unavailable storage as a 404.
+        if get_file_size_from_minio_strict(object_name) is None:
+            raise NotFoundException("Storage object does not exist")
         raise Exception("File not found or failed to read from storage")
     content_type = get_content_type(object_name)
     return file_stream, content_type

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { BrowserContext } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
@@ -84,7 +86,7 @@ journey("PW-UI-02", async (context) => {
         const agent = resolveReadyAsset("agents", "d4_chat_display_name", "PW-UI-02");
         const chat = new ChatPage(page);
         await chat.openAgent(agent);
-        const composer = page.getByPlaceholder("发送消息...");
+        const composer = page.locator("[data-workbench-composer], .aui-lexical-input").first();
         await expect(composer).toBeVisible();
         await composer.focus();
         await page.keyboard.type("只回复 OK");

@@ -1446,6 +1446,20 @@ async def test_get_storage_file_stream_error(monkeypatch):
     assert "Failed to get file information" in str(ei.value) or "Failed to get file" in str(ei.value)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("download", ["stream", "base64"])
+async def test_missing_storage_download_returns_404(monkeypatch, download):
+    async def missing(object_name):
+        raise file_management_app.NotFoundException("Storage object does not exist")
+
+    monkeypatch.setattr(file_management_app, "get_file_stream_impl", missing)
+    with pytest.raises(HTTPException) as caught:
+        await file_management_app.get_storage_file(
+            object_name="attachments/user1/missing.txt", download=download,
+            expires=60, filename=None, authorization=MOCK_AUTH)
+    assert caught.value.status_code == 404
+
+
 # --- Tests for download_datamate_file ---
 
 @pytest.mark.asyncio
