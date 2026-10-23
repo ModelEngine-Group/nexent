@@ -5,6 +5,11 @@ implementations:
   file: test_migration.py
   selector: test_
 timeout_seconds: 180
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
 acceptance_bindings:
   AC-01:
   - test_cleanup_preserves_modern_permissions_and_is_transactional_and_repeatable

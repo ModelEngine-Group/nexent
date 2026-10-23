@@ -38,6 +38,7 @@ import type {
   AidpKbDetail,
 } from "@/ext_components/aidp/shared/types/management";
 import aidpKnowledgeService from "@/ext_components/aidp/shared/services/aidpKnowledgeService";
+import { getAidpDownloadFilename } from "@/ext_components/aidp/shared/utils/aidpDownloadFilename";
 import {
   AIDP_UNKNOWN_VALUE,
   formatAidpCreator,
@@ -230,7 +231,7 @@ const AidpKnowledgeFilesPage: React.FC<AidpKnowledgeFilesPageProps> = ({
         const blobUrl = URL.createObjectURL(await response.blob());
         const link = document.createElement("a");
         link.href = blobUrl;
-        link.download = file.file_name || "download";
+        link.download = getAidpDownloadFilename(response.headers, file);
         document.body.appendChild(link);
         link.click();
         link.remove();
