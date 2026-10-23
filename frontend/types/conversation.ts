@@ -29,6 +29,7 @@ export interface ConversationListParams {
 
 export interface WorkbenchPinItem extends ConversationListItem {
   pinned_at: string;
+  conversation_type?: "agent_chat" | "workbench";
 }
 
 export interface WorkbenchPins {
