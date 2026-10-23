@@ -11,7 +11,6 @@ backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../
 sys.path.insert(0, backend_dir)
 
 prompt_service_stub = type(sys)("management.services.agent.prompt_generation")
-prompt_service_stub.gen_system_prompt_streamable = MagicMock()
 prompt_service_stub.OptimizeRequest = type("OptimizeRequest", (), {"__init__": lambda self, **kwargs: self.__dict__.update(kwargs)})
 prompt_service_stub.OptimizeResult = type("OptimizeResult", (), {})
 prompt_service_stub.PromptOptimizationService = MagicMock()
@@ -31,43 +30,8 @@ app.include_router(router)
 client = TestClient(app)
 
 
-@pytest.mark.parametrize("description", ["", " ", "\t\r\n", "\u3000", " \t\n\u3000 "])
-def test_generate_prompt_rejects_blank_description(description, mocker):
-    generate = mocker.patch("management.api.prompt.prompt.gen_system_prompt_streamable", return_value=iter(()))
-    authenticate = mocker.patch(
-        "management.api.prompt.prompt.get_current_user_info", return_value=("user-1", "tenant-1", "en")
-    )
-
-    for _ in range(2):
-        response = client.post("/prompt/generate", json={
-            "task_description": description, "agent_id": 1, "model_id": 2,
-        })
-        assert response.status_code == 422
-        assert response.headers["content-type"].startswith("application/json")
-        assert response.json()["detail"][0]["loc"] == ["body", "task_description"]
-    generate.assert_not_called()
-    authenticate.assert_not_called()
 
 
-@pytest.mark.parametrize("description", ["Answer questions", " \tAnswer questions\n\u3000"])
-def test_generate_prompt_preserves_valid_description_and_sse(description, mocker):
-    event = 'data: {"success": true, "data": {"type": "duty", "content": "Answer", "is_complete": true}}\n\n'
-    generate = mocker.patch("management.api.prompt.prompt.gen_system_prompt_streamable", return_value=iter([event]))
-    mocker.patch("management.api.prompt.prompt.get_current_user_info", return_value=("user-1", "tenant-1", "en"))
-    payload = {
-        "task_description": description, "agent_id": 1, "model_id": 2,
-        "tool_ids": [10], "sub_agent_ids": [20], "knowledge_base_display_names": ["kb-a"],
-        "has_selected_resources": True,
-    }
-
-    response = client.post("/prompt/generate", json=payload)
-
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/event-stream")
-    assert response.text == event
-    generate.assert_called_once_with(
-        **payload, user_id="user-1", tenant_id="tenant-1", language="en"
-    )
 
 
 @patch("management.api.prompt.prompt.get_current_user_info")
@@ -267,3 +231,12 @@ def test_optimize_badcase_api_nexent_capability_error(mock_service_cls, mock_get
     assert response.status_code == 400
     data = response.json()
     assert "badcase" in data["message"]
+
+
+@pytest.mark.parametrize("payload", [{}, {"agent_id": 1, "model_id": 2, "task_description": "Generate instructions"}])
+def test_retired_generation_route_returns_404_without_work(payload, mocker):
+    authenticate = mocker.patch("management.api.prompt.prompt.get_current_user_info")
+    response = client.post("/prompt/generate", json=payload)
+    assert response.status_code == 404
+    assert "text/event-stream" not in response.headers.get("content-type", "")
+    authenticate.assert_not_called()

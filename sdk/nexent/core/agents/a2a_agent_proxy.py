@@ -74,6 +74,7 @@ class A2AAgentInfo:
     timeout: float = 300.0
     raw_card: Optional[Dict[str, Any]] = None
     custom_headers: Optional[Dict[str, str]] = None
+    ssl_verify: bool = True
 
     def get_protocol_type(self) -> str:
         """Get the protocol type for calling this agent.
@@ -150,6 +151,7 @@ class ExternalA2AAgentProxy:
         # - trust_env=False to ignore proxy env vars
         # - limits configured for connection pool
         self._client = httpx.AsyncClient(
+            verify=self.agent_info.ssl_verify,
             timeout=httpx.Timeout(self.agent_info.timeout),
             http2=False,  # Force HTTP/1.1 like curl
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),

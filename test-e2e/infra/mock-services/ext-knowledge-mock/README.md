@@ -44,13 +44,15 @@ The mock is reached through two different URLs depending on who is calling:
 | Runner / test code (control plane, wire export, direct asset fetch, latency measurement) | `runner_url` | `http://127.0.0.1:30090` |
 | Product containers (config/runtime outbound params, model records, tool configuration) | `product_url` | `http://ext-knowledge:30090` |
 
-The published port binds to `127.0.0.1` only; the product side reaches the
-service through the product network overlay by its compose DNS name. Test
-helpers pick the side explicitly (`test-e2e/infra/automation/shared/ext_knowledge.py`);
-self-referential URLs (Dify `download_url`) are derived from the request's
-own Host header, so a URL handed to the product is product-reachable and a
-URL fetched by the runner is runner-reachable. Do not "fix" one by
-mechanically replacing the host.
+The Compose deployment publishes the port on `127.0.0.1` only. The
+suite-owned process binds `0.0.0.0:30090` so product containers can reach the
+same port through `product_url`; the product side uses the compose DNS name
+(`ext-knowledge`) or `host.docker.internal` for a Docker Desktop deployment.
+Test helpers pick the side explicitly
+(`test-e2e/infra/automation/shared/ext_knowledge.py`); self-referential URLs
+(Dify `download_url`) are derived from the request's own Host header, so a URL
+handed to the product is product-reachable and a URL fetched by the runner is
+runner-reachable. Do not "fix" one by mechanically replacing the host.
 
 ## Base URL conventions per service
 
@@ -167,16 +169,51 @@ leak them into the next case.
 
 ## Running
 
-Standalone (local dev / AIDP-minimal profile; the AIDP mock is loaded from
-the repository checkout):
+### Suite-owned (default; no manual start)
+
+A case only needs to declare the logical service in `execution.yaml`:
+
+```yaml
+required_mock_services:
+- knowledge-provider
+```
+
+The existing suite entry starts and stops the mock for that case:
+
+```bash
+python test-e2e/infra/scripts/run-suite.py run \
+  --test-home <test-home> --case <case-id> --execute
+```
+
+For every such case the worker starts `server.py --host 0.0.0.0 --port 30090`,
+waits for `/health`, resets state through `/_reset`, and terminates the process
+after the case. **No `config/ext-knowledge.yaml`, identity or lock is needed.**
+The product deployment must point its outbound knowledge-service settings at
+the product-facing address, for example:
+
+- Docker Desktop / containerized product: `http://host.docker.internal:30090`
+- host-mode product: `http://127.0.0.1:30090`
+
+For AIDP this is `AIDP_SERVER_URL`; the per-adapter values are in the base URL
+table above. The attach/health/reset evidence is written to
+`<case>/runtime/ext-knowledge-attach.json`.
+
+### Standalone (local dev / AIDP-minimal profile)
+
+The AIDP mock is loaded from the repository checkout:
 
 ```bash
 python test-e2e/infra/mock-services/ext-knowledge-mock/server.py --port 30090
 ```
 
-Through the mock-services dispatcher (builds the image from a packed,
-batch-owned context, waits for readiness — all eight services — and attaches
-the product network; the product must already be deployed):
+Then point the product or a manual test client at `http://127.0.0.1:30090`
+(host mode) or `http://host.docker.internal:30090` (Docker Desktop).
+
+### Dispatcher (optional external shared stack)
+
+Builds the image from a packed, batch-owned context, waits for readiness — all
+eight services — and attaches the product network; the product must already be
+deployed:
 
 ```bash
 python test-e2e/infra/mock-services/ext-knowledge-mock/build_context.py --output <context-dir>
@@ -191,20 +228,13 @@ python test-e2e/infra/mock-services/deploy.py stop ext-knowledge
 The published port is fixed at `30090` (the readiness registry probes a
 literal localhost URL); confirm the port is free before `up`. `stop` only
 stops the registered service — no `down`, no volume deletion. Run a single
-uvicorn worker — all state lives in-process.
-
-Runner-side attach (per-case locking, identity validation and evidence
-export) is implemented in `test-e2e/infra/tools/ext_attach.py` and wired
-into the suite worker; cases declare their dependency through
-`required_mock_services` in `execution.yaml` (logical IDs:
-`knowledge-provider`, `http-fixture`, `model-provider`). The suite never
-starts or stops the Compose stack itself — deployment and teardown are
-explicit operator steps.
+uvicorn worker — all state lives in-process. This external mode is optional;
+suite runs use the suite-owned process above and never read the external
+attach YAML.
 
 Profile-selected cases were removed together with the mock/real split:
-PW-KB-AIDP-01 attaches this instance directly through its plain
-`knowledge-provider` dependency, and there is no machine-local journey file
-to create.
+PW-KB-AIDP-01 attaches through its plain `knowledge-provider` dependency, and
+there is no machine-local journey file to create.
 
 ## Deliberate quirks (do not "fix" without checking the adapters)
 

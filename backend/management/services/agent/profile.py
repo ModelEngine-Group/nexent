@@ -43,7 +43,7 @@ _DESC_KB_MAX = 300
 _DESC_AGENT_MAX = 2000
 
 
-_DUTY_PROMPT_MAX = 3000
+_PROMPT_MAX = 3000
 
 
 def _fetch_agent_tools(
@@ -203,7 +203,7 @@ def fetch_agent_profile(agent_id: int, tenant_id: str) -> Optional[Dict[str, Any
     return {
         "name": agent.get("display_name") or agent.get("name") or "",
         "description": (agent.get("description") or "")[:_DESC_AGENT_MAX],
-        "duty_prompt": (agent.get("duty_prompt") or "")[:_DUTY_PROMPT_MAX],
+        "prompt": (agent.get("prompt") or "")[:_PROMPT_MAX],
         "business_description": (agent.get("business_description") or "")[
             :_DESC_AGENT_MAX
         ],

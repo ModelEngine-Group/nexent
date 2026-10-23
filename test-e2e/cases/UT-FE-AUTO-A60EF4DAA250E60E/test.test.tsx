@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // @vitest-environment jsdom
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -273,9 +275,7 @@ const buildEditedAgent = (overrides: Record<string, any> = {}) => ({
   model_ids: [],
   model: '',
   model_names: [],
-  duty_prompt: '',
-  constraint_prompt: '',
-  few_shots_prompt: '',
+  prompt: '',
   ...overrides,
 });
 

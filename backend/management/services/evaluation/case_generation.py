@@ -33,10 +33,10 @@ def _build_agent_profile_parts(profile: dict) -> list:
                 "en", "agent_profile_description", {"value": profile["description"]}
             )
         )
-    if profile["duty_prompt"]:
+    if profile["prompt"]:
         parts.append(
             render_evaluation_section(
-                "en", "agent_profile_duty", {"value": profile["duty_prompt"]}
+                "en", "agent_profile_duty", {"value": profile["prompt"]}
             )
         )
     if profile["business_description"]:

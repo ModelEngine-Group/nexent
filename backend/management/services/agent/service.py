@@ -778,7 +778,7 @@ async def update_agent_info_impl(
                     "verification_config": request.verification_config,
                     "context_policy": request.context_policy,
                     "model_params_override": model_params_override,
-                    "duty_prompt": request.duty_prompt,
+                    "prompt": request.prompt,
                     "greeting_message": request.greeting_message,
                     "example_questions": request.example_questions,
                     "icon_url": request.icon_url,

@@ -105,6 +105,10 @@ class A2AExternalAgent(TableBase):
         JSON,
         doc="Headers used only to retrieve and refresh the Agent Card"
     )
+    ssl_verify = Column(
+        Boolean, nullable=False, default=True, server_default="true",
+        comment="Verify peer TLS certificates for Agent Card retrieval and A2A invocation",
+    )
 
     # Security declared by the Agent Card and credentials configured by the user
     security_schemes = Column(JSON, doc="Security schemes declared by the Agent Card")

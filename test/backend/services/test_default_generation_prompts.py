@@ -1,13 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Default prompt generation remains available after private templates retire."""
+"""Default naming remains available after standalone prompt generation retires."""
 
 import pytest
 
 from contracts import agent as model
 from management.db.models import AgentInfo, TableBase
 from management.services.agent import naming, prompt
-from nexent.core.agents.prompt.meta import compose_agent_generation_user
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])
@@ -42,23 +41,6 @@ def test_missing_default_resource_is_reported(mocker):
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])
-def test_default_generation_renders_task_and_selected_resources(language):
-    rendered = compose_agent_generation_user(
-        language, prompt.load_default_generation_prompt(language),
-        task_description="Find deployment documentation",
-        tools=[{"name": "search_docs", "description": "Search internal documentation", "inputs": {}, "output_type": "string"}],
-        worker_agents=[{"name": "writer", "description": "Write the deployment guide"}],
-        has_local_knowledge_tool=False, has_aidp_knowledge_tool=False,
-        has_selected_resources=True,
-    )
-
-    assert "Find deployment documentation" in rendered
-    assert "search_docs" in rendered
-    assert "writer" in rendered
-    assert "{{" not in rendered
-
-
-@pytest.mark.parametrize("language", ["zh", "en"])
 @pytest.mark.parametrize("field", ["name", "display_name"])
 def test_naming_renders_default_resources_without_private_lookup(mocker, language, field):
     llm = mocker.patch.object(naming, "call_llm_for_system_prompt", return_value="fresh_name")
@@ -73,7 +55,7 @@ def test_naming_renders_default_resources_without_private_lookup(mocker, languag
     assert "Find deployment documentation" in request["user_prompt"]
 
 
-@pytest.mark.parametrize("request_type", [model.AgentRequest, model.AgentInfoRequest, model.GeneratePromptRequest, model.ExportAndImportAgentInfo])
+@pytest.mark.parametrize("request_type", [model.AgentRequest, model.AgentInfoRequest, model.ExportAndImportAgentInfo])
 def test_agent_contracts_no_longer_expose_private_template_fields(request_type):
     assert {"prompt_template_id", "prompt_template_name"}.isdisjoint(request_type.model_fields)
     assert {"prompt_template_id", "prompt_template_name"}.isdisjoint(request_type.model_json_schema()["properties"])
@@ -83,13 +65,13 @@ def test_legacy_agent_payload_drops_retired_fields():
     request = model.AgentInfoRequest.model_validate({
         "agent_id": 1,
         "name": "Existing Agent",
-        "duty_prompt": "Preserve the saved prompt",
+        "prompt": "Preserve the saved prompt",
         "prompt_template_id": 42,
         "prompt_template_name": "Private template",
     })
 
     saved = request.model_dump()
-    assert saved["duty_prompt"] == "Preserve the saved prompt"
+    assert saved["prompt"] == "Preserve the saved prompt"
     assert {"prompt_template_id", "prompt_template_name"}.isdisjoint(saved)
 
 

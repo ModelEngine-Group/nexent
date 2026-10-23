@@ -101,7 +101,7 @@ AGENT_DRAFT_FIELD_ORDER = (
     "display_name",
     "description",
     "enable_protocol_repair_retry",
-    "duty_prompt",
+    "prompt",
     "greeting_message",
     "example_questions",
 )
@@ -1406,7 +1406,7 @@ async def validate_agent_generation_complete_impl(
     if not isinstance(description, str) or not description.strip():
         raise Nl2AgentCompletionError("draft_fields_incomplete", ["description"])
 
-    required_prompt_fields = ["duty_prompt", "greeting_message"]
+    required_prompt_fields = ["prompt", "greeting_message"]
     missing_prompts = [
         field_name
         for field_name in required_prompt_fields

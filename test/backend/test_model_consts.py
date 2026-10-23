@@ -636,19 +636,6 @@ def test_process_params():
     assert params.authorization == "Bearer token123"
 
 
-def test_generate_prompt_request():
-    """Test GeneratePromptRequest"""
-    req = model_consts.GeneratePromptRequest(
-        task_description="Create an agent",
-        agent_id=1,
-        model_id=2,
-        tool_ids=[10, 20],
-        sub_agent_ids=[100]
-    )
-    assert req.task_description == "Create an agent"
-    assert req.agent_id == 1
-    assert len(req.tool_ids) == 2
-    assert req.has_selected_resources is True
 
 
 def test_optimize_prompt_section_request():

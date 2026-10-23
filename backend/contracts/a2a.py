@@ -328,6 +328,7 @@ class DiscoverExternalAgentFromUrlRequest(BaseModel):
     url: str
     name: Optional[str] = None
     custom_headers: Optional[Dict[str, str]] = None
+    ssl_verify: bool = Field(default=True, description="Verify the peer TLS certificate")
 
 
 class DiscoverExternalAgentFromNacosRequest(BaseModel):

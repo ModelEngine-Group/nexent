@@ -2106,7 +2106,7 @@ class TestBuildAgentProfileParts:
         profile = {
             "name": "A",
             "description": "d",
-            "duty_prompt": "dp",
+            "prompt": "dp",
             "constraint_prompt": "cp",
             "business_description": "bd",
         }
@@ -2119,7 +2119,7 @@ class TestBuildAgentProfileParts:
         profile = {
             "name": "A",
             "description": "",
-            "duty_prompt": None,
+            "prompt": None,
             "constraint_prompt": "",
             "business_description": None,
         }
@@ -2178,7 +2178,7 @@ class TestGenerateTestQueries:
         return {
             "name": "A",
             "description": "d",
-            "duty_prompt": "",
+            "prompt": "",
             "constraint_prompt": "",
             "business_description": "",
         }

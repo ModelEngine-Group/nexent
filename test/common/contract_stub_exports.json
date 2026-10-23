@@ -14,7 +14,6 @@
       "NL2ModelControlsRequest": "NL2ModelControlsRequest",
       "NL2AgentRunRequest": "NL2AgentRunRequest",
       "NL2SkillRunRequest": "NL2SkillRunRequest",
-      "GeneratePromptRequest": "GeneratePromptRequest",
       "OptimizePromptSectionRequest": "OptimizePromptSectionRequest",
       "BadCaseItem": "BadCaseItem",
       "OptimizePromptBadCaseRequest": "OptimizePromptBadCaseRequest",

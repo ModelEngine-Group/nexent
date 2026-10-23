@@ -20,7 +20,7 @@ def database(monkeypatch):
     agents = Table(agent_db.AgentInfo.__tablename__, metadata,
                    Column("agent_id", Integer, primary_key=True), Column("version_no", Integer, primary_key=True),
                    Column("tenant_id", String), Column("delete_flag", String), Column("display_name", String),
-                   Column("name", String), Column("duty_prompt", String))
+                   Column("name", String), Column("prompt", String))
     versions = Table(agent_db.AgentVersion.__tablename__, metadata,
                      Column("id", Integer, primary_key=True), Column("agent_id", Integer),
                      Column("version_no", Integer), Column("delete_flag", String))
@@ -42,7 +42,7 @@ def database(monkeypatch):
         def add_agent(agent_id=7, version_no=0, tenant_id="t1", delete_flag="N", display_name="Agent", name="Internal"):
             connection.execute(agents.insert().values(
                 agent_id=agent_id, version_no=version_no, tenant_id=tenant_id, delete_flag=delete_flag,
-                display_name=display_name, name=name, duty_prompt="Not needed by the deletion dialog",
+                display_name=display_name, name=name, prompt="Not needed by the deletion dialog",
             ))
 
         def add_version(version_no=1, delete_flag="N"):
@@ -61,7 +61,7 @@ def test_names_are_deduplicated_in_one_sql_and_return_only_used_fields(database,
         {"agent_id": 7, "display_name": "Agent"},
     ]
     assert len(statements) == 1
-    assert "duty_prompt" not in statements[0]
+    assert "prompt" not in statements[0]
     resource_ids = set(next(iter(selected.values())))
     assert tools.call_args.args[1:] == (param, resource_ids)
 

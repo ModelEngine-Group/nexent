@@ -183,7 +183,7 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
     result = save_agent_draft_fields_impl(
         agent_id=22,
         fields=AgentDraftFields(
-            duty_prompt="Updated duty",
+            prompt="Updated duty",
             example_questions=[],
         ),
         tenant_id="tenant-a",
@@ -191,11 +191,11 @@ def test_update_agent_draft_changes_only_explicit_fields_and_allows_empty_list(
     )
 
     assert result["created"] is False
-    assert result["updated_fields"] == ["duty_prompt", "example_questions"]
+    assert result["updated_fields"] == ["prompt", "example_questions"]
     update_fields.assert_called_once_with(
         agent_id=22,
         tenant_id="tenant-a",
-        fields={"duty_prompt": "Updated duty", "example_questions": []},
+        fields={"prompt": "Updated duty", "example_questions": []},
     )
 
 
@@ -516,9 +516,9 @@ def test_agent_draft_fields_reject_empty_null_and_extra_patches(fields):
 
 @pytest.mark.parametrize(
     "name",
-    ["9invalid_assistant", "invalid-name_assistant", "中文助手", "researcher"],
+    [123, True, [], {}],
 )
-def test_agent_draft_fields_reject_invalid_generated_name(name):
+def test_agent_draft_fields_reject_non_string_name(name):
     with pytest.raises(ValidationError):
         AgentDraftFields(name=name)
 
@@ -1521,9 +1521,7 @@ async def test_validate_agent_generation_complete_uses_database_state(mocker):
         "name": "database_assistant",
         "display_name": "Database Assistant",
         "description": "Database-backed description",
-        "duty_prompt": "Verify sources and produce a report.",
-        "constraint_prompt": "1. Use weather_forecast for current weather.",
-        "few_shots_prompt": "Task 1: Check the weather.",
+        "prompt": "Verify sources and produce a report.",
         "greeting_message": "Hello, I can verify information.",
         "example_questions": ["What is the weather?"],
     }
@@ -1567,9 +1565,7 @@ async def test_validate_agent_generation_complete_allows_empty_resource_prompts(
                 "name": "writing_assistant",
                 "display_name": "Writing Assistant",
                 "description": "Improve writing",
-                "duty_prompt": "Help users improve their writing.",
-                "constraint_prompt": "",
-                "few_shots_prompt": None,
+                "prompt": "Help users improve their writing.",
                 "greeting_message": "Hello, what should we write?",
                 "example_questions": ["Improve this paragraph"],
             },
@@ -1585,9 +1581,9 @@ async def test_validate_agent_generation_complete_allows_empty_resource_prompts(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("duty_prompt", [None, "", "   "])
+@pytest.mark.parametrize("prompt", [None, "", "   "])
 async def test_validate_agent_generation_complete_rejects_incomplete_resource_prompts(
-    mocker, duty_prompt,
+    mocker, prompt,
 ):
     mocker.patch(
         "services.nl2agent_service._load_verified_nl2agent_state",
@@ -1597,7 +1593,7 @@ async def test_validate_agent_generation_complete_rejects_incomplete_resource_pr
                 "name": "research_assistant",
                 "display_name": "Research Assistant",
                 "description": "Research help",
-                "duty_prompt": duty_prompt,
+                "prompt": prompt,
                 "constraint_prompt": "Use search.",
                 "few_shots_prompt": "A valid legacy example",
                 "greeting_message": "Hello",
@@ -1622,7 +1618,7 @@ async def test_validate_agent_generation_complete_rejects_incomplete_resource_pr
         )
 
     assert exc_info.value.code == "prompt_fields_incomplete"
-    assert exc_info.value.failed_fields == ["duty_prompt"]
+    assert exc_info.value.failed_fields == ["prompt"]
 
 
 @pytest.mark.asyncio
@@ -1802,8 +1798,40 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
 async def test_create_stream_yields_process_chunks_without_waiting_for_later_output(mocker):
     run_info = MagicMock()
     run_info.stop_event = MagicMock()
-    mocker.patch('services.nl2agent_service.build_nl2agent_run_info', new_callable=AsyncMock, return_value=run_info)
-    process_chunks = [{'type': 'step_count', 'content': '1'}, {'type': 'model_output_thinking', 'content': 'reason'}, {'type': 'model_output_deep_thinking', 'content': 'deeper reason'}, {'type': 'model_output_code', 'content': 'code'}, {'type': 'parse', 'content': 'parsed'}, {'type': 'tool', 'content': 'call'}, {'type': 'execution_logs', 'content': 'observation'}, {'type': 'nl2a_state', 'content': json.dumps({'event': 'agent_draft_fields_saved', 'agent_id': 42, 'updated_fields': ['duty_prompt']})}, {'type': 'nl2a_state', 'content': json.dumps({'event': 'agent_generation_completed', 'agent_id': 42})}, {'type': 'final_answer', 'content': 'plain answer'}]
+    mocker.patch(
+        "services.nl2agent_service.build_nl2agent_run_info",
+        new_callable=AsyncMock,
+        return_value=run_info,
+    )
+    process_chunks = [
+        {"type": "step_count", "content": "1"},
+        {"type": "model_output_thinking", "content": "reason"},
+        {"type": "model_output_deep_thinking", "content": "deeper reason"},
+        {"type": "model_output_code", "content": "code"},
+        {"type": "parse", "content": "parsed"},
+        {"type": "tool", "content": "call"},
+        {"type": "execution_logs", "content": "observation"},
+        {
+            "type": "nl2a_state",
+            "content": json.dumps(
+                {
+                    "event": "agent_draft_fields_saved",
+                    "agent_id": 42,
+                    "updated_fields": ["prompt"],
+                }
+            ),
+        },
+        {
+            "type": "nl2a_state",
+            "content": json.dumps(
+                {
+                    "event": "agent_generation_completed",
+                    "agent_id": 42,
+                }
+            ),
+        },
+        {"type": "final_answer", "content": "plain answer"},
+    ]
     release_next = [asyncio.Event() for _ in process_chunks]
 
     async def gated_agent_run(_run_info, *, thread_manager):

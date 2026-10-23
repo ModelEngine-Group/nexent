@@ -38,7 +38,7 @@ export type AgentDraft = Pick<
   | "is_a2a"
   | "verification_config"
   | "tools"
-  | "duty_prompt"
+  | "prompt"
   | "business_logic_model_name"
   | "business_logic_model_id"
   | "sub_agent_id_list"
@@ -129,7 +129,7 @@ const toDraft = (agent: Agent): AgentDraft => ({
   verification_config: agent.verification_config,
   tools: [...(agent.tools || [])],
   skills: [...(agent.skills || [])],
-  duty_prompt: agent.duty_prompt || "",
+  prompt: agent.prompt || "",
   business_logic_model_name: agent.business_logic_model_name || "",
   business_logic_model_id: agent.business_logic_model_id || 0,
   sub_agent_id_list: agent.sub_agent_id_list || [],
@@ -309,8 +309,8 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.business_logic_model_id !== undefined
     ? { business_logic_model_id: patch.business_logic_model_id }
     : {}),
-  ...(patch.duty_prompt !== undefined
-    ? { duty_prompt: patch.duty_prompt }
+  ...(patch.prompt !== undefined
+    ? { prompt: patch.prompt }
     : {}),
   ...(patch.tools !== undefined
     ? {

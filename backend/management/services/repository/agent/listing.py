@@ -564,11 +564,12 @@ def _extract_root_agent_from_snapshot(agent_info_json: Any) -> Dict[str, Any]:
     agent_info_map = agent_info_json.get("agent_info")
     if root_agent_id is None or not isinstance(agent_info_map, dict):
         return {}
-    return (
+    root_agent = (
         agent_info_map.get(str(root_agent_id))
         or agent_info_map.get(root_agent_id)
         or {}
     )
+    return root_agent if isinstance(root_agent, dict) else {}
 
 
 def _extract_tool_names(root_agent: Dict[str, Any]) -> List[str]:
@@ -626,7 +627,7 @@ def get_agent_repository_listing_detail_impl(
         "downloads": download_total,
         "created_at": _serialize_created_at(record.get("create_time")),
         "model_name": root_agent.get("model_name"),
-        "duty_prompt": root_agent.get("duty_prompt"),
+        "prompt": root_agent.get("prompt"),
         "tools": _extract_tool_names(root_agent),
         "is_official": record.get("publisher_tenant_id") == SYSTEM_TENANT_ID,
         "is_main_agent": (

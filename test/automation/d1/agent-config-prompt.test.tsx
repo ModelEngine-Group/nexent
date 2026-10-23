@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { App, Form } from "antd";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,13 +14,11 @@ const mocks = vi.hoisted(() => ({
   readOnly: false,
   focus: null as null | {
     agentId: number;
-    target: { section: string; promptTab: string };
+    target: { section: string };
   },
   draft: {
     model_ids: [7],
-    duty_prompt: "duty-value",
-    constraint_prompt: "constraint-value",
-    few_shots_prompt: "few-shot-value",
+    prompt: "duty-value",
     model_params_override: null,
   },
 }));
@@ -83,39 +83,15 @@ describe("AGENT-CONFIG-D1-001 actual nested prompt capability", () => {
     mocks.reconcileUnavailableModels.mockReset();
   });
 
-  it("opens requested constraint and few-shot fields without clearing any prompt", async () => {
+  it("focuses the complete prompt without opening split-field tabs or writing", async () => {
     const view = render(promptTree());
-    mocks.focus = {
-      agentId: 42,
-      target: { section: "role_model", promptTab: "constraint" },
-    };
+    mocks.focus = { agentId: 42, target: { section: "role_model" } };
     view.rerender(promptTree());
-    await waitFor(() =>
-      expect(
-        screen.getByRole("dialog", {
-          name: "agent.highFidelity.additionalPrompts",
-        }),
-      ).toBeInTheDocument(),
-    );
-    expect(
-      screen.getByRole("tab", { name: "agent.field.constraintPrompt" }),
-    ).toHaveAttribute("aria-selected", "true");
-    expect(
-      screen.getByPlaceholderText("agent.field.constraintPromptPlaceholder"),
-    ).toHaveValue("constraint-value");
-    mocks.focus = {
-      agentId: 42,
-      target: { section: "role_model", promptTab: "few-shots" },
-    };
-    view.rerender(promptTree());
-    await waitFor(() =>
-      expect(
-        screen.getByRole("tab", { name: "agent.field.fewShotsPrompt" }),
-      ).toHaveAttribute("aria-selected", "true"),
-    );
-    expect(
-      screen.getByPlaceholderText("agent.field.fewShotsPromptPlaceholder"),
-    ).toHaveValue("few-shot-value");
+    const input = document.getElementById("agent-primary-prompt")!;
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(input).toHaveValue(mocks.draft.prompt);
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(mocks.updateDraft).not.toHaveBeenCalled();
     expect(mocks.updateAgentConfig).not.toHaveBeenCalled();
     expect(mocks.reconcileUnavailableModels).not.toHaveBeenCalled();
@@ -139,29 +115,29 @@ describe("AGENT-CONFIG-D1-001 actual nested prompt capability", () => {
   });
 });
 
-describe("AGENT-CONFIG-D1-004 duty prompt boundaries and compatibility", () => {
+describe("AGENT-CONFIG-D1-004 complete prompt boundaries", () => {
   beforeEach(() => {
     mocks.readOnly = false;
     mocks.focus = null;
-    mocks.draft.duty_prompt = "";
+    mocks.draft.prompt = "";
     mocks.updateDraft.mockReset();
     mocks.updateAgentConfig.mockReset();
   });
 
-  it("accepts an exact 1000-character duty prompt", () => {
+  it("accepts an exact 1000-character complete prompt", () => {
     render(promptTree());
     const duty = document.getElementById("agent-primary-prompt")!;
     expect(duty).toHaveAttribute("maxlength", "1000");
     const boundary = "d".repeat(1000);
     fireEvent.change(duty, { target: { value: boundary } });
     expect(mocks.updateDraft).toHaveBeenLastCalledWith({
-      duty_prompt: boundary,
+      prompt: boundary,
     });
   });
 
-  it("shows all legacy duty text without writing and permits shortening", () => {
+  it("shows all saved long text without writing and permits shortening", () => {
     const legacy = "d".repeat(1001);
-    mocks.draft.duty_prompt = legacy;
+    mocks.draft.prompt = legacy;
     const view = render(promptTree());
     const duty = document.getElementById("agent-primary-prompt")!;
     expect(duty).toHaveValue(legacy);
@@ -171,17 +147,17 @@ describe("AGENT-CONFIG-D1-004 duty prompt boundaries and compatibility", () => {
     const shortened = "d".repeat(999);
     fireEvent.change(duty, { target: { value: shortened } });
     expect(mocks.updateDraft).toHaveBeenLastCalledWith({
-      duty_prompt: shortened,
+      prompt: shortened,
     });
-    mocks.draft.duty_prompt = shortened;
+    mocks.draft.prompt = shortened;
     view.rerender(promptTree());
     expect(duty).toHaveAttribute("maxlength", "1000");
   });
 
-  it("keeps the default duty field without the high-fidelity limit", () => {
+  it("keeps the default prompt field without the high-fidelity limit", () => {
     render(promptTree(false));
     expect(
-      screen.getByPlaceholderText("agent.field.dutyPromptPlaceholder"),
+      screen.getByPlaceholderText("agent.field.promptPlaceholder"),
     ).not.toHaveAttribute("maxlength");
   });
 });

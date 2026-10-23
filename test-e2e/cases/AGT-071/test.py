@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Nexent API + real Agent/LLM against a controlled external memory Provider."""
 
 from __future__ import annotations
@@ -88,7 +90,7 @@ async def exercise_external_memory(identity, mock, api):
     async with owned_configured_model(identity, CASE_ID) as model_id:
         async with _draft_agent(identity, model_ids=[model_id], owner_case_id=CASE_ID) as (agent_id, payload):
             configured = await api.post('/agent/update', json={**payload,
-                'duty_prompt': 'Answer using provided memory context. Return only the requested marker. '
+                'prompt': 'Answer using provided memory context. Return only the requested marker. '
                                'If no matching memory exists, return NOT_FOUND. Never invent or store markers.'})
             assert_status(configured, 200)
             published = await api.post(f'/agent/{agent_id}/publish', json={

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Offline negative-detection tests for D3 fixtures, not product acceptance."""
 import importlib.util
 import json
@@ -49,18 +51,18 @@ def test_insert_negative_invalidates_consumed_argument():
 
 
 @pytest.mark.parametrize('status,body,after', [
-    (200, {'data': {'optimized_content': 'valid result'}}, {'duty_prompt': 'original'}),
-    (400, {}, {'duty_prompt': 'original'}),
-    (422, {'detail': 'invalid bounds'}, {'duty_prompt': 'changed'}),
-    (500, {'message': 'unexpected'}, {'duty_prompt': 'original'}),
+    (200, {'data': {'optimized_content': 'valid result'}}, {'prompt': 'original'}),
+    (400, {}, {'prompt': 'original'}),
+    (422, {'detail': 'invalid bounds'}, {'prompt': 'changed'}),
+    (500, {'message': 'unexpected'}, {'prompt': 'original'}),
 ])
 def test_section_rejection_cannot_pass_false_success_or_partial_write(status, body, after):
     with pytest.raises(AssertionError):
-        section.assert_rejected(response(status, body), {'duty_prompt': 'original'}, after)
+        section.assert_rejected(response(status, body), {'prompt': 'original'}, after)
 
 
 def test_valid_section_rejection_preserves_draft():
-    before = {'duty_prompt': 'original'}
+    before = {'prompt': 'original'}
     section.assert_rejected(response(422, {'detail': 'invalid bounds'}), before, dict(before))
 
 

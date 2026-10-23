@@ -5,9 +5,8 @@ A2A Client API endpoints.
 These endpoints allow users to discover and manage external A2A agents.
 Used internally for configuring A2A sub-agents.
 """
-
 from contracts.a2a import AddRelationRequest, ChatRequest, CreateNacosConfigRequest, DiscoverExternalAgentFromNacosRequest as DiscoverFromNacosRequest, DiscoverExternalAgentFromUrlRequest as DiscoverFromUrlRequest, TestNacosConnectionRequest, UpdateAgentProtocolRequest, UpdateExternalAgentSecurityCredentialsRequest, UpdateNacosConfigRequest
-from contracts.a2a import AddRelationRequest, ChatRequest, CreateNacosConfigRequest, DiscoverExternalAgentFromNacosRequest as DiscoverFromNacosRequest, DiscoverExternalAgentFromUrlRequest as DiscoverFromUrlRequest, TestNacosConnectionRequest, UpdateAgentProtocolRequest, UpdateExternalAgentSecurityCredentialsRequest, UpdateNacosConfigRequest
+import asyncio
 import logging
 import uuid
 from typing import Annotated, Any, Dict, List, Optional
@@ -19,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
 from contracts.errors.exceptions import AgentNotFoundError, AppException, ForbiddenError, RuntimeMetadataValidationError
+from infrastructure.http.a2a import AGENT_CARD_TIMEOUT
 
 from management.services.agent.a2a.catalog import (
     a2a_client_service,
@@ -55,12 +55,25 @@ async def discover_from_url(
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
-        result = await a2a_client_service.discover_from_url(
-            url=request.url, tenant_id=tenant_id, user_id=user_id, custom_headers=request.custom_headers
+        result = await asyncio.wait_for(
+            a2a_client_service.discover_from_url(
+                url=request.url,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                custom_headers=request.custom_headers,
+                ssl_verify=request.ssl_verify,
+            ),
+            timeout=AGENT_CARD_TIMEOUT
         )
 
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success", "data": result})
 
+    except asyncio.TimeoutError as e:
+        logger.warning("URL Agent discovery timed out")
+        raise HTTPException(
+            status_code=HTTPStatus.GATEWAY_TIMEOUT,
+            detail="Agent discovery timed out after 10 seconds. Check the Agent address and connectivity, then retry."
+        ) from e
     except AgentDiscoveryError as e:
         logger.error(f"Agent discovery failed: {e}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))
@@ -82,16 +95,25 @@ async def discover_from_nacos(
     try:
         user_id, tenant_id, _ = get_current_user_info(authorization, http_request)
 
-        results = await a2a_client_service.discover_from_nacos(
-            nacos_config_id=request.nacos_config_id,
-            agent_names=[name.strip() for name in request.agent_names],
-            tenant_id=tenant_id,
-            user_id=user_id,
-            namespace=request.namespace,
+        results = await asyncio.wait_for(
+            a2a_client_service.discover_from_nacos(
+                nacos_config_id=request.nacos_config_id,
+                agent_names=[name.strip() for name in request.agent_names],
+                tenant_id=tenant_id,
+                user_id=user_id,
+                namespace=request.namespace
+            ),
+            timeout=AGENT_CARD_TIMEOUT
         )
 
         return JSONResponse(status_code=HTTPStatus.OK, content={"status": "success", "data": results})
 
+    except asyncio.TimeoutError as e:
+        logger.warning("Nacos Agent discovery timed out")
+        raise HTTPException(
+            status_code=HTTPStatus.GATEWAY_TIMEOUT,
+            detail="Agent discovery timed out after 10 seconds. Check Nacos and Agent connectivity, then retry."
+        ) from e
     except AgentDiscoveryError as e:
         logger.error(f"Nacos discovery failed: {e}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(e))

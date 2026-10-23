@@ -6,13 +6,15 @@ case:
   feature_id: F-045
   business_rule_ids:
   - F-045-RULE-01
-  title: Single Agent prompt migration preserves data and is repeatable
+  title: Agent table and marketplace snapshot migrations preserve content and are
+    repeatable
   type: DEPLOYMENT
   priority: P1
   status: active
   automation: automated
   objective: Execute the versioned migration against synthetic rows in a disposable
-    PostgreSQL container.
+    PostgreSQL container. Include frozen marketplace parent/child JSON with canonical
+    and legacy variants.
   preconditions:
   - Docker is available and postgres:15-alpine is already present; create only a uniquely
     named disposable container.
@@ -34,11 +36,32 @@ case:
       and DDL failures; remove the container in finally.
     expected: Second execution changes nothing; invalid partial schemas and DDL errors
       preserve original data and schema; cleanup succeeds even on assertion failure.
+  - order: 4
+    action: Seed isolated marketplace snapshots across tenants, versions and deletion
+      states; run the marketplace migration twice, then test conflicting aliases and
+      malformed snapshot values.
+    expected: Parent and child instructions merge in order without draft substitution;
+      unrelated JSON and row metadata remain unchanged. Repetition is a no-op and
+      invalid records roll back the entire migration.
+  - order: 5
+    action: After section consolidation and market migration, rename the Agent SQL
+      column to prompt and run the full chain again. Check rows, defaults, indexes
+      and dependent views; inject schema ambiguity and post-rename DDL failure.
+    expected: Only the column name and its descriptive comment change; every prompt
+      and row metadata value remains identical. Repetition is safe. Invalid schema
+      states and DDL errors abort without losing data or partially renaming the column.
   expected_results:
   - All legacy variants including draft/history/deleted rows merge without content
     loss or unrelated field changes. Both legacy columns are physically absent.
   - Repeat execution preserves the complete snapshot and run-owned resources are removed.
     Partial-schema and DDL errors roll back without data loss.
+  - Marketplace snapshots retain exact published instructions and unrelated fields;
+    legacy keys disappear for every child. Conflicting or invalid inputs leave every
+    row unchanged; canonical/null/empty variants are stable on repeat execution.
+  - The physical prompt column replaces duty_prompt for all tenants/versions/deleted
+    rows, preserving values/defaults/indexes/views; a canonical fresh schema is accepted;
+    missing/both/unconsolidated schemas and injected DDL failures leave the database
+    unchanged.
   forbidden_side_effects:
   - Do not access existing databases, publish ports, use product credentials or remove
     unrelated containers.
@@ -71,5 +94,25 @@ case:
     - 3
     expected_results:
     - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: Real marketplace SQL preserves published parent/child data and metadata
+      across tenants/versions/deletion states and is idempotent. Conflicts, invalid
+      field types and malformed snapshots roll back all rows.
+    steps:
+    - 4
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+  - id: AC-04
+    description: The ordered production migrations rename the SQL column without changing
+      content, metadata, defaults, indexes or view behavior. Repeat execution is idempotent;
+      invalid schemas and DDL failures roll back.
+    steps:
+    - 5
+    expected_results:
+    - 4
     forbidden_side_effects:
     - 1

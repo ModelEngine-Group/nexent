@@ -58,7 +58,11 @@ class AgentInfo(TableBase):
     model_ids = Column(
         ARRAY(Integer), doc="List of model IDs, foreign key references to model_record_t.model_id, max 5 models")
     max_steps = Column(Integer, doc="Maximum number of steps")
-    duty_prompt = Column(Text, doc="Duty prompt content")
+    prompt = Column(
+        Text,
+        doc="Complete Agent prompt content",
+        comment="Complete Agent instructions including responsibilities, constraints and examples",
+    )
     parent_agent_id = Column(Integer, doc="Parent Agent ID")
     tenant_id = Column(String(100), doc="Belonging tenant")
     enabled = Column(Boolean, doc="Enabled")

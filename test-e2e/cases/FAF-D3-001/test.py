@@ -139,8 +139,8 @@ def main():
             body = {"name": "faf_" + kind + "_" + suffix, "display_name": "FAF " + kind + " " + suffix,
                     "description": "Disposable final answer acceptance agent", "model_ids": [args.model_id],
                     "max_steps": 3, "requested_output_tokens": 2048, "is_main_agent": kind != "child",
-                    "provide_run_summary": False, "duty_prompt": duty, "constraint_prompt": "按职责规定的测试输出格式完成任务。",
-                    "few_shots_prompt": "", "enabled": True, "enable_protocol_repair_retry": False,
+                    "provide_run_summary": False, "prompt": duty + "\n\n按职责规定的测试输出格式完成任务。",
+                    "enabled": True, "enable_protocol_repair_retry": False,
                     "verification_config": {"enabled": False}, "enabled_tool_ids": [], "enabled_skill_ids": []}
             if related:
                 body["related_agent_ids"] = [related]
