@@ -203,7 +203,7 @@ export interface Nl2aAgentDraftPayload {
   name: string;
   display_name: string;
   description: string;
-  duty_prompt: string;
+  prompt: string;
   greeting_message: string;
   example_questions: string[];
 }
@@ -285,7 +285,7 @@ export type Nl2aRecommendedResource =
     };
 
 export type Nl2aPromptField =
-  "duty_prompt" | "greeting_message" | "example_questions";
+  "prompt" | "greeting_message" | "example_questions";
 
 export type Nl2aPayload =
   | Nl2aRequirementClarificationPayload
@@ -913,7 +913,7 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
       return null;
     }
     const promptFields = new Set<Nl2aPromptField>([
-      "duty_prompt",
+      "prompt",
       "greeting_message",
       "example_questions",
     ]);

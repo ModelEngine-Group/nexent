@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Database operations for A2A agent management.
 Includes external agent discovery, server agent registration, and task management.
@@ -167,6 +169,7 @@ def create_external_agent_from_url(
     agent_card_headers: Optional[Dict[str, str]] = None,
     security_schemes: Optional[Dict[str, Any]] = None,
     security_requirements: Optional[List[Dict[str, Any]]] = None,
+    ssl_verify: bool = True,
 ) -> Dict[str, Any]:
     """Create or update an external A2A agent discovered from URL.
 
@@ -183,6 +186,7 @@ def create_external_agent_from_url(
         supported_interfaces: All supported protocol interfaces.
         base_url: Base URL for health checks (service root address).
         agent_card_headers: Headers saved only for Agent Card discovery and refresh.
+        ssl_verify: Whether to verify peer TLS certificates for this agent.
         security_schemes: Security schemes declared by the Agent Card.
         security_requirements: Security requirements declared by the Agent Card.
 
@@ -208,6 +212,7 @@ def create_external_agent_from_url(
         if existing:
             # Update existing record
             existing.name = name
+            existing.ssl_verify = ssl_verify
             existing.description = description
             existing.version = version
             existing.agent_url = agent_url
@@ -238,6 +243,7 @@ def create_external_agent_from_url(
                 source_type="url",
                 source_url=source_url,
                 agent_card_headers=agent_card_headers,
+                ssl_verify=ssl_verify,
                 security_schemes=security_schemes,
                 security_requirements=security_requirements,
                 security_credentials=None,
@@ -261,6 +267,7 @@ def create_external_agent_from_url(
             "description": agent.description,
             "version": agent.version,
             "agent_url": agent.agent_url,
+            "ssl_verify": agent.ssl_verify,
             "protocol_type": agent.protocol_type,
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
@@ -382,6 +389,7 @@ def create_external_agent_from_nacos(
             "description": agent.description,
             "version": agent.version,
             "agent_url": agent.agent_url,
+            "ssl_verify": agent.ssl_verify,
             "protocol_type": agent.protocol_type,
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
@@ -430,6 +438,7 @@ def get_external_agent_by_id(
             "description": agent.description,
             "version": agent.version,
             "agent_url": agent.agent_url,
+            "ssl_verify": agent.ssl_verify,
             "streaming": agent.streaming,
             "protocol_type": agent.protocol_type,
             "supported_interfaces": agent.supported_interfaces,
@@ -497,6 +506,7 @@ def list_external_agents(
                 "description": agent.description,
                 "version": agent.version,
                 "agent_url": agent.agent_url,
+                "ssl_verify": agent.ssl_verify,
                 "streaming": agent.streaming,
             "protocol_type": agent.protocol_type,
             "supported_interfaces": agent.supported_interfaces,
@@ -653,6 +663,7 @@ def update_external_agent_protocol(
             "description": agent.description,
             "version": agent.version,
             "agent_url": agent.agent_url,
+            "ssl_verify": agent.ssl_verify,
             "protocol_type": agent.protocol_type,
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
@@ -767,6 +778,7 @@ def refresh_external_agent_cache(
             "id": agent.id,
             "name": agent.name,
             "agent_url": agent.agent_url,
+            "ssl_verify": agent.ssl_verify,
             "version": agent.version,
             "streaming": agent.streaming,
             "supported_interfaces": agent.supported_interfaces,
@@ -971,6 +983,7 @@ def query_external_sub_agents(
                 "description": agent.description,
                 "version": agent.version,
                 "agent_url": agent.agent_url,
+                "ssl_verify": agent.ssl_verify,
                 "protocol_type": agent.protocol_type,
                 "streaming": agent.streaming,
                 "supported_interfaces": agent.supported_interfaces,

@@ -1913,7 +1913,7 @@ def test_get_agent_repository_listing_detail_impl_scopes_by_tenant():
         **_repository_record(agent_repository_id=42),
         "agent_info_json": {
             "agent_id": 10,
-            "agent_info": {"10": {"model_name": "gpt", "duty_prompt": "help", "tools": []}},
+            "agent_info": {"10": {"model_name": "gpt", "prompt": "help", "tools": []}},
             "mcp_info": [],
         },
         "icon_url": None,
@@ -2616,7 +2616,7 @@ def test_get_agent_repository_listing_detail_returns_agent_level_downloads():
         **_repository_record(agent_repository_id=42, agent_id=10),
         "agent_info_json": {
             "agent_id": 10,
-            "agent_info": {"10": {"model_name": "gpt", "duty_prompt": "help", "tools": []}},
+            "agent_info": {"10": {"model_name": "gpt", "prompt": "help", "tools": []}},
             "mcp_info": [],
         },
         "icon_url": None,

@@ -55,3 +55,5 @@ take a long time on large merges. Use a new versioned file (for example
 `v2.6.0_xxxx_*.sql`) for any change after the merge.
 
 `v2.7.1_005_remove_agent_prompt_templates.sql` removes the retired private Agent prompt-template table and Agent binding columns. Historical initialization and merged migrations remain unchanged. Prompt generation uses bundled SDK defaults after this migration.
+
+The unified Agent prompt migrations are included in `v2.8.0_merged_migrations.sql` in this order: Agent section consolidation, frozen marketplace JSON consolidation, and physical `duty_prompt` to `prompt` rename. Each section is included once, with no separate migration files. The historical `v2.7.0_merged_migrations.sql` remains unchanged.

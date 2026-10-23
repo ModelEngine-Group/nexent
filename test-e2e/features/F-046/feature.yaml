@@ -5,8 +5,9 @@ module:
 feature:
   feature_id: F-046
   name: 基于任务/模型/工具/子Agent/KB生成系统Prompt SSE
-  status: active
-  description: '智能体配置 / Prompt生成: 基于任务/模型/工具/子Agent/KB生成系统Prompt SSE'
+  status: retired
+  description: '智能体配置 / Prompt生成: 基于任务/模型/工具/子Agent/KB生成系统Prompt SSE；2026-10-22 移除未使用的独立生成接口，当前生成能力由
+    F-045 NL2Agent 承担。'
   business_rules:
   - rule_id: F-046-RULE-01
     description: 基于任务/模型/工具/子Agent/KB生成系统Prompt SSE；任务描述去除首尾空白后不能为空，空白输入在创建流前返回422且草稿不变；有效输入保持原文和既有SSE契约。

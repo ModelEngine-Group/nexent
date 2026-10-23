@@ -484,7 +484,7 @@ class SystemAgentProvider:
             "provide_run_summary": False,
             "allow_chat_metadata": False,
             "is_a2a": False,
-            "duty_prompt": canonical_prompt,
+            "prompt": canonical_prompt,
             "enabled": True,
         }
 

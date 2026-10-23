@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -23,10 +25,7 @@ export type Nl2AgentFlowPhase =
 
 export type Nl2AgentConfigFocusTarget =
   | { section: "display_info" }
-  | {
-      section: "role_model";
-      promptTab: "duty" | "constraint" | "few-shots";
-    }
+  | { section: "role_model" }
   | {
       section: "tools_skills";
       capabilityTab: "tools" | "skills";

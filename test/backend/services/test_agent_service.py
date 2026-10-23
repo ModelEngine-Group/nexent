@@ -1837,9 +1837,7 @@ async def test_update_agent_info_impl_create_agent_auto_group_ids(
     request.business_logic_model_name = None
     request.max_steps = 10
     request.provide_run_summary = True
-    request.duty_prompt = "Test duty"
-    request.constraint_prompt = "Test constraint"
-    request.few_shots_prompt = "Test few shots"
+    request.prompt = "Test duty"
     request.enabled = True
     request.enabled_tool_ids = None
     request.related_agent_ids = None
@@ -1948,9 +1946,7 @@ async def test_export_agent_impl_success(
         business_description="For testing purposes",
         max_steps=10,
         provide_run_summary=True,
-        duty_prompt="Test duty prompt",
-        constraint_prompt="Test constraint prompt",
-        few_shots_prompt="Test few shots prompt",
+        prompt='# Responsibilities\nTest duty prompt\n\n# Constraints\nTest constraint prompt\n\n# Examples\nTest few shots prompt',
         enabled=True,
         tools=[mcp_tool],
         managed_agents=[],
@@ -1973,9 +1969,7 @@ async def test_export_agent_impl_success(
                 "business_description": "For testing purposes",
                 "max_steps": 10,
                 "provide_run_summary": True,
-                "duty_prompt": "Test duty prompt",
-                "constraint_prompt": "Test constraint prompt",
-                "few_shots_prompt": "Test few shots prompt",
+                "prompt": '# Responsibilities\nTest duty prompt\n\n# Constraints\nTest constraint prompt\n\n# Examples\nTest few shots prompt',
                 "enabled": True,
                 "tools": [mcp_tool.model_dump()],
                 "managed_agents": [],
@@ -2048,9 +2042,7 @@ async def test_export_agent_impl_no_mcp_tools(
         business_description="For testing purposes",
         max_steps=10,
         provide_run_summary=True,
-        duty_prompt="Test duty prompt",
-        constraint_prompt="Test constraint prompt",
-        few_shots_prompt="Test few shots prompt",
+        prompt='# Responsibilities\nTest duty prompt\n\n# Constraints\nTest constraint prompt\n\n# Examples\nTest few shots prompt',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -2070,9 +2062,7 @@ async def test_export_agent_impl_no_mcp_tools(
                 "business_description": "For testing purposes",
                 "max_steps": 10,
                 "provide_run_summary": True,
-                "duty_prompt": "Test duty prompt",
-                "constraint_prompt": "Test constraint prompt",
-                "few_shots_prompt": "Test few shots prompt",
+                "prompt": '# Responsibilities\nTest duty prompt\n\n# Constraints\nTest constraint prompt\n\n# Examples\nTest few shots prompt',
                 "enabled": True,
                 "tools": [],
                 "managed_agents": [],
@@ -4782,9 +4772,7 @@ async def test_export_agent_by_agent_id_success(
         "max_steps": 10,
         "provide_run_summary": True,
         "enable_protocol_repair_retry": False,
-        "duty_prompt": "Test duty prompt",
-        "constraint_prompt": "Test constraint prompt",
-        "few_shots_prompt": "Test few shots prompt",
+        "prompt": '# Responsibilities\nTest duty prompt\n\n# Constraints\nTest constraint prompt\n\n# Examples\nTest few shots prompt',
         "enabled": True,
         "tenant_id": "test_tenant",
     }
@@ -4965,9 +4953,7 @@ async def test_import_agent_by_agent_id_success(
         max_steps=5,
         provide_run_summary=True,
         enable_protocol_repair_retry=False,
-        duty_prompt="Imported duty prompt",
-        constraint_prompt="Imported constraint prompt",
-        few_shots_prompt="Imported few shots prompt",
+        prompt='# Responsibilities\nImported duty prompt\n\n# Constraints\nImported constraint prompt\n\n# Examples\nImported few shots prompt',
         enabled=True,
         tools=[tool_config],
         managed_agents=[],
@@ -5038,9 +5024,7 @@ async def test_import_agent_by_agent_id_invalid_tool(
         business_description="Imported business description",
         max_steps=5,
         provide_run_summary=True,
-        duty_prompt="Imported duty prompt",
-        constraint_prompt="Imported constraint prompt",
-        few_shots_prompt="Imported few shots prompt",
+        prompt='# Responsibilities\nImported duty prompt\n\n# Constraints\nImported constraint prompt\n\n# Examples\nImported few shots prompt',
         enabled=True,
         tools=[tool_config],
         managed_agents=[],
@@ -5104,9 +5088,7 @@ async def test_import_agent_by_agent_id_with_mcp_tool(
         business_description="Imported business description",
         max_steps=5,
         provide_run_summary=True,
-        duty_prompt="Imported duty prompt",
-        constraint_prompt="Imported constraint prompt",
-        few_shots_prompt="Imported few shots prompt",
+        prompt='# Responsibilities\nImported duty prompt\n\n# Constraints\nImported constraint prompt\n\n# Examples\nImported few shots prompt',
         enabled=True,
         tools=[tool_config],
         managed_agents=[],
@@ -5207,7 +5189,7 @@ def test_load_default_agents_json_file(mock_file, mock_listdir, mock_join):
         "business_description": "Business description",
         "max_steps": 10,
         "provide_run_summary": true,
-        "duty_prompt": "Agent 1 prompt",
+        "prompt": "Agent 1 prompt",
         "enabled": true,
         "tools": [],
         "managed_agents": []
@@ -5221,7 +5203,7 @@ def test_load_default_agents_json_file(mock_file, mock_listdir, mock_join):
         "business_description": "Business description",
         "max_steps": 5,
         "provide_run_summary": false,
-        "duty_prompt": "Agent 2 prompt",
+        "prompt": "Agent 2 prompt",
         "enabled": true,
         "tools": [],
         "managed_agents": []
@@ -5244,7 +5226,7 @@ def test_load_default_agents_json_file(mock_file, mock_listdir, mock_join):
                 "business_description": "Business description",
                 "max_steps": 10,
                 "provide_run_summary": True,
-                "duty_prompt": "Agent 1 prompt",
+                "prompt": "Agent 1 prompt",
                 "enabled": True,
                 "tools": [],
                 "managed_agents": [],
@@ -5257,7 +5239,7 @@ def test_load_default_agents_json_file(mock_file, mock_listdir, mock_join):
                 "business_description": "Business description",
                 "max_steps": 5,
                 "provide_run_summary": False,
-                "duty_prompt": "Agent 2 prompt",
+                "prompt": "Agent 2 prompt",
                 "enabled": True,
                 "tools": [],
                 "managed_agents": [],
@@ -5303,9 +5285,7 @@ async def test_import_agent_impl_imports_all_agents_and_links_relations(
         business_description="Business desc",
         max_steps=5,
         provide_run_summary=True,
-        duty_prompt="Sub duty",
-        constraint_prompt="Sub constraint",
-        few_shots_prompt="Sub few shots",
+        prompt='# Responsibilities\nSub duty\n\n# Constraints\nSub constraint\n\n# Examples\nSub few shots',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -5320,9 +5300,7 @@ async def test_import_agent_impl_imports_all_agents_and_links_relations(
         business_description="Business main",
         max_steps=10,
         provide_run_summary=True,
-        duty_prompt="Main duty",
-        constraint_prompt="Main constraint",
-        few_shots_prompt="Main few shots",
+        prompt='# Responsibilities\nMain duty\n\n# Constraints\nMain constraint\n\n# Examples\nMain few shots',
         enabled=True,
         tools=[],
         managed_agents=[2],
@@ -5387,9 +5365,7 @@ async def test_import_agent_impl_force_import_passes_skip_flag(
         business_description="biz",
         max_steps=5,
         provide_run_summary=True,
-        duty_prompt="duty",
-        constraint_prompt="constraint",
-        few_shots_prompt="few shots",
+        prompt='# Responsibilities\nduty\n\n# Constraints\nconstraint\n\n# Examples\nfew shots',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -7733,9 +7709,7 @@ async def test_export_agent_includes_model_names(
         "business_description": "Test business description",
         "max_steps": 5,
         "provide_run_summary": False,
-        "duty_prompt": "Test duty",
-        "constraint_prompt": "Test constraints",
-        "few_shots_prompt": "Test examples",
+        "prompt": '# Responsibilities\nTest duty\n\n# Constraints\nTest constraints\n\n# Examples\nTest examples',
         "enabled": True,
         "tenant_id": "test_tenant",
         "model_ids": [5],
@@ -7802,9 +7776,7 @@ async def test_export_agent_with_null_model_id(
         "business_description": "Test business description",
         "max_steps": 5,
         "provide_run_summary": False,
-        "duty_prompt": "Test duty",
-        "constraint_prompt": "Test constraints",
-        "few_shots_prompt": "Test examples",
+        "prompt": '# Responsibilities\nTest duty\n\n# Constraints\nTest constraints\n\n# Examples\nTest examples',
         "enabled": True,
         "tenant_id": "test_tenant",
         "model_ids": None,  # NULL in database
@@ -7867,9 +7839,7 @@ async def test_export_then_import_preserves_model_names(
         "business_description": "IoT knowledge retrieval",
         "max_steps": 5,
         "provide_run_summary": False,
-        "duty_prompt": "You are an IoT assistant",
-        "constraint_prompt": "Follow safety rules",
-        "few_shots_prompt": "Example tasks",
+        "prompt": '# Responsibilities\nYou are an IoT assistant\n\n# Constraints\nFollow safety rules\n\n# Examples\nExample tasks',
         "enabled": True,
         "tenant_id": "source_tenant",
         "model_ids": [10],  # Model ID in source tenant
@@ -7994,9 +7964,7 @@ async def test_export_agent_model_not_found(
         "business_description": "Test",
         "max_steps": 5,
         "provide_run_summary": False,
-        "duty_prompt": "Test",
-        "constraint_prompt": "Test",
-        "few_shots_prompt": "Test",
+        "prompt": '# Responsibilities\nTest\n\n# Constraints\nTest\n\n# Examples\nTest',
         "enabled": True,
         "tenant_id": "test_tenant",
         "model_ids": [999],  # This model doesn't exist
@@ -8071,9 +8039,7 @@ async def test_import_agent_model_name_consistency(
         business_description="Test",
         max_steps=5,
         provide_run_summary=False,
-        duty_prompt="Test",
-        constraint_prompt="Test",
-        few_shots_prompt="Test",
+        prompt='# Responsibilities\nTest\n\n# Constraints\nTest\n\n# Examples\nTest',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -8144,9 +8110,7 @@ def sample_agent_info():
         "business_logic_model_name": "Qwen/QwQ-32B",  # Business logic model
         "max_steps": 5,
         "provide_run_summary": True,
-        "duty_prompt": "Test duty",
-        "constraint_prompt": "Test constraint",
-        "few_shots_prompt": "Test few shots",
+        "prompt": '# Responsibilities\nTest duty\n\n# Constraints\nTest constraint\n\n# Examples\nTest few shots',
         "enabled": True,
         "tools": [],
         "managed_agents": [],
@@ -8589,9 +8553,7 @@ async def test_import_agent_includes_model_names(
         business_description="IoT knowledge retrieval assistant",
         max_steps=5,
         provide_run_summary=False,
-        duty_prompt="You are an IoT Q&A assistant",
-        constraint_prompt="Follow safety guidelines",
-        few_shots_prompt="Example tasks...",
+        prompt='# Responsibilities\nYou are an IoT Q&A assistant\n\n# Constraints\nFollow safety guidelines\n\n# Examples\nExample tasks...',
         enabled=True,
         tools=[tool_config],
         managed_agents=[],
@@ -8660,9 +8622,7 @@ async def test_import_agent_without_business_logic_model(
         business_description="Simple agent description",
         max_steps=3,
         provide_run_summary=False,
-        duty_prompt="Do your duty",
-        constraint_prompt="Follow constraints",
-        few_shots_prompt="Examples",
+        prompt='# Responsibilities\nDo your duty\n\n# Constraints\nFollow constraints\n\n# Examples\nExamples',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -8735,9 +8695,7 @@ async def test_import_agent_model_lookup_by_display_name(
         business_description="Cross-tenant import test",
         max_steps=5,
         provide_run_summary=False,
-        duty_prompt="Cross-tenant duty",
-        constraint_prompt="Cross-tenant constraints",
-        few_shots_prompt="Cross-tenant examples",
+        prompt='# Responsibilities\nCross-tenant duty\n\n# Constraints\nCross-tenant constraints\n\n# Examples\nCross-tenant examples',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -8818,9 +8776,7 @@ async def test_import_agent_model_not_found_in_target_tenant(
         business_description="Missing model test",
         max_steps=5,
         provide_run_summary=False,
-        duty_prompt="Duty",
-        constraint_prompt="Constraints",
-        few_shots_prompt="Examples",
+        prompt='# Responsibilities\nDuty\n\n# Constraints\nConstraints\n\n# Examples\nExamples',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -8895,9 +8851,7 @@ async def test_import_agent_all_model_fields_in_database(
         business_description="Complete test",
         max_steps=5,
         provide_run_summary=True,
-        duty_prompt="Complete duty",
-        constraint_prompt="Complete constraints",
-        few_shots_prompt="Complete examples",
+        prompt='# Responsibilities\nComplete duty\n\n# Constraints\nComplete constraints\n\n# Examples\nComplete examples',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -8937,7 +8891,7 @@ async def test_import_agent_all_model_fields_in_database(
     assert "business_description" not in agent_info_dict
     assert agent_info_dict["max_steps"] == 5
     assert agent_info_dict["provide_run_summary"] is True
-    assert agent_info_dict["duty_prompt"] == "# Responsibilities\nComplete duty\n\n# Constraints\nComplete constraints\n\n# Examples\nComplete examples"
+    assert agent_info_dict["prompt"] == "# Responsibilities\nComplete duty\n\n# Constraints\nComplete constraints\n\n# Examples\nComplete examples"
     assert "constraint_prompt" not in agent_info_dict
     assert "few_shots_prompt" not in agent_info_dict
     assert agent_info_dict["enabled"] is True
@@ -9061,9 +9015,7 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
         business_description="root",
         max_steps=5,
         provide_run_summary=False,
-        duty_prompt=None,
-        constraint_prompt=None,
-        few_shots_prompt=None,
+        prompt=None,
         enabled=True,
         tools=[],
         managed_agents=[2],
@@ -9076,9 +9028,7 @@ async def test_import_agent_impl_dfs_import_order(monkeypatch):
         business_description="child",
         max_steps=5,
         provide_run_summary=False,
-        duty_prompt=None,
-        constraint_prompt=None,
-        few_shots_prompt=None,
+        prompt=None,
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -10234,9 +10184,7 @@ async def test_import_agent_by_agent_id_resolves_name_and_display_name_conflicts
         business_description="Test business",
         max_steps=5,
         provide_run_summary=True,
-        duty_prompt="",
-        constraint_prompt="",
-        few_shots_prompt="",
+        prompt='',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -10293,9 +10241,7 @@ async def test_import_agent_by_agent_id_allows_duplicate_name_without_regen(
         business_description="Test business",
         max_steps=5,
         provide_run_summary=True,
-        duty_prompt="",
-        constraint_prompt="",
-        few_shots_prompt="",
+        prompt='',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -10343,9 +10289,7 @@ async def test_import_agent_by_agent_id_duplicate_name_no_regen_fallback(
         business_description="Test business",
         max_steps=5,
         provide_run_summary=True,
-        duty_prompt="",
-        constraint_prompt="",
-        few_shots_prompt="",
+        prompt='',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -10390,9 +10334,7 @@ async def test_import_agent_by_agent_id_duplicate_name_no_model_still_allows(
         business_description="Test business",
         max_steps=5,
         provide_run_summary=True,
-        duty_prompt="",
-        constraint_prompt="",
-        few_shots_prompt="",
+        prompt='',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -10435,9 +10377,7 @@ async def test_import_agent_by_agent_id_duplicate_display_name_allowed(
         business_description="Test business",
         max_steps=5,
         provide_run_summary=True,
-        duty_prompt="",
-        constraint_prompt="",
-        few_shots_prompt="",
+        prompt='',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -10485,9 +10425,7 @@ async def test_import_agent_by_agent_id_duplicate_display_name_no_llm_fallback(
         business_description="Test business",
         max_steps=5,
         provide_run_summary=True,
-        duty_prompt="",
-        constraint_prompt="",
-        few_shots_prompt="",
+        prompt='',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -10535,9 +10473,7 @@ async def test_import_agent_by_agent_id_duplicate_display_name_no_model_still_al
         business_description="Test business",
         max_steps=5,
         provide_run_summary=True,
-        duty_prompt="",
-        constraint_prompt="",
-        few_shots_prompt="",
+        prompt='',
         enabled=True,
         tools=[],
         managed_agents=[],
@@ -10773,9 +10709,7 @@ async def test_update_agent_info_impl_create_agent_with_ingroup_permission(
     request.business_logic_model_name = None
     request.max_steps = None
     request.provide_run_summary = None
-    request.duty_prompt = None
-    request.constraint_prompt = None
-    request.few_shots_prompt = None
+    request.prompt = None
     request.enabled = True
     request.enabled_tool_ids = None
     request.related_agent_ids = None
@@ -10824,9 +10758,7 @@ async def test_update_agent_info_impl_create_agent_with_ingroup_permission_none(
     request.business_logic_model_name = None
     request.max_steps = None
     request.provide_run_summary = None
-    request.duty_prompt = None
-    request.constraint_prompt = None
-    request.few_shots_prompt = None
+    request.prompt = None
     request.enabled = True
     request.enabled_tool_ids = None
     request.related_agent_ids = None
@@ -11769,9 +11701,7 @@ async def test_update_agent_info_impl_skill_update_exception(
     mock_request.business_logic_model_name = None
     mock_request.max_steps = 5
     mock_request.provide_run_summary = True
-    mock_request.duty_prompt = "Duty"
-    mock_request.constraint_prompt = "Constraint"
-    mock_request.few_shots_prompt = "Few shots"
+    mock_request.prompt = "Duty"
     mock_request.enabled = True
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = [1, 2]
@@ -12392,9 +12322,7 @@ async def test_update_agent_info_impl_related_agent_query_error(
     mock_request.business_logic_model_name = None
     mock_request.max_steps = 5
     mock_request.provide_run_summary = True
-    mock_request.duty_prompt = "Duty"
-    mock_request.constraint_prompt = "Constraint"
-    mock_request.few_shots_prompt = "Few shots"
+    mock_request.prompt = "Duty"
     mock_request.enabled = True
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
@@ -12441,9 +12369,7 @@ async def test_update_agent_info_impl_related_external_agents(
     mock_request.business_logic_model_name = None
     mock_request.max_steps = 5
     mock_request.provide_run_summary = True
-    mock_request.duty_prompt = "Duty"
-    mock_request.constraint_prompt = "Constraint"
-    mock_request.few_shots_prompt = "Few shots"
+    mock_request.prompt = "Duty"
     mock_request.enabled = True
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
@@ -12498,9 +12424,7 @@ async def test_update_agent_info_impl_external_agent_remove_relation(
     mock_request.business_logic_model_name = None
     mock_request.max_steps = 5
     mock_request.provide_run_summary = True
-    mock_request.duty_prompt = "Duty"
-    mock_request.constraint_prompt = "Constraint"
-    mock_request.few_shots_prompt = "Few shots"
+    mock_request.prompt = "Duty"
     mock_request.enabled = True
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
@@ -12557,9 +12481,7 @@ async def test_update_agent_info_impl_external_agent_relation_exists(
     mock_request.business_logic_model_name = None
     mock_request.max_steps = 5
     mock_request.provide_run_summary = True
-    mock_request.duty_prompt = "Duty"
-    mock_request.constraint_prompt = "Constraint"
-    mock_request.few_shots_prompt = "Few shots"
+    mock_request.prompt = "Duty"
     mock_request.enabled = True
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None
@@ -12613,9 +12535,7 @@ async def test_import_agent_impl_already_imported(mock_get_user):
     mock_agent_info.author = "author"
     mock_agent_info.max_steps = 5
     mock_agent_info.provide_run_summary = True
-    mock_agent_info.duty_prompt = "duty"
-    mock_agent_info.constraint_prompt = "constraint"
-    mock_agent_info.few_shots_prompt = "few"
+    mock_agent_info.prompt = "duty"
     mock_agent_info.enabled = True
     mock_agent_info.tools = []
     mock_agent_info.managed_agents = []
@@ -12681,9 +12601,7 @@ async def test_update_agent_info_impl_skill_unselected(
     mock_request.business_logic_model_name = None
     mock_request.max_steps = 5
     mock_request.provide_run_summary = True
-    mock_request.duty_prompt = "Duty"
-    mock_request.constraint_prompt = "Constraint"
-    mock_request.few_shots_prompt = "Few shots"
+    mock_request.prompt = "Duty"
     mock_request.enabled = True
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = [2]  # Only want skill 2
@@ -12738,9 +12656,7 @@ async def test_update_agent_info_impl_persists_structured_skill_config(
     request.business_logic_model_name = None
     request.max_steps = 5
     request.provide_run_summary = True
-    request.duty_prompt = "Duty"
-    request.constraint_prompt = "Constraint"
-    request.few_shots_prompt = "Few shots"
+    request.prompt = "Duty"
     request.enabled = True
     request.enabled_tool_ids = None
     request.enabled_skill_ids = [2]
@@ -12806,9 +12722,7 @@ async def test_update_agent_info_impl_rejects_unavailable_skill_id(
         model_ids=[],
         max_steps=5,
         provide_run_summary=True,
-        duty_prompt="Duty",
-        constraint_prompt="Constraint",
-        few_shots_prompt="Few shots",
+        prompt='# Responsibilities\nDuty\n\n# Constraints\nConstraint\n\n# Examples\nFew shots',
         enabled=True,
         enabled_skill_ids=[9999],
         skill_instances=[AgentSkillInstanceRequest(skill_id=9999, enabled=True)],
@@ -12880,9 +12794,7 @@ async def test_import_agent_impl_continue_path(mock_get_user):
     mock_agent_info.author = "author"
     mock_agent_info.max_steps = 5
     mock_agent_info.provide_run_summary = True
-    mock_agent_info.duty_prompt = "duty"
-    mock_agent_info.constraint_prompt = "constraint"
-    mock_agent_info.few_shots_prompt = "few"
+    mock_agent_info.prompt = "duty"
     mock_agent_info.enabled = True
     mock_agent_info.tools = []
     mock_agent_info.managed_agents = [2]  # Has sub-agent
@@ -12900,9 +12812,7 @@ async def test_import_agent_impl_continue_path(mock_get_user):
     mock_sub_agent_info.author = "author"
     mock_sub_agent_info.max_steps = 5
     mock_sub_agent_info.provide_run_summary = True
-    mock_sub_agent_info.duty_prompt = "duty"
-    mock_sub_agent_info.constraint_prompt = "constraint"
-    mock_sub_agent_info.few_shots_prompt = "few"
+    mock_sub_agent_info.prompt = "duty"
     mock_sub_agent_info.enabled = True
     mock_sub_agent_info.tools = []
     mock_sub_agent_info.managed_agents = []  # No further sub-agents
@@ -12949,9 +12859,7 @@ async def test_import_agent_by_agent_id_tool_param_error(mock_query_tools, mock_
     mock_agent_info.author = "author"
     mock_agent_info.max_steps = 5
     mock_agent_info.provide_run_summary = True
-    mock_agent_info.duty_prompt = "duty"
-    mock_agent_info.constraint_prompt = "constraint"
-    mock_agent_info.few_shots_prompt = "few"
+    mock_agent_info.prompt = "duty"
     mock_agent_info.enabled = True
     mock_agent_info.tools = [mock_tool]
     mock_agent_info.managed_agents = []
@@ -12990,9 +12898,7 @@ async def test_import_agent_by_agent_id_invalid_max_steps():
     mock_agent_info.author = "author"
     mock_agent_info.max_steps = -1  # Invalid: must be > 0
     mock_agent_info.provide_run_summary = True
-    mock_agent_info.duty_prompt = "duty"
-    mock_agent_info.constraint_prompt = "constraint"
-    mock_agent_info.few_shots_prompt = "few"
+    mock_agent_info.prompt = "duty"
     mock_agent_info.enabled = True
     mock_agent_info.tools = []
     mock_agent_info.managed_agents = []
@@ -13023,9 +12929,7 @@ async def test_import_agent_by_agent_id_invalid_name():
     mock_agent_info.author = "author"
     mock_agent_info.max_steps = 5
     mock_agent_info.provide_run_summary = True
-    mock_agent_info.duty_prompt = "duty"
-    mock_agent_info.constraint_prompt = "constraint"
-    mock_agent_info.few_shots_prompt = "few"
+    mock_agent_info.prompt = "duty"
     mock_agent_info.enabled = True
     mock_agent_info.tools = []
     mock_agent_info.managed_agents = []
@@ -13061,9 +12965,7 @@ async def test_import_agent_by_agent_id_publish_version_error(
     mock_agent_info.author = "author"
     mock_agent_info.max_steps = 5
     mock_agent_info.provide_run_summary = True
-    mock_agent_info.duty_prompt = "duty"
-    mock_agent_info.constraint_prompt = "constraint"
-    mock_agent_info.few_shots_prompt = "few"
+    mock_agent_info.prompt = "duty"
     mock_agent_info.enabled = True
     mock_agent_info.tools = []
     mock_agent_info.managed_agents = []
@@ -13155,9 +13057,7 @@ async def test_update_agent_info_impl_external_agent_list_error(mock_get_user):
     mock_request.business_logic_model_name = None
     mock_request.max_steps = 5
     mock_request.provide_run_summary = True
-    mock_request.duty_prompt = "Duty"
-    mock_request.constraint_prompt = "Constraint"
-    mock_request.few_shots_prompt = "Few shots"
+    mock_request.prompt = "Duty"
     mock_request.enabled = True
     mock_request.enabled_tool_ids = None
     mock_request.enabled_skill_ids = None

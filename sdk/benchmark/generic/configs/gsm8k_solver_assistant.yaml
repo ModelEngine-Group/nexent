@@ -38,7 +38,7 @@ agent_config:
 
 # Prompt Configuration
 prompts:
-  duty_prompt: |
+  prompt: |
     你是一个专业的数学解题助手，负责解答各类数学计算问题。你具备出色的逻辑推理与数值计算能力，能够准确理解题目并推导出正确结果。你能够严格按照要求，仅输出最终的数字答案，确保结果简洁精准。
 
 prompt_template:
@@ -324,6 +324,6 @@ available_models:
 # 1. This agent uses the system_default prompt template (id=0)
 # 2. Context manager is enabled (enable_context_manager: true)
 # 3. No tools, sub-agents, or skills are configured
-# 4. The duty_prompt defines the agent's role as a math problem solver
+# 4. The prompt defines the agent's role as a math problem solver
 # 5. Verification is disabled (enabled: false)
 # 6. For benchmark testing, use this configuration to reproduce the agent's behavior

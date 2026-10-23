@@ -136,7 +136,7 @@ def _walk_agent_tree(
         "tools": _resolve_runtime_tool_records(agent_id, tenant_id, version_no),
         "has_static_scope_reference": bool(
             STATIC_SCOPE_PATTERN.search(
-                str(agent_info.get("duty_prompt") or "")
+                str(agent_info.get("prompt") or "")
             )
         ),
     }

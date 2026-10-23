@@ -35,10 +35,10 @@ def test_ut_sdk_fps_001_dynamic_fields_render_with_supplied_parameters():
 
     duty = render_prompt_text(
         load_prompt("zh", "agent/agent_manager")["system_sections"]["duty"],
-        {"duty_prompt": "负责核对账目"},
+        {"prompt": "负责核对账目"},
     )
     assert "负责核对账目" in duty
-    assert "{{duty_prompt}}" not in duty
+    assert "{{prompt}}" not in duty
 
     document = render_prompt_text(
         load_prompt("zh", "document/summary")["user_prompt"],

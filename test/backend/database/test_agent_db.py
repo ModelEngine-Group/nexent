@@ -186,9 +186,7 @@ class MockAgent:
         self.author = None
         self.model_ids = None
         self.max_steps = 5
-        self.duty_prompt = None
-        self.constraint_prompt = None
-        self.few_shots_prompt = None
+        self.prompt = None
         self.parent_agent_id = None
         self.provide_run_summary = None
         self.is_main_agent = True
@@ -444,8 +442,6 @@ def test_create_agent_success(monkeypatch, mock_session, requested_policy, expec
     session.flush = MagicMock()
 
     mock_agent = MockAgent()
-    del mock_agent.constraint_prompt
-    del mock_agent.few_shots_prompt
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
@@ -457,14 +453,14 @@ def test_create_agent_success(monkeypatch, mock_session, requested_policy, expec
     def make_agent(**kwargs):
         assert "constraint_prompt" not in kwargs
         assert "few_shots_prompt" not in kwargs
-        assert kwargs["duty_prompt"] == "Complete prompt"
+        assert kwargs["prompt"] == "Complete prompt"
         mock_agent.enable_protocol_repair_retry = kwargs["enable_protocol_repair_retry"]
         return mock_agent
 
     monkeypatch.setattr("backend.database.agent_db.AgentInfo", make_agent)
 
     agent_info = {"name": "new_agent", "description": "test description",
-                  "duty_prompt": "Complete prompt"}
+                  "prompt": "Complete prompt"}
     if requested_policy is not None:
         agent_info["enable_protocol_repair_retry"] = requested_policy
     result = create_agent(agent_info, "tenant1", "user1")
@@ -562,17 +558,15 @@ def test_create_system_agent_skips_tenant_quota(monkeypatch, mock_session):
 
 @pytest.mark.parametrize("fields,expected", [
     ({"description": "updated description"}, "Existing"),
-    ({"duty_prompt": "Replacement"}, "Replacement"),
-    ({"duty_prompt": ""}, ""),
-    ({"duty_prompt": None}, "Existing"),
+    ({"prompt": "Replacement"}, "Replacement"),
+    ({"prompt": ""}, ""),
+    ({"prompt": None}, "Existing"),
 ])
 def test_update_agent_success(monkeypatch, mock_session, fields, expected):
     """测试成功更新agent"""
     session, query = mock_session
     mock_agent = MockAgent()
-    mock_agent.duty_prompt = "Existing"
-    del mock_agent.constraint_prompt
-    del mock_agent.few_shots_prompt
+    mock_agent.prompt = "Existing"
 
     mock_first = MagicMock()
     mock_first.return_value = mock_agent
@@ -593,7 +587,7 @@ def test_update_agent_success(monkeypatch, mock_session, fields, expected):
 
     assert mock_agent.updated_by == "user1"
 
-    assert mock_agent.duty_prompt == expected
+    assert mock_agent.prompt == expected
     assert not hasattr(mock_agent, "constraint_prompt")
     assert not hasattr(mock_agent, "few_shots_prompt")
 
