@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for the role-based permission cache."""
 
 import permissions.rbac as rbac
@@ -88,24 +87,3 @@ def test_init_failure_resets_initialized(mocker):
     )
     rbac.init_rbac()
     assert not rbac._INITIALIZED
-
-
-def test_user_model_read_repair_requires_cache_reload_and_never_grants_writes(mocker):
-    records = _records()
-    mocker.patch("permissions.rbac.get_all_role_permissions", side_effect=lambda: list(records))
-    rbac.init_rbac()
-    assert not rbac.has_permission("USER", "model:read")
-
-    records.append({
-        "user_role": "USER",
-        "permission_category": "RESOURCE",
-        "permission_type": "MODEL",
-        "permission_subtype": "READ",
-    })
-    assert not rbac.has_permission("USER", "model:read")
-    rbac.init_rbac()
-    assert rbac.has_permission("USER", "model:read")
-    assert rbac.has_permission("USER", "kb:create")
-    for operation in ("create", "update", "delete"):
-        assert not rbac.has_permission("USER", f"model:{operation}")
-    assert not rbac.has_permission("USER", "left_nav_menu:/models")

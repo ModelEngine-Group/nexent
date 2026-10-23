@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from typing import Optional
 
@@ -10,8 +9,8 @@ from consts.model import ChangeSummaryRequest
 from consts.exceptions import TokenExpiredError
 from apps.permission_utils import require_knowledge_base_edit_permission
 from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
-from management.services.permission.identity.authentication_helpers import get_current_user_id, get_current_user_info
-from management.services.configuration.tenant.settings import tenant_config_manager
+from utils.auth_utils import get_current_user_id, get_current_user_info
+from utils.config_utils import tenant_config_manager
 
 router = APIRouter(prefix="/summary")
 logger = logging.getLogger("knowledge_summary_app")

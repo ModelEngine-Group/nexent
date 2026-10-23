@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for A2A Server Service - Message Handling.
 
@@ -26,7 +25,7 @@ class TestStoreUserMessage:
 
     def test_store_user_message_with_parts(self):
         """Test storing user message with parts."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -36,7 +35,7 @@ class TestStoreUserMessage:
             ]
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.create_message.return_value = MagicMock()
 
             service._store_user_message("task_123", message_obj, "test-endpoint")
@@ -49,7 +48,7 @@ class TestStoreUserMessage:
 
     def test_store_user_message_with_text_field(self):
         """Test storing user message using text field when no parts."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -57,7 +56,7 @@ class TestStoreUserMessage:
             "text": "Just a text message"
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.create_message.return_value = MagicMock()
 
             service._store_user_message("task_123", message_obj, "test-endpoint")
@@ -69,13 +68,13 @@ class TestStoreUserMessage:
 
     def test_store_user_message_empty(self):
         """Test storing empty user message."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
         message_obj = {}
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.create_message.return_value = MagicMock()
 
             service._store_user_message("task_123", message_obj, "test-endpoint")
@@ -90,11 +89,11 @@ class TestStoreAgentResponse:
 
     def test_store_agent_response_success(self):
         """Test storing successful agent response."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.create_message.return_value = MagicMock()
             mock_db.update_task_state.return_value = MagicMock()
 
@@ -112,11 +111,11 @@ class TestStoreAgentResponse:
 
     def test_store_agent_response_empty_text(self):
         """Test storing empty agent response."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.create_message.return_value = MagicMock()
             mock_db.update_task_state.return_value = MagicMock()
 
@@ -128,11 +127,11 @@ class TestStoreAgentResponse:
 
     def test_store_agent_response_no_task_id(self):
         """Test storing agent response without task_id (no state update)."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.create_message.return_value = MagicMock()
 
             service._store_agent_response(None, "Hello", "test-endpoint")
@@ -146,11 +145,11 @@ class TestStoreErrorResponse:
 
     def test_store_error_response(self):
         """Test storing error response."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.create_message.return_value = MagicMock()
             mock_db.update_task_state.return_value = MagicMock()
 
@@ -168,11 +167,11 @@ class TestStoreErrorResponse:
 
     def test_store_error_response_no_task_id(self):
         """Test storing error response without task_id."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.create_message.return_value = MagicMock()
 
             service._store_error_response(None, "Error message", "test-endpoint")
@@ -187,7 +186,7 @@ class TestCollectStreamText:
     @pytest.mark.asyncio
     async def test_collect_stream_text_success(self):
         """Test collecting text from stream response."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -208,7 +207,7 @@ class TestCollectStreamText:
     @pytest.mark.asyncio
     async def test_collect_stream_text_with_bytes(self):
         """Test collecting text from stream with bytes chunks."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -225,7 +224,7 @@ class TestCollectStreamText:
     @pytest.mark.asyncio
     async def test_collect_stream_text_skips_invalid_json(self):
         """Test collecting text skips invalid JSON."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -246,7 +245,7 @@ class TestCollectStreamText:
     @pytest.mark.asyncio
     async def test_collect_stream_text_skips_empty_data(self):
         """Test collecting stream text skips empty data."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
@@ -267,7 +266,7 @@ class TestCollectStreamText:
     @pytest.mark.asyncio
     async def test_collect_stream_events_preserves_raw_event_objects(self):
         """Test collecting stream events preserves event fields and order."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
         first_event = {"type": "model_output_thinking", "content": "internal"}
@@ -284,7 +283,7 @@ class TestCollectStreamText:
 
     def test_build_agent_run_event_parts_keeps_each_event_separate(self):
         """Test each raw event becomes a separate JSON data part."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
         events = [
@@ -299,7 +298,7 @@ class TestCollectStreamText:
 
     def test_coalesce_consecutive_events_with_same_type(self):
         """Test adjacent same-type string events are combined."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
         events = [
@@ -317,7 +316,7 @@ class TestCollectStreamText:
 
     def test_coalesce_does_not_merge_events_with_different_metadata(self):
         """Test same-type events with different metadata stay separate."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
         events = [
@@ -329,7 +328,7 @@ class TestCollectStreamText:
 
     def test_coalesce_does_not_merge_non_string_content(self):
         """Test events with structured content stay separate."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
         events = [
@@ -341,7 +340,7 @@ class TestCollectStreamText:
 
     def test_extract_final_answer_ignores_non_final_events(self):
         """Test only final_answer events are used for persistence text."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
         events = [
@@ -355,7 +354,7 @@ class TestCollectStreamText:
     @pytest.mark.asyncio
     async def test_collect_stream_events_skips_non_sse_and_non_dict_payloads(self):
         """Test event collection handles bytes, empty data, invalid JSON, and non-dicts."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
         valid_event = {"type": "final_answer", "content": "done"}
@@ -374,7 +373,7 @@ class TestCollectStreamText:
     async def test_runtime_error_body_read_failure_still_closes_stream(self, caplog):
         """Test runtime error body failures are logged and resources are closed."""
         from consts.exceptions import RuntimeUpstreamError
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         class FailingBodyIterator:
             def __init__(self):
@@ -407,7 +406,7 @@ class TestCollectStreamText:
     @pytest.mark.asyncio
     async def test_close_stream_response_ignores_iterator_without_aclose(self):
         """Test response iterators without aclose remain compatible."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         mock_stream = MagicMock()
         mock_stream.body_iterator = object()
@@ -417,7 +416,7 @@ class TestCollectStreamText:
     @pytest.mark.asyncio
     async def test_close_stream_response_logs_close_failure(self, caplog):
         """Test close failures do not replace the A2A protocol response."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         class FailingCloseIterator:
             async def aclose(self):
@@ -437,10 +436,10 @@ class TestHandleMessageSend:
     @pytest.mark.asyncio
     async def test_handle_message_send_persists_events_and_builds_message_response(self):
         """Test simple requests persist the final answer and expose raw events."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
-        server_agent = {"agent_id": 7, "tenant_id": "agent-tenant", "version": "1", "is_enabled": True}
+        server_agent = {"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True}
         parsed_message = {"message": {"parts": [{"type": "text", "text": "hello"}]}}
         events = [
             {"type": "model_output_thinking", "content": "working"},
@@ -465,7 +464,7 @@ class TestHandleMessageSend:
                 }), \
                 patch.object(service.adapter, "build_a2a_message_response", return_value={"ok": True}) as build_response, \
                 patch(
-                    "management.services.agent.a2a.service.forward_agent_run",
+                    "backend.services.a2a_server_service.forward_agent_run",
                     new_callable=AsyncMock,
                     return_value=stream_response,
                 ) as forward_run:
@@ -491,10 +490,10 @@ class TestHandleMessageSend:
     @pytest.mark.asyncio
     async def test_handle_message_send_complex_request_builds_task_response(self):
         """Test complex requests return a completed task with coalesced event parts."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
-        server_agent = {"agent_id": 7, "version": "1", "is_enabled": True}
+        server_agent = {"agent_id": 7, "is_enabled": True}
         parsed_message = {"message": {"parts": []}, "history": [{"role": "user"}]}
         stream_response = MagicMock(
             status_code=200,
@@ -515,7 +514,7 @@ class TestHandleMessageSend:
                 }), \
                 patch.object(service.adapter, "build_a2a_task_response", return_value={"task": True}) as build_response, \
                 patch(
-                    "management.services.agent.a2a.service.forward_agent_run",
+                    "backend.services.a2a_server_service.forward_agent_run",
                     new_callable=AsyncMock,
                     return_value=stream_response,
                 ) as forward_run:
@@ -535,7 +534,7 @@ class TestHandleMessageSend:
     @pytest.mark.asyncio
     async def test_handle_message_send_maps_runtime_http_error_to_a2a_failure(self):
         """Runtime HTTP failures are closed, persisted, and returned as safe A2A errors."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
         error_iterator = AsyncMockIterator([b'{"detail":"private runtime detail"}'])
@@ -548,7 +547,7 @@ class TestHandleMessageSend:
         with patch.object(
             service,
             "_validate_endpoint",
-            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "version": "1", "is_enabled": True},
+            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True},
         ), patch.object(
             service.adapter,
             "parse_a2a_message",
@@ -569,7 +568,7 @@ class TestHandleMessageSend:
             "build_a2a_message_response",
             return_value={"failed": True},
         ), patch(
-            "management.services.agent.a2a.service.forward_agent_run",
+            "backend.services.a2a_server_service.forward_agent_run",
             new_callable=AsyncMock,
             return_value=stream_response,
         ):
@@ -591,14 +590,14 @@ class TestHandleMessageSend:
     async def test_handle_message_send_maps_runtime_timeout_to_a2a_failure(self):
         """Runtime transport failures remain A2A protocol failures without local fallback."""
         from backend.consts.exceptions import RuntimeServiceTimeoutError
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
 
         with patch.object(
             service,
             "_validate_endpoint",
-            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "version": "1", "is_enabled": True},
+            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True},
         ), patch.object(
             service.adapter,
             "parse_a2a_message",
@@ -619,7 +618,7 @@ class TestHandleMessageSend:
             "build_a2a_message_response",
             return_value={"failed": True},
         ), patch(
-            "management.services.agent.a2a.service.forward_agent_run",
+            "backend.services.a2a_server_service.forward_agent_run",
             new_callable=AsyncMock,
             side_effect=RuntimeServiceTimeoutError("Runtime agent run request timed out"),
         ) as forward_run:
@@ -644,10 +643,10 @@ class TestHandleMessageStream:
     @pytest.mark.asyncio
     async def test_handle_message_stream_filters_chunks_and_stores_final_answer(self):
         """Test streaming yields valid event artifacts and terminal status events."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
-        server_agent = {"agent_id": 7, "tenant_id": "agent-tenant", "version": "1", "is_enabled": True}
+        server_agent = {"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True}
         parsed_message = {"message": {"parts": []}}
         valid_event = {"type": "final_answer", "content": "done"}
         stream_response = MagicMock(
@@ -671,7 +670,7 @@ class TestHandleMessageStream:
                 }), \
                 patch.object(service.adapter, "build_a2a_task_event", side_effect=lambda **kwargs: kwargs), \
                 patch(
-                    "management.services.agent.a2a.service.forward_agent_run",
+                    "backend.services.a2a_server_service.forward_agent_run",
                     new_callable=AsyncMock,
                     return_value=stream_response,
                 ) as forward_run:
@@ -697,7 +696,7 @@ class TestHandleMessageStream:
     @pytest.mark.asyncio
     async def test_handle_message_stream_maps_runtime_http_error_to_failed_status(self):
         """Runtime HTTP failures close the upstream and become A2A failed task events."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
         error_iterator = AsyncMockIterator(["runtime unavailable"])
@@ -710,7 +709,7 @@ class TestHandleMessageStream:
         with patch.object(
             service,
             "_validate_endpoint",
-            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "version": "1", "is_enabled": True},
+            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True},
         ), patch.object(
             service.adapter,
             "parse_a2a_message",
@@ -731,7 +730,7 @@ class TestHandleMessageStream:
             "build_a2a_task_event",
             side_effect=lambda **kwargs: kwargs,
         ), patch(
-            "management.services.agent.a2a.service.forward_agent_run",
+            "backend.services.a2a_server_service.forward_agent_run",
             new_callable=AsyncMock,
             return_value=stream_response,
         ):
@@ -758,7 +757,7 @@ class TestHandleMessageStream:
     @pytest.mark.asyncio
     async def test_handle_message_stream_closes_runtime_stream_when_consumer_disconnects(self):
         """Closing the A2A generator releases the proxied runtime stream immediately."""
-        from management.services.agent.a2a.service import A2AServerService
+        from backend.services.a2a_server_service import A2AServerService
 
         service = A2AServerService()
         body_iterator = AsyncMockIterator([
@@ -774,7 +773,7 @@ class TestHandleMessageStream:
         with patch.object(
             service,
             "_validate_endpoint",
-            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "version": "1", "is_enabled": True},
+            return_value={"agent_id": 7, "tenant_id": "agent-tenant", "is_enabled": True},
         ), patch.object(
             service.adapter,
             "parse_a2a_message",
@@ -795,7 +794,7 @@ class TestHandleMessageStream:
             "build_a2a_task_event",
             side_effect=lambda **kwargs: kwargs,
         ), patch(
-            "management.services.agent.a2a.service.forward_agent_run",
+            "backend.services.a2a_server_service.forward_agent_run",
             new_callable=AsyncMock,
             return_value=stream_response,
         ):
@@ -818,14 +817,14 @@ class TestHandleMessageSendValidation:
     @pytest.mark.asyncio
     async def test_handle_message_send_endpoint_not_found(self):
         """Test handle_message_send when endpoint not found."""
-        from management.services.agent.a2a.service import (
+        from backend.services.a2a_server_service import (
             A2AServerService,
             EndpointNotFoundError
         )
 
         service = A2AServerService()
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = None
 
             with pytest.raises(EndpointNotFoundError):
@@ -837,7 +836,7 @@ class TestHandleMessageSendValidation:
     @pytest.mark.asyncio
     async def test_handle_message_send_agent_disabled(self):
         """Test handle_message_send when agent is disabled."""
-        from management.services.agent.a2a.service import (
+        from backend.services.a2a_server_service import (
             A2AServerService,
             AgentNotEnabledError
         )
@@ -850,7 +849,7 @@ class TestHandleMessageSendValidation:
             "is_enabled": False
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = mock_server_agent
 
             with pytest.raises(AgentNotEnabledError):
@@ -866,14 +865,14 @@ class TestHandleMessageStreamValidation:
     @pytest.mark.asyncio
     async def test_handle_message_stream_endpoint_not_found(self):
         """Test handle_message_stream when endpoint not found."""
-        from management.services.agent.a2a.service import (
+        from backend.services.a2a_server_service import (
             A2AServerService,
             EndpointNotFoundError
         )
 
         service = A2AServerService()
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = None
 
             with pytest.raises(EndpointNotFoundError):
@@ -887,7 +886,7 @@ class TestHandleMessageStreamValidation:
     @pytest.mark.asyncio
     async def test_handle_message_stream_agent_disabled(self):
         """Test handle_message_stream when agent is disabled."""
-        from management.services.agent.a2a.service import (
+        from backend.services.a2a_server_service import (
             A2AServerService,
             AgentNotEnabledError
         )
@@ -900,7 +899,7 @@ class TestHandleMessageStreamValidation:
             "is_enabled": False
         }
 
-        with patch("management.services.agent.a2a.service.a2a_agent_db") as mock_db:
+        with patch("backend.services.a2a_server_service.a2a_agent_db") as mock_db:
             mock_db.get_server_agent_by_endpoint.return_value = mock_server_agent
 
             with pytest.raises(AgentNotEnabledError):
@@ -917,7 +916,7 @@ class TestHelperFunctions:
 
     def test_generate_task_id(self):
         """Test _generate_task_id produces valid IDs."""
-        from management.services.agent.a2a.service import _generate_task_id
+        from backend.services.a2a_server_service import _generate_task_id
 
         task_id = _generate_task_id()
 
@@ -926,7 +925,7 @@ class TestHelperFunctions:
 
     def test_generate_task_id_unique(self):
         """Test _generate_task_id produces unique IDs."""
-        from management.services.agent.a2a.service import _generate_task_id
+        from backend.services.a2a_server_service import _generate_task_id
 
         ids = set()
         for _ in range(100):
@@ -936,7 +935,7 @@ class TestHelperFunctions:
 
     def test_generate_endpoint_id(self):
         """Test _generate_endpoint_id produces valid IDs."""
-        from management.services.agent.a2a.service import _generate_endpoint_id
+        from backend.services.a2a_server_service import _generate_endpoint_id
 
         endpoint_id = _generate_endpoint_id(agent_id=123)
 
@@ -945,7 +944,7 @@ class TestHelperFunctions:
 
     def test_generate_endpoint_id_unique(self):
         """Test _generate_endpoint_id produces unique IDs."""
-        from management.services.agent.a2a.service import _generate_endpoint_id
+        from backend.services.a2a_server_service import _generate_endpoint_id
 
         ids = set()
         for _ in range(100):

@@ -1,9 +1,0 @@
-{
-  "profiles": [
-    {
-      "base_url": "https://verified-gateway.example/v1",
-      "model_id": "verified-model-id",
-      "toggle_wire_format": "thinking_object"
-    }
-  ]
-}

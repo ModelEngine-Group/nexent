@@ -1,7 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 # -*- coding: utf-8 -*-
-
 """Webhook server for triggering benchmark experiments from Langfuse UI.
 
 Receives POST requests from Langfuse's "Custom Experiment" button and
@@ -77,7 +74,9 @@ def run_experiment_task(dataset_name: str, evaluators: list, max_steps: int,
         lf = Langfuse()
         evaluator_fns = resolve_evaluators(evaluators)
 
-        prompt = ""
+        duty_prompt = ""
+        constraint_prompt = ""
+        few_shots_prompt = ""
         system_prompt = ""
         enable_cm = False
 
@@ -91,11 +90,11 @@ def run_experiment_task(dataset_name: str, evaluators: list, max_steps: int,
             logger.info("Agent config loaded")
 
             prompts = agent_config.get("prompts", {})
-            if set(prompts) - {"prompt"}:
-                raise ValueError("Agent prompts only supports prompt; migrate legacy configuration first")
             agent_cfg = agent_config.get("agent_config", {})
 
-            prompt = prompts.get("prompt", "")
+            duty_prompt = prompts.get("duty_prompt", "")
+            constraint_prompt = prompts.get("constraint_prompt", "")
+            few_shots_prompt = prompts.get("few_shots_prompt", "")
             max_steps = max_steps or agent_cfg.get("max_steps", 10)
             enable_cm = agent_cfg.get("enable_context_manager", False)
 
@@ -118,7 +117,9 @@ def run_experiment_task(dataset_name: str, evaluators: list, max_steps: int,
 
         task_fn = make_nexent_task(
             system_prompt=system_prompt,
-            prompt=prompt,
+            duty_prompt=duty_prompt,
+            constraint_prompt=constraint_prompt,
+            few_shots_prompt=few_shots_prompt,
             max_steps=max_steps,
             temperature=temperature,
             language=language,

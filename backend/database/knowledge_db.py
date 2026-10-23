@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
@@ -18,7 +16,7 @@ from consts.exceptions import DuplicateError
 from consts.scheduler import VALID_SUMMARY_FREQUENCIES
 from database.client import as_dict, get_db_session
 from database.db_models import KnowledgeRecord
-from management.db.serialization import convert_list_to_string
+from utils.str_utils import convert_list_to_string
 
 logger = logging.getLogger("knowledge_db")
 
@@ -360,31 +358,6 @@ def delete_knowledge_record(query: Dict[str, Any]) -> bool:
             return True
     except SQLAlchemyError as e:
         raise e
-
-
-def get_knowledge_records_for_tag_read(tenant_id: str, index_names: list[str]) -> list[dict]:
-    """Read active knowledge-base records for one authenticated tenant page."""
-    if not index_names:
-        return []
-    with get_db_session() as session:
-        records = session.query(KnowledgeRecord).filter(
-            KnowledgeRecord.tenant_id == tenant_id,
-            KnowledgeRecord.delete_flag != 'Y',
-            KnowledgeRecord.index_name.in_(index_names),
-        ).all()
-        return [as_dict(record) for record in records]
-
-
-def get_knowledge_metadata_by_index_names(index_names: List[str]) -> List[Dict[str, Any]]:
-    """Read active metadata in bulk after the caller has authorized the indices."""
-    if not index_names:
-        return []
-    with get_db_session() as session:
-        records = session.query(KnowledgeRecord).filter(
-            KnowledgeRecord.delete_flag != 'Y',
-            KnowledgeRecord.index_name.in_(index_names),
-        ).all()
-        return [as_dict(record) for record in records]
 
 
 def get_knowledge_record(query: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

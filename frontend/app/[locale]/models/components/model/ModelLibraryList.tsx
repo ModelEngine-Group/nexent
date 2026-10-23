@@ -1,8 +1,6 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Pencil,
@@ -48,30 +46,7 @@ import {
  * actions with tooltips) and custom pagination.
  */
 
-/**
- * Adaptive pagination. The library section fills the remaining viewport
- * height and the row list scrolls internally, so a fixed page size either
- * under-fills tall screens (empty gap below the last row) or forces
- * scrolling on short ones. Derive the page size from the measured scroll
- * viewport instead. Bounds keep the layout sane: never fewer than
- * MIN_PAGE_SIZE rows (tiny viewports, matches the previous fixed size),
- * never more than MAX_PAGE_SIZE (huge viewports).
- */
-const MIN_PAGE_SIZE = 8;
-const MAX_PAGE_SIZE = 50;
-const FALLBACK_ROW_HEIGHT = 64;
-
-/** Derive the page size from measured geometry. Exported for unit tests. */
-export function computePageSize(
-  viewportHeight: number,
-  rowHeight: number,
-  headerHeight: number
-): number {
-  if (!viewportHeight || !rowHeight) return MIN_PAGE_SIZE;
-  const usable = Math.max(0, viewportHeight - headerHeight);
-  const rows = Math.floor(usable / rowHeight);
-  return Math.min(MAX_PAGE_SIZE, Math.max(MIN_PAGE_SIZE, rows));
-}
+const PAGE_SIZE = 8;
 
 const STATUS_LABEL_KEYS: Record<string, string> = {
   available: "model.status.available",
@@ -107,12 +82,6 @@ export function ModelLibraryList({
   const [sourceFilter, setSourceFilter] = useState<ModelSource | "all">("all");
   const [page, setPage] = useState(1);
 
-  /* ---------- Adaptive pagination (see computePageSize) ---------- */
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [viewportHeight, setViewportHeight] = useState(0);
-  const [rowHeight, setRowHeight] = useState(FALLBACK_ROW_HEIGHT);
-  const [headerHeight, setHeaderHeight] = useState(0);
-
   const typeOptions: ModelType[] = useMemo(
     () => Object.keys(TYPE_LABEL_KEY_MAP) as ModelType[],
     []
@@ -139,12 +108,7 @@ export function ModelLibraryList({
     });
   }, [models, query, typeFilter, sourceFilter]);
 
-  const pageSize = useMemo(
-    () => computePageSize(viewportHeight, rowHeight, headerHeight),
-    [viewportHeight, rowHeight, headerHeight]
-  );
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
 
   // Reset to page 1 whenever the filters change, and clamp when the data
   // shrinks so the current page never overflows.
@@ -156,37 +120,8 @@ export function ModelLibraryList({
     setPage((p) => Math.min(p, totalPages));
   }, [totalPages]);
 
-  const start = (page - 1) * pageSize;
-  const paged = filtered.slice(start, start + pageSize);
-
-  // Measure the scroll viewport, the first rendered row, and the (desktop
-  // only) header so the page size follows the actual available height.
-  // Re-measuring on data changes also covers models loading after mount and
-  // rows growing taller when they stack on narrow viewports.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const measure = () => {
-      setViewportHeight(el.clientHeight);
-      const row = el.querySelector<HTMLElement>("[data-model-row]");
-      if (row) setRowHeight(row.offsetHeight || FALLBACK_ROW_HEIGHT);
-      const header = el.querySelector<HTMLElement>("[data-model-row-header]");
-      if (header) setHeaderHeight(header.offsetHeight);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const row = el.querySelector<HTMLElement>("[data-model-row]");
-    if (row) setRowHeight(row.offsetHeight || FALLBACK_ROW_HEIGHT);
-    const header = el.querySelector<HTMLElement>("[data-model-row-header]");
-    if (header) setHeaderHeight(header.offsetHeight);
-  }, [filtered.length]);
+  const start = (page - 1) * PAGE_SIZE;
+  const paged = filtered.slice(start, start + PAGE_SIZE);
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col gap-4">
@@ -252,16 +187,9 @@ export function ModelLibraryList({
       </div>
 
       {/* ---------- List (internal scroll area) ---------- */}
-      <div
-        ref={scrollRef}
-        data-model-list-scroll
-        className="min-h-[240px] flex-1 overflow-y-auto rounded-xl border"
-      >
+      <div className="min-h-[240px] flex-1 overflow-y-auto rounded-xl border">
         {/* Header (desktop only) */}
-        <div
-          data-model-row-header
-          className="hidden items-center gap-3 border-b bg-secondary/50 px-4 py-2.5 text-xs font-medium text-muted-foreground md:flex"
-        >
+        <div className="hidden items-center gap-3 border-b bg-secondary/50 px-4 py-2.5 text-xs font-medium text-muted-foreground md:flex">
           <span className="w-64 shrink-0">
             {t("modelConfig.table.col.model", { defaultValue: "模型" })}
           </span>
@@ -380,10 +308,7 @@ function ModelRow({
   });
 
   return (
-    <div
-      data-model-row
-      className="flex flex-col gap-3 px-4 py-3 transition-colors hover:bg-secondary/40 md:flex-row md:items-center md:gap-3"
-    >
+    <div className="flex flex-col gap-3 px-4 py-3 transition-colors hover:bg-secondary/40 md:flex-row md:items-center md:gap-3">
       {/* Model name */}
       <div className="flex min-w-0 items-center gap-2 md:w-64 md:shrink-0">
         <div className="flex min-w-0 flex-col">

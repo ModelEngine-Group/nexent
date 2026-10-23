@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -19,13 +17,14 @@ import {
 } from 'lucide-react';
 import { OutlineItem, PdfViewerProps, ScaleMode, ViewportAnchor } from '@/types/file';
 import { ignoreAbortError, getPageWrapperStyle } from '@/lib/filePreviewUtils';
-import { PDF_DOCUMENT_OPTIONS } from '@/lib/pdfPreviewOptions.mjs';
 import log from '@/lib/logger';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
   import.meta.url,
 ).toString();
+
+const PDF_DOCUMENT_OPTIONS = { rangeChunkSize: 65536 };
 
 const OVERSCAN = 3;
 const CONTAINER_TOP_PADDING = 24;
@@ -90,7 +89,7 @@ async function resolveOutlineItemPageNumber(
   }
 }
 
-export function PdfViewer({ url, fileName, initialScaleMode = 'fit-page' }: Readonly<PdfViewerProps>) {
+export function PdfViewer({ url, fileName }: Readonly<PdfViewerProps>) {
   const { t } = useTranslation('common');
 
   const [numPages, setNumPages] = useState<number>(0);
@@ -105,7 +104,7 @@ export function PdfViewer({ url, fileName, initialScaleMode = 'fit-page' }: Read
   const [outline, setOutline] = useState<OutlineItem[] | null>(null);
   const [showOutline, setShowOutline] = useState<boolean>(false);
   
-  const [scaleMode, setScaleMode] = useState<ScaleMode>(initialScaleMode);
+  const [scaleMode, setScaleMode] = useState<ScaleMode>('fit-page');
   const [customScale, setCustomScale] = useState<number>(1);
   const [containerWidth, setContainerWidth] = useState<number>(0);
   const [containerHeight, setContainerHeight] = useState<number>(0);

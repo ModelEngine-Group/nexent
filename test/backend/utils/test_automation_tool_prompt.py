@@ -1,13 +1,15 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
-from management.services.agent.prompt import (
-    should_enable_automation_tool_policy,
-)
+from utils.automation_tool_prompt import build_automation_tool_policy
 
 
 def test_automation_tool_policy_is_empty_when_tool_is_unavailable():
-    assert not should_enable_automation_tool_policy(["other_tool"])
+    assert build_automation_tool_policy("zh", ["other_tool"]) == ""
 
 
-def test_ut_be_fps_013_automation_policy_uses_final_tool_set():
-    assert should_enable_automation_tool_policy(["create_scheduled_task_proposal"])
+def test_automation_tool_policy_uses_requested_language():
+    zh_policy = build_automation_tool_policy("zh", ["create_scheduled_task_proposal"])
+    en_policy = build_automation_tool_policy("en", ["create_scheduled_task_proposal"])
+
+    assert "定时任务工具策略" in zh_policy
+    assert "必须原样复制" in zh_policy
+    assert "Scheduled-task Tool Policy" in en_policy
+    assert "verbatim" in en_policy

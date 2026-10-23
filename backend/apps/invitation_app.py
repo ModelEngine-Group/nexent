@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Invitation management API endpoints
 """
@@ -13,14 +12,14 @@ from consts.model import (
     InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
 )
 from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
-from management.services.monitor.audit import record_security_event
-from management.services.permission.identity.invitations import (
+from services.audit_service import record_security_event
+from services.invitation_service import (
     create_invitation_code, update_invitation_code, get_invitation_by_code,
     check_invitation_available, use_invitation_code, update_invitation_code_status,
     get_invitations_list, delete_invitation_code
 )
 from database.user_tenant_db import get_user_tenant_by_user_id
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from utils.auth_utils import get_current_user_id
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/invitations", tags=["invitations"])

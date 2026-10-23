@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useId, type ReactNode, type Ref } from "react";
@@ -77,7 +75,7 @@ export default function ResourceCard({
     <div
       ref={containerRef}
       className={cn(
-        "group relative flex min-w-0 min-h-[240px] flex-col rounded-xl border bg-white text-left transition",
+        "group relative flex min-h-[240px] flex-col rounded-xl border bg-white text-left transition",
         "p-5 shadow-sm hover:border-blue-300 hover:shadow-md dark:bg-slate-900",
         selected && "border-blue-400 ring-1 ring-blue-200 dark:ring-blue-900",
         !selected && "border-slate-200 dark:border-slate-700",
@@ -93,7 +91,6 @@ export default function ResourceCard({
           {isInteractive ? (
             <button
               type="button"
-              title={typeof title === "string" ? title : undefined}
               aria-labelledby={titleId}
               role={selectionRole}
               aria-pressed={selectionRole ? undefined : selected}
@@ -112,7 +109,7 @@ export default function ResourceCard({
           >
             <div
               className={cn(
-                "flex shrink-0 gap-3",
+                "flex gap-3",
                 fixedHeaderLayout ? "min-h-[60px] items-center" : "items-start"
               )}
             >
@@ -121,12 +118,11 @@ export default function ResourceCard({
                 className={cn(
                   "min-w-0 flex-1",
                   fixedHeaderLayout &&
-                    "flex min-h-11 flex-col justify-between self-center"
+                    "flex h-11 flex-col justify-between self-center"
                 )}
               >
                 <h2
                   id={titleId}
-                  title={typeof title === "string" ? title : undefined}
                   className="truncate text-base font-semibold text-slate-900 dark:text-slate-100"
                 >
                   {title}
@@ -162,7 +158,7 @@ export default function ResourceCard({
               {description ? (
                 <div
                   className={cn(
-                    "min-h-0 overflow-hidden [overflow-wrap:anywhere] text-sm leading-6 text-slate-600 dark:text-slate-300",
+                    "min-h-0 overflow-hidden text-sm leading-6 text-slate-600 dark:text-slate-300",
                     statusRow ? "mt-3" : "mt-4"
                   )}
                   style={{
@@ -177,14 +173,14 @@ export default function ResourceCard({
               {tags ? (
                 <div
                   className={cn(
-                    "flex flex-wrap gap-2 pb-2 text-xs [&>*]:max-w-full [&>*]:[overflow-wrap:anywhere]",
+                    "flex flex-wrap gap-2 pb-2 text-xs",
                     description ? "mt-3" : "mt-4"
                   )}
                 >
                   {tags}
                 </div>
               ) : null}
-              <div className="mt-auto shrink-0">
+              <div className="mt-auto">
                 {footerLayout === "stacked" ? (
                   <>
                     {meta ? (

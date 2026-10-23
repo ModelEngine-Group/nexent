@@ -1,5 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Unit tests for ``management.services.evaluation.reporting.report``.
+"""Unit tests for ``services.evaluation_report_service``.
 
 The module is loaded with ``spec_from_file_location`` while the
 ``consts`` / ``database`` / ``services`` / ``utils`` packages are stubbed
@@ -33,7 +32,7 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "backend")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-MODULE_UNDER_TEST = "management.services.evaluation.reporting.report"
+MODULE_UNDER_TEST = "services.evaluation_report_service"
 
 _STUB_SLOTS = [
     ("consts.evaluation_report_labels", "get_report_labels"),
@@ -41,10 +40,10 @@ _STUB_SLOTS = [
     ("database.evaluation_annotation_db", "list_annotation_schemas"),
     ("database.evaluation_annotation_db", "list_annotations_by_evaluation_id"),
     ("database.evaluator_db", "get_evaluator"),
-    ("management.services.evaluation.runs", "_load_all_evaluation_cases"),
-    ("management.services.evaluation.runs", "get_evaluation_stats_impl"),
-    ("management.services.evaluation.reporting.fonts", "setup_matplotlib_cjk"),
-    ("management.services.evaluation.reporting.fonts", "setup_reportlab_cjk"),
+    ("services.agent_evaluation_service", "_load_all_evaluation_cases"),
+    ("services.agent_evaluation_service", "get_evaluation_stats_impl"),
+    ("utils.font_utils", "setup_matplotlib_cjk"),
+    ("utils.font_utils", "setup_reportlab_cjk"),
 ]
 
 # 1x1 transparent PNG (valid for reportlab ImageReader)
@@ -96,13 +95,13 @@ def _install_stubs():
     )
     _svc = _register_package("services")
     _svc.agent_evaluation_service = _mk_mod(
-        "management.services.evaluation.runs",
+        "services.agent_evaluation_service",
         _load_all_evaluation_cases=MagicMock(name="_load_all_evaluation_cases"),
         get_evaluation_stats_impl=MagicMock(name="get_evaluation_stats_impl"),
     )
     _utils = _register_package("utils")
     _utils.font_utils = _mk_mod(
-        "management.services.evaluation.reporting.fonts",
+        "utils.font_utils",
         setup_matplotlib_cjk=MagicMock(name="setup_matplotlib_cjk"),
         setup_reportlab_cjk=MagicMock(name="setup_reportlab_cjk"),
     )
@@ -213,7 +212,7 @@ def bundle():
     if hasattr(svc_pkg, "evaluation_report_service"):
         delattr(svc_pkg, "evaluation_report_service")
 
-    src = _REPO_ROOT / "backend" / "management" / "services" / "evaluation" / "reporting" / "report.py"
+    src = _REPO_ROOT / "backend" / "services" / "evaluation_report_service.py"
     spec = _ilu.spec_from_file_location(MODULE_UNDER_TEST, str(src))
     assert spec is not None and spec.loader is not None, f"cannot locate {src}"
     mod = _ilu.module_from_spec(spec)

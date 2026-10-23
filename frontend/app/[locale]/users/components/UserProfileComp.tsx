@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -18,7 +16,6 @@ import {
 } from "antd";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
-import { useQuery } from "@tanstack/react-query";
 import {
   User,
   LogOut,
@@ -41,7 +38,6 @@ import { DeleteAccountModal } from "@/components/auth/DeleteAccountModal";
 import { OAuthAccountsSection } from "@/components/settings/OAuthAccountsSection";
 import log from "@/lib/logger";
 import { authService } from "@/services/authService";
-import { oauthService } from "@/services/oauthService";
 import { getPasswordChecks, getStrengthLevel } from "@/lib/utils";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
@@ -51,7 +47,6 @@ import {
   createUserToken,
 } from "@/services/tokenService";
 import { ErrorCode } from "@/const/errorCode";
-import { UserIdentity } from "@/components/auth/UserIdentity";
 
 /**
  * UserProfileComp - User profile and account settings component
@@ -69,14 +64,6 @@ export default function UserProfileComp() {
   const { logout, revoke, isLoading } = useAuthenticationContext();
   const { user, groupIds } = useAuthorizationContext();
   const { confirm } = useConfirmModal();
-  const { data: oauthConfig } = useQuery({
-    queryKey: ["oauth", "config"],
-    queryFn: () => oauthService.getConfig(),
-    enabled: !!user,
-  });
-  const isOAuthLoginEnabled =
-    oauthConfig?.enabled &&
-    (oauthConfig.login_mode === "button" || oauthConfig.login_mode === "force");
 
   // Fetch groups for group name mapping
   const { data: groupData } = useGroupList(user?.tenantId || null);
@@ -305,10 +292,9 @@ export default function UserProfileComp() {
                       : t("common.email") || "Email"}
                   </span>
                   <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">
-                    <UserIdentity
-                      casUsername={user?.username}
-                      fallback={user?.email?.trim() || "-"}
-                    />
+                    {isCasUser
+                      ? user?.username?.trim() || user?.email?.trim() || "-"
+                      : user?.email?.trim() || "-"}
                   </span>
                 </div>
                 <div className="px-6 py-3 flex items-center justify-between">
@@ -742,11 +728,9 @@ export default function UserProfileComp() {
       />
 
       {/* OAuth Linked Accounts */}
-      {user && isOAuthLoginEnabled && (
-        <div className="w-full mt-4">
-          <OAuthAccountsSection providers={oauthConfig?.providers ?? []} />
-        </div>
-      )}
+      <div className="w-full mt-4">
+        <OAuthAccountsSection />
+      </div>
     </Flex>
   );
 }

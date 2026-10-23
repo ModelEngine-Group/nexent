@@ -1,7 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
-import { useTranslation } from "react-i18next";
-
 export function SelectedResourceTags({
   items,
   onRemove,
@@ -9,7 +5,6 @@ export function SelectedResourceTags({
   items: { id: string; name: string }[];
   onRemove: (id: string) => void;
 }) {
-  const { t } = useTranslation("common");
   if (!items.length) return null;
   return (
     <div className="flex flex-wrap gap-1.5">
@@ -24,7 +19,7 @@ export function SelectedResourceTags({
           <button
             type="button"
             className="ml-1.5 shrink-0 text-blue-600 hover:text-blue-800"
-            aria-label={t("ui.localization.removeResource", { name })}
+            aria-label={`移除 ${name}`}
             onClick={() => onRemove(id)}
           >
             ×

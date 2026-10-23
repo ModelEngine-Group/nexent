@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """Model Catalog (预置模型目录) Loader.
 
 Responsibilities:
@@ -20,11 +18,8 @@ import threading
 from typing import Any, Dict, Iterable, List, Optional
 from urllib.parse import urlsplit, urlunsplit
 
-from consts import const as _runtime_const
 from consts.const import MODEL_CATALOG_JSON_PATH, MODELS_DEV_CATALOG_JSON_PATH
 from consts.model import ModelCatalogProfile, ModelCatalogProviderInfo
-
-MODEL_REASONING_WIRE_PROFILES_PATH = getattr(_runtime_const, "MODEL_REASONING_WIRE_PROFILES_PATH", "")
 
 logger = logging.getLogger("model_catalog")
 
@@ -42,8 +37,7 @@ _catalog_cache: Optional[Dict[str, Any]] = None
 
 # Raw models.dev data is kept separate from the operator-maintained Nexent
 # catalog.  A missing downloaded file intentionally falls back to the legacy
-# resolver; an existing file is authoritative for matched providers. Unknown
-# gateway URLs may use declared native-model controls without native adapters.
+# resolver; an existing file is authoritative and prevents stale heuristics.
 _models_dev_cache: Optional[Dict[str, Any]] = None
 
 
@@ -641,11 +635,9 @@ def _resolve_models_dev_reasoning_capability(
             if prefix_length == best_prefix_length
         ]
 
-    # A matched provider remains authoritative, including missing/unsupported
-    # models. Only an unlisted gateway URL may use native-model declarations.
+    # API is the trust boundary. Do not search another provider when an API was
+    # supplied but its model ID is absent from the source snapshot.
     if not provider_candidates:
-        if requested_api:
-            return _resolve_gateway_model_reasoning(catalog, model_name, base_url, provider_hint)
         return None
 
     selected: Optional[tuple[str, str, Dict[str, Any]]] = None
@@ -757,82 +749,6 @@ def _resolve_models_dev_reasoning_capability(
         "source": "models_dev",
     }
 
-
-def _resolve_gateway_model_reasoning(
-    catalog: dict[str, Any],
-    model_name: str,
-    base_url: str | None,
-    provider_hint: str | None,
-) -> dict[str, Any] | None:
-    """Borrow unambiguous native-model controls, never its transport identity."""
-    requested_id = str(model_name or "").strip().lower()
-    requested_leaf = requested_id.rsplit("/", 1)[-1]
-    native_vendor = _infer_provider_from_model_id(requested_leaf)
-    native_provider = get_provider_info(native_vendor) if native_vendor else None
-    if native_provider is None or not native_provider.base_url:
-        return None
-
-    matches = []
-    for provider_id, provider in (catalog.get("providers") or {}).items():
-        if not isinstance(provider, dict):
-            continue
-        api = _canonical_api_url(provider.get("api") or provider.get("base_url"))
-        if _api_url_path_prefix_length(api, native_provider.base_url) is None:
-            continue
-        models = provider.get("models")
-        if not isinstance(models, dict):
-            continue
-        for key, model in models.items():
-            if not isinstance(model, dict):
-                continue
-            ids = {value.lower() for value in _model_id_candidates(key, model)}
-            if requested_id in ids:
-                rank = 0
-            elif requested_leaf and requested_leaf in {value.rsplit("/", 1)[-1] for value in ids}:
-                rank = 1
-            else:
-                continue
-            matches.append((rank, provider_id, api, key, model))
-    if not matches:
-        return None
-    best_rank = min(match[0] for match in matches)
-    best = [match for match in matches if match[0] == best_rank]
-    if len(best) != 1:
-        return None
-
-    _, provider_id, api, key, model = best[0]
-    for option in _normalize_reasoning_options(model.get("reasoning_options")):
-        if str(option.get("type") or "").strip().lower() == "effort":
-            values = option.get("values") or option.get("options") or []
-            if not isinstance(values, (str, list)):
-                return None
-    # The synthetic lookup always matches this exact API, so it cannot recurse
-    # into gateway fallback or depend on another reseller's declaration.
-    capability = _resolve_models_dev_reasoning_capability(
-        {"providers": {provider_id: {"api": api, "models": {key: model}}}},
-        model_name, api, provider_id,
-    )
-    if capability is None:
-        return None
-    controls = [control for control in capability["controls"] if control["type"] in {"toggle", "effort"}]
-    if not controls:
-        return None
-    has_effort = any(control["type"] == "effort" for control in controls)
-    gateway_provider = str(provider_hint or "").strip()
-    if gateway_provider.lower() not in {"custom", "openai-api-compatible", "modelengine"}:
-        gateway_provider = "custom"
-    return {
-        **capability,
-        "control": "effort" if has_effort else "toggle",
-        "wire_format": "reasoning_effort" if has_effort else "thinking_toggle",
-        "controls": controls,
-        "provider_id": gateway_provider,
-        "budget_wire_format": None,
-        "toggle_wire_format": None,
-        "matched_api": _canonical_api_url(base_url),
-    }
-
-
 #: Ordered candidates; first match wins.  The tuple is (provider_id, url_keyword).
 _PROVIDER_URL_HINTS: Iterable[tuple[str, str]] = (
     ("silicon", "siliconflow"),
@@ -869,7 +785,7 @@ def infer_provider_from_base_url(base_url: str) -> Optional[str]:
     return None
 
 
-def _resolve_base_reasoning_capability(
+def resolve_reasoning_capability(
     model_name: str,
     base_url: Optional[str] = None,
     provider_hint: Optional[str] = None,
@@ -1183,48 +1099,3 @@ def apply_catalog_defaults(
         # Tag capacity_source = "profile" only if the caller didn't already set one.
         model_data["capacity_source"] = "profile"
     return applied
-
-
-def resolve_reasoning_capability(
-    model_name: str, base_url: Optional[str] = None, provider_hint: Optional[str] = None,
-) -> Optional[Dict[str, Any]]:
-    """Apply only an unambiguous, explicitly verified endpoint/model wire profile."""
-    capability = _resolve_base_reasoning_capability(model_name, base_url, provider_hint)
-    if not capability or capability.get("status") != "supported" or not base_url:
-        return capability
-
-    def endpoint(value: Any) -> Optional[str]:
-        if not isinstance(value, str):
-            return None
-        try:
-            parsed = urlsplit(value)
-            if (parsed.scheme not in {"http", "https"} or not parsed.hostname
-                    or parsed.username or parsed.password or parsed.query or parsed.fragment):
-                return None
-            return _canonical_api_url(value)
-        except ValueError:
-            return None
-
-    target = endpoint(base_url)
-    if target is None or not MODEL_REASONING_WIRE_PROFILES_PATH:
-        return capability
-    try:
-        if os.path.getsize(MODEL_REASONING_WIRE_PROFILES_PATH) > 65536:
-            return capability
-        with open(MODEL_REASONING_WIRE_PROFILES_PATH, encoding="utf-8") as source:
-            profiles = json.load(source).get("profiles", [])
-        if not isinstance(profiles, list):
-            return capability
-    except (OSError, ValueError, AttributeError):
-        return capability
-    matches = [
-        profile for profile in profiles if isinstance(profile, dict)
-        and endpoint(profile.get("base_url")) == target
-        and profile.get("model_id") == model_name
-    ]
-    if len(matches) != 1:
-        return capability
-    wire = matches[0].get("toggle_wire_format")
-    if not isinstance(wire, str) or wire not in {"thinking_object", "enable_thinking", "chat_template"}:
-        return capability
-    return {**capability, "toggle_wire_format": wire}

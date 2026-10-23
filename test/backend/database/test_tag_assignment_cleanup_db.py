@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from contextlib import nullcontext
 
 from database.db_models import ResourceTagAssignment
@@ -6,7 +5,7 @@ from database.tag_management_db import (
     TagManagementDB,
     _is_document_assignment_in_knowledge_base,
 )
-from management.services.tag.resources import _encode_document_resource_id
+from services.tag_resource_adapters import _encode_document_resource_id
 
 
 class _Query:

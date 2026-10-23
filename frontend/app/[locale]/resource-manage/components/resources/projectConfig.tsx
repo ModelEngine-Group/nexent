@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -161,7 +159,7 @@ export default function ProjectConfigTab({
                       name={["configZh", item.key]}
                       label={ item.label }
                       rules={[
-                        { required: true, message: t("project.config.contentRequired") },
+                        { required: true, message: t("businessLogic.config.template.contentRequired") },
                         { max: item.max, message: t("chatLeftSidebar.renameErrorTooLong", { max: item.max }) }
                       ]}
                     >
@@ -173,7 +171,7 @@ export default function ProjectConfigTab({
                       name={["configEn", item.key]}
                       label={ `${item.label}-English` }
                       rules={[
-                        { required: true, message: t("project.config.contentRequired") },
+                        { required: true, message: t("businessLogic.config.template.contentRequired") },
                         { max: item.maxEn, message: t("chatLeftSidebar.renameErrorTooLong", { max: item.maxEn }) }
                       ]}
                     >

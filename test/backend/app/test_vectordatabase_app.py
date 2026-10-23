@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for the Elasticsearch application endpoints.
 These tests verify the behavior of the Elasticsearch API without actual database connections.
@@ -6,7 +5,6 @@ All external services and dependencies are mocked to isolate the tests.
 """
 import os
 import sys
-import logging
 import pytest
 import types
 import importlib.machinery
@@ -363,7 +361,6 @@ async def test_create_new_index_propagates_app_exception(vdb_core_mock, auth_dat
     ):
         with pytest.raises(AppException) as exc_info:
             create_new_index(
-                http_request=None,
                 index_name=auth_data["index_name"],
                 embedding_dim=768,
                 request={"embedding_model_id": 101},
@@ -424,8 +421,8 @@ async def test_delete_index_success(vdb_core_mock, redis_service_mock, auth_data
             patch("backend.apps.vectordatabase_app.ElasticSearchService.list_files") as mock_list_files, \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_index") as mock_delete, \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.full_delete_knowledge_base") as mock_full_delete, \
-            patch("management.services.tag.library.TagManagementService.cleanup_resource_assignments") as cleanup_resource, \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments_for_knowledge_base") as cleanup_documents:
+            patch("services.tag_management_service.TagManagementService.cleanup_resource_assignments") as cleanup_resource, \
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments_for_knowledge_base") as cleanup_documents:
 
         # Properly setup the async mock for list_files
         mock_list_files.return_value = {"files": []}
@@ -558,8 +555,8 @@ async def test_delete_index_redis_error(vdb_core_mock, redis_service_mock, auth_
             patch("backend.apps.vectordatabase_app.ElasticSearchService.list_files") as mock_list_files, \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_index") as mock_delete, \
             patch("backend.apps.vectordatabase_app.ElasticSearchService.full_delete_knowledge_base") as mock_full_delete, \
-            patch("management.services.tag.library.TagManagementService.cleanup_resource_assignments"), \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments_for_knowledge_base"):
+            patch("services.tag_management_service.TagManagementService.cleanup_resource_assignments"), \
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments_for_knowledge_base"):
 
         # Properly setup the async mock for list_files
         mock_list_files.return_value = {"files": []}
@@ -1095,7 +1092,7 @@ async def test_create_index_documents_embedding_model_exception(vdb_core_mock, a
             "index_name": index_name,
             "embedding_model_id": 123
         }
-
+        
         mock_get_embedding.side_effect = Exception("Embedding model not available")
 
         response = client.post(
@@ -1152,7 +1149,7 @@ async def test_get_index_files_success(vdb_core_mock):
 
         index_name = "test_index"
         expected_files = {
-            "files": [{"path": "file1.txt", "status": "complete", "tags": []}],
+            "files": [{"path": "file1.txt", "status": "complete"}],
             "status": "success"
         }
 
@@ -2058,7 +2055,7 @@ async def test_delete_documents_success(vdb_core_mock, redis_service_mock, auth_
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
             ) as mock_delete_by_scope, \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments") as cleanup_document:
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments") as cleanup_document:
 
         index_name = "test_index"
         path_or_url = "test_document.pdf"
@@ -2159,7 +2156,7 @@ async def test_delete_documents_uses_legacy_path_when_lifecycle_lookup_fails(
                 new_callable=AsyncMock,
                 return_value={"status": "success", "scope": "full"},
             ) as mock_delete, \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments"):
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments"):
         response = client.delete(
             f"/indices/{auth_data['index_name']}/documents",
             params={
@@ -2377,7 +2374,7 @@ async def test_delete_documents_forbidden_for_read_only(vdb_core_mock, auth_data
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
             ) as mock_delete_by_scope, \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments"):
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments"):
 
         response = client.delete(
             f"/indices/{auth_data['index_name']}/documents",
@@ -2400,7 +2397,7 @@ async def test_delete_documents_source_only_skips_redis(vdb_core_mock, redis_ser
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
             ) as mock_delete_by_scope, \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments"):
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments"):
 
         index_name = "test_index"
         path_or_url = "knowledge_base/test.pdf"
@@ -2440,7 +2437,7 @@ async def test_delete_documents_redis_error(vdb_core_mock, redis_service_mock, a
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
             ) as mock_delete_by_scope, \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments"):
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments"):
 
         index_name = "test_index"
         path_or_url = "test_document.pdf"
@@ -2534,7 +2531,7 @@ async def test_delete_documents_redis_warnings(vdb_core_mock, redis_service_mock
                 "backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
                 new_callable=AsyncMock,
             ) as mock_delete_by_scope, \
-            patch("management.services.tag.library.TagManagementService.cleanup_document_assignments"):
+            patch("services.tag_management_service.TagManagementService.cleanup_document_assignments"):
 
         index_name = "test_index"
         path_or_url = "test_document.pdf"
@@ -3068,7 +3065,7 @@ async def test_create_index_documents_gets_saved_embedding_model_from_knowledge_
 
         index_name = "test_index"
         documents = [{"id": 1, "text": "test doc"}]
-
+        
         # Mock knowledge record with saved embedding model id
         saved_model_id = 123
         mock_get_knowledge_record.return_value = {
@@ -3076,11 +3073,11 @@ async def test_create_index_documents_gets_saved_embedding_model_from_knowledge_
             "embedding_model_id": saved_model_id,
             "tenant_id": auth_data["tenant_id"]
         }
-
+        
         # Mock embedding model
         mock_embedding = MagicMock()
         mock_get_embedding.return_value = (mock_embedding, saved_model_id)
-
+        
         # Mock index response
         expected_response = {
             "success": True,
@@ -3096,16 +3093,16 @@ async def test_create_index_documents_gets_saved_embedding_model_from_knowledge_
 
         # Verify
         assert response.status_code == 200
-
+        
         # Verify get_knowledge_record was called with correct index_name
         mock_get_knowledge_record.assert_called_once_with({'index_name': index_name})
-
+        
         # Verify get_embedding_model_by_id was called with the saved model id
         mock_get_embedding.assert_called_once_with(
             auth_data["tenant_id"],
             saved_model_id,
         )
-
+        
         # Verify index_documents was called with the embedding model
         mock_index.assert_called_once()
         call_kwargs = mock_index.call_args[1]
@@ -3126,14 +3123,14 @@ async def test_create_index_documents_fallback_to_default_when_no_saved_model(vd
 
         index_name = "test_index"
         documents = [{"id": 1, "text": "test doc"}]
-
+        
         # Mock knowledge record with no embedding_model_id (None)
         mock_get_knowledge_record.return_value = {
             "index_name": index_name,
             "embedding_model_id": None,
             "tenant_id": auth_data["tenant_id"]
         }
-
+        
         # Mock index response
         expected_response = {
             "success": True,
@@ -3149,7 +3146,7 @@ async def test_create_index_documents_fallback_to_default_when_no_saved_model(vd
 
         # Verify
         assert response.status_code == 200
-
+        
         # No saved model id means no embedding resolver call from app layer
         mock_get_embedding.assert_not_called()
 
@@ -3169,7 +3166,7 @@ async def test_create_index_documents_fallback_when_knowledge_record_not_found(v
 
         index_name = "test_index"
         documents = [{"id": 1, "text": "test doc"}]
-
+        
         expected_response = {
             "success": True,
             "message": "Documents indexed successfully",
@@ -3182,7 +3179,7 @@ async def test_create_index_documents_fallback_when_knowledge_record_not_found(v
             f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
 
         assert response.status_code == 200
-
+        
         mock_get_embedding.assert_not_called()
 
 
@@ -3201,13 +3198,13 @@ async def test_create_index_documents_with_empty_string_model_name(vdb_core_mock
 
         index_name = "test_index"
         documents = [{"id": 1, "text": "test doc"}]
-
+        
         mock_get_knowledge_record.return_value = {
             "index_name": index_name,
             "embedding_model_id": None,
             "tenant_id": auth_data["tenant_id"]
         }
-
+        
         expected_response = {
             "success": True,
             "message": "Documents indexed successfully",
@@ -3220,7 +3217,7 @@ async def test_create_index_documents_with_empty_string_model_name(vdb_core_mock
             f"/indices/{index_name}/documents", json=documents, headers=auth_data["auth_header"])
 
         assert response.status_code == 200
-
+        
         # Empty/None model id should skip embedding model resolution
         mock_get_embedding.assert_not_called()
 
@@ -3637,72 +3634,6 @@ async def test_get_index_files_preserves_read_permission_error(vdb_core_mock, au
 
 
 @pytest.mark.asyncio
-async def test_get_index_files_projects_document_tags_in_one_batch(
-    mocker, vdb_core_mock
-):
-    from backend.apps import vectordatabase_app as vdb_app
-    from management.services.tag.projection import TagManagementDB as TagDB
-    from management.services.tag.resources import _encode_document_resource_id
-
-    mocker.patch.object(
-        vdb_app, "get_current_user_id", return_value=("user-1", "tenant-1")
-    )
-    mocker.patch.object(vdb_app, "require_knowledge_base_read_permission")
-    mocker.patch.object(
-        vdb_app.ElasticSearchService,
-        "list_files",
-        new=AsyncMock(
-            return_value={
-                "files": [
-                    {"path_or_url": "knowledge_base/a.txt", "file": "a.txt"},
-                    {"file": "lifecycle-only.txt"},
-                ]
-            }
-        ),
-    )
-    mocker.patch(
-        "management.services.tag.projection.get_knowledge_record",
-        return_value={"index_name": "kb-index", "tenant_id": "tenant-1"},
-    )
-    assignment = {
-        "definition_id": 3,
-        "definition_key": "domain",
-        "definition_name": "Domain",
-        "selection_mode": "single_select",
-        "value_id": 4,
-        "display_value": "Finance",
-        "value_status": "active",
-    }
-    lookup = mocker.patch.object(
-        TagDB,
-        "list_resource_assignments_batch",
-        return_value={
-            _encode_document_resource_id(
-                "local", "kb-index", "knowledge_base/a.txt"
-            ): [assignment]
-        },
-    )
-
-    response = await vdb_app.get_index_files(
-        "kb-index", vdb_core_mock, "Bearer token"
-    )
-
-    assert response["status"] == "success"
-    assert response["files"][0]["tags"] == [assignment]
-    assert response["files"][1]["tags"] == []
-    lookup.assert_called_once_with(
-        "tenant-1",
-        "knowledge_document",
-        [
-            _encode_document_resource_id(
-                "local", "kb-index", "knowledge_base/a.txt"
-            )
-        ],
-        "knowledge_content",
-    )
-
-
-@pytest.mark.asyncio
 async def test_get_embedding_model_status_preserves_read_permission_error(auth_data):
     with patch(
         "backend.apps.vectordatabase_app.require_knowledge_base_read_permission",
@@ -3803,107 +3734,3 @@ def test_vdb_endpoints_return_401_on_token_expired(method, url, kwargs, auth_fn)
 
     assert response.status_code == HTTPStatus.UNAUTHORIZED
     assert "expired" in response.json()["detail"]
-
-
-# ============================================================================
-# Security audit entries
-# ============================================================================
-
-class TestVectordatabaseAuditEntries:
-    """Security audit entries emitted by knowledge-base structure endpoints."""
-
-    def test_create_index_emits_audit_entry(self, vdb_core_mock, auth_data, caplog):
-        """Successful index creation records name, model and quota setting."""
-        with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
-                patch("backend.apps.vectordatabase_app.get_current_user_context",
-                      return_value=(auth_data["user_id"], auth_data["tenant_id"], "ADMIN")), \
-                patch("backend.apps.vectordatabase_app.ElasticSearchService.create_knowledge_base") as mock_create:
-            mock_create.return_value = {"status": "success"}
-
-            with caplog.at_level(logging.INFO, logger="audit.security"):
-                response = client.post(
-                    f"/indices/{auth_data['index_name']}",
-                    json={"embedding_model_id": 3, "quota_limit_bytes": 1024},
-                    headers=auth_data["auth_header"],
-                )
-
-        assert response.status_code == 200
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=kb_index_create" in messages[0]
-        assert "result=success" in messages[0]
-        assert "user_id=test_user" in messages[0]
-        assert '"knowledge_name":"test_index"' in messages[0]
-        assert '"embedding_model_id":3' in messages[0]
-        assert '"quota_limit_bytes":1024' in messages[0]
-
-    def test_delete_index_emits_audit_entry(self, vdb_core_mock, auth_data, caplog):
-        """Successful index deletion records the removed index name."""
-        with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
-                patch("backend.apps.vectordatabase_app.get_current_user_id",
-                      return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-                patch("backend.apps.vectordatabase_app.ElasticSearchService.full_delete_knowledge_base",
-                      new_callable=AsyncMock, return_value={"message": "deleted"}), \
-                patch("management.services.tag.library.TagManagementService.cleanup_resource_assignments"), \
-                patch("management.services.tag.library.TagManagementService.cleanup_document_assignments_for_knowledge_base"):
-            with caplog.at_level(logging.INFO, logger="audit.security"):
-                response = client.delete(
-                    f"/indices/{auth_data['index_name']}",
-                    headers=auth_data["auth_header"],
-                )
-
-        assert response.status_code == 200
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=kb_index_delete" in messages[0]
-        assert "user_id=test_user" in messages[0]
-        assert '"index_name":"test_index"' in messages[0]
-
-    def test_embedding_model_change_emits_audit_entry(self, auth_data, caplog):
-        """Successful embedding-model change records the index and new model."""
-        with patch("backend.apps.vectordatabase_app.get_current_user_id",
-                   return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-                patch("backend.apps.vectordatabase_app.ElasticSearchService.update_embedding_model") as mock_update:
-            mock_update.return_value = {"message": "updated"}
-
-            with caplog.at_level(logging.INFO, logger="audit.security"):
-                response = client.put(
-                    f"/indices/{auth_data['index_name']}/embedding-model",
-                    json={"model_id": 5},
-                    headers=auth_data["auth_header"],
-                )
-
-        assert response.status_code == 200
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=kb_embedding_model_change" in messages[0]
-        assert '"index_name":"test_index"' in messages[0]
-        assert '"model_id":5' in messages[0]
-
-    def test_document_delete_emits_audit_entry(self, vdb_core_mock, redis_service_mock, auth_data, caplog):
-        """Successful document deletion records the index, path and scope."""
-        with patch("backend.apps.vectordatabase_app.get_vector_db_core", return_value=vdb_core_mock), \
-                patch("backend.apps.vectordatabase_app.get_current_user_id",
-                      return_value=(auth_data["user_id"], auth_data["tenant_id"])), \
-                patch("backend.apps.vectordatabase_app.get_redis_service", return_value=redis_service_mock), \
-                patch("backend.apps.vectordatabase_app.ElasticSearchService.delete_document_by_scope",
-                      new_callable=AsyncMock, return_value={"message": "Documents deleted successfully"}), \
-                patch("management.services.tag.library.TagManagementService.cleanup_document_assignments"):
-            with caplog.at_level(logging.INFO, logger="audit.security"):
-                response = client.delete(
-                    f"/indices/{auth_data['index_name']}/documents",
-                    params={"path_or_url": "docs/a.txt", "scope": "full"},
-                    headers=auth_data["auth_header"],
-                )
-
-        assert response.status_code == 200
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=kb_document_delete" in messages[0]
-        assert '"index_name":"test_index"' in messages[0]
-        assert '"path_or_url":"docs/a.txt"' in messages[0]
-        assert '"scope":"full"' in messages[0]

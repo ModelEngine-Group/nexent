@@ -1,10 +1,9 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from types import SimpleNamespace
 
 import pytest
 
-from management.services.automation import capabilities as capability_resolver
-from contracts.automation import (
+from services.agent_automation import capability_resolver
+from services.agent_automation.models import (
     CapabilityBinding,
     CapabilityResolution,
     CapabilityType,
@@ -30,7 +29,7 @@ def test_binding_helpers_preserve_runtime_identity_and_metadata():
     skill = capability_resolver._skill_binding({"name": "report", "description": "Write reports"})
     managed = capability_resolver._agent_binding(
         SimpleNamespace(agent_id=9, description=None),
-        CapabilityType.WORKER_AGENT,
+        CapabilityType.MANAGED_AGENT,
     )
 
     assert knowledge.type == CapabilityType.KNOWLEDGE_BASE
@@ -71,7 +70,7 @@ async def test_resolve_agent_capabilities_collects_all_configured_sources(monkey
             ),
             SimpleNamespace(component_type="memory", skills=[]),
         ],
-        worker_agents=[SimpleNamespace(name="researcher", description="Research agent")],
+        managed_agents=[SimpleNamespace(name="researcher", description="Research agent")],
         external_a2a_agents=[SimpleNamespace(name="external", description="External agent")],
     )
     captured = {}
@@ -105,7 +104,7 @@ async def test_resolve_agent_capabilities_collects_all_configured_sources(monkey
         CapabilityType.TOOL,
         CapabilityType.KNOWLEDGE_BASE,
         CapabilityType.SKILL,
-        CapabilityType.WORKER_AGENT,
+        CapabilityType.MANAGED_AGENT,
         CapabilityType.EXTERNAL_A2A_AGENT,
     }
     assert resolution.agent_snapshot == {
@@ -130,7 +129,7 @@ async def test_resolve_agent_capabilities_reports_missing_requirements_and_toler
         description="",
         tools=[],
         context_components=[],
-        worker_agents=[],
+        managed_agents=[],
         external_a2a_agents=[],
     )
 

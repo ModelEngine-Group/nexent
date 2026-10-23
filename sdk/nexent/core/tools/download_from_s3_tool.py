@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
 import os
@@ -21,11 +20,14 @@ class DownloadFromS3Tool(Tool):
     name = "download_from_s3"
     is_user_selectable = False
     description = (
-        "Download an authorized S3/MinIO object into the run workspace. "
-        "Returns a local path for subsequent file tools."
+        "Download a file from S3/MinIO storage to the local workspace. "
+        "Accepts s3://bucket/key, /bucket/key, or plain object key paths. "
+        "The file will be saved to the workspace directory. "
+        "Returns the local file path for use with other tools like read_file or analyze_text_file."
     )
     description_zh = (
-        "将已授权的 S3/MinIO 对象下载到本轮隔离工作区，返回供文件工具使用的本地路径。"
+        "从 S3/MinIO 存储下载文件到当前运行的隔离工作区。"
+        "支持 s3://bucket/key、/bucket/key 或对象键格式，并返回可供其他工具使用的本地路径。"
     )
 
     inputs = {
@@ -69,7 +71,6 @@ class DownloadFromS3Tool(Tool):
         on_download: object = Field(description="Download synchronization callback", default=None, exclude=True),
     ):
         super().__init__()
-        self.workspace_mapping = None
         # Guard against FieldInfo objects when called without arguments
         _default_ws = "/mnt/nexent"
         if not isinstance(workspace_path, str):
@@ -120,7 +121,7 @@ class DownloadFromS3Tool(Tool):
     def _check_access(self, object_key: str) -> bool:
         """Check if the current user has access to the given object key.
 
-        Mirrors the access rules in backend/management/services/file/service.py:
+        Mirrors the access rules in backend/services/file_management_service.py:
         - knowledge_base/*: all authenticated users
         - images_in_attachments/*: all authenticated users
         - attachments/{user_id}/*: only the owner
@@ -179,8 +180,6 @@ class DownloadFromS3Tool(Tool):
         if not filename:
             raise ValueError(f"Cannot determine filename from S3 path: {object_key}")
 
-        if self.workspace_mapping is not None:
-            return self.workspace_mapping.resolve_file(filename, self.workspace_path)
         workspace = Path(self.workspace_path).resolve()
         local_path = (workspace / filename).resolve()
         try:
@@ -255,9 +254,6 @@ class DownloadFromS3Tool(Tool):
             }
             if self.on_download is not None:
                 self.on_download(dict(result))
-            if self.workspace_mapping is not None:
-                result["local_path"] = str(self.workspace_mapping.to_container(local_path))
-                result["relative_path"] = Path(relative_path).as_posix()
             return json.dumps(result, ensure_ascii=False)
 
         except ValueError as e:

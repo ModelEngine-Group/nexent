@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import type {
   ClarificationAnswer,
   ClarificationForm,
@@ -7,7 +5,6 @@ import type {
   ClarificationQuestion,
   HumanInteractionEvent,
   RuntimeClarificationQuestion,
-  PersistedClarificationResponse,
 } from "../types/clarification";
 
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -93,10 +90,7 @@ export function parseClarification(value: unknown): ClarificationForm | null {
         type: item.type as RuntimeClarificationQuestion["type"],
         title: item.title,
         required: item.required !== false,
-        options: options.map((option) => ({
-          id: option.id,
-          label: option.label,
-        })),
+        options,
         allow_other: item.allow_other === true,
         placeholder:
           typeof item.placeholder === "string" ? item.placeholder : "",
@@ -212,8 +206,7 @@ export function appendClarificationPart(
   parts: ContentPart[],
   content: unknown,
   unitIndex?: number,
-  completed?: boolean,
-  response?: PersistedClarificationResponse
+  completed?: boolean
 ): boolean {
   const form = parseClarification(content);
   if (!form) return false;
@@ -224,66 +217,9 @@ export function appendClarificationPart(
       (part.data as ClarificationMessageData)?.unitIndex === unitIndex
   );
   const data: ClarificationMessageData = { form, unitIndex, completed };
-  if (
-    response &&
-    response.unit_index === unitIndex &&
-    JSON.stringify(response.form) === JSON.stringify(form)
-  ) {
-    data.answers = response.answers;
-    data.submitted = true;
-  }
   if (existing) existing.data = data;
   else parts.push({ type: "data", name: "clarification", data });
   return true;
-}
-
-/** Malformed historic responses must not prevent loading the conversation. */
-export function parseClarificationResponse(
-  value: unknown
-): PersistedClarificationResponse | null {
-  if (
-    !record(value) ||
-    value.schema_version !== 1 ||
-    !Number.isSafeInteger(value.source_message_id) ||
-    Number(value.source_message_id) <= 0 ||
-    !Number.isSafeInteger(value.unit_index) ||
-    Number(value.unit_index) < 0 ||
-    !Array.isArray(value.answers)
-  )
-    return null;
-  const form = parseClarification(value.form);
-  if (!form || value.answers.length !== form.questions.length) return null;
-  const answers: ClarificationAnswer[] = [];
-  for (const answer of value.answers) {
-    if (
-      !record(answer) ||
-      typeof answer.questionId !== "string" ||
-      !(
-        typeof answer.value === "string" ||
-        (Array.isArray(answer.value) &&
-          answer.value.every((item) => typeof item === "string"))
-      ) ||
-      !(answer.otherText == null || typeof answer.otherText === "string")
-    )
-      return null;
-    answers.push({
-      questionId: answer.questionId,
-      value: answer.value as string | string[],
-      otherText: (answer.otherText as string | null) ?? null,
-    });
-  }
-  try {
-    formatClarificationQuery(form, answers, "en");
-    return {
-      schema_version: 1,
-      form,
-      answers,
-      source_message_id: Number(value.source_message_id),
-      unit_index: Number(value.unit_index),
-    };
-  } catch {
-    return null;
-  }
 }
 
 export function isClarificationFallback(

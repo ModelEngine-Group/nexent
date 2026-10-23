@@ -2,19 +2,12 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 import subprocess
 import sys
 
 
 def _run(code: str) -> None:
-    environment = os.environ.copy()
-    sdk_root = Path(__file__).resolve().parents[4] / "sdk"
-    environment["PYTHONPATH"] = os.pathsep.join(
-        [str(sdk_root), environment.get("PYTHONPATH", "")]
-    )
-    subprocess.run([sys.executable, "-c", code], check=True, env=environment)
+    subprocess.run([sys.executable, "-c", code], check=True)
 
 
 def test_agent_context_package_warns_and_reexports_canonical_symbols():

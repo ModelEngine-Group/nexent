@@ -70,34 +70,34 @@ type MemoryForm = {
 
 const scopeMeta: Record<
   MemoryScope,
-  { labelKey: string; descriptionKey: string; icon: typeof Building2 }
+  { labelKey: string; description: string; icon: typeof Building2 }
 > = {
   tenant: {
     labelKey: "memory.longTerm.scope.tenant",
-    descriptionKey: "memory.scope.tenant.description",
+    description: "组织范围内共享的全局记忆",
     icon: Building2,
   },
   user: {
     labelKey: "memory.longTerm.scope.user",
-    descriptionKey: "memory.scope.user.description",
+    description: "与当前用户偏好相关的记忆",
     icon: UserRound,
   },
   agent: {
     labelKey: "memory.longTerm.scope.agent",
-    descriptionKey: "memory.scope.agent.description",
+    description: "由智能体运行过程生成的记忆",
     icon: Bot,
   },
 };
 
-const typeMap: Record<MemoryType, { labelKey: string; color: string }> = {
-  long_term: { labelKey: "memory.type.long_term", color: "blue" },
-  short_term: { labelKey: "memory.type.short_term", color: "default" },
+const typeMap: Record<MemoryType, { label: string; color: string }> = {
+  long_term: { label: "长期记忆", color: "blue" },
+  short_term: { label: "短期记忆", color: "default" },
 };
 
-const statusMap: Record<MemoryStatus, { labelKey: string; color: string }> = {
-  active: { labelKey: "memory.status.active", color: "green" },
-  archived: { labelKey: "memory.status.archived", color: "default" },
-  disabled: { labelKey: "memory.status.disabled", color: "orange" },
+const statusMap: Record<MemoryStatus, { label: string; color: string }> = {
+  active: { label: "生效中", color: "green" },
+  archived: { label: "已归档", color: "default" },
+  disabled: { label: "已停用", color: "orange" },
 };
 
 const defaultConfig: MemoryConfig = {
@@ -156,10 +156,10 @@ export function MemoryManager() {
           [targetScope]: syncResult.records,
         }));
         if (syncResult.failedCount > 0) {
-          message.warning(t("memory.manager.refreshPartialFail"));
+          message.warning("部分记忆状态同步失败，请稍后重试");
         }
       } catch {
-        message.error(t("memory.manager.loadListFailed"));
+        message.error("记忆列表加载失败");
       } finally {
         setLoadingByScope((current) => ({
           ...current,
@@ -244,10 +244,10 @@ export function MemoryManager() {
       }
     });
     return [
-      { value: "all", label: t("memory.manager.agentFilter.all") },
+      { value: "all", label: "全部智能体" },
       ...Array.from(options, ([value, label]) => ({ value, label })),
     ];
-  }, [recordsByScope.agent, t]);
+  }, [recordsByScope.agent]);
 
   const conversationOptions = useMemo(() => {
     const options = new Map<string, string>();
@@ -255,18 +255,15 @@ export function MemoryManager() {
       if (record.conversation_id) {
         options.set(
           record.conversation_id,
-          record.conversation_title ||
-            t("memory.manager.conversationFallback", {
-              id: record.conversation_id,
-            })
+          record.conversation_title || `会话 ${record.conversation_id}`
         );
       }
     });
     return [
-      { value: "all", label: t("memory.manager.conversationFilter.all") },
+      { value: "all", label: "全部会话" },
       ...Array.from(options, ([value, label]) => ({ value, label })),
     ];
-  }, [recordsByScope.agent, t]);
+  }, [recordsByScope.agent]);
 
   useEffect(() => {
     return subscribeMemorySwitch((enabled) => {
@@ -319,23 +316,19 @@ export function MemoryManager() {
           content: values.content,
           status: values.status,
         });
-        message.success(t("memory.manager.updateSuccess"));
+        message.success("记忆已更新");
       } else {
         await createMemoryRecord({
           layer: scope,
           memory_type: "long_term",
           content: values.content,
         });
-        message.success(t("memory.manager.createSuccess"));
+        message.success("记忆已创建");
       }
       setEditorOpen(false);
       await refreshRecords(scope);
     } catch {
-      message.error(
-        editing
-          ? t("memory.manager.updateFailed")
-          : t("memory.manager.createFailed")
-      );
+      message.error(editing ? "记忆更新失败" : "记忆创建失败");
     }
   };
 
@@ -344,10 +337,10 @@ export function MemoryManager() {
     const targetScope = scope;
     modal.confirm({
       centered: true,
-      title: t("memory.manager.deleteConfirmTitle"),
-      content: t("memory.manager.deleteConfirmContent"),
-      okText: t("memory.manager.deleteConfirmOk"),
-      cancelText: t("memory.manager.cancel"),
+      title: "删除这条记忆？",
+      content: "删除后将无法恢复，请确认是否继续。",
+      okText: "确认删除",
+      cancelText: "取消",
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
@@ -358,9 +351,9 @@ export function MemoryManager() {
               (item) => item.memory_id !== record.memory_id
             ),
           }));
-          message.success(t("memory.manager.deleteSuccess"));
+          message.success("记忆已删除");
         } catch {
-          message.error(t("memory.manager.deleteFailed"));
+          message.error("记忆删除失败");
         }
       },
     });
@@ -368,17 +361,13 @@ export function MemoryManager() {
 
   const columns: TableProps<MemoryRecord>["columns"] = [
     {
-      title: t("memory.manager.field.content"),
+      title: "记忆内容",
       dataIndex: "content",
       key: "content",
       render: (content: string) => (
         <Paragraph
           className="memory-content"
-          ellipsis={{
-            rows: 2,
-            expandable: true,
-            symbol: t("memory.manager.column.expand"),
-          }}
+          ellipsis={{ rows: 2, expandable: true, symbol: "展开" }}
         >
           {content}
         </Paragraph>
@@ -387,7 +376,7 @@ export function MemoryManager() {
     ...(scope === "agent"
       ? [
           {
-            title: t("memory.manager.column.agentName"),
+            title: "智能体名称",
             dataIndex: "agent_name",
             key: "agent_name",
             width: 160,
@@ -395,7 +384,7 @@ export function MemoryManager() {
               value || (record.agent_id ? `Agent ${record.agent_id}` : "-"),
           },
           {
-            title: t("memory.manager.column.conversation"),
+            title: "来源对话",
             dataIndex: "conversation_title",
             key: "conversation_title",
             width: 200,
@@ -407,10 +396,7 @@ export function MemoryManager() {
                   )}`}
                   className="memory-conversation-link"
                 >
-                  {value ||
-                    t("memory.manager.conversationFallback", {
-                      id: record.conversation_id,
-                    })}
+                  {value || `会话 ${record.conversation_id}`}
                 </Link>
               ) : (
                 "-"
@@ -419,33 +405,29 @@ export function MemoryManager() {
         ]
       : []),
     {
-      title: t("memory.manager.field.type"),
+      title: "记忆类型",
       dataIndex: "memory_type",
       key: "memory_type",
       width: 130,
       render: (value: MemoryType) => (
         <Tag color={typeMap[value]?.color}>
-          {typeMap[value]
-            ? t(typeMap[value].labelKey)
-            : value}
+          {typeMap[value]?.label ?? value}
         </Tag>
       ),
     },
     {
-      title: t("memory.manager.field.status"),
+      title: "状态",
       dataIndex: "status",
       key: "status",
       width: 110,
       render: (value: MemoryStatus) => (
         <Tag color={statusMap[value]?.color}>
-          {statusMap[value]
-            ? t(statusMap[value].labelKey)
-            : value}
+          {statusMap[value]?.label ?? value}
         </Tag>
       ),
     },
     {
-      title: t("memory.manager.column.createTime"),
+      title: "创建时间",
       dataIndex: "create_time",
       key: "create_time",
       width: 190,
@@ -457,7 +439,7 @@ export function MemoryManager() {
       ),
     },
     {
-      title: t("memory.manager.column.actions"),
+      title: "操作",
       key: "actions",
       align: "right",
       width: scope === "agent" ? 72 : 112,
@@ -466,13 +448,13 @@ export function MemoryManager() {
           <Tooltip
             title={
               scope === "agent" && record.embedding_compatible === false
-                ? t("memory.manager.editIncompatibleTooltip")
-                : t("memory.manager.editTooltip")
+                ? "当前向量模型与该记忆不兼容，无法编辑"
+                : "编辑"
             }
           >
             <Button
               type="text"
-              aria-label={t("memory.manager.editAriaLabel")}
+              aria-label="编辑记忆"
               icon={<Edit3 size={17} />}
               disabled={
                 scope === "agent" && record.embedding_compatible === false
@@ -480,11 +462,11 @@ export function MemoryManager() {
               onClick={() => openEdit(record)}
             />
           </Tooltip>
-          <Tooltip title={t("memory.manager.deleteTooltip")}>
+          <Tooltip title="删除">
             <Button
               type="text"
               danger
-              aria-label={t("memory.manager.deleteAriaLabel")}
+              aria-label="删除记忆"
               icon={<Trash2 size={17} />}
               onClick={() => confirmDelete(record)}
             />
@@ -556,10 +538,8 @@ export function MemoryManager() {
           className="scope-intro"
         >
           <div>
-            <Title level={4}>
-              {t("memory.manager.scopeTitle", { scope: t(meta.labelKey) })}
-            </Title>
-            <Text type="secondary">{t(meta.descriptionKey)}</Text>
+            <Title level={4}>{t(meta.labelKey)} 记忆</Title>
+            <Text type="secondary">{meta.description}</Text>
           </div>
           {scope === "user" && (
             <Button
@@ -567,7 +547,7 @@ export function MemoryManager() {
               icon={<Plus size={17} />}
               onClick={openCreate}
             >
-              {t("memory.manager.createButton")}
+              新建记忆
             </Button>
           )}
           {scope === "tenant" && (
@@ -577,7 +557,7 @@ export function MemoryManager() {
                 icon={<Plus size={17} />}
                 onClick={openCreate}
               >
-                {t("memory.manager.createButton")}
+                新建记忆
               </Button>
             </Can>
           )}
@@ -589,26 +569,26 @@ export function MemoryManager() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             prefix={<Search size={17} aria-hidden="true" />}
-            placeholder={t("memory.manager.searchPlaceholder")}
+            placeholder="搜索记忆内容"
             className="search-input"
           />
           <Select
-            aria-label={t("memory.manager.statusFilterAria")}
+            aria-label="按状态筛选"
             value={statusFilter}
             onChange={setStatusFilter}
             className="status-select"
             options={[
-              { value: "all", label: t("memory.manager.statusFilterAll") },
+              { value: "all", label: "全部状态" },
               ...Object.entries(statusMap).map(([value, meta]) => ({
                 value,
-                label: t(meta.labelKey),
+                label: meta.label,
               })),
             ]}
           />
           {scope === "agent" && (
             <>
               <Select
-                aria-label={t("memory.manager.agentFilterAria")}
+                aria-label="按智能体筛选"
                 value={agentFilter}
                 onChange={setAgentFilter}
                 className="agent-select"
@@ -617,7 +597,7 @@ export function MemoryManager() {
                 optionFilterProp="label"
               />
               <Select
-                aria-label={t("memory.manager.conversationFilterAria")}
+                aria-label="按来源对话筛选"
                 value={conversationFilter}
                 onChange={setConversationFilter}
                 className="conversation-select"
@@ -626,19 +606,16 @@ export function MemoryManager() {
                 optionFilterProp="label"
               />
               <DatePicker.RangePicker
-                aria-label={t("memory.manager.createdRangeAria")}
+                aria-label="按创建时间段筛选"
                 value={createdRange}
                 onChange={(dates) => setCreatedRange(dates)}
                 className="created-range-picker"
-                placeholder={[
-                  t("memory.manager.createdRangeStart"),
-                  t("memory.manager.createdRangeEnd"),
-                ]}
+                placeholder={["开始日期", "结束日期"]}
               />
             </>
           )}
           <Text type="secondary" className="result-count">
-            {t("memory.manager.resultCount", { count: visibleRecords.length })}
+            共 {visibleRecords.length} 条记忆
           </Text>
         </Flex>
 
@@ -657,11 +634,7 @@ export function MemoryManager() {
             pageSizeOptions: [10, 20, 50],
             showSizeChanger: true,
             showTotal: (total, range) =>
-              t("memory.manager.paginationTotal", {
-                start: range[0],
-                end: range[1],
-                total,
-              }),
+              `第 ${range[0]}–${range[1]} 条，共 ${total} 条`,
             position: ["bottomRight"],
           }}
           scroll={{ x: scope === "agent" ? 1180 : 780 }}
@@ -669,7 +642,7 @@ export function MemoryManager() {
             emptyText: (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={t("memory.manager.emptyText")}
+                description="暂无符合条件的记忆"
               />
             ),
           }}
@@ -736,17 +709,9 @@ export function MemoryManager() {
       <Modal
         open={editorOpen}
         centered
-        title={
-          editing
-            ? t("memory.manager.editor.title.edit")
-            : t("memory.manager.editor.title.create")
-        }
-        okText={
-          editing
-            ? t("memory.manager.editor.ok.edit")
-            : t("memory.manager.editor.ok.create")
-        }
-        cancelText={t("memory.manager.cancel")}
+        title={editing ? "编辑记忆" : "新建记忆"}
+        okText={editing ? "保存修改" : "创建记忆"}
+        cancelText="取消"
         onOk={saveMemory}
         onCancel={() => setEditorOpen(false)}
         destroyOnHidden
@@ -761,7 +726,7 @@ export function MemoryManager() {
           <Flex gap={12}>
             <Form.Item
               name="memory_type"
-              label={t("memory.manager.field.type")}
+              label="记忆类型"
               rules={[{ required: true }]}
               className="form-half"
             >
@@ -770,44 +735,37 @@ export function MemoryManager() {
                   .filter(([value]) => !(!editing && value !== "long_term"))
                   .map(([value, meta]) => ({
                     value,
-                    label: t(meta.labelKey),
+                    label: meta.label,
                   }))}
               />
             </Form.Item>
             <Form.Item
               name="status"
-              label={t("memory.manager.field.status")}
+              label="状态"
               rules={[{ required: true }]}
               className="form-half"
             >
               <Select
                 options={Object.entries(statusMap).map(([value, meta]) => ({
                   value,
-                  label: t(meta.labelKey),
+                  label: meta.label,
                 }))}
               />
             </Form.Item>
           </Flex>
           <Form.Item
             name="content"
-            label={t("memory.manager.field.content")}
+            label="记忆内容"
             rules={[
-              {
-                required: true,
-                whitespace: true,
-                message: t("memory.manager.form.contentRequired"),
-              },
-              {
-                max: 500,
-                message: t("memory.manager.form.contentMax"),
-              },
+              { required: true, whitespace: true, message: "请输入记忆内容" },
+              { max: 500, message: "最多输入 500 个字符" },
             ]}
           >
             <Input.TextArea
               rows={6}
               showCount
               maxLength={500}
-              placeholder={t("memory.manager.form.contentPlaceholder")}
+              placeholder="输入希望被记住的信息…"
             />
           </Form.Item>
         </Form>

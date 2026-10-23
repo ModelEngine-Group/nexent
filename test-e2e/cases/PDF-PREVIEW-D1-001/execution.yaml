@@ -1,9 +1,0 @@
-schema_version: '1.0'
-case_id: PDF-PREVIEW-D1-001
-implementations:
-  - framework: custom
-    file: test_render.mjs
-    selector: PDF-PREVIEW-D1-001
-acceptance_bindings:
-  AC-01:
-    - PDF-PREVIEW-D1-001 renders Chinese glyphs with local assets at both deployment paths

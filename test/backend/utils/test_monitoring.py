@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for backend monitoring utilities (OTLP-based).
 
@@ -26,8 +25,6 @@ for name, value in {
     "MONITORING_FASTAPI_INCLUDED_URLS": "",
     "MONITORING_FASTAPI_EXCLUDED_URLS": "",
     "MONITORING_FASTAPI_EXCLUDE_SPANS": "receive,send",
-    "MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS": "search",
-    "MONITORING_EXCLUDED_SPAN_NAMES": "knowledge.process.submit",
     "MONITORING_TRACE_CONTENT_MODE": "summary",
     "MONITORING_TRACE_MAX_CHARS": "4000",
     "MONITORING_TRACE_MAX_ITEMS": "20",
@@ -41,7 +38,7 @@ fake_consts_package.const = fake_consts
 sys.modules.setdefault("consts", fake_consts_package)
 sys.modules.setdefault("consts.const", fake_consts)
 
-from infrastructure.observability.bootstrap import monitoring_manager
+from backend.utils.monitoring import monitoring_manager
 
 
 class TestMonitoringUtilsModule:
@@ -178,7 +175,7 @@ class TestMonitoringUtilsModule:
 
     def test_module_attributes(self):
         """Test that the module has correct attributes."""
-        import infrastructure.observability.bootstrap as monitoring_module
+        import backend.utils.monitoring as monitoring_module
 
         assert hasattr(monitoring_module, 'monitoring_manager')
         assert hasattr(monitoring_module, '__all__')
@@ -186,8 +183,8 @@ class TestMonitoringUtilsModule:
 
     def test_singleton_behavior(self):
         """Test that monitoring manager maintains singleton behavior."""
-        from infrastructure.observability.bootstrap import monitoring_manager as manager1
-        from infrastructure.observability.bootstrap import monitoring_manager as manager2
+        from backend.utils.monitoring import monitoring_manager as manager1
+        from backend.utils.monitoring import monitoring_manager as manager2
 
         assert manager1 is manager2
 
@@ -253,7 +250,7 @@ class TestMonitoringUtilsModule:
     def test_module_uses_backend_constants_when_top_level_import_is_unavailable(self, monkeypatch):
         """The module should support imports from the backend package namespace."""
         import importlib
-        import infrastructure.observability.bootstrap as monitoring_module
+        import backend.utils.monitoring as monitoring_module
 
         backend_consts = types.ModuleType("backend.consts.const")
         for name, value in {
@@ -270,8 +267,6 @@ class TestMonitoringUtilsModule:
             "MONITORING_FASTAPI_INCLUDED_URLS": "",
             "MONITORING_FASTAPI_EXCLUDED_URLS": "",
             "MONITORING_FASTAPI_EXCLUDE_SPANS": "receive,send",
-            "MONITORING_EXCLUDED_ELASTICSEARCH_OPERATIONS": "search",
-            "MONITORING_EXCLUDED_SPAN_NAMES": "knowledge.process.submit",
             "MONITORING_TRACE_CONTENT_MODE": "summary",
             "MONITORING_TRACE_MAX_CHARS": "4000",
             "MONITORING_TRACE_MAX_ITEMS": "20",

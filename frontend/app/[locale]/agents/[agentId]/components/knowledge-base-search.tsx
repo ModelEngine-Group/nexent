@@ -1,23 +1,12 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
-import { SELECTED_RESOURCE_HOVER } from "@/const/selectedResourceStyles";
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
 import { useTranslation } from "react-i18next";
-import { Button, Modal, Spin, Tag, Tooltip } from "antd";
-import {
-  AlertTriangle,
-  Database,
-  ExternalLink,
-  Settings,
-  Trash2,
-  Plus,
-} from "lucide-react";
+import { Button, Modal, Spin, Tag } from "antd";
+import { Settings, Plus } from "lucide-react";
 
-import { KnowledgeDrawer } from "@/components/resource-picker/KnowledgeDrawer";
+import KnowledgeBaseSelectorModal from "@/components/tool-config/KnowledgeBaseSelectorModal";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useKnowledgeBasesForToolConfig } from "@/hooks/useKnowledgeBaseSelector";
 import { useToolList } from "@/hooks/agent/useToolList";
@@ -31,8 +20,6 @@ import {
 } from "@/lib/managedKnowledgeTools";
 import type { Tool, ToolParam } from "@/types/agentConfig";
 import type { KnowledgeBase } from "@/types/knowledgeBase";
-import { ResourceAddButton } from "@/components/common/ResourceAddButton";
-import type { ResourceSectionProps } from "./resource-section.types";
 
 type KnowledgeSelectorType = "knowledge_base_search" | "aidp_search";
 
@@ -139,8 +126,6 @@ function sanitizeManagedTool(tool: Tool, profile: KnowledgeToolProfile): Tool {
 interface SelectedKnowledgeBase {
   id: string;
   displayName: string;
-  knowledgeBase?: KnowledgeBase;
-  isUnavailable: boolean;
 }
 
 interface KnowledgeBaseConfigState {
@@ -229,8 +214,6 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
         knowledgeBase?.name ||
         selectedDisplayNames[index] ||
         id,
-      knowledgeBase,
-      isUnavailable: !isLoading && !isError && !knowledgeBase,
     };
   });
   const requiresReselection =
@@ -323,20 +306,6 @@ function useKnowledgeBaseConfigState(): KnowledgeBaseConfigState | null {
   };
 }
 
-function KnowledgeBaseUnavailableWarning({ message }: { message: string }) {
-  return (
-    <Tooltip title={message}>
-      <span
-        role="img"
-        aria-label={message}
-        className="inline-flex shrink-0 cursor-help text-amber-600"
-      >
-        <AlertTriangle size={14} aria-hidden="true" />
-      </span>
-    </Tooltip>
-  );
-}
-
 export function KnowledgeBaseConfigActions() {
   const { t } = useTranslation("common");
   const state = useKnowledgeBaseConfigState();
@@ -364,20 +333,22 @@ export function KnowledgeBaseConfigActions() {
         {t("agent.knowledge.button.select")}
       </Button>
 
-      <KnowledgeDrawer
-        open={selectorOpen}
+      <KnowledgeBaseSelectorModal
+        isOpen={selectorOpen}
         onClose={() => setSelectorOpen(false)}
         onConfirm={(knowledgeBaseList) => {
           state.onKnowledgeBaseConfirm(knowledgeBaseList);
           setSelectorOpen(false);
         }}
         selectedIds={state.selectedIds}
+        toolType={state.profile.selectorType}
         maxSelect={state.profile.maxSelect}
-        isAidpSearch={state.profile.selectorType === "aidp_search"}
         knowledgeBases={state.knowledgeBases}
         isLoading={state.isLoading}
-        onRefresh={() => {
-          void state.refetch();
+        showCheckbox
+        title={t("agent.knowledge.selectModal.title")}
+        onSync={async () => {
+          await state.refetch();
         }}
       />
       <Modal
@@ -406,218 +377,9 @@ export function KnowledgeBaseConfigActions() {
   );
 }
 
-export default function KnowledgeBaseConfig({
-  highFidelity = false,
-  renderSection,
-}: ResourceSectionProps = {}) {
+export default function KnowledgeBaseConfig() {
   const { t } = useTranslation("common");
-  const router = useRouter();
   const state = useKnowledgeBaseConfigState();
-  const [selectorOpen, setSelectorOpen] = useState(false);
-  const [configOpen, setConfigOpen] = useState(false);
-  const isReadOnly = useAgentReadOnly();
-
-  if (highFidelity) {
-    const selectedKnowledgeBases = state?.selectedKnowledgeBases ?? [];
-    const isAidpSearch = state?.profile.selectorType === "aidp_search";
-    const content = (
-      <div className="flex flex-col gap-2">
-        <div className="grid grid-cols-1 gap-4 @min-[640px]/agent-config:grid-cols-2">
-          {selectedKnowledgeBases.map((selectedKnowledgeBase) => {
-            const knowledgeBase = selectedKnowledgeBase.knowledgeBase;
-            // The AIDP catalog API returns no counts, so any value here is a
-            // placeholder; do not present it as real file/chunk totals.
-            const metadata =
-              knowledgeBase && !isAidpSearch
-                ? [
-                    knowledgeBase.documentCount !== undefined
-                      ? t("agent.knowledgeBase.card.documents", {
-                          count: knowledgeBase.documentCount,
-                        })
-                      : undefined,
-                    knowledgeBase.chunkCount !== undefined
-                      ? t("agent.knowledgeBase.card.chunks", {
-                          count: knowledgeBase.chunkCount,
-                        })
-                      : undefined,
-                  ].filter((value): value is string => Boolean(value))
-                : [];
-
-            return (
-              <div
-                key={selectedKnowledgeBase.id}
-                data-testid={`agent-selected-knowledge-base-${selectedKnowledgeBase.id}`}
-                className={`flex h-12 min-w-0 items-center rounded-[4px] border border-solid border-[#dfdfdf] bg-white px-3 py-2 shadow-[0_2px_8px_rgba(0,0,0,0.08)] ${SELECTED_RESOURCE_HOVER}`}
-              >
-                <span
-                  data-testid="agent-knowledge-base-icon"
-                  aria-hidden="true"
-                  className="grid size-6 shrink-0 place-items-center rounded-md bg-gradient-to-br from-[#d8caff] via-[#ad8cf4] to-[#8060dc] shadow-[0_2px_6px_rgba(128,96,220,0.24)]"
-                >
-                  <Database size={16} strokeWidth={2} className="text-white" />
-                </span>
-                <div className="mx-2 flex min-w-0 flex-1 items-center gap-2">
-                  <Tooltip title={selectedKnowledgeBase.displayName}>
-                    <span
-                      data-testid="agent-selected-knowledge-base-name"
-                      className="min-w-0 flex-1 truncate text-sm leading-[22px] text-[#191919]"
-                    >
-                      {selectedKnowledgeBase.displayName}
-                    </span>
-                  </Tooltip>
-                  {selectedKnowledgeBase.isUnavailable ? (
-                    <KnowledgeBaseUnavailableWarning
-                      message={t("agent.knowledge.unavailableHint")}
-                    />
-                  ) : null}
-                  {metadata.length > 0 ? (
-                    <Tooltip title={metadata.join(" | ")}>
-                      <span
-                        data-testid="agent-selected-knowledge-base-metadata"
-                        className="flex shrink-0 items-center gap-2 whitespace-nowrap text-xs leading-[18px] text-[#808080]"
-                      >
-                        {metadata.map((value, index) => (
-                          <span
-                            key={`${selectedKnowledgeBase.id}-${index}`}
-                            className="whitespace-nowrap"
-                          >
-                            {value}
-                          </span>
-                        ))}
-                      </span>
-                    </Tooltip>
-                  ) : null}
-                </div>
-                <Tooltip title={t("agent.knowledge.button.configure")}>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Settings size={14} />}
-                    aria-label={`${t("agent.knowledge.button.configure")} ${selectedKnowledgeBase.displayName}`}
-                    disabled={!state || isReadOnly || !state.hasCurrentTool}
-                    onClick={() => setConfigOpen(true)}
-                    className="!size-6 !shrink-0 !p-0 !text-[#777777]"
-                  />
-                </Tooltip>
-                <Tooltip title={t("skillPool.remove")}>
-                  <Button
-                    type="text"
-                    size="small"
-                    icon={<Trash2 size={14} />}
-                    aria-label={`${t("skillPool.remove")} ${selectedKnowledgeBase.displayName}`}
-                    disabled={!state || isReadOnly}
-                    onClick={() =>
-                      state?.onKnowledgeBaseRemove(selectedKnowledgeBase.id)
-                    }
-                    className="!size-6 !shrink-0 !p-0 !text-[#777777] hover:!text-red-500"
-                  />
-                </Tooltip>
-              </div>
-            );
-          })}
-          <ResourceAddButton
-            data-testid="agent-knowledge-base-add-entry"
-            disabled={!state || isReadOnly || state.isLoading}
-            onClick={() => setSelectorOpen(true)}
-          >
-            {t("agentConfig.layout.addKnowledgeBase")}
-          </ResourceAddButton>
-        </div>
-        {state?.isLoading ? <Spin size="small" /> : null}
-        {state?.isError ? (
-          <div className="flex items-center justify-between text-xs text-red-600">
-            <span>{t("agent.knowledge.loadFailed")}</span>
-            <Button size="small" onClick={() => state.refetch()}>
-              {t("common.retry")}
-            </Button>
-          </div>
-        ) : null}
-        {state?.requiresReselection ? (
-          <p className="text-xs leading-[22px] text-[#808080]">
-            {t("agent.knowledge.reselectionRequired")}
-          </p>
-        ) : null}
-      </div>
-    );
-    const actions = (
-      <div className="flex h-6 items-center gap-2">
-        <Button
-          type="text"
-          size="small"
-          icon={<Settings size={14} />}
-          aria-label={t("agent.knowledge.button.configure")}
-          disabled={!state || isReadOnly || !state.hasCurrentTool}
-          onClick={() => setConfigOpen(true)}
-          className="!size-6 !p-0 !text-[#191919]"
-        />
-        <Button
-          type="link"
-          disabled={isReadOnly}
-          onClick={() => router.push("/knowledges")}
-          className="!h-[22px] !p-0 !text-sm !font-normal !leading-[22px] !tracking-[0px] !text-[#2673e5]"
-        >
-          <span className="inline-flex items-center gap-1">
-            {t("agentConfig.layout.newKnowledgeBase")}
-            <ExternalLink size={14} />
-          </span>
-        </Button>
-      </div>
-    );
-    return (
-      <>
-        {renderSection ? (
-          renderSection(content, actions)
-        ) : (
-          <div className="flex flex-col gap-2">
-            <div className="flex justify-end">{actions}</div>
-            {content}
-          </div>
-        )}
-        {state ? (
-          <>
-            <KnowledgeDrawer
-              open={selectorOpen}
-              onClose={() => setSelectorOpen(false)}
-              onConfirm={(knowledgeBaseList) => {
-                state.onKnowledgeBaseConfirm(knowledgeBaseList);
-                setSelectorOpen(false);
-              }}
-              selectedIds={state.selectedIds}
-              maxSelect={state.profile.maxSelect}
-              isAidpSearch={state.profile.selectorType === "aidp_search"}
-              knowledgeBases={state.knowledgeBases}
-              isLoading={state.isLoading}
-              onRefresh={() => {
-                void state.refetch();
-              }}
-            />
-            <Modal
-              open={configOpen}
-              title={t("agent.knowledge.configModal.title")}
-              onCancel={() => setConfigOpen(false)}
-              footer={null}
-            >
-              <KnowledgeRetrievalParamsForm
-                params={state.configurableParams}
-                values={Object.fromEntries(
-                  state.configurableParams.map((param) => [
-                    param.name,
-                    getParamValue(state.knowledgeSearchTool, param.name),
-                  ])
-                )}
-                onChange={(name, value) => {
-                  const param = state.configurableParams.find(
-                    (item) => item.name === name
-                  );
-                  if (param) state.onParamChange(param, value);
-                }}
-              />
-            </Modal>
-          </>
-        ) : null}
-      </>
-    );
-  }
 
   if (!state) {
     return <Spin size="small" />;
@@ -649,15 +411,8 @@ export default function KnowledgeBaseConfig({
               }
               className="!inline-flex !items-center !gap-1 !whitespace-nowrap !px-2.5 !py-1 !text-sm !text-foreground !bg-primary/5 !border !border-primary/20 !rounded-full transition-colors hover:!border-primary/40 hover:!shadow-sm"
             >
-              <span className="inline-flex min-w-0 max-w-full items-center gap-1">
-                <span className="max-w-full truncate">
-                  {knowledgeBase.displayName}
-                </span>
-                {knowledgeBase.isUnavailable ? (
-                  <KnowledgeBaseUnavailableWarning
-                    message={t("agent.knowledge.unavailableHint")}
-                  />
-                ) : null}
+              <span className="max-w-full truncate">
+                {knowledgeBase.displayName}
               </span>
             </Tag>
           ))}

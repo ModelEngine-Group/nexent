@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 from unittest.mock import AsyncMock, MagicMock
 from types import SimpleNamespace
 import sys
@@ -62,7 +60,6 @@ async def test_create_agent_run_info_forwards_all_workbench_runtime_overrides(mo
     frozen_snapshot = [{"name": "demo", "_snapshot_root": "/snapshot"}]
     materialize = MagicMock(return_value=frozen_snapshot)
     agent_config = MagicMock(model_name="model")
-    monkeypatch.setattr(create_agent_info, "get_model_by_model_id", lambda *a, **k: {"model_type": "llm", "connect_status": "available"})
     agent_config.sandbox_policy = None
     create_config = AsyncMock(return_value=agent_config)
     monkeypatch.setattr(create_agent_info, "_materialize_runtime_skill_snapshot", materialize)
@@ -138,9 +135,6 @@ def test_skill_script_tools_remove_mutating_tool_for_runtime_snapshot(monkeypatc
             self.__dict__.update(kwargs)
 
     monkeypatch.setattr(create_agent_info, "ToolConfig", Tool)
-    skill_service = types.ModuleType("management.services.skill.service")
-    skill_service.SkillService = SimpleNamespace(resolve_effective_config=lambda **kwargs: {"format": "pdf"})
-    monkeypatch.setitem(sys.modules, "management.services.skill.service", skill_service)
     tools = create_agent_info._get_skill_script_tools(
         agent_id=7,
         tenant_id="tenant-a",
@@ -165,18 +159,14 @@ def test_root_generation_overlay_skips_children_and_adds_root_alias():
             self.temperature = temperature
             self.top_p = top_p
             self.extra_body = extra_body
-            self.enable_thinking = True
-            self.reasoning_capability = None
-            self.reasoning_effort = None
-            self.reasoning_budget_tokens = None
 
-        def model_copy(self, *, deep):
+        def model_copy(self, *, deep, update):
             assert deep is True
             return Model(
-                self.cite_name,
-                self.temperature,
-                self.top_p,
-                dict(self.extra_body) if self.extra_body else None,
+                update["cite_name"],
+                update["temperature"],
+                update["top_p"],
+                update["extra_body"],
             )
 
     child = Model("child")
@@ -219,9 +209,9 @@ async def test_create_agent_config_filters_root_knowledge_tools_before_cycle_che
         lambda **_kwargs: {"name": "root"},
     )
     monkeypatch.setattr(create_agent_info, "query_sub_agent_relations", lambda **_kwargs: [])
-    runtime_mount = types.ModuleType("management.services.knowledge_base.mount")
+    runtime_mount = types.ModuleType("services.runtime_knowledge_mount")
     runtime_mount.MANAGED_CLASSES = {"knowledge_search"}
-    monkeypatch.setitem(sys.modules, "management.services.knowledge_base.mount", runtime_mount)
+    monkeypatch.setitem(sys.modules, "services.runtime_knowledge_mount", runtime_mount)
 
     with pytest.raises(WorkbenchError, match="WORKBENCH_AGENT_CYCLE"):
         await create_agent_info.create_agent_config(

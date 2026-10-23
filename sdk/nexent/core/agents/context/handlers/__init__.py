@@ -5,7 +5,7 @@ from .tool_handler import ToolHandler
 from .skill_handler import SkillHandler
 from .memory_handler import MemoryHandler
 from .knowledge_base_handler import KnowledgeBaseHandler
-from .worker_agent_handler import WorkerAgentHandler
+from .managed_agent_handler import ManagedAgentHandler
 from .external_agent_handler import ExternalAgentHandler
 from .history_turn_handler import HistoryTurnHandler
 from .tool_call_result_handler import ToolCallResultHandler
@@ -16,7 +16,7 @@ ALL_HANDLERS = [
     SkillHandler,
     MemoryHandler,
     KnowledgeBaseHandler,
-    WorkerAgentHandler,
+    ManagedAgentHandler,
     ExternalAgentHandler,
     HistoryTurnHandler,
     ToolCallResultHandler,

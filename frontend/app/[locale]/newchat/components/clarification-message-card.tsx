@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useAui, useAuiState } from "@assistant-ui/react";
@@ -49,8 +47,7 @@ export function ClarificationMessageCard({
       thread.getState().isRunning ||
       thread.getState().messages.at(-1)?.id !== messageId ||
       !complete ||
-      payload?.completed === false ||
-      payload?.submitted === true
+      payload?.completed === false
     ) {
       throw new Error(t("chat.clarification.unavailable"));
     }
@@ -72,29 +69,16 @@ export function ClarificationMessageCard({
       thread.append({
         role: "user",
         content: [{ type: "text", text: query }],
-        metadata: {
-          custom: {
-            clarificationResponse: {
-              schema_version: 1,
-              form,
-              unit_index: payload?.unitIndex ?? null,
-              answers,
-            },
-          },
-        },
         runConfig: { ...config, custom: { ...config.custom, ...feedback } },
       });
     });
   };
   return (
     <ClarificationCard
-      key={`${messageId}:${payload?.unitIndex}:${payload?.submitted === true}`}
       dataSlot="clarification-message"
       title={t("chat.clarification.title")}
       description={t("chat.clarification.description")}
       questions={toCardQuestions(form.questions)}
-      initialAnswers={payload?.answers}
-      submitted={payload?.submitted}
       readOnly={
         readOnly ||
         disabled ||

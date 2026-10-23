@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Audit entries recorded on successful OAuth login, signup and unlink operations.
 
 Feature-scoped companion to ``test_oauth_app.py``. The real audit service is
@@ -18,7 +17,7 @@ import pytest
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend"))
 sys.path.insert(0, backend_dir)
 
-_STUBBED_MODULES = ["management.services.monitor.audit", "management.services.permission.identity.oauth",
+_STUBBED_MODULES = ["services.audit_service", "services.oauth_service",
                     "database.oauth_account_db", "apps.oauth_app"]
 _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in _STUBBED_MODULES}
 
@@ -26,15 +25,15 @@ _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in _STUBBED_MODULES}
 # MagicMock, which would shadow the audit service; loading it from its file keeps
 # the audit lines real.
 _audit_spec = importlib.util.spec_from_file_location(
-    "management.services.monitor.audit", os.path.join(backend_dir, "management", "services", "monitor", "audit.py")
+    "services.audit_service", os.path.join(backend_dir, "services", "audit_service.py")
 )
 _audit_service = importlib.util.module_from_spec(_audit_spec)
 _audit_spec.loader.exec_module(_audit_service)
-sys.modules["management.services.monitor.audit"] = _audit_service
+sys.modules["services.audit_service"] = _audit_service
 
 # Import-time isolation: the provider client and the account store reach
 # external services that these audit assertions do not exercise.
-sys.modules["management.services.permission.identity.oauth"] = MagicMock()
+sys.modules["services.oauth_service"] = MagicMock()
 sys.modules["database.oauth_account_db"] = MagicMock()
 # Rebuild the app module against the collaborators above instead of reusing one
 # a legacy file already imported against its own stubs.

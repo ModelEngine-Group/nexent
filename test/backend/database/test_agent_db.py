@@ -1,17 +1,10 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import sys
-from pathlib import Path
 import types
 import pytest
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 from sqlalchemy import Boolean, Column, Integer, MetaData, String, Table, column, create_engine, literal_column, table
 from sqlalchemy.orm import Session
-
-from test.common.module_stubs import capture_module_stubs
-
-_modules_before_stubs = sys.modules.copy()
 
 # 首先模拟consts模块，避免ModuleNotFoundError
 consts_mock = MagicMock()
@@ -60,24 +53,18 @@ class TenantResourceLimitError(ValueError):
 
 exceptions_mock = types.ModuleType("consts.exceptions")
 exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
-class AgentNotFoundError(ValueError):
-    """Test stub preserving the Agent lookup error type."""
-
-
-exceptions_mock.AgentNotFoundError = AgentNotFoundError
 sys.modules["consts.exceptions"] = exceptions_mock
 
 # 模拟utils模块
-utils_mock = types.ModuleType("utils")
-utils_mock.__path__ = [str(Path(__file__).resolve().parents[3] / "backend/utils")]
+utils_mock = MagicMock()
 utils_mock.auth_utils = MagicMock()
 utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="test_user_id")
 
 # 将模拟的utils模块添加到sys.modules中
 sys.modules['utils'] = utils_mock
-sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
+sys.modules['utils.auth_utils'] = utils_mock.auth_utils
 
-# Stub management.db.serialization to satisfy imports in backend.database.agent_db
+# Stub utils.str_utils to satisfy imports in backend.database.agent_db
 str_utils_mock = MagicMock()
 str_utils_mock.convert_list_to_string = MagicMock(
     side_effect=lambda items: "" if items is None else ",".join(str(i) for i in items)
@@ -85,7 +72,7 @@ str_utils_mock.convert_list_to_string = MagicMock(
 str_utils_mock.convert_string_to_list = MagicMock(
     side_effect=lambda s: [] if not s else [int(x) for x in str(s).split(",") if str(x).strip().isdigit()]
 )
-sys.modules['management.db.serialization'] = str_utils_mock
+sys.modules['utils.str_utils'] = str_utils_mock
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -134,13 +121,6 @@ sys.modules['database.db_models'] = db_models_mock
 sys.modules['backend.database.db_models'] = db_models_mock
 
 # 现在可以安全地导入被测试的模块
-for module_name, function_name in (
-    ("database.tool_db", "query_tool_knowledge_references"),
-):
-    collaborator = types.ModuleType(module_name)
-    setattr(collaborator, function_name, MagicMock())
-    sys.modules[module_name] = collaborator
-
 from backend.database.agent_db import (
     search_agent_info_by_agent_id,
     search_agent_id_by_agent_name,
@@ -164,7 +144,7 @@ from consts.exceptions import TenantResourceLimitError
 
 
 @pytest.fixture(autouse=True)
-def _default_to_ordinary_agent(monkeypatch, _isolated_imports):
+def _default_to_ordinary_agent(monkeypatch):
     """Keep general Agent DB tests scoped to an ordinary Agent."""
     monkeypatch.setattr(
         "backend.database.agent_db.is_system_agent",
@@ -186,11 +166,15 @@ class MockAgent:
         self.author = None
         self.model_ids = None
         self.max_steps = 5
-        self.prompt = None
+        self.duty_prompt = None
+        self.constraint_prompt = None
+        self.few_shots_prompt = None
         self.parent_agent_id = None
         self.provide_run_summary = None
         self.is_main_agent = True
         self.business_description = None
+        self.prompt_template_id = None
+        self.prompt_template_name = None
         self.group_ids = None
         self.is_new = True
         self.requested_output_tokens = None
@@ -256,7 +240,7 @@ def test_search_agent_info_by_agent_id_not_found(monkeypatch, mock_session):
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
 
-    with pytest.raises(AgentNotFoundError, match="agent not found"):
+    with pytest.raises(ValueError, match="agent not found"):
         search_agent_info_by_agent_id(999, "tenant1")
 
 def test_search_agent_id_by_agent_name_success(monkeypatch, mock_session):
@@ -293,7 +277,7 @@ def test_search_agent_id_by_agent_name_not_found(monkeypatch, mock_session):
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
 
-    with pytest.raises(AgentNotFoundError, match="agent not found"):
+    with pytest.raises(ValueError, match="agent not found"):
         search_agent_id_by_agent_name("nonexistent_agent", "tenant1")
 
 
@@ -451,16 +435,12 @@ def test_create_agent_success(monkeypatch, mock_session, requested_policy, expec
     monkeypatch.setattr("backend.database.agent_db.as_dict", lambda obj: obj.__dict__)
     monkeypatch.setattr("backend.database.agent_db._enforce_tenant_agent_limit", lambda *_args: None)
     def make_agent(**kwargs):
-        assert "constraint_prompt" not in kwargs
-        assert "few_shots_prompt" not in kwargs
-        assert kwargs["prompt"] == "Complete prompt"
         mock_agent.enable_protocol_repair_retry = kwargs["enable_protocol_repair_retry"]
         return mock_agent
 
     monkeypatch.setattr("backend.database.agent_db.AgentInfo", make_agent)
 
-    agent_info = {"name": "new_agent", "description": "test description",
-                  "prompt": "Complete prompt"}
+    agent_info = {"name": "new_agent", "description": "test description"}
     if requested_policy is not None:
         agent_info["enable_protocol_repair_retry"] = requested_policy
     result = create_agent(agent_info, "tenant1", "user1")
@@ -556,17 +536,10 @@ def test_create_system_agent_skips_tenant_quota(monkeypatch, mock_session):
     session.add.assert_called_once()
 
 
-@pytest.mark.parametrize("fields,expected", [
-    ({"description": "updated description"}, "Existing"),
-    ({"prompt": "Replacement"}, "Replacement"),
-    ({"prompt": ""}, ""),
-    ({"prompt": None}, "Existing"),
-])
-def test_update_agent_success(monkeypatch, mock_session, fields, expected):
+def test_update_agent_success(monkeypatch, mock_session):
     """测试成功更新agent"""
     session, query = mock_session
     mock_agent = MockAgent()
-    mock_agent.prompt = "Existing"
 
     mock_first = MagicMock()
     mock_first.return_value = mock_agent
@@ -581,19 +554,17 @@ def test_update_agent_success(monkeypatch, mock_session, fields, expected):
     monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
 
     agent_info = MagicMock()
-    agent_info.__dict__ = fields
+    agent_info.__dict__ = {"name": "updated_agent", "description": "updated description"}
 
     update_agent(1, agent_info, "user1")
 
     assert mock_agent.updated_by == "user1"
 
-    assert mock_agent.prompt == expected
-    assert not hasattr(mock_agent, "constraint_prompt")
-    assert not hasattr(mock_agent, "few_shots_prompt")
-
 
 def test_cmsr_006_update_preserves_explicitly_disabled_protocol_repair(monkeypatch, mock_session):
     """A partial update must not reset a disabled protocol repair policy."""
+    from backend.consts.model import AgentInfoRequest
+
     session, query = mock_session
     mock_agent = MockAgent()
     query.filter.return_value.first.return_value = mock_agent
@@ -602,10 +573,10 @@ def test_cmsr_006_update_preserves_explicitly_disabled_protocol_repair(monkeypat
     monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
 
-    update_agent(1, SimpleNamespace(enable_protocol_repair_retry=False), "user1")
+    update_agent(1, AgentInfoRequest(enable_protocol_repair_retry=False), "user1")
     assert mock_agent.enable_protocol_repair_retry is False
 
-    update_agent(1, SimpleNamespace(description="updated"), "user1")
+    update_agent(1, AgentInfoRequest(description="updated"), "user1")
     assert mock_agent.enable_protocol_repair_retry is False
 
 def test_update_agent_skips_none_and_converts_group_ids(monkeypatch, mock_session):
@@ -758,7 +729,6 @@ def agent_list_info_columns(monkeypatch):
         "ingroup_permission": String,
         "description": String,
         "version_no": Integer,
-        "current_version_no": Integer,
         "delete_flag": String,
         "enabled": Boolean,
         "agent_origin": String,
@@ -798,7 +768,7 @@ def test_query_agent_list_candidates_by_tenant_id(
 
     expected_columns = [
         "agent_id", "tenant_id", "name", "display_name", "created_by",
-        "create_time", "group_ids", "ingroup_permission", "current_version_no",
+        "create_time", "group_ids", "ingroup_permission",
     ]
     if include_description:
         expected_columns.append("description")
@@ -831,7 +801,6 @@ def test_agent_list_candidates_exclude_system_agents_before_page_slicing(monkeyp
         Column("create_time", Integer),
         Column("group_ids", String),
         Column("ingroup_permission", String),
-        Column("current_version_no", Integer),
         Column("description", String),
         Column("version_no", Integer),
         Column("delete_flag", String),
@@ -1790,41 +1759,3 @@ def test_update_existing_relations_returns_early_when_empty():
         user_id="user1",
     )
     assert mock_rel.selected_agent_version_no == 1  # unchanged
-
-
-def test_batch_get_agent_main_flags_returns_flag_map(monkeypatch, mock_session):
-    """Batch main-agent lookup maps each agent id to its is_main_agent flag."""
-    from backend.database.agent_db import batch_get_agent_main_flags
-
-    session, query = mock_session
-    mock_filter = MagicMock()
-    mock_filter.all.return_value = [
-        SimpleNamespace(agent_id=10, is_main_agent=True),
-        SimpleNamespace(agent_id=11, is_main_agent=False),
-    ]
-    query.filter.return_value = mock_filter
-
-    mock_ctx = MagicMock()
-    mock_ctx.__enter__.return_value = session
-    mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-
-    assert batch_get_agent_main_flags([10, 11]) == {10: True, 11: False}
-
-
-def test_batch_get_agent_main_flags_returns_empty_without_ids(mock_session):
-    """No ids (or only None entries) short-circuits without querying the DB."""
-    from backend.database.agent_db import batch_get_agent_main_flags
-
-    session, query = mock_session
-    assert batch_get_agent_main_flags([]) == {}
-    assert batch_get_agent_main_flags([None]) == {}
-    query.filter.assert_not_called()
-
-
-_install_module_stubs = capture_module_stubs(_modules_before_stubs)
-
-
-@pytest.fixture(autouse=True)
-def _isolated_imports(monkeypatch):
-    _install_module_stubs(monkeypatch)

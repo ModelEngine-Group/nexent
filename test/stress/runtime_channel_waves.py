@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Run repeated deterministic waves against the production StreamingChannel."""
 
 import argparse
@@ -12,8 +11,8 @@ import sys
 
 sys.path.insert(0, "/opt/backend")
 
-from infrastructure.streaming.channels import StreamingChannel  # noqa: E402
-import infrastructure.streaming.channels as streaming_module  # noqa: E402
+from services.streaming_channel import StreamingChannel  # noqa: E402
+import services.streaming_channel as streaming_module  # noqa: E402
 
 
 def rss_bytes() -> int:

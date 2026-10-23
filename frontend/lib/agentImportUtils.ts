@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import JSZip from "jszip";
 
 /**
@@ -15,40 +13,6 @@ export interface ImportAgentData {
   business_logic_model_id?: number | null;
   business_logic_model_name?: string | null;
   skills?: Array<{ skill_name: string; skill_zip_base64: string }>;
-}
-
-/** Consolidate legacy fields only when decoding an external Agent file. */
-export function normalizeImportedAgentPrompt(fields: Record<string, unknown>): Record<string, unknown> {
-  const values = { ...fields };
-  const keys = ["prompt", "duty_prompt", "constraint_prompt", "constraints_prompt", "few_shots_prompt", "few_shot_prompts"];
-  for (const key of keys) {
-    if (values[key] != null && typeof values[key] !== "string") {
-      throw new Error(`${key} must be a string or null`);
-    }
-  }
-  const consumeAlias = (canonical: string, legacy: string): string | null | undefined => {
-    if (legacy in values) {
-      if (canonical in values && values[canonical] !== values[legacy]) {
-        throw new Error(`${canonical} and legacy ${legacy} must not conflict`);
-      }
-      if (!(canonical in values)) values[canonical] = values[legacy];
-      delete values[legacy];
-    }
-    return values[canonical] as string | null | undefined;
-  };
-  consumeAlias("prompt", "duty_prompt");
-  const constraint = consumeAlias("constraint_prompt", "constraints_prompt") ?? "";
-  const examples = consumeAlias("few_shots_prompt", "few_shot_prompts") ?? "";
-  delete values.constraint_prompt;
-  delete values.few_shots_prompt;
-  const hasContent = (value: string) => /[^ \t\n\r]/.test(value);
-  if (hasContent(constraint) || hasContent(examples)) {
-    values.prompt = [["Responsibilities", values.prompt ?? ""], ["Constraints", constraint], ["Examples", examples]]
-      .filter(([, content]) => hasContent(content as string))
-      .map(([title, content]) => `# ${title}\n${content}`)
-      .join("\n\n");
-  }
-  return values;
 }
 
 /**
@@ -152,13 +116,7 @@ export async function parseAgentImportFile(
       return null;
     }
 
-    const agentInfo = Object.fromEntries(Object.entries(agentData.agent_info).map(([id, fields]) => {
-      if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
-        throw new Error("Agent entries must be objects");
-      }
-      return [id, normalizeImportedAgentPrompt(fields)];
-    }));
-    return { ...agentData, agent_info: agentInfo };
+    return agentData;
   } catch (error) {
     options.onGenericError?.(error);
     return null;

@@ -1,5 +1,4 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Unit tests for ``management.services.memory.extraction``.
+"""Unit tests for ``backend.services.fa_memory_extractor``.
 
 TDD tests written BEFORE the implementation exists.  Covers:
 
@@ -17,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from management.services.memory.extraction import (
+from backend.services.fa_memory_extractor import (
     ExtractionResult,
     FaMemoryExtractor,
 )

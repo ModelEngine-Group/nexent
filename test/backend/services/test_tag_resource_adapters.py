@@ -1,11 +1,10 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import base64
 import json
 from unittest.mock import MagicMock
 
 import pytest
-from management.services.tag.resources import (
+from services.tag_resource_adapters import (
     AIDP_DOCUMENT_PROVIDER,
     AgentTagResourceAdapter,
     AuthenticatedCaller,
@@ -531,7 +530,7 @@ def test_local_document_uses_path_or_url_with_its_provider_scoped_parent():
 # ---------- pure helpers ----------
 
 def test_tenant_matches_requires_explicit_match():
-    from management.services.tag.resources import _tenant_matches
+    from services.tag_resource_adapters import _tenant_matches
 
     assert _tenant_matches({"tenant_id": "tenant-a"}, "tenant-a") is True
     assert _tenant_matches({"tenant_id": "tenant-a"}, "tenant-b") is False
@@ -542,7 +541,7 @@ def test_tenant_matches_requires_explicit_match():
 
 
 def test_permission_capabilities_matrix():
-    from management.services.tag.resources import _permission_capabilities
+    from services.tag_resource_adapters import _permission_capabilities
 
     edit = _permission_capabilities("EDIT")
     assert (edit.can_read, edit.can_edit) == (True, True)
@@ -559,7 +558,7 @@ def test_permission_capabilities_matrix():
 
 
 def test_display_prefers_first_present_field():
-    from management.services.tag.resources import _display
+    from services.tag_resource_adapters import _display
 
     record = {
         "display_name": "Agent A",
@@ -577,7 +576,7 @@ def test_display_prefers_first_present_field():
 
 
 def test_group_ids_handles_none_string_and_collection():
-    from management.services.tag.resources import _group_ids
+    from services.tag_resource_adapters import _group_ids
 
     assert _group_ids(None) == frozenset()
     assert _group_ids("g1, g2,,g3") == frozenset({"g1", "g2", "g3"})
@@ -586,7 +585,7 @@ def test_group_ids_handles_none_string_and_collection():
 
 
 def test_tenant_scoped_capabilities_variants():
-    from management.services.tag.resources import _tenant_scoped_capabilities
+    from services.tag_resource_adapters import _tenant_scoped_capabilities
 
     admin = caller(role="ADMIN")
     # can_edit_all path
@@ -933,7 +932,7 @@ def test_registry_unknown_type_or_missing_tenant_is_not_found():
 
 
 def test_adapter_helper_paths_cover_invalid_references_and_async_callbacks(monkeypatch):
-    from management.services.tag import resources as adapters
+    from services import tag_resource_adapters as adapters
 
     invalid = ResourceReference("unknown", "resource", "unknown")
     assert invalid.normalized_type() is None
@@ -978,7 +977,7 @@ def test_aidp_permission_and_marketplace_error_paths(monkeypatch):
         AidpKbNotFoundError,
         AidpKbPermissionDeniedError,
     )
-    from management.services.tag.resources import (
+    from services.tag_resource_adapters import (
         _require_provider_document_edit_permission,
         _resolve_provider_document_permission,
     )
@@ -1049,7 +1048,7 @@ def test_document_edit_require_raises_lookup_or_value_error_is_not_found():
 
 
 def test_provider_document_helpers_for_local_and_aidp_providers(monkeypatch):
-    from management.services.tag.resources import (
+    from services.tag_resource_adapters import (
         _get_provider_knowledge_base,
         _require_provider_document_edit_permission,
         _resolve_provider_document,
@@ -1068,7 +1067,7 @@ def test_provider_document_helpers_for_local_and_aidp_providers(monkeypatch):
 
     # local provider uses get_knowledge_record + ES file listing
     monkeypatch.setattr(
-        "management.services.tag.resources.get_knowledge_record",
+        "services.tag_resource_adapters.get_knowledge_record",
         lambda *_args, **_kwargs: {"index_name": "kb", "tenant_id": "t"},
     )
     assert _get_provider_knowledge_base(provider="local", knowledge_base_id="kb", tenant_id="t") == {
@@ -1089,7 +1088,7 @@ def test_provider_document_helpers_for_local_and_aidp_providers(monkeypatch):
     es_service.resolve_knowledge_base_permission.return_value = "READ"
     es_service.require_knowledge_base_edit_permission.return_value = None
     monkeypatch.setattr(
-        "management.services.tag.resources.ElasticSearchService",
+        "services.tag_resource_adapters.ElasticSearchService",
         es_service,
     )
     doc = asyncio.run(
@@ -1139,7 +1138,7 @@ def test_provider_document_helpers_for_local_and_aidp_providers(monkeypatch):
     assert aidp_doc["document_name"] == "one.pdf"
 
     # aidp permission resolution via require_permission
-    from management.services.tag.resources import AIDP_DOCUMENT_PROVIDER
+    from services.tag_resource_adapters import AIDP_DOCUMENT_PROVIDER
 
     def fake_require_permission(kb_id, user_id, tenant_id, required):
         class Perm:

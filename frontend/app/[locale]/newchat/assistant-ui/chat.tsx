@@ -1,9 +1,4 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
-
-import type { ReasoningEffort } from "@/types/modelConfig";
-import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
 import type { FC, ReactNode } from "react";
 import { useCallback, useMemo } from "react";
@@ -31,19 +26,16 @@ export interface ChatProps {
   chatMode?: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
-  modelParameterSettings?: ModelParameterSettingsControl;
   modelSelectionScope?: "agent" | "tenant";
   fallbackAgentName?: string;
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
   deepThinking?: boolean;
   onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: ReasoningEffort;
-  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
-  reasoningBudgetTokens?: number;
-  onReasoningBudgetTokensChange?: (budget: number) => void;
+  thinkingEffort?: "low" | "medium" | "high";
+  onThinkingEffortChange?: (effort: "low" | "medium" | "high") => void;
   showConversationTitle?: boolean;
-  composerTools?: ReactNode;
+  isDictationConfigured?: boolean;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities?: KnowledgeCapabilities | null;
@@ -60,8 +52,6 @@ export interface ChatProps {
   interactionContent?: ReactNode;
   readOnlyReason?: string;
   landingContent?: ReactNode;
-  /** Opt into the redesigned NewChat presentation. */
-  newChatDesign?: boolean;
   workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
@@ -93,9 +83,8 @@ export const Chat: FC<ChatProps> = ({
   onAgentSelected,
   onBack,
   chatMode = "execution",
-  onChatModeChange,
+  onChatModeChange = () => undefined,
   showModelSelector = true,
-  modelParameterSettings,
   modelSelectionScope = "agent",
   fallbackAgentName = "Nexent Workbench",
   selectedModelId,
@@ -104,10 +93,8 @@ export const Chat: FC<ChatProps> = ({
   onDeepThinkingChange,
   thinkingEffort,
   onThinkingEffortChange,
-  reasoningBudgetTokens,
-  onReasoningBudgetTokensChange,
   showConversationTitle = true,
-  composerTools,
+  isDictationConfigured = false,
   knowledgeScope = null,
   knowledgePreview = null,
   knowledgeCapabilities = null,
@@ -121,7 +108,6 @@ export const Chat: FC<ChatProps> = ({
   interactionContent,
   readOnlyReason,
   landingContent,
-  newChatDesign = false,
   workbenchPresentation,
   workbenchResources,
   onRemoveWorkbenchSkill,
@@ -157,7 +143,6 @@ export const Chat: FC<ChatProps> = ({
           agent={workbenchPlaceholderAgent}
           generatedTitle={generatedTitle}
           conversationId={conversationId}
-          newChatDesign={newChatDesign}
           welcomeContent={landingContent}
           selectedModelId={selectedModelId}
           onModelChange={onModelChange}
@@ -165,14 +150,11 @@ export const Chat: FC<ChatProps> = ({
           onDeepThinkingChange={onDeepThinkingChange}
           thinkingEffort={thinkingEffort}
           onThinkingEffortChange={onThinkingEffortChange}
-          reasoningBudgetTokens={reasoningBudgetTokens}
-          onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
           showModelSelector={showModelSelector}
-          modelParameterSettings={modelParameterSettings}
           modelSelectionScope={modelSelectionScope}
           chatMode={chatMode}
           onChatModeChange={onChatModeChange}
-          composerTools={composerTools}
+          isDictationConfigured={isDictationConfigured}
           readOnly={readOnly}
           readOnlyReason={readOnlyReason}
           interactionContent={interactionContent}
@@ -203,12 +185,10 @@ export const Chat: FC<ChatProps> = ({
       welcomeTitle={welcomeTitle}
       welcomeSuggestions={welcomeSuggestions}
       conversationId={conversationId}
-      newChatDesign={newChatDesign}
       onBack={onBack}
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
-      modelParameterSettings={modelParameterSettings}
       modelSelectionScope={modelSelectionScope}
       selectedModelId={selectedModelId}
       onModelChange={onModelChange}
@@ -216,10 +196,8 @@ export const Chat: FC<ChatProps> = ({
       onDeepThinkingChange={onDeepThinkingChange}
       thinkingEffort={thinkingEffort}
       onThinkingEffortChange={onThinkingEffortChange}
-      reasoningBudgetTokens={reasoningBudgetTokens}
-      onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
       showConversationTitle={showConversationTitle}
-      composerTools={composerTools}
+      isDictationConfigured={isDictationConfigured}
       knowledgeScope={knowledgeScope}
       knowledgePreview={knowledgePreview}
       knowledgeCapabilities={knowledgeCapabilities}

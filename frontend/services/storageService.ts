@@ -1,5 +1,3 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
-
 import { API_BASE_URL, API_ENDPOINTS } from "./api";
 import { StorageUploadResult } from "../types/chat";
 import { arrayBufferToBase64 } from "@/lib/agentImportUtils";
@@ -214,11 +212,6 @@ export function convertImageUrlToApiUrl(url: string): string {
   // Backend share URLs do not include the frontend base path.
   if (url.startsWith("/api/share/")) {
     return withBasePath(url);
-  }
-
-  // Protected AIDP images require the backend-owned credential on every host.
-  if (isHttpUrl && url.includes("/KnowledgeBase/Tenants/")) {
-    return API_ENDPOINTS.proxy.image(url);
   }
 
   // For localhost URLs in development, return original URL directly to avoid proxy issues

@@ -1,6 +1,5 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
-Unit tests for infrastructure.logging.
+Unit tests for backend.utils.logging_utils.
 
 Covers:
   - ColorFormatter: colored vs plain output for each level
@@ -19,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from infrastructure.logging import (
+from backend.utils.logging_utils import (
     ColorFormatter,
     HybridRotatingFileHandler,
     MODEL_CALL_LOGGERS,
@@ -182,7 +181,7 @@ class TestConfigureLogging:
     """configure_logging sets up root logger with console + per-category file handlers."""
 
     def test_default_categories_create_one_file_handler_each(self, reset_root_logger, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         configure_logging()
         root = logging.getLogger()
         # One StreamHandler (console) + one file handler per default category,
@@ -195,35 +194,35 @@ class TestConfigureLogging:
         assert handler_classes.count("HybridRotatingFileHandler") == len(default_cats) - 1
 
     def test_explicit_level_overrides_effective_level(self, reset_root_logger, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         configure_logging(level=logging.WARNING)
         assert logging.getLogger().level == logging.WARNING
 
     def test_is_debug_true_forces_debug_level(self, reset_root_logger, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
-        monkeypatch.setattr("infrastructure.logging.IS_DEBUG", True)
-        monkeypatch.setattr("infrastructure.logging.LOG_LEVEL", "INFO")
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.IS_DEBUG", True)
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_LEVEL", "INFO")
         configure_logging()
         assert logging.getLogger().level == logging.DEBUG
 
     def test_is_debug_false_uses_log_level(self, reset_root_logger, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
-        monkeypatch.setattr("infrastructure.logging.IS_DEBUG", False)
-        monkeypatch.setattr("infrastructure.logging.LOG_LEVEL", "ERROR")
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.IS_DEBUG", False)
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_LEVEL", "ERROR")
         configure_logging()
         assert logging.getLogger().level == logging.ERROR
 
     def test_unknown_log_level_falls_back_to_info(self, reset_root_logger, tmp_path, monkeypatch):
         """Invalid LOG_LEVEL strings should not crash; degrade to INFO."""
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
-        monkeypatch.setattr("infrastructure.logging.IS_DEBUG", False)
-        monkeypatch.setattr("infrastructure.logging.LOG_LEVEL", "NOT_A_LEVEL")
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.IS_DEBUG", False)
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_LEVEL", "NOT_A_LEVEL")
         configure_logging()
         assert logging.getLogger().level == logging.INFO
 
     def test_handlers_are_cleared_before_setup(self, reset_root_logger, tmp_path, monkeypatch):
         """Calling configure_logging twice should not accumulate handlers."""
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         configure_logging()
         first_count = len(logging.getLogger().handlers)
         configure_logging()
@@ -231,7 +230,7 @@ class TestConfigureLogging:
         assert first_count == second_count
 
     def test_custom_categories_create_only_requested_handlers(self, reset_root_logger, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         configure_logging(categories=["only_one"])
         handler_classes = [type(h).__name__ for h in logging.getLogger().handlers]
         assert handler_classes.count("HybridRotatingFileHandler") == 1
@@ -247,49 +246,49 @@ class TestGetUvicornLoggingConfig:
     """get_uvicorn_logging_config returns a dictConfig-compatible dict."""
 
     def test_returns_dictconfig_version_one(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         cfg = get_uvicorn_logging_config()
         assert cfg["version"] == 1
         assert cfg["disable_existing_loggers"] is False
 
     def test_root_handler_names_list_console_and_files(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         cfg = get_uvicorn_logging_config(categories=["a", "b"])
         assert cfg["root"]["handlers"] == ["console", "file_a", "file_b"]
 
     def test_is_debug_true_sets_debug_level(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
-        monkeypatch.setattr("infrastructure.logging.IS_DEBUG", True)
-        monkeypatch.setattr("infrastructure.logging.LOG_LEVEL", "INFO")
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.IS_DEBUG", True)
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_LEVEL", "INFO")
         cfg = get_uvicorn_logging_config()
         assert cfg["root"]["level"] == "DEBUG"
         assert cfg["handlers"]["console"]["level"] == "DEBUG"
 
     def test_is_debug_false_uses_log_level(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
-        monkeypatch.setattr("infrastructure.logging.IS_DEBUG", False)
-        monkeypatch.setattr("infrastructure.logging.LOG_LEVEL", "ERROR")
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.IS_DEBUG", False)
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_LEVEL", "ERROR")
         cfg = get_uvicorn_logging_config()
         assert cfg["root"]["level"] == "ERROR"
         assert cfg["handlers"]["console"]["level"] == "ERROR"
 
     def test_levels_remain_strings_for_dictconfig(self, tmp_path, monkeypatch):
         """dictConfig requires handler levels to be string names; verify the contract."""
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
-        monkeypatch.setattr("infrastructure.logging.IS_DEBUG", True)
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.IS_DEBUG", True)
         cfg = get_uvicorn_logging_config()
         for handler in cfg["handlers"].values():
             assert isinstance(handler["level"], str)
 
     def test_formatters_color_and_plain_are_defined(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         cfg = get_uvicorn_logging_config()
         assert "color" in cfg["formatters"]
         assert "plain" in cfg["formatters"]
         assert cfg["formatters"]["color"]["()"].endswith("ColorFormatter")
 
     def test_file_handler_paths_under_log_dir(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         cfg = get_uvicorn_logging_config(categories=["my_cat"])
         file_h = cfg["handlers"]["file_my_cat"]
         # Accept both POSIX and Windows separators for portability.
@@ -329,13 +328,13 @@ def _read(tmp_path, category: str) -> str:
 
 def _apply_dictconfig(monkeypatch, tmp_path):
     """Wire logging through the dictConfig path used by the service entrypoints."""
-    monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+    monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
     logging.config.dictConfig(get_uvicorn_logging_config(categories=["runtime", "model_call"]))
 
 
 def _apply_configure_logging(monkeypatch, tmp_path):
     """Wire logging through the programmatic configure_logging path."""
-    monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+    monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
     configure_logging(categories=["runtime", "model_call"])
 
 
@@ -344,7 +343,7 @@ class TestModelCallRouting:
     write to the dedicated model_call file and stop propagating."""
 
     def test_loggers_section_only_when_model_call_included(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         cfg_with = get_uvicorn_logging_config(categories=["runtime", "model_call"])
         assert "loggers" in cfg_with
         # Other services must keep their current behaviour untouched.
@@ -352,7 +351,7 @@ class TestModelCallRouting:
         assert "loggers" not in cfg_without
 
     def test_named_loggers_bound_to_model_call_file(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         cfg = get_uvicorn_logging_config(categories=["runtime", "model_call"])
         for name in MODEL_CALL_LOGGERS:
             entry = cfg["loggers"][name]
@@ -380,7 +379,7 @@ class TestModelCallRouting:
         }
 
     def test_config_is_dictconfig_instantiable(self, reset_root_logger, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         cfg = get_uvicorn_logging_config(categories=["runtime", "model_call"])
         logging.config.dictConfig(cfg)  # must not raise
         _cleanup_routing_state()
@@ -442,7 +441,7 @@ class TestModelCallRouting:
             assert "MODEL OUTPUT info probe" not in runtime_log
 
             # At root DEBUG (LOG_LEVEL=DEBUG): DEBUG records are emitted too.
-            monkeypatch.setattr("infrastructure.logging.LOG_LEVEL", "DEBUG")
+            monkeypatch.setattr("backend.utils.logging_utils.LOG_LEVEL", "DEBUG")
             apply_config(monkeypatch, tmp_path)
             logging.getLogger("model_call.core_agent").debug("MODEL OUTPUT debug probe")
             for h in logging.getLogger().handlers:
@@ -453,7 +452,7 @@ class TestModelCallRouting:
             _cleanup_routing_state()
 
     def test_whitelist_levels_follow_root(self, reset_root_logger, tmp_path, monkeypatch):
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         configure_logging(categories=["runtime", "model_call"])
         try:
             for name in MODEL_CALL_LOGGERS:
@@ -469,7 +468,7 @@ class TestModelCallRouting:
     def test_unbind_resets_whitelist_levels(self, reset_root_logger, tmp_path, monkeypatch):
         """Without the model_call category the whitelist returns to its
         pre-branch behaviour: no handlers, propagate on, level inherited."""
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         configure_logging(categories=["runtime", "model_call"])
         configure_logging(categories=["runtime"])
         try:
@@ -485,7 +484,7 @@ class TestModelCallRouting:
         self, reset_root_logger, tmp_path, monkeypatch
     ):
         """Calling configure_logging twice must not stack handlers on named loggers."""
-        monkeypatch.setattr("infrastructure.logging.LOG_DIR", str(tmp_path))
+        monkeypatch.setattr("backend.utils.logging_utils.LOG_DIR", str(tmp_path))
         configure_logging(categories=["runtime", "model_call"])
         configure_logging(categories=["runtime", "model_call"])
         try:

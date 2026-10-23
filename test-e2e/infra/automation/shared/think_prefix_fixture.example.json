@@ -1,8 +1,0 @@
-{
-  "runtime": "http://runtime.example.invalid/api",
-  "provider": "http://provider.example.invalid",
-  "token": "REPLACE_WITH_EPHEMERAL_TENANT_TOKEN",
-  "agent_id": 1,
-  "real_agent_id": 2,
-  "real_model_name": "REPLACE_WITH_CONFIGURED_REAL_MODEL"
-}

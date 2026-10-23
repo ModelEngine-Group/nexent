@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for ``backend.apps.agent_evaluation_app``."""
 
 import sys
@@ -91,20 +90,20 @@ _middleware_pkg.__path__ = [str(_BACKEND_DIR / "middleware")]
 
 for _name in (
     "services",
-    "management.services.evaluation.runs",
-    "management.services.evaluation.reporting.report",
-    "management.services.agent.runtime_client",
+    "services.agent_evaluation_service",
+    "services.evaluation_report_service",
+    "services.runtime_proxy_service",
     "database",
     "database.agent_evaluation_db",
     "utils",
-    "management.services.permission.identity.authentication_helpers",
+    "utils.auth_utils",
 ):
     _register_package(_name)
-sys.modules["management.services.evaluation.runs"] = MagicMock(name="agent_eval_svc")
-sys.modules["management.services.evaluation.reporting.report"] = MagicMock(name="report_svc")
-sys.modules["management.services.agent.runtime_client"] = MagicMock(name="runtime_proxy_svc")
+sys.modules["services.agent_evaluation_service"] = MagicMock(name="agent_eval_svc")
+sys.modules["services.evaluation_report_service"] = MagicMock(name="report_svc")
+sys.modules["services.runtime_proxy_service"] = MagicMock(name="runtime_proxy_svc")
 sys.modules["database.agent_evaluation_db"] = MagicMock(name="agent_eval_db")
-sys.modules["management.services.permission.identity.authentication_helpers"] = MagicMock(name="auth_utils")
+sys.modules["utils.auth_utils"] = MagicMock(name="auth_utils")
 
 # Load the target module via spec so its ``from X import Y`` lookups hit the
 # stubs above.
@@ -691,7 +690,7 @@ class TestSafeExtractors:
     def test_language_from_request(self, monkeypatch):
         request = MagicMock()
         monkeypatch.setattr(
-            sys.modules["management.services.permission.identity.authentication_helpers"],
+            sys.modules["utils.auth_utils"],
             "parse_language_from_request",
             MagicMock(return_value="en"),
         )
@@ -700,7 +699,7 @@ class TestSafeExtractors:
     def test_language_fallback_on_error(self, monkeypatch):
         request = MagicMock()
         monkeypatch.setattr(
-            sys.modules["management.services.permission.identity.authentication_helpers"],
+            sys.modules["utils.auth_utils"],
             "parse_language_from_request",
             MagicMock(side_effect=RuntimeError("boom")),
         )

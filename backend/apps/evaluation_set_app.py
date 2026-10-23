@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import io
 import logging
 from http import HTTPStatus
@@ -23,7 +22,7 @@ from consts.evaluation_limits import (
     SET_NAME_MIN_LEN,
 )
 from consts.exceptions import AppException, UnauthorizedError
-from management.services.evaluation.sets import (
+from services.evaluation_set_service import (
     _generate_cases_async,
     _update_generation_status,
     add_evaluation_set_case_impl,
@@ -40,9 +39,9 @@ from management.services.evaluation.sets import (
     list_evaluation_sets_impl,
     update_evaluation_set_case_impl,
 )
-from infrastructure.concurrency import config_thread_manager
-from management.services.permission.identity.authentication_helpers import get_current_user_id
-from management.services.evaluation.spreadsheet import (
+from services.thread_lifecycle_service import config_thread_manager
+from utils.auth_utils import get_current_user_id
+from utils.evaluation_set_excel_utils import (
     build_evaluation_set_excel_template_bytes,
     parse_evaluation_cases_from_excel,
 )

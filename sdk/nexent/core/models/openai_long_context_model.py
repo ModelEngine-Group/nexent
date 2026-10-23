@@ -1,12 +1,8 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
+from smolagents.models import ChatMessage
+import tiktoken
 import logging
 
-import tiktoken
-from smolagents.models import ChatMessage
-
 from ..models import OpenAIModel
-from .sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P
 from ..utils.observer import MessageObserver
 
 logger = logging.getLogger("openai_long_context_model")
@@ -18,7 +14,7 @@ class OpenAILongContextModel(OpenAIModel):
     Support automatic truncation of content exceeding context limits
     """
     
-    def __init__(self, observer: MessageObserver, temperature=DEFAULT_TEMPERATURE, top_p=DEFAULT_TOP_P,
+    def __init__(self, observer: MessageObserver, temperature=0.5, top_p=0.95,
                  max_context_tokens=128000, truncation_strategy="start", ssl_verify: bool = True, *args, **kwargs):
         """
         Initialize the long context model

@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import React from "react";
@@ -226,18 +224,56 @@ export default function MarketAgentDetailModal({
           <div>
             <h4 className="font-semibold mb-2 flex items-center gap-2">
               <Sparkles className="h-4 w-4" />
-              {t("market.detail.prompt", "Prompt")}
+              {t("market.detail.dutyPrompt", "Duty Prompt")}
             </h4>
             <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
               {isAgentPromptsHidden(agentDetails) ? (
                 <span className="text-sm text-slate-500">
-                  {renderAgentPromptFieldValue(agentDetails, "prompt", t)}
+                  {renderAgentPromptFieldValue(agentDetails, "duty_prompt", t)}
                 </span>
-              ) : needsConfig(agentDetails?.prompt) ? (
-                renderFieldValue(agentDetails?.prompt)
+              ) : needsConfig(agentDetails?.duty_prompt) ? (
+                renderFieldValue(agentDetails?.duty_prompt)
               ) : (
                 <pre className="whitespace-pre-wrap text-sm">
-                  {agentDetails?.prompt || t("common.none", "None")}
+                  {agentDetails?.duty_prompt || t("common.none", "None")}
+                </pre>
+              )}
+            </div>
+          </div>
+          <div>
+            <h4 className="font-semibold mb-2 flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              {t("market.detail.constraintPrompt", "Constraint Prompt")}
+            </h4>
+            <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+              {isAgentPromptsHidden(agentDetails) ? (
+                <span className="text-sm text-slate-500">
+                  {renderAgentPromptFieldValue(agentDetails, "constraint_prompt", t)}
+                </span>
+              ) : needsConfig(agentDetails?.constraint_prompt) ? (
+                renderFieldValue(agentDetails?.constraint_prompt)
+              ) : (
+                <pre className="whitespace-pre-wrap text-sm">
+                  {agentDetails?.constraint_prompt || t("common.none", "None")}
+                </pre>
+              )}
+            </div>
+          </div>
+          <div>
+            <h4 className="font-semibold mb-2 flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              {t("market.detail.fewShotsPrompt", "Few-Shots Prompt")}
+            </h4>
+            <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+              {isAgentPromptsHidden(agentDetails) ? (
+                <span className="text-sm text-slate-500">
+                  {renderAgentPromptFieldValue(agentDetails, "few_shots_prompt", t)}
+                </span>
+              ) : needsConfig(agentDetails?.few_shots_prompt) ? (
+                renderFieldValue(agentDetails?.few_shots_prompt)
+              ) : (
+                <pre className="whitespace-pre-wrap text-sm">
+                  {agentDetails?.few_shots_prompt || t("common.none", "None")}
                 </pre>
               )}
             </div>

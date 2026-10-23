@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """Acceptance regressions for the shared core-service implementations."""
 
 import importlib.util
@@ -36,13 +34,11 @@ def dependency(monkeypatch, name, **attributes):
     ("hello", None, "hello"),
     ("hello", "invalid/zone", "hello"),
     ("", "UTC", ""),
-    ("hello", "Asia/Shanghai", "hello\n\n[Current time: 2026-08-31 08:00:00]"),
-    ("hello\n\n[Current time: existing]", "UTC", "hello\n\n[Current time: existing]"),
-    ("hello\n\nRun workspace: /run/1", "UTC",
-     "hello\n\n[Current time: 2026-08-31 00:00:00]\n\nRun workspace: /run/1"),
+    ("[Current time: existing] hello", "UTC", "[Current time: existing] hello"),
+    ("hello", "Asia/Shanghai", "[Current time: 2026-08-31 08:00:00]\n\nhello"),
 ])
-def test_ac002_append_runtime_time(monkeypatch, query, zone, expected):
-    module = load_source(monkeypatch, "backend/management/services/agent/context.py", "slimming_time")
+def test_ac002_prepend_time_compatibility(monkeypatch, query, zone, expected):
+    module = load_source(monkeypatch, "backend/utils/time_context_utils.py", "slimming_time")
     assert module.prepend_current_time(
         query, zone, now=datetime(2026, 8, 31, tzinfo=timezone.utc)
     ) == expected
@@ -50,11 +46,11 @@ def test_ac002_append_runtime_time(monkeypatch, query, zone, expected):
 
 @pytest.mark.parametrize("query,expected", [
     (None, None), ("", ""), ("  hello  ", "  hello  "),
-    ("hello\n\n[Current time: now]", "hello"),
-    ("hello\n\n[当前时间: now]\n\nRun workspace: /run/1", "hello\n\nRun workspace: /run/1"),
+    ("[Current time: incomplete", "[Current time: incomplete"),
+    ("[Current time: now]\n\n hello  ", "hello"),
 ])
-def test_ac002_strip_runtime_time(monkeypatch, query, expected):
-    module = load_source(monkeypatch, "backend/management/services/agent/context.py", "slimming_time")
+def test_ac002_strip_time_compatibility(monkeypatch, query, expected):
+    module = load_source(monkeypatch, "backend/utils/time_context_utils.py", "slimming_time")
     assert module.strip_current_time_prefix(query) == expected
 
 
@@ -74,7 +70,7 @@ def _project_python_files(root):
 def test_ac002_preview_key_matches_existing_contract(monkeypatch):
     import hashlib
 
-    module = load_source(monkeypatch, "backend/management/services/file/preview.py", "slimming_keys")
+    module = load_source(monkeypatch, "backend/utils/storage_key_utils.py", "slimming_keys")
     for name in ("a.docx", "folder/中文.pptx", "without-extension", "a.b.c"):
         stem = name.rsplit(".", 1)[0] if "." in name else name
         digest = hashlib.md5(name.encode()).hexdigest()[:8]
@@ -86,10 +82,11 @@ def test_ac002_preview_key_matches_existing_contract(monkeypatch):
 def naming(monkeypatch):
     dependency(monkeypatch, "consts.const", LANGUAGE={"ZH": "zh", "EN": "en"})
     dependency(monkeypatch, "database.agent_db", query_all_agent_info_by_tenant_id=lambda tenant: [])
-    dependency(monkeypatch, "management.services.model.invocation", call_llm_for_system_prompt=lambda **kw: "fresh")
+    dependency(monkeypatch, "utils.llm_utils", call_llm_for_system_prompt=lambda **kw: "fresh")
     dependency(
-        monkeypatch, "management.services.agent.prompt",
-        load_default_generation_prompt=lambda language: {},
+        monkeypatch, "utils.prompt_template_utils",
+        get_prompt_generate_prompt_template=lambda language: {},
+        normalize_prompt_generate_template_content=lambda value: value,
     )
     return load_source(monkeypatch, "backend/management/services/agent/naming.py", "slimming_naming")
 
@@ -124,23 +121,24 @@ def test_ac003_five_attempts_then_suffix(naming, monkeypatch, field, failure):
     assert all(call["model_id"] == 12 and call["tenant_id"] == "tenant" for call in calls)
 
 
-def test_ac003_default_prompt_and_output_normalization(naming, monkeypatch):
+def test_ac003_template_resolution_and_output_normalization(naming, monkeypatch):
     observed = {}
 
-    def resolve(language):
-        observed["language"] = language
+    def resolve(**kwargs):
+        observed.update(kwargs)
         return {
             "agent_name_regenerate_system_prompt": "old={{ original_value }}",
             "agent_name_regenerate_user_prompt": "{{ task_description }} {{ existing_values }}",
         }
 
-    monkeypatch.setattr(naming, "load_default_generation_prompt", resolve)
+    dependency(monkeypatch, "services.prompt_template_service", resolve_prompt_generate_template=resolve)
     calls = []
     monkeypatch.setattr(naming, "call_llm_for_system_prompt", lambda **kw: calls.append(kw) or " fresh \nignored")
     assert naming.regenerate_agent_value(
-        "name", "old", ["z", "a"], "task", 12, "tenant", language="en"
+        "name", "old", ["z", "a"], "task", 12, "tenant", user_id="user", prompt_template_id=7
     ) == "fresh"
-    assert observed == {"language": "en"}
+    assert observed["prompt_template_id"] == 7
+    assert observed["user_id"] == "user"
     assert calls[0]["system_prompt"] == "old=old"
     assert calls[0]["user_prompt"] == "task a, z"
 
@@ -203,10 +201,10 @@ def test_ac008_shared_run_preparation(monkeypatch, enabled, debug):
         calls.append((args, kwargs))
         return types.SimpleNamespace(user_config=types.SimpleNamespace(memory_switch=enabled, agent_share_option="private"))
 
-    dependency(monkeypatch, "management.services.configuration.user.memory", build_memory_context=memory)
-    dependency(monkeypatch, "infrastructure.observability.bootstrap", monitoring_manager=types.SimpleNamespace(bind_agent_context=lambda value: value))
-    dependency(monkeypatch, "management.services.monitor.identity", resolve_monitoring_user_email=lambda user, tenant: "person@example.com")
-    module = load_source(monkeypatch, "backend/management/services/agent/context.py", "slimming_run_context")
+    dependency(monkeypatch, "services.memory_config_service", build_memory_context=memory)
+    dependency(monkeypatch, "utils.monitoring", monitoring_manager=types.SimpleNamespace(bind_agent_context=lambda value: value))
+    dependency(monkeypatch, "utils.monitoring_identity", resolve_monitoring_user_email=lambda user, tenant: "person@example.com")
+    module = load_source(monkeypatch, "backend/management/services/agent/run_context.py", "slimming_run_context")
     request = types.SimpleNamespace(
         agent_id=3, conversation_id=4, query="hello", is_debug=debug, history=[1, 2], minio_files=[]
     )
@@ -233,9 +231,9 @@ def model_resolver(monkeypatch):
         get_model_by_model_id_ignore_delete=lambda *args: None,
         get_valid_model_ids=lambda ids, tenant: [mid for mid in ids if mid != 9],
     )
-    dependency(monkeypatch, "management.services.model.adapter", build_adapter_fresh=lambda *args: args)
+    dependency(monkeypatch, "services.model_gateway_service", build_adapter_fresh=lambda *args: args)
     dependency(
-        monkeypatch, "management.services.configuration.tenant.settings",
+        monkeypatch, "utils.config_utils",
         tenant_config_manager=types.SimpleNamespace(get_model_config=lambda **kwargs: {}),
     )
     return load_source(monkeypatch, "backend/management/services/model/resolver.py", "management.services.model.resolver")
@@ -452,7 +450,7 @@ def test_ac016_management_services_are_grouped_by_business_package():
     )
 
     assert root_modules == ["__init__.py"]
-    assert business_packages == ['agent', 'automation', 'configuration', 'conversation', 'evaluation', 'file', 'knowledge_base', 'mcp', 'memory', 'model', 'monitor', 'notification', 'permission', 'repository', 'skill', 'tag', 'tool']
+    assert business_packages == ["agent", "knowledge_base", "model", "skill"]
     assert all((services_root / package / "__init__.py").is_file() for package in business_packages)
 
 

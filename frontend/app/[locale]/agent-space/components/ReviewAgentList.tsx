@@ -1,10 +1,7 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { Button } from "antd";
 import { Check, Eye, X } from "lucide-react";
-import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import type { AgentRepositoryListingItem } from "@/types/agentRepository";
@@ -56,7 +53,6 @@ export function ReviewAgentList({
   onReject,
 }: ReviewAgentListProps) {
   const { t } = useTranslation("common");
-  const displayName = useUserDisplayName();
 
   return (
     <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -78,9 +74,10 @@ export function ReviewAgentList({
               updatingRepositoryId === listing.agent_repository_id;
             const versionLabel =
               listing.version_label?.trim() || t("repository.review.noVersion");
-            const submitter = displayName(
-              listing.submitted_by_cas_username,
-              getSubmitterDisplay(listing.submitted_by, currentUserEmail, t)
+            const submitter = getSubmitterDisplay(
+              listing.submitted_by,
+              currentUserEmail,
+              t
             );
             const listingNote = listing.content?.trim() || "—";
 

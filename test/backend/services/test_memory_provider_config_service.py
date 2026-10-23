@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import sys
 import types
 from unittest.mock import MagicMock, patch
@@ -27,7 +26,7 @@ sys.modules["database.memory_provider_config_param_db"] = param_db_mod
 services_pkg = types.ModuleType("services")
 sys.modules["services"] = services_pkg
 
-plugin_loader_mod = types.ModuleType("management.services.memory.providers.plugins")
+plugin_loader_mod = types.ModuleType("services.memory_provider_plugin_loader")
 
 
 class FakePluginInfo:
@@ -60,9 +59,9 @@ class FakePluginLoader:
 
 
 plugin_loader_mod.PluginLoader = FakePluginLoader
-sys.modules["management.services.memory.providers.plugins"] = plugin_loader_mod
+sys.modules["services.memory_provider_plugin_loader"] = plugin_loader_mod
 
-from management.services.memory.providers.configuration import (
+from backend.services.memory_provider_config_service import (
     MemoryProviderConfigService,
     _mask_value,
 )

@@ -1,45 +1,37 @@
+import os
 import base64
 import hashlib
-import os
-import subprocess
 import tempfile
+import subprocess
+from typing import List, Dict, Any, Optional
 import zipfile
-from typing import Any, Dict, List, Optional
 from xml.etree import ElementTree
+
+from pptx import Presentation
 
 from .base import FileProcessor
 
+from unstructured_inference.logger import logger
+from unstructured_inference.models import tables
+from unstructured.partition.auto import partition
 
-Presentation = None
-partition = None
-tables_agent = None
+
+tables_agent = tables.tables_agent
 TABLE_TRANSFORMER_MODEL_PATH = ""
-
-
-def get_tables_agent():
-    """Load and return the third-party table agent only when it is needed."""
-    global tables_agent
-    if tables_agent is None:
-        from unstructured_inference.models import tables as tables_module
-
-        tables_agent = tables_module.tables_agent
-        tables_module.load_agent = custom_load_table_model
-    return tables_agent
-
 
 def custom_load_table_model():
     """Loads the Table agent."""
 
-    agent = get_tables_agent()
-    if getattr(agent, "model", None) is None:
-        with agent._lock:
-            if getattr(agent, "model", None) is None:
-                from unstructured_inference.logger import logger
-
+    if getattr(tables_agent, "model", None) is None:
+        with tables_agent._lock:
+            if getattr(tables_agent, "model", None) is None:
                 logger.info("Loading the Table agent ...")
-                agent.initialize(TABLE_TRANSFORMER_MODEL_PATH)
+                print("path234: ", TABLE_TRANSFORMER_MODEL_PATH)
+                tables_agent.initialize(TABLE_TRANSFORMER_MODEL_PATH)
 
     return
+
+tables.load_agent = lambda: custom_load_table_model()
 
 
 class UniversalImageExtractor(FileProcessor):
@@ -79,7 +71,7 @@ class UniversalImageExtractor(FileProcessor):
 
 
     def _convert_file(self, input_path: str, target_format: str) -> str:
-
+    
         """
         Convert a file to the target format using LibreOffice.
 
@@ -141,13 +133,7 @@ class UniversalImageExtractor(FileProcessor):
         results = []
         seen = set()
 
-        global partition
-        partition_fn = partition
-        if partition_fn is None:
-            from unstructured.partition.auto import partition as partition_fn
-            partition = partition_fn
-
-        elements = partition_fn(
+        elements = partition(
             filename=pdf_path,
             strategy="hi_res",
             extract_images_in_pdf=True,
@@ -355,21 +341,17 @@ class UniversalImageExtractor(FileProcessor):
 
 
     def _extract_pptx(self, pptx_path: str, **params) -> List[Dict]:
-        global Presentation
         if Presentation is None:
-            try:
-                from pptx import Presentation
-            except ImportError as exc:
-                raise RuntimeError("python-pptx is required to extract images from PPTX files.") from exc
+            raise RuntimeError("python-pptx is required to extract images from PPTX files.")
         prs = Presentation(pptx_path)
         results = []
         seen = set()
         emu_per_inch = params.get("emu_per_inch", 914400)
         dpi = params.get("dpi", 96)
-
+        
         def _emu_to_px(emu: int, emu_per_inch: int, dpi: int) -> int:
             return int((emu / emu_per_inch) * dpi)
-
+        
 
         slide_w = _emu_to_px(prs.slide_width, emu_per_inch, dpi)
         slide_h = _emu_to_px(prs.slide_height, emu_per_inch, dpi)

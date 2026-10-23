@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 FastAPI application factory with common configurations and exception handlers.
 """
@@ -65,7 +64,7 @@ def create_app(
     # Initialize monitoring if enabled
     if enable_monitoring:
         try:
-            from infrastructure.observability.bootstrap import monitoring_manager
+            from utils.monitoring import monitoring_manager
             monitoring_manager.setup_fastapi_app(app)
         except ImportError:
             logger.warning("Monitoring utilities not available")

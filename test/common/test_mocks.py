@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Common test utilities for mocking external dependencies.
 
@@ -67,15 +66,15 @@ def bootstrap_test_env() -> Dict[str, Any]:
         _create_module("database")
 
     config_utils_module = _create_module(
-        "management.services.configuration.tenant.settings",
+        "utils.config_utils",
         tenant_config_manager=MagicMock(),
         get_model_name_from_config=MagicMock(return_value=""),
     )
 
     nexent_module = _create_module("nexent", MessageObserver=MagicMock())
     _create_module("nexent.core")
-    _create_module("nexent.core.models", OpenAIVLModel=MagicMock(), OpenAILongContextModel=MagicMock())
-
+    _create_module("nexent.core.models", OpenAIVLModel=MagicMock())
+    
     mock_model_management_db = types.ModuleType("database.model_management_db")
     mock_model_management_db.get_model_by_model_id = MagicMock(return_value=None)
     sys.modules["database.model_management_db"] = mock_model_management_db

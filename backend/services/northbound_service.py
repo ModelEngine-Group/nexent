@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import hashlib
 import json
@@ -39,30 +38,29 @@ from database.token_db import get_latest_usage_metadata, log_token_usage
 from management.services.agent.service import (
     get_agent_by_name_impl,
 )
-from management.services.agent.runtime_client import forward_agent_run, forward_agent_stop
-from infrastructure.concurrency import northbound_thread_manager
-from management.services.agent.run_state import runtime_state_service
-from management.services.agent.versions import list_published_agents_impl
-from management.services.knowledge_base.scope import (
+from services.runtime_proxy_service import forward_agent_run, forward_agent_stop
+from services.thread_lifecycle_service import northbound_thread_manager
+from services.runtime_state_service import runtime_state_service
+from services.agent_version_service import list_published_agents_impl
+from services.knowledge_scope_service import (
     AIDP_TOOL_CLASS,
     LOCAL_TOOL_CLASS,
     get_agent_knowledge_capabilities,
 )
 from management.services.knowledge_base.service import ElasticSearchService
 from management.services.model.resolver import get_model_descriptor
-from management.services.conversation.service import (
+from services.conversation_management_service import (
     save_conversation_user,
     create_new_conversation,
     generate_conversation_title_service,
-    get_conversation_service,
     update_conversation_title as update_conversation_title_service,
 )
-from management.services.model.management import list_models_for_tenant
-from infrastructure.serialization.runtime_metadata import (
+from services.model_management_service import list_models_for_tenant
+from utils.runtime_metadata_utils import (
     runtime_metadata_hash,
     validate_runtime_metadata,
 )
-from management.services.file.service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
+from services.file_management_service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
 from database.attachment_db import get_file_url, get_file_size_from_minio
 from nexent.multi_modal.utils import parse_s3_url
 
@@ -420,10 +418,6 @@ async def start_streaming_chat(
 
         internal_conversation_id = conversation_id
 
-        # Authorize before reading history or persisting the incoming message.
-        if get_conversation_service(conversation_id, ctx.user_id, ctx.tenant_id) is None:
-            raise PermissionError("Conversation is not accessible to the current identity")
-
         # Get history according to internal_conversation_id
         history_resp = await get_conversation_history_internal(ctx, internal_conversation_id)
         normalized_attachments = _normalize_northbound_attachments(
@@ -478,8 +472,6 @@ async def start_streaming_chat(
     except UnauthorizedError as _:
         raise UnauthorizedError("Cannot authenticate.")
     except AppException:
-        raise
-    except PermissionError:
         raise
     except Exception as e:
         raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {str(e)}")
@@ -571,8 +563,7 @@ async def list_configured_models(ctx: NorthboundContext) -> Dict[str, Any]:
 
 async def get_conversation_history_internal(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
     """Internal helper to get conversation history without logging."""
-    conversation = get_conversation_service(conversation_id, ctx.user_id, ctx.tenant_id)
-    history = get_conversation_messages(conversation_id) if conversation is not None else []
+    history = get_conversation_messages(conversation_id)
     result = []
     for message in history:
         # Parse minio_files from database (stored as JSON string)

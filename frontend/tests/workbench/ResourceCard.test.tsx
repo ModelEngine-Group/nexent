@@ -1,7 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
-import { beforeEach as beforeEachI18n } from "vitest";
-import { initializeTestI18n } from "./i18n";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -110,8 +106,4 @@ describe("ResourceCard", () => {
       expect(select).not.toHaveBeenCalled();
     }
   );
-});
-
-beforeEachI18n(async () => {
-  await initializeTestI18n();
 });

@@ -45,7 +45,7 @@ import {
   ModelChunkSizeSlider,
   DEFAULT_EXPECTED_CHUNK_SIZE,
   DEFAULT_MAXIMUM_CHUNK_SIZE,
-} from "./ModelChunkSizeSlider";
+} from "./ModelChunkSizeSilder";
 import {
   buildCapacityPayload,
   capacityFormFromModel,

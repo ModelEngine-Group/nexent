@@ -422,8 +422,8 @@ class ContextManager:
             for item in candidates:
                 compact = item.compact()
                 saving = max(0, item.token_estimate - compact.token_estimate)
-                savings.append((saving, item.priority, item.layout_key, item, compact))
-            for _, _, _, original, compact in sorted(savings, key=lambda row: (-row[0], row[1], row[2])):
+                savings.append((saving, item.layout_key, item, compact))
+            for _, _, original, compact in sorted(savings, key=lambda row: (-row[0], row[1])):
                 index = result.index(original)
                 result[index] = compact
                 if (
@@ -572,18 +572,20 @@ class ContextManager:
             return [], []
         if not final_answer_templates:
             raise ValueError("final_answer purpose requires final_answer_templates")
-        from ..prompt import AgentPromptComposer
+        from jinja2 import StrictUndefined, Template
 
-        composer = AgentPromptComposer.from_compatibility_templates(final_answer_templates)
+        template = final_answer_templates["final_answer"]
         return (
-            [{"role": "system", "content": [{"type": "text", "text": composer.render_final_answer_pre_message()}]}],
+            [{"role": "system", "content": [{"type": "text", "text": template["pre_messages"]}]}],
             [
                 {
                     "role": "user",
                     "content": [
                         {
                             "type": "text",
-                            "text": composer.render_final_answer_post_message(task or ""),
+                            "text": Template(template["post_messages"], undefined=StrictUndefined).render(
+                                task=task or ""
+                            ),
                         }
                     ],
                 }
@@ -777,7 +779,7 @@ class ContextManager:
                 ContextItemType.SYSTEM,
                 ContextItemType.TOOL,
                 ContextItemType.SKILL,
-                ContextItemType.WORKER_AGENT,
+                ContextItemType.MANAGED_AGENT,
                 ContextItemType.EXTERNAL_AGENT,
             }
         }

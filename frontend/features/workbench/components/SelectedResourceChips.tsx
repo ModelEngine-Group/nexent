@@ -1,6 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
-import { useTranslation } from "react-i18next";
 import type { WorkbenchResourceControls } from "../types";
 import type { ConversationKnowledgeScope } from "@/types/knowledgeScope";
 
@@ -23,7 +20,6 @@ export function SelectedResourceChips({
   onEditKnowledge: () => void;
   onKnowledgeChange?: (scope: ConversationKnowledgeScope) => void;
 }) {
-  const { t } = useTranslation();
   const chips = [
     ...(resources.agents
       ? resources.agents.map((agent) => ({
@@ -55,11 +51,7 @@ export function SelectedResourceChips({
       const inherited = scope[source].mode === "inherit";
       return (inherited ? ["default"] : ids).map((id) => ({
         key: `kb:${source}:${id}`,
-        label: t("ui.localization.knowledgeResource", {
-          name: inherited
-            ? t("ui.localization.default")
-            : knowledgeNames?.[source]?.[id] || `#${id}`,
-        }),
+        label: `知识库 · ${inherited ? "默认" : knowledgeNames?.[source]?.[id] || `#${id}`}`,
         edit: onEditKnowledge,
         remove: () => {
           const nextIds = inherited ? [] : ids.filter((value) => value !== id);
@@ -80,8 +72,8 @@ export function SelectedResourceChips({
   if (chips.length === 0) return null;
   return (
     <div
-      className="flex min-w-0 flex-wrap gap-1.5"
-      aria-label={t("ui.localization.mountedResources")}
+      className="mx-4 mb-2 flex min-w-0 flex-wrap gap-1.5 pt-2"
+      aria-label="当前挂载资源"
     >
       {chips.map((chip) => (
         <span
@@ -101,9 +93,7 @@ export function SelectedResourceChips({
             type="button"
             disabled={disabled}
             className="px-2 py-1 hover:text-destructive focus-visible:ring-2"
-            aria-label={t("ui.localization.removeResource", {
-              name: chip.label,
-            })}
+            aria-label={`移除 ${chip.label}`}
             onClick={chip.remove}
           >
             ×

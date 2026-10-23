@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { useState, useCallback } from "react";
@@ -190,7 +188,7 @@ export function useKnowledgeBasesForToolConfig(
         } catch (error: any) {
           log.error("Failed to fetch AIDP knowledge bases:", error);
           showErrorToUser(error, t);
-          throw error;
+          kbs = [];
         }
       } else if (toolType === "ind_aidp_search") {
         if (aidpConfig?.serverUrl && aidpConfig?.apiKey) {
@@ -214,11 +212,7 @@ export function useKnowledgeBasesForToolConfig(
         // Default: knowledge_base_search or unknown - only get Nexent knowledge bases
         const result = await knowledgeBaseService.getKnowledgeBasesInfo(
           false,
-          false,
-          null,
-          null,
-          undefined,
-          { strict: true }
+          false
         );
         kbs = result.knowledgeBases;
       }
@@ -384,7 +378,7 @@ export function usePrefetchKnowledgeBases() {
             } catch (error: any) {
               log.error("Failed to prefetch AIDP knowledge bases:", error);
               showErrorToUser(error, t);
-              throw error;
+              kbs = [];
             }
           } else if (toolType === "ind_aidp_search") {
             if (difyConfig?.serverUrl && difyConfig?.apiKey) {
@@ -398,11 +392,7 @@ export function usePrefetchKnowledgeBases() {
           } else {
             const result = await knowledgeBaseService.getKnowledgeBasesInfo(
               false,
-              false,
-              null,
-              null,
-              undefined,
-              { strict: true }
+              false
             );
             kbs = result.knowledgeBases;
           }

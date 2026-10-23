@@ -1,0 +1,29 @@
+schema_version: '1.0'
+stage: D2
+module: CHAT-MESSAGE
+cases:
+  - case_id: CMSR-D2-001
+    feature_id: CMSR-005
+    requirement_ids: [CMSR-005]
+    business_rule_ids: [CMSR-RULE-013, CMSR-RULE-014, CMSR-RULE-015, CMSR-RULE-016]
+    title: SSE preserves successful retry deltas and attempt controls
+    type: CONTRACT
+    priority: P0
+    status: active
+    automation: automated
+    objective: Verify event ordering and prompt publication at the API stream boundary.
+    preconditions: [An authenticated Agent run uses a controllable model-provider fixture.]
+    test_data: {profile: mock, sequences: ['transport partial failure then success', 'semantic invalid response then valid streamed repair']}
+    steps:
+      - {order: 1, action: Begin step one and pause the provider before its first token., expected: SSE already contains one step_count before begin and before model content.}
+      - {order: 2, action: Pause the provider after the first safe success fragment., expected: The SSE client has already received that fragment with the success attempt ID.}
+      - {order: 3, action: Complete the response., expected: A commit and one parse event follow in order.}
+      - {order: 4, action: Repeat with step-one protocol-invalid output then valid repair., expected: 'SSE orders one step_count, begin, rollback, begin, corrected content, commit and one parse; corrected content is visible before completion.'}
+    expected_results: [SSE yields one step label before model output., Safe content follows the label before provider completion., Every model fragment carries its attempt ID.]
+    forbidden_side_effects: [No duplicate execution event., No control event persisted as a message unit., No failed semantic output in committed units.]
+    contract:
+      protocol: SSE
+      method: POST
+      endpoint: /agent/run
+      request_expectations: [The request selects a configured test Agent.]
+      response_expectations: [Control and model output preserve attempt order., Successful content is published before completion.]

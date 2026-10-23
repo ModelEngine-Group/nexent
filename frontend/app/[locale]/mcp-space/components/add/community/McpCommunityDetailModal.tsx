@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 import { useState } from "react";
 import { Button, Modal } from "antd";
 import { useTranslation } from "react-i18next";
@@ -170,7 +168,7 @@ export default function McpCommunityDetailModal({
 
                   {service.configJson && typeof service.configJson === "object" && "mcpServers" in service.configJson ? (
                     <div>
-                      <label className="mb-1 block text-sm font-normal text-slate-500">{t("ui.localization.containerConfiguration")}</label>
+                      <label className="mb-1 block text-sm font-normal text-slate-500">容器配置</label>
                       <div className="flex items-center justify-between">
                         <Button
                           size="small"
@@ -184,7 +182,7 @@ export default function McpCommunityDetailModal({
                             ? "bg-green-50 text-green-700"
                             : "bg-slate-100 text-slate-400"
                         }`}>
-                          {service.sharedFields?.containerConfigJson ? t("ui.localization.shared") : t("ui.localization.notShared")}
+                          {service.sharedFields?.containerConfigJson ? "已共享" : "未共享"}
                         </span>
                       </div>
                     </div>

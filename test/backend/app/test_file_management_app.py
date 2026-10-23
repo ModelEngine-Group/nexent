@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """
 Unit tests for backend.apps.file_management_app
 
@@ -28,25 +26,12 @@ if BACKEND_ROOT not in sys.path:
     sys.path.append(BACKEND_ROOT)
 
 
-# Stub management.services.file.service to prevent importing the real service
+# Stub services.file_management_service to prevent importing the real service
 services_pkg = types.ModuleType("services")
 services_pkg.__path__ = []
 sys.modules.setdefault("services", services_pkg)
 
-# The empty-__path__ services stub blocks submodule imports; register the real
-# audit_service (loaded from file) so the app module's audit import resolves
-# and caplog can capture its records.
-import importlib.util
-
-_audit_spec = importlib.util.spec_from_file_location(
-    "management.services.monitor.audit",
-    os.path.join(BACKEND_ROOT, "management", "services", "monitor", "audit.py"),
-)
-_audit_module = importlib.util.module_from_spec(_audit_spec)
-sys.modules["management.services.monitor.audit"] = _audit_module
-_audit_spec.loader.exec_module(_audit_module)
-
-sfms_stub = types.ModuleType("management.services.file.service")
+sfms_stub = types.ModuleType("services.file_management_service")
 
 async def _stub_upload_to_minio(files, folder, user_id=None):
     return []
@@ -146,7 +131,7 @@ sfms_stub.preprocess_files_generator = _stub_preprocess_files_generator
 sfms_stub.resolve_minio_upload_folder = _stub_resolve_minio_upload_folder
 sfms_stub.check_file_access = _stub_check_file_access
 sfms_stub.check_file_access_batch = _stub_check_file_access_batch
-sys.modules["management.services.file.service"] = sfms_stub
+sys.modules["services.file_management_service"] = sfms_stub
 setattr(services_pkg, "file_management_service", sfms_stub)
 
 vdb_service_stub = types.ModuleType("management.services.knowledge_base.service")
@@ -163,12 +148,12 @@ sys.modules["management.services.knowledge_base.service"] = vdb_service_stub
 setattr(services_pkg, "vectordatabase_service", vdb_service_stub)
 
 
-# Stub management.services.permission.identity.authentication_helpers.get_current_user_id (the function actually used in the app)
+# Stub utils.auth_utils.get_current_user_id (the function actually used in the app)
 utils_pkg = types.ModuleType("utils")
 utils_pkg.__path__ = [os.path.join(BACKEND_ROOT, "utils")]
 sys.modules.setdefault("utils", utils_pkg)
 
-auth_utils_stub = types.ModuleType("management.services.permission.identity.authentication_helpers")
+auth_utils_stub = types.ModuleType("utils.auth_utils")
 
 def _stub_get_current_user_id(authorization):
     """Stub for get_current_user_id - returns user_id and tenant_id tuple."""
@@ -178,16 +163,16 @@ def _stub_get_current_user_id(authorization):
     return ("user1", "tenant1")
 
 auth_utils_stub.get_current_user_id = _stub_get_current_user_id
-sys.modules["management.services.permission.identity.authentication_helpers"] = auth_utils_stub
+sys.modules["utils.auth_utils"] = auth_utils_stub
 setattr(utils_pkg, "auth_utils", auth_utils_stub)
 
 
-# Stub management.services.knowledge_base.ingestion.trigger_data_process
-fmu_stub = types.ModuleType("management.services.knowledge_base.ingestion")
+# Stub utils.file_management_utils.trigger_data_process
+fmu_stub = types.ModuleType("utils.file_management_utils")
 async def _stub_trigger_data_process(files: List[dict], params: Any):
     return [{"task_id": 1}]
 fmu_stub.trigger_data_process = _stub_trigger_data_process
-sys.modules["management.services.knowledge_base.ingestion"] = fmu_stub
+sys.modules["utils.file_management_utils"] = fmu_stub
 setattr(utils_pkg, "file_management_utils", fmu_stub)
 
 
@@ -281,7 +266,7 @@ async def test_upload_files_success(monkeypatch):
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
 
-    result = await file_management_app.upload_files(http_request=None,
+    result = await file_management_app.upload_files(
         file=[make_upload_file("a.txt")], destination="local", folder="attachments", index_name=None,
         authorization=MOCK_AUTH
     )
@@ -329,7 +314,7 @@ def test_upload_files_forbidden_for_read_only(monkeypatch):
 @pytest.mark.asyncio
 async def test_upload_files_no_files_bad_request():
     with pytest.raises(Exception) as ei:
-        await file_management_app.upload_files(http_request=None,
+        await file_management_app.upload_files(
             file=[], destination="local", folder="attachments", index_name=None,
             authorization=MOCK_AUTH
         )
@@ -364,7 +349,7 @@ async def test_upload_files_no_valid_files_uploaded(monkeypatch):
         return UploadResult()
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
-    response = await file_management_app.upload_files(http_request=None,
+    response = await file_management_app.upload_files(
         file=[make_upload_file("x.txt")], destination="minio", folder="attachments", index_name=None,
         authorization=MOCK_AUTH
     )
@@ -395,7 +380,7 @@ async def test_upload_files_internal_error(monkeypatch):
 
     monkeypatch.setattr(file_management_app, "upload_files_impl", fake_upload_impl)
     with pytest.raises(Exception) as ei:
-        await file_management_app.upload_files(http_request=None,
+        await file_management_app.upload_files(
             file=[make_upload_file("a.txt")], destination="local", folder="attachments", index_name=None,
             authorization=MOCK_AUTH
         )
@@ -771,7 +756,7 @@ async def test_storage_upload_files_knowledge_base_folder(monkeypatch):
     """Generic storage uploads cannot create unowned knowledge-base objects."""
     f1 = make_upload_file("shared.pdf")
     with pytest.raises(HTTPException) as exc_info:
-        await file_management_app.storage_upload_files(http_request=None,
+        await file_management_app.storage_upload_files(
             files=[f1],
             folder="knowledge_base",
             authorization=MOCK_AUTH
@@ -792,7 +777,7 @@ async def test_storage_upload_files_attachments_folder_user_isolation(monkeypatc
     monkeypatch.setattr(file_management_app, "upload_to_minio", fake_upload)
 
     f1 = make_upload_file("private.txt")
-    result = await file_management_app.storage_upload_files(http_request=None,
+    result = await file_management_app.storage_upload_files(
         files=[f1],
         folder="attachments",
         authorization=MOCK_AUTH
@@ -815,7 +800,7 @@ async def test_storage_upload_files_attachments_no_auth_uses_raw_folder(monkeypa
     monkeypatch.setattr(file_management_app, "upload_to_minio", fake_upload)
 
     f1 = make_upload_file("test.txt")
-    result = await file_management_app.storage_upload_files(http_request=None,
+    result = await file_management_app.storage_upload_files(
         files=[f1],
         folder="attachments",
         authorization=MOCK_AUTH_NONE
@@ -837,7 +822,7 @@ async def test_storage_upload_files_counts(monkeypatch):
     monkeypatch.setattr(file_management_app, "upload_to_minio", fake_upload)
     f1 = make_upload_file("a.txt")
     f2 = make_upload_file("b.txt")
-    result = await file_management_app.storage_upload_files(http_request=None,
+    result = await file_management_app.storage_upload_files(
         files=[f1, f2],
         folder="attachments",
         authorization=MOCK_AUTH
@@ -858,7 +843,7 @@ async def test_storage_upload_files_internal_error(monkeypatch):
     f1 = make_upload_file("a.txt")
 
     with pytest.raises(Exception) as ei:
-        await file_management_app.storage_upload_files(http_request=None,
+        await file_management_app.storage_upload_files(
             files=[f1],
             folder="attachments",
             authorization=MOCK_AUTH
@@ -1444,20 +1429,6 @@ async def test_get_storage_file_stream_error(monkeypatch):
             authorization=MOCK_AUTH
         )
     assert "Failed to get file information" in str(ei.value) or "Failed to get file" in str(ei.value)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("download", ["stream", "base64"])
-async def test_missing_storage_download_returns_404(monkeypatch, download):
-    async def missing(object_name):
-        raise file_management_app.NotFoundException("Storage object does not exist")
-
-    monkeypatch.setattr(file_management_app, "get_file_stream_impl", missing)
-    with pytest.raises(HTTPException) as caught:
-        await file_management_app.get_storage_file(
-            object_name="attachments/user1/missing.txt", download=download,
-            expires=60, filename=None, authorization=MOCK_AUTH)
-    assert caught.value.status_code == 404
 
 
 # --- Tests for download_datamate_file ---
@@ -2456,75 +2427,3 @@ class TestParseRangeHeader:
     def test_negative_start_returns_none(self):
         """Negative start values are invalid."""
         assert file_management_app._parse_range_header("bytes=-10-20", 1000) is None
-
-
-# ============================================================================
-# Security audit entries
-# ============================================================================
-
-class TestFileAuditEntries:
-    """Security audit entries emitted by file upload endpoints."""
-
-    def test_kb_upload_emits_audit_entry(self, monkeypatch, caplog):
-        """Successful KB source upload records names/count/index, not content."""
-        import logging
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-
-        mock_upload_impl = AsyncMock(return_value=([], ["/abs/path1"], ["a.txt"]))
-        monkeypatch.setattr(file_management_app, "upload_files_impl", mock_upload_impl)
-
-        app = FastAPI()
-        app.include_router(file_management_app.file_management_config_router)
-        client = TestClient(app)
-
-        with caplog.at_level(logging.INFO, logger="audit.security"):
-            response = client.post(
-                "/file/upload",
-                data={
-                    "destination": "minio",
-                    "folder": "knowledge_base",
-                    "index_name": "test_index",
-                },
-                files=[("file", ("a.txt", b"secret file body", "text/plain"))],
-                headers={"Authorization": MOCK_AUTH},
-            )
-
-        assert response.status_code == 200
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=file_upload" in messages[0]
-        assert "result=success" in messages[0]
-        assert "user_id=user1" in messages[0]
-        assert '"index_name":"test_index"' in messages[0]
-        assert '"files_count":1' in messages[0]
-        assert '"filenames":["a.txt"]' in messages[0]
-        assert "secret file body" not in messages[0]
-
-    def test_storage_upload_emits_audit_entry(self, monkeypatch, caplog):
-        """Successful chat-attachment upload records folder and filenames."""
-        import logging
-        from fastapi import FastAPI
-        from fastapi.testclient import TestClient
-
-        app = FastAPI()
-        app.include_router(file_management_app.file_management_runtime_router)
-        client = TestClient(app)
-
-        with caplog.at_level(logging.INFO, logger="audit.security"):
-            response = client.post(
-                "/file/storage",
-                files=[("files", ("note.txt", b"secret attachment body", "text/plain"))],
-                headers={"Authorization": MOCK_AUTH},
-            )
-
-        assert response.status_code == 200
-        messages = [record.getMessage() for record in caplog.records
-                    if record.name == "audit.security"]
-        assert len(messages) == 1
-        assert "event=file_storage_upload" in messages[0]
-        assert "user_id=user1" in messages[0]
-        assert '"files_count":1' in messages[0]
-        assert '"filenames":["note.txt"]' in messages[0]
-        assert "secret attachment body" not in messages[0]

@@ -1,11 +1,8 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 
 import { ReactNode } from "react";
 import { ConfigProvider, App } from "antd";
-import { QueryClientProvider } from "@tanstack/react-query";
-import { queryClient } from "@/lib/queryClient";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import {
   AuthenticationProvider,
@@ -21,7 +18,6 @@ import { RegisterModal } from "@/components/auth/registerModal";
 import { FullScreenLoading } from "@/components/ui/loading";
 import { useDeployment } from "./deploymentProvider";
 import { useSessionManager } from "@/hooks/auth/useSessionManager";
-import { AutoHideScrollbars } from "./AutoHideScrollbars";
 
 function AppReadyWrapper({ children }: { children?: ReactNode }) {
   const { isDeploymentReady, isSpeedMode } = useDeployment();
@@ -59,6 +55,8 @@ function AppReadyWrapper({ children }: { children?: ReactNode }) {
  * RootProvider Component
  * Integrates all necessary providers for the application
  */
+const queryClient = new QueryClient();
+
 export function RootProvider({ children }: { children: ReactNode }) {
   return (
     <ConfigProvider
@@ -68,7 +66,6 @@ export function RootProvider({ children }: { children: ReactNode }) {
     >
       <QueryClientProvider client={queryClient}>
         <App>
-          <AutoHideScrollbars />
           <AuthenticationProvider>
             <AuthorizationProvider>
               <AppReadyWrapper>
@@ -83,3 +80,4 @@ export function RootProvider({ children }: { children: ReactNode }) {
     </ConfigProvider>
   );
 }
+

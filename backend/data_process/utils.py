@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Utility functions for Celery tasks
 """
@@ -6,146 +5,17 @@ import asyncio
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, Dict, List, Optional
 
 import redis
 from celery.result import AsyncResult
 
 from .app import app as celery_app
 
-
 logger = logging.getLogger("data_process.utils")
 
 
-class DocumentDeleteRequested(RuntimeError):
-    """Raised when processing reaches a document with an active delete fence."""
-
-
-def update_file_lifecycle(
-    *,
-    file_id: str | None,
-    tenant_id: str | None,
-    index_name: str | None,
-    source: str | None,
-    status: str | None,
-    stage: str,
-    task_id: str | None = None,
-    updated_by: str | None = None,
-    **fields: Any,
-) -> None:
-    """Best-effort lifecycle transition shared by parser and forward tasks."""
-    if not index_name:
-        return
-    try:
-        from database.knowledge_file_lifecycle_db import (
-            get_file_record,
-            transition_file_record,
-        )
-
-        record = None
-        if file_id and tenant_id:
-            record = get_file_record(
-                file_id=file_id,
-                tenant_id=tenant_id,
-                index_name=index_name,
-                include_hidden=True,
-            )
-        if not record and source:
-            record = get_file_record(
-                tenant_id=tenant_id,
-                index_name=index_name,
-                object_name=source,
-                include_hidden=True,
-            )
-        if not record or record.get("status") in {"DELETE_REQUESTED", "DELETED"}:
-            return
-        transition_file_record(
-            record["file_id"],
-            status=status,
-            stage=stage,
-            expected_statuses=(record.get("status"),),
-            updated_by=updated_by,
-            **fields,
-        )
-    except Exception:
-        logger.warning(
-            "File lifecycle update failed task_id=%s index=%s source=%s",
-            task_id,
-            index_name,
-            source,
-            exc_info=True,
-        )
-
-
-def is_document_delete_requested(
-    *,
-    index_name: str | None,
-    source: str | None,
-    file_id: str | None = None,
-    tenant_id: str | None = None,
-) -> bool:
-    """Read the Redis deletion fence and fall back to the lifecycle row on Redis errors."""
-    if not file_id:
-        return False
-
-    try:
-        from management.services.knowledge_base.task_state import get_redis_service
-
-        # A healthy Redis miss is the normal path. Query PostgreSQL only when
-        # Redis is unavailable so regular processing does not add a DB read.
-        return bool(get_redis_service().is_document_delete_requested(file_id=file_id))
-    except Exception as redis_exc:
-        logger.warning(
-            "Deletion fence lookup failed for index=%s source=%s file_id=%s: %s",
-            index_name,
-            source,
-            file_id,
-            redis_exc,
-        )
-
-    try:
-        from database.knowledge_file_lifecycle_db import get_file_record
-
-        record = get_file_record(
-            file_id=file_id,
-            tenant_id=tenant_id,
-            index_name=index_name,
-            include_hidden=True,
-        )
-        return bool(record and str(record.get("status") or "").upper() in {"DELETE_REQUESTED", "DELETED"})
-    except Exception as lifecycle_exc:
-        # Keep deployments without the lifecycle migration compatible with the
-        # legacy behavior: an unavailable fallback must not cancel work.
-        logger.debug(
-            "Durable deletion status lookup unavailable for index=%s source=%s file_id=%s: %s",
-            index_name,
-            source,
-            file_id,
-            lifecycle_exc,
-        )
-        return False
-
-
-def ensure_document_not_deleted(
-    *,
-    index_name: str | None,
-    source: str | None,
-    file_id: str | None = None,
-    tenant_id: str | None = None,
-) -> None:
-    """Raise a chain-aware exception when deletion wins a processing race."""
-    if is_document_delete_requested(
-        index_name=index_name,
-        source=source,
-        file_id=file_id,
-        tenant_id=tenant_id,
-    ):
-        raise DocumentDeleteRequested(
-            f"Document deletion requested for index={index_name}, source={source}, file_id={file_id}"
-        )
-
-
-def _parse_failure_info(info: Any) -> tuple[dict[str, Any] | None, str | None]:
+def _parse_failure_info(info: Any) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
     """Parse Celery failure metadata as structured JSON or plain error text."""
     if isinstance(info, dict):
         return info, None
@@ -166,7 +36,7 @@ def _parse_failure_info(info: Any) -> tuple[dict[str, Any] | None, str | None]:
     return None, info_text
 
 
-def get_all_task_ids_from_redis(redis_client: redis.Redis) -> list[str]:
+def get_all_task_ids_from_redis(redis_client: redis.Redis) -> List[str]:
     """
     Get all task IDs from Redis backend
 
@@ -188,12 +58,12 @@ def get_all_task_ids_from_redis(redis_client: redis.Redis) -> list[str]:
 
         logger.debug(f"Found {len(task_ids)} task IDs in Redis")
     except Exception as e:
-        logger.warning(f"Failed to get task IDs from Redis: {e!s}")
+        logger.warning(f"Failed to get task IDs from Redis: {str(e)}")
 
     return task_ids
 
 
-async def get_task_info(task_id: str) -> dict[str, Any]:
+async def get_task_info(task_id: str) -> Dict[str, Any]:
     """
     Get task status and metadata
 
@@ -234,18 +104,18 @@ async def get_task_info(task_id: str) -> dict[str, Any]:
         except AttributeError as e:
             if 'DisabledBackend' in str(e):
                 logger.warning(
-                    f"Result backend is disabled for task {task_id}: {e!s}")
+                    f"Result backend is disabled for task {task_id}: {str(e)}")
                 backend_available = False
                 status_info['error'] = "Result backend disabled - cannot retrieve task status"
             else:
-                logger.warning(f"Backend error for task {task_id}: {e!s}")
+                logger.warning(f"Backend error for task {task_id}: {str(e)}")
                 backend_available = False
-                status_info['error'] = f"Backend error: {e!s}"
+                status_info['error'] = f"Backend error: {str(e)}"
         except Exception as e:
             logger.warning(
-                f"Error accessing task status for {task_id}: {e!s}")
+                f"Error accessing task status for {task_id}: {str(e)}")
             backend_available = False
-            status_info['error'] = f"Status access error: {e!s}"
+            status_info['error'] = f"Status access error: {str(e)}"
 
         # If backend is available, try to get metadata
         if backend_available:
@@ -276,17 +146,17 @@ async def get_task_info(task_id: str) -> dict[str, Any]:
 
                         if 'file_id' in metadata:
                             status_info['file_id'] = metadata['file_id']
-
+                        
                         # Get progress info from metadata
                         if 'total_chunks' in metadata:
                             status_info['total_chunks'] = metadata['total_chunks']
                         if 'processed_chunks' in metadata:
                             status_info['processed_chunks'] = metadata['processed_chunks']
-
+                        
                         # Always try to get latest progress from Redis (real-time updates during vectorization)
                         # Redis progress takes precedence over metadata for active tasks
                         try:
-                            from management.services.knowledge_base.task_state import get_redis_service
+                            from services.redis_service import get_redis_service
                             redis_service = get_redis_service()
                             progress_info = redis_service.get_progress_info(task_id)
                             if progress_info:
@@ -294,7 +164,7 @@ async def get_task_info(task_id: str) -> dict[str, Any]:
                                 status_info['processed_chunks'] = progress_info.get('processed_chunks', status_info.get('processed_chunks'))
                                 status_info['total_chunks'] = progress_info.get('total_chunks', status_info.get('total_chunks'))
                         except Exception as e:
-                            logger.debug(f"Failed to get progress from Redis for task {task_id}: {e!s}")
+                            logger.debug(f"Failed to get progress from Redis for task {task_id}: {str(e)}")
                 # Add error information for failed tasks
                 if result.failed():
                     try:
@@ -353,8 +223,8 @@ async def get_task_info(task_id: str) -> dict[str, Any]:
                                 status_info[key] = result.result[key]
             except Exception as e:
                 logger.warning(
-                    f"Error getting metadata for task {task_id}: {e!s}")
-                status_info['error'] = f"Metadata access error: {e!s}"
+                    f"Error getting metadata for task {task_id}: {str(e)}")
+                status_info['error'] = f"Metadata access error: {str(e)}"
         logger.debug(
             f"Task {task_id} status: {status_info['status']}, index: {status_info['index_name']}, task_name: {status_info['task_name']}")
         return status_info
@@ -377,13 +247,13 @@ async def get_task_info(task_id: str) -> dict[str, Any]:
                 'file_id': None,
             }
         else:
-            logger.error(f"Error getting status for task {task_id}: {e!s}")
+            logger.error(f"Error getting status for task {task_id}: {str(e)}")
             return {
                 'id': task_id,
                 'status': 'FAILURE',
                 'created_at': '',
                 'updated_at': '',
-                'error': f"Cannot retrieve task status: {e!s}",
+                'error': f"Cannot retrieve task status: {str(e)}",
                 'index_name': '',
                 'task_name': '',
                 'path_or_url': '',
@@ -391,14 +261,14 @@ async def get_task_info(task_id: str) -> dict[str, Any]:
                 'file_id': None,
             }
     except Exception as e:
-        logger.warning(f"Error getting status for task {task_id}: {e!s}")
+        logger.warning(f"Error getting status for task {task_id}: {str(e)}")
         # Return minimal information if task status cannot be retrieved
         return {
             'id': task_id,
             'status': 'FAILURE',
             'created_at': "",
             'updated_at': "",
-            'error': f"Cannot retrieve task status: {e!s}",
+            'error': f"Cannot retrieve task status: {str(e)}",
             'index_name': '',
             'task_name': '',
             'path_or_url': '',
@@ -407,7 +277,7 @@ async def get_task_info(task_id: str) -> dict[str, Any]:
         }
 
 
-async def get_task_details(task_id: str) -> dict[str, Any] | None:
+async def get_task_details(task_id: str) -> Optional[Dict[str, Any]]:
     """
     Get detailed task information
 

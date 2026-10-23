@@ -1,4 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """UT-SDK-TRACE-016..018: the main Agent owns the Langfuse trace name."""
 
 import asyncio
@@ -38,7 +37,6 @@ def test_ut_sdk_trace_016_named_run_preserves_operations_and_parent(spans, with_
     assert run.status.is_ok == (not fail)
     if with_http_parent:
         assert_child(run, tree["POST /agent/run"])
-        assert tree["POST /agent/run"].attributes["langfuse.trace.name"] == "知识助手"
     else:
         assert run.parent is None
 
@@ -59,12 +57,13 @@ def test_ut_sdk_trace_017_children_cannot_rename_the_trace(spans, mocker, displa
         assert wrapped() == "done"
 
     finished = spans.exporter.get_finished_spans()
-    assert all(s.attributes.get("langfuse.trace.name") == "主助手" for s in finished)
-    tree = by_name(spans)
-    run = tree["agent.run"]
+    named = [s for s in finished if "langfuse.trace.name" in s.attributes]
+    assert len(named) == 1
+    run = named[0]
     assert run.name == "agent.run"
     assert run.attributes["langfuse.trace.name"] == "主助手"
     assert sum(s.name == "agent.run" for s in finished) == 1
+    tree = by_name(spans)
     subagent = tree["agent.subagent.child"]
     assert subagent.attributes["agent.name"] == "child"
     assert subagent.attributes.get("agent.display_name") == display_name

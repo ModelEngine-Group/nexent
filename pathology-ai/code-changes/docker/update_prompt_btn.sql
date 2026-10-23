@@ -1,7 +1,5 @@
--- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
-UPDATE nexent.ag_tenant_agent_t
-SET prompt = '# 🏥 病理学AI助手
+UPDATE nexent.ag_tenant_agent_t 
+SET duty_prompt = '# 🏥 病理学AI助手
 
 你是一位专业的病理学AI助手。
 

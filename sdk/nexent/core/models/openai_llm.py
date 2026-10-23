@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 from ...monitor import get_monitoring_manager
 from ...monitor.monitoring import (
     _MonitoredClient,
@@ -9,7 +7,10 @@ from ...monitor.monitoring import (
     OPENINFERENCE_INPUT_VALUE,
 )
 from ..utils.token_estimation import estimate_tokens_text
-from .response_diagnostics import ResponseDiagnostics
+from ..utils.model_output_diagnostics import (
+    bounded_rejected_output_preview,
+    rejected_output_preview_enabled,
+)
 from ..concurrency import RunCancellationScope, run_blocking
 import logging
 import threading
@@ -39,18 +40,13 @@ from .prompt_cache import (
     extract_prompt_cache_usage,
     resolve_prompt_cache_profile,
 )
-from .message_utils import (
-    content_has_multimodal_blocks,
-    merge_system_messages,
-    prepare_messages_for_smolagents_text_flattening,
-)
+from .message_utils import content_has_multimodal_blocks, prepare_messages_for_smolagents_text_flattening
 from .context_overflow import (
     ProviderContextOverflowRetryExhausted,
     ProviderContextOverflowRetryUnsafe,
     is_provider_context_overflow,
 )
 from .model_concurrency import ModelConcurrencyExceeded, model_concurrency_limiter
-from .sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P, resolve_sampling
 from .retry import (
     DEFAULT_MODEL_RETRY,
     ModelRetryConfig,
@@ -91,12 +87,6 @@ class ReasoningConfigurationError(RuntimeError):
     """Raised when a provider rejects the configured reasoning parameters."""
 
     is_reasoning_configuration_error = True
-
-
-class SamplingConfigurationError(RuntimeError):
-    """Raised when a provider rejects explicit request-scoped sampling intent."""
-
-    is_sampling_configuration_error = True
 
 
 _REASONING_ERROR_MARKERS = (
@@ -190,7 +180,7 @@ class OpenAIModel(OpenAIServerModel):
 
     # Public SDK constructor: keep common kwargs explicit and read extension
     # kwargs below to preserve backward-compatible keyword call sites.
-    def __init__(self, observer: MessageObserver = MessageObserver, temperature=DEFAULT_TEMPERATURE, top_p=DEFAULT_TOP_P,
+    def __init__(self, observer: MessageObserver = MessageObserver, temperature=0.2, top_p=0.95,
                  ssl_verify=True, reasoning_effort: Optional[str] = None,
                  reasoning_budget_tokens: Optional[int] = None,
                  reasoning_capability: Optional[Dict[str, Any]] = None,
@@ -211,16 +201,14 @@ class OpenAIModel(OpenAIServerModel):
                  read_timeout_seconds: Optional[float] = None,
                  write_timeout_seconds: float = 30.0,
                  pool_timeout_seconds: float = 10.0,
-                 diagnostic_chunks_enabled: bool = False,
-                 explicit_sampling: Optional[List[str]] = None,
                  *args, **kwargs):
         """
         Initialize OpenAI Model with observer and SSL verification option.
 
         Args:
             observer: MessageObserver instance for tracking model output
-            temperature: Sampling temperature (default: 1.0; None inherits this default)
-            top_p: Top-p sampling parameter (default: 1.0; None inherits this default)
+            temperature: Sampling temperature (default: 0.2)
+            top_p: Top-p sampling parameter (default: 0.95)
             reasoning_effort: Optional canonical reasoning effort level declared
                                by the selected model's capability profile.
             reasoning_capability: Optional catalog metadata describing how the
@@ -257,10 +245,8 @@ class OpenAIModel(OpenAIServerModel):
         prompt_cache: Optional[Dict[str, Any]] = kwargs.pop("prompt_cache", None)
 
         self.observer = observer
-        sampling = resolve_sampling(temperature, top_p)
-        self.temperature = sampling["temperature"]
-        self.top_p = sampling["top_p"]
-        self.explicit_sampling = tuple(explicit_sampling or ())
+        self.temperature = temperature
+        self.top_p = top_p
         self.reasoning_effort = reasoning_effort
         self.reasoning_budget_tokens = reasoning_budget_tokens
         self.reasoning_capability = reasoning_capability or None
@@ -281,7 +267,6 @@ class OpenAIModel(OpenAIServerModel):
         self.last_provider_cache_advice = None
         self.last_prompt_cache_usage = None
         self.last_cached_input_token_count = 0
-        self.diagnostic_chunks_enabled = diagnostic_chunks_enabled
         self.last_response_diagnostics = None
         self.last_attempt_id = None
         self.last_attempt_number = None
@@ -368,9 +353,7 @@ class OpenAIModel(OpenAIServerModel):
                  _defer_attempt_commit: bool = False,
                  _suppress_attempt_stream: bool = False,
                  _retry_empty_response: bool = True,
-                 _empty_response_retries_used: int = 0,
                  **kwargs, ) -> ChatMessage:
-        messages = merge_system_messages(messages or [])
         _monitoring_operation.set("chat_completion")
 
         if _token_tracker is None:
@@ -416,7 +399,6 @@ class OpenAIModel(OpenAIServerModel):
                     _defer_attempt_commit=_defer_attempt_commit,
                     _suppress_attempt_stream=_suppress_attempt_stream,
                     _retry_empty_response=_retry_empty_response,
-                    _empty_response_retries_used=_empty_response_retries_used,
                     **kwargs,
                 )
 
@@ -482,8 +464,6 @@ class OpenAIModel(OpenAIServerModel):
         )
 
         completion_kwargs["stream_options"] = {"include_usage": True}
-        if "messages" in completion_kwargs:
-            completion_kwargs["messages"] = merge_system_messages(completion_kwargs["messages"])
 
         # Provider-specific extras (e.g. Qwen3 chat_template_kwargs) - only
         # set when the caller actually supplied something so default OpenAI
@@ -578,11 +558,6 @@ class OpenAIModel(OpenAIServerModel):
             close_stream_once = None
             concurrency_permit = None
             received_chunk_count = 0
-            diagnostics = ResponseDiagnostics(
-                {**dispatch_kwargs, "output_budget": trusted_budget_snapshot or self.max_tokens},
-                capture_chunks=self.diagnostic_chunks_enabled,
-            )
-            tool_call_count = 0
             try:
                 if self.concurrency_limit is not None:
                     concurrency_permit = model_concurrency_limiter.acquire(
@@ -631,7 +606,8 @@ class OpenAIModel(OpenAIServerModel):
                 content_chunk_count = 0
                 reasoning_chunk_count = 0
                 reasoning_char_count = 0
-
+                reasoning_preview = ""
+                preview_enabled = rejected_output_preview_enabled()
                 empty_choices_chunk_count = 0
                 nonstandard_chunk_count = 0
 
@@ -645,7 +621,6 @@ class OpenAIModel(OpenAIServerModel):
                 try:
                     for chunk in current_request:
                         received_chunk_count += 1
-                        diagnostics.add(chunk)
                         # Safety check: skip non-standard chunks that lack expected attributes
                         # This handles edge cases where API returns error responses as chunks
                         if not hasattr(chunk, 'choices'):
@@ -671,15 +646,12 @@ class OpenAIModel(OpenAIServerModel):
                         if reasoning_content is None:
                             reasoning_content = getattr(chunk.choices[0].delta, "reasoning_content", None)
 
-                        for choice in chunk.choices:
-                            tool_calls = getattr(choice.delta, "tool_calls", None)
-                            if isinstance(tool_calls, (list, tuple)):
-                                tool_call_count += len(tool_calls)
-
                         # Handle reasoning_content if it exists and is not null
                         if reasoning_content is not None:
                             reasoning_chunk_count += 1
                             reasoning_char_count += len(str(reasoning_content))
+                            if preview_enabled and len(reasoning_preview) < 256:
+                                reasoning_preview += str(reasoning_content)[: 256 - len(reasoning_preview)]
                             if not _suppress_attempt_stream:
                                 self.observer.add_model_reasoning_content(
                                     reasoning_content)
@@ -801,13 +773,8 @@ class OpenAIModel(OpenAIServerModel):
                             and not model_output.strip()
                         ),
                     }
-                    safe_diagnostics = diagnostics.summary(current_request)
-                    response_diagnostics.update({
-                        key: value for key, value in safe_diagnostics.items() if key != "chunks"
-                    })
-                    response_diagnostics["tool_call_count"] = tool_call_count
                     self.last_response_diagnostics = response_diagnostics
-                    self.last_reasoning_preview = None
+                    self.last_reasoning_preview = reasoning_preview if preview_enabled else None
                     self._monitoring.set_span_attributes(
                         **{f"llm.response.{key}": value for key, value in response_diagnostics.items()}
                     )
@@ -847,11 +814,14 @@ class OpenAIModel(OpenAIServerModel):
                             output_tokens,
                             response_diagnostics["reasoning_only_budget_exhausted"],
                         )
-                        logger.warning(
-                            "event=empty_model_response_diagnostics attempt_id=%s diagnostics=%s",
-                            attempt_id,
-                            json.dumps({**response_diagnostics, **safe_diagnostics}, ensure_ascii=True),
-                        )
+                        if preview_enabled:
+                            logger.warning(
+                                "event=rejected_model_output_preview attempt_id=%s "
+                                "content_preview=%s reasoning_preview=%s",
+                                attempt_id,
+                                bounded_rejected_output_preview(model_output),
+                                bounded_rejected_output_preview(reasoning_preview),
+                            )
                         self._monitoring.add_span_event("empty_model_response", response_diagnostics)
                         raise EmptyModelResponseError(
                             "Model stream completed without user-visible content "
@@ -915,9 +885,7 @@ class OpenAIModel(OpenAIServerModel):
                 # when this caller enables empty-response retry.
                 if (
                     not _retry_empty_response
-                    or self.last_finish_reason != "stop"
-                    or tool_call_count > 0
-                    or _empty_response_retries_used >= 1
+                    or self.last_finish_reason not in (None, "stop")
                     or attempt >= self.retry_config.max_attempts
                 ):
                     raise ModelInvocationTerminalError(
@@ -925,7 +893,6 @@ class OpenAIModel(OpenAIServerModel):
                         attempt,
                         cause=empty_error,
                     ) from empty_error
-                _empty_response_retries_used += 1
                 backoff = self.retry_config.calculate_backoff(attempt)
                 logger.warning(
                     "event=retry_empty_model_response attempt=%d/%d finish_reason=%s "
@@ -1016,7 +983,6 @@ class OpenAIModel(OpenAIServerModel):
                         _defer_attempt_commit=_defer_attempt_commit,
                         _suppress_attempt_stream=_suppress_attempt_stream,
                         _retry_empty_response=_retry_empty_response,
-                        _empty_response_retries_used=_empty_response_retries_used,
                         **kwargs,
                     )
                 is_timeout = _is_timeout_error(e)
@@ -1122,16 +1088,6 @@ class OpenAIModel(OpenAIServerModel):
         identity to catch a stale or cross-model W2 snapshot before the
         provider call.
         """
-        if "messages" in completion_kwargs:
-            completion_kwargs["messages"] = merge_system_messages(completion_kwargs["messages"])
-        for key in ("temperature", "top_p"):
-            if completion_kwargs.get(key) is None:
-                completion_kwargs.pop(key, None)
-        if self.explicit_sampling and completion_kwargs.get("extra_body"):
-            completion_kwargs["extra_body"] = {
-                key: value for key, value in completion_kwargs["extra_body"].items()
-                if key not in self.explicit_sampling
-            }
         snapshot = self._coerce_context_budget_snapshot(context_budget_snapshot)
         if snapshot is not None:
             self._verify_w1_w2_consistency(
@@ -1181,14 +1137,6 @@ class OpenAIModel(OpenAIServerModel):
             return self.client.chat.completions.create(**retry_kwargs)
 
     def _reasoning_wire_profile(self) -> Optional[Dict[str, Optional[str]]]:
-        """Honor an explicit toggle transport without replacing other wire controls."""
-        profile = self._base_reasoning_wire_profile()
-        toggle = (self.reasoning_capability or {}).get("toggle_wire_format")
-        if isinstance(toggle, str) and toggle in {"thinking_object", "enable_thinking", "chat_template"}:
-            return {**(profile or {}), "toggle": toggle}
-        return profile
-
-    def _base_reasoning_wire_profile(self) -> Optional[Dict[str, Optional[str]]]:
         """Return only an explicitly known provider wire mapping.
 
         models.dev declares that a model has reasoning controls, but it does
@@ -1436,11 +1384,6 @@ class OpenAIModel(OpenAIServerModel):
             return None
         if "temperature" not in completion_kwargs and "top_p" not in completion_kwargs:
             return None
-        if self.explicit_sampling:
-            logger.warning("event=explicit_sampling_rejected model_id=%s fields=%s", self.model_id, self.explicit_sampling)
-            raise SamplingConfigurationError(
-                "The provider rejected the selected temperature or top_p; restore defaults or change the settings"
-            ) from exc
         return {
             k: v
             for k, v in completion_kwargs.items()

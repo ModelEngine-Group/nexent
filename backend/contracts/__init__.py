@@ -1,1 +1,0 @@
-"""Backend cross-module contracts."""

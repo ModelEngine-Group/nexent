@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 "use client";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -23,7 +21,7 @@ import {
   List,
   type TableProps,
 } from "antd";
-import { ArrowLeft, Download, Zap, RotateCw, Tags } from "lucide-react";
+import { Download, Zap, RotateCw, Tags } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -1059,21 +1057,9 @@ export default function EvaluationDetailPage() {
 
   // ── render ──────────────────────────────────────────────
 
-  const backButton = (
-    <Tooltip title={t("common.back")}>
-      <Button
-        type="text"
-        aria-label={t("common.back")}
-        icon={<ArrowLeft className="size-4" />}
-        onClick={() => router.push(`/${params.locale}/evaluation`)}
-      />
-    </Tooltip>
-  );
-
   if (initialLoading)
     return (
       <div className="p-6">
-        {backButton}
         <Text type="secondary">{t("agentEvaluation.loading")}</Text>
       </div>
     );
@@ -1081,7 +1067,6 @@ export default function EvaluationDetailPage() {
     return (
       <div className="p-6">
         <Flex vertical gap={12}>
-          <div>{backButton}</div>
           <Text type="secondary">{t("agentEvaluation.notFound")}</Text>
           <Button
             size="small"
@@ -1100,30 +1085,27 @@ export default function EvaluationDetailPage() {
     <div className="p-6 max-w-7xl mx-auto">
       {/* ── Breadcrumb header ── */}
       <Flex vertical gap={10} className="mb-6">
-        <Flex align="center" gap={8}>
-          {backButton}
-          <Breadcrumb
-            items={[
-              {
-                title: (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const agentIds = run?.agent_id ? [run.agent_id] : [];
-                      router.push(
-                        `/evaluation?agent_ids=${encodeURIComponent(JSON.stringify(agentIds))}`
-                      );
-                    }}
-                    style={{ cursor: "pointer" }}
-                  >
-                    {t("agentEvaluation.breadcrumbEval")}
-                  </button>
-                ),
-              },
-              { title: t("agentEvaluation.breadcrumbDetail") },
-            ]}
-          />
-        </Flex>
+        <Breadcrumb
+          items={[
+            {
+              title: (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const agentIds = run?.agent_id ? [run.agent_id] : [];
+                    router.push(
+                      `/evaluation?agent_ids=${encodeURIComponent(JSON.stringify(agentIds))}`
+                    );
+                  }}
+                  style={{ cursor: "pointer" }}
+                >
+                  {t("agentEvaluation.breadcrumbEval")}
+                </button>
+              ),
+            },
+            { title: t("agentEvaluation.breadcrumbDetail") },
+          ]}
+        />
         <Flex
           justify="space-between"
           align="center"

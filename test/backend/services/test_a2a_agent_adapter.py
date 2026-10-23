@@ -1,14 +1,13 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for A2A Agent Adapter.
 
-Tests the A2AAgentAdapter class in backend/management/services/agent/a2a/adapter.py.
+Tests the A2AAgentAdapter class in backend/services/a2a_agent_adapter.py.
 """
 import pytest
 from unittest.mock import MagicMock, patch
 import json
 
-from management.services.agent.a2a.adapter import (
+from backend.services.a2a_agent_adapter import (
     A2AAgentAdapter,
     A2AExecutionContext,
     a2a_agent_adapter,

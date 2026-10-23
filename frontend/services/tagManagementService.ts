@@ -1,5 +1,3 @@
-// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 /**
  * Typed API client for the unified tag management service.
  *
@@ -8,11 +6,7 @@
  */
 
 import { getAuthHeaders } from "@/lib/auth";
-import {
-  API_BASE_URL,
-  API_ENDPOINTS,
-  fetchWithErrorHandling,
-} from "@/services/api";
+import { API_BASE_URL, fetchWithErrorHandling } from "@/services/api";
 import {
   clearCachedAssignmentsByResource,
   getCachedAssignmentPromise,
@@ -174,30 +168,6 @@ export const tagManagementApi = {
       { method: "DELETE" }
     ),
 
-  getSkillAssignmentsBatch: (skillIds: string[]) =>
-    requestJson<TagAssignment[]>(API_ENDPOINTS.skillTagAssignmentsBatch, {
-      method: "POST",
-      ...jsonBody({ skill_ids: [...new Set(skillIds)] }),
-    }),
-
-  getKnowledgeAssignmentsBatch: (indexNames: string[]) =>
-    requestJson<TagAssignment[]>(API_ENDPOINTS.knowledgeTagAssignmentsBatch, {
-      method: "POST",
-      ...jsonBody({ index_names: [...new Set(indexNames)] }),
-    }),
-
-  getAgentAssignmentsBatch: (agentIds: string[]) =>
-    requestJson<TagAssignment[]>(API_ENDPOINTS.agentTagAssignmentsBatch, {
-      method: "POST",
-      ...jsonBody({ agent_ids: [...new Set(agentIds)] }),
-    }),
-
-  getToolAssignmentsBatch: (toolIds: string[]) =>
-    requestJson<TagAssignment[]>(API_ENDPOINTS.toolTagAssignmentsBatch, {
-      method: "POST",
-      ...jsonBody({ tool_ids: [...new Set(toolIds)] }),
-    }),
-
   getAssignments: (
     resourceType: string,
     resourceId: string,
@@ -209,10 +179,12 @@ export const tagManagementApi = {
       search.set("knowledge_base_id", options.knowledgeBaseId);
     const query = search.toString();
     const cacheKey = mergeAssignmentCacheKey(resourceType, resourceId, query);
-    return getCachedAssignmentPromise(cacheKey, () =>
-      requestJson<TagAssignment>(
-        `${TAG_ENDPOINT}/assignments/${resourceType}/${encodeURIComponent(resourceId)}${query ? `?${query}` : ""}`
-      )
+    return getCachedAssignmentPromise(
+      cacheKey,
+      () =>
+        requestJson<TagAssignment>(
+          `${TAG_ENDPOINT}/assignments/${resourceType}/${encodeURIComponent(resourceId)}${query ? `?${query}` : ""}`
+        )
     );
   },
 
