@@ -5,9 +5,44 @@ import re
 from http import HTTPStatus
 from typing import Optional
 from urllib.parse import quote, urlparse, urlunparse
+
+import httpx
 from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
+
+
+def build_storage_proxy_url(presigned_url: str, storage_endpoint: Optional[str]) -> httpx.URL:
+    """Pin the request authority to configured storage without rewriting its signature."""
+    try:
+        origin = httpx.URL(storage_endpoint or "")
+        if (
+            origin.scheme not in ("http", "https") or not origin.host
+            or origin.userinfo or origin.fragment or origin.query or origin.path != "/"
+        ):
+            raise ValueError("Invalid storage endpoint")
+    except (httpx.InvalidURL, ValueError):
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="Storage endpoint is not configured correctly"
+        ) from None
+
+    try:
+        if not presigned_url or "\\" in presigned_url or any(ord(char) <= 32 or ord(char) == 127 for char in presigned_url):
+            raise ValueError("Invalid URL characters")
+        parsed = urlparse(presigned_url)
+        target = httpx.URL(presigned_url)
+        if (
+            parsed.username is not None or "#" in presigned_url
+            or target.scheme != origin.scheme or target.host != origin.host or target.port != origin.port
+        ):
+            raise ValueError("URL must use configured storage origin")
+    except (httpx.InvalidURL, ValueError):
+        raise HTTPException(
+            status_code=HTTPStatus.BAD_REQUEST, detail="presigned_url must use the configured storage endpoint"
+        ) from None
+
+    # Copy only the object path and signed query; the authority always comes from server configuration.
+    return origin.copy_with(raw_path=target.raw_path)
 
 
 def build_content_disposition_header(filename: Optional[str], inline: bool = False) -> str:

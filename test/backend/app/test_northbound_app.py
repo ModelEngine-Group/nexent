@@ -1598,7 +1598,7 @@ def test_file_fetch_rejects_invalid_urls(url, expected_status):
 def test_file_fetch_returns_bad_gateway_for_storage_status():
     response = MagicMock(status_code=404)
     response.headers = {}
-    with patch("gateway.api.northbound.httpx.AsyncClient") as client_cls:
+    with patch("gateway.api.northbound.MINIO_ENDPOINT", "https://storage"), patch("gateway.api.northbound.httpx.AsyncClient") as client_cls:
         client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
         client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
         client_cls.return_value.get = AsyncMock(return_value=response)
@@ -1609,7 +1609,7 @@ def test_file_fetch_returns_bad_gateway_for_storage_status():
 
 @pytest.mark.parametrize("error", [httpx.TimeoutException("timeout"), httpx.RequestError("request failed")])
 def test_file_fetch_maps_http_client_errors(error):
-    with patch("gateway.api.northbound.httpx.AsyncClient") as client_cls:
+    with patch("gateway.api.northbound.MINIO_ENDPOINT", "https://storage"), patch("gateway.api.northbound.httpx.AsyncClient") as client_cls:
         client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
         client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
         client_cls.return_value.get = AsyncMock(side_effect=error)
@@ -1628,7 +1628,7 @@ def test_file_fetch_streams_content_and_uses_content_disposition_filename():
         "Content-Disposition": 'attachment; filename="report.txt"',
     }
     response.aiter_bytes = chunks
-    with patch("gateway.api.northbound.httpx.AsyncClient") as client_cls:
+    with patch("gateway.api.northbound.MINIO_ENDPOINT", "https://storage"), patch("gateway.api.northbound.httpx.AsyncClient") as client_cls:
         client_cls.return_value.__aenter__ = AsyncMock(return_value=client_cls.return_value)
         client_cls.return_value.__aexit__ = AsyncMock(return_value=None)
         client_cls.return_value.get = AsyncMock(return_value=response)

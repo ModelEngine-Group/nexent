@@ -12,6 +12,7 @@ from typing import Annotated, Any, Dict, List, Optional
 from urllib.parse import unquote, urlparse
 
 import httpx
+from contracts.constants.environment import MINIO_ENDPOINT
 from contracts.a2a import JSONRPCRequest
 from contracts.agent import reject_legacy_agent_fields
 from contracts.authentication import NorthboundContext
@@ -87,7 +88,7 @@ from management.services.permission.api_keys import (
     refresh_user_api_key,
     revoke_user_api_keys,
 )
-from management.utils.file_http import build_content_disposition_header
+from management.utils.file_http import build_content_disposition_header, build_storage_proxy_url
 from pydantic import ValidationError as PydanticValidationError
 from services.northbound_service import (
     generate_conversation_title,
@@ -681,24 +682,17 @@ async def fetch_file_from_presigned_url(
 
     The presigned_url parameter should be URL-encoded by the caller.
 
-    NOTE: No authentication required for this endpoint.
+    No separate login is required; MinIO verifies the signed URL. Only the
+    configured storage origin is permitted, and redirects are never followed.
     """
     if not presigned_url:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="presigned_url is required")
 
-    try:
-        parsed = urlparse(presigned_url)
-        if parsed.scheme not in ("http", "https"):
-            raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid URL scheme. Must be http or https")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logging.error(f"Invalid presigned_url format: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="Invalid presigned_url format")
+    storage_url = build_storage_proxy_url(presigned_url, MINIO_ENDPOINT)
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as client:
-            response = await client.get(presigned_url)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0), follow_redirects=False, trust_env=False) as client:
+            response = await client.get(storage_url)
 
         if response.status_code != 200:
             logging.error(f"Failed to fetch file from presigned_url, status: {response.status_code}")
@@ -723,9 +717,9 @@ async def fetch_file_from_presigned_url(
     except httpx.TimeoutException:
         logging.error(f"Timeout fetching file from presigned_url")
         raise HTTPException(status_code=HTTPStatus.GATEWAY_TIMEOUT, detail="Timeout fetching file from storage")
-    except httpx.RequestError as e:
-        logging.error(f"Request error fetching file from presigned_url: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail=f"Failed to fetch file from storage: {str(e)}")
+    except httpx.RequestError:
+        logging.error("Request error fetching file from configured storage")
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail="Failed to fetch file from storage") from None
     except HTTPException:
         raise
     except Exception as e:

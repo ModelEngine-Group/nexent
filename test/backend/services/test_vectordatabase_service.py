@@ -162,7 +162,6 @@ consts_exceptions_mod.ValidationError = ValidationError
 consts_exceptions_mod.TenantResourceLimitError = TenantResourceLimitError
 
 # Use real contracts.constants.environment/scheduler (env vars are configured in test/conftest.py)
-consts_pkg = importlib.import_module("consts")
 consts_const_mod = importlib.import_module("contracts.constants.environment")
 consts_scheduler_mod = importlib.import_module("contracts.constants.constants")
 
@@ -181,7 +180,6 @@ if not hasattr(consts_const_mod, "VectorDatabaseType"):
 
     consts_const_mod.VectorDatabaseType = VectorDatabaseType
 
-sys.modules["consts"] = consts_pkg
 sys.modules["contracts.constants.environment"] = consts_const_mod
 install_business_constant_stubs(consts_const_mod)
 install_shared_contract_stub(consts_exceptions_mod, 'exceptions')

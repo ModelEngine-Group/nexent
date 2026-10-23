@@ -184,6 +184,7 @@ consts_model_module.HybridSearchRequest = HybridSearchRequest
 install_business_contract_stubs(consts_model_module)
 
 consts_const_module = types.ModuleType("contracts.constants.environment")
+consts_const_module.MINIO_ENDPOINT = "http://minio:9000"
 consts_const_module.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
 
 
@@ -210,6 +211,7 @@ sys.modules["gateway.authentication.northbound_auth"] = northbound_app_module
 northbound_app_module.get_northbound_context = northbound_app_module._get_northbound_context
 
 file_management_app_module = types.ModuleType("management.utils.file_http")
+file_management_app_module.build_storage_proxy_url = MagicMock()
 file_management_app_module.build_content_disposition_header = MagicMock(
     return_value='attachment; filename="file.txt"'
 )

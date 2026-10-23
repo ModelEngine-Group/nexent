@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: GATEWAY-PROXY-IMPORTS-20261023
+  change_type: bugfix
+  bug_id: GATEWAY-PROXY-IMPORTS-20261023
+  title: Constrain northbound file proxy and repair migrated test imports
+  description: Pin file fetch authority to configured MinIO and remove stale test package dependencies.
+  observed_behavior: The unauthenticated file proxy requests arbitrary HTTP URLs; two test files fail after package migration.
+  expected_behavior: Reject foreign origins before HTTP, preserve signed MinIO downloads, disable redirects and collect both test files without removed packages.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing route UT lacks origin and redirect assertions; SEC-06 exercises MCP endpoints rather than the file proxy.
+  feature_contract_changed: false
+  affected_features:
+    existing: [V5-SEC-06]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Reject untrusted URL authorities and malformed URLs before HTTP transport.
+      - Preserve encoded signature and successful file response while disabling redirects and environment proxies.
+      - Collect vector database and time localization tests without deleted package imports or missing SDK collaborators.
+    reason: HTTP route UT with real HTTPX and a controlled transport proves this local origin boundary. SEC-06 covers a different MCP path and is retained without claiming file-proxy acceptance.
+    test_selectors:
+      - test/backend/utils/test_presigned_proxy_url.py
+      - test/backend/app/test_northbound_file_proxy_security.py
+      - test/backend/app/test_northbound_app.py
+      - test/backend/services/test_vectordatabase_service.py
+      - test/backend/utils/test_time_context_localization.py
+  notes: >-
+    Design nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/contracts-business-layout/proxy-security-fix.md.
+    No new formal Cases; the existing MCP D5 cannot detect this isolated route defect.
+    Real MinIO and deployed security journeys are not covered by the controlled transport tests.

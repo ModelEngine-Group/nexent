@@ -171,6 +171,7 @@ install_shared_contract_stub(consts_exceptions_module, 'exceptions')
 
 # contracts.constants.environment - stub used by northbound_knowledge_app
 consts_const_module = types.ModuleType("contracts.constants.environment")
+consts_const_module.MINIO_ENDPOINT = "http://minio:9000"
 consts_const_module.ASSET_OWNER_TENANT_ID = "asset_owner_tenant_id"
 consts_const_module.NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS = 1
 
