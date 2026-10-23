@@ -1110,6 +1110,20 @@ export default function UserManageComp() {
     }
   }, [isSuperAdmin, tenantId, user?.tenantId]);
 
+  // Restore a usable tenant selection after a page refresh. Super admins do
+  // not have a tenantId on the user object, so select the first tenant once
+  // the tenant list has loaded instead of leaving the resource panel empty.
+  useEffect(() => {
+    if (
+      isSuperAdmin &&
+      !tenantId &&
+      tenantData?.data?.length &&
+      tenantData.data[0]?.tenant_id
+    ) {
+      setTenantId(tenantData.data[0].tenant_id);
+    }
+  }, [isSuperAdmin, tenantId, tenantData?.data]);
+
   // For non-super-admin users, directly fetch their tenant details
   // This ensures they always get the correct tenant info regardless of pagination
   const {
