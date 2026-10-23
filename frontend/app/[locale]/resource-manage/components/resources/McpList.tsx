@@ -121,6 +121,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
   const [openApiServiceName, setOpenApiServiceName] = useState("");
   const [openApiServerUrl, setOpenApiServerUrl] = useState("");
   const [openApiHeadersTemplate, setOpenApiHeadersTemplate] = useState("");
+  const [openApiAuthEnabled, setOpenApiAuthEnabled] = useState(false);
   const [openApiSslVerify, setOpenApiSslVerify] = useState(true);
   const [importingOpenApi, setImportingOpenApi] = useState(false);
   const [openapiServices, setOpenapiServices] = useState<any[]>([]);
@@ -429,6 +430,10 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       message.error(t("mcpConfig.openApiToMcp.jsonPlaceholder"));
       return;
     }
+    if (openApiAuthEnabled && !openApiHeadersTemplate.trim()) {
+      message.error(t("mcpConfig.openapiService.message.authHeadersRequired"));
+      return;
+    }
 
     let parsedJson;
     try {
@@ -438,13 +443,24 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       return;
     }
 
+    let parsedHeaders = null;
+    if (openApiAuthEnabled && openApiHeadersTemplate.trim()) {
+      try {
+        parsedHeaders = JSON.parse(openApiHeadersTemplate.trim());
+      } catch {
+        message.error(t("mcpConfig.message.invalidCustomHeadersJson"));
+        return;
+      }
+    }
+
     setImportingOpenApi(true);
     try {
       await importOpenApiService({
         service_name: openApiServiceName.trim(),
         server_url: openApiServerUrl.trim(),
         openapi_json: parsedJson,
-        headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
+        auth_enabled: openApiAuthEnabled,
+        headers_template: parsedHeaders,
         ssl_verify: openApiSslVerify,
       });
 
@@ -453,6 +469,7 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       setOpenApiServiceName("");
       setOpenApiServerUrl("");
       setOpenApiHeadersTemplate("");
+      setOpenApiAuthEnabled(false);
       setOpenApiSslVerify(true);
       await loadOpenapiServices();
     } catch (error) {
@@ -1022,7 +1039,24 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                         value={openApiHeadersTemplate}
                         onChange={(e) => setOpenApiHeadersTemplate(e.target.value)}
                         rows={2}
-                        disabled={actionsLocked || importingOpenApi}
+                        disabled={actionsLocked || importingOpenApi || !openApiAuthEnabled}
+                      />
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={openApiAuthEnabled}
+                          onChange={setOpenApiAuthEnabled}
+                          disabled={actionsLocked || importingOpenApi}
+                        />
+                        <Text>{t("mcpConfig.openapiService.form.authEnabledLabel")}</Text>
+                      </div>
+                      <Alert
+                        type={openApiAuthEnabled ? "info" : "success"}
+                        showIcon
+                        message={t(
+                          openApiAuthEnabled
+                            ? "mcpConfig.openapiService.form.authEnabledHint"
+                            : "mcpConfig.openapiService.form.authDisabledHint"
+                        )}
                       />
                       <div className="flex items-center gap-2">
                         <Switch

@@ -24,6 +24,7 @@ def import_openapi_service(
     tenant_id: str,
     user_id: str,
     service_description: str = None,
+    auth_enabled: bool = False,
     headers_template: Dict[str, Any] = None,
     ssl_verify: bool = True,
     force_update: bool = False,
@@ -61,6 +62,7 @@ def import_openapi_service(
         tenant_id=tenant_id,
         user_id=user_id,
         description=service_description,
+        auth_enabled=auth_enabled,
         headers_template=headers_template,
         ssl_verify=ssl_verify,
     )

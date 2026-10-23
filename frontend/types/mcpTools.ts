@@ -273,6 +273,7 @@ export interface LocalAddMcpDraft {
   transportType: McpTransportType;
   serverUrl: string;
   authorizationToken?: string;
+  apiAuthEnabled?: boolean;
   customHeaders?: string;
   openApiJson?: string;
   containerConfigJson: string;
