@@ -63,4 +63,16 @@ D3 fault receipts record exactly one actual Provider request for each unavailabl
 
 Earlier failures remain as historical evidence, including the original port-3000/Next-15 attempts, stale direct Configure selector, missing conversation columns and old MCP ORM. They are not relabeled as passes. PW-PROMPT-01 passed after MCP alignment; PW-PROMPT-02 passed after restoring the configuration/Debug navigation. All eight selected Cases passed.
 
-Final 2026-10-23 acceptance is **8/8 PASS**. PW-PROMPT-01 completed all 3 preconditions, 8 actions and 3 final assertions. PW-PROMPT-02 completed the same contract shape, including two old outputs, two new outputs, retained histories and one normal-mode answer. Both formal receipts have zero cleanup errors. Strict implementation validation was repeated after the final Compare fix and passed. Changes remain uncommitted for review.
+Final 2026-10-23 acceptance is **8/8 PASS**. PW-PROMPT-01 completed all 3 preconditions, 8 actions and 3 final assertions. PW-PROMPT-02 completed the same contract shape, including two old outputs, two new outputs, retained histories and one normal-mode answer. Both formal receipts have zero cleanup errors. Strict implementation validation was repeated after the final Compare fix and passed. The repair is committed for PR review.
+
+## Latest develop integration
+
+Merged `origin/develop` at `75906a319` on 2026-10-23. The only conflicted file was AgentPage. The resolution retains the upstream debugComposer abstraction and uses one visible accessible textbox for normal and Compare modes, including panes that stay mounted while hidden. The exact-card Configure menu repair remains in place.
+
+After the merge, all 11 selected infrastructure regressions passed again (one unrelated pre-existing test deselected). Strict implementation asset validation and copyright checks passed. All three affected browser Cases passed against the merged frontend, with zero cleanup errors.
+
+The first post-merge PW-PROMPT-01 request reached the real Provider but exhausted its 4096 completion-token limit using reasoning-only chunks (4093 reasoning chunks, zero content chunks). It produced no save-tool call. This attempt is retained as failure evidence in 20261023T020049Z-context-prompt-PW-PROMPT-01. An independent rerun uses the same script, model configuration and assertions; no automatic retry or alternate oracle was added to the Case.
+
+The unchanged PW-PROMPT-01 rerun passed all obligations at `20261023T020356Z-context-prompt-PW-PROMPT-01`. This confirms a passing execution after the conflict resolution while retaining the Provider exhaustion as a known run-time limitation.
+
+Post-merge successful receipts are `20261023T020356Z-context-prompt-PW-PROMPT-01`, `20261023T020708Z-context-prompt-PW-PROMPT-02` and `20261023T020801Z-context-prompt-SEARCH-DEEPSEEK-D4-001`. The remote develop tip was confirmed unchanged at `75906a3191feda4f09810540165382189ed8cd96` before PR creation.
