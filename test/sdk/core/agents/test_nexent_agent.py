@@ -2123,6 +2123,26 @@ def test_agent_run_with_observer_rethrows_mcp_timeout(nexent_agent_instance, moc
     mock_core_agent.observer.add_message.assert_not_called()
 
 
+def test_agent_run_with_observer_step_mcp_failure_emits_friendly_error(
+    nexent_agent_instance, mock_core_agent
+):
+    """Classified MCP failures surface a friendly, retryable step error with a code."""
+    nexent_agent_instance.agent = mock_core_agent
+    grouped = BaseExceptionGroup(
+        "unhandled errors in a taskgroup (1 sub-exception)", [ConnectionRefusedError()]
+    )
+    mock_core_agent.run.side_effect = grouped
+
+    with pytest.raises(ValueError, match="Error in interaction"):
+        nexent_agent_instance.agent_run_with_observer("test query")
+
+    kwargs = mock_core_agent.observer.add_message.call_args.kwargs
+    assert kwargs["process_type"] == ProcessType.ERROR
+    assert "MCP tool service connection failed" in kwargs["content"]
+    assert kwargs["error_code"] == "mcp_connection_refused"
+    assert kwargs["retryable"] is True
+
+
 def test_agent_run_with_observer_invalid_agent_type(nexent_agent_instance):
     """Test agent_run_with_observer raises TypeError when agent is not a CoreAgent."""
     nexent_agent_instance.agent = "not_core_agent"

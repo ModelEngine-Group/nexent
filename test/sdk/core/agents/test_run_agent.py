@@ -3,6 +3,7 @@ import types
 import json
 import importlib.machinery
 import pytest
+import httpx
 import importlib
 import sys
 from types import ModuleType
@@ -310,6 +311,7 @@ with patch.dict("sys.modules", module_mocks):
     import sdk.nexent.core.agents.run_agent as run_agent  # noqa: E402
     from sdk.nexent.consts.mcp_errors import (  # noqa: E402
         is_mcp_connection_timeout_error,
+        MCPConnectionFailure,
         MCPToolTimeoutError,
         is_mcp_timeout_error,
         propagate_mcp_timeout,
@@ -1459,3 +1461,139 @@ def test_agent_run_thread_preserves_context_var(basic_agent_run_info, monkeypatc
     test_var.set("preserved!")
     run_agent.agent_run_thread(basic_agent_run_info)
     assert captured_value.get("val") == "preserved!"
+
+
+# ---------------------------------------------------------------------------
+# Grouped MCP failure translation (taskgroup-aware error messages)
+# ---------------------------------------------------------------------------
+
+
+def _mcp_host_single():
+    return [{"url": "http://mcp.invalid:5011/mcp", "transport": "streamable-http"}]
+
+
+def _mcp_http_status_error(status):
+    request = httpx.Request("GET", "http://mcp.invalid:5011/mcp")
+    response = httpx.Response(status_code=status, request=request)
+    return httpx.HTTPStatusError(f"Client error '{status}'", request=request, response=response)
+
+
+def test_agent_run_error_message_classifies_grouped_http_status(basic_agent_run_info):
+    """A taskgroup carrying a 404 leaf renders the friendly bad-URL text with the server."""
+    basic_agent_run_info.observer.lang = "en"
+    group = BaseExceptionGroup(
+        "unhandled errors in a taskgroup (1 sub-exception)", [_mcp_http_status_error(404)]
+    )
+
+    message = run_agent._agent_run_error_message(basic_agent_run_info, _mcp_host_single(), group)
+
+    assert "MCP service address is invalid (HTTP 404, http://mcp.invalid:5011/mcp)" in message
+
+
+def test_agent_run_error_message_localizes_by_observer_lang(basic_agent_run_info):
+    basic_agent_run_info.observer.lang = "zh"
+    group = BaseExceptionGroup(
+        "unhandled errors in a taskgroup (1 sub-exception)", [ConnectionRefusedError()]
+    )
+
+    message = run_agent._agent_run_error_message(basic_agent_run_info, _mcp_host_single(), group)
+
+    assert "MCP 工具服务连接失败" in message
+    assert "http://mcp.invalid:5011/mcp" in message
+
+
+def test_agent_run_error_message_omits_url_when_multiple_hosts(basic_agent_run_info):
+    basic_agent_run_info.observer.lang = "en"
+    group = BaseExceptionGroup(
+        "unhandled errors in a taskgroup (1 sub-exception)", [ConnectionRefusedError()]
+    )
+    hosts = [
+        {"url": "http://a.invalid/mcp", "transport": "sse"},
+        {"url": "http://b.invalid/mcp", "transport": "sse"},
+    ]
+
+    message = run_agent._agent_run_error_message(basic_agent_run_info, hosts, group)
+
+    assert "MCP tool service connection failed" in message
+    assert "http://a.invalid/mcp" not in message
+    assert "http://b.invalid/mcp" not in message
+
+
+def test_agent_run_error_message_prefers_attributed_server(basic_agent_run_info):
+    basic_agent_run_info.observer.lang = "en"
+    attributed = MCPConnectionFailure(url="http://attributed.invalid:8080/mcp", transport="sse")
+    attributed.__cause__ = ConnectionRefusedError()
+    group = BaseExceptionGroup("unhandled errors in a taskgroup (1 sub-exception)", [attributed])
+
+    message = run_agent._agent_run_error_message(basic_agent_run_info, _mcp_host_single(), group)
+
+    assert "http://attributed.invalid:8080/mcp" in message
+    assert "http://mcp.invalid:5011/mcp" not in message
+
+
+def test_agent_run_error_message_exposes_leaf_for_unclassified_group(basic_agent_run_info):
+    basic_agent_run_info.observer.lang = "en"
+    group = BaseExceptionGroup(
+        "unhandled errors in a taskgroup (1 sub-exception)", [RuntimeError("disk on fire")]
+    )
+
+    message = run_agent._agent_run_error_message(basic_agent_run_info, _mcp_host_single(), group)
+
+    assert message == "Run Agent Error: RuntimeError: disk on fire"
+
+
+def test_agent_run_error_message_fallback_without_mcp_host(basic_agent_run_info):
+    group = BaseExceptionGroup(
+        "unhandled errors in a taskgroup (1 sub-exception)", [RuntimeError("Boom")]
+    )
+
+    message = run_agent._agent_run_error_message(basic_agent_run_info, None, group)
+
+    assert message == f"Run Agent Error: {group}"
+
+
+def test_grouped_mcp_tool_timeout_stays_localized(basic_agent_run_info):
+    """Regression: a timeout inside a taskgroup keeps the localized timeout text."""
+    basic_agent_run_info.mcp_tool_timeout_seconds = 10
+    group = BaseExceptionGroup(
+        "unhandled errors in a taskgroup (1 sub-exception)",
+        [RuntimeError("Timed out while waiting for response to CallToolRequest")],
+    )
+
+    assert run_agent._is_mcp_timeout_error(group)
+    message = run_agent._agent_run_error_message(basic_agent_run_info, _mcp_host_single(), group)
+
+    assert message == (
+        "MCP tool execution timed out after 10 seconds. "
+        "Please check the service response and try again."
+    )
+
+
+def test_agent_run_thread_grouped_mcp_failure_friendly_message(
+    basic_agent_run_info, caplog, monkeypatch
+):
+    """End to end: grouped MCP failure → friendly FINAL_ANSWER + error-level log."""
+    basic_agent_run_info.observer.lang = "en"
+    basic_agent_run_info.mcp_host = _mcp_host_single()
+    failing = MagicMock(name="NexentAgentInstance")
+    failing.create_single_agent.side_effect = BaseExceptionGroup(
+        "unhandled errors in a taskgroup (1 sub-exception)", [ConnectionRefusedError()]
+    )
+    monkeypatch.setattr(run_agent, "NexentAgent", MagicMock(return_value=failing))
+
+    with pytest.raises(ValueError):
+        run_agent.agent_run_thread(basic_agent_run_info)
+
+    basic_agent_run_info.observer.add_message.assert_called_with(
+        "",
+        ProcessType.FINAL_ANSWER,
+        "MCP tool service connection failed (http://mcp.invalid:5011/mcp refused the "
+        "connection). Please verify the service is running, the address and port are "
+        "correct, and the firewall allows access.",
+    )
+    error_records = [
+        record
+        for record in caplog.records
+        if "event=agent_run_failed" in record.getMessage()
+    ]
+    assert error_records and error_records[0].levelname == "ERROR"

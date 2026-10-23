@@ -8,7 +8,11 @@ import mcp.types
 import mcpadapt.core
 import pytest
 from nexent.core.agents.managed_mcp import ManagedMCPToolCollection
-from nexent.consts.mcp_errors import MCPConnectionTimeoutError, MCPToolTimeoutError
+from nexent.consts.mcp_errors import (
+    MCPConnectionFailure,
+    MCPConnectionTimeoutError,
+    MCPToolTimeoutError,
+)
 from nexent.core.concurrency import LanePolicy, RunCancellationScope, ThreadManager
 
 
@@ -265,4 +269,68 @@ def test_ut_sdk_tlm_032_run_cancel_cancels_active_call_future():
     assert exited.is_set()
     assert context.exit_count == 1
     assert manager.snapshot().active_count == 0
+    asyncio.run(manager.shutdown(timeout=1))
+
+
+class _FailingConnectContext:
+    async def __aenter__(self):
+        raise ConnectionRefusedError("[Errno 111] Connection refused")
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        return False
+
+
+class _CancelledConnectContext:
+    async def __aenter__(self):
+        raise asyncio.CancelledError()
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        return False
+
+
+def test_connection_failure_is_attributed_to_server():
+    """A failed session setup surfaces MCPConnectionFailure carrying url/transport."""
+    manager = _manager()
+    scope = RunCancellationScope()
+    with pytest.raises(MCPConnectionFailure) as exc_info:
+        with ManagedMCPToolCollection(
+            manager=manager,
+            server_parameters=[
+                {"url": "http://mcp.invalid:5011/mcp", "transport": "streamable-http"}
+            ],
+            cancellation_scope=scope,
+            tool_timeout_seconds=1,
+            close_timeout_seconds=0.5,
+            connect_timeout_seconds=1,
+            session_context_factory=lambda *_args, **_kwargs: _FailingConnectContext(),
+        ):
+            pass
+
+    failure = exc_info.value
+    assert failure.url == "http://mcp.invalid:5011/mcp"
+    assert failure.transport == "streamable-http"
+    assert isinstance(failure.__cause__, ConnectionRefusedError)
+    assert manager.snapshot().active_count == 0
+    asyncio.run(manager.shutdown(timeout=1))
+
+
+def test_connection_cancellation_is_not_wrapped():
+    """Cancelling a session setup must not be disguised as an MCP failure."""
+    manager = _manager()
+    scope = RunCancellationScope()
+    collection = ManagedMCPToolCollection(
+        manager=manager,
+        server_parameters=[{"url": "http://mcp.invalid/mcp", "transport": "sse"}],
+        cancellation_scope=scope,
+        tool_timeout_seconds=1,
+        close_timeout_seconds=0.5,
+        connect_timeout_seconds=1,
+        session_context_factory=lambda *_args, **_kwargs: _CancelledConnectContext(),
+    )
+
+    async def run_session():
+        await collection._run_async_session()
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(run_session())
     asyncio.run(manager.shutdown(timeout=1))

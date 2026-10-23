@@ -23,7 +23,12 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
 
-from ...consts.mcp_errors import is_mcp_timeout_error
+from ...consts.mcp_errors import (
+    classify_mcp_failure,
+    find_mcp_server_url,
+    is_mcp_timeout_error,
+    mcp_failure_message,
+)
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
 from ..model_errors import ModelInvocationTerminalError
 from ..models.openai_llm import OpenAIModel
@@ -1548,6 +1553,30 @@ class NexentAgent:
                 except Exception as e:
                     if is_mcp_timeout_error(e):
                         raise
+                    category, leaf = classify_mcp_failure(e)
+                    if category:
+                        # Keep the ReAct loop alive: the model receives the
+                        # friendly text and can switch tools or tell the user.
+                        content = mcp_failure_message(
+                            category,
+                            getattr(observer, "lang", "en"),
+                            server=find_mcp_server_url(e),
+                            leaf=leaf,
+                        )
+                        logger.error(
+                            "event=agent_step_mcp_failure agent=%s category=%s",
+                            self.agent.agent_name,
+                            category,
+                            exc_info=True,
+                        )
+                        observer.add_message(
+                            agent_name=self.agent.agent_name,
+                            process_type=ProcessType.ERROR,
+                            content=content,
+                            error_code=f"mcp_{category}",
+                            retryable=True,
+                        )
+                        raise ValueError(f"Error in interaction: {content}")
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
                                          content=f"Error in interaction: {str(e)}")
                     raise ValueError(f"Error in interaction: {str(e)}")
