@@ -208,6 +208,7 @@ export interface AddMcpServicePayload {
   tags?: string[];
   authorization_token?: string;
   custom_headers?: Record<string, string>;
+  ssl_verify?: boolean;
   container_config?: Record<string, unknown>;
   container_port?: number;
   config_json?: Record<string, unknown>;
@@ -273,6 +274,8 @@ export interface LocalAddMcpDraft {
   transportType: McpTransportType;
   serverUrl: string;
   authorizationToken?: string;
+  apiAuthEnabled?: boolean;
+  sslVerify?: boolean;
   customHeaders?: string;
   openApiJson?: string;
   containerConfigJson: string;

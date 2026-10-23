@@ -19,6 +19,8 @@ import {
   Upload,
   Tabs,
   Tag,
+  Switch,
+  Alert,
 } from "antd";
 import {
   Trash,
@@ -88,6 +90,8 @@ export default function McpConfigModal({
   const [openApiServiceName, setOpenApiServiceName] = useState("");
   const [openApiServerUrl, setOpenApiServerUrl] = useState("");
   const [openApiHeadersTemplate, setOpenApiHeadersTemplate] = useState("");
+  const [openApiAuthEnabled, setOpenApiAuthEnabled] = useState(false);
+  const [openApiSslVerify, setOpenApiSslVerify] = useState(true);
   const [importingOpenApi, setImportingOpenApi] = useState(false);
   const [openapiServices, setOpenapiServices] = useState<any[]>([]);
   const [loadingOpenapiServices, setLoadingOpenapiServices] = useState(false);
@@ -516,6 +520,10 @@ export default function McpConfigModal({
       message.error(t("mcpConfig.openApiToMcp.message.jsonRequired"));
       return;
     }
+    if (openApiAuthEnabled && !openApiHeadersTemplate.trim()) {
+      message.error(t("mcpConfig.openapiService.message.authHeadersRequired"));
+      return;
+    }
 
     let parsedJson;
     try {
@@ -534,13 +542,25 @@ export default function McpConfigModal({
       return;
     }
 
+    let parsedHeaders = null;
+    if (openApiAuthEnabled && openApiHeadersTemplate.trim()) {
+      try {
+        parsedHeaders = JSON.parse(openApiHeadersTemplate.trim());
+      } catch {
+        message.error(t("mcpConfig.message.invalidCustomHeadersJson"));
+        return;
+      }
+    }
+
     setImportingOpenApi(true);
     try {
       await importOpenApiService({
         service_name: openApiServiceName.trim(),
         server_url: openApiServerUrl.trim(),
         openapi_json: parsedJson,
-        headers_template: openApiHeadersTemplate.trim() ? JSON.parse(openApiHeadersTemplate.trim()) : null,
+        auth_enabled: openApiAuthEnabled,
+        headers_template: parsedHeaders,
+        ssl_verify: openApiSslVerify,
       });
 
       message.success(t("mcpConfig.openApiToMcp.message.importSuccess"));
@@ -548,6 +568,8 @@ export default function McpConfigModal({
       setOpenApiServiceName("");
       setOpenApiServerUrl("");
       setOpenApiHeadersTemplate("");
+      setOpenApiAuthEnabled(false);
+      setOpenApiSslVerify(true);
       await loadOpenapiServices();
       await refreshToolsAndAgents();
     } catch (error) {
@@ -1245,8 +1267,40 @@ export default function McpConfigModal({
                         value={openApiHeadersTemplate}
                         onChange={(e) => setOpenApiHeadersTemplate(e.target.value)}
                         rows={2}
-                        disabled={actionsLocked || importingOpenApi}
+                        disabled={actionsLocked || importingOpenApi || !openApiAuthEnabled}
                       />
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Switch
+                          checked={openApiAuthEnabled}
+                          onChange={setOpenApiAuthEnabled}
+                          disabled={actionsLocked || importingOpenApi}
+                        />
+                        <Text>{t("mcpConfig.openapiService.form.authEnabledLabel")}</Text>
+                      </div>
+                      <Alert
+                        type={openApiAuthEnabled ? "info" : "success"}
+                        showIcon
+                        message={t(
+                          openApiAuthEnabled
+                            ? "mcpConfig.openapiService.form.authEnabledHint"
+                            : "mcpConfig.openapiService.form.authDisabledHint"
+                        )}
+                      />
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Switch
+                          checked={openApiSslVerify}
+                          onChange={setOpenApiSslVerify}
+                          disabled={actionsLocked || importingOpenApi}
+                        />
+                        <Text>{t("mcpConfig.openapiService.form.sslVerifyLabel")}</Text>
+                      </div>
+                      {!openApiSslVerify && (
+                        <Alert
+                          type="warning"
+                          showIcon
+                          message={t("mcpConfig.openapiService.form.sslVerifyWarning")}
+                        />
+                      )}
                       <Input.TextArea
                         placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
                         value={openApiJson}

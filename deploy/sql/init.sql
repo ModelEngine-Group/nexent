@@ -264,6 +264,7 @@ CREATE TABLE IF NOT EXISTS nexent.ag_tool_info_t (
     source VARCHAR(100),
     author VARCHAR(100),
     usage VARCHAR(100),
+    outer_api_service_id BIGINT,
     params JSON,
     inputs VARCHAR,
     output_type VARCHAR(100),
@@ -301,6 +302,7 @@ COMMENT ON COLUMN nexent.ag_tool_info_t.description IS 'Prompt tool description'
 COMMENT ON COLUMN nexent.ag_tool_info_t.source IS 'Source';
 COMMENT ON COLUMN nexent.ag_tool_info_t.author IS 'Tool author';
 COMMENT ON COLUMN nexent.ag_tool_info_t.usage IS 'Usage';
+COMMENT ON COLUMN nexent.ag_tool_info_t.outer_api_service_id IS 'Source API-to-MCP service ID';
 COMMENT ON COLUMN nexent.ag_tool_info_t.params IS 'Tool parameter information (json)';
 COMMENT ON COLUMN nexent.ag_tool_info_t.inputs IS 'Prompt tool inputs description';
 COMMENT ON COLUMN nexent.ag_tool_info_t.output_type IS 'Prompt tool output description';

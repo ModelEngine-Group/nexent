@@ -110,6 +110,7 @@ async def add_mcp_service(
     tags: list | None,
     authorization_token: str | None,
     custom_headers: dict | None = None,
+    ssl_verify: bool = True,
     container_config: dict | None,
     registry_json: dict | None,
     config_json: dict | None = None,
@@ -181,7 +182,9 @@ async def add_mcp_service(
                     tenant_id=tenant_id,
                     user_id=user_id,
                     service_description=description,
+                    auth_enabled=bool(custom_headers),
                     headers_template=custom_headers,
+                    ssl_verify=ssl_verify,
                     force_update=True,
                 )
                 _refresh_openapi_services_in_mcp(tenant_id)
