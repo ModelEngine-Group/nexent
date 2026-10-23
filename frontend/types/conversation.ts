@@ -75,6 +75,7 @@ export interface ApiMessageItem {
 }
 
 export interface ApiMessage {
+  clarification_response?: unknown;
   status?: "pending" | "streaming" | "completed" | "failed" | "stopped";
   role: "user" | "assistant";
   message: ApiMessageItem[] | string;
