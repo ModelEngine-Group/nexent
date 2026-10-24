@@ -1,7 +1,7 @@
 schema_version: '1.0'
 case_id: PW-KB-AIDP-01
 # The journey always runs against the controlled AIDP served by the
-# ext-knowledge mock (seed aidp-kb-product); there is no profile selection,
+# ext-knowledge mock (owned oracle copied from its seed); there is no profile selection,
 # no machine-local journey file and no real AIDP environment.
 required_mock_services:
 - knowledge-provider
@@ -30,3 +30,4 @@ preparation:
   special_assets: false
   d4_groups:
   - llm_agent
+  - aidp_knowledge

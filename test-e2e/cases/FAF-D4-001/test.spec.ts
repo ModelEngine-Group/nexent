@@ -75,7 +75,10 @@ journey("FAF-D4-001", async (context) => {
     }
   });
   await executeFixedScenario(context, {
-    preconditions: [async () => { agents = await fixtures("setup"); await loginCurrent(page, "tenant_a_admin"); }],
+    preconditions: [
+      async () => { agents = await fixtures("setup"); },
+      async () => { await loginCurrent(page, "tenant_a_admin"); },
+    ],
     steps: [
       async () => {
         await run("mixed");

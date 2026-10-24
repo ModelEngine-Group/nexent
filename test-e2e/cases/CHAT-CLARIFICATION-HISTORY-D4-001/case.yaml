@@ -1,0 +1,49 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-MESSAGE
+case:
+  case_id: CHAT-CLARIFICATION-HISTORY-D4-001
+  feature_id: CHAT-CLARIFICATION-HISTORY
+  requirement_ids: [CHAT-CLARIFICATION-HISTORY-001]
+  business_rule_ids: [CHAT-CLARIFICATION-HISTORY-RULE-001, CHAT-CLARIFICATION-HISTORY-RULE-002, CHAT-CLARIFICATION-HISTORY-RULE-003]
+  title: Submitted clarification choices survive reload and reopening
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify the real frontend submits structured responses and replays saved controls after remounting a conversation.
+  preconditions:
+  - Real frontend is available with isolated authenticated HTTP fixtures and completed clarification history.
+  test_data:
+    profile: mock
+    controls: [text, single_choice, multiple_choice, other]
+  steps:
+  - order: 1
+    action: Open the conversation, fill all control types, reject the first send and retry successfully.
+    expected: Rejection retains editable values; retry sends readable query and structured form/answer/unit identity once and displays Submitted.
+  - order: 2
+    action: Reload the page, navigate away, and reopen the same conversation from persisted history.
+    expected: All answer controls and Submitted are restored read-only on both loads; no additional run occurs.
+  - order: 3
+    action: Open a separate legacy conversation containing the same question IDs without structured responses.
+    expected: The new card remains empty and unsubmitted, with no values copied from the first conversation.
+  expected_results:
+  - Saved structured answers restore every control and submitted state after reload and reopening.
+  - Failed send is retryable and legacy conversations remain isolated and readable.
+  forbidden_side_effects:
+  - No real provider calls or real database mutations through fixture endpoints.
+  - No extra runs from restoring history or cross-conversation answer leakage.
+  actor: Isolated ordinary chat user
+  journey: [Open clarification, Submit with rejection and retry, Reload, Reopen, Inspect legacy conversation]
+  final_business_result: [Previously submitted choices remain visible as submitted read-only history.]
+  failure_evidence: [Browser trace, Screenshots, Captured request bodies]
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Submitted answers recover after reload/reopen without cross-conversation leakage or extra runs.
+    steps: [1, 2, 3]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1, 2]

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Tenant-scoped model discovery for test asset preparation, not ACL assertions."""
 from shared.asset_registry import AssetDependencyError
 from shared.auth import sign_in
@@ -21,7 +22,7 @@ async def catalog_reader(identity):
 
 
 async def load_model_catalog(identity):
-    """Only discovery/health uses the reader; runtime calls keep their own user."""
+    """Only discovery uses a fallback reader; business calls keep their user."""
     async with client("config", token=identity.access_token) as api:
         response = await api.get("/model/list")
     reader = identity

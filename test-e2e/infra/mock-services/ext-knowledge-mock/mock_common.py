@@ -124,10 +124,10 @@ class StateStore:
     re-persists, keeping disk and memory consistent.
     """
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, state_dir: Optional[Path] = None):
         self.name = name
         self.seed_file = SEEDS_DIR / f"{name}.json"
-        self.state_file = STATE_DIR / f"{name}.json"
+        self.state_file = (Path(state_dir) if state_dir is not None else STATE_DIR) / f"{name}.json"
         self.data: Dict[str, Any] = {}
         self._load()
 
@@ -156,7 +156,7 @@ class StateStore:
 
     def save(self) -> None:
         """Atomically persist state (tmp file + rename, mirrors AIDP mock)."""
-        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
         tmp_path = self.state_file.with_suffix(".json.tmp")
         try:
             with open(tmp_path, "w", encoding="utf-8") as handle:

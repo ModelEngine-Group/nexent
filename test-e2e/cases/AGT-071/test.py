@@ -17,6 +17,7 @@ from shared.factories.tenant import isolated_accounts
 from shared.http import MODEL_TIMEOUT, assert_status, client
 from shared.memory_mock import memory_mock
 from shared.sse import assert_terminal_event
+from shared.final_answers import final_answer_text
 
 
 CASE_ID = 'AGT-071'
@@ -25,10 +26,9 @@ CASE_ID = 'AGT-071'
 def final_text(events):
     payloads = [event.get('data') for event in events if isinstance(event.get('data'), dict)]
     assert not any(item.get('type') == 'error' for item in payloads), 'Agent emitted a runtime error'
-    text = ''.join(item.get('content', '') for item in payloads
-                   if item.get('type') == 'final_answer' and isinstance(item.get('content'), str))
-    assert text.strip(), 'Missing actual final answer; tool/query echo is not an answer'
-    return text
+    # A completion can reclassify already-streamed body text instead of
+    # repeating it. Preserve invocation, step and rollback attribution.
+    return final_answer_text(events)
 
 
 def external_context_has_marker(events, marker):
