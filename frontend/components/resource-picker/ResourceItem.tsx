@@ -4,6 +4,7 @@
 
 import { useId, type HTMLAttributes } from "react";
 import { Check } from "lucide-react";
+import { Tooltip } from "antd";
 import { cn } from "@/lib/utils";
 import type {
   ResourceItemContext,
@@ -43,6 +44,9 @@ export function ResourceItem<T>({
       ));
   const actions = slots?.renderActions?.(item, context);
   const titleTrailing = slots?.renderTitleTrailing?.(item, context);
+  const description = slots?.renderDescription
+    ? slots.renderDescription(item, context)
+    : item.description;
 
   return (
     <div
@@ -127,11 +131,11 @@ export function ResourceItem<T>({
                   )}
                 </span>
                 {(item.description || slots?.renderDescription) && (
-                  <span className="line-clamp-2 text-xs text-muted-foreground">
-                    {slots?.renderDescription
-                      ? slots.renderDescription(item, context)
-                      : item.description}
-                  </span>
+                  <Tooltip title={item.description || description}>
+                    <span className="line-clamp-2 text-xs text-muted-foreground">
+                      {description}
+                    </span>
+                  </Tooltip>
                 )}
               </>
             )}
