@@ -1,4 +1,9 @@
 {
+  "toolPool.mcpSelectPage": "Select this page",
+  "toolPool.mcpSelectService": "Select tools from {{name}}",
+  "toolPool.mcpToolCount": "{{count}} tools",
+  "toolPool.mcpUnknownService": "Other MCP tools",
+  "toolPool.selectionFailed": "Unable to select tools. Please retry.",
   "ui.localization.removeResource": "Remove {{name}}",
   "ui.localization.knowledgeResource": "Knowledge base · {{name}}",
   "ui.localization.runTest": "Run test",
