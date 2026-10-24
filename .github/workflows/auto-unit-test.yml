@@ -82,6 +82,9 @@ jobs:
           uv pip install -e "../sdk[dev]"
           cd ..
 
+      - name: Check packaged model profiles before submission
+        run: backend/.venv/bin/python scripts/check_model_profiles.py
+
       - name: Run all tests and collect coverage
         env:
           NEXENT_PYTEST_WORKERS: ${{ github.event.inputs.pytest_workers || 'auto' }}
