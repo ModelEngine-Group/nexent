@@ -7,7 +7,10 @@ import { usePathname } from "next/navigation";
 import { I18nextProvider } from "react-i18next";
 
 import i18n, { loadLocaleMessages } from "@/app/i18n";
-import { useGlobalConfigStore, useGlobalConfigStoreAllLanguage } from "@/stores/global";
+import {
+  useGlobalConfigStore,
+  useGlobalConfigStoreAllLanguage,
+} from "@/stores/global";
 
 interface I18nProviderWrapperProps {
   children: ReactNode;
@@ -20,10 +23,14 @@ export default function I18nProviderWrapper({
 }: I18nProviderWrapperProps) {
   const [loaded, setLoaded] = useState(false);
   const pathname = usePathname();
-  const { setConfig } = useGlobalConfigStore();
+  const { config, setConfig } = useGlobalConfigStore();
   const { setAllConfig } = useGlobalConfigStoreAllLanguage();
   const targetLocale =
     initialLocale || pathname.split("/").filter(Boolean)[0] || "zh";
+
+  useEffect(() => {
+    document.title = config.productName?.trim() || "Nexent";
+  }, [config.productName, pathname]);
 
   useEffect(() => {
     let isCurrentEffect = true;
