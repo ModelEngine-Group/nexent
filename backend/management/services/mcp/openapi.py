@@ -2,7 +2,7 @@
 
 import re
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 from contracts.constants.environment import MCP_INTERNAL_TOKEN, MCP_MANAGEMENT_API
@@ -23,7 +23,7 @@ def import_openapi_service(
     tenant_id: str,
     user_id: str,
     service_description: str = None,
-    auth_enabled: bool = False,
+    auth_enabled: Optional[bool] = None,
     headers_template: Dict[str, Any] = None,
     ssl_verify: bool = True,
     force_update: bool = False,
@@ -45,6 +45,12 @@ def import_openapi_service(
     Returns:
         Dictionary with import result
     """
+    # Preserve legacy behavior: a non-empty header template implies that
+    # authentication is enabled unless the caller explicitly disables it.
+    effective_auth_enabled = (
+        bool(headers_template) if auth_enabled is None else auth_enabled
+    )
+
     # If service_description not provided, extract from openapi_json info
     if service_description is None:
         info = openapi_json.get("info", {})
@@ -61,7 +67,7 @@ def import_openapi_service(
         tenant_id=tenant_id,
         user_id=user_id,
         description=service_description,
-        auth_enabled=auth_enabled,
+        auth_enabled=effective_auth_enabled,
         headers_template=headers_template,
         ssl_verify=ssl_verify,
     )

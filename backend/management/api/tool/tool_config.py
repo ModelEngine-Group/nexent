@@ -218,8 +218,11 @@ async def import_openapi_service_api(
     server_url = openapi_service_request.get("server_url")
     openapi_json = openapi_service_request.get("openapi_json")
     service_description = openapi_service_request.get("service_description")
-    auth_enabled = openapi_service_request.get("auth_enabled", False)
     headers_template = openapi_service_request.get("headers_template")
+    auth_enabled_provided = "auth_enabled" in openapi_service_request
+    auth_enabled = openapi_service_request.get(
+        "auth_enabled", bool(headers_template)
+    )
     ssl_verify = openapi_service_request.get("ssl_verify", True)
     force_update = openapi_service_request.get("force_update", False)
 
@@ -251,17 +254,22 @@ async def import_openapi_service_api(
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="openapi_json is required")
     try:
         user_id, tenant_id = get_current_user_id(authorization)
+        import_kwargs = {
+            "service_name": service_name,
+            "openapi_json": openapi_json,
+            "server_url": server_url,
+            "tenant_id": tenant_id,
+            "user_id": user_id,
+            "service_description": service_description,
+            "headers_template": headers_template,
+            "ssl_verify": ssl_verify,
+            "force_update": force_update,
+        }
+        if auth_enabled_provided:
+            import_kwargs["auth_enabled"] = auth_enabled
+
         result = import_openapi_service(
-            service_name=service_name,
-            openapi_json=openapi_json,
-            server_url=server_url,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            service_description=service_description,
-            auth_enabled=auth_enabled,
-            headers_template=headers_template,
-            ssl_verify=ssl_verify,
-            force_update=force_update,
+            **import_kwargs,
         )
 
         mcp_result = _refresh_openapi_services_in_mcp(tenant_id)
@@ -322,14 +330,24 @@ async def delete_openapi_service_api(
     """
     try:
         user_id, tenant_id = get_current_user_id(authorization)
-        service = next(
-            (
-                item
-                for item in list_openapi_services(tenant_id)
-                if item.get("mcp_service_name") == service_name
-            ),
-            None,
-        )
+        service = None
+        try:
+            service = next(
+                (
+                    item
+                    for item in list_openapi_services(tenant_id)
+                    if item.get("mcp_service_name") == service_name
+                ),
+                None,
+            )
+        except Exception as lookup_error:
+            # The service delete is the primary operation.  Metadata lookup is
+            # only needed to clean up the legacy MCP record and must not prevent
+            # the delete path from running in degraded database environments.
+            logger.warning(
+                "Failed to load OpenAPI service metadata before deletion: %s",
+                lookup_error,
+            )
         deleted = delete_openapi_service(service_name, tenant_id, user_id)
         if not deleted:
             raise HTTPException(
@@ -344,7 +362,17 @@ async def delete_openapi_service_api(
             )
         # Refresh MCP service to reflect the deletion
         mcp_result = _refresh_openapi_services_in_mcp(tenant_id)
-        tool_sync = await update_tool_list(tenant_id=tenant_id, user_id=user_id)
+        try:
+            tool_sync = await update_tool_list(tenant_id=tenant_id, user_id=user_id)
+        except Exception as sync_error:
+            # Deletion has already succeeded.  Tool catalog synchronization is
+            # a follow-up operation and must not turn a successful delete into
+            # a 500 when MCP or the database is temporarily unavailable.
+            logger.warning(
+                "Failed to synchronize tools after OpenAPI service deletion: %s",
+                sync_error,
+            )
+            tool_sync = {"error": str(sync_error)}
         record_security_event("tool_openapi_delete", request=http_request,
                               user_id=user_id, tenant_id=tenant_id,
                               details={"service_name": service_name})

@@ -220,6 +220,10 @@ class AddContainerMcpServiceRequest(BaseModel):
     shared_fields: Optional[Dict[str, Any]] = Field(
         None, description="JSON object of field-level sharing flags"
     )
+    ssl_verify: Optional[bool] = Field(
+        None,
+        description="Whether to verify TLS certificates for the MCP service",
+    )
 
     @field_validator("name", "description", "authorization_token", mode="before")
     @classmethod
