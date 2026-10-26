@@ -654,6 +654,29 @@ class TestRegisterOpenapiService:
         )
 
     @patch.object(mcp_service, 'FastMCP')
+    @patch.object(mcp_service.httpx, 'AsyncClient')
+    def test_register_service_reuses_client_during_refresh(
+        self, mock_async_client, mock_fastmcp
+    ):
+        """A refreshed service must keep the client used by existing sessions."""
+        existing_client = MagicMock()
+        mock_fastmcp.from_openapi.return_value = MagicMock()
+
+        result = mcp_service.register_openapi_service(
+            "reused_client_service",
+            {"openapi": "3.0.0", "info": {}, "paths": {}},
+            "https://internal.example.com",
+            self._headers_template(),
+            ssl_verify=False,
+            auth_enabled=True,
+            client=existing_client,
+        )
+
+        assert result is True
+        mock_async_client.assert_not_called()
+        assert mock_fastmcp.from_openapi.call_args.kwargs["client"] is existing_client
+
+    @patch.object(mcp_service, 'FastMCP')
     def test_register_service_from_openapi_failure(self, mock_fastmcp):
         """Test handling of FastMCP.from_openapi failure"""
         mock_fastmcp.from_openapi.side_effect = Exception("Parse error")
