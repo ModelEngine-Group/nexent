@@ -52,7 +52,10 @@ import {
 import { ConversationSidebarProvider } from "@/components/common/ConversationSidebarProvider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
-import { ConversationModelControlsProvider } from "@/features/model-controls/ConversationModelControlsProvider";
+import {
+  ConversationModelControlsProvider,
+  useBindConversationModelThread,
+} from "@/features/model-controls/ConversationModelControlsProvider";
 import { ConversationLoadingBoundary } from "./components/ConversationLoadingBoundary";
 import { message } from "antd";
 import type { Agent } from "@/types/agentConfig";
@@ -276,6 +279,7 @@ const HomeContent: FC<{
   isDictationConfigured,
 }) => {
   const { t } = useTranslation();
+  const bindModelThread = useBindConversationModelThread();
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
   const [knowledgeScope, setKnowledgeScope] =
     useState<ConversationKnowledgeScope | null>(null);
@@ -367,6 +371,11 @@ const HomeContent: FC<{
       const previous = map.get(threadId);
       const numericId = String(Number(serverId));
       if (previous !== numericId) {
+        // The existing callback marks new runs even when the query is empty.
+        // Historical runs already use a server key and must not be rebound.
+        if (initialQuestion !== undefined) {
+          bindModelThread?.(threadId, numericId);
+        }
         map.set(threadId, numericId);
         cacheHistoricalChatMode(numericId, chatMode);
         // Keep the sidebar and run configuration in sync with the server id.
@@ -394,7 +403,7 @@ const HomeContent: FC<{
           });
       }
     },
-    [chatMode]
+    [chatMode, bindModelThread]
   );
 
   const handleConversationRenamed = useCallback(

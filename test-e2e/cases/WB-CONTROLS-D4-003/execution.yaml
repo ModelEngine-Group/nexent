@@ -9,6 +9,7 @@ acceptance_bindings:
   AC-01: [WB-CONTROLS-D4-003]
   AC-02: [WB-CONTROLS-D4-003]
   AC-03: [WB-CONTROLS-D4-003]
+  AC-04: [WB-CONTROLS-D4-003]
 preparation:
   families: []
   anchors: false
