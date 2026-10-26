@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Check fault injection and negative detection without product mutations."""
 import asyncio
 import importlib.util
@@ -38,7 +40,7 @@ class PromptFaultTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_readback_after_fault_does_not_reuse_closed_keepalive(self):
         clients = []
-        draft = {'agent_id': 123, 'duty_prompt': 'unchanged'}
+        draft = {'agent_id': 123, 'prompt': 'unchanged'}
 
         @asynccontextmanager
         async def fake_model(*args):
@@ -112,11 +114,11 @@ class PromptFaultTests(unittest.IsolatedAsyncioTestCase):
         failure = httpx.Response(500, json={'message': 'Internal server error, please try again later.'},
                                  request=httpx.Request('POST', 'http://fixture'))
         receipt = {'mode': 'unavailable', 'calls': 1}
-        before = {'duty_prompt': 'original'}
+        before = {'prompt': 'original'}
         case.assert_fault(failure, receipt, before, dict(before), 2, 'unavailable')
         for args in [
             (failure, {**receipt, 'calls': 0}, before, before, 2, 'unavailable'),
-            (failure, receipt, before, {'duty_prompt': 'changed'}, 2, 'unavailable'),
+            (failure, receipt, before, {'prompt': 'changed'}, 2, 'unavailable'),
             (httpx.Response(200, json={'data': {}}, request=httpx.Request('POST', 'http://fixture')),
              receipt, before, before, 2, 'unavailable'),
             (failure, receipt, before, before, 91, 'unavailable'),
@@ -125,19 +127,19 @@ class PromptFaultTests(unittest.IsolatedAsyncioTestCase):
                 case.assert_fault(*args)
 
     def test_complete_draft_requires_saved_fields_not_a_completion_marker(self):
-        before = {'name': 'owned_draft', 'description': 'complete', 'duty_prompt': 'do the task',
+        before = {'name': 'owned_draft', 'description': 'complete', 'prompt': 'do the task',
                   'greeting_message': 'hello', 'example_questions': ['a question'],
                   'tools': [], 'skills': [], 'related_agent_ids': []}
         revision.assert_complete_draft(before)
-        for field in ('name', 'description', 'duty_prompt', 'greeting_message', 'example_questions'):
+        for field in ('name', 'description', 'prompt', 'greeting_message', 'example_questions'):
             with self.subTest(field=field), self.assertRaises(AssertionError):
                 revision.assert_complete_draft({**before, field: ''})
-        with self.assertRaises(AssertionError):
-            revision.assert_complete_draft({**before, 'tools': [{'tool_id': 1}]})
+        # Resources do not introduce additional persisted prompt fields.
+        revision.assert_complete_draft({**before, 'tools': [{'tool_id': 1}]})
 
     def test_snapshot_uses_actual_agent_payload_and_rejects_empty_readback(self):
-        draft = {'agent_id': 123, 'duty_prompt': 'original'}
+        draft = {'agent_id': 123, 'prompt': 'original'}
         self.assertEqual(case.snapshot(draft), case.snapshot({'data': draft}))
-        self.assertNotEqual(case.snapshot(draft), case.snapshot({**draft, 'duty_prompt': 'changed'}))
+        self.assertNotEqual(case.snapshot(draft), case.snapshot({**draft, 'prompt': 'changed'}))
         with self.assertRaises(AssertionError):
             case.snapshot({'message': 'not an Agent'})

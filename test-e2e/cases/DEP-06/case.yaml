@@ -6,38 +6,52 @@ case:
   feature_id: V5-DEP-06
   business_rule_ids:
   - V5-DEP-06-RULE-01
-  title: Docker/Kubernetes 备份脚本参数、空间预检、资产完整性与回滚前置契约
+  title: Docker 备份脚本参数、空间预检、资产完整性与回滚前置契约
   type: DEPLOYMENT
   priority: P0
   status: active
   automation: automated
   objective: 升级前备份遗漏持久化目录、目标目录冲突、空间不足、交互式阻塞或生成不完整恢复资产。
   preconditions:
-  - '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  - 仓库包含 Docker 备份契约脚本；使用临时目录和桩命令，不连接或修改已有容器。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+    contract: Docker backup CLI with isolated temporary directories and stubbed commands.
   steps:
   - order: 1
     action: 执行 deploy/tests/test_docker_backup.sh。
-    expected: 两个仓库内确定性契约脚本均退出 0。
+    expected: Docker 备份契约脚本退出 0。
   - order: 2
-    action: 执行 deploy/tests/test_k8s_backup.sh。
+    action: 校验缺参/未知参数/目录嵌套/名称冲突/空间不足均在复制前失败。
     expected: 所有失败分支错误明确且未开始复制。
   - order: 3
-    action: 校验缺参/未知参数/目录嵌套/名称冲突/空间不足均在复制前失败。
+    action: 校验成功路径包含 ROOT_DIR、NEXENT_USER_DIR 和 Docker volume 数据。
     expected: 成功产物目录和文件完整。
   - order: 4
-    action: 校验成功路径包含 ROOT_DIR、NEXENT_USER_DIR、Docker volume 或 Kubernetes PVC 数据和元数据。
-    expected: 无生产数据写入或残留。
-  - order: 5
     action: 确认执行无交互提示、临时目录自动清理。
     expected: 无生产数据写入或残留。
   expected_results:
-  - 两个仓库内确定性契约脚本均退出 0。
+  - Docker 备份契约脚本退出 0。
   - 所有失败分支错误明确且未开始复制。
   - 成功产物目录和文件完整。
   - 无生产数据写入或残留。
-  forbidden_side_effects: []
+  forbidden_side_effects:
+  - 不连接、停止或修改已有容器及生产数据。
+  - 不遗留测试临时目录。
+  acceptance:
+  - id: AC-01
+    description: Docker 备份契约脚本真实执行并退出 0，不再执行已移除的平台测试。
+    steps: [1]
+    expected_results: [1]
+  - id: AC-02
+    description: 非法参数、目录冲突和空间不足在复制前失败，桩命令不得操作现有容器。
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: 成功资产完整、执行无交互，临时目录清理且无生产数据副作用。
+    steps: [3, 4]
+    expected_results: [3, 4]
+    forbidden_side_effects: [1, 2]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 04_安全性能可靠性
@@ -45,19 +59,19 @@ case:
   risk_type: DEPLOYMENT
   risk: 升级前备份遗漏持久化目录、目标目录冲突、空间不足、交互式阻塞或生成不完整恢复资产。
   condition:
-  - '- ${NEXENT_TEST_HOME}/config/environment.yaml'
+  - 仓库包含 Docker 备份契约脚本；使用临时目录和桩命令，不连接或修改已有容器。
   metrics:
-  - 两个仓库内确定性契约脚本均退出 0。
+  - Docker 备份契约脚本退出 0。
   - 所有失败分支错误明确且未开始复制。
   - 成功产物目录和文件完整。
   - 无生产数据写入或残留。
   thresholds:
-  - 两个仓库内确定性契约脚本均退出 0。
+  - Docker 备份契约脚本退出 0。
   - 所有失败分支错误明确且未开始复制。
   - 成功产物目录和文件完整。
   - 无生产数据写入或残留。
   recovery_expectations:
-  - 两个仓库内确定性契约脚本均退出 0。
+  - Docker 备份契约脚本退出 0。
   - 所有失败分支错误明确且未开始复制。
   - 成功产物目录和文件完整。
   - 无生产数据写入或残留。

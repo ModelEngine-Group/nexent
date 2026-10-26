@@ -721,7 +721,11 @@ class AgentInfo(TableBase):
     model_ids = Column(
         ARRAY(Integer), doc="List of model IDs, foreign key references to model_record_t.model_id, max 5 models")
     max_steps = Column(Integer, doc="Maximum number of steps")
-    duty_prompt = Column(Text, doc="Duty prompt content")
+    prompt = Column(
+        Text,
+        doc="Complete Agent prompt content",
+        comment="Complete Agent instructions including responsibilities, constraints and examples",
+    )
     parent_agent_id = Column(Integer, doc="Parent Agent ID")
     tenant_id = Column(String(100), doc="Belonging tenant")
     enabled = Column(Boolean, doc="Enabled")
@@ -2066,6 +2070,10 @@ class A2AExternalAgent(TableBase):
     agent_card_headers = Column(
         JSON,
         doc="Headers used only to retrieve and refresh the Agent Card"
+    )
+    ssl_verify = Column(
+        Boolean, nullable=False, default=True, server_default="true",
+        comment="Verify peer TLS certificates for Agent Card retrieval and A2A invocation",
     )
 
     # Security declared by the Agent Card and credentials configured by the user

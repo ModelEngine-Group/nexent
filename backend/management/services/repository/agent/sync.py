@@ -40,7 +40,7 @@ def _source_agent_payload(agent: Any) -> dict[str, Any]:
         "allow_chat_metadata": agent.allow_chat_metadata,
         "verification_config": agent.verification_config,
         "context_policy": agent.context_policy,
-        "duty_prompt": agent.duty_prompt,
+        "prompt": agent.prompt,
         "enabled": agent.enabled,
         "model_ids": agent.model_ids,
         "business_logic_model_id": agent.business_logic_model_id,

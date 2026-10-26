@@ -595,6 +595,7 @@ class ExternalA2AAgentConfig(BaseModel):
     protocol_version: str = Field(description="A2A protocol version", default="1.0")
     protocol_type: str = Field(description="Protocol type: JSONRPC, HTTP+JSON, or GRPC", default=PROTOCOL_JSONRPC)
     timeout: float = Field(description="Request timeout in seconds", default=300.0)
+    ssl_verify: bool = Field(description="Verify the peer TLS certificate", default=True)
     raw_card: Optional[Dict[str, Any]] = Field(
         description="Raw Agent Card containing skills and capabilities", default=None
     )
@@ -654,6 +655,7 @@ class ExternalA2AAgentConfig(BaseModel):
             protocol_version=self.protocol_version,
             protocol_type=self.protocol_type,
             timeout=self.timeout,
+            ssl_verify=self.ssl_verify,
             raw_card=self.raw_card,
             custom_headers=self.custom_headers,
         )

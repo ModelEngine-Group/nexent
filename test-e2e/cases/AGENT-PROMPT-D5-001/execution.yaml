@@ -1,10 +1,14 @@
 schema_version: '1.0'
 case_id: AGENT-PROMPT-D5-001
+preparation:
+  anchors: false
+  families: []
+notes: The pytest fixture creates synthetic rows in a uniquely named no-network PostgreSQL container and removes only that container in finally.
 implementations:
 - framework: pytest
   file: test_migration.py
   selector: test_
-timeout_seconds: 180
+timeout_seconds: 600
 acceptance_bindings:
   AC-01:
   - test_legacy_prompt_migration_preserves_rows_and_repeated_execution
@@ -12,3 +16,12 @@ acceptance_bindings:
   - test_legacy_prompt_migration_preserves_rows_and_repeated_execution
   - test_partial_legacy_schema_aborts_without_data_loss
   - test_drop_failure_rolls_back_consolidation_and_preserves_schema
+  AC-03:
+  - test_marketplace_migration_preserves_frozen_parent_child_content_and_is_idempotent
+  - test_marketplace_migration_invalid_agent_rolls_back_all_listings
+  - test_marketplace_migration_malformed_snapshot_rolls_back_all_listings
+  AC-04:
+  - test_agent_prompt_column_rename_preserves_rows_and_full_chain_is_repeatable
+  - test_agent_prompt_column_rename_rejects_invalid_schema_without_changes
+  - test_agent_prompt_column_rename_ddl_failure_rolls_back
+  - test_merged_prompt_sections_run_in_deployment_order_and_repeat

@@ -90,6 +90,12 @@ class RuntimeFixture:
                     for row in session.scalars(select(ModelRecord))}
 
 
+def _bind_case_mcp(monkeypatch, mcp_url, *consumers):
+    """Route each real preparation consumer to the same case-owned server."""
+    for module in consumers:
+        monkeypatch.setattr(module, "get_tenant_local_mcp_server", lambda _: mcp_url)
+
+
 @contextmanager
 def runtime_fixture(monkeypatch):
     provider = Provider()
@@ -116,7 +122,9 @@ def runtime_fixture(monkeypatch):
             from permissions import rbac
             old_permissions, old_initialized = rbac._ROLE_PERMISSIONS.copy(), rbac._INITIALIZED
             rbac.init_rbac()
-            monkeypatch.setattr(nl2agent_service, "get_tenant_local_mcp_server", lambda _: mcp_url)
+            # Ordinary Agent preparation resolves MCP through this imported
+            # boundary as well. Never fall back to a developer's deployment URL.
+            _bind_case_mcp(monkeypatch, mcp_url, nl2agent_service, create_agent_info)
             monkeypatch.setattr(agent_app, "ENABLE_AGENT_WORKBENCH", True)
             monkeypatch.setattr(skill_app, "ENABLE_AGENT_WORKBENCH", True)
             from management.services.agent import execution as ordinary

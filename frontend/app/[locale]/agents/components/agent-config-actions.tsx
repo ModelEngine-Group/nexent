@@ -196,7 +196,7 @@ export default function AgentConfigActions({
           detail.enable_protocol_repair_retry ?? false,
         enabled: detail.enabled,
         business_description: detail.business_description,
-        duty_prompt: detail.duty_prompt,
+        prompt: detail.prompt,
         business_logic_model_name:
           detail.business_logic_model_name ?? undefined,
         business_logic_model_id: detail.business_logic_model_id ?? undefined,

@@ -66,6 +66,8 @@ def main(argv=None):
             state = {"branch": args.branch, "started_at": now(), "status": "PREPARING"}
             save(directory / "status.json", state)
             try:
+                if (home / "state/deployment-exceptions/pending.json").exists():
+                    raise RuntimeError("Pending deployment-mode recovery must be resolved before synchronization")
                 if (home / "state/deployment-guard/pending.json").exists():
                     raise RuntimeError("Pending deployment recovery must be resolved before synchronization")
                 state["head"] = sync_checkout(repo, args.branch, log_dir=directory / "git")

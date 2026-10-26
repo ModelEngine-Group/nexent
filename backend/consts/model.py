@@ -18,7 +18,8 @@ from pydantic import (
 )
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 
-from infrastructure.agent_prompt import normalize_imported_agent_prompt
+from contracts.clarification import ClarificationResponse
+from infrastructure.agent_prompt import normalize_imported_agent_bundle
 
 
 def _validated_context_policy(value: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -1021,6 +1022,7 @@ class AgentRequest(BaseModel):
     # Internal provenance is never accepted from serialized client requests.
     _message_source: str = PrivateAttr(default="CHAT")
     query: str
+    clarification_response: Optional[ClarificationResponse] = None
     conversation_id: Optional[int] = None
     history: Optional[List[HistoryItem]] = None
     # Complete list of attachment information
@@ -1201,6 +1203,7 @@ class MessageRequest(BaseModel):
     message_idx: int  # Modified to integer type
     role: str
     message: List[MessageUnit]
+    clarification_response: Optional[ClarificationResponse] = None
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
 
@@ -1308,28 +1311,6 @@ class OpinionRequest(BaseModel):
     opinion: Optional[str] = None
 
 
-# used in prompt/generate request
-class GeneratePromptRequest(BaseModel):
-    task_description: str
-    agent_id: int
-    model_id: int
-    tool_ids: Optional[List[int]] = Field(
-        None, description="Optional: tool IDs from frontend (takes precedence over database query)")
-    sub_agent_ids: Optional[List[int]] = Field(
-        None, description="Optional: sub-agent IDs from frontend (takes precedence over database query)")
-    knowledge_base_display_names: Optional[List[str]] = Field(
-        None, description="Optional: knowledge base display names from frontend (takes precedence over database query)")
-    has_selected_resources: bool = Field(
-        True, description="Whether tools or sub-agents are selected; when False, skips generating constraint and few_shots sections")
-
-    @field_validator("task_description")
-    @classmethod
-    def validate_task_description(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("task_description must not be blank")
-        return value
-
-
 class OptimizePromptSectionRequest(BaseModel):
     task_description: str
     agent_id: int
@@ -1414,7 +1395,7 @@ class AgentInfoRequest(BaseModel):
     requested_output_tokens: Optional[int] = Field(default=None, gt=0)
     is_main_agent: Optional[bool] = None
     provide_run_summary: Optional[bool] = None
-    duty_prompt: Optional[str] = None
+    prompt: Optional[str] = None
     enabled: Optional[bool] = None
     business_logic_model_name: Optional[str] = None
     business_logic_model_id: Optional[int] = None
@@ -1533,7 +1514,7 @@ class ExportAndImportAgentInfo(BaseModel):
     enable_protocol_repair_retry: bool = False
     verification_config: Optional[Dict[str, Any]] = None
     context_policy: Optional[Dict[str, Any]] = None
-    duty_prompt: Optional[str] = None
+    prompt: Optional[str] = None
     enabled: bool
     tools: List[ToolConfig]
     managed_agents: List[int]
@@ -1546,13 +1527,6 @@ class ExportAndImportAgentInfo(BaseModel):
     model_params_override: Optional[Dict[str, Any]] = None
     greeting_message: Optional[str] = None
     example_questions: Optional[List[str]] = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def normalize_business_prompt(cls, values):
-        if isinstance(values, dict):
-            return normalize_imported_agent_prompt(values)
-        return values
 
     @field_validator("context_policy")
     @classmethod
@@ -1787,7 +1761,7 @@ class AgentRepositoryListingDetailResponse(BaseModel):
     downloads: int = 0
     created_at: Optional[str] = None
     model_name: Optional[str] = None
-    duty_prompt: Optional[str] = None
+    prompt: Optional[str] = None
     tools: List[str] = Field(default_factory=list)
 
 
@@ -1856,6 +1830,11 @@ class SkillConflictCheckRequest(BaseModel):
 
 
 class AgentImportRequest(BaseModel):
+    @field_validator("agent_info", mode="before")
+    @classmethod
+    def normalize_external_prompt_fields(cls, values):
+        return normalize_imported_agent_bundle(values)
+
     agent_info: ExportAndImportDataFormat
     force_import: bool = False
     skills: Optional[List[SkillZipEntry]] = None

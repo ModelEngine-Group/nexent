@@ -6,7 +6,6 @@ import type { MyAgentRepositoryInfoItem } from "@/types/agentRepository";
 
 import { ChatMessageType } from "./chat";
 import { ModelOption } from "@/types/modelConfig";
-import { GENERATE_PROMPT_STREAM_TYPES } from "../const/agentConfig";
 
 export type AgentConfigUpdate = Partial<
   Pick<
@@ -23,7 +22,7 @@ export type AgentConfigUpdate = Partial<
     | "allow_chat_metadata"
     | "enable_protocol_repair_retry"
     | "description"
-    | "duty_prompt"
+    | "prompt"
     | "business_description"
     | "business_logic_model_id"
     | "business_logic_model_name"
@@ -180,7 +179,7 @@ export interface Agent {
   verification_config?: AgentVerificationConfig;
   tools: Tool[];
   skills?: Skill[]; // Skills configured for this agent
-  duty_prompt?: string;
+  prompt?: string;
   business_description?: string;
   business_logic_model_name?: string;
   business_logic_model_id?: number;
@@ -416,12 +415,6 @@ export interface AgentSetupOrchestratorProps {
   setEnabledAgentIds: (ids: number[]) => void;
   onEditingStateChange?: (isEditing: boolean, agent: any) => void;
   onToolsRefresh: (showSuccessMessage?: boolean) => void | Promise<any>;
-  dutyContent: string;
-  setDutyContent: (value: string) => void;
-  constraintContent: string;
-  setConstraintContent: (value: string) => void;
-  fewShotsContent: string;
-  setFewShotsContent: (value: string) => void;
   agentName?: string;
   setAgentName?: (value: string) => void;
   agentDescription?: string;
@@ -430,10 +423,8 @@ export interface AgentSetupOrchestratorProps {
   setAgentDisplayName?: (value: string) => void;
   agentAuthor?: string;
   setAgentAuthor?: (value: string) => void;
-  isGeneratingAgent?: boolean;
   onDebug?: () => void;
   getCurrentAgentId?: () => number | undefined;
-  onGenerateAgent?: (selectedModel?: ModelOption) => void;
   onExportAgent?: () => void;
   onDeleteAgent?: () => void;
   editingAgent?: any;
@@ -456,7 +447,6 @@ export interface SubAgentPoolProps {
   subAgentList?: Agent[];
   loadingAgents?: boolean;
   isImporting?: boolean;
-  isGeneratingAgent?: boolean;
   editingAgent?: Agent | null;
   isCreatingNewAgent?: boolean;
   onCopyAgent?: (agent: Agent) => void;
@@ -475,7 +465,6 @@ export interface ToolPoolProps {
   localIsGenerating?: boolean;
   onToolsRefresh?: (showSuccessMessage?: boolean) => void | Promise<any>;
   isEditingMode?: boolean;
-  isGeneratingAgent?: boolean;
   isEmbeddingConfigured?: boolean;
   agentUnavailableReasons?: string[];
   toolConfigDrafts?: Record<string, ToolParam[]>;
@@ -602,6 +591,8 @@ export interface AgentRefreshEvent extends CustomEvent {
 // MCP server interface definition
 export interface McpServer {
   service_name: string;
+  description?: string | null;
+  tags?: string[];
   mcp_url: string;
   status: boolean;
   enabled: boolean;
@@ -640,29 +631,6 @@ export interface McpContainer {
 }
 
 // ========== Prompt Service Interfaces ==========
-
-/**
- * Prompt Generation Request Parameters
- */
-export interface GeneratePromptParams {
-  agent_id: number;
-  task_description: string;
-  model_id: number;
-  tool_ids?: number[]; // Optional: tool IDs selected in frontend (takes precedence over database query)
-  sub_agent_ids?: number[]; // Optional: sub-agent IDs selected in frontend (takes precedence over database query)
-  /**
-   * Optional: Knowledge base display names for few-shot examples.
-   * If provided, the backend will use these instead of querying the database.
-   * This allows the frontend to pass the latest configured knowledge base names
-   * without waiting for tool config to be saved first.
-   */
-  knowledge_base_display_names?: string[];
-  /**
-   * Whether tools or sub-agents are selected.
-   * When false, the backend skips generating constraint and few_shots sections.
-   */
-  has_selected_resources?: boolean;
-}
 
 export interface OptimizePromptSectionParams {
   agent_id: number;
@@ -711,13 +679,4 @@ export interface OptimizePromptBadCaseResponse {
   section_title: string;
   original_content: string;
   optimized_content: string;
-}
-
-/**
- * Stream Response Data Structure
- */
-export interface StreamResponseData {
-  type: (typeof GENERATE_PROMPT_STREAM_TYPES)[keyof typeof GENERATE_PROMPT_STREAM_TYPES];
-  content: string;
-  is_complete: boolean;
 }

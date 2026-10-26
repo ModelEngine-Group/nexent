@@ -15,18 +15,20 @@ import { AidpKnowledgePage } from "../../infra/automation/d4/pages/aidp-knowledg
  * PW-KB-AIDP-01 — AIDP knowledge branch, end to end, mode-exclusive.
  *
  * The journey always runs against the controlled AIDP served by the
- * ext-knowledge mock (logical service knowledge-provider, seed
- * aidp-kb-product); there is no profile selection and no real AIDP
+ * ext-knowledge mock (logical service knowledge-provider, owned KB
+ * populated from its oracle seed); there is no profile selection and no real AIDP
  * environment. The oracle is the stable seed text, its source document and
  * the selected KB id — a name filter match never impersonates retrieval
  * here.
  */
 
 const ORACLE = {
-  kbName: "AIDP Product Handbook",
-  kbId: "aidp-kb-product",
+  kbName: "",
+  kbId: "",
   query: "AIDP Search 提供了什么能力？请引用原文回答。",
-  expectedText: "AIDP Search provides low-latency retrieval",
+  // The model may translate around the sentence; this seed-only phrase is
+  // preserved in both the debug recall and the released conversation.
+  expectedText: "low-latency retrieval",
   expectedSource: "AIDP产品介绍.pdf",
 };
 
@@ -38,7 +40,7 @@ interface JourneyOracle {
   expectedSource: string;
 }
 
-const oracle: JourneyOracle = ORACLE;
+const oracle: JourneyOracle = { ...ORACLE };
 
 journey("PW-KB-AIDP-01", async (context) => {
   const { page, expect } = context;
@@ -54,7 +56,9 @@ journey("PW-KB-AIDP-01", async (context) => {
   await executeFixedScenario(context, {
     preconditions: [
       async () => {
-        return `using the built-in mock oracle (ext-knowledge seed ${oracle.kbId})`;
+        oracle.kbId = resolveReadyAsset("knowledge", "d4_aidp_id", "PW-KB-AIDP-01");
+        oracle.kbName = resolveReadyAsset("knowledge", "d4_aidp_name", "PW-KB-AIDP-01");
+        return `using the product-created owned AIDP oracle ${oracle.kbId}`;
       },
       async () => {
         await loginCurrent(page, "tenant_a_admin");

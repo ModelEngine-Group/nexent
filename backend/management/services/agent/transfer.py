@@ -460,7 +460,7 @@ async def export_agent_by_agent_id(
         verification_config=agent_info.get("verification_config"),
         context_policy=agent_info.get("context_policy"),
         model_params_override=agent_info.get("model_params_override"),
-        duty_prompt=agent_info.get("duty_prompt"),
+        prompt=agent_info.get("prompt"),
         enabled=agent_info["enabled"],
         tools=tool_list,
         managed_agents=agent_relation_in_db,
@@ -643,7 +643,7 @@ async def import_agent_by_agent_id(
             "model_params_override": getattr(
                 import_agent_info, "model_params_override", None
             ),
-            "duty_prompt": import_agent_info.duty_prompt,
+            "prompt": import_agent_info.prompt,
             "enabled": import_agent_info.enabled,
             "group_ids": user_group_ids,
             "greeting_message": getattr(import_agent_info, "greeting_message", None),

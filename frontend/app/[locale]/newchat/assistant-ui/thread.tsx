@@ -3,6 +3,7 @@
 "use client";
 
 import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";
+import { useConversationModelThreadKey } from "@/features/model-controls/ConversationModelControlsProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import type { ReasoningEffort } from "@/types/modelConfig";
 import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
@@ -310,10 +311,20 @@ export const Thread: FC<ThreadProps> = ({
   const { t } = useTranslation();
   const models = useAgentModels(agent, modelSelectionScope);
   const threadKey = useAuiState((state) => state.threads.mainThreadId);
+  const remoteThreadKey = useAuiState(
+    (state) =>
+      state.threads.threadItems.find(
+        (item) => item.id === state.threads.mainThreadId
+      )?.remoteId
+  );
+  const modelThreadKey = useConversationModelThreadKey(
+    threadKey,
+    remoteThreadKey
+  );
   const { user } = useAuthorizationContext();
   const controls = useConversationModelControls(
     models,
-    `${user?.tenantId ?? ""}:${user?.id ?? ""}:${agent.id}:${threadKey ?? "new"}`,
+    `${user?.tenantId ?? ""}:${user?.id ?? ""}:${agent.id}:${modelThreadKey}`,
     selectedModelId,
     onModelChange ? (selectedModelId ?? "") : undefined
   );

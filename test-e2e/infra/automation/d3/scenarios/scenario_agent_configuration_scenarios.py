@@ -29,7 +29,7 @@ from shared.sse import assert_terminal_event, read_sse
 AGENT_CONFIG_CASES = [
     "API-055", "API-056", "API-057", "API-058",
     "AGT-001", "AGT-002", "AGT-003", "AGT-004",
-    "AGT-006", "AGT-007", "AGT-008", "AGT-009", "AGT-010", "AGT-011", "AGT-012",
+    "AGT-009", "AGT-010", "AGT-011", "AGT-012",
     "API-060", "API-061", "API-062", "API-063", "API-064", "API-065", "API-066",
 ]
 
@@ -300,51 +300,6 @@ async def _nl2agent(identity, mode: str) -> None:
             assert "missing" in text.lower() or "error" in text.lower() or "clar" in text.lower()
 
 
-async def _prompt_generate(identity, mode: str) -> None:
-    model_id = await _llm_id(identity)
-    async with _draft_agent(identity, name_prefix="prompt") as (agent_id, _):
-        payload = {
-            "task_description": "Answer questions using concise factual language",
-            "agent_id": agent_id,
-            "model_id": model_id if mode != "failure" else absent_numeric_id(__name__),
-            "tool_ids": [], "sub_agent_ids": [], "knowledge_base_display_names": [],
-            "has_selected_resources": False,
-        }
-        if mode == "boundary":
-            async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
-                before = await api.post("/agent/search_info", json={"agent_id": agent_id, "version_no": 0})
-                assert_status(before, 200)
-                snapshot = before.json()
-                for blank in ("", " \t\r\n", "\u3000"):
-                    payload["task_description"] = blank
-                    response = await api.post("/prompt/generate", json=payload)
-                    assert_status(response, 422)
-                    assert "text/event-stream" not in response.headers.get("content-type", "")
-                    errors = response.json().get("detail", [])
-                    assert any(item.get("loc", [])[-1:] == ["task_description"] for item in errors)
-                    after = await api.post("/agent/search_info", json={"agent_id": agent_id, "version_no": 0})
-                    assert_status(after, 200)
-                    assert after.json() == snapshot, "invalid input changed the draft"
-            return
-        async with client("config", token=identity.access_token, timeout=MODEL_TIMEOUT) as api:
-            async with api.stream("POST", "/prompt/generate", json=payload) as response:
-                assert_status(response, 200)
-                events = await read_sse(response)
-        if mode == "failure":
-            payloads = [event.get("data") for event in events]
-            assert payloads and all(isinstance(item, dict) for item in payloads)
-            assert any(item.get("success") is False and
-                       item.get("error", {}).get("code") and
-                       item.get("error", {}).get("message") for item in payloads), "missing structured SSE model error"
-            assert not any(item.get("success") is True for item in payloads), "failed model generated partial success"
-            async with client("config", token=identity.access_token) as api:
-                fetched = await api.post("/agent/search_info", json={"agent_id": agent_id, "version_no": 0})
-            assert_status(fetched, 200)
-            saved = fetched.json().get("data") or fetched.json()
-            assert not any(saved.get(field) for field in ("duty_prompt", "constraint_prompt", "few_shots_prompt")), "failed generation persisted prompt fields"
-            return
-        assert_terminal_event(events)
-        assert any(str(item.get("data") or "").strip() for item in events)
 
 
 async def _prompt_section(identity, valid: bool) -> None:
@@ -637,9 +592,6 @@ async def execute_agent_configuration_scenario(case: dict, tenant_a_admin, tenan
         "AGT-002": lambda: _regenerate_name_isolated(force_failure=True),
         "AGT-003": lambda: _nl2agent(tenant_a_admin, "core"),
         "AGT-004": lambda: _nl2agent(tenant_a_admin, "boundary"),
-        "AGT-006": lambda: _prompt_generate(tenant_a_admin, "core"),
-        "AGT-007": lambda: _prompt_generate(tenant_a_admin, "boundary"),
-        "AGT-008": lambda: _prompt_generate(tenant_a_admin, "failure"),
         "AGT-009": lambda: _prompt_section(tenant_a_admin, True),
         "AGT-010": lambda: _prompt_section(tenant_a_admin, False),
         "AGT-011": lambda: _prompt_badcase(tenant_a_admin, False, False),

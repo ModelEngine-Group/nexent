@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Portable orchestration primitives; runtime state always stays outside Git."""
 from __future__ import annotations
 
@@ -245,6 +247,13 @@ def report_context(directory, summary, *, metadata_directory=None, evidence_root
                   "- 使用同步包时，明细中的 `cases/…`、`logs/…` 和 `checkpoints/…` 相对于解压目录；包内报告与日志属于同一批次。",
                   "- 共享包只包含脱敏后的白名单文件，Ubuntu 原始证据保持不变。",
                   f"- 未共享的截图／Trace 等二进制证据：{sharing.get('excluded_binary_count', '未统计')} 个；未经隐私确认，保留在 Ubuntu，详见包内 `excluded-evidence.json`。", ""]
+    if provenance.get("deployment_campaign"):
+        lines += ["## 部署切换与 Local 恢复", "",
+                  "- 部署例外和执行分组：`deployment-plan.json`；常规用例不重复计数。",
+                  "- Local 配置恢复及恢复用例验证：" +
+                  ("通过" if state.get("local_restored_and_verified") else "未完成或未通过，不能认为环境已恢复可用"),
+                  "- 恢复记录：`restoration.json`；恢复回归原始证据仅保留在执行机器：`profiles/restore-local/`。",
+                  "- 原始配置备份仅保留在执行机器的私有 runtime 目录，不进入共享日志包。", ""]
     return lines
 
 

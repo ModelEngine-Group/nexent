@@ -48,9 +48,7 @@ def _snapshot(info):
         'name': info.get('name'),
         'display_name': info.get('display_name'),
         'description': info.get('description'),
-        'duty_prompt': info.get('duty_prompt'),
-        'constraint_prompt': info.get('constraint_prompt'),
-        'few_shots_prompt': info.get('few_shots_prompt'),
+        'prompt': info.get('prompt'),
         'greeting_message': info.get('greeting_message'),
         'example_questions': _normalize_example_questions(info.get('example_questions')),
         'model_ids': info.get('model_ids'),
@@ -63,7 +61,7 @@ def _snapshot(info):
 def assert_complete_draft(snapshot):
     """Prove the persisted local-task prerequisite, not a historical SSE marker."""
     assert re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,59}', snapshot.get('name') or ''), 'Invalid draft name'
-    for field in ('description', 'duty_prompt', 'greeting_message'):
+    for field in ('description', 'prompt', 'greeting_message'):
         assert isinstance(snapshot.get(field), str) and snapshot[field].strip(), f'Missing draft field: {field}'
     questions = snapshot.get('example_questions')
     assert isinstance(questions, list) and questions and all(
@@ -87,9 +85,7 @@ async def _create_draft(identity):
         'name': name,
         'display_name': 'NL2A 最小流程测试 ' + run_id,
         'description': '我是一个根据用户提供的天气文字生成简洁报告的助手。',
-        'duty_prompt': '我负责根据用户直接提供的天气文字生成简洁报告，不查询外部天气。\n\n约束：仅使用用户提供的数据，不调用外部工具、技能或子智能体。\n\n示例：用户提供晴天和二十度信息时，我汇总这些已提供的信息。',
-        'constraint_prompt': '',
-        'few_shots_prompt': '',
+        'prompt': '我负责根据用户直接提供的天气文字生成简洁报告，不查询外部天气。\n\n约束：仅使用用户提供的数据，不调用外部工具、技能或子智能体。\n\n示例：用户提供晴天和二十度信息时，我汇总这些已提供的信息。',
         'greeting_message': '你好，我是天气助手，请告诉我你想查询的城市。',
         'example_questions': ['今天北京的天气怎么样？', '上海明天会下雨吗？'],
         'enabled': True,
@@ -279,17 +275,17 @@ async def test_local_tasks_do_not_enter_full_generation(tenant_a_admin):
         assert _snapshot(await _read_agent(tenant_a_admin, agent_id)) == base_snapshot, 'clarify_requirements must not modify any field'
 
         before_update = _snapshot(await _read_agent(tenant_a_admin, agent_id))
-        update = await _run_turn(tenant_a_admin, agent_id, '请把职责（duty_prompt）修改为：我负责为用户提供专业的数据分析并输出可视化报告，只修改职责这一个字段，不要改动其他字段。', phase='update')
+        update = await _run_turn(tenant_a_admin, agent_id, '请把职责（prompt）修改为：我负责为用户提供专业的数据分析并输出可视化报告，只修改职责这一个字段，不要改动其他字段。', phase='update')
         after_update = _snapshot(await _read_agent(tenant_a_admin, agent_id))
         write_case_evidence(CASE_ID + '-update-readback', {
             'before': before_update, 'after': after_update, 'state_events': update['state_events'],
         }, secrets=(tenant_a_admin.access_token, tenant_a_admin.refresh_token))
-        assert_local_save(update, before_update, after_update, agent_id, {'duty_prompt'})
-        assert_requested_duty(after_update['duty_prompt'])
+        assert_local_save(update, before_update, after_update, agent_id, {'prompt'})
+        assert_requested_duty(after_update['prompt'])
         assert not any(p.get('subtype') == 'requirement_clarification' for p in update['nl2a_payloads']), 'update_fields must not open a clarification card'
         assert _has_tool(update, SAVE_TOOL), 'update_fields must call save_agent_draft_fields'
-        assert after_update['duty_prompt'] != before_update['duty_prompt'], 'duty_prompt was not changed'
-        for field in ('name', 'display_name', 'description', 'constraint_prompt', 'few_shots_prompt', 'greeting_message', 'example_questions'):
+        assert after_update['prompt'] != before_update['prompt'], 'prompt was not changed'
+        for field in ('name', 'display_name', 'description', 'greeting_message', 'example_questions'):
             assert after_update[field] == before_update[field], 'update_fields must not change ' + field
 
         before_opt = _snapshot(await _read_agent(tenant_a_admin, agent_id))
@@ -306,7 +302,7 @@ async def test_local_tasks_do_not_enter_full_generation(tenant_a_admin):
         # idempotent. Still prove one real save, nonempty readback and no cascade.
         assert_local_save(optimize, before_opt, after_opt, agent_id,
                           {'greeting_message', 'example_questions'}, require_change=False)
-        for field in ('name', 'display_name', 'description', 'duty_prompt', 'constraint_prompt', 'few_shots_prompt'):
+        for field in ('name', 'display_name', 'description', 'prompt'):
             assert after_opt[field] == before_opt[field], 'optimize_conversation must not change ' + field
 
         before_res = _snapshot(await _read_agent(tenant_a_admin, agent_id))
@@ -328,7 +324,7 @@ async def test_local_tasks_do_not_enter_full_generation(tenant_a_admin):
         assert _snapshot(await _read_agent(tenant_a_admin, agent_id)) == before_res, 'manage_resources must not modify any Prompt or description field'
 
         before_related = _snapshot(await _read_agent(tenant_a_admin, agent_id))
-        related_query = ('把职责 duty_prompt 改成：我只根据用户直接提供的天气文字输出简明报告。'
+        related_query = ('把职责 prompt 改成：我只根据用户直接提供的天气文字输出简明报告。'
                          '这可能影响其他 Prompt，但我还没有决定同步哪些字段，请先让我选择。')
         related = await _run_turn(tenant_a_admin, agent_id, related_query, phase='related-clarify')
         cards = [card for card in related['nl2a_payloads'] if card.get('subtype') == 'requirement_clarification']
@@ -349,7 +345,7 @@ async def test_local_tasks_do_not_enter_full_generation(tenant_a_admin):
             'before': before_related, 'after': after_related, 'action': action,
             'save_results': confirmed['save_results'], 'state_events': confirmed['state_events'],
         }, secrets=(tenant_a_admin.access_token, tenant_a_admin.refresh_token))
-        assert_local_save(confirmed, before_related, after_related, agent_id, {'duty_prompt'})
+        assert_local_save(confirmed, before_related, after_related, agent_id, {'prompt'})
 
         before_violation = _snapshot(await _read_agent(tenant_a_admin, agent_id))
         violation = await _run_turn(tenant_a_admin, agent_id, '请把智能体的显示名称改成：新名字。', phase='violation')

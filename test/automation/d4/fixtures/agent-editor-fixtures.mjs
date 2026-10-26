@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 export function makeDraft(permission = "EDIT") {
   return {
     agent_id: 42,
@@ -50,9 +52,7 @@ export function makeDraft(permission = "EDIT") {
       enabled: false,
       guardrail_config: { enabled: false, rules: [], default_action: "pass" },
     },
-    duty_prompt: "Answer the question using the draft Agent configuration.",
-    constraint_prompt: "",
-    few_shots_prompt: "",
+    prompt: "Answer the question using the draft Agent configuration.",
     current_version_no: null,
   };
 }

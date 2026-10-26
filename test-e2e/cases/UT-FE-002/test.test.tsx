@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -83,12 +85,12 @@ describe("D1 frontend functional components and state reducers", () => {
     const pageSource = readFileSync(join(repoRoot, "frontend/app/[locale]/agents/[agentId]/page.tsx"), "utf8");
     const versionSource = readFileSync(join(repoRoot, "frontend/app/[locale]/agents/agent-version.tsx"), "utf8");
     const selectorSource = readFileSync(
-      join(repoRoot, "frontend/app/[locale]/agents/[agentId]/components/advanced/collaborative-agent-selector-modal.tsx"),
+      join(repoRoot, "frontend/app/[locale]/agents/[agentId]/components/collaborative-agent.tsx"),
       "utf8",
     );
     expect(pageSource).toMatch(/onRefreshAgentInfo=\{refetchAgentInfo\}/);
     expect(versionSource).toMatch(/onRefreshAgentInfo: \(\) => Promise<Agent \| null>/);
     expect(selectorSource).toMatch(/agent\.collaborative\.selector\.versionName/);
-    expect(selectorSource).toMatch(/name:\s*internalAgent\.version_name/);
+    expect(selectorSource).toMatch(/name:\s*agent\.version_name/);
   });
 });

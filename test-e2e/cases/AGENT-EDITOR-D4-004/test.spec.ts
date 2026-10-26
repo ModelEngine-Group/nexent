@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { journey } from "../../infra/automation/d4/runner/journey";
 import {
   baseUrl,
@@ -41,9 +43,17 @@ journey("AGENT-EDITOR-D4-004", async ({ page, contract, expect }) => {
       await entry.click();
       const dialog = page.getByRole("dialog");
       await expect(dialog).toBeVisible();
+      if (key === "agent.highFidelity.addModel") {
+        // Stage a real change before cancellation; opening a drawer alone
+        // cannot prove that pending selections are discarded.
+        const secondModel = dialog.getByRole("checkbox", { name: "Second Model", exact: true });
+        await secondModel.check();
+        await expect(secondModel).toBeChecked();
+        expect(fixture.updates).toEqual([]);
+      }
       await dialog
         .getByRole("button", { name: /关闭|Close/ })
-        .first()
+        .last()
         .click();
       await expect(dialog).toHaveCount(0);
       await expect(page.locator(".ant-drawer-mask:visible")).toHaveCount(0);

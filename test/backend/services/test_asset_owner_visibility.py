@@ -110,9 +110,9 @@ class TestResolveAgentListPermission:
 class TestApplyAgentDetailPromptVisibility:
     def test_current_agent_mask_does_not_add_removed_prompt_fields(self):
         result = aov.apply_agent_detail_prompt_visibility("regular_tenant", {
-            "tenant_id": ASSET_OWNER_TENANT_ID, "duty_prompt": "Complete prompt",
+            "tenant_id": ASSET_OWNER_TENANT_ID, "prompt": "Complete prompt",
         })
-        assert result["duty_prompt"] is None
+        assert result["prompt"] is None
         assert result[PROMPTS_HIDDEN_FLAG] is True
         assert "constraint_prompt" not in result
         assert "few_shots_prompt" not in result
@@ -120,37 +120,29 @@ class TestApplyAgentDetailPromptVisibility:
     def test_masks_prompts_for_non_asset_owner_viewer(self):
         agent_info = {
             "tenant_id": ASSET_OWNER_TENANT_ID,
-            "duty_prompt": "duty",
-            "constraint_prompt": "constraint",
-            "few_shots_prompt": "few",
+            "prompt": "duty",
         }
         result = aov.apply_agent_detail_prompt_visibility("regular_tenant", agent_info)
-        assert result["duty_prompt"] is None
-        assert result["constraint_prompt"] is None
-        assert result["few_shots_prompt"] is None
+        assert result["prompt"] is None
         assert result[PROMPTS_HIDDEN_FLAG] is True
-        assert agent_info["duty_prompt"] == "duty"
+        assert agent_info["prompt"] == "duty"
 
     def test_no_mask_for_asset_owner_tenant_viewer(self):
         agent_info = {
             "tenant_id": ASSET_OWNER_TENANT_ID,
-            "duty_prompt": "duty",
-            "constraint_prompt": "constraint",
-            "few_shots_prompt": "few",
+            "prompt": "duty",
         }
         result = aov.apply_agent_detail_prompt_visibility(ASSET_OWNER_TENANT_ID, agent_info)
-        assert result["duty_prompt"] == "duty"
+        assert result["prompt"] == "duty"
         assert PROMPTS_HIDDEN_FLAG not in result
 
     def test_no_mask_for_regular_agent(self):
         agent_info = {
             "tenant_id": "tenant_a",
-            "duty_prompt": "duty",
-            "constraint_prompt": "constraint",
-            "few_shots_prompt": "few",
+            "prompt": "duty",
         }
         result = aov.apply_agent_detail_prompt_visibility("regular_tenant", agent_info)
-        assert result["duty_prompt"] == "duty"
+        assert result["prompt"] == "duty"
         assert PROMPTS_HIDDEN_FLAG not in result
 
 

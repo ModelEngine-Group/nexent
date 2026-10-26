@@ -29,6 +29,7 @@ export interface ConversationListParams {
 
 export interface WorkbenchPinItem extends ConversationListItem {
   pinned_at: string;
+  conversation_type?: "agent_chat" | "workbench";
 }
 
 export interface WorkbenchPins {
@@ -74,6 +75,7 @@ export interface ApiMessageItem {
 }
 
 export interface ApiMessage {
+  clarification_response?: unknown;
   status?: "pending" | "streaming" | "completed" | "failed" | "stopped";
   role: "user" | "assistant";
   message: ApiMessageItem[] | string;

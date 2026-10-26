@@ -383,7 +383,7 @@ def test_sal_004_initializes_release_and_returns_published_ref(mocker):
     assert ref == SystemAgentRef("tenant-a", WORKBENCH_MAIN_SYSTEM_KEY, 17, 1)
     assert search.call_count == 4
     assert create.call_args.args[0]["system_revision"] is None
-    assert "通用智能工作台助手" in create.call_args.args[0]["duty_prompt"]
+    assert "通用智能工作台助手" in create.call_args.args[0]["prompt"]
     prepare.assert_called_once_with("tenant-a", "user-a")
     sync.assert_called_once()
     publish.assert_called_once()
@@ -450,7 +450,7 @@ def test_sal_007_same_revision_drift_does_not_mutate(mocker):
     provider = SystemAgentProvider(app_version="2.5.1", aidp_enabled=False)
     mocker.patch(
         "management.services.agent.system.search_system_agent",
-        return_value=_agent(provider, duty_prompt="drift"),
+        return_value=_agent(provider, prompt="drift"),
     )
     mocker.patch.object(provider, "_release_state_matches", return_value=False)
     prepare = mocker.patch.object(provider, "_prepare_official_skills")

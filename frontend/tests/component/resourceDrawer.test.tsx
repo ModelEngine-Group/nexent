@@ -187,6 +187,77 @@ describe("ResourceItem", () => {
     raw: { id: 1 },
   };
 
+  it.each(["list", "card"] as const)(
+    "shows the full description on hover in %s layout without changing selection",
+    async (viewMode) => {
+      const description = "Complete resource description. ".repeat(20);
+      const toggle = vi.fn();
+      render(
+        <ResourceItem
+          item={{ ...item, description }}
+          viewMode={viewMode}
+          onToggle={toggle}
+        />
+      );
+      const text = screen.getByText(description.trim());
+      expect(text).toHaveClass("line-clamp-2");
+      fireEvent.mouseEnter(text);
+      expect(await screen.findByRole("tooltip")).toHaveTextContent(
+        description.trim()
+      );
+      expect(toggle).not.toHaveBeenCalled();
+      expect(screen.getByRole("option", { name: item.name })).toHaveAttribute(
+        "aria-selected",
+        "false"
+      );
+    }
+  );
+
+  it("retains custom description markup and shows the full plain description on hover", async () => {
+    const toggle = vi.fn();
+    render(
+      <ResourceItem
+        item={item}
+        onToggle={toggle}
+        slots={{
+          renderDescription: () => (
+            <span>
+              <strong>Custom description</strong>
+              <span>128 documents</span>
+            </span>
+          ),
+        }}
+      />
+    );
+    fireEvent.mouseEnter(
+      screen.getByText("Custom description").closest(".line-clamp-2")!
+    );
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      item.description
+    );
+    expect(screen.getByText("Custom description").tagName).toBe("STRONG");
+    expect(toggle).not.toHaveBeenCalled();
+  });
+
+  it("keeps empty descriptions absent and permits slot-only full descriptions", async () => {
+    const props = { item: { ...item, description: "" }, onToggle: vi.fn() };
+    const view = render(<ResourceItem {...props} />);
+    expect(document.querySelector(".line-clamp-2")).toBeNull();
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    view.rerender(
+      <ResourceItem
+        {...props}
+        slots={{ renderDescription: () => <span>Slot-only description</span> }}
+      />
+    );
+    fireEvent.mouseEnter(
+      screen.getByText("Slot-only description").closest(".line-clamp-2")!
+    );
+    expect(await screen.findByRole("tooltip")).toHaveTextContent(
+      "Slot-only description"
+    );
+  });
+
   it("retains selection and metadata across list/card layout and keeps actions independent", () => {
     const toggle = vi.fn();
     const configure = vi.fn();

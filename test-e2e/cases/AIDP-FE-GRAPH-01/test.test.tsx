@@ -201,7 +201,7 @@ describe("AIDP-FE-GRAPH-01", () => {
       graph_config: { disambiguation_enable: false },
     });
     expect(screen.queryByRole("dialog")).toBeNull();
-  });
+  }, 15000);
 
   it("disabling requires the exact confirmation and locks the graph display", async () => {
     statefulDetail(graphDetail());

@@ -13,6 +13,8 @@ case:
   automation: automated
   objective: 创建AIDP知识库：USER强制PRIVATE、非USER缺group_ids/跨租户拒绝、kds_id冲突409、权限落库失败回滚
   preconditions:
+  - 创建请求（包括无凭据和非法凭据测试）满足当前请求 Schema，包含 description 及目录解析的 embedding_model，避免 422 掩盖权限断言。
+  - 由 aidp 部署例外组执行，产品 ENABLE_AIDP_KNOWLEDGE 与测试侧 aidp_knowledge 同时开启；外部 AIDP 使用用例所属 knowledge-provider Mock，产品权限、数据库、缓存和接口链路不被替换，结束后恢复 Local。
   - Nexent 本地测试全栈已启动并 health check 通过，AIDP 依赖服务（AIDP_SERVER_URL/AIDP_API_KEY）可访问且 ENABLE_AIDP_KNOWLEDGE 开启。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。

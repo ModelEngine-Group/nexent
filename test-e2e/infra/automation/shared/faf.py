@@ -66,13 +66,20 @@ async def prepare_faf_agents(identity, case_id):
                              'related_agents': [{'agent_id': child['agent_id'], 'version_no': child['version_no']}]}
                 async with client('config', token=identity.access_token) as api:
                     updated = await api.post('/agent/update', json={
-                        **body, **extra, 'duty_prompt': prompt, 'is_main_agent': kind != 'child',
+                        **body, **extra, 'prompt': prompt, 'is_main_agent': kind != 'child',
                         'enable_protocol_repair_retry': False, 'verification_config': {'enabled': False},
                     })
                     assert_status(updated, 200)
+                    draft = await api.post('/agent/search_info', json={'agent_id': agent_id, 'version_no': 0})
+                    assert_status(draft, 200)
+                    assert draft.json()['prompt'] == prompt, 'FAF instructions were not saved on the owned draft'
                     published = await api.post(f'/agent/{agent_id}/publish', json={'version_name': 'final-answer-acceptance'})
                     assert_status(published, 200)
                     fixtures[kind]['version_no'] = published.json()['version_no']
+                    version = await api.post('/agent/search_info', json={
+                        'agent_id': agent_id, 'version_no': fixtures[kind]['version_no']})
+                    assert_status(version, 200)
+                    assert version.json()['prompt'] == prompt, 'Published FAF instructions differ from the saved draft'
         return fixtures
     except BaseException:
         await cleanup_faf_agents(identity, fixtures)

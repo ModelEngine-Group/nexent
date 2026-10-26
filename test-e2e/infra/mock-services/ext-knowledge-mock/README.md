@@ -44,15 +44,26 @@ The mock is reached through two different URLs depending on who is calling:
 | Runner / test code (control plane, wire export, direct asset fetch, latency measurement) | `runner_url` | `http://127.0.0.1:30090` |
 | Product containers (config/runtime outbound params, model records, tool configuration) | `product_url` | `http://ext-knowledge:30090` |
 
-The published port binds to `127.0.0.1` only; the product side reaches the
-service through the product network overlay by its compose DNS name. Test
-helpers pick the side explicitly (`test-e2e/infra/automation/shared/ext_knowledge.py`);
-self-referential URLs (Dify `download_url`) are derived from the request's
-own Host header, so a URL handed to the product is product-reachable and a
-URL fetched by the runner is runner-reachable. Do not "fix" one by
-mechanically replacing the host.
+The Compose deployment publishes the port on `127.0.0.1` only. The
+suite-owned process binds `0.0.0.0:30090` so product containers can reach the
+same port through `product_url`; the suite-owned product side uses the existing
+`NEXENT_TEST_ASSETS_CONTAINER_HOST` setting (for example a reachable Ubuntu
+bridge gateway or `host.docker.internal` on Docker Desktop). The
+`ext-knowledge` Compose DNS name applies only to the optional external container,
+not to a host-owned process.
+Test helpers pick the side explicitly
+(`test-e2e/infra/automation/shared/ext_knowledge.py`); self-referential URLs
+(Dify `download_url`) are derived from the request's own Host header, so a URL
+handed to the product is product-reachable and a URL fetched by the runner is
+runner-reachable. Do not "fix" one by mechanically replacing the host.
 
 ## Base URL conventions per service
+
+The suite starts the CLI with `--state-dir <case>/runtime/ext-knowledge-state`.
+All adapter JSON and AIDP state stays outside the checkout, so runtime writes do
+not change the frozen test-asset fingerprint. The standalone import/Compose mode
+keeps its existing persistent state defaults. Do not ignore source fingerprints
+to accommodate Mock output written into the checkout.
 
 Every product configuration points at the plain service **root**:
 
@@ -167,16 +178,66 @@ leak them into the next case.
 
 ## Running
 
-Standalone (local dev / AIDP-minimal profile; the AIDP mock is loaded from
-the repository checkout):
+### Suite-owned (default; no manual start)
+
+A case only needs to declare the logical service in `execution.yaml`:
+
+```yaml
+required_mock_services:
+- knowledge-provider
+```
+
+The existing suite entry starts and stops the mock for that case:
+
+```bash
+python test-e2e/infra/scripts/run-suite.py run \
+  --test-home <test-home> --case <case-id> --execute
+```
+
+For every such case the worker starts `server.py --host 0.0.0.0 --port 30090`,
+waits for `/health`, resets state through `/_reset`, and terminates the process
+after the case. **No `config/ext-knowledge.yaml`, identity or lock is needed.**
+The product deployment must point its outbound knowledge-service settings at
+the product-facing address, for example:
+
+- Docker Desktop / containerized product: `http://host.docker.internal:30090`
+- host-mode product: `http://127.0.0.1:30090`
+
+For AIDP this is `AIDP_SERVER_URL`; the per-adapter values are in the base URL
+table above. The attach/health/reset evidence is written to
+`<case>/runtime/ext-knowledge-attach.json`.
+
+### Standalone (local dev / AIDP-minimal profile)
+
+The AIDP mock is loaded from the repository checkout:
 
 ```bash
 python test-e2e/infra/mock-services/ext-knowledge-mock/server.py --port 30090
 ```
 
-Through the mock-services dispatcher (builds the image from a packed,
-batch-owned context, waits for readiness — all eight services — and attaches
-the product network; the product must already be deployed):
+Then point the product or a manual test client at `http://127.0.0.1:30090`
+(host mode) or `http://host.docker.internal:30090` (Docker Desktop).
+
+### Dispatcher (optional external shared stack)
+
+The optional `prepare_ext_knowledge.py up --test-home <home> --execute`
+operator helper packs the checkout, uses the dispatcher, verifies product
+network access and writes a verified external attach configuration. Its
+`ensure` action is for that external mode only. Do **not** add an external
+startup hook to the default suite pipeline: the suite-owned process also
+binds 30090 and the two lifecycles cannot run together. Stop the external
+stack before switching to suite-owned execution; keep its configuration
+and deployment receipt for recovery rather than deleting them.
+
+Changed online execution bindings can be checked with
+`validate_test_assets.py --phase implementation --require-preparation-case <Case-ID>`
+(repeat per Case). Explicit preparation remains required even though the
+default suite no longer requires an external attach YAML. Starting a mock
+does not switch the product from Local knowledge mode to AIDP mode.
+
+Builds the image from a packed, batch-owned context, waits for readiness — all
+eight services — and attaches the product network; the product must already be
+deployed:
 
 ```bash
 python test-e2e/infra/mock-services/ext-knowledge-mock/build_context.py --output <context-dir>
@@ -191,20 +252,13 @@ python test-e2e/infra/mock-services/deploy.py stop ext-knowledge
 The published port is fixed at `30090` (the readiness registry probes a
 literal localhost URL); confirm the port is free before `up`. `stop` only
 stops the registered service — no `down`, no volume deletion. Run a single
-uvicorn worker — all state lives in-process.
-
-Runner-side attach (per-case locking, identity validation and evidence
-export) is implemented in `test-e2e/infra/tools/ext_attach.py` and wired
-into the suite worker; cases declare their dependency through
-`required_mock_services` in `execution.yaml` (logical IDs:
-`knowledge-provider`, `http-fixture`, `model-provider`). The suite never
-starts or stops the Compose stack itself — deployment and teardown are
-explicit operator steps.
+uvicorn worker — all state lives in-process. This external mode is optional;
+suite runs use the suite-owned process above and never read the external
+attach YAML.
 
 Profile-selected cases were removed together with the mock/real split:
-PW-KB-AIDP-01 attaches this instance directly through its plain
-`knowledge-provider` dependency, and there is no machine-local journey file
-to create.
+PW-KB-AIDP-01 attaches through its plain `knowledge-provider` dependency, and
+there is no machine-local journey file to create.
 
 ## Deliberate quirks (do not "fix" without checking the adapters)
 

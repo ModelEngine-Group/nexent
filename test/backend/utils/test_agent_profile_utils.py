@@ -436,7 +436,7 @@ class TestFetchAgentProfile:
         agent = {
             "display_name": "AgentA",
             "description": "desc",
-            "duty_prompt": "duty",
+            "prompt": "duty",
             "constraint_prompt": "cons",
             "business_description": "biz",
         }
@@ -457,7 +457,7 @@ class TestFetchAgentProfile:
 
         assert profile["name"] == "AgentA"
         assert profile["description"] == "desc"
-        assert profile["duty_prompt"] == "duty"
+        assert profile["prompt"] == "duty"
         assert "constraint_prompt" not in profile
         assert profile["business_description"] == "biz"
         assert profile["tools"] == [{"name": "weather", "description": "w", "source": "local"}]
@@ -469,7 +469,7 @@ class TestFetchAgentProfile:
         stubs.agent_db.search_agent_info_by_agent_id.return_value = {
             "name": "OnlyName",
             "description": "d" * (profile_mod._DESC_AGENT_MAX + 10),
-            "duty_prompt": "x" * (profile_mod._DUTY_PROMPT_MAX + 10),
+            "prompt": "x" * (profile_mod._PROMPT_MAX + 10),
         }
         stubs.tool_db.search_tools_for_sub_agent.return_value = []
         stubs.skill_service.SkillService.return_value.get_enabled_skills_for_agent.return_value = []
@@ -479,7 +479,7 @@ class TestFetchAgentProfile:
 
         assert profile["name"] == "OnlyName"
         assert len(profile["description"]) == profile_mod._DESC_AGENT_MAX
-        assert len(profile["duty_prompt"]) == profile_mod._DUTY_PROMPT_MAX
+        assert len(profile["prompt"]) == profile_mod._PROMPT_MAX
         assert "constraint_prompt" not in profile
         assert profile["business_description"] == ""
         assert profile["tools"] == []
@@ -561,7 +561,7 @@ class TestFormatAgentProfileContext:
         profile = {
             "name": "AgentA",
             "description": "desc",
-            "duty_prompt": "duty",
+            "prompt": "duty",
             "constraint_prompt": "cons",
             "business_description": "biz",
             "tools": [{"name": "t1", "source": "api", "description": "d1"}],
@@ -586,7 +586,7 @@ class TestFormatAgentProfileContext:
         profile = {
             "name": "A",
             "description": "",
-            "duty_prompt": "",
+            "prompt": "",
             "constraint_prompt": "c",
             "business_description": "",
             "tools": [],

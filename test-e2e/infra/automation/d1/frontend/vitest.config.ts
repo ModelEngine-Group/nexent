@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import path from "node:path";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
@@ -45,6 +47,11 @@ export default defineConfig({
       { find: /^react-shiki$/, replacement: path.join(testNodeModules, "react-shiki") },
       { find: /^@assistant-ui\/react$/, replacement: path.join(testNodeModules, "@assistant-ui/react") },
       { find: /^@assistant-ui\/react-markdown$/, replacement: path.join(testNodeModules, "@assistant-ui/react-markdown") },
+      // Preview imports are analyzed even when an AIDP test does not open a
+      // document. Use the isolated, locked dependencies rather than host drift.
+      { find: /^docx-preview$/, replacement: path.join(testNodeModules, "docx-preview") },
+      { find: /^exceljs$/, replacement: path.join(testNodeModules, "exceljs") },
+      { find: /^pptxtojson$/, replacement: path.join(testNodeModules, "pptxtojson") },
       // Next is a product runtime dependency. Resolve its subpath exports from
       // the checked-out product tree rather than installing a second copy.
       { find: /^next\/(.*)$/, replacement: path.join(productModules, "next/$1") },

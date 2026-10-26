@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Case-owned configured models for tenants without preinstalled anchors."""
 from contextlib import asynccontextmanager
 from uuid import uuid4
@@ -30,7 +31,9 @@ async def owned_configured_model(identity, case_id, model_type="llm"):
                        if row.get("display_name") == display and row.get("model_type") == model_type]
             assert len(matches) == 1, "Owned model must be uniquely visible in its tenant"
             row = matches[0]
-            await ensure_model_health(identity, configured_model(model_type), row)
+            # New records start as not_detected. Activate this owned record
+            # once; ordinary resolution of existing models never probes.
+            await ensure_model_health(identity, configured_model(model_type), row, force=True)
         yield int(row.get("model_id") or row["id"])
     except BaseException as exc:
         primary = exc
