@@ -491,4 +491,102 @@ journey("WB-CONTROLS-D4-003", async ({ page, contract }) => {
       expect(JSON.stringify([defaultRun, selectedRun])).toBe(frozenRequests);
     });
   });
+  await contract.step(contract.expectedIds("steps")[5], async () => {
+    await contract.assertion(contract.expectedIds("assertions")[3], async () => {
+      const createdTitle = "Created model binding";
+      const histories = [{ conversation_id: 1001, agent_id: 7, conversation_title: "Binding other history", create_time: Date.now(), update_time: Date.now() }];
+      const boundRuns: Array<Record<string, any>> = [];
+      await page.route("**/api/conversation/list**", route => route.fulfill({ json: { code: 0, data: { items: histories, metadata: { total: histories.length } } } }));
+      await page.route("**/api/conversation/generate_title", route => route.fulfill({ json: { code: 0, data: createdTitle } }));
+      await page.route(/\/api\/conversation\/100[01]$/, route => {
+        const id = Number(route.request().url().split("/").at(-1));
+        const message = id === 1000 ? boundRuns.flatMap((run, index) => [
+          { role: "user", message: run.query, message_id: 10000 + index * 2 },
+          { role: "assistant", message: [{ type: "final_answer", content: `Binding answer ${index + 1}`, unit_index: 0 }], message_id: 10001 + index * 2 },
+        ]) : [{ role: "user", message: "Other saved input", message_id: 11000 }];
+        return route.fulfill({ json: { code: 0, data: [{ ...histories.find(row => row.conversation_id === id), message, workbench_config: null, chat_mode: "execution" }] } });
+      });
+      await page.route("**/api/agent/run", async route => {
+        const body = route.request().postDataJSON();
+        requests.push(body);
+        boundRuns.push(body);
+        if (boundRuns.length === 1) {
+          expect(body).not.toHaveProperty("conversation_id");
+          histories.unshift({ conversation_id: 1000, agent_id: 7, conversation_title: createdTitle, create_time: Date.now(), update_time: Date.now() });
+        } else {
+          expect(body.conversation_id).toBe(1000);
+        }
+        await route.fulfill({
+          contentType: "text/event-stream",
+          headers: { conversation_id: "1000" },
+          body: `data: ${JSON.stringify({ type: "final_answer", content: `Binding answer ${boundRuns.length}`, unit_index: 0 })}\n\ndata: {"type":"complete","content":""}\n\n`,
+        });
+      });
+      await page.goto(`${process.env.NEXENT_BASE_URL}/zh/newchat?conversation_id=1001`);
+      await expect(trigger).toContainText("Fixture Model");
+      await page.getByRole("button", { name: "新对话", exact: true }).click();
+      const input = page.getByRole("textbox", { name: "对话输入", exact: true });
+      await expect(input).toBeVisible();
+      const sendBound = async (query: string) => {
+        const count = boundRuns.length;
+        const response = page.waitForResponse(r => r.url().endsWith("/api/agent/run") && r.request().method() === "POST");
+        await input.fill(query);
+        await page.getByRole("button", { name: "发送", exact: true }).click();
+        expect((await response).headers().conversation_id).toBe("1000");
+        await expect(page.getByText(`Binding answer ${count + 1}`, { exact: true })).toBeVisible();
+        await expect(page.getByRole("button", { name: "发送", exact: true })).toBeVisible();
+        return boundRuns[count];
+      };
+      const first = await sendBound("First default run in a blank conversation");
+      expect(first.model_id).toBe(1);
+      const createdRow = page.locator("button[data-radix-collection-item]").filter({ hasText: createdTitle });
+      const otherRow = page.locator("button[data-radix-collection-item]").filter({ hasText: "Binding other history" });
+      await expect(createdRow).toBeVisible({ timeout: 15000 });
+      await open();
+      await settings.getByText("Automatic Model", { exact: true }).click();
+      await setThinking(true);
+      await choose("低");
+      await settings.getByRole("button", { name: "高级设置", exact: true }).hover();
+      const panel = page.getByRole("region", { name: "高级设置", exact: true });
+      for (const [name, value] of [["温度", "0"], ["Top P", "0.37"]]) {
+        await panel.getByRole("spinbutton", { name, exact: true }).fill(value);
+        await panel.getByRole("spinbutton", { name, exact: true }).press("Enter");
+      }
+      await page.keyboard.press("Escape");
+      if (await settings.isVisible()) await trigger.click();
+      const selected = await sendBound("Non-default run after server identity binding");
+      const expectedGeneration = { deep_thinking: true, thinking_effort: "low", temperature: 0, top_p: 0.37 };
+      expect(selected.model_id).toBe(3);
+      expect(selected.reasoning_effort).toBe("low");
+      expect(selected.generation_config).toEqual(expectedGeneration);
+      const frozen = JSON.stringify([first, selected]);
+      const beforeWrites = writes.length;
+      await otherRow.click();
+      await expect(trigger).toContainText("Fixture Model");
+      await createdRow.click();
+      await expect(trigger).toContainText("Automatic Model");
+      await open();
+      await expect(settings.getByRole("switch")).toHaveAttribute("aria-checked", "true");
+      await expect(settings.getByRole("combobox")).toHaveText("低");
+      await settings.getByRole("button", { name: "高级设置", exact: true }).hover();
+      await expect(panel.getByRole("spinbutton", { name: "温度", exact: true })).toHaveValue("0");
+      await expect(panel.getByRole("spinbutton", { name: "Top P", exact: true })).toHaveValue("0.37");
+      await page.keyboard.press("Escape");
+      if (await settings.isVisible()) await trigger.click();
+      await page.getByRole("button", { name: "新对话", exact: true }).click();
+      await expect(trigger).toContainText("Fixture Model");
+      await createdRow.click();
+      await expect(trigger).toContainText("Automatic Model");
+      expect(boundRuns).toHaveLength(2);
+      expect(writes).toHaveLength(beforeWrites);
+      const restored = await sendBound("Restored new conversation run");
+      expect(restored.model_id).toBe(3);
+      expect(restored.reasoning_effort).toBe("low");
+      expect(restored.generation_config).toEqual(expectedGeneration);
+      expect(restored).not.toHaveProperty("temperature");
+      expect(restored).not.toHaveProperty("top_p");
+      expect(boundRuns).toHaveLength(3);
+      expect(JSON.stringify([first, selected])).toBe(frozen);
+    });
+  });
 });

@@ -1,5 +1,6 @@
 schema_version: '1.0'
 case_id: EVAL-LEGACY-D5-001
+notes: The pytest fixture owns its isolated PostgreSQL container and synthetic grants; no product database or account is used.
 implementations:
 - framework: pytest
   file: test_migration.py

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Run selected formal cases from the repository with machine-local assets.
 
 This is a targeted developer runner, not the Ubuntu deployment/scheduling
@@ -432,7 +434,16 @@ def main() -> int:
     home = home.resolve()
     if home.is_relative_to(repo):
         parser.error("Test home must be outside the Git checkout")
+    from deployment_exceptions import assert_recovered, catalog
+    assert_recovered(home)
     env = machine_environment(home, repo)
+    exceptions = catalog(repo)["cases"]
+    if any(case_id in exceptions for case_id in args.case_ids):
+        command = [sys.executable, str(repo / "test-e2e/infra/scripts/run-suite.py"),
+                   "run", "--test-home", str(home), "--execute"]
+        for case_id in dict.fromkeys(args.case_ids):
+            command.extend(["--case", case_id])
+        return subprocess.run(command, cwd=repo, env=env, check=False).returncode
     failed = 0
     data_files = []
     for case_id in dict.fromkeys(args.case_ids):

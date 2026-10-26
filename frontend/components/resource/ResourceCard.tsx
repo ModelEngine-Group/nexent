@@ -93,6 +93,7 @@ export default function ResourceCard({
           {isInteractive ? (
             <button
               type="button"
+              title={typeof title === "string" ? title : undefined}
               aria-labelledby={titleId}
               role={selectionRole}
               aria-pressed={selectionRole ? undefined : selected}
@@ -125,6 +126,7 @@ export default function ResourceCard({
               >
                 <h2
                   id={titleId}
+                  title={typeof title === "string" ? title : undefined}
                   className="truncate text-base font-semibold text-slate-900 dark:text-slate-100"
                 >
                   {title}

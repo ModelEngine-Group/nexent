@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D3 conversation title, Memory and natural-language automation scenarios."""
 
 from __future__ import annotations
@@ -110,7 +111,7 @@ async def _memory_records(identity, valid: bool) -> None:
         assert_status(invalid, 422)
         return
     marker = f"MEMORY-{uuid4().hex[:10]}"
-    await model_id('embedding', identity, force_health=True)
+    await model_id('embedding', identity)
     memory_id_value = await _create_agent_memory(identity, marker, require_indexed=True)
     operations = []
     try:
@@ -281,10 +282,9 @@ async def _memory_agent_context(identity, mode: str) -> None:
             )
         assert_status(response, (200, 409, 500, 502, 503, 504))
         return
-    # Record indexing alone does not prove that the vector Provider works.
-    # Classify an unavailable dependency before creating memory or blaming
-    # an empty context on the retrieval/prompt implementation.
-    await model_id("embedding", identity, force_health=True)
+    # Resolve the declared model only; indexing and retrieval prove the
+    # actual vector behavior without a model-management permission gate.
+    await model_id("embedding", identity)
     marker = f"CTXMEM{uuid4().hex[:10]}"
     lookup = f"CTXLOOKUP{uuid4().hex[:10]}"
     memory_id_value = await _create_agent_memory(identity, f"{lookup} has unique answer {marker}", require_indexed=True)

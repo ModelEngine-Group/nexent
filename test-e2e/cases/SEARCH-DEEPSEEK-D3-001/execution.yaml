@@ -1,5 +1,6 @@
 schema_version: '1.0'
 case_id: SEARCH-DEEPSEEK-D3-001
+notes: The script owns a loopback HTTP provider and closes its server and thread in finally; no product assets are required.
 implementations:
   - framework: pytest
     file: test_integration.py
