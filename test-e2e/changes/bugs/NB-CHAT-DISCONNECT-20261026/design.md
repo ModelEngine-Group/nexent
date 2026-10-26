@@ -69,3 +69,11 @@ b783c709e46a453d5bebc9df36348f7bee71ad820e1374c09fa6b96bb5d91550  test-e2e/cases
 ## Verification limits
 
 Both documented sibling SPEC directories (`nexent-doc`, `nexent_SPEC`) are absent. The formal assets and actual UT/scripts in this repository were inspected; this is a delivery record, not a replacement external SPEC. Record UT, static validation and real runtime results separately. Missing runtime configuration or credentials blocks D3 acceptance and never counts as a pass.
+
+## Develop merge verification — 2026-10-26
+
+Merged `origin/develop` at `003771c9d39b02f2548f1a40b99809e3de366e05` without textual conflicts. The upstream backend refactor moved the run manager into `management.services.agent.lifecycle`; the new lifecycle UT fixture now loads that file instead of the removed `backend/agents/agent_run_manager.py`. The producer ownership fix remains unchanged relative to the updated base.
+
+The targeted lifecycle/service selection above passed again: **50 passed, 449 deselected**. The runtime proxy/channel selection passed again: **66 passed**. Copyright and whitespace checks passed.
+
+The upstream merge also repairs the external-knowledge fixture's missing `aidp_fixture.py` copy. Re-running `test/ext_components/ext_knowledge/test_dify_fidelity.py::test_datasets_require_bearer` passed (**1 passed**). This is separate from the Agent disconnect behavior. Regenerated the local execution registry and Excel view and passed implementation-phase validation with `--require-ut-change NB-CHAT-DISCONNECT-20261026 --require-acceptance-case NB-CHAT-DISCONNECT-001`. No new live-provider D3 execution was performed; its runtime prerequisite limitation remains unchanged.
