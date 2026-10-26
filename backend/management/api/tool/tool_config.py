@@ -24,7 +24,6 @@ from management.services.tool.configuration import (
     delete_openapi_service,
     _refresh_openapi_services_in_mcp,
 )
-<<<<<<< HEAD:backend/management/api/tool/tool_config.py
 from contracts.errors.exceptions import AgentDraftEditError, ResourceBindingError
 from management.db.identity.user_tenant import get_user_email_map
 from management.db.mcp.remote import delete_mcp_record_by_name_and_url
