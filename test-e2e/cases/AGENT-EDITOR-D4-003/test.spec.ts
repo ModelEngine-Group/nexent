@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { journey } from "../../infra/automation/d4/runner/journey";
 import {
   baseUrl,
@@ -29,6 +31,9 @@ journey("AGENT-EDITOR-D4-003", async ({ page, contract, expect }) => {
   });
   await contract.step(steps[1], async () => {
     await description().fill("Description saved by the browser journey");
+    const guide = page.getByTestId("agent-config-card-welcome").getByRole("button", { name: new RegExp(label("agent.highFidelity.guideTitle")) });
+    await guide.click();
+    await expect(greeting()).toBeVisible();
     await greeting().fill("Greeting saved by the browser journey");
     await greeting().blur();
     await expect

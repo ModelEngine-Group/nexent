@@ -50,7 +50,7 @@ def test_no_selection_never_creates_unrestricted_tool(mocker, mode):
 
 
 def test_selected_range_replaces_defaults_before_tool_construction(mocker):
-    from consts.model import ConversationKnowledgeScopeRequest
+    from contracts.knowledge import ConversationKnowledgeScopeRequest
     from management.services.knowledge_base import scope as scopes
 
     mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", False)

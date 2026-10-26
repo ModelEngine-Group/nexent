@@ -16,41 +16,15 @@ from nexent.core.concurrency import run_blocking
 from nexent.core.models import OpenAILongContextModel
 from nexent.multi_modal.utils import parse_s3_url
 
-from consts.const import (
-    ASSET_OWNER_ATTACHMENTS_PREFIX,
-    ASSET_OWNER_TENANT_ID,
-    DATA_PROCESS_SERVICE,
-    FILE_PREVIEW_SIZE_LIMIT,
-    MAX_KNOWLEDGE_FILE_SIZE_BYTES,
-    MAX_CONCURRENT_UPLOADS,
-    MODEL_CONFIG_MAPPING,
-    OFFICE_MIME_TYPES,
-    UPLOAD_FOLDER,
-)
-from consts.error_code import ErrorCode
-from consts.exceptions import (
-    AppException,
-    FileTooLargeException,
-    NotFoundException,
-    OfficeConversionException,
-    UnsupportedFileTypeException,
-)
-from database.attachment_db import (
-    copy_file,
-    delete_file,
-    file_exists,
-    generate_object_name,
-    get_content_type,
-    get_file_range,
-    get_file_size_from_minio,
-    get_file_stream,
-    get_file_stream_raw,
-    get_file_url,
-    list_files,
-    upload_fileobj,
-)
-from database.knowledge_file_lifecycle_db import create_file_records, transition_file_record
-from database.model_management_db import get_model_by_model_id
+from contracts.constants.constants import ASSET_OWNER_ATTACHMENTS_PREFIX, ASSET_OWNER_TENANT_ID
+from contracts.constants.environment import DATA_PROCESS_SERVICE, MAX_KNOWLEDGE_FILE_SIZE_BYTES, UPLOAD_FOLDER
+from contracts.constants.constants import FILE_PREVIEW_SIZE_LIMIT, MAX_CONCURRENT_UPLOADS, OFFICE_MIME_TYPES
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, FileTooLargeException, NotFoundException, OfficeConversionException, UnsupportedFileTypeException
+from management.db.file.attachment import copy_file, delete_file, file_exists, generate_object_name, get_content_type, get_file_range, get_file_size_from_minio, get_file_size_from_minio_strict, get_file_stream, get_file_stream_raw, get_file_url, list_files, upload_fileobj
+from management.db.knowledge_base.file_lifecycle import create_file_records, transition_file_record
+from management.db.model.repository import get_model_by_model_id
 from management.services.knowledge_base.service import ElasticSearchService, get_vector_db_core
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.model.names import get_model_name_from_config
@@ -645,6 +619,10 @@ async def get_file_url_impl(object_name: str, expires: int):
 async def get_file_stream_impl(object_name: str):
     file_stream = get_file_stream(object_name=object_name)
     if file_stream is None:
+        # The legacy read helper collapses missing keys and operational errors.
+        # Confirm absence without treating denied/unavailable storage as a 404.
+        if get_file_size_from_minio_strict(object_name) is None:
+            raise NotFoundException("Storage object does not exist")
         raise Exception("File not found or failed to read from storage")
     content_type = get_content_type(object_name)
     return file_stream, content_type
@@ -659,7 +637,7 @@ async def delete_file_impl(
     reference = None
     ledger_record = None
     if tenant_id:
-        from database.knowledge_storage_object_db import get_storage_object
+        from management.db.knowledge_base.storage_object import get_storage_object
         from management.services.knowledge_base.storage import resolve_storage_reference
 
         reference = resolve_storage_reference(object_name)

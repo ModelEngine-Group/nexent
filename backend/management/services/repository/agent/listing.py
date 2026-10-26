@@ -4,46 +4,18 @@ import logging
 import uuid
 from typing import Any, Collection, Dict, FrozenSet, List, Optional, Tuple
 
-from consts.agent_repository import (
-    OWNERSHIP_ALL,
-    OWNERSHIP_CREATED,
-    OWNERSHIP_OTHERS,
-    STATUS_NOT_SHARED,
-    STATUS_PENDING_REVIEW,
-    STATUS_REJECTED,
-    STATUS_SHARED,
-    VALID_OWNERSHIP_FILTERS,
-    VALID_REPOSITORY_STATUSES,
-)
-from consts.const import SYSTEM_TENANT_ID
-from consts.exceptions import UnauthorizedError
-from consts.model import (
-    AgentRepositorySnapshot,
-    KnowledgeBaseResolution,
-    SkillResolution,
-)
-from consts.notification import (
-    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-    RESOURCE_TYPE_AGENT_REPOSITORY,
-)
-from database.agent_db import delete_agent_by_id, search_agent_info_by_agent_id
-from database.agent_repository_db import (
-    fetch_draft_agent_mine_metadata,
-    get_agent_repository_by_agent_id,
-    get_agent_repository_by_id,
-    increment_agent_repository_downloads,
-    insert_agent_repository_record,
-    list_agent_repository_by_agent_ids,
-    list_agent_repository_summaries,
-    reset_agent_repository_status,
-    soft_delete_agent_repository_record,
-    sum_agent_repository_downloads_by_agent_ids,
-    update_agent_repository_by_id,
-    update_agent_repository_status_by_id,
-)
-from database.agent_version_db import search_version_by_version_no
-from database.tag_management_db import TagManagementDB
-from database.user_tenant_db import get_user_tenant_by_user_id
+from contracts.constants.constants import OWNERSHIP_ALL, OWNERSHIP_CREATED, OWNERSHIP_OTHERS, STATUS_NOT_SHARED, STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_OWNERSHIP_FILTERS, VALID_REPOSITORY_STATUSES
+from contracts.constants.constants import SYSTEM_TENANT_ID
+from contracts.errors.exceptions import UnauthorizedError
+from contracts.agent import AgentRepositorySnapshot
+from contracts.knowledge import KnowledgeBaseResolution
+from contracts.skill import SkillResolution
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
+from management.db.agent.repository import delete_agent_by_id, search_agent_info_by_agent_id
+from management.db.agent.catalog import fetch_draft_agent_mine_metadata, get_agent_repository_by_agent_id, get_agent_repository_by_id, increment_agent_repository_downloads, insert_agent_repository_record, list_agent_repository_by_agent_ids, list_agent_repository_summaries, reset_agent_repository_status, soft_delete_agent_repository_record, sum_agent_repository_downloads_by_agent_ids, update_agent_repository_by_id, update_agent_repository_status_by_id
+from management.db.agent.version import search_version_by_version_no
+from management.db.tag.repository import TagManagementDB
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.agent.icon import read_icon_image, upload_icon_image
 from management.services.agent.service import (
     collect_skill_zip_entries,
@@ -592,11 +564,12 @@ def _extract_root_agent_from_snapshot(agent_info_json: Any) -> Dict[str, Any]:
     agent_info_map = agent_info_json.get("agent_info")
     if root_agent_id is None or not isinstance(agent_info_map, dict):
         return {}
-    return (
+    root_agent = (
         agent_info_map.get(str(root_agent_id))
         or agent_info_map.get(root_agent_id)
         or {}
     )
+    return root_agent if isinstance(root_agent, dict) else {}
 
 
 def _extract_tool_names(root_agent: Dict[str, Any]) -> List[str]:
@@ -654,7 +627,7 @@ def get_agent_repository_listing_detail_impl(
         "downloads": download_total,
         "created_at": _serialize_created_at(record.get("create_time")),
         "model_name": root_agent.get("model_name"),
-        "duty_prompt": root_agent.get("duty_prompt"),
+        "prompt": root_agent.get("prompt"),
         "tools": _extract_tool_names(root_agent),
         "is_official": record.get("publisher_tenant_id") == SYSTEM_TENANT_ID,
         "is_main_agent": (
@@ -762,4 +735,4 @@ def _order_listings_by_publish_time(
 
 from datetime import datetime
 
-from database.agent_db import batch_get_agent_main_flags
+from management.db.agent.repository import batch_get_agent_main_flags

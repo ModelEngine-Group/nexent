@@ -35,16 +35,33 @@ feature:
       body 14/22px/400/#191919, points 14/22px/400/#777777; step title is 18/26px/500/#191919
       and description 14/22px/400/#777777. The visible 72x22px header tutorial toggle uses text
       before an 8px arrow with 6px gap, while the transparent guide-internal toggle is absent.
+      A divider separates the expanded guide from the list for both populated and empty data;
+      it disappears when the guide is collapsed and does not add to the guide height.
       Longer translated step copy may grow naturally above its 156px minimum while retaining
       readable text and usable controls.
   - rule_id: AGENT-LIST-RULE-007
-    description: Desktop cards are 440x148px with 24px horizontal and 16px vertical padding,
-      a 12px radius, white background and 1px outside
+    description: Desktop cards are 440x180px with 24px horizontal and 16px vertical padding,
+      a 12px radius, white background and 1px outside stroke. The 148px inner area
+      contains a 112px body with a reserved 22px category row, a 4px derived gap
+      and a 32px footer; card dates and publication status align at opposite ends
+      of the footer. The 180px design was confirmed on 2026-10-23.
   - rule_id: AGENT-LIST-RULE-008
     description: Visual refinement preserves real list metadata and existing search, pagination,
       creation, details, configuration, publication, import and more-menu actions; guide/card
       presentation never fabricates update dates, status or import provenance and never causes
       a business write by itself.
+  - rule_id: AGENT-LIST-RULE-009
+    description: The Agent list page heading uses the existing localized Agent Configuration
+      label in every supported locale.
+  - rule_id: AGENT-LIST-RULE-010
+    description: Card Configure and Publish actions are available from the existing more menu;
+      Publish remains disabled for read-only Agents, and existing menu actions remain available.
+  - rule_id: AGENT-LIST-RULE-011
+    description: A card footer places its creation/update date at the left edge and online status
+      at the right edge while preserving metadata source and label semantics.
+  - rule_id: AGENT-LIST-RULE-012
+    description: The Agent list does not show creator/import category tabs while its data source
+      cannot reliably distinguish Agents by import provenance.
   required_test_stages:
   - D1
   - D4

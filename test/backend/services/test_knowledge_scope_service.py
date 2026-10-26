@@ -5,8 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.consts.model import ConversationKnowledgeScopeRequest, ToolParamsRequest
-from consts.exceptions import ValidationError
+from contracts.knowledge import ConversationKnowledgeScopeRequest
+from contracts.tool import ToolParamsRequest
+from contracts.errors.exceptions import ValidationError
 from management.services.knowledge_base.scope import (
     ResolvedKnowledgeScope,
     STATIC_SCOPE_PATTERN,
@@ -323,7 +324,7 @@ def test_list_and_tool_default_parsing_is_defensive():
 @patch(
     "management.services.knowledge_base.scope.search_agent_info_by_agent_id",
     side_effect=[
-        {"name": "root", "duty_prompt": 'index_names: ["fixed"]'},
+        {"name": "root", "prompt": 'index_names: ["fixed"]'},
         {"name": "child"},
     ],
 )
@@ -557,7 +558,7 @@ def test_runtime_resources_only_describe_effective_source():
 
 @pytest.mark.parametrize("legacy", [None, {}, {"top_k": 0}, {"top_k": 99}, {"api_key": "unused"}])
 def test_retired_retrieval_config_is_not_part_of_knowledge_scope(legacy):
-    from consts.model import WorkbenchSessionConfig
+    from contracts.agent import WorkbenchSessionConfig
 
     raw = {"local": {"mode": "override", "knowledge_ids": ["12"]},
            "aidp": {"mode": "disabled"}, "retrieval_config": legacy}

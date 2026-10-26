@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import asyncio
 import sys
 import types
@@ -30,9 +32,10 @@ consts_mock.const.PERMISSION_EDIT = "EDIT"
 consts_mock.const.PERMISSION_READ = "READ_ONLY"
 
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
-consts_exceptions_mod = types.ModuleType("consts.exceptions")
+consts_exceptions_mod = types.ModuleType("contracts.errors.exceptions")
 
 
 class ValidationError(Exception):
@@ -40,9 +43,9 @@ class ValidationError(Exception):
 
 
 consts_exceptions_mod.ValidationError = ValidationError
-sys.modules['consts.exceptions'] = consts_exceptions_mod
+install_shared_contract_stub(consts_exceptions_mod, 'exceptions')
 
-# Mock consts.agent_unavailable_reasons
+# Mock contracts.constants.constants
 agent_unavailable_reasons_mock = MagicMock()
 agent_unavailable_reasons_mock.AgentUnavailableReason = type('AgentUnavailableReason', (), {
     'DUPLICATE_NAME': 'duplicate_name',
@@ -61,7 +64,7 @@ agent_unavailable_reasons_mock.AgentUnavailableReason = type('AgentUnavailableRe
         'model_unavailable', 'tool_unavailable', 'all_tools_disabled', 'agent_not_found'
     ]),
 })()
-sys.modules['consts.agent_unavailable_reasons'] = agent_unavailable_reasons_mock
+install_shared_contract_stub(agent_unavailable_reasons_mock, 'agent_unavailable_reasons')
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -77,15 +80,15 @@ utils_mock.skill_params_utils.strip_params_comments_for_db = MagicMock(
 )
 
 sys.modules['utils'] = utils_mock
-sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
-sys.modules['management.db.serialization'] = utils_mock.str_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.utils.serialization'] = utils_mock.str_utils
 sys.modules['management.services.skill.params'] = utils_mock.skill_params_utils
 
 # Mock boto3
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
-# Mock database.client
+# Mock management.db.client
 client_mock = MagicMock()
 client_mock.MinioClient = MagicMock()
 client_mock.PostgresClient = MagicMock()
@@ -93,10 +96,16 @@ client_mock.db_client = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 
-sys.modules['database.client'] = client_mock
-sys.modules['backend.database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
-# Mock database.db_models
+# Mock management.db.models
 db_models_mock = MagicMock()
 db_models_mock.AgentInfo = MagicMock()
 db_models_mock.ToolInstance = MagicMock()
@@ -107,10 +116,10 @@ db_models_mock.SkillToolRelation = MagicMock()
 db_models_mock.SkillInstance = MagicMock()
 db_models_mock.ToolInfo = MagicMock()
 
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
-# Mock database.agent_version_db
+# Mock management.db.agent.version
 agent_version_db_mock = MagicMock()
 agent_version_db_mock.SOURCE_TYPE_NORMAL = "NORMAL"
 agent_version_db_mock.SOURCE_TYPE_ROLLBACK = "ROLLBACK"
@@ -118,37 +127,37 @@ agent_version_db_mock.STATUS_RELEASED = "RELEASED"
 agent_version_db_mock.STATUS_DISABLED = "DISABLED"
 agent_version_db_mock.STATUS_ARCHIVED = "ARCHIVED"
 
-sys.modules['database.agent_version_db'] = agent_version_db_mock
-sys.modules['backend.database.agent_version_db'] = agent_version_db_mock
+sys.modules['management.db.agent.version'] = agent_version_db_mock
+sys.modules['management.db.agent.version'] = agent_version_db_mock
 
-# Mock database.model_management_db
+# Mock management.db.model.repository
 model_management_db_mock = MagicMock()
 # Default pass-through behavior for get_valid_model_ids
 model_management_db_mock.get_valid_model_ids = MagicMock(
     side_effect=lambda model_ids, tenant_id: model_ids
 )
-sys.modules['database.model_management_db'] = model_management_db_mock
-sys.modules['backend.database.model_management_db'] = model_management_db_mock
+sys.modules['management.db.model.repository'] = model_management_db_mock
+sys.modules['management.db.model.repository'] = model_management_db_mock
 
-# Mock database.agent_db (for list_published_agents_impl)
+# Mock management.db.agent.repository (for list_published_agents_impl)
 agent_db_mock = MagicMock()
-sys.modules['database.agent_db'] = agent_db_mock
-sys.modules['backend.database.agent_db'] = agent_db_mock
+sys.modules['management.db.agent.repository'] = agent_db_mock
+sys.modules['management.db.agent.repository'] = agent_db_mock
 
-# Mock database.skill_db
+# Mock management.db.skill.repository
 skill_db_mock = MagicMock()
 skill_db_mock.query_skill_instances_by_agent_id = MagicMock(return_value=[])
 skill_db_mock.strip_params_comments_for_db = MagicMock(side_effect=lambda x: x)
-sys.modules['database.skill_db'] = skill_db_mock
-sys.modules['backend.database.skill_db'] = skill_db_mock
+sys.modules['management.db.skill.repository'] = skill_db_mock
+sys.modules['management.db.skill.repository'] = skill_db_mock
 
 # Mock published-agent dependencies at their canonical import sites.
 agent_read_mock = MagicMock()
 sys.modules["management.services.agent.read"] = agent_read_mock
 user_tenant_db_mock = MagicMock()
-sys.modules["database.user_tenant_db"] = user_tenant_db_mock
+sys.modules["management.db.identity.user_tenant"] = user_tenant_db_mock
 group_db_mock = MagicMock()
-sys.modules["database.group_db"] = group_db_mock
+sys.modules["management.db.identity.group"] = group_db_mock
 
 # Mock database module
 database_mock = MagicMock()
@@ -157,15 +166,15 @@ database_mock.agent_db = agent_db_mock
 sys.modules['database'] = database_mock
 sys.modules['backend.database'] = database_mock
 
-# Mock database.a2a_agent_db
+# Mock management.db.a2a.repository
 a2a_agent_db_mock = MagicMock()
 a2a_agent_db_mock.create_server_agent = MagicMock()
 a2a_agent_db_mock.get_server_agent_by_agent_id = MagicMock()
-sys.modules['database.a2a_agent_db'] = a2a_agent_db_mock
-sys.modules['backend.database.a2a_agent_db'] = a2a_agent_db_mock
+sys.modules['management.db.a2a.repository'] = a2a_agent_db_mock
+sys.modules['management.db.a2a.repository'] = a2a_agent_db_mock
 
 # Now import the service module
-import management.services.agent.versions as agent_version_service_module
+from management.services.agent import versions as agent_version_service_module
 from management.services.agent.versions import (
     publish_version_impl,
     get_version_list_impl,
@@ -287,7 +296,7 @@ def mock_agent_draft():
         "model_ids": [1],
         "business_logic_model_id": 2,
         "max_steps": 10,
-        "duty_prompt": "Test prompt",
+        "prompt": "Test prompt",
         "group_ids": "1,2",
         "is_a2a": False,
         "create_time": "2023-01-01 12:00:00",
@@ -647,7 +656,7 @@ def test_get_version_detail_impl_success(monkeypatch):
         "business_logic_model_id": 2,
         "max_steps": 10,
         "description": "Test",
-        "duty_prompt": "Test prompt",
+        "prompt": "Test prompt",
         "group_ids": "1,2",
     }
 
@@ -729,7 +738,7 @@ def test_get_version_detail_impl_with_skills(monkeypatch):
         "business_logic_model_id": 0,
         "max_steps": 10,
         "description": "Test",
-        "duty_prompt": "Test prompt",
+        "prompt": "Test prompt",
         "group_ids": "1,2",
     }
 
@@ -779,7 +788,7 @@ def test_get_version_detail_impl_no_model(monkeypatch):
         "business_logic_model_id": 0,
         "max_steps": 10,
         "description": "Test",
-        "duty_prompt": "Test prompt",
+        "prompt": "Test prompt",
         "group_ids": None,  # group_ids is None -> empty list
     }
 
@@ -1205,7 +1214,7 @@ def test_compare_versions_impl_success(monkeypatch):
         "model_name": "Model A1",
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [{"tool_id": 1}],
         "sub_agent_id_list": [2],
         "skills": [],
@@ -1217,7 +1226,7 @@ def test_compare_versions_impl_success(monkeypatch):
         "model_name": "Model B1",
         "max_steps": 20,
         "description": "Desc B",
-        "duty_prompt": "Prompt B",
+        "prompt": "Prompt B",
         "tools": [{"tool_id": 1}, {"tool_id": 2}],
         "sub_agent_id_list": [2, 3],
         "skills": [],
@@ -1254,7 +1263,7 @@ def test_compare_versions_impl_no_differences(monkeypatch):
         "model_name": "Model A",
         "max_steps": 10,
         "description": "Same Desc",
-        "duty_prompt": "Same Prompt",
+        "prompt": "Same Prompt",
         "tools": [{"tool_id": 1}],
         "sub_agent_id_list": [2],
         "skills": [],
@@ -1282,7 +1291,7 @@ def test_compare_versions_impl_skills_count_difference(monkeypatch):
         "model_name": "Model A",
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [],
         "sub_agent_id_list": [],
         "skills": [{"skill_id": 1}],
@@ -1294,7 +1303,7 @@ def test_compare_versions_impl_skills_count_difference(monkeypatch):
         "model_name": "Model A",
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [],
         "sub_agent_id_list": [],
         "skills": [{"skill_id": 1}, {"skill_id": 2}],
@@ -1323,7 +1332,7 @@ def test_compare_versions_impl_sub_agents_count_difference(monkeypatch):
         "model_name": "Model A",
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [],
         "sub_agent_id_list": [1],
         "skills": [],
@@ -1335,7 +1344,7 @@ def test_compare_versions_impl_sub_agents_count_difference(monkeypatch):
         "model_name": "Model A",
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [],
         "sub_agent_id_list": [1, 2, 3],
         "skills": [],
@@ -2202,7 +2211,7 @@ def test_publish_version_impl_with_a2a_no_name_uses_default(monkeypatch, mock_to
         "model_ids": [1],
         "business_logic_model_id": 0,
         "max_steps": 10,
-        "duty_prompt": "Test prompt",
+        "prompt": "Test prompt",
         "group_ids": "1,2",
         "is_a2a": True,
     }
@@ -2361,7 +2370,7 @@ def test_publish_version_impl_with_a2a_existing_agent_no_name(monkeypatch, mock_
         "model_ids": [1],
         "business_logic_model_id": 0,
         "max_steps": 10,
-        "duty_prompt": "Test prompt",
+        "prompt": "Test prompt",
         "group_ids": "1,2",
         "is_a2a": True,
     }
@@ -2447,7 +2456,7 @@ def test_publish_version_impl_with_a2a_empty_string_name(monkeypatch, mock_tools
         "model_ids": [1],
         "business_logic_model_id": 0,
         "max_steps": 10,
-        "duty_prompt": "Test prompt",
+        "prompt": "Test prompt",
         "group_ids": "1,2",
         "is_a2a": True,
     }
@@ -2995,7 +3004,7 @@ def test_get_version_detail_impl_multiple_models(monkeypatch):
         "business_logic_model_id": 4,
         "max_steps": 10,
         "description": "Test",
-        "duty_prompt": "Test prompt",
+        "prompt": "Test prompt",
         "group_ids": "1,2",
     }
 
@@ -3045,7 +3054,7 @@ def test_get_version_detail_impl_model_ids_none(monkeypatch):
         "business_logic_model_id": None,
         "max_steps": 10,
         "description": "Test",
-        "duty_prompt": "Test prompt",
+        "prompt": "Test prompt",
         "group_ids": "1,2",
     }
 
@@ -3077,7 +3086,7 @@ def test_compare_versions_impl_model_ids_difference(monkeypatch):
         "model_name": "Model A1",
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [],
         "sub_agent_id_list": [],
         "skills": [],
@@ -3089,7 +3098,7 @@ def test_compare_versions_impl_model_ids_difference(monkeypatch):
         "model_name": "Model A1",
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [],
         "sub_agent_id_list": [],
         "skills": [],
@@ -3118,7 +3127,7 @@ def test_compare_versions_impl_model_ids_same(monkeypatch):
         "model_name": "Model A1",
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [],
         "sub_agent_id_list": [],
         "skills": [],
@@ -3130,7 +3139,7 @@ def test_compare_versions_impl_model_ids_same(monkeypatch):
         "model_name": "Model A1",
         "max_steps": 10,
         "description": "Desc B",
-        "duty_prompt": "Prompt B",
+        "prompt": "Prompt B",
         "tools": [],
         "sub_agent_id_list": [],
         "skills": [],
@@ -3160,7 +3169,7 @@ def test_compare_versions_impl_model_ids_order_difference(monkeypatch):
         "model_name": "Model A1",
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [],
         "sub_agent_id_list": [],
         "skills": [],
@@ -3172,7 +3181,7 @@ def test_compare_versions_impl_model_ids_order_difference(monkeypatch):
         "model_name": "Model A2",
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [],
         "sub_agent_id_list": [],
         "skills": [],
@@ -3735,7 +3744,7 @@ def test_compare_versions_impl_model_ids_none(monkeypatch):
         "model_name": None,
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [],
         "sub_agent_id_list": [],
         "skills": [],
@@ -3747,7 +3756,7 @@ def test_compare_versions_impl_model_ids_none(monkeypatch):
         "model_name": "Model A1",
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [],
         "sub_agent_id_list": [],
         "skills": [],
@@ -3776,7 +3785,7 @@ def test_compare_versions_impl_both_model_ids_empty(monkeypatch):
         "model_name": None,
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [],
         "sub_agent_id_list": [],
         "skills": [],
@@ -3788,7 +3797,7 @@ def test_compare_versions_impl_both_model_ids_empty(monkeypatch):
         "model_name": None,
         "max_steps": 10,
         "description": "Desc A",
-        "duty_prompt": "Prompt A",
+        "prompt": "Prompt A",
         "tools": [],
         "sub_agent_id_list": [],
         "skills": [],

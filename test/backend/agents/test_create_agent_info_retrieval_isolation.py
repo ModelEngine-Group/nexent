@@ -7,9 +7,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from test.backend.agents import test_create_agent_info as legacy
-
-service = legacy.create_agent_info_module
+from management.services.agent.preparation import tools as service
 
 
 def record(top_k, method, kds):

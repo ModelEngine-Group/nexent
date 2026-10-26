@@ -15,25 +15,25 @@ case:
   automation: automated
   objective: Verify the approved final answer display contract at the declared stage.
   preconditions:
-  - Local deployment running this branch, authenticated test tenant and configured
-    real model.
+  - Owned fixture instructions use the canonical prompt field; draft and published
+    instructions are verified before opening the browser conversation.
+  - Local deployment running this branch, authenticated test tenant and configured real model.
   test_data:
     profile: real_smoke
     sequences:
     - mixed step
-    - pure final-answer step
     - subagent
+    - pure final-answer step
   steps:
   - order: 1
     action: Run mixed reasoning and final-answer envelope output.
     expected: Thinking prefix remains; final answer occurs once outside reasoning.
   - order: 2
+    action: Run a subagent final answer and reload persisted history.
+    expected: Answer remains once in its owning result area; sibling reasoning remains intact.
+  - order: 3
     action: Run a step beginning with the final-answer opening tag.
     expected: No reasoning card and no persisted step marker.
-  - order: 3
-    action: Run a subagent final answer and reload persisted history.
-    expected: Answer remains once in its owning result area; sibling reasoning remains
-      intact.
   expected_results:
   - Tag-free unique answer outside reasoning.
   - Pure answer step has no empty reasoning card.

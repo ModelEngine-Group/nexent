@@ -11,7 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from database import memory_provider_config_db, memory_provider_config_param_db
+from management.db.memory import provider_config as memory_provider_config_db
+from management.db.memory import provider_config_param as memory_provider_config_param_db
 from management.services.memory.providers.plugins import PluginLoader
 
 logger = logging.getLogger("memory_provider_config_service")

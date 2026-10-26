@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 openjiuwen SDK adapter for Nexent.
 
@@ -17,7 +19,10 @@ import logging
 import os
 import sys
 import types
-from typing import Any, List, Literal, Optional, Tuple
+from typing import TYPE_CHECKING, Any, List, Literal, Optional, Tuple
+
+if TYPE_CHECKING:
+    from openjiuwen.core.foundation.llm.schema.config import ModelClientConfig, ModelRequestConfig
 
 # ----------------------------------------------------------------------
 # MUST install bypasser + stubs before any openjiuwen import.
@@ -312,7 +317,7 @@ def _lazy_import_jiuwen():
 
 def build_jiuwen_model_configs(model_id: int, tenant_id: str):
     """将 nexent 模型配置转换为 Jiuwen 配置对象"""
-    from database.model_management_db import get_model_by_model_id
+    from management.db.model.repository import get_model_by_model_id
     from management.services.model.names import get_model_name_from_config
 
     ModelRequestConfig, ModelClientConfig, ProviderType, _, _, _, _, _ = _lazy_import_jiuwen()

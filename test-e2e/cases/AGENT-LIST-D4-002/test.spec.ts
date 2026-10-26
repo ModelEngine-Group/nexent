@@ -5,6 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { expect } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
+import { DEFAULT_AGENT_VERIFICATION_CONFIG } from "../../../frontend/types/agentConfig";
 const scenarios: Array<{ name: string; run: (fixture: any) => Promise<void> }> = [];
 const scenario = (name: string, run: (fixture: any) => Promise<void>) => scenarios.push({ name, run });
 
@@ -56,6 +57,7 @@ async function mockList(page, rows = agentRows()) {
   const readOnlyPostPaths = new Set([
     "/api/agent/search_info",
     "/api/groups/list",
+    "/api/agent/check_name",
   ]);
   page.on("request", (request) => {
     const url = new URL(request.url());
@@ -111,6 +113,12 @@ async function mockList(page, rows = agentRows()) {
   // The page resolves the default resource tag library before it renders the
   // list, so the catch-all stub above must be narrowed here.
   await page.route("**/api/tag-libraries**", (route) => json(route, []));
+  await page.route("**/api/agent/check_name", (route) =>
+    json(route, route.request().postDataJSON().items.map(() => ({
+      name_conflict: false,
+      display_name_conflict: false,
+    }))),
+  );
   await page.route("**/api/agent/search_info", (route) => {
     const { agent_id } = route.request().postDataJSON();
     const agent = fixture.rows.find((row) => row.agent_id === agent_id);
@@ -122,6 +130,7 @@ async function mockList(page, rows = agentRows()) {
       model_ids: [],
       enabled: true,
       provide_run_summary: false,
+      verification_config: structuredClone(DEFAULT_AGENT_VERIFICATION_CONFIG),
     });
   });
   await page.route("**/api/agent/list/page?*", (route) => {
@@ -184,6 +193,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   const fixture = await mockList(page);
   await page.goto(`${baseUrl}/zh/agents`);
   await expect(page.locator("article")).toHaveCount(8);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("智能体配置");
   const header = page.locator("header");
   const headerBox = await bounds(header);
   pixel(headerBox.width, 1808, "header width");
@@ -311,7 +321,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   const secondBox = await bounds(cards.nth(1));
   const fifthBox = await bounds(cards.nth(4));
   pixel(cardBox.width, 440, "card width");
-  pixel(cardBox.height, 148, "card height");
+  pixel(cardBox.height, 180, "card height");
   const scrollport = page.getByTestId("agent-list-content");
   const scrollportBox = await bounds(scrollport);
   await expect(scrollport).toHaveCSS("overflow-y", "auto");
@@ -343,7 +353,7 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   const body = first.getByTestId("agent-card-body");
   const bodyBox = await bounds(body);
   pixel(bodyBox.width, 392, "card inner width");
-  pixel(bodyBox.height, 86, "card body height");
+  pixel(bodyBox.height, 112, "card body height");
   pixel(bodyBox.x - cardBox.x, 24, "card horizontal padding");
   pixel(bodyBox.y - cardBox.y, 16, "card vertical padding");
   const title = first.getByText("健康小助手", { exact: true });
@@ -363,27 +373,34 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   pixel((await bounds(description)).height, 42, "card description text bounds");
   pixel(
     (await bounds(description)).y -
-      (await bounds(body.locator(":scope > div"))).y -
+      (await bounds(body.locator(":scope > div").first())).y -
       40,
     4,
     "card header/description gap",
   );
   const footer = first.getByTestId("agent-card-footer");
   const footerBox = await bounds(footer);
-  pixel(footerBox.height, 18, "card footer height");
-  pixel(footerBox.y - bodyBox.y, 98, "card footer inner top");
+  const category = body.locator(":scope > div").last();
+  pixel((await bounds(category)).height, 22, "reserved category row height");
+  await expect(category).toContainText("医疗");
+  pixel(footerBox.height, 32, "card footer height");
+  pixel(footerBox.y - bodyBox.y, 116, "card footer inner top");
   pixel(
     footerBox.y - bodyBox.y - bodyBox.height,
-    12,
+    4,
     "derived body/footer gap",
   );
   const status = first.getByTestId("agent-card-status");
   const statusBox = await bounds(status);
   pixel(statusBox.width, 48, "status width");
   pixel(statusBox.height, 18, "status height");
-  pixel(statusBox.x - bodyBox.x, 197, "left-aligned status position");
-  const dateBox = await bounds(footer.locator(":scope > span").first());
-  pixel(statusBox.x - dateBox.x - dateBox.width, 78, "date/status gap");
+  const dateBox = await bounds(first.getByTestId("agent-card-date"));
+  pixel(dateBox.x - footerBox.x, 0, "date left alignment");
+  pixel(
+    footerBox.x + footerBox.width - statusBox.x - statusBox.width,
+    0,
+    "status right alignment",
+  );
   await expect(status).toHaveText("已上线");
   const dot = first.getByTestId("agent-card-status-dot");
   const dotBox = await bounds(dot);
@@ -414,36 +431,77 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
     "more glyph right",
   );
   await expect(moreGlyph).toHaveCSS("color", "rgb(25, 25, 25)");
+  await expect(page.getByTestId("agent-list-tabs")).toHaveCount(0);
+  await expect(page.getByTestId("agent-guide-divider")).toBeVisible();
+
+  await first.hover();
+  await expect(status).toBeVisible();
   await expect(
-    page.getByRole("button", {
-      name: label("zh", "agentConfig.list.imported"),
+    first.getByRole("button", { name: "配置", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    first.getByRole("button", { name: "发布", exact: true }),
+  ).toHaveCount(0);
+  await more.click();
+  await expect(page.getByRole("menu")).toBeVisible();
+  const configure = page.getByRole("menuitem", {
+    name: label("zh", "agentConfig.list.configure"),
+    exact: true,
+  });
+  const publish = page.getByRole("menuitem", {
+    name: label("zh", "agentConfig.list.publish"),
+    exact: true,
+  });
+  await expect(configure).toBeVisible();
+  await expect(publish).toBeEnabled();
+  await configure.click();
+  await expect(page).toHaveURL(/\/zh\/agents\/1$/);
+  noPresentationMutation(fixture);
+  await page.goto(`${baseUrl}/zh/agents`);
+  await expect(cards).toHaveCount(8);
+  await more.click();
+  await expect(
+    page.getByRole("menuitem", {
+      name: label("zh", "agentConfig.list.publish"),
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page
+    .getByRole("menuitem", {
+      name: label("zh", "agentConfig.list.publish"),
+      exact: true,
+    })
+    .click();
+  await expect(page).toHaveURL(/\/zh\/agents\/1\?publish=1$/);
+  noPresentationMutation(fixture);
+  await page.goto(`${baseUrl}/zh/agents`);
+  await expect(cards).toHaveCount(8);
+  await header.getByRole("heading").click();
+  await more.focus();
+  await page.keyboard.press("Enter");
+  await expect(
+    page.getByRole("menuitem", {
+      name: label("zh", "agentConfig.list.configure"),
+      exact: true,
+    }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
+  await cards.nth(1).hover();
+  await cards
+    .nth(1)
+    .getByRole("button", {
+      name: label("zh", "agentRepository.mine.menu.more"),
+    })
+    .click();
+  await expect(
+    page.getByRole("menuitem", {
+      name: label("zh", "agentConfig.list.publish"),
       exact: true,
     }),
   ).toBeDisabled();
-  await expect(page.getByTestId("agent-guide-divider")).toHaveCount(0);
-
-  await first.hover();
-  await expect(
-    first.getByRole("button", { name: "配置", exact: true }),
-  ).toBeVisible();
-  await expect(
-    first.getByRole("button", { name: "发布", exact: true }),
-  ).toBeVisible();
-  await expect(status).toBeHidden();
-  await more.click();
-  await expect(page.getByRole("menu")).toBeVisible();
-  await header.getByRole("heading").click();
-  await body.focus();
-  await expect(
-    first.getByRole("button", { name: "配置", exact: true }),
-  ).toBeVisible();
-  await expect(
-    first.getByRole("button", { name: "发布", exact: true }),
-  ).toBeVisible();
-  await cards.nth(1).hover();
-  await expect(
-    cards.nth(1).getByRole("button", { name: "发布", exact: true }),
-  ).toBeDisabled();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
 
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "false");
@@ -452,10 +510,12 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   await expect
     .poll(async () => (await guide.boundingBox())?.height ?? 0)
     .toBe(0);
+  await expect(page.getByTestId("agent-guide-divider")).toHaveCount(0);
   await expect(cards).toHaveCount(8);
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect.poll(async () => (await guide.boundingBox())?.height).toBe(378);
+  await expect(page.getByTestId("agent-guide-divider")).toBeVisible();
 
   const search = page.getByPlaceholder(
     label("zh", "agentSelector.searchPlaceholder"),
@@ -471,17 +531,21 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
   await page
     .getByRole("button", { name: label("zh", "agentConfig.list.listView") })
     .click();
-  await expect(page.getByRole("table")).toBeVisible();
-  await expect(page.getByRole("table")).toHaveCSS(
+  // Fixed-header Ant tables render a header table and a data table.
+  // Bind the unique data body, not an arbitrary first/last table.
+  const table = page.getByRole("table").filter({ has: page.locator("tbody") });
+  const dataRows = table.locator("tbody tr[data-row-key]");
+  await expect(table).toBeVisible();
+  await expect(table).toHaveCSS(
     "font-family",
     expectedFontFamily,
   );
-  await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(8);
+  await expect(dataRows).toHaveCount(8);
   await expect(
-    page.getByRole("table").locator("tbody tr").first(),
+    dataRows.first(),
   ).toContainText("2026-02-04");
   await expect(
-    page.getByRole("table").locator("tbody tr").nth(1),
+    dataRows.nth(1),
   ).not.toContainText("2026-01-23");
   await page
     .getByRole("button", { name: label("zh", "agentConfig.list.gridView") })
@@ -491,6 +555,9 @@ scenario("[AGENT-LIST-D4-002] measured desktop guide/card geometry and complete 
 
   fixture.rows = agentRows(20);
   await page.reload();
+  // Exercise an explicit page size instead of relying on a changing default.
+  await page.getByRole("combobox", { name: label("zh", "agentConfig.list.pageSize") }).click();
+  await page.getByText("10条/页", { exact: true }).click();
   await expect(cards).toHaveCount(10);
   await page.getByRole("listitem", { name: "2", exact: true }).click();
   await expect(
@@ -541,7 +608,7 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
     378,
     "restored populated guide height",
   );
-  await expect(page.getByTestId("agent-guide-divider")).toHaveCount(0);
+  await expect(page.getByTestId("agent-guide-divider")).toBeVisible();
   await page.setViewportSize({ width: 768, height: 900 });
   const narrowCreate = page.getByRole("button", {
     name: label("zh", "agentConfig.list.new"),
@@ -556,21 +623,12 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
   await narrowBody.scrollIntoViewIfNeeded();
   await expect(narrowBody).toBeInViewport();
   await narrowBody.click();
-  await expect(
-    page
-      .getByRole("dialog")
-      .getByRole("heading", { name: "健康小助手", exact: true }),
-  ).toBeVisible();
-  await page.getByRole("dialog").locator(".ant-modal-close").click();
+  await expect(page).toHaveURL(/\/zh\/agents\/1$/);
+  await page.goto(`${baseUrl}/zh/agents`);
+  await expect(page.locator("article")).toHaveCount(8);
   const narrowFirstCard = page.locator("article").first();
   await narrowFirstCard.scrollIntoViewIfNeeded();
   await narrowFirstCard.hover();
-  const narrowConfigure = narrowFirstCard.getByRole("button", {
-    name: label("zh", "agentConfig.list.configure"),
-    exact: true,
-  });
-  await expect(narrowConfigure).toBeInViewport();
-  await narrowConfigure.click({ trial: true });
   const narrowMore = narrowFirstCard.getByRole("button", {
     name: label("zh", "agentRepository.mine.menu.more"),
     exact: true,
@@ -578,7 +636,15 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
   await expect(narrowMore).toBeInViewport();
   await narrowMore.click();
   await expect(page.getByRole("menu")).toBeVisible();
+  const narrowConfigure = page.getByRole("menuitem", {
+    name: label("zh", "agentConfig.list.configure"),
+    exact: true,
+  });
+  await expect(narrowConfigure).toBeVisible();
+  await expect(narrowConfigure).toBeInViewport();
+  await narrowConfigure.click({ trial: true });
   await page.keyboard.press("Escape");
+  await expect(page.getByRole("menu")).toHaveCount(0);
   const narrowLastBody = page
     .locator("article")
     .last()
@@ -617,9 +683,20 @@ scenario("[AGENT-LIST-D4-002] empty guide height and narrow card/toolbar reachab
     }),
   ).toBeVisible();
   await cards.first().hover();
-  await expect(
-    cards.first().getByRole("button", { name: "配置", exact: true }),
-  ).toBeVisible();
+  await cards
+    .first()
+    .getByRole("button", {
+      name: label("zh", "agentRepository.mine.menu.more"),
+      exact: true,
+    })
+    .click();
+  const narrowCardConfigure = page.getByRole("menuitem", {
+    name: label("zh", "agentConfig.list.configure"),
+    exact: true,
+  });
+  await expect(narrowCardConfigure).toBeVisible();
+  await expect(narrowCardConfigure).toBeInViewport();
+  await page.keyboard.press("Escape");
   noPresentationMutation(fixture);
   await narrowCreate.click();
   await expect(
@@ -643,6 +720,9 @@ scenario("[AGENT-LIST-D4-002] English step growth and 1280px hover/focus actions
   const fixture = await mockList(page, rows);
   await page.goto(`${baseUrl}/en/agents`);
   await expect(page.locator("article")).toHaveCount(8);
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Agent Configuration",
+  );
   const steps = page.getByTestId("agent-guide-step");
   for (const step of await steps.all()) {
     expect((await bounds(step)).height).toBeGreaterThanOrEqual(156);
@@ -682,40 +762,19 @@ scenario("[AGENT-LIST-D4-002] English step growth and 1280px hover/focus actions
     .toBe(0);
   const first = page.locator("article").first();
   await first.hover();
-  const configure = first.getByRole("button", {
+  const more = first.getByRole("button", {
+    name: label("en", "agentRepository.mine.menu.more"),
+    exact: true,
+  });
+  await more.click();
+  const configure = page.getByRole("menuitem", {
     name: label("en", "agentConfig.list.configure"),
     exact: true,
   });
-  const publish = first.getByRole("button", {
+  const publish = page.getByRole("menuitem", {
     name: label("en", "agentConfig.list.publish"),
     exact: true,
   });
-  const cardBox = await bounds(first);
-  const configureBox = await bounds(configure);
-  const publishBox = await bounds(publish);
-  expect(configureBox.x + configureBox.width).toBeLessThanOrEqual(publishBox.x);
-  expect(publishBox.x + publishBox.width).toBeLessThanOrEqual(
-    cardBox.x + cardBox.width - 23,
-  );
-  const visibleTextBottom = await first
-    .getByTestId("agent-card-body")
-    .locator("p")
-    .evaluate((element) => {
-      const box = element.getBoundingClientRect();
-      const range = document.createRange();
-      range.selectNodeContents(element);
-      const lineHeight = Number.parseFloat(
-        getComputedStyle(element).lineHeight,
-      );
-      return Math.max(
-        ...Array.from(range.getClientRects())
-          .filter((rect) => rect.y < box.y + lineHeight * 2)
-          .map((rect) => rect.bottom),
-      );
-    });
-  expect(configureBox.y).toBeGreaterThanOrEqual(visibleTextBottom);
-  await page.locator("header h1").click();
-  await first.getByTestId("agent-card-body").focus();
   await expect(configure).toBeVisible();
   await expect(publish).toBeVisible();
   noPresentationMutation(fixture);

@@ -223,23 +223,27 @@ def worker(repo, home, record, directory, settings):
         preparation_log = log
         outcome = "TIMEOUT" if code == 124 else "BLOCKED"
         raise RuntimeError("Preparation failed; inspect " + str(log.relative_to(directory)))
-    services = controlled_services(repo, directory, env, bool((review or {}).get("anchors")))
+    required_mock_services = record["execution"].get("required_mock_services") or []
+    services = controlled_services(
+        repo, directory, env, bool((review or {}).get("anchors")),
+        required_mock_services,
+    )
     services_started = False
-    # ext-knowledge mock attach runs BEFORE any preparation (including the
-    # controlled test-assets services): it only validates, locks and resets a
-    # pre-deployed batch-owned instance; the suite never starts or stops the
-    # mock's Compose stack.
+    # The ext-knowledge mock is a suite-owned controlled service. Starting it
+    # here (and stopping it in the finally block) means cases no longer need a
+    # machine-local attach YAML, identity or cross-batch lock. ExtKnowledgeAttach
+    # still performs the per-case health check and reset over HTTP.
     ext = ExtKnowledgeAttach(
         repo, home, directory, env,
-        (record["execution"].get("required_mock_services") or []),
+        required_mock_services,
         record["case_id"], record,
     )
     ext_attached = False
     try:
-        ext.attach()
-        ext_attached = True
         services.__enter__()
         services_started = True
+        ext.attach()
+        ext_attached = True
         if (review or {}).get("anchors"):
             code = run_logged([sys.executable, str(automation / "prepare_anchor_assets.py")], repo, env,
                           directory / "logs/prepare-anchors.log", settings["command_timeout_seconds"])
@@ -320,7 +324,23 @@ def worker(repo, home, record, directory, settings):
 
 
 def execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False):
-    directory = home / "runs/repository-daily" / (now().replace(":", "").replace("+", "-") + "-" + uuid.uuid4().hex[:8])
+    from deployment_exceptions import assert_recovered, catalog, execute_campaign, groups
+    assert_recovered(home)
+    rules = catalog(repo)
+    if any(profile != "local" for profile in groups(records, rules)):
+        if resume:
+            raise RuntimeError("Resume deployment campaigns only after recovery; select unresolved Cases for a new run")
+        issues, registry = inspect(repo)
+        if issues:
+            raise ValueError("Invalid execution assets")
+        return execute_campaign(repo, home, records, settings, daily=daily, publish_latest=publish_latest,
+                                execute_one=_execute, all_records=registry["cases"], hook=execute_hooks,
+                                machine_env=machine_environment)
+    return _execute(repo, home, records, settings, daily=daily, resume=resume, publish_latest=publish_latest)
+
+
+def _execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False, directory=None, on_result=None):
+    directory = directory or home / "runs/repository-daily" / (now().replace(":", "").replace("+", "-") + "-" + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True, exist_ok=False)
     if os.name != "nt":
         directory.chmod(0o700)
@@ -424,6 +444,8 @@ def execute(repo, home, records, settings, *, daily=False, resume=None, publish_
                     output.write(json.dumps(row, ensure_ascii=False) + "\n")
                 print(f"{len(rows)}/{len(records)} {case_id}: {row['result']}" +
                       (" (reused)" if reused else ""), flush=True)
+                if on_result is not None:
+                    on_result(dict(row))
                 if (home / "state/deployment-guard/pending.json").exists() or (
                     stage == "D5" and row["result"] in {"TIMEOUT", "CLEANUP_FAILED"}
                 ):
@@ -523,7 +545,10 @@ def main(argv=None):
             print(json.dumps({"ready": not problems, "problems": problems}, ensure_ascii=False, indent=2))
             return 2 if problems else 0
         if args.mode == "plan" or not args.execute:
+            from deployment_exceptions import catalog, groups
             print(json.dumps({"mode": args.mode, "execution_requested": False, "cases": len(records),
+                              "deployment_groups": {key: [r["case_id"] for r in group]
+                                                    for key, group in groups(records, catalog(repo)).items()},
                               "stages": dict(Counter(record["stage"] for record in records)),
                               "statuses": dict(Counter(record["status"] for record in records)),
                               "online_cases_without_preparation_declaration": sum(

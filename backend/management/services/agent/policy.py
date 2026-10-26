@@ -5,10 +5,9 @@
 from copy import deepcopy
 from typing import Any, Optional
 
+from contracts.errors.exceptions import AgentToolImportError
 from nexent.core.ext_components.aidp.constants import AIDP_SEARCH_TOOL_CLASSES
 from nexent.core.ext_components.aidp.retrieval_config import prepare_config
-
-from consts.exceptions import AgentToolImportError
 
 
 def build_sandbox_policy(tenant_id: str, agent_type: str) -> Optional[dict]:
@@ -30,18 +29,7 @@ def build_sandbox_policy(tenant_id: str, agent_type: str) -> Optional[dict]:
     Returns:
         A sandbox policy dict, or None when ``NEXENT_SANDBOX_DEFAULT_LEVEL=local``.
     """
-    from consts.const import (
-        NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS,
-        NEXENT_SANDBOX_CPU_QUOTA,
-        NEXENT_SANDBOX_DEFAULT_LEVEL,
-        NEXENT_SANDBOX_DEFAULT_SCOPE,
-        NEXENT_SANDBOX_DOCKER_IMAGE,
-        NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S,
-        NEXENT_SANDBOX_MEMORY_LIMIT_MB,
-        NEXENT_SANDBOX_NETWORK_DISABLED,
-        NEXENT_SANDBOX_SHELL_POLICY,
-        NEXENT_SANDBOX_TIMEOUT_S,
-    )
+    from contracts.constants.environment import NEXENT_SANDBOX_AUTO_SYNC_OUTPUTS, NEXENT_SANDBOX_CPU_QUOTA, NEXENT_SANDBOX_DEFAULT_LEVEL, NEXENT_SANDBOX_DEFAULT_SCOPE, NEXENT_SANDBOX_DOCKER_IMAGE, NEXENT_SANDBOX_HOST_TOOL_TIMEOUT_S, NEXENT_SANDBOX_MEMORY_LIMIT_MB, NEXENT_SANDBOX_NETWORK_DISABLED, NEXENT_SANDBOX_SHELL_POLICY, NEXENT_SANDBOX_TIMEOUT_S
 
     level = NEXENT_SANDBOX_DEFAULT_LEVEL
     if level == "local":
@@ -71,13 +59,7 @@ def get_sandbox_minio_client() -> Optional[Any]:
     returns a fresh client on each call so the caller can call ``close()`` on it
     after the run finishes.
     """
-    from consts.const import (
-        MINIO_ACCESS_KEY,
-        MINIO_ENDPOINT,
-        MINIO_SECRET_KEY,
-        MINIO_SECURE,
-        NEXENT_SANDBOX_OUTPUT_BUCKET,
-    )
+    from contracts.constants.environment import MINIO_ACCESS_KEY, MINIO_ENDPOINT, MINIO_SECRET_KEY, MINIO_SECURE, NEXENT_SANDBOX_OUTPUT_BUCKET
 
     if not MINIO_ENDPOINT:
         return None

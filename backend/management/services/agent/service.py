@@ -5,55 +5,23 @@ from collections import deque
 from typing import Optional
 from uuid import uuid4
 
-from consts.agent_unavailable_reasons import AgentUnavailableReason
-from consts.const import CAN_EDIT_ALL_USER_ROLES, LANGUAGE, MODEL_CONFIG_MAPPING
-from consts.error_code import ErrorCode
-from consts.exceptions import (
-    AgentNotFoundError,
-    AgentRelationValidationError,
-    AppException,
-    ForbiddenError,
-    TenantResourceLimitError,
-)
-from consts.model import (
-    AgentInfoRequest,
-    AgentNameBatchCheckRequest,
-    AgentNameBatchRegenerateRequest,
-    SkillInstanceInfoRequest,
-    ToolInstanceInfoRequest,
-)
-from database import a2a_agent_db, skill_db
-from database.a2a_agent_db import query_external_sub_agents
-from database.agent_db import (
-    batch_search_agent_display_names,
-    create_agent,
-    is_system_agent,
-    query_all_agent_info_by_tenant_id,
-    query_sub_agent_relations,
-    query_sub_agents_id_list,
-    search_agent_info_by_agent_id,
-    update_agent,
-    update_agent_icon,
-    update_related_agents,
-)
-from database.agent_version_db import (
-    batch_query_current_version_nos,
-    batch_search_version_names,
-    query_current_version_no,
-)
-from database.model_management_db import (
-    get_model_by_model_id,
-)
-from database.tool_db import (
-    create_or_update_tool_by_tool_info,
-    query_all_enabled_tool_instances,
-    query_tool_instances_by_agent_id,
-    query_tool_instances_by_id,  # noqa: F401 - compatibility patch point
-    query_tools_by_ids,
-    search_tools_for_sub_agent,
-)
-from database.user_tenant_db import get_user_tenant_by_user_id
-from fastapi import Header
+from contracts.agent import AgentUnavailableReason
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
+from contracts.constants.constants import LANGUAGE
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AgentNotFoundError, AgentRelationValidationError, AppException, ForbiddenError, TenantResourceLimitError
+from contracts.agent import AgentInfoRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest
+from contracts.skill import SkillInstanceInfoRequest
+from contracts.tool import ToolInstanceInfoRequest
+from management.db.a2a import repository as a2a_agent_db
+from management.db.skill import repository as skill_db
+from management.db.a2a.repository import query_external_sub_agents
+from management.db.agent.repository import batch_search_agent_display_names, create_agent, is_system_agent, query_all_agent_info_by_tenant_id, query_sub_agent_relations, query_sub_agents_id_list, search_agent_info_by_agent_id, update_agent, update_agent_icon, update_related_agents
+from management.db.agent.version import batch_query_current_version_nos, batch_search_version_names, query_current_version_no
+from management.db.model.repository import get_model_by_model_id
+from management.db.tool.repository import create_or_update_tool_by_tool_info, query_all_enabled_tool_instances, query_tool_instances_by_agent_id, query_tool_instances_by_id, query_tools_by_ids, search_tools_for_sub_agent
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.agent.icon import (
     read_icon_image,
     upload_icon_image,
@@ -82,9 +50,9 @@ from management.services.conversation.service import (
     update_unit_status,  # noqa: F401 - retained as a compatibility re-export
 )
 from management.services.permission.identity.display import enrich_cas_usernames
-from management.services.permission.identity.authentication_helpers import get_current_user_info
+from contracts.authentication import AuthenticatedIdentity
 from management.services.configuration.tenant.settings import tenant_config_manager
-from management.db.serialization import convert_list_to_string, convert_string_to_list
+from management.utils.serialization import convert_list_to_string, convert_string_to_list
 
 # Monitoring utilities: bind Agent metadata once at the request boundary.
 
@@ -237,12 +205,12 @@ async def get_agent_icon_impl(
 
 
 async def check_agent_name_conflict_batch_impl(
-    request: AgentNameBatchCheckRequest, authorization: str
+    request: AgentNameBatchCheckRequest, identity: AuthenticatedIdentity
 ) -> list[dict]:
     """
     Batch check name/display_name duplication for multiple agents.
     """
-    _, tenant_id, _ = get_current_user_info(authorization)
+    tenant_id = identity.tenant_id
     agents_cache = query_all_agent_info_by_tenant_id(tenant_id)
 
     results: list[dict] = []
@@ -280,12 +248,12 @@ async def check_agent_name_conflict_batch_impl(
 
 
 async def regenerate_agent_name_batch_impl(
-    request: AgentNameBatchRegenerateRequest, authorization: str
+    request: AgentNameBatchRegenerateRequest, identity: AuthenticatedIdentity
 ) -> list[dict]:
     """
     Batch regenerate agent name/display_name with LLM (or suffix fallback).
     """
-    _, tenant_id, _ = get_current_user_info(authorization)
+    tenant_id = identity.tenant_id
     agents_cache = query_all_agent_info_by_tenant_id(tenant_id)
 
     existing_names = [agent.get("name") for agent in agents_cache if agent.get("name")]
@@ -701,9 +669,9 @@ def _validate_agent_relationships(request: AgentInfoRequest, tenant_id: str):
 
 
 async def update_agent_info_impl(
-    request: AgentInfoRequest, authorization: str = Header(None)
+    request: AgentInfoRequest, identity: AuthenticatedIdentity
 ):
-    user_id, tenant_id, _ = get_current_user_info(authorization)
+    user_id, tenant_id = identity.user_id, identity.tenant_id
 
     if (
         request.agent_id is not None
@@ -810,7 +778,7 @@ async def update_agent_info_impl(
                     "verification_config": request.verification_config,
                     "context_policy": request.context_policy,
                     "model_params_override": model_params_override,
-                    "duty_prompt": request.duty_prompt,
+                    "prompt": request.prompt,
                     "greeting_message": request.greeting_message,
                     "example_questions": request.example_questions,
                     "icon_url": request.icon_url,

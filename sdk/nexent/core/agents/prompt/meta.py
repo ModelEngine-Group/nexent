@@ -1,4 +1,6 @@
-"""Compose agent-generation prompts from selected resources and user templates."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Compose naming, NL2Agent and prompt-optimization resources."""
 
 from collections.abc import Mapping, Sequence
 import logging
@@ -104,7 +106,6 @@ def _resource_context(
     *,
     has_local_knowledge_tool: bool,
     has_aidp_knowledge_tool: bool,
-    optimization: bool,
 ) -> dict[str, Any]:
     descriptions = load_prompt(language, "meta/resource_descriptions")
     tool_description = "\n".join(
@@ -114,7 +115,7 @@ def _resource_context(
         render_prompt_text(descriptions["worker_agent"], agent) for agent in worker_agents
     )
     if has_local_knowledge_tool or has_aidp_knowledge_tool:
-        key = "optimization_knowledge_scope" if optimization else "generation_knowledge_scope"
+        key = "optimization_knowledge_scope"
         tool_description = "\n\n".join(
             part for part in (tool_description, descriptions[key]) if part
         )
@@ -126,27 +127,6 @@ def _resource_context(
         "has_local_knowledge_tool": has_local_knowledge_tool,
         "has_aidp_knowledge_tool": has_aidp_knowledge_tool,
     }
-
-
-def compose_agent_generation_user(
-    language: str,
-    template: Mapping[str, Any],
-    *,
-    task_description: str,
-    tools: Sequence[Mapping[str, Any]],
-    worker_agents: Sequence[Mapping[str, Any]],
-    has_local_knowledge_tool: bool,
-    has_aidp_knowledge_tool: bool,
-    has_selected_resources: bool,
-) -> str:
-    context = _resource_context(
-        language, tools, worker_agents,
-        has_local_knowledge_tool=has_local_knowledge_tool,
-        has_aidp_knowledge_tool=has_aidp_knowledge_tool,
-        optimization=False,
-    )
-    context.update(task_description=task_description, has_selected_resources=has_selected_resources)
-    return render_prompt_text(template["user_prompt"], context)
 
 
 def compose_agent_optimization(
@@ -167,7 +147,6 @@ def compose_agent_optimization(
         language, tools, worker_agents,
         has_local_knowledge_tool=has_local_knowledge_tool,
         has_aidp_knowledge_tool=has_aidp_knowledge_tool,
-        optimization=True,
     )
     context.update(
         section_type=section_type, section_title=section_title,

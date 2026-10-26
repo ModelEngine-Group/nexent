@@ -7,6 +7,11 @@ implementations:
   profiles:
   - mock
 timeout_seconds: 1800
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
 acceptance_bindings:
   AC-01:
   - test_SAI_D5_001_repeated_parallel_calls

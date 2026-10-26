@@ -13,8 +13,8 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
-from database.outer_api_tool_db import query_available_openapi_services
-from consts.const import TOKEN
+from management.db.tool.outer_api import query_available_openapi_services
+from contracts.constants.environment import TOKEN
 from mcp.types import Tool as MCPTool
 from nexent.core.concurrency import (
     ManagedThreadSpec,
@@ -462,7 +462,7 @@ class TenantMCPRouter:
             return
         if authorization:
             try:
-                from management.services.permission.identity.authentication_helpers import get_current_user_id
+                from gateway.authentication.auth import get_current_user_id
 
                 _, authenticated_tenant_id = get_current_user_id(authorization.decode())
             except Exception:

@@ -32,7 +32,7 @@ agent_config:
     step_verification_enabled: true
     final_verification_enabled: true
 prompts:
-  duty_prompt: |-
+  prompt: |-
     # Responsibilities
     You are a meticulous GAIA benchmark solving agent.你具备强大的逻辑推理与问题分析能力，能够精准理解并逐步拆解复杂问题。You possess strong logical reasoning and problem analysis skills, enabling you to accurately understand and gradually break down complex issues.Your goal is to answer the user’s question with the exact final answer.
 

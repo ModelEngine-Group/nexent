@@ -93,21 +93,27 @@ tool_discovery_mod = types.ModuleType("management.services.tool.discovery")
 tool_discovery_mod.get_tool_from_remote_mcp_server = AsyncMock()
 sys.modules[tool_discovery_mod.__name__] = tool_discovery_mod
 
-# Pre-mock database.client module
-db_client_mod = types.ModuleType("database.client")
+# Pre-mock management.db.client module
+db_client_mod = types.ModuleType("management.db.client")
 db_client_mod.MinioClient = MagicMock()
 db_client_mod.minio_client = MagicMock()
 db_client_mod.as_dict = MagicMock()
 db_client_mod.filter_property = MagicMock()
 db_client_mod.get_db_session = MagicMock()
-db_client_mod.__spec__ = importlib.machinery.ModuleSpec("database.client", loader=None)
-sys.modules['database.client'] = db_client_mod
+db_client_mod.__spec__ = importlib.machinery.ModuleSpec("management.db.client", loader=None)
+sys.modules['management.db.client'] = db_client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
-backend_db_client_mod = types.ModuleType("backend.database.client")
+backend_db_client_mod = db_client_mod
 backend_db_client_mod.MinioClient = MagicMock()
 backend_db_client_mod.minio_client = MagicMock()
-backend_db_client_mod.__spec__ = importlib.machinery.ModuleSpec("backend.database.client", loader=None)
-sys.modules['backend.database.client'] = backend_db_client_mod
+backend_db_client_mod.__spec__ = importlib.machinery.ModuleSpec("management.db.client", loader=None)
+sys.modules['management.db.client'] = backend_db_client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Apply critical patches before importing any modules
 storage_client_mock = MagicMock()
@@ -118,19 +124,15 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
-patch('backend.database.client.minio_client', minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
-from backend.consts.exceptions import (
-    MCPConnectionError, MCPNameIllegal, MCPContainerError,
-    McpNotFoundError, McpValidationError, McpNameConflictError,
-    McpPortConflictError,
-)
-from backend.consts.const import PERMISSION_READ, PERMISSION_EDIT
-from backend.consts.model import MCPConfigRequest
+from contracts.errors.exceptions import MCPConnectionError, MCPNameIllegal, MCPContainerError, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError
+from contracts.constants.constants import PERMISSION_READ, PERMISSION_EDIT
+from contracts.tool import MCPConfigRequest
 
 # Functions to test
 from management.services.mcp.service import (
@@ -160,7 +162,7 @@ from management.services.mcp.service import (
     _mcp_protocol_health_check,
 )
 # Patch exception classes to ensure tests use correct exceptions
-import management.services.mcp.service as remote_service
+from management.services.mcp import service as remote_service
 bind_import_attribute(remote_service, 'MCPConnectionError', MCPConnectionError)
 bind_import_attribute(remote_service, 'MCPNameIllegal', MCPNameIllegal)
 bind_import_attribute(remote_service, 'McpNotFoundError', McpNotFoundError)
@@ -546,8 +548,8 @@ class TestAddMcpServiceNameConflictGroupVisibility(unittest.IsolatedAsyncioTestC
 
     @patch_import_context('management.services.mcp.service.create_mcp_record')
     @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
-    @patch('database.group_db.query_group_ids_by_user')
-    @patch('database.remote_mcp_db.get_mcp_records_by_tenant')
+    @patch('management.db.identity.group.query_group_ids_by_user')
+    @patch('management.db.mcp.remote.get_mcp_records_by_tenant')
     @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_name_conflict_allowed_when_existing_mcp_invisible(
         self, mock_check_name, mock_get_records, mock_query_groups, mock_health, mock_create
@@ -572,8 +574,8 @@ class TestAddMcpServiceNameConflictGroupVisibility(unittest.IsolatedAsyncioTestC
 
     @patch_import_context('management.services.mcp.service.create_mcp_record')
     @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
-    @patch('database.group_db.query_group_ids_by_user')
-    @patch('database.remote_mcp_db.get_mcp_records_by_tenant')
+    @patch('management.db.identity.group.query_group_ids_by_user')
+    @patch('management.db.mcp.remote.get_mcp_records_by_tenant')
     @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_name_conflict_blocks_when_user_in_allowed_group(
         self, mock_check_name, mock_get_records, mock_query_groups, mock_health, mock_create
@@ -597,8 +599,8 @@ class TestAddMcpServiceNameConflictGroupVisibility(unittest.IsolatedAsyncioTestC
 
     @patch_import_context('management.services.mcp.service.create_mcp_record')
     @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
-    @patch('database.group_db.query_group_ids_by_user')
-    @patch('database.remote_mcp_db.get_mcp_records_by_tenant')
+    @patch('management.db.identity.group.query_group_ids_by_user')
+    @patch('management.db.mcp.remote.get_mcp_records_by_tenant')
     @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_name_conflict_blocks_when_same_creator(
         self, mock_check_name, mock_get_records, mock_query_groups, mock_health, mock_create
@@ -621,7 +623,7 @@ class TestAddMcpServiceNameConflictGroupVisibility(unittest.IsolatedAsyncioTestC
 
     @patch_import_context('management.services.mcp.service.create_mcp_record')
     @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
-    @patch('database.remote_mcp_db.get_mcp_records_by_tenant')
+    @patch('management.db.mcp.remote.get_mcp_records_by_tenant')
     @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_name_conflict_blocks_when_no_group_ids(
         self, mock_check_name, mock_get_records, mock_health, mock_create

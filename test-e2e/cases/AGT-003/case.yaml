@@ -30,19 +30,18 @@ case:
     expected: 功能结果与代码契约一致，测试过程无未处理异常。
   - order: 2
     action: 通过实际 API 创建一个带唯一 RunID 后缀的临时 Agent 草稿（name 留空），记录 agent_id。
-    expected: 空 name 草稿仅根据 display_name 生成并保存一次变量名，满足正则 ^[a-zA-Z_][a-zA-Z0-9_]*_assistant$ 且不超过 30 字符；重复 name 返回 retryable
+    expected: 空 name 草稿仅根据 display_name 生成并保存一次变量名，使用后端导入和运行时的合法 Python 标识符规则，排除 Python 关键字，长度为 1–100 字符，支持 Unicode 且不要求固定后缀；重复 name 返回 retryable
       的 agent_name_duplicate，已设置 name 返回 agent_name_already_set。
   - order: 3
-    action: 发起 NL2Agent 核心流程（full_generation）：先触发空 name 初始化，断言模型仅按 display_name 生成变量名并保存一次，变量名满足正则 ^[a-zA-Z_][a-zA-Z0-9_]*_assistant$
-      且不超过 30 字符，保存后 draft.name 非空且 display_name 不变。
-    expected: description 与 duty_prompt 为第一人称；无资源需绑定或选中绑定集合为空时返回 binding_required=false，流程跳过绑定卡直接进入 duty_prompt 生成，不出现空的 installed_resource_binding
+    action: 发起 NL2Agent 核心流程（full_generation）：先触发空 name 初始化，断言模型仅按 display_name 生成变量名并保存一次，变量名使用后端导入和运行时的 Python 标识符规则并排除关键字，长度为 1–100 字符，保存后 draft.name 非空且 display_name 不变。
+    expected: description 与 prompt 为第一人称；无资源需绑定或选中绑定集合为空时返回 binding_required=false，流程跳过绑定卡直接进入 prompt 生成，不出现空的 installed_resource_binding
       卡。
   - order: 4
     action: 按“需求澄清对话、proposal 解析、安装资源绑定｜核心流程”调用对应配置/生成接口，提交与 UI 相同的数据结构；无资源需求或选中绑定集合为空时，断言后端返回 binding_required=false，跳过绑定卡直接进入
-      duty_prompt 生成，不出现空的 installed_resource_binding 卡。
+      prompt 生成，不出现空的 installed_resource_binding 卡。
     expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致；失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
   - order: 5
-    action: 读取 Agent 详情再次核对字段：名称、描述、Prompt、模型、max_steps、tools、skills、sub-agents 等与提交值一致；断言 description 与 duty_prompt 生成为第一人称。
+    action: 读取 Agent 详情再次核对字段：名称、描述、Prompt、模型、max_steps、tools、skills、sub-agents 等与提交值一致；断言 description 与 prompt 生成为第一人称。
     expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
   - order: 6
     action: 对需要模型生成的 NL2Agent/Prompt 功能调用真实 LLM，断言返回结构可解析、关键字段非空且能保存为 Agent 配置。
@@ -64,14 +63,25 @@ case:
     expected: 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
   expected_results:
   - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 空 name 草稿仅根据 display_name 生成并保存一次变量名，满足正则 ^[a-zA-Z_][a-zA-Z0-9_]*_assistant$ 且不超过 30 字符；重复 name 返回 retryable 的 agent_name_duplicate，已设置
+  - 空 name 草稿仅根据 display_name 生成并保存一次变量名，使用后端导入和运行时的合法 Python 标识符规则，排除 Python 关键字，长度为 1–100 字符，支持 Unicode 且不要求固定后缀；重复 name 返回 retryable 的 agent_name_duplicate，已设置
     name 返回 agent_name_already_set。
-  - description 与 duty_prompt 为第一人称；无资源需绑定或选中绑定集合为空时返回 binding_required=false，流程跳过绑定卡直接进入 duty_prompt 生成，不出现空的 installed_resource_binding
+  - description 与 prompt 为第一人称；无资源需绑定或选中绑定集合为空时返回 binding_required=false，流程跳过绑定卡直接进入 prompt 生成，不出现空的 installed_resource_binding
     卡。
   - 关键状态在 API 返回、数据库/存储和后续读取中保持一致；失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
   - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
   - 真实模型调用成功，stream/Agent run 正常结束；自然语言只做稳定关键词/结构/工具调用断言。
   forbidden_side_effects: []
+  acceptance:
+  - id: AC-NAMING
+    description: Name initialization uses ordinary backend field validation while preserving first-write and duplicate behavior; no mandatory suffix or creator-only format/length constraint.
+    steps: [2, 3, 8]
+    expected_results: [2]
+    forbidden_side_effects: []
+  - id: AC-LEGACY-FLOW
+    description: Retain the existing model/resource/persistence/runtime/cleanup contract; the legacy script's detailed assertion completeness remains unverified.
+    steps: [1, 3, 4, 5, 6, 7, 9, 10, 11]
+    expected_results: [1, 3, 4, 5, 6]
+    forbidden_side_effects: []
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
@@ -80,9 +90,9 @@ case:
   - REAL_REQUIRED：使用 ${NEXENT_TEST_HOME}/config/models.yaml 中配置的真实模型/向量/Rerank/语音/多模态能力；Mock 仅用于不可稳定制造的 5xx/超时/畸形响应故障注入。
   observations:
   - 功能结果与代码契约一致，测试过程无未处理异常。
-  - 空 name 草稿仅根据 display_name 生成并保存一次变量名，满足正则 ^[a-zA-Z_][a-zA-Z0-9_]*_assistant$ 且不超过 30 字符；重复 name 返回 retryable 的 agent_name_duplicate，已设置
+  - 空 name 草稿仅根据 display_name 生成并保存一次变量名，使用后端导入和运行时的合法 Python 标识符规则，排除 Python 关键字，长度为 1–100 字符，支持 Unicode 且不要求固定后缀；重复 name 返回 retryable 的 agent_name_duplicate，已设置
     name 返回 agent_name_already_set。
-  - description 与 duty_prompt 为第一人称；无资源需绑定或选中绑定集合为空时返回 binding_required=false，流程跳过绑定卡直接进入 duty_prompt 生成，不出现空的 installed_resource_binding
+  - description 与 prompt 为第一人称；无资源需绑定或选中绑定集合为空时返回 binding_required=false，流程跳过绑定卡直接进入 prompt 生成，不出现空的 installed_resource_binding
     卡。
   - 关键状态在 API 返回、数据库/存储和后续读取中保持一致；失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
   - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。

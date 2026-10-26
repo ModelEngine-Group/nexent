@@ -12,8 +12,8 @@ import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.dml import Update
 
-from consts.exceptions import ConversationNotFoundError
-from database import workbench_pin_db as pins
+from contracts.errors.exceptions import ConversationNotFoundError
+from management.db.conversation import pins as pins
 
 STAMP = datetime(2026, 10, 1, tzinfo=timezone.utc)
 NEW_STAMP = datetime(2026, 10, 2, tzinfo=timezone.utc)
@@ -40,21 +40,24 @@ def conversation(stamp=STAMP):
                            workbench_pinned_at=stamp, created_by="user", update_time=STAMP, last_activity_time=None)
 
 
-def result_row(record):
-    return record, 1234.9, 4567.8
+def result_row(record, conversation_type="workbench"):
+    return record, 1234.9, 4567.8, conversation_type
 
 
-def test_list_serializes_metadata_and_filters_owned_active_workbench_pins(session):
-    session.execute.return_value = [result_row(conversation())]
+@pytest.mark.parametrize("conversation_type", ["workbench", "agent_chat"])
+def test_list_serializes_metadata_and_filters_owned_active_pins(session, conversation_type):
+    session.execute.return_value = [result_row(conversation(), conversation_type)]
     assert pins.list_workbench_pins("user", "tenant") == [{
         "conversation_id": 42, "conversation_title": "History", "agent_id": 3,
+        "conversation_type": conversation_type,
         "create_time": 1234, "update_time": 4567, "last_activity_time": 1234, "pinned_at": STAMP.isoformat(),
     }]
     query = sql(session.execute.call_args.args[0])
-    for predicate in ("created_by = 'user'", "workbench_config IS NOT NULL",
-                      "workbench_config != 'null'::jsonb", "delete_flag = 'N'",
+    for predicate in ("created_by = 'user'", "delete_flag = 'N'",
                       "workbench_pinned_at IS NOT NULL"):
         assert predicate in query
+    assert "workbench_config IS NOT NULL" not in query
+    assert "CASE WHEN (nexent.conversation_record_t.workbench_config IS NULL) THEN 'agent_chat' ELSE 'workbench' END" in query
     assert "JOIN" not in query and "conversation_workbench_pin_t" not in query
     assert "ORDER BY nexent.conversation_record_t.workbench_pinned_at DESC, nexent.conversation_record_t.conversation_id DESC" in query
     session.add.assert_not_called()
@@ -66,7 +69,8 @@ def test_empty_pin_list_is_empty_without_fake_metadata(session):
 
 
 @pytest.mark.parametrize("pinned,stamp", [(True, None), (True, STAMP), (False, STAMP), (False, None)])
-def test_pin_transitions_are_idempotent_and_preserve_activity(session, pinned, stamp):
+@pytest.mark.parametrize("conversation_type", ["workbench", "agent_chat"])
+def test_pin_transitions_are_idempotent_and_preserve_activity(session, pinned, stamp, conversation_type):
     record = conversation(stamp)
     changes = pinned != (stamp is not None)
     session.scalar.side_effect = [record, NEW_STAMP] if pinned and changes else [record]
@@ -80,7 +84,7 @@ def test_pin_transitions_are_idempotent_and_preserve_activity(session, pinned, s
             assert "update_time=nexent.conversation_record_t.update_time" in sql(statement)
             assert "updated_by" not in str(statement)
             return None
-        return [result_row(record)] if record.workbench_pinned_at is not None else []
+        return [result_row(record, conversation_type)] if record.workbench_pinned_at is not None else []
 
     session.execute.side_effect = execute
     result = pins.set_workbench_pin(42, pinned, "user", "tenant")
@@ -89,7 +93,8 @@ def test_pin_transitions_are_idempotent_and_preserve_activity(session, pinned, s
     assert json.loads(lock.args[1]["scope"].removeprefix("workbench-pins:")) == ["user"]
     ownership = sql(session.scalar.call_args_list[0].args[0])
     assert "conversation_id = 42" in ownership and "created_by = 'user'" in ownership
-    assert "workbench_config IS NOT NULL" in ownership and "workbench_config != 'null'::jsonb" in ownership
+    assert "workbench_config IS NOT NULL" not in ownership
+    assert "delete_flag = 'N'" in ownership
     assert ownership.endswith("FOR UPDATE")
     writes = [c.args[0] for c in session.execute.call_args_list if isinstance(c.args[0], Update)]
     assert len(writes) == int(changes)

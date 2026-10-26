@@ -4,9 +4,9 @@ import json
 import re
 from typing import Any
 
-from consts.error_code import ErrorCode
-from consts.evaluation_limits import MAX_TURNS_PER_SESSION
-from consts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.constants.constants import MAX_TURNS_PER_SESSION
+from contracts.errors.exceptions import AppException
 from management.services.evaluation.common import (
     _QUERY_FORMAT_ERR_MSG,
     logger,
@@ -33,10 +33,10 @@ def _build_agent_profile_parts(profile: dict) -> list:
                 "en", "agent_profile_description", {"value": profile["description"]}
             )
         )
-    if profile["duty_prompt"]:
+    if profile["prompt"]:
         parts.append(
             render_evaluation_section(
-                "en", "agent_profile_duty", {"value": profile["duty_prompt"]}
+                "en", "agent_profile_duty", {"value": profile["prompt"]}
             )
         )
     if profile["business_description"]:

@@ -9,10 +9,11 @@ import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Query, Session
 
-import database.conversation_db as db
-import management.services.conversation.service as conversations
-from consts.exceptions import WorkbenchConfigVersionConflict
-from consts.model import ConversationKnowledgeScopeRequest, WorkbenchSessionConfig
+from management.db.conversation import repository as db
+from management.services.conversation import service as conversations
+from contracts.errors.exceptions import WorkbenchConfigVersionConflict
+from contracts.knowledge import ConversationKnowledgeScopeRequest
+from contracts.agent import WorkbenchSessionConfig
 
 
 def scope(provider, ids):
@@ -128,7 +129,7 @@ def test_stale_save_cannot_restore_deleted_binding(database, monkeypatch):
     monkeypatch.setattr(conversations, "replace_conversation_workbench_config", db.replace_conversation_workbench_config)
     with pytest.raises(WorkbenchConfigVersionConflict):
         conversations.update_conversation_workbench_config_service(
-            conversation_id=42, config=stale, expected_version=4, user_id="user", tenant_id="tenant",
+            conversation_id=42, config=stale, expected_version=4, user_id="user",
         )
     assert row.workbench_config["knowledge_scope"]["aidp"]["kds_ids"] == []
     save_session.flush.assert_not_called()

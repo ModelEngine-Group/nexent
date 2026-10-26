@@ -28,13 +28,10 @@ with patch(
     "nexent.storage.storage_client_factory.create_storage_client_from_config",
     return_value=MagicMock(),
 ), patch("nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None):
-    from apps import conversation_management_app as routes
-    from database import conversation_db as db
-    from database import user_tenant_db
-    from database.db_models import (
-        ConversationMessage, ConversationMessageUnit, ConversationRecord,
-        ConversationSourceImage, ConversationSourceSearch, UserTenant,
-    )
+    from management.api.conversation import conversation_management as routes
+    from management.db.conversation import repository as db
+    from management.db.identity import user_tenant as user_tenant_db
+    from management.db.models import ConversationMessage, ConversationMessageUnit, ConversationRecord, ConversationSourceImage, ConversationSourceSearch, UserTenant
     from management.services.conversation import service
 
 pytestmark = [pytest.mark.case_id("CHAT-TITLE-D5-001"), pytest.mark.stage("D5")]
@@ -213,7 +210,12 @@ def test_deleted_or_foreign_history_rejects_title_write(probe, monkeypatch):
 
 def test_additive_title_revision_migration_preserves_rows_and_replays(probe):
     root = Path(__file__).resolve().parents[3]
-    source = (root / "deploy/sql/migrations/v2.7.1_008_conversation_title_version.sql").read_text(encoding="utf-8")
+    merged = root / "deploy/sql/migrations/v2.8.0_merged_migrations.sql"
+    migration_text = merged.read_text(encoding="utf-8")
+    marker = "-- Source migration: v2.7.1_008_conversation_title_version.sql"
+    start = migration_text.index(marker)
+    end = migration_text.find("-- Source migration: ", start + len(marker))
+    source = migration_text[start:] if end == -1 else migration_text[start:end]
     sql = source.replace("nexent.", probe.schema + ".")
     with probe.engine.begin() as connection:
         connection.exec_driver_sql(f"ALTER TABLE {probe.schema}.conversation_record_t DROP COLUMN title_version")

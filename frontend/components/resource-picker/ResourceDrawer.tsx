@@ -186,6 +186,7 @@ export function ListHeader({
   extra,
   partiallySelected,
   selectAllDisabled,
+  selectAllLabel,
   refreshDisabled,
 }: {
   title: string;
@@ -196,6 +197,7 @@ export function ListHeader({
   extra?: ReactNode;
   partiallySelected?: boolean;
   selectAllDisabled?: boolean;
+  selectAllLabel?: string;
   refreshDisabled?: boolean;
 }) {
   const { t } = useTranslation("common");
@@ -228,9 +230,11 @@ export function ListHeader({
               indeterminate={partiallySelected}
               disabled={selectAllDisabled}
               onToggle={() => onSelectAll(!allSelected)}
-              ariaLabel={t("resourcePicker.selectAll", "全选")}
+              ariaLabel={
+                selectAllLabel ?? t("resourcePicker.selectAll", "全选")
+              }
             />
-            {t("resourcePicker.selectAll", "全选")}
+            {selectAllLabel ?? t("resourcePicker.selectAll", "全选")}
           </span>
         )}
       </div>
@@ -503,6 +507,7 @@ export interface ResourceDrawerProps {
   allSelected?: boolean;
   partiallySelected?: boolean;
   selectAllDisabled?: boolean;
+  selectAllLabel?: string;
   refreshDisabled?: boolean;
   selectedTrailing?: ReactNode;
   children: ReactNode;
@@ -565,6 +570,7 @@ export function ResourceDrawer({
   allSelected,
   partiallySelected,
   selectAllDisabled,
+  selectAllLabel,
   refreshDisabled,
   selectedTrailing,
   children,
@@ -664,6 +670,7 @@ export function ResourceDrawer({
               allSelected={allSelected}
               partiallySelected={partiallySelected}
               selectAllDisabled={selectAllDisabled}
+              selectAllLabel={selectAllLabel}
               refreshDisabled={refreshDisabled}
               onRefresh={onRefresh}
               refreshLoading={refreshLoading}

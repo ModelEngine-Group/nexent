@@ -2,8 +2,8 @@
 """Northbound overrides use Agent defaults without retired conversation policies."""
 import pytest
 
-from consts.exceptions import ValidationError
-from consts.model import ToolParamsRequest
+from contracts.errors.exceptions import ValidationError
+from contracts.tool import ToolParamsRequest
 from management.services.knowledge_base import scope as service
 
 

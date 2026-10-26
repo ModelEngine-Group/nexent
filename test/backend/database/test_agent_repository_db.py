@@ -1,7 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Unit tests for backend.database.agent_repository_db."""
+"""Unit tests for management.db.agent.catalog."""
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 from datetime import datetime
 from unittest.mock import MagicMock
@@ -17,7 +19,8 @@ consts_mock.const = MagicMock()
 consts_mock.const.CAN_EDIT_ALL_USER_ROLES = frozenset({"admin"})
 consts_mock.const.PERMISSION_EDIT = "edit"
 sys.modules["consts"] = consts_mock
-sys.modules["consts.const"] = consts_mock.const
+sys.modules["contracts.constants.environment"] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 agent_repository_consts = MagicMock()
 agent_repository_consts.STATUS_NOT_SHARED = "not_shared"
@@ -27,7 +30,7 @@ agent_repository_consts.STATUS_SHARED = "shared"
 agent_repository_consts.OWNERSHIP_ALL = "all"
 agent_repository_consts.OWNERSHIP_CREATED = "created"
 agent_repository_consts.OWNERSHIP_OTHERS = "others"
-sys.modules["consts.agent_repository"] = agent_repository_consts
+install_shared_contract_stub(agent_repository_consts, 'agent_repository')
 
 boto3_mock = MagicMock()
 sys.modules["boto3"] = boto3_mock
@@ -36,13 +39,19 @@ client_mock = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
-sys.modules["database.client"] = client_mock
-sys.modules["backend.database.client"] = client_mock
+sys.modules["management.db.client"] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.client"] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 group_db_mock = MagicMock()
 group_db_mock.query_group_ids_by_user = MagicMock(return_value=[])
-sys.modules["database.group_db"] = group_db_mock
-sys.modules["backend.database.group_db"] = group_db_mock
+sys.modules["management.db.identity.group"] = group_db_mock
+sys.modules["management.db.identity.group"] = group_db_mock
 
 
 class _AgentRepositoryModel:
@@ -104,25 +113,11 @@ db_models_mock = MagicMock()
 db_models_mock.AgentRepository = _AgentRepositoryModel
 db_models_mock.AgentInfo = _AgentInfoModel
 db_models_mock.AgentVersion = _AgentVersionModel
-sys.modules["database.db_models"] = db_models_mock
-sys.modules["backend.database.db_models"] = db_models_mock
+sys.modules["management.db.models"] = db_models_mock
+sys.modules["management.db.models"] = db_models_mock
 
-from backend.database import agent_repository_db as repo_db  # noqa: E402
-from backend.database.agent_repository_db import (  # noqa: E402
-    fetch_draft_agent_mine_metadata,
-    get_agent_repository_by_agent_id,
-    get_agent_repository_by_id,
-    increment_agent_repository_downloads,
-    insert_agent_repository_record,
-    list_agent_repository_by_agent_ids,
-    list_agent_repository_by_publisher,
-    list_agent_repository_summaries,
-    reset_agent_repository_status,
-    sum_agent_repository_downloads_by_agent_ids,
-    update_agent_repository_by_id,
-    update_agent_repository_status_by_id,
-    upsert_agent_repository_record,
-)
+from management.db.agent import catalog as repo_db
+from management.db.agent.catalog import fetch_draft_agent_mine_metadata, get_agent_repository_by_agent_id, get_agent_repository_by_id, increment_agent_repository_downloads, insert_agent_repository_record, list_agent_repository_by_agent_ids, list_agent_repository_by_publisher, list_agent_repository_summaries, reset_agent_repository_status, sum_agent_repository_downloads_by_agent_ids, update_agent_repository_by_id, update_agent_repository_status_by_id, upsert_agent_repository_record
 
 STATUS_NOT_SHARED = "not_shared"
 

@@ -93,5 +93,5 @@ The new design standard requires all five audit fields on every new table, inclu
 ## SQL
 
 - Every file named `init.sql` or with `merged_migrations` in its name is already merged into the target branch, which is immutable. Never modify, rename, or delete one.
-- Add a versioned migration under `deploy/sql/migrations/`, following current naming/version conventions. Application version is `APP_VERSION` in `backend/consts/const.py`.
+- Add a versioned migration under `deploy/sql/migrations/`, following current naming/version conventions. Application version is `APP_VERSION` in `backend/contracts/constants/environment.py`.
 - Verify naming/comments, type limits, JSONB validation, audit maintenance, reference/uniqueness behavior, soft deletion/versioning, query indexes, transaction ownership, and migration compatibility as applicable. External database execution requires authorization for that action.

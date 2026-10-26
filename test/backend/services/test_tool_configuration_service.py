@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-
-from consts.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
+from test.common.contract_stubs import install_business_contract_stubs
+from contracts.errors.exceptions import MCPConnectionError, NotFoundException, ToolExecutionException
 
 from test.backend.management.import_patching import patch_import_context, patch_imports, set_import_attribute
 import asyncio
@@ -26,7 +26,7 @@ if str(SDK_ROOT) not in sys.path:
     sys.path.insert(0, str(SDK_ROOT))
 
 try:
-    import nexent.memory.memory_service as real_memory_service
+    from nexent.memory import memory_service as real_memory_service
     memory_pkg = sys.modules.get("nexent.memory")
 except Exception:
     real_memory_service = None
@@ -94,7 +94,7 @@ mcpadapt_smolagents_adapter_mock._sanitize_function_name = lambda name: name
 sys.modules['mcpadapt'] = mcpadapt_mock
 sys.modules['mcpadapt.smolagents_adapter'] = mcpadapt_smolagents_adapter_mock
 
-# Patch smolagents and its sub-modules before importing consts.model to avoid ImportError
+# Patch smolagents and its sub-modules before importing contracts.agent to avoid ImportError
 mock_smolagents = MagicMock()
 sys.modules['smolagents'] = mock_smolagents
 
@@ -192,7 +192,7 @@ def _create_package_mock(name):
 nexent_mock = _create_package_mock('nexent')
 sys.modules['nexent'] = nexent_mock
 
-# Mock psycopg2 before backend.database.client is imported
+# Mock psycopg2 before management.db.client is imported
 psycopg2_mock = MagicMock()
 sys.modules['psycopg2'] = psycopg2_mock
 sys.modules['psycopg2.pool'] = MagicMock()
@@ -482,11 +482,11 @@ sys.modules["management.services.model.resolver"] = model_resolver_module
 import importlib  # noqa: E402
 backend_module = importlib.import_module('backend')
 sys.modules['backend'] = backend_module
-backend_database_module = importlib.import_module('backend.database')
-sys.modules['backend.database'] = backend_database_module
 backend_database_client_module = importlib.import_module(
-    'backend.database.client')
-sys.modules['backend.database.client'] = backend_database_client_module
+    'management.db.client')
+sys.modules['management.db.client'] = backend_database_client_module
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 backend_services_module = importlib.import_module(
     'management.services.tool.configuration')
 # Ensure services package can resolve tool_configuration_service for patching
@@ -587,7 +587,7 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('backend.database.client.MinioClient',
+patch('management.db.client.MinioClient',
       return_value=minio_client_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
@@ -599,31 +599,20 @@ patch_import_context('management.services.knowledge_base.service.get_vector_db_c
 patch('services.tenant_config_service.get_selected_knowledge_list', MagicMock()).start()
 patch('services.tenant_config_service.build_knowledge_name_mapping',
       MagicMock()).start()
-patch('backend.database.knowledge_db.get_knowledge_name_map_by_index_names', MagicMock()).start()
+patch('management.db.knowledge_base.repository.get_knowledge_name_map_by_index_names', MagicMock()).start()
 
-# Ensure this module always uses the real consts.model instead of mocks injected by other test files.
-_consts_model = sys.modules.get("consts.model")
-if _consts_model is None or isinstance(_consts_model, MagicMock) or not hasattr(_consts_model, "ToolInfo"):
-    consts_pkg = sys.modules.get("consts")
-    if consts_pkg is None or not isinstance(consts_pkg, types.ModuleType):
-        consts_pkg = types.ModuleType("consts")
-        consts_pkg.__path__ = [str(REPO_ROOT / "backend" / "consts")]
-        sys.modules["consts"] = consts_pkg
-    model_path = REPO_ROOT / "backend" / "consts" / "model.py"
-    spec = importlib.util.spec_from_file_location("consts.model", model_path)
-    module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(module)
-    sys.modules["consts.model"] = module
-    setattr(consts_pkg, "model", module)
+# Ensure this module always uses the real tool contracts instead of mocks
+# injected by other test files. The business owner is importable directly.
+_tool_contracts = importlib.import_module("contracts.tool")
+importlib.reload(_tool_contracts)
 
-# Reload service module so ToolInfo/ToolSourceEnum bindings come from the real consts.model.
-import management.services.tool.configuration as _tool_cfg_service
+# Reload service module so ToolInfo/ToolSourceEnum bind to the real tool contracts.
+from management.services.tool import configuration as _tool_cfg_service
 importlib.reload(_tool_cfg_service)
 patch_import_context('management.services.tool.configuration.get_embedding_model_by_index_name', MagicMock()).start()
 
 # Import consts after patching dependencies
-from consts.model import ToolInfo, ToolSourceEnum, ToolInstanceInfoRequest, ToolValidateRequest  # noqa: E402
+from contracts.tool import ToolInfo, ToolSourceEnum, ToolInstanceInfoRequest, ToolValidateRequest
 
 
 class TestPythonTypeToJsonSchema:
@@ -1013,7 +1002,7 @@ class TestUpdateToolInfoImpl:
         mock_request = Mock(spec=ToolInstanceInfoRequest)
         mock_request.version_no = 5
         mock_request.__dict__ = {"agent_id": 1, "tool_id": 1, "version_no": 5}
-        from consts.exceptions import AgentDraftEditError
+        from contracts.errors.exceptions import AgentDraftEditError
         from management.services.tool.configuration import update_tool_info_impl
         with pytest.raises(AgentDraftEditError, match="agent_not_draft"):
             update_tool_info_impl(mock_request, "test_tenant", "test_user")
@@ -5406,7 +5395,7 @@ class TestUpdateToolInfoImplAidpPermission:
     def test_rejects_new_unauthorized_id(
         self, mock_snapshot, mock_existing, mock_create_update
     ):
-        from consts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         mock_snapshot.return_value = types.SimpleNamespace(
             accessible_id_set={"kb1"},
@@ -5744,7 +5733,7 @@ def test_update_tool_info_preserves_existing_kds_when_key_missing(mocker):
 
 def test_update_tool_info_rejects_new_kds_when_aidp_unavailable(mocker):
     """When AIDP is unreachable and the submission adds ids, the edit must fail."""
-    from consts.exceptions import ValidationError
+    from contracts.errors.exceptions import ValidationError
 
     patch_imports(mocker,
         "management.services.tool.configuration.require_agent_draft_edit"
@@ -5906,13 +5895,13 @@ class TestCoerceParamValue:
         assert _tool_cfg_service._coerce_param_value("t", "p", "number", 2.5, "le") == 2.5
 
     def test_invalid_numeric_raises_valid_type(self):
-        from consts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         with pytest.raises(ValidationError, match="p must be a valid integer"):
             _tool_cfg_service._coerce_param_value("t", "p", "integer", "abc", "ge")
 
     def test_non_integer_for_integer_type_raises(self):
-        from consts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         with pytest.raises(ValidationError, match="p must be an integer"):
             _tool_cfg_service._coerce_param_value("t", "p", "integer", 1.5, "ge")
@@ -5934,7 +5923,7 @@ class TestApplyParamConstraints:
         _tool_cfg_service._apply_param_constraints("t", "p", "integer", 0, {})
 
     def test_ge_violation_raises(self):
-        from consts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         with pytest.raises(ValidationError, match="top_k must be >= 1"):
             _tool_cfg_service._apply_param_constraints(
@@ -5947,7 +5936,7 @@ class TestApplyParamConstraints:
         )
 
     def test_le_violation_raises(self):
-        from consts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         with pytest.raises(ValidationError, match="top_k must be <= 100"):
             _tool_cfg_service._apply_param_constraints(
@@ -5955,7 +5944,7 @@ class TestApplyParamConstraints:
             )
 
     def test_min_length_violation_raises(self):
-        from consts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         with pytest.raises(ValidationError, match="name length must be >= 3"):
             _tool_cfg_service._apply_param_constraints(
@@ -5998,7 +5987,7 @@ class TestValidateToolParamRanges:
             _tool_cfg_service._validate_tool_param_ranges(1, {"top_k": 0})
 
     def test_violation_raises(self):
-        from consts.exceptions import ValidationError
+        from contracts.errors.exceptions import ValidationError
 
         tool = self._tool([{"name": "top_k", "type": "integer", "constraints": {"ge": 1}}])
         with patch_import_context(
@@ -6055,7 +6044,7 @@ async def test_call_mcp_tool_enforces_runtime_timeout(monkeypatch):
 ])
 def test_aidp_policy_checked_once_before_persistence(mocker, params, rejected):
     from types import SimpleNamespace
-    from consts.exceptions import ValidationError
+    from contracts.errors.exceptions import ValidationError
     mocker.patch.object(_tool_cfg_service, "require_agent_draft_edit")
     mocker.patch.object(_tool_cfg_service, "query_all_tools", return_value=[{
         "tool_id": 9, "name": "ind_aidp_search", "is_available": True,

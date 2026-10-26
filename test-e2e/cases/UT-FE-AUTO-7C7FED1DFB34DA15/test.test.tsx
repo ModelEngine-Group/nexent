@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, cleanup, fireEvent } from "@testing-library/react";
@@ -303,3 +305,6 @@ it("UT-FE-AUTO-7C7FED1DFB34DA15 clicking a citation opens and locates the source
     expect.objectContaining({ block: "center" }),
   );
 });
+
+// Document preview is outside this case's component contract.
+vi.mock("@/components/common/rawStreamPreviewViewer", () => ({ RawStreamPreviewViewer: () => null }));

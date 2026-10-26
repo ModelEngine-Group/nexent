@@ -813,7 +813,7 @@ export const Composer: FC<ComposerProps> = ({
                   />
                 )}
               </div>
-              <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
+              <div className="flex min-w-0 flex-[1_1_16rem] items-center justify-end gap-1">
                 {showModelSelector && (
                   <ModelSelector
                     models={models}

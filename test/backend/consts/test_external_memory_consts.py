@@ -1,6 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Contract tests for external-memory runtime configuration."""
 
-from backend.consts import const
+from contracts.constants import constants as const_memory
+from contracts.constants import environment as const
 
 
 def test_ac_p3_36_ingest_has_no_deployment_master_switch():
@@ -8,4 +11,4 @@ def test_ac_p3_36_ingest_has_no_deployment_master_switch():
 
 
 def test_ac_p3_37_agent_memory_units_are_allowed_for_external_ingest():
-    assert "agent" in const.EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES
+    assert "agent" in const_memory.EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES

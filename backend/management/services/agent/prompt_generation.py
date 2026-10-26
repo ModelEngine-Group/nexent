@@ -3,43 +3,26 @@
 import copy
 import json
 import logging
-import queue
-import sys
-import threading
 from typing import Optional, List
 
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
 from nexent.core.agents.prompt.meta import (
-    append_optimization_scope_instruction, compose_agent_generation_user,
-    compose_agent_optimization, default_section_title, optimization_scope_instruction,
+    append_optimization_scope_instruction, compose_agent_optimization,
+    default_section_title, optimization_scope_instruction,
 )
 
 from nexent.core.tools.parallel_executor import ParallelExecutorTool
-from nexent.core.concurrency import ManagedExecution, ManagedTaskSpec
 
-from consts.const import LANGUAGE, ENABLE_JIUWEN_SDK
-from consts.tool_labels import PARALLEL_EXECUTOR_TOOL_NAME
-from consts.error_code import ErrorCode
-from consts.error_message import ErrorMessage
-from consts.exceptions import AppException
-from consts.model import AgentInfoRequest
-from database.agent_db import search_agent_info_by_agent_id, query_all_agent_info_by_tenant_id, \
-    query_sub_agents_id_list
-from database.model_management_db import get_model_by_model_id
-from database.knowledge_db import get_knowledge_name_map_by_index_names
-from database.tool_db import query_tools_by_ids, query_tool_instances_by_id
+from contracts.constants.constants import LANGUAGE
+from contracts.constants.environment import ENABLE_JIUWEN_SDK
+from contracts.constants.constants import PARALLEL_EXECUTOR_TOOL_NAME
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
+from management.db.agent.repository import search_agent_info_by_agent_id, query_sub_agents_id_list
+from management.db.tool.repository import query_tools_by_ids
 from management.services.agent.service import get_enable_tool_id_by_agent_id
-from management.services.agent.naming import (
-    check_agent_value_duplicate,
-    generate_unique_agent_value,
-    regenerate_agent_value,
-)
-from database.agent_db import update_agent
-from management.services.agent.prompt import load_default_generation_prompt
-from infrastructure.concurrency import config_thread_manager
 from management.services.model.invocation import call_llm_for_system_prompt
 
-from dataclasses import dataclass
 from typing import Optional as Opt
 
 from adapters.exception import JiuwenSDKError, NexentCapabilityError
@@ -110,232 +93,6 @@ def _copy_bad_cases_with_scope_instruction(bad_cases: list, language: str) -> li
     return copied_cases
 
 
-def gen_system_prompt_streamable(agent_id: int, model_id: int, task_description: str, user_id: str, tenant_id: str, language: str, tool_ids: Optional[List[int]] = None, sub_agent_ids: Optional[List[int]] = None, knowledge_base_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
-    try:
-        for system_prompt in generate_and_save_system_prompt_impl(
-            agent_id=agent_id,
-            model_id=model_id,
-            task_description=task_description,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            language=language,
-            tool_ids=tool_ids,
-            sub_agent_ids=sub_agent_ids,
-            knowledge_base_display_names=knowledge_base_display_names,
-            has_selected_resources=has_selected_resources,
-        ):
-            # SSE format, each message ends with \n\n
-            yield f"data: {json.dumps({'success': True, 'data': system_prompt}, ensure_ascii=False)}\n\n"
-    except Exception as e:
-        # Catch model unavailable or other errors and return error through SSE
-        logger.error(f"Error generating prompt: {e}")
-        # Use original error code if it's an AppException, otherwise use default
-        if isinstance(e, AppException):
-            error_code = e.error_code
-            error_message = e.message
-        else:
-            error_code = ErrorCode.MODEL_PROMPT_GENERATION_FAILED
-            error_message = ErrorMessage.get_message(error_code)
-        yield f"data: {json.dumps({'success': False, 'error': {'code': error_code.value, 'message': error_message}}, ensure_ascii=False)}\n\n"
-
-
-def generate_and_save_system_prompt_impl(agent_id: int,
-                                         model_id: int,
-                                         task_description: str,
-                                         user_id: str,
-                                         tenant_id: str,
-                                         language: str,
-                                         tool_ids: Optional[List[int]] = None,
-                                         sub_agent_ids: Optional[List[int]] = None,
-                                         knowledge_base_display_names: Optional[List[str]] = None,
-                                         aidp_kb_display_names: Optional[List[str]] = None,
-                                         has_selected_resources: bool = True):
-    # Get description of tool and agent from frontend-provided IDs
-    # Frontend always provides tool_ids and sub_agent_ids (could be empty arrays)
-
-    # Handle tool IDs
-    if tool_ids and len(tool_ids) > 0:
-        tool_info_list = query_tools_by_ids(tool_ids)
-        logger.debug(f"Using frontend-provided tool IDs: {tool_ids}")
-    else:
-        logger.debug("No tools selected (empty tool_ids list)")
-        # If no tool IDs provided, get enabled tools from database
-        tool_info_list = get_enabled_tool_description_for_generate_prompt(
-            tenant_id=tenant_id, agent_id=agent_id)
-
-    # Prompt generation describes capabilities only. Concrete knowledge base
-    # names and IDs are resolved at conversation runtime.
-    knowledge_base_display_names = None
-    aidp_kb_display_names = None
-
-    # Handle sub-agent IDs
-    if sub_agent_ids and len(sub_agent_ids) > 0:
-        sub_agent_info_list = []
-        for sub_agent_id in sub_agent_ids:
-            try:
-                sub_agent_info = search_agent_info_by_agent_id(
-                    agent_id=sub_agent_id, tenant_id=tenant_id)
-                sub_agent_info_list.append(sub_agent_info)
-            except Exception as e:
-                logger.warning(
-                    f"Failed to get sub-agent info for agent_id {sub_agent_id}: {str(e)}")
-        logger.debug(f"Using frontend-provided sub-agent IDs: {sub_agent_ids}")
-    else:
-        logger.debug("No sub-agents selected (empty sub_agent_ids list)")
-        # If no sub-agent IDs provided, get enabled sub-agents from database
-        sub_agent_info_list = get_enabled_sub_agent_description_for_generate_prompt(
-            tenant_id=tenant_id, agent_id=agent_id)
-
-    # Re-evaluate has_selected_resources based on the actual resolved lists.
-    # The frontend value indicates user intent, but after resolving tool_ids/sub_agent_ids
-    # the actual lists are the source of truth. If both lists are empty, constraint and
-    # few_shots sections have no meaningful content to generate, so we force False.
-    has_selected_resources = bool(tool_info_list or sub_agent_info_list)
-    logger.info(
-        "Resolved resource availability: tools=%d, sub_agents=%d, has_selected_resources=%s",
-        len(tool_info_list),
-        len(sub_agent_info_list),
-        has_selected_resources,
-    )
-
-    # 1. Real-time streaming push
-    final_results = {"duty": "", "constraint": "", "few_shots": "", "agent_var_name": "", "agent_display_name": "",
-                     "agent_description": "", "greeting_message": "", "example_questions": ""}
-
-    # Get all existing agent names and display names for duplicate checking (only if not in create mode)
-    all_agents = query_all_agent_info_by_tenant_id(tenant_id)
-    existing_names = [
-        agent.get("name")
-        for agent in all_agents
-        if agent.get("name") and agent.get("agent_id") != agent_id
-    ]
-    existing_display_names = [
-        agent.get("display_name")
-        for agent in all_agents
-        if agent.get("display_name") and agent.get("agent_id") != agent_id
-    ]
-
-    # Collect results and yield non-name fields immediately, but hold name fields for duplicate checking
-    for result_data in generate_system_prompt(
-        sub_agent_info_list,
-        task_description,
-        tool_info_list,
-        tenant_id,
-        user_id,
-        model_id,
-        language,
-        knowledge_base_display_names,
-        aidp_kb_display_names,
-        has_selected_resources
-    ):
-        result_type = result_data["type"]
-        final_results[result_type] = result_data["content"]
-
-        # Yield non-name fields immediately
-        if result_type not in ["agent_var_name", "agent_display_name"]:
-            yield result_data
-        else:
-            # If name field is complete, check for duplicates and regenerate if needed before yielding
-            if result_data.get("is_complete", False):
-                field_key = "name" if result_type == "agent_var_name" else "display_name"
-                value = final_results[result_type]
-                if check_agent_value_duplicate(
-                    field_key, value, tenant_id, exclude_agent_id=agent_id, agents_cache=all_agents
-                ):
-                    try:
-                        value = regenerate_agent_value(
-                            field_key=field_key,
-                            original_value=value,
-                            existing_values=existing_names if field_key == "name" else existing_display_names,
-                            task_description=task_description,
-                            model_id=model_id,
-                            tenant_id=tenant_id,
-                            language=language,
-                            agents_cache=all_agents,
-                            exclude_agent_id=agent_id,
-                        )
-                    except Exception as exc:
-                        logger.error("Failed to regenerate agent %s with LLM: %s, using fallback", field_key, exc)
-                        value = generate_unique_agent_value(
-                            field_key, value, tenant_id, all_agents, agent_id
-                        )
-                    final_results[result_type] = value
-                yield {"type": result_type, "content": value, "is_complete": True}
-
-    # 2. Update agent with the final result (skip in create mode)
-    if agent_id == 0:
-        logger.info("Skipping agent update in create mode (agent_id=0)")
-    else:
-        logger.info(
-            "Updating agent with business_description and prompt segments")
-        logger.info("Prompt generation and agent update completed successfully")
-
-    # Check if any content was generated - if all fields are empty, model likely failed
-    all_fields = ["duty", "constraint", "few_shots",
-                  "agent_var_name", "agent_display_name", "agent_description"]
-    has_content = any(final_results.get(field, "").strip()
-                      for field in all_fields)
-    if not has_content:
-        raise Exception("Failed to generate prompt content.")
-
-    # 3. Generate greeting message and example questions
-    try:
-        greeting_prompt = compose_auxiliary_prompt(language, "greeting", {
-            "display_name": final_results.get("agent_display_name", ""),
-            "duty_description": final_results.get("duty", ""),
-            "business_description": task_description,
-            "few_shots": final_results.get("few_shots", ""),
-        })
-
-        greeting_result = call_llm_for_system_prompt(
-            model_id=model_id,
-            user_prompt=greeting_prompt.user,
-            system_prompt=greeting_prompt.system,
-            tenant_id=tenant_id,
-        )
-
-        parsed = None
-        try:
-            json_start = greeting_result.find("{")
-            json_end = greeting_result.rfind("}") + 1
-            if json_start >= 0 and json_end > json_start:
-                parsed = json.loads(greeting_result[json_start:json_end])
-        except json.JSONDecodeError:
-            logger.warning(f"Failed to parse greeting JSON from LLM output: {greeting_result}")
-
-        if parsed and "greeting_message" in parsed and "example_questions" in parsed:
-            greeting_message = parsed["greeting_message"]
-            example_questions = parsed["example_questions"]
-            if isinstance(example_questions, list) and len(example_questions) > 6:
-                example_questions = example_questions[:6]
-        else:
-            greeting_message = greeting_result.strip() if greeting_result else ""
-            example_questions = []
-
-        yield {
-            "type": "greeting_message",
-            "content": greeting_message,
-            "is_complete": True
-        }
-        yield {
-            "type": "example_questions",
-            "content": json.dumps(example_questions, ensure_ascii=False),
-            "is_complete": True
-        }
-
-        final_results["greeting_message"] = greeting_message
-        final_results["example_questions"] = json.dumps(example_questions, ensure_ascii=False)
-
-        # Update agent with greeting (skip in create mode)
-        if agent_id != 0:
-            update_agent(agent_id, AgentInfoRequest(
-                agent_id=agent_id,
-                greeting_message=greeting_message,
-                example_questions=example_questions,
-            ), user_id)
-    except Exception as e:
-        logger.warning(f"Greeting generation failed: {str(e)}, skipping greeting")
-
 def optimize_prompt_section_impl(
     agent_id: int,
     model_id: int,
@@ -370,14 +127,14 @@ def optimize_prompt_section_impl(
             "Optimization feedback is required."
         )
 
-    tool_info_list = _resolve_prompt_generation_tools(
+    tool_info_list = _resolve_prompt_tools(
         agent_id=agent_id,
         tenant_id=tenant_id,
         tool_ids=tool_ids,
     )
     knowledge_base_display_names = None
     aidp_kb_display_names = None
-    sub_agent_info_list = _resolve_prompt_generation_sub_agents(
+    sub_agent_info_list = _resolve_prompt_sub_agents(
         agent_id=agent_id,
         tenant_id=tenant_id,
         sub_agent_ids=sub_agent_ids,
@@ -524,48 +281,7 @@ def generate_guardrail_rules_impl(
     )
 
 
-def generate_system_prompt(sub_agent_info_list, task_description, tool_info_list, tenant_id: str, user_id: str, model_id: int, language: str = LANGUAGE["ZH"], knowledge_base_display_names: Optional[List[str]] = None, aidp_kb_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
-    """Main function for generating system prompts"""
-    prompt_for_generate = load_default_generation_prompt(language)
-
-    # Prepare content for generating system prompts
-    content = join_info_for_generate_system_prompt(
-        prompt_for_generate=prompt_for_generate,
-        sub_agent_info_list=sub_agent_info_list,
-        task_description=task_description,
-        tool_info_list=tool_info_list,
-        language=language,
-        knowledge_base_display_names=knowledge_base_display_names,
-        aidp_kb_display_names=aidp_kb_display_names,
-        has_selected_resources=has_selected_resources,
-    )
-
-    # Initialize state
-    produce_queue = queue.Queue()
-    latest = {"duty": "", "constraint": "", "few_shots": "",
-              "agent_var_name": "", "agent_display_name": "", "agent_description": ""}
-    stop_flags = {"duty": False, "constraint": False, "few_shots": False,
-                  "agent_var_name": False, "agent_display_name": False, "agent_description": False}
-
-    # Get model concurrency limit to control the number of concurrent LLM calls
-    # If None or >= 6, no limit (all 6 calls run concurrently)
-    # If < 6, use semaphore to limit concurrent calls
-    model_config = get_model_by_model_id(model_id, tenant_id)
-    concurrency_limit = model_config.get(
-        "concurrency_limit") if model_config else None
-
-    # Start all generation threads with concurrency control
-    threads, error_holder = _start_generation_threads(
-        content, prompt_for_generate, produce_queue, latest, stop_flags, tenant_id, model_id,
-        has_selected_resources,
-        concurrency_limit=concurrency_limit
-    )
-
-    # Stream results
-    yield from _stream_results(produce_queue, latest, stop_flags, threads, error_holder)
-
-
-def _resolve_prompt_generation_tools(
+def _resolve_prompt_tools(
     agent_id: int,
     tenant_id: str,
     tool_ids: Optional[List[int]] = None,
@@ -575,47 +291,12 @@ def _resolve_prompt_generation_tools(
         return query_tools_by_ids(tool_ids)
 
     logger.debug("No tools selected (empty tool_ids list)")
-    return get_enabled_tool_description_for_generate_prompt(
+    return _get_enabled_tool_descriptions(
         tenant_id=tenant_id, agent_id=agent_id
     )
 
 
-def _resolve_knowledge_base_display_names(
-    agent_id: int,
-    tenant_id: str,
-    tool_info_list: List[dict],
-    knowledge_base_display_names: Optional[List[str]] = None,
-) -> Optional[List[str]]:
-    if knowledge_base_display_names:
-        logger.debug(
-            f"Using frontend-provided knowledge base display names: {knowledge_base_display_names}"
-        )
-        return knowledge_base_display_names
-
-    resolved_names = get_knowledge_base_display_names(
-        tool_info_list=tool_info_list,
-        agent_id=agent_id,
-        tenant_id=tenant_id
-    )
-    logger.debug(
-        f"Using database query for knowledge base display names: {resolved_names}")
-    return resolved_names
-
-
-def _resolve_aidp_kb_display_names(
-    tool_info_list: List[dict],
-    user_id: str,
-    tenant_id: str,
-) -> Optional[List[str]]:
-    """Resolve aidp knowledge base display names from tool list."""
-    return get_aidp_kb_display_names(
-        tool_info_list=tool_info_list,
-        user_id=user_id,
-        tenant_id=tenant_id,
-    )
-
-
-def _resolve_prompt_generation_sub_agents(
+def _resolve_prompt_sub_agents(
     agent_id: int,
     tenant_id: str,
     sub_agent_ids: Optional[List[int]] = None,
@@ -635,201 +316,8 @@ def _resolve_prompt_generation_sub_agents(
         return sub_agent_info_list
 
     logger.debug("No sub-agents selected (empty sub_agent_ids list)")
-    return get_enabled_sub_agent_description_for_generate_prompt(
+    return _get_enabled_sub_agent_descriptions(
         tenant_id=tenant_id, agent_id=agent_id
-    )
-
-
-def _start_generation_threads(content, prompt_for_generate, produce_queue, latest, stop_flags, tenant_id, model_id,
-                              has_selected_resources=True, concurrency_limit: Optional[int] = None):
-    """Start all prompt generation threads with optional concurrency control."""
-    # Shared error tracking across threads
-    error_holder = {"error": None}
-
-    # Total number of generation tasks
-    total_tasks = 6
-
-    # Determine effective concurrency limit
-    # None means unlimited, 0 or negative means unlimited
-    if concurrency_limit is None or concurrency_limit <= 0 or concurrency_limit >= total_tasks:
-        effective_limit = None
-    else:
-        effective_limit = concurrency_limit
-
-    # Use semaphore if concurrency is limited
-    semaphore = threading.Semaphore(
-        effective_limit) if effective_limit else None
-    if semaphore:
-        logger.info(
-            f"Using concurrency limit of {effective_limit} for prompt generation (total tasks: {total_tasks})")
-    else:
-        logger.info("Using unlimited concurrency for prompt generation")
-
-    def make_callback(tag):
-        def callback_fn(current_text):
-            latest[tag] = current_text
-            produce_queue.put(tag)
-        return callback_fn
-
-    def run_and_flag(tag, sys_prompt):
-        try:
-            # Acquire semaphore before starting (if limited)
-            if semaphore:
-                semaphore.acquire()
-            try:
-                call_llm_for_system_prompt(
-                    model_id, content, sys_prompt, make_callback(tag), tenant_id)
-            finally:
-                # Always release semaphore after completion
-                if semaphore:
-                    semaphore.release()
-        except Exception as e:
-            logger.error(f"Error in {tag} generation: {e}")
-            error_holder["error"] = e
-        finally:
-            stop_flags[tag] = True
-
-    executions = []
-    logger.info("Generating system prompt")
-
-    # Base sections always generated
-    prompt_configs = [
-        ("duty", prompt_for_generate["duty_system_prompt"]),
-        ("agent_var_name",
-         prompt_for_generate["agent_variable_name_system_prompt"]),
-        ("agent_display_name",
-         prompt_for_generate["agent_display_name_system_prompt"]),
-        ("agent_description",
-         prompt_for_generate["agent_description_system_prompt"])
-    ]
-
-    # Constraint and few_shots sections are only generated when tools or sub-agents are selected
-    if has_selected_resources:
-        prompt_configs.extend([
-            ("constraint", prompt_for_generate["constraint_system_prompt"]),
-            ("few_shots", prompt_for_generate["few_shots_system_prompt"]),
-        ])
-    else:
-        logger.info(
-            "Skipping constraint and few_shots generation: no tools or sub-agents selected")
-        # Mark these sections as already complete with empty content
-        stop_flags["constraint"] = True
-        stop_flags["few_shots"] = True
-        latest["constraint"] = ""
-        latest["few_shots"] = ""
-
-    for tag, sys_prompt in prompt_configs:
-        execution = config_thread_manager.submit(
-            "evaluation",
-            ManagedTaskSpec(
-                task_name=f"prompt-generation-{tag}",
-                owner="config",
-            ),
-            run_and_flag,
-            tag,
-            sys_prompt,
-        )
-        executions.append(execution)
-
-    return executions, error_holder
-
-
-def _stream_results(produce_queue, latest, stop_flags, threads, error_holder):
-    """Stream prompt generation results"""
-
-    try:
-        yield from _stream_results_impl(
-            produce_queue, latest, stop_flags, threads, error_holder
-        )
-    finally:
-        for execution in threads:
-            if isinstance(execution, ManagedExecution):
-                config_thread_manager.cancel(
-                    execution.execution_id,
-                    reason="prompt result stream closed",
-                    wait_timeout=0,
-                )
-
-
-def _wait_prompt_execution(execution, timeout):
-    if isinstance(execution, ManagedExecution):
-        try:
-            execution.future.result(timeout=timeout)
-        except Exception:
-            return
-    else:
-        execution.join(timeout=timeout)
-
-
-def _stream_results_impl(produce_queue, latest, stop_flags, threads, error_holder):
-    """Yield prompt fragments while managed executions are active."""
-
-    # Real-time streaming output for the first three sections
-    last_results = {"duty": "", "constraint": "", "few_shots": "",
-                    "agent_var_name": "", "agent_display_name": "", "agent_description": ""}
-
-    while not all(stop_flags.values()):
-        # Check if error occurred in any thread - raise immediately
-        if error_holder.get("error"):
-            # Wait for threads to finish
-            for thread in threads:
-                _wait_prompt_execution(thread, timeout=5)
-            raise error_holder["error"]
-
-        try:
-            produce_queue.get(timeout=0.5)
-        except queue.Empty:
-            continue
-
-        # Check if there is new content (only stream the first three sections)
-        for tag in ["duty", "constraint", "few_shots"]:
-            if latest[tag] != last_results[tag]:
-                result_data = {
-                    "type": tag,
-                    "content": latest[tag],
-                    "is_complete": stop_flags[tag]
-                }
-                yield result_data
-                last_results[tag] = latest[tag]
-
-    # Check if error occurred before final output
-    if error_holder.get("error"):
-        raise error_holder["error"]
-
-    # Wait for all threads to complete
-    for thread in threads:
-        _wait_prompt_execution(thread, timeout=5)
-
-    # Output final results
-    all_tags = ["duty", "constraint", "few_shots",
-                "agent_var_name", "agent_display_name", "agent_description"]
-    for tag in all_tags:
-        if stop_flags[tag]:
-            # Clean up content for specific tags
-            if tag in {'agent_var_name', 'agent_display_name', 'agent_description'}:
-                latest[tag] = latest[tag].strip().replace('\n', '')
-
-            result_data = {
-                "type": tag,
-                "content": latest[tag].strip(),
-                "is_complete": True
-            }
-            yield result_data
-            last_results[tag] = latest[tag]
-
-
-def join_info_for_generate_system_prompt(prompt_for_generate, sub_agent_info_list, task_description, tool_info_list, language: str = LANGUAGE["ZH"], knowledge_base_display_names: Optional[List[str]] = None, aidp_kb_display_names: Optional[List[str]] = None, has_selected_resources: bool = True):
-    has_local_knowledge_tool, has_aidp_knowledge_tool = _resolve_knowledge_tool_capabilities(
-        tool_info_list
-    )
-    return compose_agent_generation_user(
-        language, prompt_for_generate,
-        task_description=task_description,
-        tools=tool_info_list,
-        worker_agents=sub_agent_info_list,
-        has_local_knowledge_tool=has_local_knowledge_tool,
-        has_aidp_knowledge_tool=has_aidp_knowledge_tool,
-        has_selected_resources=has_selected_resources,
     )
 
 
@@ -868,7 +356,7 @@ def _default_prompt_section_title(section_type: str, language: str) -> str:
     return default_section_title(language, section_type)
 
 
-def get_enabled_tool_description_for_generate_prompt(agent_id: int, tenant_id: str):
+def _get_enabled_tool_descriptions(agent_id: int, tenant_id: str):
     # Get tool information
     logger.info("Fetching tool instances")
     tool_id_list = get_enable_tool_id_by_agent_id(
@@ -895,117 +383,7 @@ def get_enabled_tool_description_for_generate_prompt(agent_id: int, tenant_id: s
     return tool_info_list
 
 
-def get_knowledge_base_display_names(tool_info_list: List[dict], agent_id: int, tenant_id: str) -> Optional[List[str]]:
-    """
-    Extract knowledge base display names from tool configurations.
-    This is used to ensure few-shot examples use actual configured knowledge base names.
-
-    Args:
-        tool_info_list: List of tool info dictionaries
-        agent_id: Agent ID for querying tool instances
-        tenant_id: Tenant ID for database queries
-
-    Returns:
-        List of knowledge base display names if knowledge_base_search tool is configured, None otherwise
-    """
-    # Check if knowledge_base_search tool is in the list
-    kb_tool_ids = [tool['tool_id'] for tool in tool_info_list if tool.get(
-        'name') == 'knowledge_base_search']
-    if not kb_tool_ids:
-        logger.debug("No knowledge_base_search tool found in tool list")
-        return None
-
-    # Get the index_names from ToolInstance for knowledge_base_search tool
-    all_index_names = []
-    for kb_tool_id in kb_tool_ids:
-        try:
-            tool_instance = query_tool_instances_by_id(
-                agent_id=agent_id,
-                tool_id=kb_tool_id,
-                tenant_id=tenant_id
-            )
-            if tool_instance and tool_instance.get('params', {}).get('index_names'):
-                index_names = tool_instance['params']['index_names']
-                if isinstance(index_names, list):
-                    all_index_names.extend(index_names)
-                elif isinstance(index_names, str):
-                    # Handle JSON string format
-                    try:
-                        all_index_names.extend(json.loads(index_names))
-                    except json.JSONDecodeError:
-                        logger.warning(
-                            f"Failed to parse index_names JSON: {index_names}")
-        except Exception as e:
-            logger.warning(
-                f"Failed to get tool instance for tool_id {kb_tool_id}: {e}")
-
-    if not all_index_names:
-        logger.debug(
-            "No index_names configured for knowledge_base_search tool")
-        return None
-
-    # Remove duplicates while preserving order
-    unique_index_names = list(dict.fromkeys(all_index_names))
-
-    # Convert to display names
-    knowledge_name_map = get_knowledge_name_map_by_index_names(
-        unique_index_names,
-        tenant_id=tenant_id,
-    )
-
-    # Return list of display names (knowledge_name) for each configured index_name
-    display_names = []
-    for index_name in unique_index_names:
-        display_name = knowledge_name_map.get(index_name, index_name)
-        if display_name and display_name not in display_names:
-            display_names.append(display_name)
-
-    logger.debug(
-        f"Converted index_names {unique_index_names} to display_names: {display_names}")
-    return display_names if display_names else None
-
-
-def get_aidp_kb_display_names(tool_info_list: List[dict], user_id: str, tenant_id: str) -> Optional[List[str]]:
-    """
-    Extract aidp knowledge base display names from tool configurations.
-    This is used to ensure few-shot examples use actual configured aidp knowledge base names.
-
-    Args:
-        tool_info_list: List of tool info dictionaries
-        user_id: User ID for permission queries
-        tenant_id: Tenant ID for database queries
-
-    Returns:
-        List of aidp knowledge base display names if aidp_search tool is configured, None otherwise
-    """
-    # Check if aidp_search tool is in the list
-    aidp_tool_ids = [tool['tool_id'] for tool in tool_info_list if tool.get('name') == 'aidp_search']
-    if not aidp_tool_ids:
-        logger.debug("No aidp_search tool found in tool list")
-        return None
-
-    try:
-        from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
-        from ext_components.aidp.services.aidp_access_service import (
-            resolve_current_aidp_access,
-        )
-
-        snapshot = resolve_current_aidp_access(
-            server_url=AIDP_SERVER_URL,
-            api_key=AIDP_API_KEY,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            aidp_tenant_id=AIDP_TENANT_ID,
-        )
-        display_names = list(snapshot.name_to_id.keys())
-        logger.debug(f"Retrieved aidp_kb_display_names: {display_names}")
-        return display_names if display_names else None
-    except Exception as e:
-        logger.warning(f"Failed to get aidp knowledge base display names: {e}")
-        return None
-
-
-def get_enabled_sub_agent_description_for_generate_prompt(agent_id: int, tenant_id: str):
+def _get_enabled_sub_agent_descriptions(agent_id: int, tenant_id: str):
     logger.info("Fetching sub-agents information")
 
     sub_agent_id_list = query_sub_agents_id_list(
@@ -1053,7 +431,7 @@ class PromptOptimizationService:
         agent_info = search_agent_info_by_agent_id(
             agent_id=agent_id, tenant_id=self.tenant_id, version_no=0)
 
-        original_full_prompt = (agent_info.get("duty_prompt") or "").strip()
+        original_full_prompt = (agent_info.get("prompt") or "").strip()
 
         if not original_full_prompt:
             raise AppException(

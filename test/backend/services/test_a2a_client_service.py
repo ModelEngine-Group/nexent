@@ -260,7 +260,7 @@ class TestBuildEndpointUrl:
     def test_uses_json_rpc_agent_card_url_as_complete_endpoint(self):
         """Test JSON-RPC calls preserve the exact Agent Card endpoint."""
         from management.services.agent.a2a.catalog import A2AClientService
-        from database.a2a_agent_db import PROTOCOL_JSONRPC
+        from contracts.constants.constants import PROTOCOL_JSONRPC
 
         service = A2AClientService()
 
@@ -275,7 +275,7 @@ class TestBuildEndpointUrl:
     def test_build_http_json_streaming_url(self):
         """Test building HTTP+JSON streaming endpoint URL."""
         from management.services.agent.a2a.catalog import A2AClientService
-        from database.a2a_agent_db import PROTOCOL_HTTP_JSON
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
 
@@ -290,7 +290,7 @@ class TestBuildEndpointUrl:
     def test_build_http_json_non_streaming_url(self):
         """Test building HTTP+JSON non-streaming endpoint URL."""
         from management.services.agent.a2a.catalog import A2AClientService
-        from database.a2a_agent_db import PROTOCOL_HTTP_JSON
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
 
@@ -305,7 +305,7 @@ class TestBuildEndpointUrl:
     def test_does_not_duplicate_path(self):
         """Test URL path is not duplicated."""
         from management.services.agent.a2a.catalog import A2AClientService
-        from database.a2a_agent_db import PROTOCOL_HTTP_JSON
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
 
@@ -322,7 +322,7 @@ class TestBuildEndpointUrl:
     def test_handles_url_without_trailing_slash(self):
         """Test handles URL without trailing slash."""
         from management.services.agent.a2a.catalog import A2AClientService
-        from database.a2a_agent_db import PROTOCOL_JSONRPC
+        from contracts.constants.constants import PROTOCOL_JSONRPC
 
         service = A2AClientService()
 
@@ -341,7 +341,7 @@ class TestGetProtocolPath:
     def test_http_json_streaming(self):
         """Test HTTP+JSON streaming path."""
         from management.services.agent.a2a.catalog import A2AClientService
-        from database.a2a_agent_db import PROTOCOL_HTTP_JSON
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
 
@@ -351,7 +351,7 @@ class TestGetProtocolPath:
     def test_http_json_non_streaming(self):
         """Test HTTP+JSON non-streaming path."""
         from management.services.agent.a2a.catalog import A2AClientService
-        from database.a2a_agent_db import PROTOCOL_HTTP_JSON
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
 
@@ -361,7 +361,7 @@ class TestGetProtocolPath:
     def test_json_rpc_has_no_operation_suffix(self):
         """Test JSON-RPC Agent Card URLs do not receive a path suffix."""
         from management.services.agent.a2a.catalog import A2AClientService
-        from database.a2a_agent_db import PROTOCOL_JSONRPC
+        from contracts.constants.constants import PROTOCOL_JSONRPC
 
         service = A2AClientService()
 
@@ -587,6 +587,7 @@ class TestDiscoverFromUrl:
                     user_id="user-1"
                 )
 
+                MockClient.assert_called_once_with(timeout=10.0, max_retries=1, ssl_verify=True)
                 assert result == mock_result
                 mock_db.create_external_agent_from_url.assert_called_once()
                 # None means "preserve existing stored headers"; {} means "explicitly clear headers"
@@ -1059,6 +1060,7 @@ class TestDiscoverSingleFromNacos:
                     )
 
                     assert result is not None
+                    MockClient.assert_called_once_with(timeout=10.0, max_retries=1)
                     # Verify NacosClient was instantiated with correct params
                     mock_nacos_module.NacosClient.assert_called_once_with(
                         "http://nacos:8848", "testuser", "testpass"
@@ -1476,7 +1478,7 @@ class TestCallAgent:
             A2AClientService,
             AgentCallError
         )
-        from database.a2a_agent_db import PROTOCOL_JSONRPC
+        from contracts.constants.constants import PROTOCOL_JSONRPC
 
         service = A2AClientService()
 
@@ -1515,7 +1517,7 @@ class TestCallAgent:
     async def test_builds_http_json_payload(self):
         """Test builds HTTP+JSON payload for non-JSONRPC protocol."""
         from management.services.agent.a2a.catalog import A2AClientService
-        from database.a2a_agent_db import PROTOCOL_HTTP_JSON
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
 
@@ -1552,7 +1554,7 @@ class TestCallAgent:
             A2AClientService,
             AgentCallError
         )
-        from database.a2a_agent_db import PROTOCOL_JSONRPC
+        from contracts.constants.constants import PROTOCOL_JSONRPC
 
         service = A2AClientService()
 
@@ -1825,7 +1827,7 @@ class TestCallAgentStreaming:
     async def test_builds_json_rpc_payload_for_streaming(self):
         """Test builds JSON-RPC payload for streaming call."""
         from management.services.agent.a2a.catalog import A2AClientService
-        from database.a2a_agent_db import PROTOCOL_JSONRPC
+        from contracts.constants.constants import PROTOCOL_JSONRPC
 
         service = A2AClientService()
 
@@ -1864,7 +1866,7 @@ class TestCallAgentStreaming:
     async def test_builds_http_json_payload_for_streaming(self):
         """Test builds HTTP+JSON payload for streaming with HTTP+JSON protocol."""
         from management.services.agent.a2a.catalog import A2AClientService
-        from database.a2a_agent_db import PROTOCOL_HTTP_JSON
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
 
@@ -1981,7 +1983,7 @@ class TestCallAgentStreaming:
     async def test_builds_streaming_url_with_message_stream_path(self):
         """Test builds streaming URL with /message:stream path."""
         from management.services.agent.a2a.catalog import A2AClientService
-        from database.a2a_agent_db import PROTOCOL_HTTP_JSON
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
 
@@ -2390,7 +2392,7 @@ class TestCallAgentProtocolVariants:
     async def test_builds_http_json_non_streaming_url_without_duplicate(self):
         """Test HTTP+JSON non-streaming URL doesn't duplicate path."""
         from management.services.agent.a2a.catalog import A2AClientService
-        from database.a2a_agent_db import PROTOCOL_HTTP_JSON
+        from contracts.constants.constants import PROTOCOL_HTTP_JSON
 
         service = A2AClientService()
 
@@ -2476,3 +2478,16 @@ class TestCallAgentStreamingErrors:
                 error_msg = str(exc_info.value)
                 assert "Streaming call failed" in error_msg
                 assert "Stream connection failed" in error_msg
+
+
+@pytest.mark.asyncio
+async def test_url_discovery_timeout_propagates_without_database_write():
+    from management.services.agent.a2a.catalog import A2AClientService
+
+    with patch("management.services.agent.a2a.catalog.A2AHttpClient") as http, \
+            patch("management.services.agent.a2a.catalog.a2a_agent_db") as db:
+        http.return_value.__aenter__.return_value.get_json = AsyncMock(side_effect=asyncio.TimeoutError())
+        with pytest.raises(asyncio.TimeoutError):
+            await A2AClientService().discover_from_url("https://example.com/card", "tenant", "user")
+        http.assert_called_once_with(timeout=10.0, max_retries=1, ssl_verify=True)
+        db.create_external_agent_from_url.assert_not_called()

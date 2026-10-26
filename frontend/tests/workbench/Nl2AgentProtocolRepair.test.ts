@@ -37,7 +37,7 @@ it("accepts policy with existing prompt and name fields", () => {
     "display_name",
     "description",
     "enable_protocol_repair_retry",
-    "duty_prompt",
+    "prompt",
   ];
   expect(parseNl2AgentState(saved(fields))?.event).toBe(
     "agent_draft_fields_saved"

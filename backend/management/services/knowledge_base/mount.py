@@ -2,9 +2,9 @@
 """Request-local knowledge tool binding; never updates database records."""
 from copy import deepcopy
 
-from consts.const import ENABLE_AIDP_KNOWLEDGE
-from consts.exceptions import ValidationError
-from database.tool_db import query_all_tools
+from contracts.constants.environment import ENABLE_AIDP_KNOWLEDGE
+from contracts.errors.exceptions import ValidationError
+from management.db.tool.repository import query_all_tools
 
 MANAGED_CLASSES = {"KnowledgeBaseSearchTool", "AidpSearchTool"}
 

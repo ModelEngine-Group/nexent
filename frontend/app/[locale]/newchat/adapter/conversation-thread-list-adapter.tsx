@@ -31,6 +31,7 @@ import { toMessageCreatedAt } from "@/lib/messageDate";
 import { buildHistoricalMessageTiming } from "@/lib/messageTiming";
 import {
   appendClarificationPart,
+  parseClarificationResponse,
   isClarificationFallback,
 } from "@/lib/clarification";
 import { stripAnsiControlSequences } from "@/lib/ansi";
@@ -203,8 +204,12 @@ const toToolSearchItem = (value: unknown) => {
         sourceType:
           typeof item.source_type === "string" ? item.source_type : undefined,
         filename: filename || undefined,
-        publishedDate: typeof item.published_date === "string" ? item.published_date : undefined,
-        downloadUrl: typeof item.download_url === "string" ? item.download_url : undefined,
+        publishedDate:
+          typeof item.published_date === "string"
+            ? item.published_date
+            : undefined,
+        downloadUrl:
+          typeof item.download_url === "string" ? item.download_url : undefined,
         sourceFile: sourceFile || imageMetadata?.source_file || undefined,
         objectName:
           typeof item.object_name === "string" ? item.object_name : undefined,
@@ -212,7 +217,7 @@ const toToolSearchItem = (value: unknown) => {
         toolSign,
         isImage: Boolean(imageMetadata),
         retrievalHighlightTerms: getRetrievalHighlightTerms(item.score_details),
-                ...getSourceAttributes(item.search_type, item.score_details),
+        ...getSourceAttributes(item.search_type, item.score_details),
       }
     : null;
 };
@@ -380,6 +385,25 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
     let assistantIdx = 0;
 
     const historyMessages = collapseRefreshUserMessages(detail.message);
+    const clarificationResponses = new Map<
+      string,
+      NonNullable<ReturnType<typeof parseClarificationResponse>>
+    >(
+      historyMessages.flatMap((message) => {
+        const response =
+          message.role === "user"
+            ? parseClarificationResponse(message.clarification_response)
+            : null;
+        return response
+          ? [
+              [
+                `${response.source_message_id}:${response.unit_index}`,
+                response,
+              ] as const,
+            ]
+          : [];
+      })
+    );
 
     for (const [messageIndex, msg] of historyMessages.entries()) {
       // Resolve a stable messageId first — every per-message side store
@@ -1142,7 +1166,8 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
               content,
               part.content,
               part.unit_index,
-              msg.status === "completed"
+              msg.status === "completed",
+              clarificationResponses.get(`${msg.message_id}:${part.unit_index}`)
             );
             continue;
           }
@@ -1510,7 +1535,9 @@ const parseConversationListOffset = (after: string | undefined): number => {
     : 0;
 };
 
-const createHistoryProvider = (): FC<PropsWithChildren> => {
+const createHistoryProvider = (
+  loadDetail?: import("@/types/conversation").ConversationDetailReader
+): FC<PropsWithChildren> => {
   const Provider: FC<PropsWithChildren> = ({ children }) => {
     const aui = useAui();
 
@@ -1518,7 +1545,13 @@ const createHistoryProvider = (): FC<PropsWithChildren> => {
       () =>
         new RemoteConversationHistoryAdapter(
           () => aui.threadListItem.getState().remoteId,
-          () => aui.threadListItem.initialize()
+          () => aui.threadListItem.initialize(),
+          loadDetail
+            ? () => {
+                const id = aui.threadListItem.getState().remoteId;
+                return id ? loadDetail(id) : Promise.resolve(undefined);
+              }
+            : undefined
         ),
       [aui]
     );
@@ -1717,13 +1750,14 @@ export const createConversationThreadListAdapter = (
   pinStorageKey?: string,
   loadPins: () => Promise<WorkbenchPins> = () =>
     conversationService.getWorkbenchPins(),
-  onDeleted?: (conversationId: number) => Promise<void>
+  onDeleted?: (conversationId: number) => Promise<void>,
+  detailLoader?: import("@/types/conversation").ConversationDetailLoader
 ): RemoteThreadListAdapter => {
   const prefetchedConversationIds = new Set<string>();
   let loadedCount = INITIAL_CONVERSATION_PAGE_SIZE;
   let generation = 0;
   return {
-    unstable_Provider: createHistoryProvider(),
+    unstable_Provider: createHistoryProvider(detailLoader?.load),
 
     async list({ after } = {}): Promise<RemoteThreadListResponse> {
       const currentGeneration = after === undefined ? ++generation : generation;
@@ -1771,7 +1805,7 @@ export const createConversationThreadListAdapter = (
       let pinnedMetadata: RemoteThreadMetadata[] = [];
       if (after === undefined) {
         prefetchedConversationIds.clear();
-        if (conversationType === "workbench" && pinStorageKey) {
+        if (pinStorageKey) {
           const loadedIds = new Set(
             items.map((item) => String(item.conversation_id))
           );
@@ -1779,6 +1813,10 @@ export const createConversationThreadListAdapter = (
             const pins = await loadPins();
             if (currentGeneration !== generation) return { threads: [] };
             pinnedMetadata = pins.items
+              .filter(
+                (item) =>
+                  (item.conversation_type ?? "workbench") === conversationType
+              )
               .filter((item) => !loadedIds.has(String(item.conversation_id)))
               .map(toRemoteThreadMetadata);
             for (const item of pinnedMetadata)
@@ -1859,6 +1897,7 @@ export const createConversationThreadListAdapter = (
         );
       }
       await conversationService.rename(conversationId, newTitle);
+      detailLoader?.invalidate(String(conversationId));
     },
 
     // The backend currently has no archive/unarchive endpoints, so these are
@@ -1893,7 +1932,9 @@ export const createConversationThreadListAdapter = (
     },
 
     async fetch(threadId: string): Promise<RemoteThreadMetadata> {
-      const detail = await conversationService.getById(threadId);
+      const detail = await (detailLoader?.load ?? conversationService.getById)(
+        threadId
+      );
 
       return toRemoteThreadMetadata({
         conversation_id: Number(detail.conversation_id),

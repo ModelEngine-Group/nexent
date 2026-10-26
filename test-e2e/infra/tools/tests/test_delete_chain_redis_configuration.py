@@ -26,7 +26,7 @@ class RedisConfigurationTests(unittest.TestCase):
             'data_process': package,
             'data_process.app': SimpleNamespace(app=Mock()),
             'management.services.knowledge_base.task_state': SimpleNamespace(get_redis_service=supplier),
-            'database.knowledge_file_lifecycle_db': SimpleNamespace(get_file_record=lookup),
+            'management.db.knowledge_base.file_lifecycle': SimpleNamespace(get_file_record=lookup),
         }
         spec = importlib.util.spec_from_file_location(
             'data_process.delete_fence_fixture_utils', repo / 'backend/data_process/utils.py')
@@ -54,7 +54,16 @@ class RedisConfigurationTests(unittest.TestCase):
         request = SimpleNamespace(node=SimpleNamespace(
             iter_markers=lambda name: [SimpleNamespace(args=['API-AUTO-2B3A078E3CD1B151'])]))
         general, backend = 'redis://example.test/0', 'redis://example.test/1'
-        with patch.dict(sys.modules, {'services': SimpleNamespace(redis_service=service),
+        management = ModuleType('management')
+        services = ModuleType('management.services')
+        knowledge = ModuleType('management.services.knowledge_base')
+        management.services = services
+        services.knowledge_base = knowledge
+        knowledge.task_state = service
+        with patch.dict(sys.modules, {'management': management,
+                                     'management.services': services,
+                                     'management.services.knowledge_base': knowledge,
+                                     'management.services.knowledge_base.task_state': service,
                                      'consts': SimpleNamespace(const=canonical)}), \
                 patch.object(redis_target, 'deployed_redis_urls', return_value=(general, backend)):
             with pytest.MonkeyPatch.context() as monkeypatch:

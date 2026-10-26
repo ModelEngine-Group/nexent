@@ -1,10 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """
-Unit tests for backend.apps.agent_app module.
+Unit tests for management.api.agent.agent module.
 
 Tests all agent management API endpoints including runtime and configuration operations.
 """
+from contracts.authentication import AuthenticatedIdentity
 import atexit
 from http import HTTPStatus
 from unittest.mock import AsyncMock, patch, Mock, MagicMock, ANY
@@ -21,20 +22,12 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
-from consts.const import AGENT_PROMPTS_HIDDEN_FLAG, ASSET_OWNER_TENANT_ID
-from consts.error_code import ErrorCode
-from consts.exceptions import (
-    AppException,
-    ForbiddenError,
-    RuntimeCapacityExceededError,
-    RuntimeQueueTimeoutError,
-    TenantResourceLimitError,
-    UnauthorizedError,
-    ValidationError,
-    tenant_resource_limit_error_payload,
-)
-from consts.model import NL2AgentRunRequest
-from consts.exceptions import AgentDraftEditError
+from contracts.constants.constants import AGENT_PROMPTS_HIDDEN_FLAG
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, ForbiddenError, RuntimeCapacityExceededError, RuntimeQueueTimeoutError, TenantResourceLimitError, UnauthorizedError, ValidationError, tenant_resource_limit_error_payload
+from contracts.agent import NL2AgentRunRequest
+from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError
 
 # Filter out deprecation warnings from third-party libraries
@@ -69,15 +62,15 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
-patch('backend.database.client.minio_client', minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Apply patches before importing any app modules (similar to test_config_app.py)
 patches = [
     # Mock database sessions
-    patch('backend.database.client.get_db_session', return_value=Mock())
+    patch('management.db.client.get_db_session', return_value=Mock())
 ]
 
 for p in patches:
@@ -86,7 +79,7 @@ for p in patches:
 # Import target endpoints with all external dependencies patched
 
 # Mock external dependencies before importing the modules that use them
-# Stub agent model types used by consts.model and Workbench knowledge services.
+# Stub agent model types used by contracts.agent and Workbench knowledge services.
 agent_model_stub = types.ModuleType("agent_model")
 
 
@@ -125,25 +118,32 @@ monitoring_stub.MonitoringManager = MagicMock
 monitoring_stub.MonitoringConfig = MagicMock
 
 # Mock all external dependencies that agent_app.py imports
-# These must be in sys.modules BEFORE we import apps.agent_app
+# These must be in sys.modules BEFORE we import management.api.agent.agent
 sys.modules['nexent'] = types.ModuleType('nexent')
 sys.modules['nexent.core'] = types.ModuleType('nexent.core')
 sys.modules['nexent.core.agents'] = types.ModuleType('nexent.core.agents')
 sys.modules['nexent.core.agents.agent_model'] = agent_model_stub
 sys.modules['nexent.monitor'] = monitoring_stub
 sys.modules['nexent.monitor.monitoring'] = monitoring_stub
-sys.modules['database.client'] = MagicMock()
-sys.modules['database.agent_db'] = MagicMock()
-sys.modules['agents.create_agent_info'] = MagicMock()
+sys.modules['management.db.client'] = MagicMock()
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.agent.repository'] = MagicMock()
+sys.modules["management.services.agent.preparation.run"] = MagicMock()
+sys.modules["management.services.agent.preparation.tools"] = MagicMock()
+
 sys.modules['nexent.core.agents.run_agent'] = MagicMock()
-sys.modules['management.services.permission.identity.authentication_helpers'] = MagicMock()
+sys.modules['gateway.authentication.auth'] = MagicMock()
+sys.modules['gateway.authentication.auth'].get_current_user_id.return_value = ('test_user', 'test_tenant')
 sys.modules['management.services.configuration.tenant.settings'] = MagicMock()
 sys.modules['utils.thread_utils'] = MagicMock()
 sys.modules['infrastructure.observability.bootstrap'] = MagicMock()
 sys.modules['infrastructure.observability.bootstrap'].monitoring_manager = monitoring_manager_mock
 sys.modules['infrastructure.observability.bootstrap'].setup_fastapi_app = MagicMock(
     return_value=True)
-sys.modules['agents.agent_run_manager'] = MagicMock()
+sys.modules['management.services.agent.lifecycle'] = MagicMock()
 sys.modules['management.services.agent.service'] = MagicMock()
 sys.modules['management.services.skill.service'] = MagicMock()
 sys.modules['management.services.conversation.service'] = MagicMock()
@@ -152,14 +152,9 @@ sys.modules['management.services.agent.versions'] = MagicMock()
 sys.modules['management.services.agent.prompt_generation'] = MagicMock()
 
 # Now safe to import app modules after all mocks are set up
-from apps.agent_app import (
-    agent_config_router,
-    agent_runtime_router,
-    get_workbench_bootstrap_api,
-    nl2agent_run_api,
-    require_agent_create_permission,
-)
-from apps.app_factory import register_exception_handlers
+from management.api.agent.agent import agent_config_router, get_workbench_bootstrap_api
+from runtime.api.agent.execution import agent_runtime_router, nl2agent_run_api, require_agent_create_permission
+from management.utils.app_factory import register_exception_handlers
 
 
 
@@ -192,7 +187,7 @@ def mock_conversation_id():
 async def test_agent_run_api(mocker, mock_auth_header):
     """Test agent_run_api endpoint."""
     mock_run_agent_stream = mocker.patch(
-        "apps.agent_app.run_agent_stream", new_callable=AsyncMock)
+        "runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock)
 
     # Mock the streaming response
     async def mock_stream():
@@ -238,7 +233,7 @@ def test_ut_be_tlm_027_agent_run_overload_is_json_before_sse(
     expected_code,
     expected_retry_after,
 ):
-    mocker.patch("apps.agent_app.run_agent_stream", new_callable=AsyncMock, side_effect=error)
+    mocker.patch("runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock, side_effect=error)
 
     response = runtime_client.post(
         "/agent/run",
@@ -297,11 +292,11 @@ def test_agent_run_preserves_runtime_metadata_app_exceptions(
     client = TestClient(app, raise_server_exceptions=False)
 
     mocker.patch(
-        "apps.agent_app.verify_internal_runtime_jwt",
+        "runtime.api.agent.execution.verify_internal_runtime_jwt",
         return_value=("user-a", "tenant-a"),
     )
     mocker.patch(
-        "apps.agent_app.run_agent_stream",
+        "runtime.api.agent.execution.run_agent_stream",
         new_callable=AsyncMock,
         side_effect=AppException(
             error_code,
@@ -322,7 +317,7 @@ def test_agent_run_preserves_runtime_metadata_app_exceptions(
 
 @pytest.mark.asyncio
 async def test_workbench_bootstrap_is_unavailable_when_disabled(mocker):
-    mocker.patch("apps.agent_app.ENABLE_AGENT_WORKBENCH", False)
+    mocker.patch("management.api.agent.agent.ENABLE_AGENT_WORKBENCH", False)
 
     with pytest.raises(HTTPException) as exc_info:
         await get_workbench_bootstrap_api(authorization="Bearer test-token")
@@ -336,7 +331,7 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
     mocker, mock_auth_header
 ):
     mocker.patch(
-        "apps.agent_app.get_current_user_info",
+        "runtime.api.agent.execution.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
 
@@ -344,7 +339,7 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
         yield 'data: {"type":"final_answer","content":"done"}\n\n'
 
     create_stream = mocker.patch(
-        "apps.agent_app.create_nl2agent_stream",
+        "runtime.api.agent.execution.create_nl2agent_stream",
         new_callable=AsyncMock,
         return_value=mock_stream(),
     )
@@ -382,13 +377,13 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
 async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
     mocker, mock_auth_header
 ):
-    mocker.patch("apps.agent_app.ENABLE_AGENT_WORKBENCH", True)
+    mocker.patch("runtime.api.agent.execution.ENABLE_AGENT_WORKBENCH", True)
     mocker.patch(
-        "apps.agent_app.get_current_user_info",
+        "runtime.api.agent.execution.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
     mocker.patch(
-        "apps.agent_app.get_current_user_id",
+        "runtime.api.agent.execution.get_current_user_id",
         return_value=("user-a", "tenant-a"),
     )
 
@@ -396,15 +391,15 @@ async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
         yield 'data: {"type":"final_answer","content":"done"}\n\n'
 
     mocker.patch(
-        "apps.agent_app.create_nl2agent_stream",
+        "runtime.api.agent.execution.create_nl2agent_stream",
         new_callable=AsyncMock,
         return_value=mock_stream(),
     )
     prepare = mocker.patch(
-        "apps.agent_app.prepare_creation_history", return_value=(42, 1)
+        "runtime.api.agent.execution.prepare_creation_history", return_value=(42, 1)
     )
     persist = mocker.patch(
-        "apps.agent_app.persist_creation_stream",
+        "runtime.api.agent.execution.persist_creation_stream",
         side_effect=lambda stream, **kwargs: stream,
     )
     response = await nl2agent_run_api(
@@ -429,11 +424,11 @@ async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
 @pytest.mark.asyncio
 async def test_northbound_agent_run_api_uses_internal_identity(mocker):
     mocker.patch(
-        "apps.agent_app.verify_internal_runtime_jwt",
+        "runtime.api.agent.execution.verify_internal_runtime_jwt",
         return_value=("user-a", "tenant-a"),
     )
     run_agent = mocker.patch(
-        "apps.agent_app.run_agent_stream",
+        "runtime.api.agent.execution.run_agent_stream",
         new_callable=AsyncMock,
     )
 
@@ -461,7 +456,7 @@ async def test_northbound_agent_run_api_uses_internal_identity(mocker):
 @pytest.mark.asyncio
 async def test_northbound_agent_run_api_rejects_invalid_token(mocker):
     mocker.patch(
-        "apps.agent_app.verify_internal_runtime_jwt",
+        "runtime.api.agent.execution.verify_internal_runtime_jwt",
         side_effect=UnauthorizedError("Invalid internal runtime token"),
     )
 
@@ -487,11 +482,11 @@ def test_northbound_agent_run_api_maps_domain_errors(
     expected_status,
 ):
     mocker.patch(
-        "apps.agent_app.verify_internal_runtime_jwt",
+        "runtime.api.agent.execution.verify_internal_runtime_jwt",
         return_value=("user-a", "tenant-a"),
     )
     mocker.patch(
-        "apps.agent_app.run_agent_stream",
+        "runtime.api.agent.execution.run_agent_stream",
         new_callable=AsyncMock,
         side_effect=error,
     )
@@ -507,11 +502,11 @@ def test_northbound_agent_run_api_maps_domain_errors(
 
 def test_northbound_agent_run_api_maps_unexpected_error(mocker):
     mocker.patch(
-        "apps.agent_app.verify_internal_runtime_jwt",
+        "runtime.api.agent.execution.verify_internal_runtime_jwt",
         return_value=("user-a", "tenant-a"),
     )
     mocker.patch(
-        "apps.agent_app.run_agent_stream",
+        "runtime.api.agent.execution.run_agent_stream",
         new_callable=AsyncMock,
         side_effect=RuntimeError("unexpected"),
     )
@@ -529,11 +524,11 @@ def test_northbound_agent_run_api_maps_unexpected_error(mocker):
 @pytest.mark.asyncio
 async def test_northbound_agent_stop_api_uses_internal_identity(mocker):
     mocker.patch(
-        "apps.agent_app.verify_internal_runtime_jwt",
+        "runtime.api.agent.execution.verify_internal_runtime_jwt",
         return_value=("user-a", "tenant-a"),
     )
     stop_agent = mocker.patch(
-        "apps.agent_app.stop_agent_tasks",
+        "runtime.api.agent.execution.stop_agent_tasks",
         return_value={"message": "stopped"},
     )
 
@@ -549,7 +544,7 @@ async def test_northbound_agent_stop_api_uses_internal_identity(mocker):
 
 def test_northbound_agent_stop_api_rejects_invalid_token(mocker):
     mocker.patch(
-        "apps.agent_app.verify_internal_runtime_jwt",
+        "runtime.api.agent.execution.verify_internal_runtime_jwt",
         side_effect=UnauthorizedError("Invalid internal runtime token"),
     )
 
@@ -567,7 +562,7 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
     mocker, mock_auth_header
 ):
     mocker.patch(
-        "apps.agent_app.get_current_user_info",
+        "runtime.api.agent.execution.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
 
@@ -575,7 +570,7 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
         yield 'data: {"type":"final_answer","content":"done"}\n\n'
 
     create_stream = mocker.patch(
-        "apps.agent_app.create_nl2agent_stream",
+        "runtime.api.agent.execution.create_nl2agent_stream",
         new_callable=AsyncMock,
         return_value=mock_stream(),
     )
@@ -612,11 +607,11 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_maps_authentication_failure_to_401(mocker):
     mocker.patch(
-        "apps.agent_app.get_current_user_info",
+        "runtime.api.agent.execution.get_current_user_info",
         side_effect=UnauthorizedError("Invalid access token"),
     )
     create_stream = mocker.patch(
-        "apps.agent_app.create_nl2agent_stream",
+        "runtime.api.agent.execution.create_nl2agent_stream",
         new_callable=AsyncMock,
     )
 
@@ -638,11 +633,11 @@ async def test_nl2agent_run_api_maps_authentication_failure_to_401(mocker):
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_hides_internal_startup_errors(mocker):
     mocker.patch(
-        "apps.agent_app.get_current_user_info",
+        "runtime.api.agent.execution.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
     mocker.patch(
-        "apps.agent_app.create_nl2agent_stream",
+        "runtime.api.agent.execution.create_nl2agent_stream",
         new_callable=AsyncMock,
         side_effect=RuntimeError("private model configuration"),
     )
@@ -684,11 +679,11 @@ async def test_nl2agent_run_api_maps_draft_identity_errors(
     expected_code,
 ):
     mocker.patch(
-        "apps.agent_app.get_current_user_info",
+        "runtime.api.agent.execution.get_current_user_info",
         return_value=("user-a", "tenant-a", "en"),
     )
     mocker.patch(
-        "apps.agent_app.create_nl2agent_stream",
+        "runtime.api.agent.execution.create_nl2agent_stream",
         new_callable=AsyncMock,
         side_effect=error,
     )
@@ -725,7 +720,7 @@ async def test_nl2agent_run_api_requires_agent_id():
 async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):
     """Test agent_run_api error case in debug mode - should expose actual error."""
     mock_run_agent_stream = mocker.patch(
-        "apps.agent_app.run_agent_stream", new_callable=AsyncMock)
+        "runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock)
     mock_run_agent_stream.side_effect = Exception("Test error")
 
     response = runtime_client.post(
@@ -749,7 +744,7 @@ async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):
 async def test_agent_run_api_error_normal_mode(mocker, mock_auth_header):
     """Test agent_run_api error case in normal mode - should show generic error."""
     mock_run_agent_stream = mocker.patch(
-        "apps.agent_app.run_agent_stream", new_callable=AsyncMock)
+        "runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock)
     mock_run_agent_stream.side_effect = Exception("Test internal error")
 
     response = runtime_client.post(
@@ -775,8 +770,8 @@ async def test_agent_run_api_error_normal_mode(mocker, mock_auth_header):
 def test_agent_run_api_exception(mocker, mock_auth_header):
     """Test agent_run_api exception handling."""
     mock_run_agent_stream = mocker.patch(
-        "apps.agent_app.run_agent_stream", new_callable=AsyncMock)
-    mock_logger = mocker.patch("apps.agent_app.logger")
+        "runtime.api.agent.execution.run_agent_stream", new_callable=AsyncMock)
+    mock_logger = mocker.patch("runtime.api.agent.execution.logger")
     mock_run_agent_stream.side_effect = Exception("Test error")
 
     response = runtime_client.post(
@@ -799,15 +794,15 @@ def test_agent_run_api_exception(mocker, mock_auth_header):
 
 @pytest.mark.asyncio
 async def test_agent_run_api_maps_forbidden_conversation_to_403(mocker):
-    from consts.exceptions import ForbiddenError
-    from consts.model import AgentRequest
+    from contracts.errors.exceptions import ForbiddenError
+    from contracts.agent import AgentRequest
     from fastapi import HTTPException
     from starlette.requests import Request
 
-    from apps.agent_app import agent_run_api
+    from runtime.api.agent.execution import agent_run_api
 
     mock_run_agent_stream = mocker.patch(
-        "apps.agent_app.run_agent_stream",
+        "runtime.api.agent.execution.run_agent_stream",
         new_callable=AsyncMock,
     )
     mock_run_agent_stream.side_effect = ForbiddenError("Conversation is not accessible")
@@ -835,14 +830,14 @@ async def test_agent_run_api_maps_forbidden_conversation_to_403(mocker):
 
 @pytest.mark.asyncio
 async def test_agent_run_api_maps_scope_validation_to_422(mocker):
-    from consts.exceptions import ValidationError
-    from consts.model import AgentRequest
+    from contracts.errors.exceptions import ValidationError
+    from contracts.agent import AgentRequest
     from starlette.requests import Request
 
-    from apps.agent_app import agent_run_api
+    from runtime.api.agent.execution import agent_run_api
 
     mock_run_agent_stream = mocker.patch(
-        "apps.agent_app.run_agent_stream",
+        "runtime.api.agent.execution.run_agent_stream",
         new_callable=AsyncMock,
         side_effect=ValidationError("Selected knowledge bases are incompatible"),
     )
@@ -869,10 +864,10 @@ async def test_agent_run_api_maps_scope_validation_to_422(mocker):
 
 def test_agent_stop_api_success(mocker, mock_conversation_id):
     """Test agent_stop_api success case."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("runtime.api.agent.execution.get_current_user_id")
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
 
-    mock_stop_tasks = mocker.patch("apps.agent_app.stop_agent_tasks")
+    mock_stop_tasks = mocker.patch("runtime.api.agent.execution.stop_agent_tasks")
     mock_stop_tasks.return_value = {"status": "success"}
 
     response = runtime_client.get(
@@ -889,10 +884,10 @@ def test_agent_stop_api_success(mocker, mock_conversation_id):
 
 def test_agent_stop_api_exception(mocker, mock_conversation_id):
     """Test agent_stop_api exception handling - exception propagates without catch."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("runtime.api.agent.execution.get_current_user_id")
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
 
-    mock_stop_tasks = mocker.patch("apps.agent_app.stop_agent_tasks")
+    mock_stop_tasks = mocker.patch("runtime.api.agent.execution.stop_agent_tasks")
     mock_stop_tasks.side_effect = Exception("Stop error")
 
     # The endpoint doesn't catch exceptions, so they propagate
@@ -910,9 +905,9 @@ def test_agent_stop_api_exception(mocker, mock_conversation_id):
 
 def test_search_agent_info_api_success(mocker, mock_auth_header):
     """Test search_agent_info_api success case without tenant_id query parameter."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_agent_info = mocker.patch(
-        "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.get_agent_info_impl", new_callable=AsyncMock)
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
     mock_get_agent_info.return_value = {"agent_id": 123, "name": "Test Agent"}
 
@@ -933,9 +928,9 @@ def test_search_agent_info_api_success(mocker, mock_auth_header):
 
 def test_search_agent_info_api_with_explicit_tenant_id(mocker, mock_auth_header):
     """Test search_agent_info_api success case with explicit tenant_id query parameter."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_agent_info = mocker.patch(
-        "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.get_agent_info_impl", new_callable=AsyncMock)
     # Mock return values - auth tenant_id is different from explicit tenant_id
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
     mock_get_agent_info.return_value = {
@@ -962,9 +957,9 @@ def test_search_agent_info_api_with_explicit_tenant_id(mocker, mock_auth_header)
 
 def test_search_agent_info_api_exception(mocker, mock_auth_header):
     """Test search_agent_info_api exception handling."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_agent_info = mocker.patch(
-        "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.get_agent_info_impl", new_callable=AsyncMock)
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
     mock_get_agent_info.side_effect = Exception("Test error")
 
@@ -987,11 +982,11 @@ def test_search_agent_info_api_maps_system_agent_forbidden_without_disclosure(
 ):
     """UT-BE-SAL-010: ordinary detail returns a non-disclosing 403 response."""
     mocker.patch(
-        "apps.agent_app.get_current_user_id",
+        "management.api.agent.agent.get_current_user_id",
         return_value=("user_id", "auth_tenant_id"),
     )
     mock_get_agent_info = mocker.patch(
-        "apps.agent_app.get_agent_info_impl",
+        "management.api.agent.agent.get_agent_info_impl",
         new_callable=AsyncMock,
     )
     mock_get_agent_info.side_effect = ForbiddenError("Agent is not accessible")
@@ -1011,9 +1006,9 @@ def test_search_agent_info_api_maps_system_agent_forbidden_without_disclosure(
 def test_search_agent_info_api_exception_with_explicit_tenant_id(mocker, mock_auth_header):
     """Test search_agent_info_api exception handling with explicit tenant_id query parameter and default version_no=0."""
     # Setup mocks using pytest-mock
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_agent_info = mocker.patch(
-        "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.get_agent_info_impl", new_callable=AsyncMock)
     # Mock return values and exception
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
     mock_get_agent_info.side_effect = Exception(
@@ -1039,9 +1034,9 @@ def test_search_agent_info_api_exception_with_explicit_tenant_id(mocker, mock_au
 
 def test_search_agent_info_api_with_version_no(mocker, mock_auth_header):
     """Test search_agent_info_api success case with explicit version_no parameter."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_agent_info = mocker.patch(
-        "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.get_agent_info_impl", new_callable=AsyncMock)
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
     mock_get_agent_info.return_value = {
         "agent_id": 123, "name": "Test Agent", "version_no": 2}
@@ -1059,16 +1054,14 @@ def test_search_agent_info_api_with_version_no(mocker, mock_auth_header):
 
 def test_search_agent_info_api_masks_asset_owner_prompts(mocker, mock_auth_header):
     """Non-asset-owner callers see masked prompts for asset-owner-scoped agents."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_agent_info = mocker.patch(
-        "apps.agent_app.get_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.get_agent_info_impl", new_callable=AsyncMock)
     mock_get_user_id.return_value = ("user_id", "regular_tenant")
     mock_get_agent_info.return_value = {
         "agent_id": 1,
         "tenant_id": ASSET_OWNER_TENANT_ID,
-        "duty_prompt": "secret duty",
-        "constraint_prompt": "secret constraint",
-        "few_shots_prompt": "secret few",
+        "prompt": "Responsibilities and secret constraints/examples",
     }
 
     response = config_client.post(
@@ -1079,9 +1072,9 @@ def test_search_agent_info_api_masks_asset_owner_prompts(mocker, mock_auth_heade
 
     assert response.status_code == 200
     body = response.json()
-    assert body["duty_prompt"] is None
-    assert body["constraint_prompt"] is None
-    assert body["few_shots_prompt"] is None
+    assert body["prompt"] is None
+    assert "constraint_prompt" not in body
+    assert "few_shots_prompt" not in body
     assert body[AGENT_PROMPTS_HIDDEN_FLAG] is True
 
 
@@ -1091,9 +1084,9 @@ def test_search_agent_info_api_masks_asset_owner_prompts(mocker, mock_auth_heade
 
 def test_get_agent_by_name_api_success(mocker, mock_auth_header):
     """Test get_agent_by_name_api success case."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_agent_by_name = mocker.patch(
-        "apps.agent_app.get_agent_by_name_impl")
+        "management.api.agent.agent.get_agent_by_name_impl")
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
     mock_get_agent_by_name.return_value = {"agent_id": 123, "version_no": 1}
 
@@ -1112,9 +1105,9 @@ def test_get_agent_by_name_api_success(mocker, mock_auth_header):
 
 def test_get_agent_by_name_api_with_explicit_tenant_id(mocker, mock_auth_header):
     """Test get_agent_by_name_api with explicit tenant_id."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_agent_by_name = mocker.patch(
-        "apps.agent_app.get_agent_by_name_impl")
+        "management.api.agent.agent.get_agent_by_name_impl")
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
     mock_get_agent_by_name.return_value = {"agent_id": 123, "version_no": 1}
 
@@ -1132,9 +1125,9 @@ def test_get_agent_by_name_api_with_explicit_tenant_id(mocker, mock_auth_header)
 
 def test_get_agent_by_name_api_exception(mocker, mock_auth_header):
     """Test get_agent_by_name_api exception handling."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mocker.patch(
-        "apps.agent_app.get_agent_by_name_impl",
+        "management.api.agent.agent.get_agent_by_name_impl",
         side_effect=RuntimeError("database unavailable"),
     )
     mock_get_user_id.return_value = ("user_id", "auth_tenant_id")
@@ -1166,7 +1159,7 @@ def test_legacy_creating_sub_agent_endpoint_is_not_exposed():
 def test_update_agent_info_api_success(mocker, mock_auth_header):
     """Test update_agent_info_api success case."""
     mock_update_agent = mocker.patch(
-        "apps.agent_app.update_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.update_agent_info_impl", new_callable=AsyncMock)
     mock_update_agent.return_value = None
 
     response = config_client.post(
@@ -1184,7 +1177,7 @@ def test_update_agent_info_api_success(mocker, mock_auth_header):
 def test_update_agent_info_api_with_result(mocker, mock_auth_header):
     """Test update_agent_info_api returns result when provided."""
     mock_update_agent = mocker.patch(
-        "apps.agent_app.update_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.update_agent_info_impl", new_callable=AsyncMock)
     mock_update_agent.return_value = {"updated": True, "agent_id": 123}
 
     response = config_client.post(
@@ -1200,7 +1193,7 @@ def test_update_agent_info_api_with_result(mocker, mock_auth_header):
 def test_update_agent_info_api_exception(mocker, mock_auth_header):
     """Test update_agent_info_api exception handling."""
     mock_update_agent = mocker.patch(
-        "apps.agent_app.update_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.update_agent_info_impl", new_callable=AsyncMock)
     mock_update_agent.side_effect = Exception("Test error")
 
     response = config_client.post(
@@ -1223,7 +1216,7 @@ def test_update_agent_info_api_returns_agent_quota_error(mocker, mock_auth_heade
         current_count=1000,
     )
     mock_update_agent = mocker.patch(
-        "apps.agent_app.update_agent_info_impl", new_callable=AsyncMock,
+        "management.api.agent.agent.update_agent_info_impl", new_callable=AsyncMock,
         side_effect=limit_error,
     )
 
@@ -1244,9 +1237,9 @@ def test_update_agent_info_api_returns_agent_quota_error(mocker, mock_auth_heade
 
 def test_delete_agent_api_success(mocker, mock_auth_header):
     """Test delete_agent_api success case without tenant_id query parameter."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_delete_agent = mocker.patch(
-        "apps.agent_app.delete_agent_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.delete_agent_impl", new_callable=AsyncMock)
     # Mock return values
     mock_get_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_delete_agent.return_value = None
@@ -1267,9 +1260,9 @@ def test_delete_agent_api_success(mocker, mock_auth_header):
 
 def test_delete_agent_api_with_explicit_tenant_id(mocker, mock_auth_header):
     """Test delete_agent_api success case with explicit tenant_id query parameter."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_delete_agent = mocker.patch(
-        "apps.agent_app.delete_agent_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.delete_agent_impl", new_callable=AsyncMock)
     # Mock return values - auth tenant_id is different from explicit tenant_id
     mock_get_user_info.return_value = ("test_user", "auth_tenant", "en")
     mock_delete_agent.return_value = None
@@ -1290,10 +1283,10 @@ def test_delete_agent_api_with_explicit_tenant_id(mocker, mock_auth_header):
 
 def test_delete_agent_api_exception(mocker, mock_auth_header):
     """Test delete_agent_api exception handling."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_delete_agent = mocker.patch(
-        "apps.agent_app.delete_agent_impl", new_callable=AsyncMock)
-    mock_logger = mocker.patch("apps.agent_app.logger")
+        "management.api.agent.agent.delete_agent_impl", new_callable=AsyncMock)
+    mock_logger = mocker.patch("management.api.agent.agent.logger")
     mock_get_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_delete_agent.side_effect = Exception("Test error")
 
@@ -1312,10 +1305,10 @@ def test_delete_agent_api_exception(mocker, mock_auth_header):
 def test_delete_agent_api_exception_with_explicit_tenant_id(mocker, mock_auth_header):
     """Test delete_agent_api exception handling with explicit tenant_id query parameter."""
     # Setup mocks using pytest-mock
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_delete_agent = mocker.patch(
-        "apps.agent_app.delete_agent_impl", new_callable=AsyncMock)
-    mock_logger = mocker.patch("apps.agent_app.logger")
+        "management.api.agent.agent.delete_agent_impl", new_callable=AsyncMock)
+    mock_logger = mocker.patch("management.api.agent.agent.logger")
     # Mock return values and exception
     mock_get_user_info.return_value = ("test_user", "auth_tenant", "en")
     mock_delete_agent.side_effect = Exception(
@@ -1347,7 +1340,7 @@ def test_delete_agent_api_exception_with_explicit_tenant_id(mocker, mock_auth_he
 def test_export_agent_api_success(mocker, mock_auth_header):
     """Test export_agent_api success case returning JSON."""
     mock_export_agent = mocker.patch(
-        "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.export_agent_with_skills_impl", new_callable=AsyncMock)
     mock_export_agent.return_value = {"agent_id": 123, "name": "Test Agent"}
 
     response = config_client.post(
@@ -1358,7 +1351,7 @@ def test_export_agent_api_success(mocker, mock_auth_header):
 
     assert response.status_code == 200
     mock_export_agent.assert_called_once_with(
-        123, mock_auth_header["Authorization"])
+        123, AuthenticatedIdentity("test_user", "test_tenant"))
     assert response.json()["code"] == 0
     assert response.json()["message"] == "success"
 
@@ -1366,7 +1359,7 @@ def test_export_agent_api_success(mocker, mock_auth_header):
 def test_export_agent_api_success_with_zip(mocker, mock_auth_header):
     """Test export_agent_api success case returning ZIP file."""
     mock_export_agent = mocker.patch(
-        "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.export_agent_with_skills_impl", new_callable=AsyncMock)
     mock_export_agent.return_value = {
         "_zip": True,
         "data": b"PK\x03\x04test zip content",
@@ -1388,7 +1381,7 @@ def test_export_agent_api_success_with_zip(mocker, mock_auth_header):
 def test_export_agent_api_success_with_zip_default_filename(mocker, mock_auth_header):
     """Test export_agent_api ZIP response with default filename."""
     mock_export_agent = mocker.patch(
-        "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.export_agent_with_skills_impl", new_callable=AsyncMock)
     mock_export_agent.return_value = {
         "_zip": True,
         "data": b"PK\x03\x04minimal zip",
@@ -1410,7 +1403,7 @@ def test_export_agent_api_success_with_zip_non_ascii_filename(mocker, mock_auth_
     from urllib.parse import quote
 
     mock_export_agent = mocker.patch(
-        "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.export_agent_with_skills_impl", new_callable=AsyncMock)
     mock_export_agent.return_value = {
         "_zip": True,
         "data": b"PK\x03\x04zip content",
@@ -1432,7 +1425,7 @@ def test_export_agent_api_success_with_zip_non_ascii_filename(mocker, mock_auth_
 def test_export_agent_api_exception(mocker, mock_auth_header):
     """Test export_agent_api exception handling."""
     mock_export_agent = mocker.patch(
-        "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.export_agent_with_skills_impl", new_callable=AsyncMock)
     mock_export_agent.side_effect = Exception("Test error")
 
     response = config_client.post(
@@ -1451,7 +1444,7 @@ def test_export_agent_api_exception(mocker, mock_auth_header):
 
 def test_check_skills_api_returns_conflicts(mocker, mock_auth_header):
     """Skill conflict precheck returns service results without importing data."""
-    mock_check = mocker.patch("apps.agent_app.check_skill_conflicts_impl")
+    mock_check = mocker.patch("management.api.agent.agent.check_skill_conflicts_impl")
     mock_check.return_value = [{
         "skill_name": "SkillA",
         "suggested_new_name": "SkillA 副本",
@@ -1472,14 +1465,14 @@ def test_check_skills_api_returns_conflicts(mocker, mock_auth_header):
     }
     mock_check.assert_called_once_with(
         ["SkillA", "SkillB"],
-        mock_auth_header["Authorization"],
+        AuthenticatedIdentity("test_user", "test_tenant"),
     )
 
 
 def test_check_skills_api_error(mocker, mock_auth_header):
     """Skill conflict precheck maps unexpected failures to a server error."""
     mocker.patch(
-        "apps.agent_app.check_skill_conflicts_impl",
+        "management.api.agent.agent.check_skill_conflicts_impl",
         side_effect=Exception("database unavailable"),
     )
 
@@ -1496,7 +1489,7 @@ def test_check_skills_api_error(mocker, mock_auth_header):
 def test_import_agent_api_success_without_skills(mocker, mock_auth_header):
     """Test import_agent_api success case without skills."""
     mock_import_agent = mocker.patch(
-        "apps.agent_app.import_agent_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.import_agent_impl", new_callable=AsyncMock)
     mock_import_agent.return_value = {123: 456}
 
     response = config_client.post(
@@ -1541,7 +1534,7 @@ def test_import_agent_api_returns_agent_quota_error(mocker, mock_auth_header):
         current_count=1000,
     )
     mock_import_agent = mocker.patch(
-        "apps.agent_app.import_agent_impl",
+        "management.api.agent.agent.import_agent_impl",
         new_callable=AsyncMock,
         side_effect=limit_error,
     )
@@ -1578,7 +1571,7 @@ def test_import_agent_api_returns_agent_quota_error(mocker, mock_auth_header):
 def test_import_agent_api_success_with_skills(mocker, mock_auth_header):
     """Test import_agent_api success case with skills."""
     mock_import_with_skills = mocker.patch(
-        "apps.agent_app.import_agent_with_skills_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.import_agent_with_skills_impl", new_callable=AsyncMock)
     mock_import_with_skills.return_value = {123: 456}
 
     response = config_client.post(
@@ -1621,9 +1614,9 @@ def test_import_agent_api_success_with_skills(mocker, mock_auth_header):
 
 def test_import_agent_api_duplicate_error(mocker, mock_auth_header):
     """Test import_agent_api with SkillDuplicateError."""
-    from consts.exceptions import SkillDuplicateError
+    from contracts.errors.exceptions import SkillDuplicateError
     mock_import_agent = mocker.patch(
-        "apps.agent_app.import_agent_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.import_agent_impl", new_callable=AsyncMock)
     mock_import_agent.side_effect = SkillDuplicateError(
         duplicate_names=["skill1", "skill2"],
         skill_conflicts=[{
@@ -1665,7 +1658,7 @@ def test_import_agent_api_duplicate_error(mocker, mock_auth_header):
 def test_import_agent_api_exception(mocker, mock_auth_header):
     """Test import_agent_api exception handling."""
     mock_import_agent = mocker.patch(
-        "apps.agent_app.import_agent_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.import_agent_impl", new_callable=AsyncMock)
     mock_import_agent.side_effect = Exception("Test error")
 
     response = config_client.post(
@@ -1704,9 +1697,9 @@ def test_list_agent_page_api_forwards_filters_and_returns_paged_agents(
     mocker, mock_auth_header
 ):
     """The paged list endpoint delegates filters after resolving the caller."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_list_agent_page = mocker.patch(
-        "apps.agent_app.list_agent_page_impl", new_callable=AsyncMock, create=True
+        "management.api.agent.agent.list_agent_page_impl", new_callable=AsyncMock, create=True
     )
     mock_get_user_info.return_value = ("test_user", "auth_tenant", "en")
     mock_list_agent_page.return_value = {
@@ -1756,11 +1749,11 @@ def test_list_agent_page_api_forwards_filters_and_returns_paged_agents(
 def test_list_agent_page_api_forwards_publish_time_sort(mocker, mock_auth_header):
     """The latest-published-first selector is forwarded to the service."""
     mocker.patch(
-        "apps.agent_app.get_current_user_info",
+        "management.api.agent.agent.get_current_user_info",
         return_value=("test_user", "auth_tenant", "en"),
     )
     mock_list = mocker.patch(
-        "apps.agent_app.list_agent_page_impl", new_callable=AsyncMock
+        "management.api.agent.agent.list_agent_page_impl", new_callable=AsyncMock
     )
     mock_list.return_value = {
         "items": [],
@@ -1781,11 +1774,11 @@ def test_list_agent_page_api_forwards_creator_and_structured_tag_filters(
     mocker, mock_auth_header
 ):
     mocker.patch(
-        "apps.agent_app.get_current_user_info",
+        "management.api.agent.agent.get_current_user_info",
         return_value=("test_user", "auth_tenant", "en"),
     )
     mock_list = mocker.patch(
-        "apps.agent_app.list_agent_page_impl", new_callable=AsyncMock
+        "management.api.agent.agent.list_agent_page_impl", new_callable=AsyncMock
     )
     mock_list.return_value = {"items": [], "pagination": {"total": 0}}
 
@@ -1812,12 +1805,12 @@ def test_list_agent_page_api_forwards_creator_and_asset_owner_tenant(
     mocker, mock_auth_header
 ):
     mocker.patch(
-        "apps.agent_app.get_current_user_info",
+        "management.api.agent.agent.get_current_user_info",
         return_value=("test_user", "auth_tenant", "en"),
     )
-    mocker.patch("apps.agent_app.ASSET_OWNER_TENANT_ID", "asset_owner")
+    mocker.patch("management.api.agent.agent.ASSET_OWNER_TENANT_ID", "asset_owner")
     mock_list = mocker.patch(
-        "apps.agent_app.list_agent_page_impl", new_callable=AsyncMock
+        "management.api.agent.agent.list_agent_page_impl", new_callable=AsyncMock
     )
     mock_list.return_value = {"items": [], "pagination": {"total": 0}}
 
@@ -1837,11 +1830,11 @@ def test_list_agent_page_api_forwards_creator_and_asset_owner_tenant(
 
 def test_list_agent_page_api_rejects_invalid_tag_predicates(mocker, mock_auth_header):
     mocker.patch(
-        "apps.agent_app.get_current_user_info",
+        "management.api.agent.agent.get_current_user_info",
         return_value=("test_user", "auth_tenant", "en"),
     )
     mock_list = mocker.patch(
-        "apps.agent_app.list_agent_page_impl", new_callable=AsyncMock
+        "management.api.agent.agent.list_agent_page_impl", new_callable=AsyncMock
     )
 
     response = config_client.get(
@@ -1857,15 +1850,15 @@ def test_list_agent_page_api_rejects_invalid_tag_predicates(mocker, mock_auth_he
 
 def test_list_agent_page_api_hides_unexpected_error(mocker, mock_auth_header):
     mocker.patch(
-        "apps.agent_app.get_current_user_info",
+        "management.api.agent.agent.get_current_user_info",
         return_value=("test_user", "auth_tenant", "en"),
     )
     mock_list = mocker.patch(
-        "apps.agent_app.list_agent_page_impl",
+        "management.api.agent.agent.list_agent_page_impl",
         new_callable=AsyncMock,
         side_effect=RuntimeError("lookup failed"),
     )
-    log_error = mocker.patch("apps.agent_app.logger.error")
+    log_error = mocker.patch("management.api.agent.agent.logger.error")
 
     response = config_client.get("/agent/list/page", headers=mock_auth_header)
 
@@ -1877,9 +1870,9 @@ def test_list_agent_page_api_hides_unexpected_error(mocker, mock_auth_header):
 
 def test_list_all_agent_info_api_success(mocker, mock_auth_header):
     """Test list_all_agent_info_api success case without tenant_id."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_list_all_agent = mocker.patch(
-        "apps.agent_app.list_all_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.list_all_agent_info_impl", new_callable=AsyncMock)
     # Mock return values
     mock_get_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_list_all_agent.return_value = [
@@ -1903,9 +1896,9 @@ def test_list_all_agent_info_api_success(mocker, mock_auth_header):
 
 def test_list_all_agent_info_api_with_explicit_tenant_id(mocker, mock_auth_header):
     """Test list_all_agent_info_api success case with explicit tenant_id."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_list_all_agent = mocker.patch(
-        "apps.agent_app.list_all_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.list_all_agent_info_impl", new_callable=AsyncMock)
     # Mock return values - auth tenant_id is different from explicit tenant_id
     mock_get_user_info.return_value = ("test_user", "auth_tenant", "en")
     mock_list_all_agent.return_value = [{"agent_id": 3, "name": "Agent 3"}]
@@ -1925,9 +1918,9 @@ def test_list_all_agent_info_api_with_explicit_tenant_id(mocker, mock_auth_heade
 
 def test_list_all_agent_info_api_asset_owner_tenant_single_query(mocker, mock_auth_header):
     """Asset-owner tenant callers only query their own tenant (no merge)."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_list_all_agent = mocker.patch(
-        "apps.agent_app.list_all_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.list_all_agent_info_impl", new_callable=AsyncMock)
     mock_get_user_info.return_value = ("ao_user", ASSET_OWNER_TENANT_ID, "en")
     mock_list_all_agent.return_value = [{"agent_id": 1, "name": "AO Agent"}]
 
@@ -1942,9 +1935,9 @@ def test_list_all_agent_info_api_asset_owner_tenant_single_query(mocker, mock_au
 
 def test_list_all_agent_info_api_exception(mocker, mock_auth_header):
     """Test list_all_agent_info_api exception handling."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_list_all_agent = mocker.patch(
-        "apps.agent_app.list_all_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.list_all_agent_info_impl", new_callable=AsyncMock)
     # Mock return values and exception
     mock_get_user_info.return_value = ("test_user", "test_tenant", "en")
     mock_list_all_agent.side_effect = Exception("Test error")
@@ -1961,9 +1954,9 @@ def test_list_all_agent_info_api_exception(mocker, mock_auth_header):
 def test_list_all_agent_info_api_exception_with_explicit_tenant_id(mocker, mock_auth_header):
     """Test list_all_agent_info_api exception handling with explicit tenant_id query parameter."""
     # Setup mocks using pytest-mock
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_list_all_agent = mocker.patch(
-        "apps.agent_app.list_all_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.list_all_agent_info_impl", new_callable=AsyncMock)
     # Mock return values and exception
     mock_get_user_info.return_value = ("test_user", "auth_tenant", "en")
     mock_list_all_agent.side_effect = Exception(
@@ -1992,7 +1985,7 @@ async def test_export_agent_api_detailed(mocker, mock_auth_header):
     """Detailed testing of export_agent_api function, including ConversationResponse construction"""
     # Setup mocks using pytest-mock
     mock_export_agent = mocker.patch(
-        "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.export_agent_with_skills_impl", new_callable=AsyncMock)
 
     # Setup mocks - return complex JSON data
     agent_data = {
@@ -2015,7 +2008,7 @@ async def test_export_agent_api_detailed(mocker, mock_auth_header):
     # Assertions
     assert response.status_code == 200
     mock_export_agent.assert_called_once_with(
-        456, mock_auth_header["Authorization"])
+        456, AuthenticatedIdentity("test_user", "test_tenant"))
 
     # Verify correct construction of ConversationResponse
     response_data = response.json()
@@ -2029,7 +2022,7 @@ async def test_export_agent_api_empty_response(mocker, mock_auth_header):
     """Test export_agent_api handling empty response"""
     # Setup mocks using pytest-mock
     mock_export_agent = mocker.patch(
-        "apps.agent_app.export_agent_with_skills_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.export_agent_with_skills_impl", new_callable=AsyncMock)
 
     # Setup mock to return empty data
     mock_export_agent.return_value = {}
@@ -2044,7 +2037,7 @@ async def test_export_agent_api_empty_response(mocker, mock_auth_header):
     # Verify
     assert response.status_code == 200
     mock_export_agent.assert_called_once_with(
-        789, mock_auth_header["Authorization"])
+        789, AuthenticatedIdentity("test_user", "test_tenant"))
 
     # Verify empty data can also be correctly wrapped in ConversationResponse
     response_data = response.json()
@@ -2061,7 +2054,7 @@ def _alias_services_for_tests():
     import sys
     try:
         import backend.services as b_services
-        import management.services.agent.service as b_agent_service
+        from management.services.agent import service as b_agent_service
         # Map both the package and submodule for compatibility
         sys.modules['services'] = b_services
         sys.modules['management.services.agent.service'] = b_agent_service
@@ -2072,8 +2065,8 @@ def _alias_services_for_tests():
 
 def test_get_agent_call_relationship_api_success(mocker, mock_auth_header):
     """Test get_agent_call_relationship_api success case."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_impl = mocker.patch("apps.agent_app.get_agent_call_relationship_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_impl = mocker.patch("management.api.agent.agent.get_agent_call_relationship_impl")
     mock_get_user_id.return_value = ("user_id_x", "tenant_abc")
     mock_impl.return_value = {
         "agent_id": 1,
@@ -2092,8 +2085,8 @@ def test_get_agent_call_relationship_api_success(mocker, mock_auth_header):
 
 def test_get_agent_call_relationship_api_exception(mocker, mock_auth_header):
     """Test get_agent_call_relationship_api exception handling."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_impl = mocker.patch("apps.agent_app.get_agent_call_relationship_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_impl = mocker.patch("management.api.agent.agent.get_agent_call_relationship_impl")
     mock_get_user_id.return_value = ("user_id_x", "tenant_abc")
     mock_impl.side_effect = Exception("boom")
 
@@ -2111,7 +2104,7 @@ def test_get_agent_call_relationship_api_exception(mocker, mock_auth_header):
 def test_check_agent_name_batch_api_success(mocker, mock_auth_header):
     """Test check_agent_name_batch_api success case."""
     mock_impl = mocker.patch(
-        "apps.agent_app.check_agent_name_conflict_batch_impl",
+        "management.api.agent.agent.check_agent_name_conflict_batch_impl",
         new_callable=AsyncMock,
     )
     mock_impl.return_value = [{"name_conflict": True}]
@@ -2134,7 +2127,7 @@ def test_check_agent_name_batch_api_success(mocker, mock_auth_header):
 def test_check_agent_name_batch_api_bad_request(mocker, mock_auth_header):
     """Test check_agent_name_batch_api with ValueError."""
     mock_impl = mocker.patch(
-        "apps.agent_app.check_agent_name_conflict_batch_impl",
+        "management.api.agent.agent.check_agent_name_conflict_batch_impl",
         new_callable=AsyncMock,
     )
     mock_impl.side_effect = ValueError("bad payload")
@@ -2152,7 +2145,7 @@ def test_check_agent_name_batch_api_bad_request(mocker, mock_auth_header):
 def test_check_agent_name_batch_api_error(mocker, mock_auth_header):
     """Test check_agent_name_batch_api with general exception."""
     mock_impl = mocker.patch(
-        "apps.agent_app.check_agent_name_conflict_batch_impl",
+        "management.api.agent.agent.check_agent_name_conflict_batch_impl",
         new_callable=AsyncMock,
     )
     mock_impl.side_effect = Exception("unexpected")
@@ -2174,7 +2167,7 @@ def test_check_agent_name_batch_api_error(mocker, mock_auth_header):
 def test_regenerate_agent_name_batch_api_success(mocker, mock_auth_header):
     """Test regenerate_agent_name_batch_api success case."""
     mock_impl = mocker.patch(
-        "apps.agent_app.regenerate_agent_name_batch_impl",
+        "management.api.agent.agent.regenerate_agent_name_batch_impl",
         new_callable=AsyncMock,
     )
     mock_impl.return_value = [
@@ -2199,7 +2192,7 @@ def test_regenerate_agent_name_batch_api_success(mocker, mock_auth_header):
 def test_regenerate_agent_name_batch_api_bad_request(mocker, mock_auth_header):
     """Test regenerate_agent_name_batch_api with ValueError."""
     mock_impl = mocker.patch(
-        "apps.agent_app.regenerate_agent_name_batch_impl",
+        "management.api.agent.agent.regenerate_agent_name_batch_impl",
         new_callable=AsyncMock,
     )
     mock_impl.side_effect = ValueError("invalid")
@@ -2217,7 +2210,7 @@ def test_regenerate_agent_name_batch_api_bad_request(mocker, mock_auth_header):
 def test_regenerate_agent_name_batch_api_error(mocker, mock_auth_header):
     """Test regenerate_agent_name_batch_api with general exception."""
     mock_impl = mocker.patch(
-        "apps.agent_app.regenerate_agent_name_batch_impl",
+        "management.api.agent.agent.regenerate_agent_name_batch_impl",
         new_callable=AsyncMock,
     )
     mock_impl.side_effect = Exception("boom")
@@ -2238,9 +2231,9 @@ def test_regenerate_agent_name_batch_api_error(mocker, mock_auth_header):
 
 def test_clear_agent_new_mark_api_success(mocker, mock_auth_header):
     """Test clear_agent_new_mark_api success case."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_clear_agent_new_mark = mocker.patch(
-        "apps.agent_app.clear_agent_new_mark_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.clear_agent_new_mark_impl", new_callable=AsyncMock)
 
     mock_get_user_info.return_value = (
         "test_user_id", "test_tenant_id", "extra_info")
@@ -2261,10 +2254,10 @@ def test_clear_agent_new_mark_api_success(mocker, mock_auth_header):
 
 def test_clear_agent_new_mark_api_exception(mocker, mock_auth_header):
     """Test clear_agent_new_mark_api exception handling."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_clear_agent_new_mark = mocker.patch(
-        "apps.agent_app.clear_agent_new_mark_impl", new_callable=AsyncMock)
-    mock_logger = mocker.patch("apps.agent_app.logger")
+        "management.api.agent.agent.clear_agent_new_mark_impl", new_callable=AsyncMock)
+    mock_logger = mocker.patch("management.api.agent.agent.logger")
 
     mock_get_user_info.return_value = (
         "test_user_id", "test_tenant_id", "extra_info")
@@ -2287,8 +2280,8 @@ def test_clear_agent_new_mark_api_exception(mocker, mock_auth_header):
 
 def test_publish_version_api_success(mocker, mock_auth_header):
     """Test publish_version_api success case."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_publish_version = mocker.patch("apps.agent_app.publish_version_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_publish_version = mocker.patch("management.api.agent.agent.publish_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_publish_version.return_value = {
@@ -2319,8 +2312,8 @@ def test_publish_version_api_success(mocker, mock_auth_header):
 
 def test_publish_version_api_ignores_publish_as_a2a_request_field(mocker, mock_auth_header):
     """Test publish_version_api does not accept publish_as_a2a as an API option."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_publish_version = mocker.patch("apps.agent_app.publish_version_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_publish_version = mocker.patch("management.api.agent.agent.publish_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_publish_version.return_value = {"success": True, "version_no": 1}
@@ -2342,8 +2335,8 @@ def test_publish_version_api_ignores_publish_as_a2a_request_field(mocker, mock_a
 
 def test_publish_version_api_bad_request(mocker, mock_auth_header):
     """Test publish_version_api with ValueError."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_publish_version = mocker.patch("apps.agent_app.publish_version_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_publish_version = mocker.patch("management.api.agent.agent.publish_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_publish_version.side_effect = ValueError("Agent not found")
@@ -2360,8 +2353,8 @@ def test_publish_version_api_bad_request(mocker, mock_auth_header):
 
 def test_publish_version_api_exception(mocker, mock_auth_header):
     """Test publish_version_api with general exception."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_publish_version = mocker.patch("apps.agent_app.publish_version_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_publish_version = mocker.patch("management.api.agent.agent.publish_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_publish_version.side_effect = Exception("Database error")
@@ -2378,9 +2371,9 @@ def test_publish_version_api_exception(mocker, mock_auth_header):
 
 def test_compare_versions_api_success(mocker, mock_auth_header):
     """Test compare_versions_api success case."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_compare_versions = mocker.patch(
-        "apps.agent_app.compare_versions_impl")
+        "management.api.agent.agent.compare_versions_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_compare_versions.return_value = {
@@ -2403,9 +2396,9 @@ def test_compare_versions_api_success(mocker, mock_auth_header):
 
 def test_compare_versions_api_bad_request(mocker, mock_auth_header):
     """Test compare_versions_api with ValueError."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_compare_versions = mocker.patch(
-        "apps.agent_app.compare_versions_impl")
+        "management.api.agent.agent.compare_versions_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_compare_versions.side_effect = ValueError("Version not found")
@@ -2422,9 +2415,9 @@ def test_compare_versions_api_bad_request(mocker, mock_auth_header):
 
 def test_compare_versions_api_exception(mocker, mock_auth_header):
     """Test compare_versions_api with general exception."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_compare_versions = mocker.patch(
-        "apps.agent_app.compare_versions_impl")
+        "management.api.agent.agent.compare_versions_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_compare_versions.side_effect = Exception("Database error")
@@ -2441,9 +2434,9 @@ def test_compare_versions_api_exception(mocker, mock_auth_header):
 
 def test_get_version_list_api_success(mocker, mock_auth_header):
     """Test get_version_list_api success case."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_get_version_list = mocker.patch(
-        "apps.agent_app.get_version_list_impl")
+        "management.api.agent.agent.get_version_list_impl")
 
     mock_get_user_info.return_value = ("test_user_id", "test_tenant_id", "en")
     mock_get_version_list.return_value = {
@@ -2466,9 +2459,9 @@ def test_get_version_list_api_success(mocker, mock_auth_header):
 
 def test_get_version_list_api_with_explicit_tenant_id(mocker, mock_auth_header):
     """Test get_version_list_api with explicit tenant_id."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_get_version_list = mocker.patch(
-        "apps.agent_app.get_version_list_impl")
+        "management.api.agent.agent.get_version_list_impl")
 
     mock_get_user_info.return_value = ("test_user_id", "auth_tenant_id", "en")
     mock_get_version_list.return_value = {"versions": []}
@@ -2487,9 +2480,9 @@ def test_get_version_list_api_with_explicit_tenant_id(mocker, mock_auth_header):
 
 def test_get_version_list_api_exception(mocker, mock_auth_header):
     """Test get_version_list_api with exception."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_get_version_list = mocker.patch(
-        "apps.agent_app.get_version_list_impl")
+        "management.api.agent.agent.get_version_list_impl")
 
     mock_get_user_info.return_value = ("test_user_id", "test_tenant_id", "en")
     mock_get_version_list.side_effect = Exception("Database error")
@@ -2505,8 +2498,8 @@ def test_get_version_list_api_exception(mocker, mock_auth_header):
 
 def test_get_version_api_success(mocker, mock_auth_header):
     """Test get_version_api success case."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_version = mocker.patch("apps.agent_app.get_version_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_get_version = mocker.patch("management.api.agent.agent.get_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version.return_value = {
@@ -2529,8 +2522,8 @@ def test_get_version_api_success(mocker, mock_auth_header):
 
 def test_get_version_api_not_found(mocker, mock_auth_header):
     """Test get_version_api with ValueError (not found)."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_version = mocker.patch("apps.agent_app.get_version_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_get_version = mocker.patch("management.api.agent.agent.get_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version.side_effect = ValueError("Version not found")
@@ -2546,8 +2539,8 @@ def test_get_version_api_not_found(mocker, mock_auth_header):
 
 def test_get_version_api_exception(mocker, mock_auth_header):
     """Test get_version_api with general exception."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_get_version = mocker.patch("apps.agent_app.get_version_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_get_version = mocker.patch("management.api.agent.agent.get_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version.side_effect = Exception("Database error")
@@ -2563,9 +2556,9 @@ def test_get_version_api_exception(mocker, mock_auth_header):
 
 def test_get_version_detail_api_success(mocker, mock_auth_header):
     """Test get_version_detail_api success case."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_version_detail = mocker.patch(
-        "apps.agent_app._get_version_detail_or_draft")
+        "management.api.agent.agent._get_version_detail_or_draft")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version_detail.return_value = {
@@ -2590,9 +2583,9 @@ def test_get_version_detail_api_success(mocker, mock_auth_header):
 
 def test_get_version_detail_api_draft_version_success(mocker, mock_auth_header):
     """Test get_version_detail_api with draft version_no=0."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_version_detail = mocker.patch(
-        "apps.agent_app._get_version_detail_or_draft")
+        "management.api.agent.agent._get_version_detail_or_draft")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version_detail.return_value = {
@@ -2619,9 +2612,9 @@ def test_get_version_detail_api_draft_version_success(mocker, mock_auth_header):
 
 def test_get_version_detail_api_not_found(mocker, mock_auth_header):
     """Test get_version_detail_api with ValueError (not found)."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_version_detail = mocker.patch(
-        "apps.agent_app._get_version_detail_or_draft")
+        "management.api.agent.agent._get_version_detail_or_draft")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version_detail.side_effect = ValueError("Version not found")
@@ -2637,9 +2630,9 @@ def test_get_version_detail_api_not_found(mocker, mock_auth_header):
 
 def test_get_version_detail_api_exception(mocker, mock_auth_header):
     """Test get_version_detail_api with general exception."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_version_detail = mocker.patch(
-        "apps.agent_app._get_version_detail_or_draft")
+        "management.api.agent.agent._get_version_detail_or_draft")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_version_detail.side_effect = Exception("Database error")
@@ -2655,9 +2648,9 @@ def test_get_version_detail_api_exception(mocker, mock_auth_header):
 
 def test_rollback_version_api_success(mocker, mock_auth_header):
     """Test rollback_version_api success case."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_rollback_version = mocker.patch(
-        "apps.agent_app.rollback_version_impl")
+        "management.api.agent.agent.rollback_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_rollback_version.return_value = {
@@ -2680,9 +2673,9 @@ def test_rollback_version_api_success(mocker, mock_auth_header):
 
 def test_rollback_version_api_bad_request(mocker, mock_auth_header):
     """Test rollback_version_api with ValueError."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_rollback_version = mocker.patch(
-        "apps.agent_app.rollback_version_impl")
+        "management.api.agent.agent.rollback_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_rollback_version.side_effect = ValueError("Version not found")
@@ -2698,9 +2691,9 @@ def test_rollback_version_api_bad_request(mocker, mock_auth_header):
 
 def test_rollback_version_api_exception(mocker, mock_auth_header):
     """Test rollback_version_api with general exception."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_rollback_version = mocker.patch(
-        "apps.agent_app.rollback_version_impl")
+        "management.api.agent.agent.rollback_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_rollback_version.side_effect = Exception("Database error")
@@ -2716,9 +2709,9 @@ def test_rollback_version_api_exception(mocker, mock_auth_header):
 
 def test_update_version_status_api_success(mocker, mock_auth_header):
     """Test update_version_status_api success case."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_update_version_status = mocker.patch(
-        "apps.agent_app.update_version_status_impl")
+        "management.api.agent.agent.update_version_status_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_update_version_status.return_value = {
@@ -2742,9 +2735,9 @@ def test_update_version_status_api_success(mocker, mock_auth_header):
 
 def test_update_version_status_api_bad_request(mocker, mock_auth_header):
     """Test update_version_status_api with ValueError."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_update_version_status = mocker.patch(
-        "apps.agent_app.update_version_status_impl")
+        "management.api.agent.agent.update_version_status_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_update_version_status.side_effect = ValueError("Invalid status")
@@ -2761,9 +2754,9 @@ def test_update_version_status_api_bad_request(mocker, mock_auth_header):
 
 def test_update_version_status_api_exception(mocker, mock_auth_header):
     """Test update_version_status_api with general exception."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_update_version_status = mocker.patch(
-        "apps.agent_app.update_version_status_impl")
+        "management.api.agent.agent.update_version_status_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_update_version_status.side_effect = Exception("Database error")
@@ -2780,8 +2773,8 @@ def test_update_version_status_api_exception(mocker, mock_auth_header):
 
 def test_update_version_api_success(mocker, mock_auth_header):
     """Test update_version_api success case."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_update_version = mocker.patch("apps.agent_app.update_version_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_update_version = mocker.patch("management.api.agent.agent.update_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_update_version.return_value = {
@@ -2806,8 +2799,8 @@ def test_update_version_api_success(mocker, mock_auth_header):
 
 def test_update_version_api_bad_request(mocker, mock_auth_header):
     """Test update_version_api with ValueError."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_update_version = mocker.patch("apps.agent_app.update_version_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_update_version = mocker.patch("management.api.agent.agent.update_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_update_version.side_effect = ValueError("No changes to update")
@@ -2824,8 +2817,8 @@ def test_update_version_api_bad_request(mocker, mock_auth_header):
 
 def test_update_version_api_exception(mocker, mock_auth_header):
     """Test update_version_api with general exception."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_update_version = mocker.patch("apps.agent_app.update_version_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_update_version = mocker.patch("management.api.agent.agent.update_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_update_version.side_effect = Exception("Database error")
@@ -2842,8 +2835,8 @@ def test_update_version_api_exception(mocker, mock_auth_header):
 
 def test_delete_version_api_success(mocker, mock_auth_header):
     """Test delete_version_api success case."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_delete_version = mocker.patch("apps.agent_app.delete_version_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_delete_version = mocker.patch("management.api.agent.agent.delete_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_delete_version.return_value = {
@@ -2865,8 +2858,8 @@ def test_delete_version_api_success(mocker, mock_auth_header):
 
 def test_delete_version_api_bad_request(mocker, mock_auth_header):
     """Test delete_version_api with ValueError."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_delete_version = mocker.patch("apps.agent_app.delete_version_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_delete_version = mocker.patch("management.api.agent.agent.delete_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_delete_version.side_effect = ValueError("Cannot delete draft version")
@@ -2882,8 +2875,8 @@ def test_delete_version_api_bad_request(mocker, mock_auth_header):
 
 def test_delete_version_api_exception(mocker, mock_auth_header):
     """Test delete_version_api with general exception."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
-    mock_delete_version = mocker.patch("apps.agent_app.delete_version_impl")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
+    mock_delete_version = mocker.patch("management.api.agent.agent.delete_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_delete_version.side_effect = Exception("Database error")
@@ -2899,9 +2892,9 @@ def test_delete_version_api_exception(mocker, mock_auth_header):
 
 def test_get_current_version_api_success(mocker, mock_auth_header):
     """Test get_current_version_api success case."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_current_version = mocker.patch(
-        "apps.agent_app.get_current_version_impl")
+        "management.api.agent.agent.get_current_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_current_version.return_value = {
@@ -2923,9 +2916,9 @@ def test_get_current_version_api_success(mocker, mock_auth_header):
 
 def test_get_current_version_api_not_found(mocker, mock_auth_header):
     """Test get_current_version_api with ValueError (not found)."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_current_version = mocker.patch(
-        "apps.agent_app.get_current_version_impl")
+        "management.api.agent.agent.get_current_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_current_version.side_effect = ValueError(
@@ -2942,9 +2935,9 @@ def test_get_current_version_api_not_found(mocker, mock_auth_header):
 
 def test_get_current_version_api_exception(mocker, mock_auth_header):
     """Test get_current_version_api with general exception."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_get_current_version = mocker.patch(
-        "apps.agent_app.get_current_version_impl")
+        "management.api.agent.agent.get_current_version_impl")
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_current_version.side_effect = Exception("Database error")
@@ -2960,9 +2953,9 @@ def test_get_current_version_api_exception(mocker, mock_auth_header):
 
 def test_list_published_agents_api_success(mocker, mock_auth_header):
     """Test list_published_agents_api success case."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_list_published_agents = mocker.patch(
-        "apps.agent_app.list_published_agents_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.list_published_agents_impl", new_callable=AsyncMock)
 
     mock_get_user_info.return_value = ("test_user_id", "test_tenant_id", "en")
     mock_list_published_agents.side_effect = [
@@ -2988,9 +2981,9 @@ def test_list_published_agents_api_success(mocker, mock_auth_header):
 
 def test_list_published_agents_api_asset_owner_tenant_single_query(mocker, mock_auth_header):
     """Asset-owner tenant callers only query published agents once (no merge)."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_list_published_agents = mocker.patch(
-        "apps.agent_app.list_published_agents_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.list_published_agents_impl", new_callable=AsyncMock)
     mock_get_user_info.return_value = ("ao_user", ASSET_OWNER_TENANT_ID, "en")
     mock_list_published_agents.return_value = [
         {"agent_id": 1, "name": "AO Agent", "published_version_no": 1},
@@ -3007,9 +3000,9 @@ def test_list_published_agents_api_asset_owner_tenant_single_query(mocker, mock_
 
 def test_list_published_agents_api_exception(mocker, mock_auth_header):
     """Test list_published_agents_api with exception."""
-    mock_get_user_info = mocker.patch("apps.agent_app.get_current_user_info")
+    mock_get_user_info = mocker.patch("management.api.agent.agent.get_current_user_info")
     mock_list_published_agents = mocker.patch(
-        "apps.agent_app.list_published_agents_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.list_published_agents_impl", new_callable=AsyncMock)
 
     mock_get_user_info.return_value = ("test_user_id", "test_tenant_id", "en")
     mock_list_published_agents.side_effect = Exception("Database error")
@@ -3029,9 +3022,9 @@ def test_list_published_agents_api_exception(mocker, mock_auth_header):
 
 def test_get_agent_knowledge_capabilities_api_success(mocker, mock_auth_header):
     """get_agent_knowledge_capabilities_api returns the resolved capability tree."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_caps = mocker.patch(
-        "apps.agent_app.get_agent_knowledge_capabilities")
+        "management.api.agent.agent.get_agent_knowledge_capabilities")
     mock_get_user_id.return_value = ("user-1", "tenant-1")
     mock_caps.return_value = {
         "local": [{"index_name": "idx-a"}],
@@ -3054,9 +3047,9 @@ def test_get_agent_knowledge_capabilities_api_success(mocker, mock_auth_header):
 
 def test_get_agent_knowledge_capabilities_api_with_version(mocker, mock_auth_header):
     """version_no query parameter is forwarded to the resolver."""
-    mock_get_user_id = mocker.patch("apps.agent_app.get_current_user_id")
+    mock_get_user_id = mocker.patch("management.api.agent.agent.get_current_user_id")
     mock_caps = mocker.patch(
-        "apps.agent_app.get_agent_knowledge_capabilities")
+        "management.api.agent.agent.get_agent_knowledge_capabilities")
     mock_get_user_id.return_value = ("user-1", "tenant-1")
     mock_caps.return_value = {}
 
@@ -3073,10 +3066,10 @@ def test_get_agent_knowledge_capabilities_api_with_version(mocker, mock_auth_hea
 
 def test_get_agent_knowledge_capabilities_api_value_error(mocker, mock_auth_header):
     """ValueError from the resolver maps to 404."""
-    mocker.patch("apps.agent_app.get_current_user_id",
+    mocker.patch("management.api.agent.agent.get_current_user_id",
                  return_value=("user-1", "tenant-1"))
     mocker.patch(
-        "apps.agent_app.get_agent_knowledge_capabilities",
+        "management.api.agent.agent.get_agent_knowledge_capabilities",
         side_effect=ValueError("agent not found"),
     )
 
@@ -3098,8 +3091,8 @@ def test_get_agent_knowledge_capabilities_api_value_error(mocker, mock_auth_head
     ],
 )
 def test_upload_agent_icon_api_error_mapping(mocker, mock_auth_header, error, expected_status, detail):
-    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
-    mocker.patch("apps.agent_app.upload_agent_icon_impl", new_callable=AsyncMock, side_effect=error)
+    mocker.patch("management.api.agent.agent.get_current_user_id", return_value=("user-1", "tenant-1"))
+    mocker.patch("management.api.agent.agent.upload_agent_icon_impl", new_callable=AsyncMock, side_effect=error)
 
     response = config_client.post(
         "/agent/7/icon",
@@ -3112,9 +3105,9 @@ def test_upload_agent_icon_api_error_mapping(mocker, mock_auth_header, error, ex
 
 
 def test_upload_agent_icon_api_success(mocker, mock_auth_header):
-    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    mocker.patch("management.api.agent.agent.get_current_user_id", return_value=("user-1", "tenant-1"))
     upload_impl = mocker.patch(
-        "apps.agent_app.upload_agent_icon_impl",
+        "management.api.agent.agent.upload_agent_icon_impl",
         new_callable=AsyncMock,
         return_value={"icon_url": "/api/agent/7/icon", "content_type": "image/png"},
     )
@@ -3139,9 +3132,9 @@ def test_upload_agent_icon_api_success(mocker, mock_auth_header):
 
 
 def test_get_agent_icon_api_success(mocker, mock_auth_header):
-    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    mocker.patch("management.api.agent.agent.get_current_user_id", return_value=("user-1", "tenant-1"))
     get_impl = mocker.patch(
-        "apps.agent_app.get_agent_icon_impl",
+        "management.api.agent.agent.get_agent_icon_impl",
         new_callable=AsyncMock,
         return_value=(b"image-bytes", "image/webp"),
     )
@@ -3160,9 +3153,9 @@ def test_get_agent_icon_api_success(mocker, mock_auth_header):
 
 
 def test_get_agent_icon_api_not_found(mocker, mock_auth_header):
-    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    mocker.patch("management.api.agent.agent.get_current_user_id", return_value=("user-1", "tenant-1"))
     mocker.patch(
-        "apps.agent_app.get_agent_icon_impl",
+        "management.api.agent.agent.get_agent_icon_impl",
         new_callable=AsyncMock,
         side_effect=FileNotFoundError("Agent icon not found"),
     )
@@ -3174,9 +3167,9 @@ def test_get_agent_icon_api_not_found(mocker, mock_auth_header):
 
 
 def test_get_agent_icon_api_internal_error(mocker, mock_auth_header):
-    mocker.patch("apps.agent_app.get_current_user_id", return_value=("user-1", "tenant-1"))
+    mocker.patch("management.api.agent.agent.get_current_user_id", return_value=("user-1", "tenant-1"))
     mocker.patch(
-        "apps.agent_app.get_agent_icon_impl",
+        "management.api.agent.agent.get_agent_icon_impl",
         new_callable=AsyncMock,
         side_effect=RuntimeError("storage unavailable"),
     )
@@ -3196,10 +3189,10 @@ def test_update_agent_info_api_emits_audit_entry(mocker, mock_auth_header, caplo
     """Successful agent update records an identifier-only audit line."""
     import logging
 
-    mocker.patch("apps.agent_app.update_agent_info_impl", new_callable=AsyncMock,
+    mocker.patch("management.api.agent.agent.update_agent_info_impl", new_callable=AsyncMock,
                  return_value={"updated": True})
     mocker.patch(
-        "apps.agent_app.get_current_user_id",
+        "management.api.agent.agent.get_current_user_id",
         return_value=("test_user", "test_tenant"),
     )
 
@@ -3207,7 +3200,7 @@ def test_update_agent_info_api_emits_audit_entry(mocker, mock_auth_header, caplo
         response = config_client.post(
             "/agent/update",
             json={"agent_id": 123, "display_name": "Bot",
-                  "duty_prompt": "secret prompt text"},
+                  "prompt": "secret prompt text"},
             headers=mock_auth_header,
         )
 
@@ -3219,7 +3212,7 @@ def test_update_agent_info_api_emits_audit_entry(mocker, mock_auth_header, caplo
     assert "result=success" in messages[0]
     assert "user_id=test_user" in messages[0]
     assert '"agent_id":123' in messages[0]
-    assert '"patch_keys":["agent_id","display_name","duty_prompt"]' in messages[0]
+    assert '"patch_keys":["agent_id","display_name","prompt"]' in messages[0]
     assert "secret prompt text" not in messages[0]
 
 
@@ -3228,12 +3221,12 @@ def test_upload_agent_icon_api_emits_audit_entry(mocker, mock_auth_header, caplo
     import logging
 
     mocker.patch(
-        "apps.agent_app.upload_agent_icon_impl",
+        "management.api.agent.agent.upload_agent_icon_impl",
         new_callable=AsyncMock,
         return_value={"icon_url": "/agent/7/icon/x"},
     )
     mocker.patch(
-        "apps.agent_app.get_current_user_id",
+        "management.api.agent.agent.get_current_user_id",
         return_value=("test_user", "test_tenant"),
     )
 
@@ -3259,10 +3252,10 @@ def test_import_agent_api_emits_audit_entry_without_payload(mocker, mock_auth_he
     """Successful import records identifiers and counts, not the agent payload."""
     import logging
 
-    mocker.patch("apps.agent_app.import_agent_impl", new_callable=AsyncMock,
+    mocker.patch("management.api.agent.agent.import_agent_impl", new_callable=AsyncMock,
                  return_value={123: 456})
     mocker.patch(
-        "apps.agent_app.get_current_user_id",
+        "management.api.agent.agent.get_current_user_id",
         return_value=("test_user", "test_tenant"),
     )
 
@@ -3308,9 +3301,9 @@ def test_publish_version_api_emits_audit_entry(mocker, mock_auth_header, caplog)
     """Successful publish records agent_id and version name."""
     import logging
 
-    mocker.patch("apps.agent_app.get_current_user_id",
+    mocker.patch("management.api.agent.agent.get_current_user_id",
                  return_value=("test_user", "test_tenant"))
-    mocker.patch("apps.agent_app.publish_version_impl", return_value={"version_no": 1})
+    mocker.patch("management.api.agent.agent.publish_version_impl", return_value={"version_no": 1})
 
     with caplog.at_level(logging.INFO, logger="audit.security"):
         response = config_client.post(

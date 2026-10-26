@@ -12,23 +12,14 @@ from nexent.core.agents.agent_model import AgentConfig
 from nexent.core.ext_components.aidp.constants import AIDP_SEARCH_TOOL_CLASS, AIDP_SEARCH_TOOL_NAME
 from nexent.core.ext_components.aidp.retrieval_config import CONFIG_KEYS, prepare_config
 
-from agents.create_agent_info import _get_agent_tool_overrides, _resolve_runtime_tool_records
-from consts.exceptions import ValidationError
-from consts.model import (
-    ConversationKnowledgeScopeRequest,
-    ToolParamsRequest,
-)
-from database.agent_db import (
-    query_sub_agent_relations,
-    resolve_sub_agent_version_no,
-    search_agent_info_by_agent_id,
-)
-from database.agent_version_db import query_current_version_no
-from database.knowledge_db import (
-    get_knowledge_info_by_ids_and_tenant,
-    get_knowledge_info_by_tenant_id,
-    get_knowledge_name_map_by_index_names,
-)
+from management.services.agent.preparation.tools import _get_agent_tool_overrides
+from management.services.agent.resource_resolver import _resolve_runtime_tool_records
+from contracts.errors.exceptions import ValidationError
+from contracts.knowledge import ConversationKnowledgeScopeRequest
+from contracts.tool import ToolParamsRequest
+from management.db.agent.repository import query_sub_agent_relations, resolve_sub_agent_version_no, search_agent_info_by_agent_id
+from management.db.agent.version import query_current_version_no
+from management.db.knowledge_base.repository import get_knowledge_info_by_ids_and_tenant, get_knowledge_info_by_tenant_id, get_knowledge_name_map_by_index_names
 from management.services.knowledge_base.service import ElasticSearchService
 
 
@@ -103,7 +94,7 @@ def _filter_accessible_aidp_ids(
 
 def _resolve_aidp_access_snapshot(user_id: str, tenant_id: str):
     """Resolve AIDP access lazily so deployments without the extension still import."""
-    from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
+    from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID
     from ext_components.aidp.services.aidp_access_service import (
         resolve_current_aidp_access,
     )
@@ -138,7 +129,7 @@ def _walk_agent_tree(
         "tools": _resolve_runtime_tool_records(agent_id, tenant_id, version_no),
         "has_static_scope_reference": bool(
             STATIC_SCOPE_PATTERN.search(
-                str(agent_info.get("duty_prompt") or "")
+                str(agent_info.get("prompt") or "")
             )
         ),
     }

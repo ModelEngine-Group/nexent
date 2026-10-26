@@ -6,7 +6,7 @@ case:
   feature_id: V5-PW-AGENT-03
   business_rule_ids:
   - V5-PW-AGENT-03-RULE-01
-  title: 工具与技能Tab Tools+Skills选择→autosave→Debug真实调用
+  title: 工具管理与技能管理 Tools+Skills选择→autosave→Debug真实调用
   type: E2E
   priority: P0
   status: active
@@ -23,7 +23,7 @@ case:
     action: 进入 /agents 页面，选择 Draft Agent。
     expected: Tool/Skill绑定刷新后不丢。
   - order: 2
-    action: 点击「工具与技能」Tab（t('agent.config.tab.toolsSkills')）。
+    action: 展开当前连续卡片中的工具管理与技能管理分区，确认两个添加入口可见。
     expected: 真实LLM产生可用tool call且marker正确。
   - order: 3
     action: 在「工具」分区点击「选择工具」，选择本用例资产注册表中的受控MCP服务，再搜索并勾选get_test_code，读取保存结果核对工具ID与该服务一致。
@@ -32,7 +32,7 @@ case:
     action: 在「技能」分区点击「选择技能」，搜索并绑定固定 Skill。
     expected: wire证明真实请求到达。
   - order: 5
-    action: 等待 autosave，切换 Agent 再切回并重新进入「工具与技能」Tab，确认仍选中。
+    action: 等待 autosave，切换 Agent 再切回并重新展开工具管理及技能管理，确认仍选中。
     expected: wire证明真实请求到达。
   - order: 6
     action: 点击 Debug 按钮发送必须调用 Tool 的问题。
@@ -72,10 +72,10 @@ case:
   actor: Nexent browser user
   journey:
   - 进入 /agents 页面，选择 Draft Agent。
-  - 点击「工具与技能」Tab（t('agent.config.tab.toolsSkills')）。
+  - 展开当前连续卡片中的工具管理与技能管理分区，确认两个添加入口可见。
   - 在「工具」分区点击「选择工具」，选择本用例资产注册表中的受控MCP服务，再搜索并勾选get_test_code，读取保存结果核对工具ID与该服务一致。
   - 在「技能」分区点击「选择技能」，搜索并绑定固定 Skill。
-  - 等待 autosave，切换 Agent 再切回并重新进入「工具与技能」Tab，确认仍选中。
+  - 等待 autosave，切换 Agent 再切回并重新展开工具管理及技能管理，确认仍选中。
   - 点击 Debug 按钮发送必须调用 Tool 的问题。
   - 等待工具执行 UI 和最终 NX-92831。
   - 刷新后在无历史消息的独立 Debug 会话执行绑定验证技能，读取参考文件并返回其中规定的答案。

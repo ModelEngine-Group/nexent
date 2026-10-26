@@ -5,28 +5,18 @@ import logging
 from collections import defaultdict
 from typing import Any
 
-from database.knowledge_db import get_knowledge_record
-from database.tag_management_db import TagManagementDB
+from management.db.knowledge_base.repository import get_knowledge_record
+from management.db.tag.repository import TagManagementDB
 from management.services.tag.resources import (
     KNOWLEDGE_CONTENT_LIBRARY_CODE,
     LOCAL_DOCUMENT_PROVIDER,
     _encode_document_resource_id,
 )
 
-
 logger = logging.getLogger(__name__)
 
-KNOWLEDGE_DOCUMENT_TYPE = "knowledge_document"
-DOCUMENT_TAG_BATCH_SIZE = 500
-_PUBLIC_ASSIGNMENT_FIELDS = (
-    "definition_id",
-    "definition_key",
-    "definition_name",
-    "selection_mode",
-    "value_id",
-    "display_value",
-    "value_status",
-)
+from contracts.constants.constants import DOCUMENT_TAG_BATCH_SIZE, KNOWLEDGE_DOCUMENT_TYPE
+from contracts.constants.constants import PUBLIC_DOCUMENT_ASSIGNMENT_FIELDS as _PUBLIC_ASSIGNMENT_FIELDS
 
 
 def project_authorized_resource_tags(

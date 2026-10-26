@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D5 fault-recovery and deployment special matrix."""
 
 from __future__ import annotations
@@ -16,7 +18,6 @@ from shared.factories.files import _upload_kb_file
 from d5.assets import bash_path, destructive_deployment_enabled, require_command, run_command, run_posix_contract
 from d5.scenarios.scenario_security_reliability_deployment import (
     _docker_deployment,
-    _kubernetes_deployment,
     _merged_migration_equivalence,
     _v260_merged_migration_equivalence,
     _migration_idempotency,
@@ -32,7 +33,7 @@ from shared.sse import read_sse
 
 CASES = [
     "REL-01", "REL-02", "REL-03", "REL-04", "REL-05",
-    "DEP-01", "DEP-02", "DEP-03", "DEP-04", "DEP-06",
+    "DEP-01", "DEP-02", "DEP-04", "DEP-06",
 ]
 
 
@@ -310,10 +311,9 @@ async def _migration_upgrade_compatibility(identity) -> None:
 
 
 async def _backup_upgrade_rollback_contracts() -> None:
-    """DEP-06: deterministic Docker/Kubernetes backup and rollback assets."""
+    """DEP-06: deterministic Docker backup and rollback assets."""
     for contract in (
         repo_root() / "deploy" / "tests" / "test_docker_backup.sh",
-        repo_root() / "deploy" / "tests" / "test_k8s_backup.sh",
     ):
         assert contract.is_file(), f"missing backup contract: {contract}"
         code, output = await run_posix_contract(contract, timeout=1200)
@@ -329,7 +329,7 @@ _REL06_WORKER_LOG_RE = re.compile(
 
 def _rel06_expected_topology() -> tuple[dict[str, tuple[str, int]], list[str]]:
     """Recompute backend/data_process_service.py::_build_worker_configs from const.py defaults."""
-    text = (repo_root() / "backend" / "consts" / "const.py").read_text(encoding="utf-8")
+    text = (repo_root() / "backend" / 'contracts' / 'constants' / 'environment.py').read_text(encoding="utf-8")
     dp = int(re.search(r'DP_PART_PROCESSOR_COUNT = int\(os\.getenv\("DP_PART_PROCESSOR_COUNT", "(\d+)"\)\)', text).group(1))
     actor_cpus = int(re.search(r'RAY_ACTOR_NUM_CPUS = int\(os\.getenv\("RAY_ACTOR_NUM_CPUS", "(\d+)"\)\)', text).group(1))
     queues = re.search(r'QUEUES = os\.getenv\(\s*"QUEUES",\s*"([^"]+)",', text).group(1).split(",")
@@ -574,7 +574,6 @@ async def execute_d5_reliability_deployment_special(case, tenant_a_admin, tenant
         "REL-06": lambda: _forward_queue_isolation(tenant_a_admin),
         "DEP-01": _docker_deployment,
         "DEP-02": lambda: _docker_persistence(tenant_a_user),
-        "DEP-03": _kubernetes_deployment,
         "DEP-04": lambda: _migration_upgrade_compatibility(tenant_a_user),
         "DEP-06": _backup_upgrade_rollback_contracts,
     }

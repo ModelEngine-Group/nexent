@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -8,7 +9,7 @@ from test.backend.app import test_conversation_management_app as legacy
 
 
 conversation_app = __import__(
-    "backend.apps.conversation_management_app",
+    "management.api.conversation.conversation_management",
     fromlist=["update_conversation_workbench_config_endpoint"],
 )
 

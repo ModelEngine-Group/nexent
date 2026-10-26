@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import fs from "node:fs";
 import path from "node:path";
 import type { Page, Route } from "playwright/test";
@@ -55,6 +57,13 @@ export async function installEditor(page: Page, permission = "EDIT") {
       return json(route, state.templateAgents);
     }
     if (await fulfillEditorReadFixture(route, endpoint)) return;
+    if (request.method() === "POST" &&
+        /^\/tag-libraries\/assignments\/(?:knowledge_base|skill|agent|tool)\/batch_read$/.test(endpoint)) {
+      return json(route, (payload?.resource_ids || []).map((resourceId: string) => ({
+        resource_type: endpoint.split("/").at(-2), resource_id: String(resourceId),
+        assignments: [], assignment_count: 0, assignment_capacity: 100,
+      })));
+    }
     if (endpoint === "/agent/search_info") return json(route, state.draft);
     if (endpoint === "/agent/check_name")
       return json(

@@ -12,63 +12,19 @@ from urllib.parse import urljoin
 
 import jsonref
 import requests
-from consts.const import (
-    AIDP_API_KEY,
-    AIDP_SERVER_URL,
-    AIDP_TENANT_ID,
-    DATA_PROCESS_SERVICE,
-    LOCAL_MCP_SERVER,
-    MCP_MANAGEMENT_API,
-    MCP_REQUEST_TIMEOUT_SECONDS,
-    RUNTIME_MCP_TOOL_TIMEOUT_SECONDS,
-    TOKEN,
-)
-from consts.error_message import ErrorMessage
-from consts.exceptions import (
-    AgentDraftEditError,
-    MCPConnectionError,
-    NotFoundException,
-    ResourceBindingError,
-    ToolExecutionException,
-    ValidationError,
-)
-from consts.model import (
-    ToolInfo,
-    ToolInstanceInfoRequest,
-    ToolSourceEnum,
-    ToolValidateRequest,
-)
-from consts.tool_labels import SYSTEM_MANAGED_TOOL_NAMES
-from consts.tool_param_constraints import (
-    TOOL_PARAM_CONSTRAINT_KEYS,
-    TOOL_PARAM_CONSTRAINT_RULES,
-)
-from database.client import minio_client
-from database.knowledge_db import get_knowledge_name_map_by_index_names
-from database.outer_api_tool_db import (
-    delete_openapi_service as db_delete_openapi_service,
-)
-from database.outer_api_tool_db import (
-    query_openapi_services_by_tenant,
-    upsert_openapi_service,
-)
-from database.remote_mcp_db import (
-    get_mcp_authorization_token_by_name_and_url,
-    get_mcp_custom_headers_by_name_and_url,
-    get_mcp_records_by_tenant,
-    get_mcp_server_by_name_and_tenant,
-)
-from database.tool_db import (
-    check_tool_list_initialized,
-    create_or_update_tool_by_tool_info,
-    query_all_tools,
-    query_tool_instances_by_id,
-    query_tools_by_ids,
-    query_tools_by_labels,
-    search_last_tool_instance_by_tool_id,
-    update_tool_table_from_scan_tool_list,
-)
-from database.user_tenant_db import get_user_email_map
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, AIDP_TENANT_ID, DATA_PROCESS_SERVICE, LOCAL_MCP_SERVER, MCP_MANAGEMENT_API, MCP_REQUEST_TIMEOUT_SECONDS, RUNTIME_MCP_TOOL_TIMEOUT_SECONDS, TOKEN
+from contracts.errors.messages import ErrorMessage
+from contracts.errors.exceptions import AgentDraftEditError, MCPConnectionError, NotFoundException, ResourceBindingError, ToolExecutionException, ValidationError
+from contracts.tool import ToolInfo, ToolInstanceInfoRequest, ToolSourceEnum, ToolValidateRequest
+from contracts.constants.constants import SYSTEM_MANAGED_TOOL_NAMES
+from contracts.constants.constants import TOOL_PARAM_CONSTRAINT_KEYS, TOOL_PARAM_CONSTRAINT_RULES
+from management.db.client import minio_client
+from management.db.knowledge_base.repository import get_knowledge_name_map_by_index_names
+from management.db.tool.outer_api import delete_openapi_service as db_delete_openapi_service
+from management.db.tool.outer_api import query_openapi_services_by_tenant, upsert_openapi_service
+from management.db.mcp.remote import get_mcp_authorization_token_by_name_and_url, get_mcp_custom_headers_by_name_and_url, get_mcp_records_by_tenant, get_mcp_server_by_name_and_tenant
+from management.db.tool.repository import check_tool_list_initialized, create_or_update_tool_by_tool_info, query_all_tools, query_tool_instances_by_id, query_tools_by_ids, query_tools_by_labels, search_last_tool_instance_by_tool_id, update_tool_table_from_scan_tool_list
+from management.db.identity.user_tenant import get_user_email_map
 from fastmcp import Client
 from fastmcp.client.transports import SSETransport, StreamableHttpTransport
 from infrastructure.http.client import create_httpx_client

@@ -6,6 +6,8 @@ implementations:
   selector: CHAT-ROUTE-D4-001
 timeout_seconds: 120
 acceptance_bindings:
+  AC-04:
+  - CHAT-ROUTE-D4-001
   AC-01:
   - CHAT-ROUTE-D4-001
   AC-02:

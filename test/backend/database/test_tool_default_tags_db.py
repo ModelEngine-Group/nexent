@@ -4,15 +4,15 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from database.db_models import ResourceTagAssignment, TagDefinition, TagValue
-from database.tool_default_tags_db import initialize_search_tool_tags
+from management.db.models import ResourceTagAssignment, TagDefinition, TagValue
+from management.db.tool.default_tags import initialize_search_tool_tags
 
 
 @pytest.fixture
 def tags(mocker):
     session = MagicMock()
     binding = mocker.patch(
-        "database.tool_default_tags_db.TagManagementDB._get_active_resource_binding",
+        "management.db.tool.default_tags.TagManagementDB._get_active_resource_binding",
         return_value=SimpleNamespace(bucket_id=3),
     )
     definition = TagDefinition(definition_id=4, status="active", selection_mode="multi_select")

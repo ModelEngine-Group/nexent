@@ -3,17 +3,21 @@
 """Define and implement the internal Local MCP tools used by NL2Agent."""
 
 import json
+import keyword
 import logging
 import re
 import unicodedata
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastmcp.server.dependencies import get_http_request
 from nexent.core.agents.agent_model import ToolConfig
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, ValidationError, model_validator
+from pydantic import (
+    BaseModel, ConfigDict, Field, StrictBool, StringConstraints,
+    ValidationError, field_validator, model_validator,
+)
 
-from consts.exceptions import UnauthorizedError
-from management.services.permission.identity.authentication_helpers import get_current_user_id
+from contracts.errors.exceptions import UnauthorizedError
+from gateway.authentication.auth import get_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -98,12 +102,13 @@ NL2A_WRAPPER_DESCRIPTION = (
 SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION = (
     "Partially update the current tenant's existing ordinary agent draft. "
     "Always pass the current agent_id and only whitelisted fields, never null. "
-    "Allowed fields: name, display_name, description, duty_prompt, greeting_message, example_questions, "
+    "Allowed fields: name, display_name, description, prompt, greeting_message, example_questions, "
     "enable_protocol_repair_retry. "
     "enable_protocol_repair_retry must be a boolean: explicit true enables strict output validation and silent "
     "protocol repair for the target Agent, false disables it; omit it unless requested. "
     "It does not control model-service retries or the NL2Agent creator itself. "
-    "duty_prompt is the only business prompt and contains responsibilities, constraints and examples. "
+    "prompt contains complete responsibilities, constraints, tool-use rules, output requirements and necessary few-shot. "
+    "For partial edits, read draft_fields.prompt, preserve unrelated instructions, and save the full merged prompt. "
     "greeting_message and example_questions are separate conversation settings; "
     "example_questions must be a list of strings, never a newline-delimited string. "
     "Only submit the fields determined by the current action. "
@@ -117,7 +122,7 @@ MAX_BINDING_CANDIDATES = 12
 MAX_REQUIREMENT_CLARIFICATION_QUESTIONS = 5
 _NL2AGENT_PROMPT_FIELDS = frozenset(
     {
-        "duty_prompt",
+        "prompt",
         "greeting_message",
         "example_questions",
     }
@@ -393,20 +398,31 @@ class AgentDraftFields(BaseModel):
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    name: str | None = Field(
+    name: Annotated[str, StringConstraints(strip_whitespace=False)] | None = Field(
         default=None,
         min_length=1,
-        max_length=30,
-        pattern=r"^[a-zA-Z_][a-zA-Z0-9_]*_assistant$",
+        max_length=100,
+        description="A valid Python identifier, not a Python keyword; no fixed suffix is required.",
     )
     display_name: str | None = Field(default=None, min_length=1, max_length=100)
     description: str | None = None
     enable_protocol_repair_retry: StrictBool | None = None
-    duty_prompt: str | None = Field(default=None, description="Complete business prompt including constraints and examples.")
+    prompt: Annotated[str, StringConstraints(strip_whitespace=False)] | None = Field(
+        default=None,
+        description="Complete Agent instructions: responsibilities, constraints, tool-use rules and necessary few-shot.",
+    )
     greeting_message: str | None = None
     example_questions: list[str] | None = Field(
         default=None, max_length=6, description="Array of suggested question strings; not a newline-delimited string."
     )
+
+    @field_validator("name")
+    @classmethod
+    def validate_name_as_runtime_identifier(cls, value: str) -> str:
+        """Match backend import and runtime identifier rules without trimming names."""
+        if not value.isidentifier() or keyword.iskeyword(value):
+            raise ValueError("Agent name must be a valid Python identifier and not a Python keyword")
+        return value
 
     @model_validator(mode="before")
     @classmethod
@@ -691,7 +707,7 @@ def create_nl2agent_mcp_tool_configs() -> list[ToolConfig]:
                             "name": "str",
                             "description": "str",
                             "enable_protocol_repair_retry": "bool",
-                            "duty_prompt": "str",
+                            "prompt": "str",
                             "greeting_message": "str",
                             "example_questions": "list[str]",
                         }.items()
@@ -868,7 +884,7 @@ async def search_installed_resources(
         )
 
     try:
-        from consts.exceptions import AgentDraftEditError
+        from contracts.errors.exceptions import AgentDraftEditError
         from management.services.agent.authorization import require_agent_draft_edit
         from services.nl2agent_service import search_installed_resources_impl
 
@@ -920,7 +936,7 @@ async def search_uninstalled_resources(
         )
 
     try:
-        from consts.exceptions import AgentDraftEditError
+        from contracts.errors.exceptions import AgentDraftEditError
         from management.services.agent.authorization import require_agent_draft_edit
         from services.nl2agent_service import search_uninstalled_resources_impl
 
@@ -973,7 +989,7 @@ async def recommend_resources(
         )
 
     try:
-        from consts.exceptions import AgentDraftEditError
+        from contracts.errors.exceptions import AgentDraftEditError
         from management.services.agent.authorization import require_agent_draft_edit
         from services.nl2agent_service import (
             Nl2AgentResourceError,
@@ -1024,7 +1040,7 @@ async def nl2a_wrapper(
 ) -> str:
     """Return the NL2Agent JSON template selected by subtype in its wrapper."""
 
-    from consts.exceptions import AgentDraftEditError
+    from contracts.errors.exceptions import AgentDraftEditError
     from management.services.agent.authorization import require_agent_draft_edit
 
     try:
@@ -1113,7 +1129,7 @@ def _serialize_agent_draft_save_result(
             else {
                 "event": "agent_draft_fields_saved",
                 "agent_id": result.agent_id,
-                "updated_fields": result.updated_fields,
+                "updated_fields": payload["updated_fields"],
             }
         )
         state = json.dumps(
@@ -1124,7 +1140,8 @@ def _serialize_agent_draft_save_result(
         return f"{serialized}\n<nl2a_state>{state}</nl2a_state>"
 
     prompt_fields = sorted(
-        set(failed_fields or attempted_fields or []) & _NL2AGENT_PROMPT_FIELDS
+        set(failed_fields or attempted_fields or [])
+        & _NL2AGENT_PROMPT_FIELDS
     )
     if (
         isinstance(result, SaveAgentDraftFieldsError)

@@ -25,7 +25,7 @@ VERSION_HELPER="$DEPLOY_ROOT/common/version.sh"
 
 # Constants for deployment options
 K8S_ROOT="$SCRIPT_DIR"
-CONST_FILE="$PROJECT_ROOT/backend/consts/const.py"
+CONST_FILE="$PROJECT_ROOT/backend/contracts/constants/environment.py"
 DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
 GENERATED_VALUES="$APPLICATION_CHART_DIR/generated-values.yaml"
 GENERATED_RUNTIME_VALUES="$APPLICATION_CHART_DIR/generated-runtime-values.yaml"

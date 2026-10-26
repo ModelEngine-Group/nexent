@@ -2,7 +2,7 @@
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import type { ModelOption } from "@/app/newchat/ui/model-selector";
 import type { ReasoningEffort } from "@/types/modelConfig";
 import { isReasoningEffort } from "@/lib/modelReasoning";
@@ -10,16 +10,10 @@ import { snapshotTurnModelControls } from "./turnControls";
 import { DEFAULT_MODEL_PARAMETER_VALUES } from "@/const/modelParameterSettings";
 import type { ModelParameterValue } from "@/types/modelParameterSettings";
 import { subscribeRejectedSelection } from "./rejectedSelection";
-
-interface ModelState {
-  enabled: boolean;
-  effort: ReasoningEffort;
-  budget: number;
-}
-interface SessionState {
-  modelId: string;
-  values: Record<string, ModelState>;
-}
+import {
+  useModelControlsState,
+  type ModelState,
+} from "./ConversationModelControlsProvider";
 
 export function useConversationModelControls(
   models: readonly ModelOption[],
@@ -27,11 +21,14 @@ export function useConversationModelControls(
   defaultModelId?: string,
   controlledModelId?: string
 ) {
-  const [sessions, setSessions] = useState<Record<string, SessionState>>({});
-  const [sampling, setSampling] = useState<Record<string, ModelParameterValue>>(
-    {}
-  );
-  const [rejected, setRejected] = useState<Record<string, boolean>>({});
+  const {
+    sessions,
+    setSessions,
+    sampling,
+    setSampling,
+    rejected,
+    setRejected,
+  } = useModelControlsState();
   const saved = sessions[sessionKey];
   const selectedId =
     controlledModelId ??
@@ -75,7 +72,7 @@ export function useConversationModelControls(
         if (String(id) === selectedId)
           setRejected((current) => ({ ...current, [parameterScope]: true }));
       }),
-    [selectedId, parameterScope]
+    [selectedId, parameterScope, setRejected]
   );
   const snapshot = useMemo(
     () =>

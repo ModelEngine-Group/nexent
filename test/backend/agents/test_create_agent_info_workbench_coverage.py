@@ -8,14 +8,20 @@ import types
 import pytest
 
 from test.backend.agents import test_create_agent_info as legacy
+from runtime.adapters.nexent import factory as runtime_factory
 
 
-create_agent_info = legacy.create_agent_info_module
 WorkbenchError = legacy.WorkbenchError
 
 
+import management.services.agent.preparation.compiler as preparation_compiler
+import management.services.agent.preparation.inputs as input_preparation
+import management.services.agent.resource_resolver as resource_resolver
+import management.services.agent.preparation.run as run_preparation
+import management.services.agent.preparation.tools as tool_preparation
+
 def test_materialize_runtime_skill_snapshot_writes_frozen_files(tmp_path):
-    result = create_agent_info._materialize_runtime_skill_snapshot(
+    result = input_preparation._materialize_runtime_skill_snapshot(
         [
             {
                 "name": "demo",
@@ -50,7 +56,7 @@ def test_materialize_runtime_skill_snapshot_rejects_unsafe_or_incomplete_input(
     tmp_path, tenant_id, snapshot
 ):
     with pytest.raises(WorkbenchError, match="RUNTIME_SKILL_DEPENDENCY_UNAVAILABLE"):
-        create_agent_info._materialize_runtime_skill_snapshot(
+        input_preparation._materialize_runtime_skill_snapshot(
             snapshot, str(tmp_path), tenant_id
         )
 
@@ -62,39 +68,39 @@ async def test_create_agent_run_info_forwards_all_workbench_runtime_overrides(mo
     frozen_snapshot = [{"name": "demo", "_snapshot_root": "/snapshot"}]
     materialize = MagicMock(return_value=frozen_snapshot)
     agent_config = MagicMock(model_name="model")
-    monkeypatch.setattr(create_agent_info, "get_model_by_model_id", lambda *a, **k: {"model_type": "llm", "connect_status": "available"})
+    monkeypatch.setattr(run_preparation, "get_model_by_model_id", lambda *a, **k: {"model_type": "llm", "connect_status": "available"})
     agent_config.sandbox_policy = None
     create_config = AsyncMock(return_value=agent_config)
-    monkeypatch.setattr(create_agent_info, "_materialize_runtime_skill_snapshot", materialize)
-    monkeypatch.setattr(create_agent_info, "_validate_run_minio_files", MagicMock())
+    monkeypatch.setattr(run_preparation, "_materialize_runtime_skill_snapshot", materialize)
+    monkeypatch.setattr(run_preparation, "_validate_run_minio_files", MagicMock())
     monkeypatch.setattr(
-        create_agent_info,
+        run_preparation,
         "join_minio_file_description_to_query",
         AsyncMock(return_value="processed"),
     )
     monkeypatch.setattr(
-        create_agent_info, "create_model_config_list", AsyncMock(return_value=[])
+        run_preparation, "create_model_config_list", AsyncMock(return_value=[])
     )
-    monkeypatch.setattr(create_agent_info, "create_agent_config", create_config)
-    monkeypatch.setattr(create_agent_info, "query_current_version_no", lambda **_kwargs: 3)
-    monkeypatch.setattr(create_agent_info, "_ensure_agent_reasoning_snapshot", MagicMock())
+    monkeypatch.setattr(run_preparation, "create_agent_config", create_config)
+    monkeypatch.setattr(run_preparation, "query_current_version_no", lambda **_kwargs: 3)
+    monkeypatch.setattr(run_preparation, "_ensure_agent_reasoning_snapshot", MagicMock())
     monkeypatch.setattr(
-        create_agent_info,
+        run_preparation,
         "search_agent_info_by_agent_id",
         MagicMock(return_value={}),
     )
     monkeypatch.setattr(
-        create_agent_info, "get_remote_mcp_server_list", AsyncMock(return_value=[])
+        run_preparation, "get_remote_mcp_server_list", AsyncMock(return_value=[])
     )
-    monkeypatch.setattr(create_agent_info, "filter_mcp_servers_and_tools", MagicMock(return_value=[]))
-    monkeypatch.setattr(create_agent_info, "resolve_tool_user_context", MagicMock(return_value=None))
-    monkeypatch.setattr(create_agent_info, "urljoin", MagicMock(return_value="http://mcp"))
-    monkeypatch.setattr(create_agent_info.threading, "Event", MagicMock(return_value="stop"))
+    monkeypatch.setattr(run_preparation, "filter_mcp_servers_and_tools", MagicMock(return_value=[]))
+    monkeypatch.setattr(run_preparation, "resolve_tool_user_context", MagicMock(return_value=None))
+    monkeypatch.setattr(run_preparation, "urljoin", MagicMock(return_value="http://mcp"))
+    monkeypatch.setattr(runtime_factory.threading, "Event", MagicMock(return_value="stop"))
     agent_service = sys.modules["management.services.agent.service"]
     monkeypatch.setattr(agent_service, "build_sandbox_policy", MagicMock(return_value=None))
     monkeypatch.setattr(agent_service, "get_sandbox_minio_client", MagicMock(return_value=None))
 
-    await create_agent_info.create_agent_run_info(
+    await run_preparation.create_agent_run_info(
         agent_id=7,
         minio_files=[],
         query="hello",
@@ -122,7 +128,7 @@ async def test_create_agent_run_info_forwards_all_workbench_runtime_overrides(mo
 
 
 def test_get_skills_for_template_uses_runtime_snapshot_without_repository_lookup():
-    result = create_agent_info._get_skills_for_template(
+    result = resource_resolver._get_skills_for_template(
         agent_id=7,
         tenant_id="tenant-a",
         version_no=3,
@@ -137,11 +143,11 @@ def test_skill_script_tools_remove_mutating_tool_for_runtime_snapshot(monkeypatc
         def __init__(self, **kwargs):
             self.__dict__.update(kwargs)
 
-    monkeypatch.setattr(create_agent_info, "ToolConfig", Tool)
+    monkeypatch.setattr(tool_preparation, "ToolConfig", Tool)
     skill_service = types.ModuleType("management.services.skill.service")
     skill_service.SkillService = SimpleNamespace(resolve_effective_config=lambda **kwargs: {"format": "pdf"})
     monkeypatch.setitem(sys.modules, "management.services.skill.service", skill_service)
-    tools = create_agent_info._get_skill_script_tools(
+    tools = tool_preparation._get_skill_script_tools(
         agent_id=7,
         tenant_id="tenant-a",
         version_no=3,
@@ -184,7 +190,7 @@ def test_root_generation_overlay_skips_children_and_adds_root_alias():
     models = [child, root]
     config = SimpleNamespace(model_name="root")
 
-    create_agent_info.apply_root_generation_overlay(
+    run_preparation.apply_root_generation_overlay(
         models,
         config,
         {"deep_thinking": False, "temperature": 0.2, "top_p": 0.8},
@@ -211,20 +217,20 @@ async def test_create_agent_config_filters_root_knowledge_tools_before_cycle_che
         model_copy=MagicMock(return_value=copied_params),
     )
     monkeypatch.setattr(
-        create_agent_info, "_normalize_tool_params_request", lambda _params: normalized
+        preparation_compiler, "_normalize_tool_params_request", lambda _params: normalized
     )
     monkeypatch.setattr(
-        create_agent_info,
+        preparation_compiler,
         "search_agent_info_by_agent_id",
         lambda **_kwargs: {"name": "root"},
     )
-    monkeypatch.setattr(create_agent_info, "query_sub_agent_relations", lambda **_kwargs: [])
+    monkeypatch.setattr(preparation_compiler, "query_sub_agent_relations", lambda **_kwargs: [])
     runtime_mount = types.ModuleType("management.services.knowledge_base.mount")
     runtime_mount.MANAGED_CLASSES = {"knowledge_search"}
     monkeypatch.setitem(sys.modules, "management.services.knowledge_base.mount", runtime_mount)
 
     with pytest.raises(WorkbenchError, match="WORKBENCH_AGENT_CYCLE"):
-        await create_agent_info.create_agent_config(
+        await preparation_compiler.create_agent_config(
             agent_id=7,
             tenant_id="tenant-a",
             user_id="user-a",

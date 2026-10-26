@@ -51,6 +51,17 @@ class TestBuildA2AHeaders:
 class TestA2AHttpClientInit:
     """Test class for A2AHttpClient initialization."""
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("preference", [{}, {"ssl_verify": True}, {"ssl_verify": False}])
+    async def test_certificate_verification_connector(self, mocker, preference):
+        from infrastructure.http import a2a
+
+        connector = mocker.patch.object(a2a.aiohttp, "TCPConnector")
+        session = mocker.patch.object(a2a.aiohttp, "ClientSession")
+        session.return_value.close = AsyncMock()
+        async with a2a.A2AHttpClient(**preference):
+            assert connector.call_args.kwargs["ssl"] is preference.get("ssl_verify", True)
+
     def test_default_initialization(self):
         """Test default initialization values."""
         from infrastructure.http.a2a import A2AHttpClient, DEFAULT_TIMEOUT, DEFAULT_MAX_RETRIES

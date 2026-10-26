@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, CancelledError, wait
 import pytest
 from sqlalchemy import select, update, func
 
-from database.db_models import ModelRecord, ConversationRecord, ConversationMessage
+from management.db.models import ModelRecord, ConversationRecord, ConversationMessage
 from model_controls.runtime import runtime_fixture
 
 pytestmark = [pytest.mark.case_id("CHAT-MODEL-CONTROLS-D3-002"), pytest.mark.stage("D3")]
@@ -101,7 +101,7 @@ def test_cancel_retry_rejects_delayed_old_provider_output(runtime, path, workben
             runtime.provider.release.set()
             finished, _ = wait([old_run.thread_future], timeout=10)
             assert finished
-            from agents.agent_run_manager import agent_run_manager
+            from management.services.agent.lifecycle import agent_run_manager
             deadline = time.monotonic() + 2
             while agent_run_manager.get_agent_run_info(stop_id, runtime.storage["owner"]) and time.monotonic() < deadline:
                 time.sleep(0.02)

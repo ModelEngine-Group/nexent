@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 from pathlib import Path
 import types
@@ -32,7 +34,8 @@ consts_mock.const.MAX_AGENTS_PER_TENANT = 1000
 
 # 将模拟的consts模块添加到sys.modules中
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 
 class TenantResourceLimitError(ValueError):
@@ -58,14 +61,14 @@ class TenantResourceLimitError(ValueError):
         }
 
 
-exceptions_mock = types.ModuleType("consts.exceptions")
+exceptions_mock = types.ModuleType("contracts.errors.exceptions")
 exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
 class AgentNotFoundError(ValueError):
     """Test stub preserving the Agent lookup error type."""
 
 
 exceptions_mock.AgentNotFoundError = AgentNotFoundError
-sys.modules["consts.exceptions"] = exceptions_mock
+install_shared_contract_stub(exceptions_mock, 'exceptions')
 
 # 模拟utils模块
 utils_mock = types.ModuleType("utils")
@@ -75,9 +78,9 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(return_value="t
 
 # 将模拟的utils模块添加到sys.modules中
 sys.modules['utils'] = utils_mock
-sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 
-# Stub management.db.serialization to satisfy imports in backend.database.agent_db
+# Stub management.utils.serialization to satisfy imports in management.db.agent.repository
 str_utils_mock = MagicMock()
 str_utils_mock.convert_list_to_string = MagicMock(
     side_effect=lambda items: "" if items is None else ",".join(str(i) for i in items)
@@ -85,7 +88,7 @@ str_utils_mock.convert_list_to_string = MagicMock(
 str_utils_mock.convert_string_to_list = MagicMock(
     side_effect=lambda s: [] if not s else [int(x) for x in str(s).split(",") if str(x).strip().isdigit()]
 )
-sys.modules['management.db.serialization'] = str_utils_mock
+sys.modules['management.utils.serialization'] = str_utils_mock
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -102,8 +105,14 @@ client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
 # 将模拟的client模块添加到sys.modules中
-sys.modules['database.client'] = client_mock
-sys.modules['backend.database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # 模拟db_models模块
 # First, try to import real classes before mocking (if possible)
@@ -113,7 +122,7 @@ _real_agent_relation = None
 try:
     # Try to import real classes before they get mocked
     # This will only work if the module can be imported without database connection
-    from backend.database.db_models import AgentInfo as _real_agent_info, ToolInstance as _real_tool_instance, AgentRelation as _real_agent_relation
+    from management.db.models import AgentInfo as _real_agent_info, ToolInstance as _real_tool_instance, AgentRelation as _real_agent_relation
 except (ImportError, Exception):
     # If import fails (e.g., database not available), we'll use mocks
     pass
@@ -123,51 +132,33 @@ db_models_mock.AgentInfo = MagicMock()
 db_models_mock.ToolInstance = MagicMock()
 db_models_mock.AgentRelation = MagicMock()
 
-# Mock database.agent_version_db before agent_db imports it
+# Mock management.db.agent.version before agent_db imports it
 agent_version_db_mock = MagicMock()
 agent_version_db_mock.query_current_version_no = MagicMock(return_value=3)
-sys.modules['database.agent_version_db'] = agent_version_db_mock
-sys.modules['backend.database.agent_version_db'] = agent_version_db_mock
+sys.modules['management.db.agent.version'] = agent_version_db_mock
+sys.modules['management.db.agent.version'] = agent_version_db_mock
 
 # 将模拟的db_models模块添加到sys.modules中
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
 # 现在可以安全地导入被测试的模块
 for module_name, function_name in (
-    ("database.tool_db", "query_tool_knowledge_references"),
+    ("management.db.tool.repository", "query_tool_knowledge_references"),
 ):
     collaborator = types.ModuleType(module_name)
     setattr(collaborator, function_name, MagicMock())
     sys.modules[module_name] = collaborator
 
-from backend.database.agent_db import (
-    search_agent_info_by_agent_id,
-    search_agent_id_by_agent_name,
-    find_agent_id_by_agent_name,
-    search_blank_sub_agent_by_main_agent_id,
-    query_sub_agents_id_list,
-    query_sub_agent_relations,
-    resolve_sub_agent_version_no,
-    create_agent,
-    _enforce_tenant_agent_limit,
-    update_agent,
-    delete_agent_by_id,
-    query_all_agent_info_by_tenant_id,
-    insert_related_agent,
-    delete_related_agent,
-    delete_agent_relationship,
-    update_related_agents,
-    batch_search_agent_display_names,
-)
-from consts.exceptions import TenantResourceLimitError
+from management.db.agent.repository import search_agent_info_by_agent_id, search_agent_id_by_agent_name, find_agent_id_by_agent_name, search_blank_sub_agent_by_main_agent_id, query_sub_agents_id_list, query_sub_agent_relations, resolve_sub_agent_version_no, create_agent, _enforce_tenant_agent_limit, update_agent, delete_agent_by_id, query_all_agent_info_by_tenant_id, insert_related_agent, delete_related_agent, delete_agent_relationship, update_related_agents, batch_search_agent_display_names
+from contracts.errors.exceptions import TenantResourceLimitError
 
 
 @pytest.fixture(autouse=True)
 def _default_to_ordinary_agent(monkeypatch, _isolated_imports):
     """Keep general Agent DB tests scoped to an ordinary Agent."""
     monkeypatch.setattr(
-        "backend.database.agent_db.is_system_agent",
+        "management.db.agent.repository.is_system_agent",
         lambda *_args, **_kwargs: False,
     )
 
@@ -186,9 +177,7 @@ class MockAgent:
         self.author = None
         self.model_ids = None
         self.max_steps = 5
-        self.duty_prompt = None
-        self.constraint_prompt = None
-        self.few_shots_prompt = None
+        self.prompt = None
         self.parent_agent_id = None
         self.provide_run_summary = None
         self.is_main_agent = True
@@ -234,8 +223,8 @@ def test_search_agent_info_by_agent_id_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.as_dict", lambda obj: obj.__dict__)
 
     result = search_agent_info_by_agent_id(1, "tenant1")
 
@@ -256,7 +245,7 @@ def test_search_agent_info_by_agent_id_not_found(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(AgentNotFoundError, match="agent not found"):
         search_agent_info_by_agent_id(999, "tenant1")
@@ -275,7 +264,7 @@ def test_search_agent_id_by_agent_name_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     result = search_agent_id_by_agent_name("test_agent", "tenant1")
 
@@ -293,7 +282,7 @@ def test_search_agent_id_by_agent_name_not_found(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(AgentNotFoundError, match="agent not found"):
         search_agent_id_by_agent_name("nonexistent_agent", "tenant1")
@@ -310,7 +299,7 @@ def test_find_agent_id_by_agent_name_returns_none_when_not_found(monkeypatch, mo
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     assert find_agent_id_by_agent_name("nonexistent_agent", "tenant1") is None
 
@@ -329,7 +318,7 @@ def test_search_blank_sub_agent_by_main_agent_id_found(monkeypatch, mock_session
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     result = search_blank_sub_agent_by_main_agent_id("tenant1")
 
@@ -347,7 +336,7 @@ def test_search_blank_sub_agent_by_main_agent_id_not_found(monkeypatch, mock_ses
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     result = search_blank_sub_agent_by_main_agent_id("tenant1")
 
@@ -367,7 +356,7 @@ def test_query_sub_agents_id_list(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     result = query_sub_agents_id_list(1, "tenant1")
 
@@ -388,8 +377,8 @@ def test_query_sub_agent_relations(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.as_dict", lambda obj: obj.__dict__)
 
     result = query_sub_agent_relations(1, "tenant1", version_no=1)
 
@@ -411,7 +400,7 @@ def test_resolve_sub_agent_version_no_pinned(monkeypatch):
 def test_resolve_sub_agent_version_no_fallback(monkeypatch):
     """Test resolve falls back to child current_version_no when pin is NULL"""
     monkeypatch.setattr(
-        "backend.database.agent_db.query_current_version_no",
+        "management.db.agent.repository.query_current_version_no",
         MagicMock(return_value=3),
     )
     result = resolve_sub_agent_version_no(
@@ -425,7 +414,7 @@ def test_resolve_sub_agent_version_no_fallback(monkeypatch):
 def test_resolve_sub_agent_version_no_fallback_to_draft(monkeypatch):
     """Test resolve falls back to draft when child has no published version"""
     monkeypatch.setattr(
-        "backend.database.agent_db.query_current_version_no",
+        "management.db.agent.repository.query_current_version_no",
         MagicMock(return_value=None),
     )
     result = resolve_sub_agent_version_no(
@@ -444,27 +433,25 @@ def test_create_agent_success(monkeypatch, mock_session, requested_policy, expec
     session.flush = MagicMock()
 
     mock_agent = MockAgent()
-    del mock_agent.constraint_prompt
-    del mock_agent.few_shots_prompt
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
-    monkeypatch.setattr("backend.database.agent_db.as_dict", lambda obj: obj.__dict__)
-    monkeypatch.setattr("backend.database.agent_db._enforce_tenant_agent_limit", lambda *_args: None)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.agent.repository._enforce_tenant_agent_limit", lambda *_args: None)
     def make_agent(**kwargs):
         assert "constraint_prompt" not in kwargs
         assert "few_shots_prompt" not in kwargs
-        assert kwargs["duty_prompt"] == "Complete prompt"
+        assert kwargs["prompt"] == "Complete prompt"
         mock_agent.enable_protocol_repair_retry = kwargs["enable_protocol_repair_retry"]
         return mock_agent
 
-    monkeypatch.setattr("backend.database.agent_db.AgentInfo", make_agent)
+    monkeypatch.setattr("management.db.agent.repository.AgentInfo", make_agent)
 
     agent_info = {"name": "new_agent", "description": "test description",
-                  "duty_prompt": "Complete prompt"}
+                  "prompt": "Complete prompt"}
     if requested_policy is not None:
         agent_info["enable_protocol_repair_retry"] = requested_policy
     result = create_agent(agent_info, "tenant1", "user1")
@@ -479,9 +466,9 @@ def test_create_agent_rejects_when_tenant_quota_is_reached(monkeypatch, mock_ses
     """Standard Agent creation must reject the first Agent above the tenant quota."""
     session, query = mock_session
     query.filter.return_value.count.return_value = 1
-    monkeypatch.setattr("backend.database.agent_db.MAX_AGENTS_PER_TENANT", 1)
+    monkeypatch.setattr("management.db.agent.repository.MAX_AGENTS_PER_TENANT", 1)
     monkeypatch.setattr(
-        "backend.database.agent_db.AgentInfo",
+        "management.db.agent.repository.AgentInfo",
         types.SimpleNamespace(
             agent_id=literal_column("agent_id"),
             tenant_id=literal_column("tenant_id"),
@@ -494,8 +481,8 @@ def test_create_agent_rejects_when_tenant_quota_is_reached(monkeypatch, mock_ses
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
 
     with pytest.raises(TenantResourceLimitError) as exc_info:
         create_agent({"name": "new_agent"}, "tenant1", "user1")
@@ -515,9 +502,9 @@ def test_enforce_tenant_agent_limit_allows_below_quota(monkeypatch, mock_session
     """The quota helper should allow a tenant whose count is below the limit."""
     session, query = mock_session
     query.filter.return_value.count.return_value = 0
-    monkeypatch.setattr("backend.database.agent_db.MAX_AGENTS_PER_TENANT", 1)
+    monkeypatch.setattr("management.db.agent.repository.MAX_AGENTS_PER_TENANT", 1)
     monkeypatch.setattr(
-        "backend.database.agent_db.AgentInfo",
+        "management.db.agent.repository.AgentInfo",
         types.SimpleNamespace(
             agent_id=literal_column("agent_id"),
             tenant_id=literal_column("tenant_id"),
@@ -542,12 +529,12 @@ def test_create_system_agent_skips_tenant_quota(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
-    monkeypatch.setattr("backend.database.agent_db.as_dict", lambda obj: obj.__dict__)
-    monkeypatch.setattr("backend.database.agent_db.AgentInfo", lambda **kwargs: mock_agent)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.agent.repository.AgentInfo", lambda **kwargs: mock_agent)
     enforce_limit = MagicMock()
-    monkeypatch.setattr("backend.database.agent_db._enforce_tenant_agent_limit", enforce_limit)
+    monkeypatch.setattr("management.db.agent.repository._enforce_tenant_agent_limit", enforce_limit)
 
     result = create_agent(
         {"name": "system_agent", "agent_origin": "SYSTEM"},
@@ -562,17 +549,15 @@ def test_create_system_agent_skips_tenant_quota(monkeypatch, mock_session):
 
 @pytest.mark.parametrize("fields,expected", [
     ({"description": "updated description"}, "Existing"),
-    ({"duty_prompt": "Replacement"}, "Replacement"),
-    ({"duty_prompt": ""}, ""),
-    ({"duty_prompt": None}, "Existing"),
+    ({"prompt": "Replacement"}, "Replacement"),
+    ({"prompt": ""}, ""),
+    ({"prompt": None}, "Existing"),
 ])
 def test_update_agent_success(monkeypatch, mock_session, fields, expected):
     """测试成功更新agent"""
     session, query = mock_session
     mock_agent = MockAgent()
-    mock_agent.duty_prompt = "Existing"
-    del mock_agent.constraint_prompt
-    del mock_agent.few_shots_prompt
+    mock_agent.prompt = "Existing"
 
     mock_first = MagicMock()
     mock_first.return_value = mock_agent
@@ -583,8 +568,8 @@ def test_update_agent_success(monkeypatch, mock_session, fields, expected):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
 
     agent_info = MagicMock()
     agent_info.__dict__ = fields
@@ -593,7 +578,7 @@ def test_update_agent_success(monkeypatch, mock_session, fields, expected):
 
     assert mock_agent.updated_by == "user1"
 
-    assert mock_agent.duty_prompt == expected
+    assert mock_agent.prompt == expected
     assert not hasattr(mock_agent, "constraint_prompt")
     assert not hasattr(mock_agent, "few_shots_prompt")
 
@@ -605,8 +590,8 @@ def test_cmsr_006_update_preserves_explicitly_disabled_protocol_repair(monkeypat
     query.filter.return_value.first.return_value = mock_agent
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
 
     update_agent(1, SimpleNamespace(enable_protocol_repair_retry=False), "user1")
     assert mock_agent.enable_protocol_repair_retry is False
@@ -628,11 +613,11 @@ def test_update_agent_skips_none_and_converts_group_ids(monkeypatch, mock_sessio
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
 
-    # Spy on the imported convert_list_to_string in backend.database.agent_db
-    from backend.database import agent_db as agent_db_module
+    # Spy on the imported convert_list_to_string in management.db.agent.repository
+    from management.db.agent import repository as agent_db_module
     agent_db_module.convert_list_to_string.reset_mock()
 
     agent_info = MagicMock()
@@ -667,8 +652,8 @@ def test_update_agent_allows_explicit_requested_output_tokens_null(monkeypatch, 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
 
     class AgentInfoUpdate:
         def __init__(self):
@@ -694,7 +679,7 @@ def test_update_agent_not_found(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     agent_info = MagicMock()
     agent_info.__dict__ = {"name": "updated_agent"}
@@ -712,14 +697,14 @@ def test_delete_agent_by_id_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     # Restore real AgentInfo and ToolInstance classes for SQLAlchemy update
     # Use the real classes that were saved before mocking
     if _real_agent_info is not None:
-        monkeypatch.setattr("backend.database.agent_db.AgentInfo", _real_agent_info)
+        monkeypatch.setattr("management.db.agent.repository.AgentInfo", _real_agent_info)
     if _real_tool_instance is not None:
-        monkeypatch.setattr("backend.database.agent_db.ToolInstance", _real_tool_instance)
+        monkeypatch.setattr("management.db.agent.repository.ToolInstance", _real_tool_instance)
 
     delete_agent_by_id(1, "tenant1", "user1")
 
@@ -742,8 +727,8 @@ def test_query_all_agent_info_by_tenant_id(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.as_dict", lambda obj: obj.__dict__)
 
     result = query_all_agent_info_by_tenant_id("tenant1")
 
@@ -776,7 +761,7 @@ def agent_list_info_columns(monkeypatch):
     agent_info = SimpleNamespace(
         **{name: agent_table.c[name] for name in fields}
     )
-    monkeypatch.setattr("backend.database.agent_db.AgentInfo", agent_info)
+    monkeypatch.setattr("management.db.agent.repository.AgentInfo", agent_info)
     return agent_info
 
 
@@ -788,7 +773,7 @@ def _sql(expression):
 def test_query_agent_list_candidates_by_tenant_id(
     monkeypatch, mock_session, agent_list_info_columns, include_description
 ):
-    from backend.database.agent_db import query_agent_list_candidates_by_tenant_id
+    from management.db.agent.repository import query_agent_list_candidates_by_tenant_id
 
     session, query = mock_session
     query.filter.return_value.order_by.return_value.all.return_value = [
@@ -796,7 +781,7 @@ def test_query_agent_list_candidates_by_tenant_id(
     ]
     db_session = MagicMock()
     db_session.__enter__.return_value = session
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: db_session)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: db_session)
 
     result = query_agent_list_candidates_by_tenant_id(
         "tenant1", include_description=include_description
@@ -824,7 +809,7 @@ def test_query_agent_list_candidates_by_tenant_id(
 
 
 def test_agent_list_candidates_exclude_system_agents_before_page_slicing(monkeypatch):
-    from backend.database.agent_db import query_agent_list_candidates_by_tenant_id
+    from management.db.agent.repository import query_agent_list_candidates_by_tenant_id
 
     metadata = MetaData()
     agent_table = Table(
@@ -871,11 +856,11 @@ def test_agent_list_candidates_exclude_system_agents_before_page_slicing(monkeyp
         ])
 
     monkeypatch.setattr(
-        "backend.database.agent_db.AgentInfo",
+        "management.db.agent.repository.AgentInfo",
         SimpleNamespace(**agent_table.c),
     )
     monkeypatch.setattr(
-        "backend.database.agent_db.get_db_session", lambda: Session(engine),
+        "management.db.agent.repository.get_db_session", lambda: Session(engine),
     )
 
     candidates = query_agent_list_candidates_by_tenant_id("tenant1")
@@ -886,10 +871,10 @@ def test_agent_list_candidates_exclude_system_agents_before_page_slicing(monkeyp
 
 
 def test_query_agent_info_by_ids_skips_empty_ids(monkeypatch):
-    from backend.database.agent_db import query_agent_info_by_ids
+    from management.db.agent.repository import query_agent_info_by_ids
 
     get_session = MagicMock()
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", get_session)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", get_session)
 
     assert query_agent_info_by_ids("tenant1", []) == []
     get_session.assert_not_called()
@@ -898,16 +883,16 @@ def test_query_agent_info_by_ids_skips_empty_ids(monkeypatch):
 def test_query_agent_info_by_ids_filters_and_converts(
     monkeypatch, mock_session, agent_list_info_columns
 ):
-    from backend.database.agent_db import query_agent_info_by_ids
+    from management.db.agent.repository import query_agent_info_by_ids
 
     session, query = mock_session
     agents = [SimpleNamespace(agent_id=3), SimpleNamespace(agent_id=5)]
     query.filter.return_value.all.return_value = agents
     db_session = MagicMock()
     db_session.__enter__.return_value = session
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: db_session)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: db_session)
     to_dict = MagicMock(side_effect=lambda agent: {"agent_id": agent.agent_id})
-    monkeypatch.setattr("backend.database.agent_db.as_dict", to_dict)
+    monkeypatch.setattr("management.db.agent.repository.as_dict", to_dict)
 
     result = query_agent_info_by_ids("tenant1", [3, 5])
 
@@ -930,9 +915,9 @@ def test_insert_related_agent_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
-    monkeypatch.setattr("backend.database.agent_db.AgentRelation", lambda **kwargs: MagicMock())
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.AgentRelation", lambda **kwargs: MagicMock())
 
     result = insert_related_agent(1, 2, "tenant1", "user1")
 
@@ -948,9 +933,9 @@ def test_insert_related_agent_failure(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
-    monkeypatch.setattr("backend.database.agent_db.AgentRelation", lambda **kwargs: MagicMock())
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.AgentRelation", lambda **kwargs: MagicMock())
 
     result = insert_related_agent(1, 2, "tenant1", "user1")
 
@@ -967,7 +952,7 @@ def test_delete_related_agent_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     result = delete_related_agent(1, 2, "tenant1", "user1")
 
@@ -985,7 +970,7 @@ def test_delete_related_agent_failure(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     result = delete_related_agent(1, 2, "tenant1", "user1")
 
@@ -1002,7 +987,7 @@ def test_delete_agent_relationship_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     # 函数不返回任何值，只验证执行成功
     delete_agent_relationship(1, "tenant1", "user1")
@@ -1021,7 +1006,7 @@ def test_delete_agent_relationship_failure(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     # 函数应该抛出异常，因为数据库操作失败
     with pytest.raises(Exception, match="Database error"):
@@ -1056,8 +1041,8 @@ def test_update_related_agents_add_new(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
 
     # Create a Mock class for AgentRelation that supports both class attribute access and instantiation
     # The class attributes need to support comparison operations (==, !=, .in_()) for SQLAlchemy queries
@@ -1072,7 +1057,7 @@ def test_update_related_agents_add_new(monkeypatch, mock_session):
             for key, value in kwargs.items():
                 setattr(self, key, value)
 
-    monkeypatch.setattr("backend.database.agent_db.AgentRelation", MockAgentRelationClass)
+    monkeypatch.setattr("management.db.agent.repository.AgentRelation", MockAgentRelationClass)
 
     # Execute - add new relations [2, 3]
     update_related_agents(1, "tenant1", "user1", related_agents=[{"agent_id": 2}, {"agent_id": 3}])
@@ -1115,7 +1100,7 @@ def test_update_related_agents_delete_existing(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     # Execute - remove all relations (empty list)
     update_related_agents(1, "tenant1", "user1", related_agents=[])
@@ -1157,8 +1142,8 @@ def test_update_related_agents_replace_mixed(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
 
     # Create a Mock class for AgentRelation that supports both class attribute access and instantiation
     # The class attributes need to support comparison operations (==, !=, .in_()) for SQLAlchemy queries
@@ -1173,7 +1158,7 @@ def test_update_related_agents_replace_mixed(monkeypatch, mock_session):
             for key, value in kwargs.items():
                 setattr(self, key, value)
 
-    monkeypatch.setattr("backend.database.agent_db.AgentRelation", MockAgentRelationClass)
+    monkeypatch.setattr("management.db.agent.repository.AgentRelation", MockAgentRelationClass)
 
     # Execute - replace [2, 3] with [3, 4] (delete 2, add 4)
     update_related_agents(1, "tenant1", "user1", related_agents=[{"agent_id": 3}, {"agent_id": 4}])
@@ -1208,7 +1193,7 @@ def test_update_related_agents_no_changes(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     # Execute - same relations [2, 3]
     update_related_agents(1, "tenant1", "user1", related_agents=[{"agent_id": 2}, {"agent_id": 3}])
@@ -1235,7 +1220,7 @@ def test_update_related_agents_no_changes(monkeypatch, mock_session):
 def test_system_agent_relationship_mutations_are_rejected(monkeypatch, operation):
     """UT-BE-SAL-012."""
     monkeypatch.setattr(
-        "backend.database.agent_db.is_system_agent",
+        "management.db.agent.repository.is_system_agent",
         lambda *_args, **_kwargs: True,
     )
 
@@ -1245,14 +1230,14 @@ def test_system_agent_relationship_mutations_are_rejected(monkeypatch, operation
 
 def test_clear_agent_new_mark_success(monkeypatch):
     """Test successful clearing of agent NEW mark"""
-    from backend.database.agent_db import clear_agent_new_mark
+    from management.db.agent.repository import clear_agent_new_mark
 
     # Mock the entire update operation
     mock_update_result = MagicMock()
     mock_update_result.rowcount = 1
 
     mock_update = MagicMock(return_value=mock_update_result)
-    monkeypatch.setattr("backend.database.agent_db.update", mock_update)
+    monkeypatch.setattr("management.db.agent.repository.update", mock_update)
 
     # Mock session
     mock_session = MagicMock()
@@ -1261,7 +1246,7 @@ def test_clear_agent_new_mark_success(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = mock_session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     # Execute
     result = clear_agent_new_mark(1, "tenant1", "user1")
@@ -1273,14 +1258,14 @@ def test_clear_agent_new_mark_success(monkeypatch):
 
 def test_clear_agent_new_mark_no_rows_affected(monkeypatch):
     """Test clearing agent NEW mark when no rows are affected"""
-    from backend.database.agent_db import clear_agent_new_mark
+    from management.db.agent.repository import clear_agent_new_mark
 
     # Mock the entire update operation
     mock_update_result = MagicMock()
     mock_update_result.rowcount = 0
 
     mock_update = MagicMock(return_value=mock_update_result)
-    monkeypatch.setattr("backend.database.agent_db.update", mock_update)
+    monkeypatch.setattr("management.db.agent.repository.update", mock_update)
 
     # Mock session
     mock_session = MagicMock()
@@ -1289,7 +1274,7 @@ def test_clear_agent_new_mark_no_rows_affected(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = mock_session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     # Execute
     result = clear_agent_new_mark(999, "tenant1", "user1")
@@ -1301,11 +1286,11 @@ def test_clear_agent_new_mark_no_rows_affected(monkeypatch):
 
 def test_mark_agents_as_new_success(monkeypatch):
     """Test successful marking agents as new"""
-    from backend.database.agent_db import mark_agents_as_new
+    from management.db.agent.repository import mark_agents_as_new
 
     # Mock the update function
     mock_update = MagicMock()
-    monkeypatch.setattr("backend.database.agent_db.update", mock_update)
+    monkeypatch.setattr("management.db.agent.repository.update", mock_update)
 
     # Mock session
     mock_session = MagicMock()
@@ -1313,7 +1298,7 @@ def test_mark_agents_as_new_success(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = mock_session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     # Execute
     mark_agents_as_new([1, 2, 3], "tenant1", "user1")
@@ -1324,7 +1309,7 @@ def test_mark_agents_as_new_success(monkeypatch):
 
 def test_mark_agents_as_new_empty_list(monkeypatch):
     """Test marking agents as new with empty list"""
-    from backend.database.agent_db import mark_agents_as_new
+    from management.db.agent.repository import mark_agents_as_new
 
     # Mock session
     mock_session = MagicMock()
@@ -1332,7 +1317,7 @@ def test_mark_agents_as_new_empty_list(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = mock_session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     # Execute with empty list
     mark_agents_as_new([], "tenant1", "user1")
@@ -1343,12 +1328,12 @@ def test_mark_agents_as_new_empty_list(monkeypatch):
 
 def test_clear_agent_new_mark_sqlalchemy_error(monkeypatch):
     """Test clear_agent_new_mark with SQLAlchemy error"""
-    from backend.database.agent_db import clear_agent_new_mark
+    from management.db.agent.repository import clear_agent_new_mark
     from sqlalchemy.exc import SQLAlchemyError
 
     # Mock the update function
     mock_update = MagicMock()
-    monkeypatch.setattr("backend.database.agent_db.update", mock_update)
+    monkeypatch.setattr("management.db.agent.repository.update", mock_update)
 
     # Mock session to raise SQLAlchemy error
     mock_session = MagicMock()
@@ -1357,7 +1342,7 @@ def test_clear_agent_new_mark_sqlalchemy_error(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = mock_session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     # Execute and expect exception
     with pytest.raises(SQLAlchemyError):
@@ -1366,12 +1351,12 @@ def test_clear_agent_new_mark_sqlalchemy_error(monkeypatch):
 
 def test_mark_agents_as_new_sqlalchemy_error(monkeypatch):
     """Test mark_agents_as_new with SQLAlchemy error"""
-    from backend.database.agent_db import mark_agents_as_new
+    from management.db.agent.repository import mark_agents_as_new
     from sqlalchemy.exc import SQLAlchemyError
 
     # Mock the update function
     mock_update = MagicMock()
-    monkeypatch.setattr("backend.database.agent_db.update", mock_update)
+    monkeypatch.setattr("management.db.agent.repository.update", mock_update)
 
     # Mock session to raise SQLAlchemy error
     mock_session = MagicMock()
@@ -1380,7 +1365,7 @@ def test_mark_agents_as_new_sqlalchemy_error(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = mock_session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     # Execute and expect exception
     with pytest.raises(SQLAlchemyError):
@@ -1389,10 +1374,10 @@ def test_mark_agents_as_new_sqlalchemy_error(monkeypatch):
 
 def test_clear_agent_new_mark_database_connection_error(monkeypatch):
     """Test clear_agent_new_mark with database connection error"""
-    from backend.database.agent_db import clear_agent_new_mark
+    from management.db.agent.repository import clear_agent_new_mark
 
     # Mock get_db_session to raise an exception
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: (_ for _ in ()).throw(Exception("Connection failed")))
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: (_ for _ in ()).throw(Exception("Connection failed")))
 
     # Execute and expect exception
     with pytest.raises(Exception):
@@ -1431,7 +1416,7 @@ def test_batch_search_agent_display_names_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     result = batch_search_agent_display_names(agent_ids=[1, 2], tenant_id="tenant1")
 
@@ -1455,9 +1440,9 @@ def test_insert_related_agent_with_selected_agent_version_no(monkeypatch, mock_s
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
-    monkeypatch.setattr("backend.database.agent_db.AgentRelation", mock_agent_relation_init)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.AgentRelation", mock_agent_relation_init)
 
     result = insert_related_agent(1, 2, "tenant1", "user1", selected_agent_version_no=5)
 
@@ -1480,9 +1465,9 @@ def test_insert_related_agent_without_selected_agent_version_no(monkeypatch, moc
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
-    monkeypatch.setattr("backend.database.agent_db.AgentRelation", mock_agent_relation_init)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.AgentRelation", mock_agent_relation_init)
 
     result = insert_related_agent(1, 2, "tenant1", "user1")
 
@@ -1514,8 +1499,8 @@ def test_update_related_agents_updates_version_no(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
 
     # Execute - update relation for agent 2 with new version_no=3
     update_related_agents(1, "tenant1", "user1", related_agents=[{"agent_id": 2, "version_no": 3}])
@@ -1546,7 +1531,7 @@ def test_update_related_agents_no_version_no_keeps_existing(monkeypatch, mock_se
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     # Execute - related_agents has agent_id=2 but version_no=None
     update_related_agents(1, "tenant1", "user1", related_agents=[{"agent_id": 2, "version_no": None}])
@@ -1578,7 +1563,7 @@ def test_update_related_agents_with_none_related_agents(monkeypatch, mock_sessio
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     # Execute - related_agents=None means no new relations
     update_related_agents(1, "tenant1", "user1", related_agents=None)
@@ -1593,7 +1578,7 @@ def test_update_related_agents_with_none_related_agents(monkeypatch, mock_sessio
 
 def test_parse_related_agents_none():
     """Test _parse_related_agents with None input returns empty sets."""
-    from backend.database.agent_db import _parse_related_agents
+    from management.db.agent.repository import _parse_related_agents
     ids, version_map = _parse_related_agents(None)
     assert ids == set()
     assert version_map == {}
@@ -1601,7 +1586,7 @@ def test_parse_related_agents_none():
 
 def test_parse_related_agents_empty_list():
     """Test _parse_related_agents with empty list returns empty sets."""
-    from backend.database.agent_db import _parse_related_agents
+    from management.db.agent.repository import _parse_related_agents
     ids, version_map = _parse_related_agents([])
     assert ids == set()
     assert version_map == {}
@@ -1609,7 +1594,7 @@ def test_parse_related_agents_empty_list():
 
 def test_parse_related_agents_with_none_agent_id():
     """Test _parse_related_agents skips entries with agent_id=None."""
-    from backend.database.agent_db import _parse_related_agents
+    from management.db.agent.repository import _parse_related_agents
     ids, version_map = _parse_related_agents([
         {"agent_id": None, "version_no": 1},
         {"agent_id": 2, "version_no": 3},
@@ -1620,7 +1605,7 @@ def test_parse_related_agents_with_none_agent_id():
 
 def test_parse_related_agents_with_none_version_no():
     """Test _parse_related_agents does not add None version_no to version_map."""
-    from backend.database.agent_db import _parse_related_agents
+    from management.db.agent.repository import _parse_related_agents
     ids, version_map = _parse_related_agents([
         {"agent_id": 1, "version_no": None},
         {"agent_id": 2, "version_no": 5},
@@ -1631,7 +1616,7 @@ def test_parse_related_agents_with_none_version_no():
 
 def test_parse_related_agents_normal_case():
     """Test _parse_related_agents with normal input."""
-    from backend.database.agent_db import _parse_related_agents
+    from management.db.agent.repository import _parse_related_agents
     ids, version_map = _parse_related_agents([
         {"agent_id": 1, "version_no": 2},
         {"agent_id": 3, "version_no": 4},
@@ -1657,10 +1642,10 @@ def test_add_new_relations_with_version_map(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
-    monkeypatch.setattr("backend.database.agent_db.AgentRelation", MockAgentRelationClass)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.AgentRelation", MockAgentRelationClass)
 
-    from backend.database.agent_db import _add_new_relations
+    from management.db.agent.repository import _add_new_relations
     _add_new_relations(
         session=session,
         parent_agent_id=1,
@@ -1698,8 +1683,8 @@ def test_update_agent_pops_requested_output_tokens_when_not_in_fields_set(monkey
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.agent_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.filter_property", lambda data, model: data)
 
     class AgentInfoUpdate:
         def __init__(self):
@@ -1721,7 +1706,7 @@ def test_update_agent_pops_requested_output_tokens_when_not_in_fields_set(monkey
 
 def test_update_existing_relations_skips_none_version_no(monkeypatch):
     """Test _update_existing_relations skips update when new_version_no is None for some relations."""
-    from backend.database.agent_db import _update_existing_relations
+    from management.db.agent.repository import _update_existing_relations
 
     mock_rel_with_version = MagicMock()
     mock_rel_with_version.selected_agent_id = 2
@@ -1748,7 +1733,7 @@ def test_update_existing_relations_skips_none_version_no(monkeypatch):
 
 def test_update_existing_relations_skips_relations_not_in_update_set(monkeypatch):
     """Test _update_existing_relations skips relations not in ids_to_update."""
-    from backend.database.agent_db import _update_existing_relations
+    from management.db.agent.repository import _update_existing_relations
 
     mock_rel_to_update = MagicMock()
     mock_rel_to_update.selected_agent_id = 2
@@ -1773,7 +1758,7 @@ def test_update_existing_relations_skips_relations_not_in_update_set(monkeypatch
 
 def test_update_existing_relations_returns_early_when_empty():
     """Test _update_existing_relations returns early when ids_to_update or version_map is empty."""
-    from backend.database.agent_db import _update_existing_relations
+    from management.db.agent.repository import _update_existing_relations
 
     mock_rel = MagicMock()
     mock_rel.selected_agent_id = 2
@@ -1800,7 +1785,7 @@ def test_update_existing_relations_returns_early_when_empty():
 
 def test_batch_get_agent_main_flags_returns_flag_map(monkeypatch, mock_session):
     """Batch main-agent lookup maps each agent id to its is_main_agent flag."""
-    from backend.database.agent_db import batch_get_agent_main_flags
+    from management.db.agent.repository import batch_get_agent_main_flags
 
     session, query = mock_session
     mock_filter = MagicMock()
@@ -1813,14 +1798,14 @@ def test_batch_get_agent_main_flags_returns_flag_map(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.agent_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
     assert batch_get_agent_main_flags([10, 11]) == {10: True, 11: False}
 
 
 def test_batch_get_agent_main_flags_returns_empty_without_ids(mock_session):
     """No ids (or only None entries) short-circuits without querying the DB."""
-    from backend.database.agent_db import batch_get_agent_main_flags
+    from management.db.agent.repository import batch_get_agent_main_flags
 
     session, query = mock_session
     assert batch_get_agent_main_flags([]) == {}

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "enabled"],
+  "properties": {"schema_version": {"const": 1}, "enabled": {"type": "boolean"}}
+}

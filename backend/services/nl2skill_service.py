@@ -12,20 +12,20 @@ from typing import Any
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import ContextManagerConfig
-from nexent.core.agents.run_agent import agent_run
+from runtime.adapters.nexent.runner import agent_run
 from nexent.core.utils.observer import MessageObserver
 
-from agents.create_agent_info import (
-    _resolve_input_budget,
-    _resolve_context_budget,
-    create_model_config_list,
-    join_minio_file_description_to_query,
-)
-from agents.nl2skill_agent import create_nl2skill_agent_config
+from management.services.model.run_budget import _resolve_input_budget
+from management.services.model.run_budget import _resolve_context_budget
+from management.services.model.run_bindings import create_model_config_list
+from management.services.agent.preparation.inputs import join_minio_file_description_to_query
+from management.services.skill.creation import create_nl2skill_agent_config
 from management.services.agent.context import build_authorized_context_input
-from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING
-from consts.model import HistoryItem, NL2SkillRunRequest
-from database.model_management_db import get_model_by_model_id
+from contracts.constants.constants import LANGUAGE
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
+from contracts.conversation import HistoryItem
+from contracts.agent import NL2SkillRunRequest
+from management.db.model.repository import get_model_by_model_id
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.model.names import get_model_name_from_config
 from management.services.skill.stream_parser import SkillStreamParser

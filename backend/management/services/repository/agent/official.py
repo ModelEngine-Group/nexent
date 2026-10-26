@@ -21,20 +21,11 @@ import tempfile
 import zipfile
 from typing import Dict, List, Optional
 
-from consts.const import OFFICIAL_AGENTS_PATH
-from consts.model import (
-    KnowledgeBaseResolution,
-    KnowledgeBaseSeedDoc,
-    ModelConnectStatusEnum,
-    OfficialAgentAgentInfo,
-    OfficialAgentBundle,
-    OfficialAgentInstallItem,
-    OfficialAgentInstallStep,
-    OfficialAgentListItem,
-    OfficialAgentMcpPreview,
-    SkillResolution,
-    SkillZipEntry,
-)
+from contracts.constants.environment import OFFICIAL_AGENTS_PATH
+from contracts.knowledge import KnowledgeBaseResolution
+from contracts.agent import KnowledgeBaseSeedDoc, OfficialAgentAgentInfo, OfficialAgentBundle, OfficialAgentInstallItem, OfficialAgentInstallStep, OfficialAgentListItem, OfficialAgentMcpPreview
+from contracts.model import ModelConnectStatusEnum
+from contracts.skill import SkillResolution, SkillZipEntry
 from management.services.agent.naming import (
     check_agent_value_duplicate,
     generate_unique_agent_value,
@@ -310,7 +301,7 @@ def _find_installed_agent_id(
         return False
 
     if user_id is not None:
-        from database.agent_db import query_all_agent_info_by_tenant_id
+        from management.db.agent.repository import query_all_agent_info_by_tenant_id
 
         for agent in query_all_agent_info_by_tenant_id(tenant_id):
             if (
@@ -320,7 +311,7 @@ def _find_installed_agent_id(
                 return agent.get("agent_id")
         return None
 
-    from database.agent_db import search_agent_id_by_agent_name
+    from management.db.agent.repository import search_agent_id_by_agent_name
 
     try:
         return search_agent_id_by_agent_name(name, tenant_id)
@@ -430,7 +421,7 @@ def _mcp_previews(
     ``installed`` mirrors the install dedup rule: an MCP is considered installed
     only when a server with the same name AND url already exists.
     """
-    from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
+    from management.db.mcp.remote import get_mcp_server_by_name_and_tenant
 
     previews: List[OfficialAgentMcpPreview] = []
     for mcp in bundle.mcp_info or []:
@@ -511,7 +502,7 @@ async def _install_mcp_servers(
     Official MCP endpoints are trusted platform-provided URLs, so health checks
     are skipped.
     """
-    from database.remote_mcp_db import get_mcp_server_by_name_and_tenant
+    from management.db.mcp.remote import get_mcp_server_by_name_and_tenant
     from management.services.mcp.registration import add_mcp_service
 
     for mcp in bundle.mcp_info or []:
@@ -570,9 +561,9 @@ async def _create_knowledge_bases(
     Returns a mapping ``logical_index_name -> actual tenant index_name``. A KB
     whose logical index name already exists in the tenant is reused unchanged.
     """
-    from database.group_db import query_groups_by_tenant
-    from database.knowledge_db import get_knowledge_record, update_knowledge_record
-    from management.db.serialization import convert_string_to_list
+    from management.db.identity.group import query_groups_by_tenant
+    from management.db.knowledge_base.repository import get_knowledge_record, update_knowledge_record
+    from management.utils.serialization import convert_string_to_list
     from management.services.knowledge_base.service import ElasticSearchService
     from management.services.knowledge_base.common import (
         get_vector_db_core,
@@ -736,7 +727,7 @@ async def _index_binary_docs(
 
     from starlette.datastructures import UploadFile
 
-    from consts.model import ProcessParams
+    from contracts.knowledge import ProcessParams
     from management.services.file.service import upload_files_impl
     from management.services.knowledge_base.ingestion import trigger_data_process
 
@@ -780,6 +771,7 @@ async def _index_binary_docs(
                 model_id=embedding_model_id,
                 authorization=authorization,
             ),
+            tenant_id=tenant_id,
         )
 
 
@@ -813,12 +805,8 @@ def _update_existing_agent_kb_refs(
     user_id: str,
 ) -> None:
     """Repair KB tool references on an Agent from an earlier partial install."""
-    from consts.model import ToolInstanceInfoRequest
-    from database.tool_db import (
-        create_or_update_tool_by_tool_info,
-        query_all_tools,
-        query_tool_instances_by_agent_id,
-    )
+    from contracts.tool import ToolInstanceInfoRequest
+    from management.db.tool.repository import create_or_update_tool_by_tool_info, query_all_tools, query_tool_instances_by_agent_id
 
     bundle_tools = {
         (tool.class_name, tool.source): tool
@@ -1039,7 +1027,7 @@ async def install_official_agents(
         root_name = getattr(root_agent, "name", None) if root_agent else None
         root_renamed = bool(renames) and bool(root_name) and root_name in renames
         existing_agent_id = None
-        from database.agent_db import query_all_agent_info_by_tenant_id
+        from management.db.agent.repository import query_all_agent_info_by_tenant_id
 
         agents_cache = query_all_agent_info_by_tenant_id(tenant_id)
         if root_name and not root_renamed and check_agent_value_duplicate(
@@ -1056,7 +1044,7 @@ async def install_official_agents(
             )
 
         if root_agent is not None:
-            from database.user_tenant_db import get_user_tenant_by_user_id
+            from management.db.identity.user_tenant import get_user_tenant_by_user_id
 
             user_record = get_user_tenant_by_user_id(user_id) or {}
             user_email = str(user_record.get("user_email") or "").strip()

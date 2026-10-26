@@ -3,6 +3,7 @@
 "use client";
 
 import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";
+import { useConversationModelThreadKey } from "@/features/model-controls/ConversationModelControlsProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import type { ReasoningEffort } from "@/types/modelConfig";
 import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
@@ -42,6 +43,7 @@ import { AgentWelcome } from "@/components/agent/agent-welcome";
 import { TextSuggestion } from "@/components/agent/agent-suggestion";
 import type { AgentSuggestionItem } from "@/types/agentSuggestion";
 import { NewChatWelcomeBackdrop } from "./newchat-welcome-backdrop";
+import { deriveWelcomeSuggestions } from "./welcome-suggestions";
 import newChatStyles from "./newchat-design.module.css";
 import { Button } from "@/components/ui/button";
 import {
@@ -309,10 +311,20 @@ export const Thread: FC<ThreadProps> = ({
   const { t } = useTranslation();
   const models = useAgentModels(agent, modelSelectionScope);
   const threadKey = useAuiState((state) => state.threads.mainThreadId);
+  const remoteThreadKey = useAuiState(
+    (state) =>
+      state.threads.threadItems.find(
+        (item) => item.id === state.threads.mainThreadId
+      )?.remoteId
+  );
+  const modelThreadKey = useConversationModelThreadKey(
+    threadKey,
+    remoteThreadKey
+  );
   const { user } = useAuthorizationContext();
   const controls = useConversationModelControls(
     models,
-    `${user?.tenantId ?? ""}:${user?.id ?? ""}:${agent.id}:${threadKey ?? "new"}`,
+    `${user?.tenantId ?? ""}:${user?.id ?? ""}:${agent.id}:${modelThreadKey}`,
     selectedModelId,
     onModelChange ? (selectedModelId ?? "") : undefined
   );
@@ -779,13 +791,10 @@ const ThreadView: FC<ThreadViewProps> = ({
     workbenchPresentation && !hasMessages && !isShareMode
   );
   const aui = useAui();
-  const suggestions = welcomeSuggestions?.length
-    ? welcomeSuggestions.slice(0, 4)
-    : (agent.example_questions || []).slice(0, 4).map((question, index) => ({
-        id: `question-${index}`,
-        title: question,
-        prompt: question,
-      }));
+  const suggestions = deriveWelcomeSuggestions(
+    welcomeSuggestions,
+    agent.example_questions
+  );
 
   return (
     <ThreadPrimitive.Root

@@ -14,46 +14,15 @@ from typing import Any, Dict, List, Optional
 from nexent.core.concurrency import run_blocking
 from nexent.monitor import get_monitoring_manager, set_monitoring_context, set_monitoring_operation
 
-from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING, MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
-from consts.model import AgentRequest, MessageRequest, MessageUnit
-from consts.exceptions import AppException, ConversationNotFoundError, ValidationError
-from database.conversation_db import (
-    CHAT_MODE_VALUES,
-    create_conversation,
-    create_conversation_message,
-    create_message_unit,
-    create_source_image,
-    create_source_search,
-    delete_conversation,
-    delete_conversations_batch,
-    get_conversation,
-    get_conversation_history,
-    get_historical_context,
-    get_latest_assistant_message,  # noqa: F401 - service boundary re-export
-    get_latest_assistant_message_id,
-    get_latest_user_message_id,
-    get_last_unit_for_message,  # noqa: F401 - service boundary re-export
-    get_message_id_by_index,
-    get_source_images_by_conversation,
-    get_source_images_by_message,
-    get_source_searches_by_conversation,
-    get_source_searches_by_message,
-    persist_assistant_run_batch as persist_assistant_run_batch_db,
-    rename_conversation,
-    save_history_summary,
-    update_conversation_agent_id,
-    update_conversation_chat_mode,
-    update_conversation_knowledge_scope,
-    replace_conversation_workbench_config,
-    replace_conversation_workbench_and_metadata,
-    update_conversation_message_content,
-    update_conversation_message_status,
-    update_message_minio_files,
-    update_message_opinion,
-    update_message_unit_content,
-    update_message_unit_status,
-)
-from database.model_management_db import get_model_by_model_id
+from contracts.constants.constants import LANGUAGE
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
+from contracts.constants.constants import MESSAGE_ROLE, DEFAULT_EN_TITLE, DEFAULT_ZH_TITLE
+from contracts.agent import AgentRequest
+from contracts.conversation import MessageRequest, MessageUnit
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError
+from contracts.constants.constants import CHAT_MODE_VALUES
+from management.db.conversation.repository import create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message, get_latest_assistant_message_id, get_latest_user_message_id, get_last_unit_for_message, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
+from management.db.model.repository import get_model_by_model_id
 from management.services.model.adapter import get_llm_adapter_from_config
 from management.services.configuration.tenant.settings import tenant_config_manager
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
@@ -115,6 +84,8 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
         'content': string_content or "",
         'minio_files': message_data.get('minio_files'),
     }
+    if message_data.get('clarification_response') is not None:
+        message_data_copy['clarification_response'] = message_data['clarification_response']
     return create_conversation_message(
         message_data_copy, user_id, status=status, message_source=message_source,
     )
@@ -278,11 +249,7 @@ def save_source_search(search_data: Dict[str, Any], user_id: Optional[str] = Non
 
 
 def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) -> None:
-    """Persist the user-side message (one message row only).
-
-    Note: conversation_message_unit_t only stores assistant message content.
-    User messages do not need unit records.
-    """
+    """Persist readable user text and any structured clarification response atomically."""
     user_role_count = sum(1 for item in getattr(
         request, "history", []) if item.role == MESSAGE_ROLE["USER"])
 
@@ -297,6 +264,8 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
         role=MESSAGE_ROLE["USER"],
         message=[MessageUnit(type="string", content=raw_query)],
         minio_files=request.minio_files,
+        **({'clarification_response': request.clarification_response}
+           if getattr(request, 'clarification_response', None) is not None else {}),
     )
     save_message(
         conversation_req, user_id=user_id, tenant_id=tenant_id,
@@ -456,7 +425,7 @@ def update_conversation_workbench_config_service(
 ) -> Dict[str, Any]:
     """Validate and atomically replace a conversation Workbench declaration."""
 
-    from consts.model import WorkbenchSessionConfig
+    from contracts.agent import WorkbenchSessionConfig
 
     normalized = WorkbenchSessionConfig.model_validate(config).model_dump(mode="json")
     return replace_conversation_workbench_config(
@@ -478,7 +447,7 @@ def update_conversation_workbench_and_metadata_service(
 ) -> Dict[str, Any]:
     """Validate Workbench config and commit it with runtime metadata atomically."""
 
-    from consts.model import WorkbenchSessionConfig
+    from contracts.agent import WorkbenchSessionConfig
 
     normalized = WorkbenchSessionConfig.model_validate(config).model_dump(mode="json")
     return replace_conversation_workbench_and_metadata(
@@ -557,7 +526,7 @@ def _resolve_knowledge_scope_for_update(
     **kwargs,
 ):
     """Load the scope resolver lazily to avoid service import cycles."""
-    from consts.model import ConversationKnowledgeScopeRequest
+    from contracts.knowledge import ConversationKnowledgeScopeRequest
     from management.services.knowledge_base.scope import resolve_knowledge_scope
 
     return resolve_knowledge_scope(
@@ -892,6 +861,14 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                     'create_time': msg.get('create_time'),
                     'opinion_flag': None
                 }
+                for unit in message_units:
+                    if unit.get('unit_type') == 'clarification_response':
+                        try:
+                            response = json.loads(unit['unit_content'])
+                            if isinstance(response, dict):
+                                message_item['clarification_response'] = response
+                        except (ValueError, TypeError):
+                            logger.warning("Skipping invalid clarification response message_id=%s", message_id)
 
                 # Add minio_files field (if any)
                 if 'minio_files' in msg and msg['minio_files']:

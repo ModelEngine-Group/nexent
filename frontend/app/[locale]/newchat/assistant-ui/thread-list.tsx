@@ -773,8 +773,15 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
     searchQuery,
     newChatDesign,
     generatedTitles,
-    visibleThreadIds
+    visibleThreadIds,
+    selectedAgentId === undefined
   );
+  const [collapsedSearchGroups, setCollapsedSearchGroups] = useState<
+    Set<string>
+  >(() => new Set());
+  useEffect(() => {
+    setCollapsedSearchGroups(new Set());
+  }, [searchQuery]);
   const timeGroups = useThreadListGroups(
     generatedTitles,
     searchQuery,
@@ -919,8 +926,10 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
   if (selectedAgentId !== undefined) {
     const entries = visibleAgentGroups.flatMap((group) => group.entries);
     const orderedEntries = pinned
-      ? hoistPinnedThreads([{ label: "", entries }], (entry) =>
-          pinned.isPinned({ id: entry.id })
+      ? hoistPinnedThreads(
+          [{ label: "", entries }],
+          (entry) => pinned.isPinned(entry),
+          pinned.getPinOrder
         ).flatMap((group) => group.entries)
       : entries;
 
@@ -929,8 +938,8 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
         {orderedEntries.map(({ id, index }, entryIndex) => (
           <Fragment key={id}>
             {entryIndex > 0 &&
-              pinned?.isPinned({ id: orderedEntries[entryIndex - 1].id }) &&
-              !pinned.isPinned({ id }) && (
+              pinned?.isPinned(orderedEntries[entryIndex - 1]) &&
+              !pinned.isPinned(orderedEntries[entryIndex]) && (
                 <div
                   role="separator"
                   className="ml-8 mr-3 my-2 border-t border-dashed border-gray-400/60 dark:border-gray-500/70"
@@ -958,11 +967,29 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
         const entries = pinned
           ? [...group.entries].sort(
               (left, right) =>
-                Number(pinned.pinnedIds.has(right.id)) -
-                Number(pinned.pinnedIds.has(left.id))
+                Number(pinned.isPinned(right)) -
+                  Number(pinned.isPinned(left)) ||
+                (pinned.isPinned(left) && pinned.isPinned(right)
+                  ? (pinned.getPinOrder?.(right) ?? 0) -
+                    (pinned.getPinOrder?.(left) ?? 0)
+                  : 0)
             )
           : group.entries;
-        const isExpanded = expandedAgentKeys.has(groupKey);
+        const isExpanded = group.hasMatchingConversation
+          ? !collapsedSearchGroups.has(groupKey)
+          : expandedAgentKeys.has(groupKey);
+        const toggleExpanded = () => {
+          if (!group.hasMatchingConversation) {
+            onToggleAgentExpanded(groupKey);
+            return;
+          }
+          setCollapsedSearchGroups((previous) => {
+            const next = new Set(previous);
+            if (next.has(groupKey)) next.delete(groupKey);
+            else next.add(groupKey);
+            return next;
+          });
+        };
         const visibleEntries = getVisibleAgentThreads(
           entries,
           isExpanded,
@@ -1014,7 +1041,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
                   type="button"
                   data-slot="aui_thread-list-group-label"
                   className="group flex h-full min-w-0 flex-1 items-center gap-3 rounded-lg px-2 text-left text-[14px] text-[#191919]"
-                  onClick={() => onToggleAgentExpanded(groupKey)}
+                  onClick={toggleExpanded}
                   aria-expanded={isExpanded}
                 >
                   {groupLabel}
@@ -1040,7 +1067,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
                   "group flex h-10 items-center rounded-lg text-left text-[14px] text-[#191919] hover:bg-[#e5e7eb]",
                   newChatDesign ? "gap-5 px-1" : "gap-3 px-3"
                 )}
-                onClick={() => onToggleAgentExpanded(groupKey)}
+                onClick={toggleExpanded}
                 aria-expanded={isExpanded}
               >
                 {groupLabel}
@@ -1049,8 +1076,8 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
             {visibleEntries.map(({ id, index }, entryIndex) => (
               <Fragment key={id}>
                 {entryIndex > 0 &&
-                  pinned?.pinnedIds.has(visibleEntries[entryIndex - 1].id) &&
-                  !pinned.pinnedIds.has(id) && (
+                  pinned?.isPinned(visibleEntries[entryIndex - 1]) &&
+                  !pinned.isPinned(visibleEntries[entryIndex]) && (
                     <div
                       role="separator"
                       className="ml-8 mr-3 my-2 border-t border-dashed border-gray-400/60 dark:border-gray-500/70"
@@ -1071,6 +1098,7 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
 
 type ThreadListGroupEntry = {
   id: string;
+  remoteId?: string;
   index: number;
   hasRemoteId: boolean;
   isRunning: boolean;
@@ -1080,6 +1108,7 @@ type AgentThreadGroup = {
   agentId: number | null;
   agentName: string;
   entries: ThreadListGroupEntry[];
+  hasMatchingConversation: boolean;
 };
 
 // Group the current thread list by agent (conversation history), ordered by
@@ -1090,7 +1119,8 @@ const useThreadListAgentGroups = (
   searchQuery: string,
   newChatDesign: boolean,
   generatedTitles: ReadonlyMap<string, string> | undefined,
-  visibleThreadIds: readonly string[]
+  visibleThreadIds: readonly string[],
+  matchAgentName: boolean
 ): AgentThreadGroup[] | null => {
   const { t } = useTranslation();
   const threadIds = useAuiState((s) => s.threads.threadIds);
@@ -1156,22 +1186,27 @@ const useThreadListAgentGroups = (
               ? (agentNameById.get(agentId) ?? `#${agentId}`)
               : t("chat.threadList.recentConversations"),
           entries: [],
+          hasMatchingConversation: false,
         };
         groupByAgent.set(agentId, group);
         groups.push(group);
       }
       if (query) {
-        const agentNameMatch = group.agentName.toLowerCase().includes(query);
+        const agentNameMatch =
+          matchAgentName && group.agentName.toLowerCase().includes(query);
         const threadTitle =
           (
             generatedTitles?.get(threadIds[index]) ?? item?.title
           )?.toLowerCase() ?? "";
-        if (!agentNameMatch && !threadTitle.includes(query)) {
+        const conversationTitleMatch = threadTitle.includes(query);
+        if (!agentNameMatch && !conversationTitleMatch) {
           continue;
         }
+        group.hasMatchingConversation ||= conversationTitleMatch;
       }
       group.entries.push({
         id: threadIds[index],
+        remoteId: item?.remoteId,
         index,
         hasRemoteId: Boolean(itemsById.get(threadIds[index])?.remoteId),
         isRunning: item?.isRunning === true,
@@ -1193,6 +1228,7 @@ const useThreadListAgentGroups = (
     generatedTitles,
     t,
     searchQuery,
+    matchAgentName,
     visibleThreadIds,
   ]);
   return newChatDesign ? groups : null;

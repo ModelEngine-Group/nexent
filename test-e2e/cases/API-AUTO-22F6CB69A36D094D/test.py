@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import uuid
@@ -6,11 +8,12 @@ import pytest
 
 from shared.http import assert_status, client, response_message
 from shared.factories.ownership import register_owned_http
+from shared.aidp import create_payload
 
 
 def _first_tenant_group_id(tenant_id: str) -> int:
     """Return one real active group_id for ``tenant_id`` (LOCAL_FULL_STACK reads the real DB)."""
-    from database import group_db
+    from management.db.identity import group as group_db
 
     payload = group_db.query_groups_by_tenant(tenant_id, page=None, page_size=None)
     groups = payload.get('groups') or []
@@ -35,7 +38,7 @@ async def test_create_aidp_kb_contract(tenant_a_user, tenant_a_admin, tenant_b_a
     async with client('config') as api:
         response = await api.post(
             '/aidp-mgmt/knowledge-bases',
-            json={'name': 'aidp-d2-%s-noauth' % run_tag},
+            json=await create_payload(tenant_a_admin, 'aidp-d2-%s-noauth' % run_tag),
         )
     assert response.status_code == 401
     assert 'Missing Authorization header' in response_message(response)
@@ -44,7 +47,7 @@ async def test_create_aidp_kb_contract(tenant_a_user, tenant_a_admin, tenant_b_a
     async with client('config', token='invalid-token-value') as api:
         response = await api.post(
             '/aidp-mgmt/knowledge-bases',
-            json={'name': 'aidp-d2-%s-badtoken' % run_tag},
+            json=await create_payload(tenant_a_admin, 'aidp-d2-%s-badtoken' % run_tag),
         )
     assert response.status_code == 401
 
@@ -56,11 +59,8 @@ async def test_create_aidp_kb_contract(tenant_a_user, tenant_a_admin, tenant_b_a
     async with client('config', token=tenant_a_user.access_token) as api:
         response = await api.post(
             '/aidp-mgmt/knowledge-bases',
-            json={
-                'name': 'aidp-d2-%s-user' % run_tag,
-                'ingroup_permission': 'EDIT',
-                'group_ids': [tenant_a_group_id],
-            },
+            json=await create_payload(tenant_a_admin, 'aidp-d2-%s-user' % run_tag,
+                                      ingroup_permission='EDIT', group_ids=[tenant_a_group_id]),
         )
     assert response.status_code == 200
     body = response.json()
@@ -95,10 +95,8 @@ async def test_create_aidp_kb_contract(tenant_a_user, tenant_a_admin, tenant_b_a
     async with client('config', token=tenant_a_admin.access_token) as api:
         response = await api.post(
             '/aidp-mgmt/knowledge-bases',
-            json={
-                'name': 'aidp-d2-%s-admin-nogroup' % run_tag,
-                'ingroup_permission': 'EDIT',
-            },
+            json=await create_payload(tenant_a_admin, 'aidp-d2-%s-admin-nogroup' % run_tag,
+                                      ingroup_permission='EDIT'),
         )
     assert response.status_code == 400
     assert 'group_ids is required' in response_message(response)
@@ -107,10 +105,8 @@ async def test_create_aidp_kb_contract(tenant_a_user, tenant_a_admin, tenant_b_a
     async with client('config', token=tenant_a_admin.access_token) as api:
         response = await api.post(
             '/aidp-mgmt/knowledge-bases',
-            json={
-                'name': 'aidp-d2-%s-admin-badperm' % run_tag,
-                'ingroup_permission': 'BOGUS',
-            },
+            json=await create_payload(tenant_a_admin, 'aidp-d2-%s-admin-badperm' % run_tag,
+                                      ingroup_permission='BOGUS'),
         )
     assert response.status_code == 400
     assert 'Unsupported ingroup_permission' in response_message(response)
@@ -119,11 +115,8 @@ async def test_create_aidp_kb_contract(tenant_a_user, tenant_a_admin, tenant_b_a
     async with client('config', token=tenant_a_admin.access_token) as api:
         response = await api.post(
             '/aidp-mgmt/knowledge-bases',
-            json={
-                'name': 'aidp-d2-%s-admin-cross' % run_tag,
-                'ingroup_permission': 'EDIT',
-                'group_ids': [tenant_b_group_id],
-            },
+            json=await create_payload(tenant_a_admin, 'aidp-d2-%s-admin-cross' % run_tag,
+                                      ingroup_permission='EDIT', group_ids=[tenant_b_group_id]),
         )
     assert response.status_code == 400
     assert 'are not part of tenant' in response_message(response)
