@@ -355,6 +355,28 @@ def register_openapi_service(
         return False
 
 
+def _update_openapi_service_client_ssl_verify(
+    service_mcp: FastMCP, ssl_verify: bool
+) -> None:
+    """Update an already-mounted OpenAPI client's TLS policy in place.
+
+    Tenant MCP applications can keep an SSE session alive while the service
+    configuration is edited.  Rebuilding the tenant registry alone does not
+    update tools that are still served by that existing session, because
+    their OpenAPI tools retain the original ``httpx.AsyncClient`` instance.
+    Replace that client's transport so both existing and new sessions use the
+    current service setting.
+    """
+    client = getattr(service_mcp, "_client", None)
+    if not isinstance(client, httpx.AsyncClient):
+        return
+
+    # FastMCP's OpenAPI tools keep a reference to the service-level client.
+    # Replacing the transport on that same client updates all existing tools
+    # without invalidating their MCP session or requiring a container restart.
+    client._transport = httpx.AsyncHTTPTransport(verify=ssl_verify)
+
+
 def unregister_openapi_service(service_name: str) -> bool:
     """
     Unregister an OpenAPI service.
@@ -414,6 +436,10 @@ def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
     # services have been registered. Existing clients keep using the old
     # instance until the replacement is ready.
     with _tenant_mcp_lock:
+        previous_server = _tenant_mcp_servers.get(tenant_id)
+        previous_registry = getattr(
+            previous_server, "_nexent_openapi_services", {}
+        )
         tenant_mcp = FastMCP(name=f"nexent_mcp_{tenant_id}")
         tenant_registry: Dict[str, FastMCP] = {}
         tenant_mcp._nexent_openapi_services = tenant_registry
@@ -434,6 +460,12 @@ def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
             headers_template = service.get("headers_template")
             auth_enabled = service.get("auth_enabled", bool(headers_template))
             ssl_verify = service.get("ssl_verify", True)
+
+            previous_service = previous_registry.get(service_name)
+            if previous_service is not None:
+                _update_openapi_service_client_ssl_verify(
+                    previous_service, ssl_verify
+                )
 
             if not openapi_json:
                 logger.warning(f"Service '{service_name}' has no OpenAPI JSON, skipping")
