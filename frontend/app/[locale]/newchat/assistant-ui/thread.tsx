@@ -1042,6 +1042,7 @@ const ThreadView: FC<ThreadViewProps> = ({
       </div>
 
       <SourcesPanel
+        messageId={selection?.messageId}
         sources={selection?.sources ?? []}
         images={selection?.images ?? []}
         open={selection !== null}
@@ -1096,6 +1097,7 @@ export const ReadOnlyConversation: FC<{
           </ThreadPrimitive.Viewport>
         </main>
         <SourcesPanel
+          messageId={selection?.messageId}
           sources={selection?.sources ?? []}
           images={selection?.images ?? []}
           open={selection !== null}

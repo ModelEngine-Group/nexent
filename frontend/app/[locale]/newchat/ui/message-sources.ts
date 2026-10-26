@@ -67,21 +67,29 @@ export function getMessageSources(
   )
     return cached.model;
   const contentSources = content.filter((part) => part.type === "source");
-  const contentKeys = new Set(
-    contentSources.map((part) =>
-      getCitationKey({ ...part, citeIndex: Number(part.citeIndex) })
-    )
-  );
-  // Images can live only in the registry, outside the grouped source parts.
-  const rawSources = contentSources.length
-    ? [
-        ...contentSources,
-        ...registered.filter((source) => {
-          const key = getCitationKey(source);
-          return key === undefined || !contentKeys.has(key);
-        }),
-      ]
-    : registered;
+  const rawSources: MessageSourcePart[] = [];
+  const objects = new Set<MessageSourcePart>();
+  const identities = new Set<string>();
+  // History can put the same image in both collections. Zero is a placeholder,
+  // so uncited images need their image key or URL instead of a citation key.
+  for (const source of [...contentSources, ...registered]) {
+    const index = Number(source.citeIndex);
+    const citationKey =
+      Number.isInteger(index) && index > 0
+        ? getCitationKey({ citeIndex: index, toolSign: source.toolSign })
+        : undefined;
+    const identity = citationKey
+      ? `citation:${citationKey}`
+      : source.isImage && source.imageKey
+        ? `image-key:${source.imageKey}`
+        : source.isImage && source.url
+          ? `image-url:${source.url}`
+          : undefined;
+    if (objects.has(source) || (identity && identities.has(identity))) continue;
+    objects.add(source);
+    if (identity) identities.add(identity);
+    rawSources.push(source);
+  }
   const items: PanelSourceItem[] = rawSources.map((source) => {
     const index = Number(source.citeIndex);
     return {
@@ -103,6 +111,7 @@ export function getMessageSources(
       citeIndex: Number.isFinite(index) ? index : undefined,
       toolSign: source.toolSign,
       isImage: source.isImage,
+      imageKey: source.imageKey,
       retrievalHighlightTerms: source.retrievalHighlightTerms,
       searchType: source.searchType,
       sourceMetadata: source.sourceMetadata,

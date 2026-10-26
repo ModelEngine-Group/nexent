@@ -63,6 +63,7 @@ export interface PanelSourceItem extends SourceAttributes {
   downloadUrl?: string;
   objectName?: string;
   isImage?: boolean;
+  imageKey?: string;
   citeIndex?: number;
   /** Message-wide number shared with inline citations, including image hits. */
   displayIndex?: number;
@@ -88,6 +89,8 @@ export function getCitationLabel(
 }
 
 export interface SourcesPanelProps {
+  /** Scopes card state to its owning message, independently of click tokens. */
+  messageId?: string;
   /** Regular (non-image) sources rendered in the first tab. */
   sources: PanelSourceItem[];
   /** Image sources rendered in the second tab. */
@@ -110,6 +113,7 @@ type PanelTab = "sources" | "images";
  * behind the inline summary button without cluttering the chat stream.
  */
 export const SourcesPanel: FC<SourcesPanelProps> = ({
+  messageId,
   sources,
   images,
   open,
@@ -141,6 +145,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
     return { tab, page: Math.floor(Math.max(0, index) / 20) + 1 };
   }, [sources, images, selectedCitationKey]);
   const [navigation, setNavigation] = useState<{
+    messageId?: string;
     token?: object;
     key?: string;
     open: boolean;
@@ -148,6 +153,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
     page: number;
   } | null>(null);
   const manual =
+    navigation?.messageId === messageId &&
     navigation?.token === selectionToken &&
     navigation?.key === selectedCitationKey &&
     navigation?.open === open
@@ -161,6 +167,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   );
   const navigate = (tab: PanelTab, page: number) => {
     setNavigation({
+      messageId,
       token: selectionToken,
       key: selectedCitationKey,
       open,
@@ -180,6 +187,16 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   const title = showSources
     ? t("chat.sources.referenceTitle", { count: sources.length })
     : t("chat.sources.imageTitle", { count: images.length });
+  const itemKey = (item: PanelSourceItem, index: number) =>
+    JSON.stringify([
+      messageId,
+      Number.isInteger(item.citeIndex) && item.citeIndex! > 0
+        ? getCitationKey(item)
+        : [
+            item.imageKey ?? item.url ?? item.objectName ?? item.title,
+            (currentPage - 1) * 20 + index,
+          ],
+    ]);
 
   return (
     <aside
@@ -240,10 +257,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
           <ul className="flex flex-col gap-2">
             {currentItems.map((item, index) => (
               <SourceListItem
-                key={
-                  getCitationKey(item) ??
-                  `${item.url ?? item.title ?? "source"}-${(currentPage - 1) * 20 + index}`
-                }
+                key={itemKey(item, index)}
                 item={item}
                 selected={
                   selectedCitationKey !== undefined &&
@@ -265,12 +279,7 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
         ) : (
           <ul className="grid grid-cols-2 gap-2">
             {currentItems.map((item, index) => (
-              <li
-                key={
-                  getCitationKey(item) ??
-                  `${item.url ?? "image"}-${(currentPage - 1) * 20 + index}`
-                }
-              >
+              <li key={itemKey(item, index)}>
                 <ImageListItem
                   item={item}
                   selected={

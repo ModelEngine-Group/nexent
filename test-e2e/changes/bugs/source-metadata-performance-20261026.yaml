@@ -29,6 +29,7 @@ change:
     added: []
     modified:
       - UT-FE-AUTO-A1A182D995AD0FC8
+      - UT-FE-AUTO-82166F602745F6D7
     retired: []
   traditional_ut:
     decision: reuse
@@ -45,3 +46,5 @@ change:
     citation/panel Case for pagination and adapt existing UT triggers broken by foreground policy changes.
     Keep the 300-source diagnostic scripts and timing evidence local. Do not register cache/render/refresh performance
     as E2E. Existing numeric citations, source/provider data and ES follow-up scope are unchanged.
+    Review follow-up verifies placeholder image identities, historical content/registry image deduplication
+    and message-scoped download state through the existing image/tab and download tests, without new UT or Cases.
