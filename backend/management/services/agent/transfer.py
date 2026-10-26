@@ -15,6 +15,8 @@ import zipfile
 from collections import deque
 from typing import Dict, List, Optional
 
+from nexent.core.agent_names import validate_agent_name
+
 from agents.create_agent_info import create_tool_config_list
 from consts.const import MODEL_CONFIG_MAPPING
 from consts.exceptions import ForbiddenError, SkillDuplicateError
@@ -494,6 +496,9 @@ async def import_agent_impl(
     user_id, tenant_id, _ = get_current_user_info(authorization)
     agent_id = agent_info.agent_id
 
+    for imported in agent_info.agent_info.values():
+        validate_agent_name(imported.name)
+
     agent_stack = deque([agent_id])
     agent_id_set = set()
     mapping_agent_id = {}
@@ -542,6 +547,7 @@ async def import_agent_by_agent_id(
     skip_duplicate_regeneration: bool = False,
     resolve_name_conflicts: bool = False,
 ):
+    validate_agent_name(import_agent_info.name)
     tool_list = []
 
     # query all tools in the current tenant
@@ -574,10 +580,6 @@ async def import_agent_by_agent_id(
     if import_agent_info.max_steps <= 0:
         raise ValueError(
             f"Invalid max steps: {import_agent_info.max_steps}. max steps must be greater than 0."
-        )
-    if not import_agent_info.name.isidentifier():
-        raise ValueError(
-            f"Invalid agent name: {import_agent_info.name}. agent name must be a valid python variable name."
         )
 
     # Resolve model_ids from the export payload.
@@ -744,6 +746,8 @@ async def import_agent_with_skills_impl(
     user_id, tenant_id, _ = get_current_user_info(authorization)
 
     # Validate every agent before creating any dependency skills.
+    for imported in agent_info.agent_info.values():
+        validate_agent_name(imported.name)
     catalog = {
         (tool["class_name"], tool["source"]): tool
         for tool in query_all_tools(tenant_id=tenant_id)

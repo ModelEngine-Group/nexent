@@ -17,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
+from nexent.core.agent_names import validate_agent_name
 
 from contracts.clarification import ClarificationResponse
 from infrastructure.agent_prompt import normalize_imported_agent_bundle
@@ -1422,6 +1423,11 @@ class AgentInfoRequest(BaseModel):
     example_questions: Optional[List[str]] = None
     icon_url: Optional[str] = None
     version_no: int = 0
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: Optional[str]) -> Optional[str]:
+        return validate_agent_name(value) if value is not None else None
 
     @field_validator("verification_config", mode="before")
     @classmethod

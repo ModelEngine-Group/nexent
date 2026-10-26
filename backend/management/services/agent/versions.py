@@ -103,9 +103,14 @@ def publish_version_impl(
     if not agent_draft:
         raise ValueError("Agent draft not found")
 
+    from nexent.core.agent_names import validate_agent_name
+
     publish_as_a2a = bool(agent_draft.get("is_a2a", False))
     if publish_as_a2a:
         validate_a2a_agent_name(agent_draft.get("name") or f"Agent-{agent_id}")
+    # Keep the existing unnamed publication fallback; validate every supplied name.
+    if agent_draft.get("name"):
+        validate_agent_name(agent_draft["name"])
 
     # Calculate new version number
     new_version_no = get_next_version_no(agent_id, tenant_id)

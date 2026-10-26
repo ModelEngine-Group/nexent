@@ -4712,7 +4712,7 @@
   "agent.validation.nameConflictCheckFailed": "Unable to check whether the agent variable name is unique. Please try again.",
   "agent.validation.displayNameDuplicate": "Agent name already exists. Please choose another one.",
   "agent.validation.displayNameConflictCheckFailed": "Unable to check whether the agent name is unique. Please try again.",
-  "agent.validation.namePattern": "Variable name can only contain letters, numbers, and underscores, and must start with a letter or underscore",
+  "agent.validation.namePattern": "Use a valid Python identifier of 1–100 characters. Unicode letters are supported; Python keywords are not allowed.",
   "agent.validation.authorRequired": "Please enter an author name",
   "agent.validation.descriptionRequired": "Please enter an agent description",
   "agent.validation.descriptionMaxLength": "Agent description cannot exceed {{max}} characters",
