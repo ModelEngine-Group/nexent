@@ -31,6 +31,10 @@ from database.market_mcp_db import (
     get_mcp_market_record_by_source_mcp_id,
     update_mcp_market_record,
 )
+from database.outer_api_tool_db import (
+    query_service_by_name,
+    update_openapi_service_ssl_verify,
+)
 from database.remote_mcp_db import (
     check_enabled_mcp_name_exists,
     check_mcp_name_exists,
@@ -121,6 +125,7 @@ def update_mcp_service(
     group_ids: str | None = None,
     ingroup_permission: str | None = None,
     shared_fields: dict | None = None,
+    ssl_verify: bool | None = None,
 ) -> None:
     """Update an MCP service record by ID.
 
@@ -162,6 +167,18 @@ def update_mcp_service(
     next_market_id = (
         market_id if market_id is not None else current_record.get("market_id")
     )
+
+    if (
+        isinstance(current_config_json, dict)
+        and "openapi" in current_config_json
+        and ssl_verify is not None
+    ):
+        update_openapi_service_ssl_verify(
+            service_name=current_record.get("mcp_name") or new_name,
+            tenant_id=tenant_id,
+            user_id=user_id,
+            ssl_verify=ssl_verify,
+        )
 
     update_mcp_record_manage_fields_by_id(
         mcp_id=mcp_id,
@@ -641,6 +658,9 @@ async def get_remote_mcp_server_list(
 
         config_json = record.get("config_json")
         container_id = record.get("container_id")
+        openapi_service = None
+        if isinstance(config_json, dict) and "openapi" in config_json:
+            openapi_service = query_service_by_name(record["mcp_name"], tenant_id)
 
         # Reuse _is_container_record so an empty config_json (e.g. `{}`) is not
         # misclassified as a container, matching the API/enable path behavior.
@@ -675,6 +695,11 @@ async def get_remote_mcp_server_list(
             "group_ids": record.get("group_ids"),
             "ingroup_permission": record.get("ingroup_permission"),
             "shared_fields": record.get("shared_fields"),
+            "ssl_verify": (
+                openapi_service.get("ssl_verify", True)
+                if openapi_service
+                else None
+            ),
         }
         if is_need_auth:
             record_dict["authorization_token"] = record.get("authorization_token")

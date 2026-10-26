@@ -182,6 +182,7 @@ export interface McpServiceItem {
   containerStatus?: McpContainerStatus;
   authorizationToken?: string;
   customHeaders?: Record<string, string>;
+  sslVerify?: boolean;
   isListedInRepository?: boolean;
   communityId?: number;
   marketId?: number;
@@ -230,6 +231,7 @@ export interface UpdateMcpServicePayload {
   tags?: string[];
   authorization_token?: string;
   custom_headers?: Record<string, string>;
+  ssl_verify?: boolean;
   config_json?: Record<string, unknown>;
   version?: string;
   community_id?: number;

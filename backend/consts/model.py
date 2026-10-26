@@ -2479,6 +2479,7 @@ class UpdateMcpServiceRequest(BaseModel):
     tags: List[str] = Field(default_factory=list, description="MCP tags")
     authorization_token: Optional[str] = Field(None, description="Authorization token for MCP server")
     custom_headers: Optional[Dict[str, Any]] = Field(None, description="Custom HTTP headers as JSON object")
+    ssl_verify: Optional[bool] = Field(None, description="Whether to verify TLS certificates for API-type MCP services")
     config_json: Optional[Dict[str, Any]] = Field(None, description="MCP configuration JSON")
     version: Optional[str] = Field(None, description="MCP version")
     market_id: Optional[int] = Field(None, gt=0, description="Linked market record ID")
