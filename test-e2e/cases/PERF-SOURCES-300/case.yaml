@@ -32,8 +32,8 @@ case:
       expected: Each operation completes; P50/P95, maximum long task, layout and script time are recorded.
   expected_results:
     - >-
-      No lost sources or failed metadata interactions; warmed source-open P95 is below 2000 ms and no
-      operation exceeds 5000 ms on the recorded local fixture.
+      No lost sources or failed metadata interactions; source-open P95 is below 500 ms, citation-switch P95
+      below 150 ms, and all operations below 5000 ms on the recorded local fixture.
   risk_type: PERFORMANCE
   risk: Bulk metadata mounting blocks source inspection.
   condition:
@@ -41,7 +41,7 @@ case:
   metrics:
     - Painted operation P50/P95, maximum long task, layout/script duration, API count.
   thresholds:
-    - Source-open P95 < 2000 ms; all measured operations < 5000 ms.
+    - Source-open P95 < 500 ms; citation-switch P95 < 150 ms; all measured operations < 5000 ms.
   recovery_expectations:
     - >-
       Closing and reopening the panel remains functional; browsers and test-owned servers can be stopped

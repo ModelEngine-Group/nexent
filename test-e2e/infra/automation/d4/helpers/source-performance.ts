@@ -1,10 +1,16 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, test, type Page } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export { test, expect };
 
-export async function loadSourceChat(page: Page, provider = "aidp") {
+export async function loadSourceChat(
+  page: Page,
+  provider = "aidp",
+  variants: { images?: number; shortMessage?: boolean } = {},
+) {
   const requests: string[] = [];
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -45,11 +51,27 @@ export async function loadSourceChat(page: Page, provider = "aidp") {
     },
   }));
   const sign = provider === "aidp" ? "j" : "a";
+  const imageSources = Array.from(
+    { length: variants.images ?? 0 },
+    (_, index) => ({
+      cite_index: index + 1,
+      tool_sign: "b",
+      search_type: "web_search",
+      source_type: "url",
+      title: `Image ${index + 1}`,
+      url: `https://source-fixture.invalid/image-${index + 1}.svg`,
+      score_details: { chunk_type: "image" },
+    }),
+  );
   const answer =
     Array.from(
       { length: 100 },
       (_, index) => `Evidence paragraph ${index + 1} [[${sign}${index + 1}]].`,
-    ).join("\n\n") + `\n\nFinal evidence [[${sign}300]].`;
+    ).join("\n\n") +
+    `\n\nFinal evidence [[${sign}300]].` +
+    (imageSources.length
+      ? `\n\nImage evidence [[b${imageSources.length}]].`
+      : "");
   const item = {
     conversation_id: 930001,
     conversation_title: "300 source performance fixture",
@@ -70,19 +92,49 @@ export async function loadSourceChat(page: Page, provider = "aidp") {
         role: "assistant",
         message_id: 930003,
         message: [{ type: "final_answer", content: answer }],
-        search: sources,
+        search: [...sources, ...imageSources],
+        picture: imageSources.map((image) => image.url),
       },
+      ...(variants.shortMessage
+        ? [
+            {
+              role: "user",
+              message_id: 930004,
+              message: "Inspect a shorter list",
+            },
+            {
+              role: "assistant",
+              message_id: 930005,
+              message: [
+                { type: "final_answer", content: "Short evidence [[k3]]." },
+              ],
+              search: sources
+                .slice(0, 3)
+                .map((source) => ({ ...source, tool_sign: "k" })),
+            },
+          ]
+        : []),
     ],
   };
-  await page.context().route("https://source-fixture.invalid/**", (route) =>
-    route.fulfill({
-      contentType: "text/html",
-      body: "<h1>Source document 300</h1>",
-    }),
-  );
+  await page.context().route("https://source-fixture.invalid/**", (route) => {
+    const image = route.request().url().includes("/image-");
+    return route.fulfill({
+      contentType: image ? "image/svg+xml" : "text/html",
+      body: image
+        ? '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="blue"/></svg>'
+        : "<h1>Source document 300</h1>",
+    });
+  });
   await page.route("**/api/**", async (route) => {
     const pathname = new URL(route.request().url()).pathname;
     requests.push(`${route.request().method()} ${pathname}`);
+    if (pathname === "/api/image") {
+      await route.fulfill({
+        contentType: "image/svg+xml",
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="blue"/></svg>',
+      });
+      return;
+    }
     let body: unknown = { code: 0, success: true, data: [], items: [] };
     if (pathname.endsWith("/tenant_config/deployment_version"))
       body = {
@@ -234,6 +286,10 @@ export async function sourceJourney(page: Page, repetitions = 1) {
         apiCount: performance
           .getEntriesByType("resource")
           .filter((entry) => entry.name.includes("/api/")).length,
+        apiPaths: performance
+          .getEntriesByType("resource")
+          .filter((entry) => entry.name.includes("/api/"))
+          .map((entry) => new URL(entry.name).pathname),
       };
     });
     const after = await metrics();
@@ -241,6 +297,7 @@ export async function sourceJourney(page: Page, repetitions = 1) {
       operation,
       ...measurement,
       apiRequests: measurement.apiCount - apiBefore,
+      apiRequestPaths: measurement.apiPaths.slice(apiBefore),
       layoutCount: after.LayoutCount - before.LayoutCount,
       layoutMs: (after.LayoutDuration - before.LayoutDuration) * 1000,
       scriptMs: (after.ScriptDuration - before.ScriptDuration) * 1000,
@@ -256,7 +313,9 @@ export async function sourceJourney(page: Page, repetitions = 1) {
       () => page.locator("[data-citation-marker]").last().click(),
       async () => {
         await expect(panel).toBeVisible();
-        await expect(panel.locator("[data-source-metadata]")).toHaveCount(300);
+        await expect(panel).toHaveAttribute("data-source-page", "15");
+        await expect(panel.getByRole("heading")).toContainText("300");
+        await expect(panel.locator("[data-source-metadata]")).toHaveCount(20);
       },
     );
     await measure(
@@ -273,7 +332,17 @@ export async function sourceJourney(page: Page, repetitions = 1) {
       "summary-open",
       () => summary.click(),
       async () => {
-        await expect(panel.locator("[data-source-metadata]")).toHaveCount(300);
+        await expect(panel.locator("[data-source-metadata]")).toHaveCount(20);
+      },
+    );
+    await measure(
+      "pagination-last",
+      () => panel.getByTitle("15", { exact: true }).click(),
+      async () => {
+        await expect(panel).toHaveAttribute("data-source-page", "15");
+        await expect(
+          panel.getByText("Source document 300", { exact: true }),
+        ).toBeVisible();
       },
     );
     await measure(
@@ -293,6 +362,7 @@ export async function sourceJourney(page: Page, repetitions = 1) {
       },
       async () => expect(panel).toBeVisible(),
     );
+    await panel.getByTitle("1", { exact: true }).click();
     const trigger = panel.locator("[data-source-metadata] button").first();
     const dialog = page.getByRole("dialog", { name: "来源属性", exact: true });
     await measure(

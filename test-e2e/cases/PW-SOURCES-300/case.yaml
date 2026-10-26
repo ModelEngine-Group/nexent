@@ -43,6 +43,13 @@ case:
       expected: >-
         Details are lazy, complete and closable; metadata chips remain within two rows without a hidden-count
         badge.
+    - order: 5
+      action: >-
+        Navigate 20-item pages, click a citation whose display number differs from its list position, manually
+        leave that page and click the same citation again.
+      expected: >-
+        Only one page mounts; all 300 remain counted, source key selects the correct page, repeated clicks
+        return to it, and image/source tabs and shorter lists clamp pagination.
   expected_results:
     - All source identities restore through the production history adapter.
     - >-
@@ -52,12 +59,18 @@ case:
     - >-
       Details are lazy, complete and closable; metadata chips remain within two rows without a hidden-count
       badge.
+    - >-
+      Only one page mounts; all 300 remain counted, source key selects the correct page, repeated clicks
+      return to it, and image/source tabs and shorter lists clamp pagination.
   actor: Chat user
   journey:
     - Load a historical chat fixture containing 300 sources and citation markers.
     - Click an inline citation, close the panel, then click the search-results summary.
     - Select another citation, click a supported source link, hover metadata, move into the popup and pin it.
     - Expand a nested property, select JSON, close with Escape and outside click, and repeat after resize.
+    - >-
+      Navigate 20-item pages, click a citation whose display number differs from its list position, manually
+      leave that page and click the same citation again.
   final_business_result:
     - All 300 sources can be inspected through both entry points and metadata hover remains usable.
   failure_evidence:
@@ -97,5 +110,15 @@ case:
         - 4
       expected_results:
         - 4
+      forbidden_side_effects:
+        - 1
+    - id: AC-05
+      description: >-
+        Only one page mounts; all 300 remain counted, source key selects the correct page, repeated clicks
+        return to it, and image/source tabs and shorter lists clamp pagination.
+      steps:
+        - 5
+      expected_results:
+        - 5
       forbidden_side_effects:
         - 1

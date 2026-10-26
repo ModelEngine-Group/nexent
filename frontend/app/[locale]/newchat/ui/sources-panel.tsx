@@ -1,8 +1,9 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
 
 import {
+  memo,
   useEffect,
   useMemo,
   useRef,
@@ -20,6 +21,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { StandardPaginator } from "@/components/common/StandardPaginator";
 import { cn } from "@/lib/utils";
 import { getCitationKey } from "@/lib/citationDisplay";
 import {
@@ -69,8 +71,11 @@ export interface PanelSourceItem extends SourceAttributes {
 }
 
 export function getCitationLabel(
-  item: Pick<PanelSourceItem, "citeIndex" | "displayIndex" | "toolSign" | "sourceType">,
-  labels: { knowledgeBase: string; web: string; source: string },
+  item: Pick<
+    PanelSourceItem,
+    "citeIndex" | "displayIndex" | "toolSign" | "sourceType"
+  >,
+  labels: { knowledgeBase: string; web: string; source: string }
 ): string {
   const index = item.displayIndex ?? item.citeIndex ?? 0;
   if (item.toolSign === "a" || item.sourceType === "document") {
@@ -115,35 +120,63 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   onClose,
 }) => {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<PanelTab>(
-    sources.length > 0 ? "sources" : "images"
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const requested = useMemo(() => {
+    const imageIndex =
+      selectedCitationKey === undefined
+        ? -1
+        : images.findIndex(
+            (item) => getCitationKey(item) === selectedCitationKey
+          );
+    const tab: PanelTab =
+      imageIndex >= 0 || (!sources.length && images.length)
+        ? "images"
+        : "sources";
+    const index =
+      imageIndex >= 0
+        ? imageIndex
+        : sources.findIndex(
+            (item) => getCitationKey(item) === selectedCitationKey
+          );
+    return { tab, page: Math.floor(Math.max(0, index) / 20) + 1 };
+  }, [sources, images, selectedCitationKey]);
+  const [navigation, setNavigation] = useState<{
+    token?: object;
+    key?: string;
+    open: boolean;
+    tab: PanelTab;
+    page: number;
+  } | null>(null);
+  const manual =
+    navigation?.token === selectionToken &&
+    navigation?.key === selectedCitationKey &&
+    navigation?.open === open
+      ? navigation
+      : null;
+  const activeTab = manual?.tab ?? requested.tab;
+  const total = activeTab === "sources" ? sources.length : images.length;
+  const currentPage = Math.min(
+    manual?.page ?? requested.page,
+    Math.max(1, Math.ceil(total / 20))
   );
-
-  useEffect(() => {
-    if (!open) return;
-
-    const selectedIsImage =
-      selectedCitationKey !== undefined &&
-      images.some((item) => getCitationKey(item) === selectedCitationKey);
-    if (selectedIsImage) {
-      setActiveTab("images");
-    } else if (selectedCitationKey !== undefined || sources.length > 0) {
-      setActiveTab("sources");
-    } else if (images.length > 0) {
-      setActiveTab("images");
-    }
-  }, [
-    open,
-    selectedCitationKey,
-    sources.length,
-    images.length,
-    selectionToken,
-  ]);
+  const navigate = (tab: PanelTab, page: number) => {
+    setNavigation({
+      token: selectionToken,
+      key: selectedCitationKey,
+      open,
+      tab,
+      page,
+    });
+    scrollRef.current?.scrollTo?.({ top: 0 });
+  };
 
   if (!open) return null;
 
   const showSources = activeTab === "sources";
-  const currentItems = showSources ? sources : images;
+  const currentItems = (showSources ? sources : images).slice(
+    (currentPage - 1) * 20,
+    currentPage * 20
+  );
   const title = showSources
     ? t("chat.sources.referenceTitle", { count: sources.length })
     : t("chat.sources.imageTitle", { count: images.length });
@@ -151,9 +184,10 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
   return (
     <aside
       data-slot="sources-panel"
+      data-source-page={currentPage}
       className={cn(
         "flex h-full w-[380px] shrink-0 flex-col border-l border-slate-200 bg-white",
-        className,
+        className
       )}
       aria-label={t("chat.sources.panel")}
     >
@@ -169,28 +203,33 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
         </Button>
       </header>
 
-      {images.length > 0 && <div
-        role="tablist"
-        aria-label={t("chat.sources.tabs")}
-        className="grid grid-cols-2 gap-0 border-b border-slate-200 px-3 py-2"
-      >
-        <TabButton
-          label={t("chat.sources.sources")}
-          count={sources.length}
-          icon={<FileTextIcon className="size-3.5" />}
-          active={showSources}
-          onClick={() => setActiveTab("sources")}
-        />
-        <TabButton
-          label={t("chat.sources.images")}
-          count={images.length}
-          icon={<ImageIcon className="size-3.5" />}
-          active={!showSources}
-          onClick={() => setActiveTab("images")}
-        />
-      </div>}
+      {images.length > 0 && (
+        <div
+          role="tablist"
+          aria-label={t("chat.sources.tabs")}
+          className="grid grid-cols-2 gap-0 border-b border-slate-200 px-3 py-2"
+        >
+          <TabButton
+            label={t("chat.sources.sources")}
+            count={sources.length}
+            icon={<FileTextIcon className="size-3.5" />}
+            active={showSources}
+            onClick={() => navigate("sources", 1)}
+          />
+          <TabButton
+            label={t("chat.sources.images")}
+            count={images.length}
+            icon={<ImageIcon className="size-3.5" />}
+            active={!showSources}
+            onClick={() => navigate("images", 1)}
+          />
+        </div>
+      )}
 
-      <div className="flex-1 overflow-y-auto bg-slate-50/40 px-3 py-3">
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-auto bg-slate-50/40 px-3 py-3"
+      >
         {currentItems.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
             {showSources
@@ -201,34 +240,69 @@ export const SourcesPanel: FC<SourcesPanelProps> = ({
           <ul className="flex flex-col gap-2">
             {currentItems.map((item, index) => (
               <SourceListItem
-                key={`${item.url ?? item.title ?? "source"}-${index}`}
+                key={
+                  getCitationKey(item) ??
+                  `${item.url ?? item.title ?? "source"}-${(currentPage - 1) * 20 + index}`
+                }
                 item={item}
                 selected={
                   selectedCitationKey !== undefined &&
                   getCitationKey(item) === selectedCitationKey
                 }
-                citationContext={citationContext}
-                selectionToken={selectionToken}
+                citationContext={
+                  getCitationKey(item) === selectedCitationKey
+                    ? citationContext
+                    : undefined
+                }
+                selectionToken={
+                  getCitationKey(item) === selectedCitationKey
+                    ? selectionToken
+                    : undefined
+                }
               />
             ))}
           </ul>
         ) : (
           <ul className="grid grid-cols-2 gap-2">
             {currentItems.map((item, index) => (
-              <li key={`${item.url ?? "image"}-${index}`}>
+              <li
+                key={
+                  getCitationKey(item) ??
+                  `${item.url ?? "image"}-${(currentPage - 1) * 20 + index}`
+                }
+              >
                 <ImageListItem
                   item={item}
                   selected={
                     selectedCitationKey !== undefined &&
                     getCitationKey(item) === selectedCitationKey
                   }
-                  selectionToken={selectionToken}
+                  selectionToken={
+                    getCitationKey(item) === selectedCitationKey
+                      ? selectionToken
+                      : undefined
+                  }
                 />
               </li>
             ))}
           </ul>
         )}
       </div>
+      {total > 20 && (
+        <nav
+          aria-label={t("chat.sources.pagination")}
+          className="flex shrink-0 justify-center border-t border-slate-200 px-3 py-3"
+        >
+          <StandardPaginator
+            size="small"
+            current={currentPage}
+            pageSize={20}
+            total={total}
+            showSizeChanger={false}
+            onChange={(page) => navigate(activeTab, page)}
+          />
+        </nav>
+      )}
     </aside>
   );
 };
@@ -258,7 +332,7 @@ const TabButton: FC<TabButtonProps> = ({
         "flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
         active
           ? "bg-[#1677ff] text-white"
-          : "text-slate-700 hover:bg-slate-100 hover:text-slate-900",
+          : "text-slate-700 hover:bg-slate-100 hover:text-slate-900"
       )}
     >
       {icon}
@@ -266,7 +340,7 @@ const TabButton: FC<TabButtonProps> = ({
       <span
         className={cn(
           "ml-1 inline-flex min-w-5 items-center justify-center rounded-full px-1.5 text-[10px]",
-          active ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500",
+          active ? "bg-white/25 text-white" : "bg-slate-100 text-slate-500"
         )}
       >
         {count}
@@ -296,7 +370,7 @@ const SourceSummary: FC<{
     if (firstHighlight) {
       textRef.current.scrollTop = Math.max(
         0,
-        firstHighlight.offsetTop - textRef.current.offsetTop - 16,
+        firstHighlight.offsetTop - textRef.current.offsetTop - 16
       );
     }
   }, [highlighted, highlightTerms]);
@@ -306,11 +380,11 @@ const SourceSummary: FC<{
   if (highlighted && highlightTerms.length > 0) {
     return (
       <div className="mt-2">
-        <p ref={textRef} className="max-h-52 overflow-y-auto whitespace-pre-wrap wrap-break-word pr-1 text-sm leading-6 text-gray-700">
-          <HighlightedChunkText
-            text={text}
-            terms={highlightTerms}
-          />
+        <p
+          ref={textRef}
+          className="max-h-52 overflow-y-auto whitespace-pre-wrap wrap-break-word pr-1 text-sm leading-6 text-gray-700"
+        >
+          <HighlightedChunkText text={text} terms={highlightTerms} />
         </p>
       </div>
     );
@@ -330,7 +404,8 @@ const SourceFooter: FC<{ item: PanelSourceItem; sourceLabel: string }> = ({
   return (
     <div className="mt-2 flex min-w-0 text-xs text-gray-500">
       <div className="flex min-w-0 items-center gap-1">
-        {getSourceProvider(item.searchType, item.toolSign) || item.sourceType === "document" ? (
+        {getSourceProvider(item.searchType, item.toolSign) ||
+        item.sourceType === "document" ? (
           <DatabaseIcon className="size-3 shrink-0" />
         ) : (
           <ExternalLinkIcon className="size-3 shrink-0" />
@@ -375,12 +450,17 @@ const SourceCardBody: FC<{
   </>
 );
 
-const SourceListItem: FC<{
+const SourceListItem = memo(function SourceListItem({
+  item,
+  selected,
+  citationContext,
+  selectionToken,
+}: {
   item: PanelSourceItem;
   selected: boolean;
   citationContext?: string;
   selectionToken?: object;
-}> = ({ item, selected, citationContext, selectionToken }) => {
+}) {
   const { t } = useTranslation();
   const itemRef = useRef<HTMLLIElement>(null);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -430,7 +510,10 @@ const SourceListItem: FC<{
       }
       await storageService.downloadFileWithAuth(objectName, filename);
     } catch (error) {
-      log.error("Failed to download citation file", { searchType: item.searchType, error });
+      log.error("Failed to download citation file", {
+        searchType: item.searchType,
+        error,
+      });
       setDownloadError(t("chat.sources.downloadError"));
     } finally {
       setIsDownloading(false);
@@ -450,7 +533,7 @@ const SourceListItem: FC<{
         (term, index, terms) =>
           term.length >= 2 &&
           sourceText.toLowerCase().includes(term.toLowerCase()) &&
-          terms.indexOf(term) === index,
+          terms.indexOf(term) === index
       );
   }, [item.retrievalHighlightTerms, item.text, selected]);
   const highlightTerms = useMemo(
@@ -458,20 +541,27 @@ const SourceListItem: FC<{
       selected
         ? mergeHighlightTerms(
             retrievalHighlightTerms,
-            extractHighlightTerms(citationContext || "", item.text || ""),
+            extractHighlightTerms(citationContext || "", item.text || "")
           )
         : [],
-    [citationContext, retrievalHighlightTerms, item.text, selected],
+    [citationContext, retrievalHighlightTerms, item.text, selected]
   );
-  const previewUrl = isAidp ? undefined : getLocalFilePreviewUrl(
-    item.url,
-    item.filename || item.title,
-    item.objectName
-  );
+  const previewUrl = isAidp
+    ? undefined
+    : getLocalFilePreviewUrl(
+        item.url,
+        item.filename || item.title,
+        item.objectName
+      );
 
   if (item.sourceType === "document") {
     return (
-      <li ref={itemRef} className={cn("rounded-lg border p-3", selectedClassName)}>
+      <li
+        ref={itemRef}
+        data-citation-key={getCitationKey(item)}
+        data-citation-selected={selected ? "true" : undefined}
+        className={cn("rounded-lg border p-3", selectedClassName)}
+      >
         <div className="flex items-start gap-2 text-left text-sm">
           <button
             type="button"
@@ -506,8 +596,7 @@ const SourceListItem: FC<{
               disabled={isDownloading}
               className="shrink-0 rounded p-1.5 text-muted-foreground hover:bg-accent hover:text-foreground disabled:cursor-wait disabled:opacity-70"
               aria-label={t("chat.sources.download", {
-                name:
-                  item.filename || item.title || t("chat.sources.document"),
+                name: item.filename || item.title || t("chat.sources.document"),
               })}
             >
               {isDownloading ? (
@@ -531,7 +620,12 @@ const SourceListItem: FC<{
     const domain = extractDomain(item.url);
     const displayTitle = item.title || domain;
     return (
-      <li ref={itemRef} className={cn("rounded-lg border p-3", selectedClassName)}>
+      <li
+        ref={itemRef}
+        data-citation-key={getCitationKey(item)}
+        data-citation-selected={selected ? "true" : undefined}
+        className={cn("rounded-lg border p-3", selectedClassName)}
+      >
         <a
           href={item.url}
           target="_blank"
@@ -566,7 +660,12 @@ const SourceListItem: FC<{
   return (
     <li
       ref={itemRef}
-      className={cn("rounded-lg border p-3 text-sm text-foreground", selectedClassName)}
+      data-citation-key={getCitationKey(item)}
+      data-citation-selected={selected ? "true" : undefined}
+      className={cn(
+        "rounded-lg border p-3 text-sm text-foreground",
+        selectedClassName
+      )}
     >
       <SourceCardBody
         title={
@@ -582,40 +681,44 @@ const SourceListItem: FC<{
       <SourceFooter item={item} sourceLabel={sourceLabel} />
     </li>
   );
-};
+});
 
-const ImageListItem: FC<{
+const ImageListItem = memo(function ImageListItem({
+  item,
+  selected,
+  selectionToken,
+}: {
   item: PanelSourceItem;
   selected: boolean;
   selectionToken?: object;
-}> = ({ item, selected, selectionToken }) => {
+}) {
   const { t } = useTranslation();
   const imageUrl = item.url || "";
   const itemRef = useRef<HTMLDivElement>(null);
-  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState(false);
+  const [imageState, setImageState] = useState<{
+    url: string;
+    resolved?: string;
+    error?: boolean;
+  }>({ url: "" });
+  const resolvedUrl =
+    imageState.url === imageUrl ? imageState.resolved : undefined;
+  const loadError = imageState.url === imageUrl && imageState.error;
   const usesBackendStream = isLocalStorageObjectUrl(imageUrl);
 
   useEffect(() => {
-    if (!imageUrl || !usesBackendStream) {
-      setResolvedUrl(null);
-      setLoadError(false);
-      return;
-    }
+    if (!imageUrl || !usesBackendStream) return;
 
     let cancelled = false;
     let objectUrl: string | null = null;
-    setResolvedUrl(null);
-    setLoadError(false);
 
     fetchImageBlob(imageUrl)
       .then((blob) => {
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
-        setResolvedUrl(objectUrl);
+        setImageState({ url: imageUrl, resolved: objectUrl });
       })
       .catch(() => {
-        if (!cancelled) setLoadError(true);
+        if (!cancelled) setImageState({ url: imageUrl, error: true });
       });
 
     return () => {
@@ -701,4 +804,4 @@ const ImageListItem: FC<{
       </div>
     </div>
   );
-};
+});

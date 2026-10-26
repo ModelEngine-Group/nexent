@@ -15,7 +15,9 @@ feature:
     - rule_id: F-115-RULE-02
       description: >-
         Chat source inspection preserves citation and summary entry points, full source access and metadata
-        hover; metadata summaries use two CSS rows without hidden counts and details render on demand.
+        hover; metadata summaries use two CSS rows without hidden counts and details render on demand. Source
+        lists mount at most 20 items per tab; citation selection locates its actual source page, including
+        repeated clicks, while totals and complete data are retained.
   required_test_stages:
     - D1
     - D2

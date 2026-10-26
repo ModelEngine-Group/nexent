@@ -3,8 +3,11 @@ change:
   change_id: CHAT-SOURCE-PERF-20261026
   change_type: bugfix
   bug_id: BUG-SOURCE-METADATA-PERF
-  title: Remove synchronous metadata layout and defer details
-  description: Simplify two-row source metadata and verify 300-source chat inspection.
+  title: Keep bulk source inspection responsive with lazy metadata and pagination
+  description: >-
+    Simplify two-row source metadata and verify 300-source chat inspection. Continue with shared message
+    source derivation, isolated panel actions, memoized cards, coalesced foreground refresh and 20-item
+    frontend pagination.
   observed_behavior: >-
     Every source measures metadata chips repeatedly before paint; closed metadata creates serialized JSON
     eagerly.
@@ -21,6 +24,7 @@ change:
     added: []
     modified:
       - F-115
+      - CHAT-SIDEBAR
     retired: []
   affected_cases:
     existing: []
@@ -37,8 +41,19 @@ change:
       - >-
         Closed metadata does not serialize JSON; collapsed groups do not instantiate descendants; hover and
         pin interactions remain functional.
+      - >-
+        Pagination follows actual citation identity, repeated clicks and image tabs; cached source data
+        invalidates on content/provider changes; ordinary clicks do not refresh thread lists.
     test_selectors:
       - frontend/tests/component/sourceMetadata.test.tsx
+      - frontend/tests/component/messageSources.test.tsx
+      - frontend/tests/component/sourcePagination.test.tsx
+      - frontend/tests/component/sourcePanelActions.test.tsx
+      - frontend/tests/component/foregroundRefresh.test.tsx
+      - frontend/tests/workbench/ConversationActivitySync.test.tsx
+      - frontend/tests/workbench/ConversationActivityRuntime.test.tsx
+      - frontend/tests/workbench/ServerThreadPins.test.tsx
+      - frontend/tests/workbench/WorkbenchPinHistorySync.test.tsx
     reason: Frontend-only behavior requires focused component/browser regression; no Python boundary changes.
   notes: >-
     Local design is kept in the workspace auto-test/source-metadata-performance directory because shared
@@ -46,4 +61,6 @@ change:
     preview/download and image scenarios require follow-up runtime acceptance; provider-shaped browser
     fixtures do not establish those results. Adjacent citation fixtures retain all assertions: HTML checks now
     await the existing asynchronous preview effect, and the assistant-ui hook stub preserves unrelated exports
-    required by current dependencies.
+    required by current dependencies. Continuation explicitly authorized in this chat on 2026-10-26; branch
+    532234ba0 is ahead 1 / behind 0 of freshly fetched develop. Add CHAT-SIDEBAR refresh coverage without
+    changing backend contracts.

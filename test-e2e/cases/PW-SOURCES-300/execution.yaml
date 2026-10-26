@@ -13,6 +13,8 @@ acceptance_bindings:
     - PW-SOURCES-300
   AC-04:
     - PW-SOURCES-300
+  AC-05:
+    - PW-SOURCES-300
 preparation:
   families: []
   anchors: false
