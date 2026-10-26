@@ -277,6 +277,7 @@ def register_openapi_service(
     tenant_id: Optional[str] = None,
     ssl_verify: bool = True,
     auth_enabled: bool = False,
+    client: Optional[httpx.AsyncClient] = None,
 ) -> bool:
     """
     Register an OpenAPI service using FastMCP.from_openapi().
@@ -312,13 +313,16 @@ def register_openapi_service(
         if server_url:
             openapi_spec["servers"] = [{"url": server_url}]
 
-        # Create HTTP client for the underlying REST API
-        client = httpx.AsyncClient(
-            base_url=server_url,
-            timeout=120.0,
-            headers=headers_template if auth_enabled else None,
-            verify=ssl_verify,
-        )
+        # Create HTTP client for the underlying REST API.  A refresh reuses the
+        # previous client so tools belonging to an already-open MCP session and
+        # tools in the newly-built server observe the same TLS policy.
+        if client is None:
+            client = httpx.AsyncClient(
+                base_url=server_url,
+                timeout=120.0,
+                headers=headers_template if auth_enabled else None,
+                verify=ssl_verify,
+            )
 
         # Create FastMCP instance from OpenAPI spec
         service_mcp = FastMCP.from_openapi(
@@ -453,25 +457,35 @@ def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
             ssl_verify = service.get("ssl_verify", True)
 
             previous_service = previous_registry.get(service_name)
+            previous_client = None
             if previous_service is not None:
                 _update_openapi_service_client_ssl_verify(
                     previous_service, ssl_verify
                 )
+                previous_client = getattr(previous_service, "_client", None)
+                if not isinstance(previous_client, httpx.AsyncClient):
+                    previous_client = None
 
             if not openapi_json:
                 logger.warning(f"Service '{service_name}' has no OpenAPI JSON, skipping")
                 skipped_count += 1
                 continue
 
+            register_kwargs = {
+                "ssl_verify": ssl_verify,
+                "auth_enabled": auth_enabled,
+                "mcp_server": tenant_mcp,
+                "tenant_id": tenant_id,
+            }
+            if previous_client is not None:
+                register_kwargs["client"] = previous_client
+
             if register_openapi_service(
                 service_name,
                 openapi_json,
                 server_url,
                 headers_template,
-                ssl_verify=ssl_verify,
-                auth_enabled=auth_enabled,
-                mcp_server=tenant_mcp,
-                tenant_id=tenant_id,
+                **register_kwargs,
             ):
                 registered_count += 1
             else:
