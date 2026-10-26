@@ -65,7 +65,12 @@ import {
 } from "../adapter/thread-agent-registry";
 import type { PublishedAgent } from "@/types/agentConfig";
 import type { FC } from "react";
-import { setPendingThreadOperationId } from "../adapter/conversation-thread-list-adapter";
+import {
+  requestAgentConversationLoad,
+  setPendingThreadOperationId,
+} from "../adapter/conversation-thread-list-adapter";
+import { useConversationAgentSummary } from "@/hooks/chat/useConversationAgentSummary";
+import { mergeAgentSummaryGroups } from "./thread-list-agent-summary";
 import { getVisibleThreadIds } from "./visible-thread-ids";
 import { getVisibleAgentThreads } from "./thread-list-visibility";
 import { hoistPinnedThreads, usePinnedThreads } from "./thread-pins";
@@ -782,6 +787,13 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
   useEffect(() => {
     setCollapsedSearchGroups(new Set());
   }, [searchQuery]);
+  const aui = useAui();
+  const isLoadingMore = useAuiState((s) => s.threads.isLoadingMore);
+  // Agents whose conversations were already injected through a load-more
+  // request; kept for the sidebar's lifetime so re-expanding never refetches.
+  const [injectedAgentIds, setInjectedAgentIds] = useState<Set<number>>(
+    () => new Set()
+  );
   const timeGroups = useThreadListGroups(
     generatedTitles,
     searchQuery,
@@ -981,14 +993,31 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
         const toggleExpanded = () => {
           if (!group.hasMatchingConversation) {
             onToggleAgentExpanded(groupKey);
-            return;
+          } else {
+            setCollapsedSearchGroups((previous) => {
+              const next = new Set(previous);
+              if (next.has(groupKey)) next.delete(groupKey);
+              else next.add(groupKey);
+              return next;
+            });
           }
-          setCollapsedSearchGroups((previous) => {
-            const next = new Set(previous);
-            if (next.has(groupKey)) next.delete(groupKey);
-            else next.add(groupKey);
-            return next;
-          });
+          // Expanding a group whose conversations have not paginated into
+          // the loaded window injects that agent's page through the next
+          // load-more instead of paging through every newer conversation.
+          if (
+            !isExpanded &&
+            agentId !== null &&
+            group.conversationCount != null &&
+            group.conversationCount > group.entries.length &&
+            !injectedAgentIds.has(agentId)
+          ) {
+            setInjectedAgentIds((previous) => new Set(previous).add(agentId));
+            requestAgentConversationLoad(
+              newChatDesign ? "agent_chat" : "workbench",
+              agentId
+            );
+            void aui.threads.loadMore();
+          }
         };
         const visibleEntries = getVisibleAgentThreads(
           entries,
@@ -1003,6 +1032,12 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
                 entries.map((entry) => entry.id)
               )
             : null;
+        const isInjectingAgent =
+          agentId !== null &&
+          injectedAgentIds.has(agentId) &&
+          group.conversationCount != null &&
+          group.conversationCount > group.entries.length &&
+          isLoadingMore;
         const groupLabel = (
           <>
             <LayoutGrid
@@ -1012,6 +1047,21 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
             <OverflowTooltipText className="min-w-0 truncate">
               {group.agentName}
             </OverflowTooltipText>
+            {isInjectingAgent ? (
+              <LoaderCircle
+                className="size-3 shrink-0 animate-spin text-[#808080]"
+                aria-hidden
+              />
+            ) : (
+              group.conversationCount != null && (
+                <span className="shrink-0 text-xs leading-none text-[#808080]">
+                  {t("chat.threadList.agentConversationCount", {
+                    value: group.conversationCount,
+                    defaultValue: "{{value}} 条",
+                  })}
+                </span>
+              )
+            )}
             <ChevronRight
               className={`h-3.5 w-0 shrink-0 overflow-hidden text-[#808080] opacity-0 transition-all duration-200 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:w-3.5 group-focus-visible:opacity-100${isExpanded ? " rotate-90" : ""}`}
               aria-hidden
@@ -1109,6 +1159,8 @@ type AgentThreadGroup = {
   agentName: string;
   entries: ThreadListGroupEntry[];
   hasMatchingConversation: boolean;
+  /** Total conversations owned by this agent, from the agent summary. */
+  conversationCount?: number;
 };
 
 // Group the current thread list by agent (conversation history), ordered by
@@ -1128,6 +1180,12 @@ const useThreadListAgentGroups = (
   const { availableMainAgents } = usePublishedAgentList({
     enabled: newChatDesign,
   });
+  // One row per agent with at least one conversation, so every agent group
+  // renders before its conversations paginate into the loaded window.
+  const { data: agentSummary } = useConversationAgentSummary(
+    newChatDesign ? "agent_chat" : "workbench",
+    newChatDesign
+  );
   // Brand-new conversations bind their agent via this registry until the
   // backend conversation list carries the agent_id after the first run.
   const threadAgentOverrides = useThreadAgentOverrides();
@@ -1171,6 +1229,7 @@ const useThreadListAgentGroups = (
     const query = searchQuery.trim().toLowerCase();
     const groups: AgentThreadGroup[] = [];
     const groupByAgent = new Map<number | null, AgentThreadGroup>();
+    const newestActivityByAgent = new Map<number | null, number>();
     for (const index of indices) {
       const item = itemsById.get(threadIds[index]);
       const agentId = resolveThreadAgentId(
@@ -1190,6 +1249,13 @@ const useThreadListAgentGroups = (
         };
         groupByAgent.set(agentId, group);
         groups.push(group);
+      }
+      const timestamp = timestamps[index];
+      if (timestamp !== undefined) {
+        newestActivityByAgent.set(
+          agentId,
+          Math.max(newestActivityByAgent.get(agentId) ?? 0, timestamp)
+        );
       }
       if (query) {
         const agentNameMatch =
@@ -1212,10 +1278,20 @@ const useThreadListAgentGroups = (
         isRunning: item?.isRunning === true,
       });
     }
-    const orderedGroups = [
-      ...groups.filter((group) => group.agentId !== null),
-      ...groups.filter((group) => group.agentId === null),
-    ];
+    const orderedGroups = mergeAgentSummaryGroups(
+      groups,
+      agentSummary,
+      (group) => newestActivityByAgent.get(group.agentId),
+      (row) => ({
+        agentId: row.agent_id,
+        agentName:
+          row.agent_id !== null
+            ? (agentNameById.get(row.agent_id) ?? `#${row.agent_id}`)
+            : t("chat.threadList.recentConversations"),
+        entries: [],
+        hasMatchingConversation: false,
+      })
+    );
     if (query) {
       return orderedGroups.filter((group) => group.entries.length > 0);
     }
@@ -1230,6 +1306,7 @@ const useThreadListAgentGroups = (
     searchQuery,
     matchAgentName,
     visibleThreadIds,
+    agentSummary,
   ]);
   return newChatDesign ? groups : null;
 };

@@ -10,6 +10,7 @@ import type {
   ConversationListResponse,
   ConversationListPage,
   ConversationListParams,
+  ConversationAgentSummaryItem,
   ApiConversationDetail,
   ApiConversationResponse,
   WorkbenchPins,
@@ -89,6 +90,7 @@ export const conversationService = {
       query.set("conversation_type", params.conversationType);
     }
     if (params.cursor) query.set("cursor", params.cursor);
+    if (params.agentId != null) query.set("agent_id", String(params.agentId));
     const response = await fetch(
       `${API_ENDPOINTS.conversation.list}?${query.toString()}`
     );
@@ -97,6 +99,30 @@ export const conversationService = {
 
     if (data.code === 0) {
       return data.data;
+    }
+
+    throw new ApiError(data.code, data.message);
+  },
+
+  // Get per-agent conversation counts and latest activity for sidebar groups
+  async getAgentSummary(
+    conversationType?: "agent_chat" | "workbench"
+  ): Promise<ConversationAgentSummaryItem[]> {
+    const query = new URLSearchParams();
+    if (conversationType) query.set("conversation_type", conversationType);
+    const suffix = query.toString() ? `?${query.toString()}` : "";
+    const response = await fetch(
+      `${API_ENDPOINTS.conversation.agentSummary}${suffix}`
+    );
+
+    const data = (await response.json()) as {
+      code: number;
+      message: string;
+      data?: { items?: ConversationAgentSummaryItem[] };
+    };
+
+    if (data.code === 0) {
+      return data.data?.items ?? [];
     }
 
     throw new ApiError(data.code, data.message);

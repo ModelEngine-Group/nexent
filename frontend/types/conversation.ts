@@ -25,6 +25,15 @@ export interface ConversationListParams {
   limit: number;
   conversationType?: "agent_chat" | "workbench";
   cursor?: string;
+  agentId?: number;
+}
+
+/** One row per agent from /conversation/agent-summary: enough to render
+ *  every sidebar group before its conversations paginate into view. */
+export interface ConversationAgentSummaryItem {
+  agent_id: number | null;
+  conversation_count: number;
+  last_activity_time: number | null;
 }
 
 export interface WorkbenchPinItem extends ConversationListItem {

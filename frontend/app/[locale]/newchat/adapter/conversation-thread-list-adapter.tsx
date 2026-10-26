@@ -1496,6 +1496,33 @@ const toRemoteThreadMetadata = (
 
 const INITIAL_CONVERSATION_PAGE_SIZE = 30;
 
+/** Upper bound for a single agent-scoped injection: one request at the
+ *  backend's per-request limit, mirroring the batch-selection page size. */
+const AGENT_CONVERSATION_PAGE_LIMIT = 100;
+
+// Agent-scoped conversation loading. The sidebar requests an agent's
+// conversations through this registry when the user expands a group whose
+// conversations have not paginated into the global activity stream yet. The
+// next loadMore-driven list() call serves the request instead of advancing
+// the global cursor and returns the untouched cursor so the global stream's
+// position survives. Keyed by conversationType so concurrent sidebars never
+// cross queues.
+const agentLoadQueues = new Map<
+  "agent_chat" | "workbench",
+  { agentId: number }[]
+>();
+
+export function requestAgentConversationLoad(
+  conversationType: "agent_chat" | "workbench",
+  agentId: number
+): void {
+  const queue = agentLoadQueues.get(conversationType) ?? [];
+  if (!queue.some((request) => request.agentId === agentId)) {
+    queue.push({ agentId });
+  }
+  agentLoadQueues.set(conversationType, queue);
+}
+
 const parseConversationListOffset = (after: string | undefined): number => {
   if (after === undefined) return 0;
 
@@ -1734,6 +1761,41 @@ export const createConversationThreadListAdapter = (
     async list({ after } = {}): Promise<RemoteThreadListResponse> {
       const currentGeneration = after === undefined ? ++generation : generation;
       const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
+
+      // Fresh loads reset any pending agent-scoped requests with the list.
+      if (after === undefined) agentLoadQueues.delete(conversationType);
+
+      // Serve a pending agent-scoped request before advancing the global
+      // cursor: expanding a summary-only group needs that agent's
+      // conversations without paging through every newer conversation.
+      if (after !== undefined) {
+        const queue = agentLoadQueues.get(conversationType);
+        const request = queue?.shift();
+        if (request) {
+          try {
+            const agentPage = await conversationService.getList({
+              offset: 0,
+              limit: AGENT_CONVERSATION_PAGE_LIMIT,
+              todayStartMs,
+              weekStartMs,
+              conversationType,
+              agentId: request.agentId,
+            });
+            if (currentGeneration !== generation) return { threads: [] };
+            return {
+              threads: agentPage.items.map(toRemoteThreadMetadata),
+              // Keep the global cursor so the next ordinary load-more
+              // continues the activity stream exactly where it was.
+              nextCursor: after,
+            };
+          } catch (error) {
+            // Re-queue so a later load-more can retry the failed page.
+            queue?.unshift(request);
+            throw error;
+          }
+        }
+      }
+
       const keyset = after?.startsWith("activity:")
         ? after.slice(9)
         : undefined;

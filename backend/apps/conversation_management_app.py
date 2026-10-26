@@ -25,7 +25,7 @@ from consts.exceptions import (
     WorkbenchConfigVersionConflict,
     WorkbenchError,
 )
-from database.conversation_db import get_conversation_list_page
+from database.conversation_db import get_conversation_agent_summary, get_conversation_list_page
 from management.services.conversation.service import (
     create_new_conversation,
     delete_conversation_service,
@@ -83,6 +83,7 @@ async def list_conversations_endpoint(
     limit: Annotated[Optional[int], Query(ge=1, le=100)] = None,
     conversation_type: Annotated[Optional[str], Query(pattern="^(agent_chat|workbench)$")] = None,
     cursor: Annotated[Optional[str], Query(max_length=512)] = None,
+    agent_id: Annotated[Optional[int], Query(ge=1)] = None,
 ):
     """
     Get all conversation list
@@ -105,6 +106,7 @@ async def list_conversations_endpoint(
             offset=offset,
             **({"conversation_type": conversation_type} if conversation_type is not None else {}),
             **({"cursor": cursor} if cursor is not None else {}),
+            **({"agent_id": agent_id} if agent_id is not None else {}),
         )
         return ConversationResponse(code=0, message="success", data=conversations)
     except ValueError as exc:
@@ -117,6 +119,36 @@ async def list_conversations_endpoint(
     except Exception as e:
         logging.error(f"Failed to get conversation list: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/agent-summary", response_model=ConversationResponse)
+async def list_conversation_agent_summary_endpoint(
+    authorization: Optional[str] = Header(None),
+    conversation_type: Annotated[Optional[str], Query(pattern="^(agent_chat|workbench)$")] = None,
+):
+    """
+    Get per-agent conversation counts and latest activity for sidebar groups
+    """
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        if not user_id:
+            raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Unauthorized access, Please login first")
+        summary = get_conversation_agent_summary(
+            user_id=user_id,
+            **({"conversation_type": conversation_type} if conversation_type is not None else {}),
+        )
+        return ConversationResponse(code=0, message="success", data=summary)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except TokenExpiredError as e:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Failed to get conversation agent summary: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
 
 @router.post("/rename", response_model=ConversationResponse)
 async def rename_conversation_endpoint(request: RenameRequest, authorization: Optional[str] = Header(None)):

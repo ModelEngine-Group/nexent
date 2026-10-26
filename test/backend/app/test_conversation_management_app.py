@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import os
 import sys
 import types
@@ -44,6 +46,7 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 from backend.apps.conversation_management_app import (
     create_new_conversation_endpoint,
     list_conversations_endpoint,
+    list_conversation_agent_summary_endpoint,
     rename_conversation_endpoint,
     delete_conversation_endpoint,
     delete_conversations_batch_endpoint,
@@ -66,6 +69,7 @@ def conversation_mocks():
     with patch('backend.apps.conversation_management_app.get_current_user_id') as mock_get_current_user_id, \
             patch('backend.apps.conversation_management_app.create_new_conversation') as mock_create_new_conv, \
             patch('backend.apps.conversation_management_app.get_conversation_list_page') as mock_get_conv_list, \
+            patch('backend.apps.conversation_management_app.get_conversation_agent_summary') as mock_get_agent_summary, \
             patch('backend.apps.conversation_management_app.rename_conversation_service') as mock_rename_conv, \
             patch('backend.apps.conversation_management_app.logging') as mock_logging, \
             patch('backend.apps.conversation_management_app.delete_conversation_service') as mock_delete_conv, \
@@ -81,6 +85,7 @@ def conversation_mocks():
             'get_current_user_id': mock_get_current_user_id,
             'create_new_convo': mock_create_new_conv,
             'get_conversation_list': mock_get_conv_list,
+            'get_agent_summary': mock_get_agent_summary,
             'rename_conversation': mock_rename_conv,
             'logging': mock_logging,
             'delete_conversation': mock_delete_conv,
@@ -267,6 +272,84 @@ async def test_list_conversations_filters_by_entrypoint(conversation_mocks, conv
         offset=0,
         conversation_type=conversation_type,
     )
+
+
+@pytest.mark.asyncio
+async def test_list_conversations_filters_by_agent(conversation_mocks):
+    """An agent-scoped page only requests that agent's conversations."""
+    conversation_mocks['get_current_user_id'].return_value = ("user_id", "tenant_id")
+    conversation_mocks['get_conversation_list'].return_value = {"items": [], "metadata": {}}
+
+    await list_conversations_endpoint(
+        authorization="Bearer test-token",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        agent_id=7,
+    )
+
+    conversation_mocks['get_conversation_list'].assert_called_once_with(
+        user_id="user_id",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=None,
+        offset=0,
+        agent_id=7,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("conversation_type", ["agent_chat", "workbench", None])
+async def test_list_conversation_agent_summary_success(conversation_mocks, conversation_type):
+    """Verify successful retrieval of the per-agent conversation summary"""
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
+    dummy_summary = {
+        "items": [
+            {"agent_id": 7, "conversation_count": 102, "last_activity_time": 1729900000000},
+            {"agent_id": None, "conversation_count": 3, "last_activity_time": 1729800000000},
+        ]
+    }
+    conversation_mocks['get_agent_summary'].return_value = dummy_summary
+
+    kwargs = {"authorization": "Bearer test-token"}
+    if conversation_type is not None:
+        kwargs["conversation_type"] = conversation_type
+    result = await list_conversation_agent_summary_endpoint(**kwargs)
+
+    assert result.code == 0
+    assert result.data == dummy_summary
+    conversation_mocks['get_current_user_id'].assert_called_once_with(
+        "Bearer test-token")
+    expected_kwargs = {"user_id": "user_id"}
+    if conversation_type is not None:
+        expected_kwargs["conversation_type"] = conversation_type
+    conversation_mocks['get_agent_summary'].assert_called_once_with(
+        **expected_kwargs)
+
+
+@pytest.mark.asyncio
+async def test_list_conversation_agent_summary_unauthorized(conversation_mocks):
+    """Ensure unauthorized access raises HTTPException"""
+    conversation_mocks['get_current_user_id'].return_value = (None, None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await list_conversation_agent_summary_endpoint(
+            authorization="Bearer invalid-token")
+
+    assert exc_info.value.status_code == 401
+    conversation_mocks['get_agent_summary'].assert_not_called()
+
+
+def test_list_conversation_agent_summary_rejects_invalid_type(conversation_mocks):
+    """Verify FastAPI rejects conversation types outside the public contract."""
+    app = FastAPI()
+    app.include_router(router)
+
+    response = TestClient(app).get(
+        "/conversation/agent-summary?conversation_type=unknown")
+
+    assert response.status_code == 422
+    conversation_mocks['get_agent_summary'].assert_not_called()
 
 
 @pytest.mark.asyncio

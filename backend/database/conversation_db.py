@@ -1213,11 +1213,14 @@ def get_conversation_list_page(
     offset: int = 0,
     conversation_type: Optional[str] = None,
     cursor: Optional[str] = None,
+    agent_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Return activity-ordered histories with full-scope bucket counts.
 
     An optional keyset cursor avoids offset drift as older conversations gain
-    new activity. The legacy offset contract remains available.
+    new activity. The legacy offset contract remains available. An optional
+    agent_id restricts the page to that agent's conversations (agent-scoped
+    pages exclude conversations without an agent binding).
     """
     if conversation_type not in (None, "agent_chat", "workbench"):
         raise ValueError("Invalid conversation type")
@@ -1248,6 +1251,8 @@ def get_conversation_list_page(
             scope = scope.where(ConversationRecord.workbench_config.is_not(None))
         elif conversation_type == "agent_chat":
             scope = scope.where(ConversationRecord.workbench_config.is_(None))
+        if agent_id is not None:
+            scope = scope.where(ConversationRecord.agent_id == agent_id)
         rows = scope.subquery()
         statement = select(rows).order_by(rows.c.activity_time.desc(), rows.c.conversation_id.desc())
         if boundary:
@@ -1290,6 +1295,57 @@ def get_conversation_list_page(
             if has_more and visible else None
         )
         return {"items": items, "metadata": metadata, "next_cursor": next_cursor}
+
+
+def get_conversation_agent_summary(
+    user_id: str,
+    conversation_type: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Return one row per agent that owns at least one active conversation.
+
+    The sidebar uses this summary to render every agent group up front
+    instead of discovering agents only once their conversations paginate
+    into the activity-ordered list.
+    """
+    if conversation_type not in (None, "agent_chat", "workbench"):
+        raise ValueError("Invalid conversation type")
+    with get_db_session() as session:
+        activity = _activity_time_expression()
+        activity_ms = func.extract("epoch", activity) * 1000
+        scope = (
+            select(
+                ConversationRecord.agent_id.label("agent_id"),
+                func.count().label("conversation_count"),
+                func.max(activity_ms).label("last_activity_time"),
+            )
+            .where(
+                ConversationRecord.delete_flag == "N",
+                ConversationRecord.created_by == user_id,
+            )
+            .group_by(ConversationRecord.agent_id)
+        )
+        if conversation_type == "workbench":
+            scope = scope.where(ConversationRecord.workbench_config.is_not(None))
+        elif conversation_type == "agent_chat":
+            scope = scope.where(ConversationRecord.workbench_config.is_(None))
+        statement = scope.order_by(
+            func.max(activity_ms).desc().nulls_last(),
+            ConversationRecord.agent_id.desc().nulls_last(),
+        )
+        rows = session.execute(statement).all()
+        items = [
+            {
+                "agent_id": row.agent_id,
+                "conversation_count": int(row.conversation_count),
+                "last_activity_time": (
+                    int(row.last_activity_time)
+                    if row.last_activity_time is not None
+                    else None
+                ),
+            }
+            for row in rows
+        ]
+        return {"items": items}
 
 
 def update_conversation_agent_id(conversation_id: int, agent_id: int, user_id: Optional[str] = None) -> bool:

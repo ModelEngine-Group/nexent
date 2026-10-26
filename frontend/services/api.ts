@@ -55,6 +55,7 @@ export const API_ENDPOINTS = {
   },
   conversation: {
     list: `${API_BASE_URL}/conversation/list`,
+    agentSummary: `${API_BASE_URL}/conversation/agent-summary`,
     workbenchPins: `${API_BASE_URL}/conversation/workbench_pins`,
     workbenchPin: (id: number) =>
       `${API_BASE_URL}/conversation/${id}/workbench_pin`,
