@@ -10,7 +10,7 @@
 # ---------------------------------------------------------------------
 # Stage 1: builder - install uv and the Nexent SDK with all of its
 # tool-side dependencies so the runtime stage can copy them in as a
-# pre-built artifact (no `pip install` happens at sandbox startup).
+# pre-built artifact (no package installation happens at sandbox startup).
 # ---------------------------------------------------------------------
 FROM python:3.11-slim AS builder
 
@@ -40,13 +40,12 @@ RUN --mount=type=cache,id=nexent-sandbox-apt-cache-${TARGETARCH},target=/var/cac
     apt-get update && \
     apt-get install -y --no-install-recommends curl build-essential
 
-RUN --mount=type=cache,id=nexent-sandbox-pip-${TARGETARCH},target=/root/.cache/pip,sharing=locked \
-    pip install uv $(test -n "$MIRROR" && echo "-i $MIRROR")
+COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /usr/local/bin/
 
 WORKDIR /opt
 
 # Copy SDK source first (and pyproject.toml) so uv can resolve deps.
-# The sandbox does not run `pip install` at startup; everything here is
+# The sandbox does not install packages at startup; everything here is
 # pre-installed in the image so that DockerExecutor.start_kernel_gateway
 # can hand control to a Jupyter kernel immediately.
 COPY sdk/pyproject.toml /opt/sdk/pyproject.toml
@@ -144,6 +143,8 @@ RUN pnpm create vite nexent-vite-template --template react-ts && \
 # ---------------------------------------------------------------------
 FROM python:3.11-slim AS runtime
 
+COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /usr/local/bin/
+
 ARG APT_MIRROR
 ARG TARGETARCH
 LABEL authors="nexent"
@@ -192,8 +193,8 @@ RUN --mount=type=cache,id=nexent-sandbox-apt-cache-${TARGETARCH},target=/var/cac
 
 # Install Jupyter Kernel Gateway - the IPC channel smolagents DockerExecutor
 # uses to send code actions and stream back observations.
-RUN --mount=type=cache,id=nexent-sandbox-pip-${TARGETARCH},target=/root/.cache/pip,sharing=locked \
-    pip install --no-cache-dir \
+RUN --mount=type=cache,id=nexent-sandbox-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
+    uv pip install --system --link-mode copy \
         jupyter_kernel_gateway \
         jupyter_client \
         ipykernel
@@ -228,8 +229,8 @@ FROM runtime AS with-libs
 ARG MIRROR
 ARG TARGETARCH
 
-RUN --mount=type=cache,id=nexent-sandbox-pip-${TARGETARCH},target=/root/.cache/pip,sharing=locked \
-    pip install --no-cache-dir \
+RUN --mount=type=cache,id=nexent-sandbox-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
+    uv pip install --system --link-mode copy \
         "numpy>=1.26.4,<2.0" \
         "pandas>=2.0,<3.0" \
         "requests>=2.31,<3.0" \

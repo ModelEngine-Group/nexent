@@ -1,0 +1,81 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: DEP-UV-DEPENDENCY-VARIANTS
+  feature_id: F-173
+  requirement_ids:
+  - CPU-DEFAULT-UV-20261026
+  business_rule_ids:
+  - F-173-RULE-04
+  title: CPU and NVIDIA dependency profiles across development, CI and image builds
+  type: DEPLOYMENT
+  priority: P1
+  status: manual
+  automation: manual
+  objective: Verify real dependency installation and image construction without Nexent deployment or application functional execution.
+  preconditions:
+  - Docker, uv and Python 3.11 are available; package registries and image registries are reachable.
+  - Use fresh task-owned environments, image tags and evidence directories. NVIDIA hardware is not required for installation acceptance.
+  test_data:
+    profiles:
+    - base
+    - data-process
+    - nvidia
+    torch_versions:
+    - 2.11.0
+    - 0.26.0
+    images:
+    - main
+    - data-process-cpu
+    - data-process-gpu
+    - sandbox
+    - sandbox-full
+    - mcp
+    - container-mcp
+    - ext-knowledge-mock
+    - a2a-agent
+  steps:
+  - order: 1
+    action: Install base, CPU document-processing and SDK developer dependencies in fresh environments using maintained uv commands. Inspect installed
+      package metadata and import Torch/Torchvision.
+    expected: Base has no Torch; CPU profiles use matching CPU builds, torch.version.cuda is None, and no nvidia-*, cuda-* or triton distribution
+      is installed.
+  - order: 2
+    action: Install the alternative NVIDIA profile; inspect package metadata and import Torch/Torchvision. Try selecting both parsing profiles.
+    expected: NVIDIA profile contains CUDA-enabled matching builds and required NVIDIA distributions; conflicting CPU/NVIDIA combinations fail
+      before installation.
+  - order: 3
+    action: Run the existing UT CI installation and test sequence locally with CPU and NVIDIA profiles. Record each test result separately and
+      inspect remote CPU CI install logs after push.
+    expected: Both environments execute the existing tests without changed assertions. Failures are diagnosed against the unchanged baseline,
+      with no unavailable or failed checks reported as passing.
+  - order: 4
+    action: Build each changed application/test image, including both data-process variants; inspect final image package inventories and uv availability
+      where installation occurs.
+    expected: CPU data-process contains no GPU distributions; GPU data-process contains CUDA Torch/NVIDIA dependencies. Base images do not gain
+      Torch; uv-installed tools retain entrypoints.
+  - order: 5
+    action: Review remaining direct pip commands, install guidance and build configuration. Check sandbox dynamic install policy/tests are unchanged.
+    expected: Build/development commands and guidance use uv; uv bootstrap does not use pip. Dynamic sandbox pip allowlisting and security fixtures
+      retain their existing contract.
+  expected_results:
+  - CPU, NVIDIA, base and conflicting-profile installation results match their contracts.
+  - CPU/NVIDIA UT results and remote CI installation observations are retained separately.
+  - Changed image builds and final dependency inventories match the selected profiles.
+  - No new installer script or recurring CI dependency assertion is introduced; sandbox dynamic installation behavior is preserved.
+  forbidden_side_effects:
+  - Do not deploy Nexent, start application services, execute functional/model tests or claim GPU hardware inference.
+  - Do not publish images, alter existing containers/volumes, expose credentials or change sandbox command security policy.
+  risk_type: DEPLOYMENT
+  risk: A different installation entry point silently selects CUDA by default or incompatible Torch/Torchvision builds.
+  condition:
+  - Exercise fresh CPU/NVIDIA installations and actual changed Dockerfiles, preserving mirrors and Python environment targeting.
+  metrics:
+  - CPU/GPU/base environment package inventories and Torch build identities.
+  - Unit-test outcomes per profile and successful image builds per Dockerfile/variant.
+  thresholds:
+  - Zero CUDA/NVIDIA/Triton packages in CPU profiles; CUDA-enabled Torch and NVIDIA runtime packages in the NVIDIA profile.
+  - Every required image builds and its inventory matches its profile; required UT failures remain explicitly reported.
+  recovery_expectations:
+  - Remove only task-owned disposable containers after inspection; preserve sanitized evidence and existing services/data.

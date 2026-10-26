@@ -39,10 +39,22 @@ System-scoped runtime sandboxes are enabled by default. Keep Docker running when
 ```bash
 cd backend
 uv sync --extra data-process --extra test
-uv pip install -e "../sdk[dev]"
 ```
 
 These commands create or update `backend/.venv`, install the backend dependencies, and install the local SDK in editable mode. Changes under `sdk/nexent/` do not require copying the package files again.
+
+CPU PyTorch and Torchvision are selected by the `data-process` extra (and SDK `dev`). Use uv 0.11.7, matching CI and image builds. The local SDK is included by the backend extras; a second SDK install is unnecessary.
+
+For NVIDIA CUDA 13.0 dependencies, use the alternative profile:
+
+```bash
+# From backend/
+uv sync --extra nvidia --extra test
+```
+
+`data-process` and `nvidia` are mutually exclusive; do not use `--all-extras`. `uv sync` removes dependencies belonging only to the previously selected profile. Base installs without either profile do not install PyTorch. PyTorch CPU/CUDA wheels use their explicit upstream indexes even when other packages use a mirror. CUDA installation does not verify GPU hardware or driver compatibility.
+
+For standalone SDK development, run `uv pip install -e ".[dev]"` from `sdk/` for CPU, or `uv pip install -e ".[quality,performance,nvidia]"` for NVIDIA. Use a fresh virtual environment when switching standalone `uv pip` profiles; unlike `uv sync`, it retains unrelated installed packages. NVIDIA is an alternative to SDK `data_process`/`dev`.
 
 #### Optional: Use Package Mirrors
 
@@ -50,16 +62,13 @@ When network access is limited, specify a package mirror for uv. For example:
 
 ```bash
 # Tsinghua mirror
-uv sync --all-extras --default-index https://pypi.tuna.tsinghua.edu.cn/simple
-uv pip install -e "../sdk[dev]" --default-index https://pypi.tuna.tsinghua.edu.cn/simple
+uv sync --extra data-process --extra test --default-index https://pypi.tuna.tsinghua.edu.cn/simple
 
 # Alibaba Cloud mirror
-uv sync --all-extras --default-index https://mirrors.aliyun.com/pypi/simple/
-uv pip install -e "../sdk[dev]" --default-index https://mirrors.aliyun.com/pypi/simple/
+uv sync --extra data-process --extra test --default-index https://mirrors.aliyun.com/pypi/simple/
 
 # Multiple sources (recommended)
-uv sync --all-extras --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
-uv pip install -e "../sdk[dev]" --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
+uv sync --extra data-process --extra test --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
 ```
 
 :::: info Mirror References

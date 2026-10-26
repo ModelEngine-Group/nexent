@@ -63,14 +63,10 @@ dependencies = [
 ]
 
 [tool.uv]
-override-dependencies = [
-    "pymongo==999.0.0",
-    "psycopg2-binary==999.0.0",
-    "redis==999.0.0",
-    "neo4j==999.0.0",
-    "chromadb==999.0.0",
-    "pinecone-client==999.0.0",
-    "weaviate-client==999.0.0",
+required-version = ">=0.11.7"
+conflicts = [
+    [{ extra = "data-process" }, { extra = "nvidia" }],
+    [{ extra = "dev" }, { extra = "nvidia" }],
 ]
 
 [project.optional-dependencies]
@@ -79,8 +75,16 @@ quality = [
     "pytest>=8.1.0"
 ]
 data_process = [
-    "unstructured[all-docs]",
+    "unstructured[all-docs]==0.18.14",
     "unstructured-inference==1.2.0",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+]
+nvidia = [
+    "unstructured[all-docs]==0.18.14",
+    "unstructured-inference==1.2.0",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
 ]
 performance = [
     "opentelemetry-api>=1.20.0",
@@ -117,3 +121,23 @@ lint.select = ["E", "F", "I", "W"]
 [tool.ruff.lint.isort]
 known-first-party = ["nexent"]
 lines-after-imports = 2
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "data-process" },
+    { index = "pytorch-nvidia", extra = "nvidia" },
+]
+torchvision = [
+    { index = "pytorch-cpu", extra = "data-process" },
+    { index = "pytorch-nvidia", extra = "nvidia" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-nvidia"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true

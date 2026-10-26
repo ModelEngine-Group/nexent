@@ -73,13 +73,14 @@ jobs:
           python-version: '3.11'
 
       - name: Install uv
-        run: pip install --upgrade uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.7"
 
       - name: Install dependencies
         run: |
           cd backend
           uv sync --extra data-process --extra test
-          uv pip install -e "../sdk[dev]"
           cd ..
 
       - name: Run all tests and collect coverage

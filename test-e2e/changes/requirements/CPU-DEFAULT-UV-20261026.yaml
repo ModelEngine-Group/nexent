@@ -1,0 +1,31 @@
+schema_version: '1.0'
+change:
+  change_id: CPU-DEFAULT-UV-20261026
+  change_type: requirement
+  requirement_id: CPU-DEFAULT-UV-20261026
+  title: Default document processing to CPU and standardize uv installation
+  description: Use alternative CPU/NVIDIA extras across development, UT CI and data-process builds; migrate direct build/development pip commands
+    to uv without changing sandbox dynamic installation. User excludes deployment and application functional verification.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - F-173
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - DEP-UV-DEPENDENCY-VARIANTS
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: reuse
+    test_selectors:
+    - test/backend/data_process/test_tasks.py
+    - test/sdk/data_process/test_core.py
+    behaviors:
+    - Execute the existing CI unit-test suite under both CPU and NVIDIA dependency installations without weakening assertions.
+    reason: Dependency resolution and Docker installation are proved by real D5 installation/build observations; there is no new isolated Python
+      business logic requiring implementation-mirroring tests. Existing UT verifies imports and regressions in both dependency environments.
+  notes: 'SPEC: ../nexent-doc/docs/Developing/management-cpu-default-uv-installation. Approved by user 2026-10-26; no new install script, recurring
+    CI dependency guard, deployment or application functional verification.'

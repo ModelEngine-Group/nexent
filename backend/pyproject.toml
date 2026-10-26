@@ -41,12 +41,29 @@ dependencies = [
 data-process = [
     "celery>=5.3.6",
     "flower>=2.0.1",
-    "unstructured[csv,docx,pdf,pptx,xlsx,md]==0.18.14",
+    "unstructured[all-docs]==0.18.14",
+    "unstructured-inference==1.2.0",
     "openpyxl>=3.1.5",
     "xlrd>=2.0.1",
-    "huggingface_hub>=0.30.0,<1.0"
+    "huggingface_hub>=0.30.0,<1.0",
+    "nexent[performance]",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+]
+nvidia = [
+    "celery>=5.3.6",
+    "flower>=2.0.1",
+    "unstructured[all-docs]==0.18.14",
+    "unstructured-inference==1.2.0",
+    "openpyxl>=3.1.5",
+    "xlrd>=2.0.1",
+    "huggingface_hub>=0.30.0,<1.0",
+    "nexent[performance]",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
 ]
 test = [
+    "nexent[quality,performance]",
     "pytest",
     "pytest-cov",
     "coverage",
@@ -64,3 +81,29 @@ test = [
 
 [tool.setuptools]
 packages = []
+
+# CPU and NVIDIA are alternative document-processing profiles.
+[tool.uv]
+required-version = ">=0.11.7"
+conflicts = [[{ extra = "data-process" }, { extra = "nvidia" }]]
+
+[tool.uv.sources]
+nexent = { path = "../sdk", editable = true }
+torch = [
+    { index = "pytorch-cpu", extra = "data-process" },
+    { index = "pytorch-nvidia", extra = "nvidia" },
+]
+torchvision = [
+    { index = "pytorch-cpu", extra = "data-process" },
+    { index = "pytorch-nvidia", extra = "nvidia" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-nvidia"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true

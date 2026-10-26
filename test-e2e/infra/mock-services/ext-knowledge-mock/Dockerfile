@@ -5,6 +5,8 @@
 # current worktree, never from a stale snapshot.
 FROM python:3.11-slim
 
+COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /usr/local/bin/
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
@@ -12,7 +14,7 @@ WORKDIR /app
 
 # Versions are pinned inline (locked resolved versions, wheels only) to keep
 # the image reproducible; keep requirements.txt in sync when bumping.
-RUN pip install --no-cache-dir --only-binary :all: \
+RUN uv pip install --system --no-cache --only-binary :all: \
     fastapi==0.139.0 \
     uvicorn==0.51.0 \
     python-multipart==0.0.32 \

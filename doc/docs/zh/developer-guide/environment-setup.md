@@ -39,10 +39,22 @@ bash deploy.sh docker --components infrastructure --port-policy development
 ```bash
 cd backend
 uv sync --extra data-process --extra test
-uv pip install -e "../sdk[dev]"
 ```
 
 以上命令会创建或更新 `backend/.venv`，安装后端依赖，并以可编辑模式安装本地 SDK。修改 `sdk/nexent/` 后无需重复复制包文件。
+
+`data-process` extra（以及 SDK `dev`）默认选择 CPU 版 PyTorch 和 Torchvision。请使用与 CI、镜像构建一致的 uv 0.11.7。backend extras 已包含本地 SDK，无需再次单独安装。
+
+需要 NVIDIA CUDA 13.0 依赖时，使用替代配置：
+
+```bash
+# 在 backend/ 下执行
+uv sync --extra nvidia --extra test
+```
+
+`data-process` 与 `nvidia` 互斥，不要使用 `--all-extras`。`uv sync` 会移除仅属于上一配置的依赖。两者均不选择时，基础安装不会引入 PyTorch。普通依赖可以使用镜像源，PyTorch CPU/CUDA wheel 仍使用显式配置的官方索引。安装 CUDA 依赖不代表已验证 GPU 硬件或驱动兼容性。
+
+独立开发 SDK 时，在 `sdk/` 下执行 `uv pip install -e ".[dev]"` 使用 CPU，或 `uv pip install -e ".[quality,performance,nvidia]"` 使用 NVIDIA。独立 `uv pip` 安装切换配置时请使用全新虚拟环境；它与 `uv sync` 不同，会保留无关的已安装依赖。NVIDIA 配置替代 SDK 的 `data_process`/`dev`。
 
 #### 可选：镜像加速
 
@@ -50,16 +62,13 @@ uv pip install -e "../sdk[dev]"
 
 ```bash
 # 清华源
-uv sync --all-extras --default-index https://pypi.tuna.tsinghua.edu.cn/simple
-uv pip install -e "../sdk[dev]" --default-index https://pypi.tuna.tsinghua.edu.cn/simple
+uv sync --extra data-process --extra test --default-index https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 阿里云
-uv sync --all-extras --default-index https://mirrors.aliyun.com/pypi/simple/
-uv pip install -e "../sdk[dev]" --default-index https://mirrors.aliyun.com/pypi/simple/
+uv sync --extra data-process --extra test --default-index https://mirrors.aliyun.com/pypi/simple/
 
 # 多源（推荐）
-uv sync --all-extras --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
-uv pip install -e "../sdk[dev]" --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
+uv sync --extra data-process --extra test --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
 ```
 
 :::: info 镜像参考
