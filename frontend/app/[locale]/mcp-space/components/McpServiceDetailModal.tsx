@@ -426,6 +426,37 @@ export default function McpServiceDetailModal({
               />
             </Form.Item>
             <Form.Item
+              name="sslVerify"
+              valuePropName="checked"
+              className="mb-0"
+              style={{ marginBottom: 0 }}
+            >
+              <div className="flex items-center gap-2">
+                <Switch disabled={isReadOnly} />
+                <span className="text-sm text-slate-700">
+                  {t("mcpConfig.openapiService.form.sslVerifyLabel")}
+                </span>
+              </div>
+            </Form.Item>
+            <Form.Item noStyle shouldUpdate={(prev, current) =>
+              prev.sslVerify !== current.sslVerify
+            }>
+              {({ getFieldValue }) => {
+                const sslVerify = getFieldValue("sslVerify") !== false;
+                return (
+                  <Alert
+                    type={sslVerify ? "info" : "warning"}
+                    showIcon
+                    message={t(
+                      sslVerify
+                        ? "mcpConfig.openapiService.form.sslVerifyHint"
+                        : "mcpConfig.openapiService.form.sslVerifyWarning"
+                    )}
+                  />
+                );
+              }}
+            </Form.Item>
+            <Form.Item
               name="openApiJson"
               rules={rules.openApiJson}
               className="mb-0"
@@ -763,37 +794,6 @@ export default function McpServiceDetailModal({
                         />
                       </Form.Item>
                     </div>
-
-                    <Form.Item
-                      name="sslVerify"
-                      valuePropName="checked"
-                      className="mb-0"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Switch disabled={isReadOnly} />
-                        <span className="text-sm text-slate-700">
-                          {t("mcpConfig.openapiService.form.sslVerifyLabel")}
-                        </span>
-                      </div>
-                    </Form.Item>
-                    <Form.Item noStyle shouldUpdate={(prev, current) =>
-                      prev.sslVerify !== current.sslVerify
-                    }>
-                      {({ getFieldValue }) => {
-                        const sslVerify = getFieldValue("sslVerify") !== false;
-                        return (
-                          <Alert
-                            type={sslVerify ? "info" : "warning"}
-                            showIcon
-                            message={t(
-                              sslVerify
-                                ? "mcpConfig.openapiService.form.sslVerifyHint"
-                                : "mcpConfig.openapiService.form.sslVerifyWarning"
-                            )}
-                          />
-                        );
-                      }}
-                    </Form.Item>
 
                     <div>
                       <label className="mb-1 block text-sm font-normal text-slate-500">
