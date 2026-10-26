@@ -614,7 +614,8 @@ class TestRegisterOpenapiService:
             "headers_service",
             {"openapi": "3.0.0", "info": {}, "paths": {}},
             "https://api.example.com",
-            headers_template
+            headers_template,
+            auth_enabled=True,
         )
 
         assert result is True
@@ -641,6 +642,7 @@ class TestRegisterOpenapiService:
             "https://internal.example.com",
             self._headers_template(),
             ssl_verify=False,
+            auth_enabled=True,
         )
 
         assert result is True
@@ -860,6 +862,7 @@ class TestRefreshOpenapiServicesByTenant:
                 "X-Tenant-ID": "{{tenant_id}}"
             },
             ssl_verify=True,
+            auth_enabled=True,
             mcp_server=mcp_service._tenant_mcp_servers["tenant1"],
             tenant_id="tenant1",
         )
@@ -1009,6 +1012,7 @@ class TestRefreshSingleOpenapiService:
             "https://api.example.com",
             self._headers_template(),
             ssl_verify=True,
+            auth_enabled=True,
             mcp_server=mcp_service._tenant_mcp_servers["tenant1"],
             tenant_id="tenant1",
         )
