@@ -33,6 +33,7 @@ import {
   CircleAlertIcon,
   LoaderCircle,
   ListChecks,
+  Share2Icon,
 } from "lucide-react";
 import {
   Fragment,
@@ -51,6 +52,7 @@ import { removeDeletedWorkbenchPins } from "@/lib/workbenchPins";
 import { cn } from "@/lib/utils";
 import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
+import { useConversationShareRequest } from "@/stores/conversationShare";
 import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import {
   fetchAgentConversationIds,
@@ -100,6 +102,7 @@ const ConversationStatusIndicator: FC<{
 };
 
 interface BatchSelectionValue {
+  resolveRemoteId: (id: string) => string | undefined;
   batchMode: boolean;
   selectedIds: Set<string>;
   allVisibleSelected: boolean;
@@ -418,6 +421,7 @@ export const BatchSelectionProvider: FC<{
 
   const value = useMemo<BatchSelectionValue>(
     () => ({
+      resolveRemoteId,
       batchMode,
       selectedIds,
       allVisibleSelected:
@@ -437,6 +441,7 @@ export const BatchSelectionProvider: FC<{
       deleteSelected,
     }),
     [
+      resolveRemoteId,
       batchMode,
       selectedIds,
       visibleConversationIds,
@@ -1524,7 +1529,42 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
     });
   };
 
+  const shareAgentOverrides = useThreadAgentOverrides();
   const togglePinned = () => pinned?.togglePin(thread);
+  const shareConversationId = Number(
+    batch?.resolveRemoteId(thread.id) || thread.remoteId
+  );
+
+  const handleShare = async () => {
+    const conversationId = shareConversationId;
+    if (
+      !Number.isSafeInteger(conversationId) ||
+      conversationId <= 0 ||
+      isRunning
+    )
+      return;
+    const agentId = resolveThreadAgentId(
+      thread.custom?.agentId,
+      shareAgentOverrides[thread.id]
+    );
+    if (agentId !== null) onHistoryAgentSelected?.(agentId);
+    try {
+      await aui.threads.switchToThread(thread.id);
+      if (aui.threads.getState().mainThreadId === thread.id) {
+        useConversationShareRequest
+          .getState()
+          .setRequest({ threadId: thread.id, conversationId });
+      }
+    } catch (error) {
+      if (
+        useConversationShareRequest.getState().request?.threadId === thread.id
+      ) {
+        useConversationShareRequest.getState().setRequest(null);
+      }
+      log.error("[ThreadList] Failed to open conversation for sharing:", error);
+      message.error(t("chatInterface.shareCreateFailed"));
+    }
+  };
 
   const renderMainContent = () => {
     if (isEditing) {
@@ -1652,6 +1692,18 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
             <MoreHorizontalIcon className="size-4" />
           </ThreadListItemMorePrimitive.Trigger>
           <ThreadListItemMorePrimitive.Content className="z-50 rounded-md border bg-popover p-1 shadow-md">
+            <ThreadListItemMorePrimitive.Item
+              onSelect={() => void handleShare()}
+              disabled={
+                isRunning ||
+                !Number.isSafeInteger(shareConversationId) ||
+                shareConversationId <= 0
+              }
+              className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent data-[disabled]:opacity-50"
+            >
+              <Share2Icon className="size-4" />
+              {t("chatInterface.shareConversation")}
+            </ThreadListItemMorePrimitive.Item>
             <ThreadListItemMorePrimitive.Item
               onSelect={togglePinned}
               disabled={!pinned?.canPin(thread)}
