@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Database operations for user API token (API Key) management.
 """
@@ -63,14 +65,19 @@ def create_token(
         }
 
 
-def list_tokens_by_user(user_id: str) -> List[Dict[str, Any]]:
+def list_tokens_by_user(user_id: str, mask: bool = True) -> List[Dict[str, Any]]:
     """List all active tokens for the specified user.
 
     Args:
         user_id: The user ID to query tokens for.
+        mask: When True (the default) the middle of each access key is replaced
+            with asterisks, so a caller that forgets to handle secrets cannot
+            leak one. Callers that enforce their own role-based exposure rules
+            pass False to receive the stored key unchanged.
 
     Returns:
-        List of token information with masked access keys.
+        List of token information, newest first, with access keys masked unless
+        the caller opts out through ``mask=False``.
     """
     with get_db_session() as session:
         tokens = session.query(UserTokenInfo).filter(
@@ -81,7 +88,9 @@ def list_tokens_by_user(user_id: str) -> List[Dict[str, Any]]:
         return [
             {
                 "token_id": token.token_id,
-                "access_key": mask_access_key(token.access_key),
+                # Masking is opt-out so the permission layer can decide who may
+                # copy a key while every other caller stays safe by default.
+                "access_key": mask_access_key(token.access_key) if mask else token.access_key,
                 "user_id": token.user_id,
                 "create_time": token.create_time.isoformat() if token.create_time else None
             }
