@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 # MOCK external dependencies BEFORE importing modules under test
 # =============================================================================
 
-# Mock psycopg2 before backend.database.client is imported
+# Mock psycopg2 before management.db.client is imported
 sys.modules['psycopg2'] = MagicMock()
 sys.modules['psycopg2.pool'] = MagicMock()
 sys.modules['psycopg2.extras'] = MagicMock()
@@ -253,19 +253,19 @@ sys.modules['backend.utils'] = sys.modules['utils']
 sys.modules['utils'].__path__ = [os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../backend/utils'))]
 
 # Create document_vector_utils mock
-document_vector_utils_mock = types.ModuleType('backend.management.services.knowledge_base.summary')
+document_vector_utils_mock = types.ModuleType('management.services.knowledge_base.summary')
 document_vector_utils_mock.process_documents_for_clustering = MagicMock(return_value=([], []))
 document_vector_utils_mock.kmeans_cluster_documents = MagicMock(return_value=[])
 document_vector_utils_mock.summarize_clusters_map_reduce = MagicMock(return_value="test summary")
 document_vector_utils_mock.merge_cluster_summaries = MagicMock(return_value="merged summary")
-sys.modules['backend.management.services.knowledge_base.summary'] = document_vector_utils_mock
+sys.modules['management.services.knowledge_base.summary'] = document_vector_utils_mock
 sys.modules['management.services.knowledge_base.summary'] = document_vector_utils_mock
 setattr(sys.modules['utils'], 'document_vector_utils', document_vector_utils_mock)
 
-str_utils_mock = types.ModuleType('management.db.serialization')
+str_utils_mock = types.ModuleType('management.utils.serialization')
 str_utils_mock.convert_list_to_string = lambda items: ",".join(str(item) for item in items) if items else ""
 str_utils_mock.convert_string_to_list = lambda s: [int(x.strip()) for x in s.split(',') if x.strip().isdigit()] if s and s.strip() else []
-sys.modules['management.db.serialization'] = str_utils_mock
+sys.modules['management.utils.serialization'] = str_utils_mock
 setattr(sys.modules['utils'], 'str_utils', str_utils_mock)
 
 config_utils_mock = types.ModuleType('management.services.configuration.tenant.settings')
@@ -282,10 +282,10 @@ setattr(sys.modules['utils'], 'config_utils', config_utils_mock)
 import importlib
 backend_module = importlib.import_module('backend')
 sys.modules['backend'] = backend_module
-backend_database_module = importlib.import_module('backend.database')
-sys.modules['backend.database'] = backend_database_module
-backend_database_client_module = importlib.import_module('backend.database.client')
-sys.modules['backend.database.client'] = backend_database_client_module
+backend_database_client_module = importlib.import_module('management.db.client')
+sys.modules['management.db.client'] = backend_database_client_module
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock MinioClient after loading the module
 minio_client_mock = MagicMock()
@@ -305,8 +305,8 @@ from management.services.knowledge_base.scheduler import (
     _in_flight,
     CHECK_INTERVAL_SECONDS,
 )
-from backend.database.knowledge_db import get_knowledge_bases_for_auto_summary
-from backend.consts.scheduler import SCHEDULER_CHECK_INTERVAL_SECONDS
+from management.db.knowledge_base.repository import get_knowledge_bases_for_auto_summary
+from contracts.constants.constants import SCHEDULER_CHECK_INTERVAL_SECONDS
 
 
 class TestParseLastSummaryTime:
@@ -464,7 +464,7 @@ class TestRunAutoSummaryForKb:
              patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]), \
              patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final summary"), \
              patch('management.services.knowledge_base.scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "1"}), \
-             patch('backend.database.knowledge_db.update_last_summary_time'):
+             patch('management.db.knowledge_base.repository.update_last_summary_time'):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
 
@@ -506,7 +506,7 @@ class TestRunAutoSummaryForKb:
              patch('management.services.knowledge_base.summary.summarize_clusters_map_reduce', return_value=["summary"]) as mock_summarize, \
              patch('management.services.knowledge_base.summary.merge_cluster_summaries', return_value="final"), \
              patch('management.services.knowledge_base.scheduler.tenant_config_manager.load_config', return_value={"LLM_ID": "8"}), \
-             patch('backend.database.knowledge_db.update_last_summary_time'):
+             patch('management.db.knowledge_base.repository.update_last_summary_time'):
 
             _run_auto_summary_for_kb("test_index", "tenant_id")
 
@@ -813,7 +813,7 @@ class TestGetKnowledgeBasesForAutoSummary:
         mock_session = MagicMock()
         mock_session.query.return_value.filter.return_value.all.return_value = []
 
-        with patch('backend.database.knowledge_db.get_db_session') as mock_get_session:
+        with patch('management.db.knowledge_base.repository.get_db_session') as mock_get_session:
             mock_get_session.return_value.__enter__.return_value = mock_session
 
             result = get_knowledge_bases_for_auto_summary()
@@ -833,8 +833,8 @@ class TestGetKnowledgeBasesForAutoSummary:
         mock_session = MagicMock()
         mock_session.query.return_value.filter.return_value.all.return_value = [mock_record1, mock_record2]
 
-        with patch('backend.database.knowledge_db.get_db_session') as mock_get_session, \
-             patch('backend.database.knowledge_db.as_dict') as mock_as_dict:
+        with patch('management.db.knowledge_base.repository.get_db_session') as mock_get_session, \
+             patch('management.db.knowledge_base.repository.as_dict') as mock_as_dict:
             mock_get_session.return_value.__enter__.return_value = mock_session
             mock_as_dict.side_effect = [
                 {"index_name": "kb1", "summary_frequency": "3h"},
@@ -851,7 +851,7 @@ class TestGetKnowledgeBasesForAutoSummary:
         """Should exclude records with delete_flag='Y'."""
         mock_session = MagicMock()
 
-        with patch('backend.database.knowledge_db.get_db_session') as mock_get_session:
+        with patch('management.db.knowledge_base.repository.get_db_session') as mock_get_session:
             mock_get_session.return_value.__enter__.return_value = mock_session
 
             get_knowledge_bases_for_auto_summary()

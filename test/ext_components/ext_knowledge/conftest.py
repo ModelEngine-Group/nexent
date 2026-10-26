@@ -82,11 +82,12 @@ MOCK_COPY_FILES = (
     "datamate_mock.py", "dify_mock.py", "ragflow_mock.py",
     "idata_mock.py", "haotian_mock.py", "assets_mock.py",
     "fault_provider_mock.py",
+    "aidp_fixture.py",
 )
 SEED_FILES = ("assets.json", "datamate.json", "dify.json", "haotian.json", "idata.json", "ragflow.json")
 AIDP_COPY_FILES = ("aidp_mgmt_mock_server.py", "graph_config_template_chinese.json")
 
-# Ensure env vars are set so consts.const can load without a .env file
+# Ensure env vars are set so contracts.constants.environment can load without a .env file
 # (same list as the sibling aidp conftest).
 for _var in (
     "POSTGRES_HOST", "POSTGRES_USER", "POSTGRES_PASSWORD",

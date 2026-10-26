@@ -14,7 +14,7 @@ class _Payload:
 
 
 def _load_runner_with_stubs(monkeypatch):
-    consts_model = types.ModuleType("consts.model")
+    consts_model = types.ModuleType("contracts.agent")
     consts_model.AgentRequest = _Payload
     consts_model.HistoryItem = _Payload
     consts_model.MessageRequest = _Payload
@@ -35,7 +35,7 @@ def _load_runner_with_stubs(monkeypatch):
     conversation_service.save_message_unit = lambda **kwargs: None
     conversation_service.update_unit_content = lambda *args, **kwargs: None
 
-    monkeypatch.setitem(sys.modules, "consts.model", consts_model)
+    monkeypatch.setitem(sys.modules, "contracts.agent", consts_model)
     monkeypatch.setitem(sys.modules, "management.services.agent.service", agent_service)
     monkeypatch.setitem(sys.modules, "management.services.conversation.service", conversation_service)
     sys.modules.pop("management.services.automation.runner", None)

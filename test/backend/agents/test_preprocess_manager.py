@@ -1,7 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import pytest
 import asyncio
 from unittest.mock import Mock, AsyncMock
-from backend.agents.preprocess_manager import PreprocessManager, PreprocessTask
+from management.services.agent.preprocessing import PreprocessManager, PreprocessTask
 
 
 class TestPreprocessManager:

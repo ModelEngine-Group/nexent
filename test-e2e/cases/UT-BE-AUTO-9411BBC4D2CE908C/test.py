@@ -1,10 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 from unittest import mock
 
 import pytest
 
-from agents import create_agent_info
-from agents.create_agent_info import _resolve_context_budget
+from management.services.model import run_budget
+from management.services.model.run_budget import _resolve_context_budget
 from nexent.core.models.capacity_budget import (
     CapacityReservePolicy,
     ContextBudgetSnapshot,
@@ -62,11 +64,11 @@ def test_resolve_context_budget_w2_snapshot_and_w1_fallback(caplog):
     calculator = mock.MagicMock()
 
     with mock.patch.object(
-        create_agent_info,
+        run_budget,
         'ContextBudgetCalculator',
         return_value=calculator,
     ), mock.patch.object(
-        create_agent_info.tenant_config_manager,
+        run_budget.tenant_config_manager,
         'get_capacity_reserve_policy',
         return_value=reserve_policy,
     ):

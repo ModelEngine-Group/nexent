@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 '''D5 security regression for retrieval_highlight_terms XSS / regex escaping.
 
 Checks the security contract of the source-card highlight and hover preview
@@ -103,7 +105,7 @@ def test_retrieval_highlight_terms_xss_and_regex_escaping() -> None:
     highlighted_src = _read('frontend/components/common/highlightedSourceText.tsx')
     cite_marker_src = _read('frontend/app/[locale]/newchat/ui/cite-marker.tsx')
     sources_panel_src = _read('frontend/app/[locale]/newchat/ui/sources-panel.tsx')
-    conversation_db_src = _read('backend/database/conversation_db.py')
+    conversation_db_src = _read('backend/management/db/conversation/repository.py')
 
     persisted_verbatim = False
     for pos in _find_all(conversation_db_src, 'retrieval_highlight_terms'):

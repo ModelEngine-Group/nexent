@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-import database.tool_db as tool_db
+from management.db.tool import repository as tool_db
 import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import Session

@@ -9,7 +9,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from apps import vectordatabase_app as vdb_app
+from management.api.knowledge_base import vectordatabase as vdb_app
 
 
 class _FakeDeletionService:
@@ -168,7 +168,7 @@ async def test_document_deletion_redis_cleanup_sink(monkeypatch):
     assert audit.call_count == 0
 
     monkeypatch.setattr(vdb_app, 'require_knowledge_base_edit_permission', lambda index_name, user_id, tenant_id: None)
-    monkeypatch.setattr('database.knowledge_file_lifecycle_db.get_file_record', lambda **kwargs: {'file_id': 'f1'})
+    monkeypatch.setattr('management.db.knowledge_base.file_lifecycle.get_file_record', lambda **kwargs: {'file_id': 'f1'})
     with pytest.raises(HTTPException) as exc_info:
         await run(
             result={'status': 'success', 'message': 'Documents deleted successfully'},

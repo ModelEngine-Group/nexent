@@ -20,7 +20,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Sequence
 
-from database import memory_record_db
+from management.db.memory import record as memory_record_db
 from nexent.memory.embedding_model import (
     EmbeddingModelInfo,
     get_embedding_client,
@@ -103,7 +103,7 @@ def _resolve_tenant_embedding_model_info(
 ) -> Optional[EmbeddingModelInfo]:
     """Return the embedding model selected by the tenant, or ``None``."""
     try:
-        from database.tenant_config_db import get_single_config_info
+        from management.db.configuration.tenant import get_single_config_info
         from management.services.configuration.tenant.settings import tenant_config_manager
 
         record = get_single_config_info(tenant_id, "EMBEDDING_ID")
@@ -161,7 +161,7 @@ def _resolve_tenant_embedding_model_info(
 
 def is_tenant_embedding_configured(tenant_id: str) -> bool:
     """Return whether the tenant has an active ``EMBEDDING_ID`` row."""
-    from database.tenant_config_db import get_single_config_info
+    from management.db.configuration.tenant import get_single_config_info
 
     record = get_single_config_info(tenant_id, "EMBEDDING_ID")
     return bool(record and record.get("config_value"))

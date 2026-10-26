@@ -7,7 +7,7 @@ from typing import Optional
 
 import redis
 
-from consts.const import REDIS_BACKEND_URL
+from contracts.constants.environment import REDIS_BACKEND_URL
 
 logger = logging.getLogger("redis_utils")
 

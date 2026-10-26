@@ -8,21 +8,21 @@ import pytest
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
 database_pkg = types.ModuleType("database")
-config_db_mod = types.ModuleType("database.memory_provider_config_db")
+config_db_mod = types.ModuleType("management.db.memory.provider_config")
 config_db_mod.insert_provider_config = MagicMock(name="insert_provider_config")
 config_db_mod.get_provider_config = MagicMock(name="get_provider_config")
 config_db_mod.list_provider_configs = MagicMock(name="list_provider_configs")
 config_db_mod.update_provider_config = MagicMock(name="update_provider_config")
 config_db_mod.soft_delete_provider_config = MagicMock(name="soft_delete_provider_config")
-param_db_mod = types.ModuleType("database.memory_provider_config_param_db")
+param_db_mod = types.ModuleType("management.db.memory.provider_config_param")
 param_db_mod.get_params = MagicMock(name="get_params")
 param_db_mod.upsert_params = MagicMock(name="upsert_params")
 param_db_mod.delete_params = MagicMock(name="delete_params")
 database_pkg.memory_provider_config_db = config_db_mod
 database_pkg.memory_provider_config_param_db = param_db_mod
 sys.modules["database"] = database_pkg
-sys.modules["database.memory_provider_config_db"] = config_db_mod
-sys.modules["database.memory_provider_config_param_db"] = param_db_mod
+sys.modules["management.db.memory.provider_config"] = config_db_mod
+sys.modules["management.db.memory.provider_config_param"] = param_db_mod
 
 services_pkg = types.ModuleType("services")
 sys.modules["services"] = services_pkg

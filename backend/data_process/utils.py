@@ -37,10 +37,7 @@ def update_file_lifecycle(
     if not index_name:
         return
     try:
-        from database.knowledge_file_lifecycle_db import (
-            get_file_record,
-            transition_file_record,
-        )
+        from management.db.knowledge_base.file_lifecycle import get_file_record, transition_file_record
 
         record = None
         if file_id and tenant_id:
@@ -104,7 +101,7 @@ def is_document_delete_requested(
         )
 
     try:
-        from database.knowledge_file_lifecycle_db import get_file_record
+        from management.db.knowledge_base.file_lifecycle import get_file_record
 
         record = get_file_record(
             file_id=file_id,

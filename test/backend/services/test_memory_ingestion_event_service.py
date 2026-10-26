@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -7,23 +8,24 @@ import pytest
 
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
-consts_const = types.ModuleType("consts.const")
+consts_const = types.ModuleType("contracts.constants.environment")
 consts_const.EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES = {
     "agent", "model_output", "tool", "final_answer"
 }
-sys.modules["consts.const"] = consts_const
+sys.modules["contracts.constants.environment"] = consts_const
+install_business_constant_stubs(consts_const)
 sys.modules["consts"] = types.ModuleType("consts")
 
 database_pkg = types.ModuleType("database")
-event_log_db = types.ModuleType("database.memory_external_ingest_event_log_db")
+event_log_db = types.ModuleType("management.db.memory.external_ingest_event_log")
 event_log_db.insert_event_log = MagicMock(name="insert_event_log")
-param_db_mod = types.ModuleType("database.memory_provider_config_param_db")
+param_db_mod = types.ModuleType("management.db.memory.provider_config_param")
 param_db_mod.get_params = MagicMock(name="get_params")
 database_pkg.memory_external_ingest_event_log_db = event_log_db
 database_pkg.memory_provider_config_param_db = param_db_mod
 sys.modules["database"] = database_pkg
-sys.modules["database.memory_external_ingest_event_log_db"] = event_log_db
-sys.modules["database.memory_provider_config_param_db"] = param_db_mod
+sys.modules["management.db.memory.external_ingest_event_log"] = event_log_db
+sys.modules["management.db.memory.provider_config_param"] = param_db_mod
 
 nexent_pkg = types.ModuleType("nexent")
 memory_pkg = types.ModuleType("nexent.memory")

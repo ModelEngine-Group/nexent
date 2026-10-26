@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import os
 import sys
 import types
@@ -36,9 +38,9 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
-patch('backend.database.client.minio_client', minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Now we can safely import the function to test
@@ -50,11 +52,11 @@ patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 @pytest.fixture
 def config_mocks():
     # Create fresh mocks for each test
-    with patch('backend.apps.config_sync_app.get_current_user_info') as mock_get_user_info, \
-            patch('backend.apps.config_sync_app.get_current_user_id') as mock_get_current_user_id, \
-            patch('backend.apps.config_sync_app.save_config_impl') as mock_save_config_impl, \
-            patch('backend.apps.config_sync_app.load_config_impl') as mock_load_config_impl, \
-            patch('backend.apps.config_sync_app.logger') as mock_logger:
+    with patch('management.api.configuration.config_sync.get_current_user_info') as mock_get_user_info, \
+            patch('management.api.configuration.config_sync.get_current_user_id') as mock_get_current_user_id, \
+            patch('management.api.configuration.config_sync.save_config_impl') as mock_save_config_impl, \
+            patch('management.api.configuration.config_sync.load_config_impl') as mock_load_config_impl, \
+            patch('management.api.configuration.config_sync.logger') as mock_logger:
 
         yield {
             'get_user_info': mock_get_user_info,
@@ -82,7 +84,7 @@ async def test_load_config_success(config_mocks):
     config_mocks['load_config_impl'].return_value = mock_config
 
     # Execute
-    from backend.apps.config_sync_app import load_config
+    from management.api.configuration.config_sync import load_config
     result = await load_config(mock_auth_header, mock_request)
 
     # Assert
@@ -116,7 +118,7 @@ async def test_load_config_chinese_language(config_mocks):
     config_mocks['load_config_impl'].return_value = mock_config
 
     # Execute
-    from backend.apps.config_sync_app import load_config
+    from management.api.configuration.config_sync import load_config
     result = await load_config(mock_auth_header, mock_request)
 
     # Assert
@@ -145,7 +147,7 @@ async def test_load_config_with_error(config_mocks):
     config_mocks['get_user_info'].side_effect = Exception("Auth error")
 
     # Execute and Assert
-    from backend.apps.config_sync_app import load_config
+    from management.api.configuration.config_sync import load_config
     with pytest.raises(HTTPException) as exc_info:
         await load_config(mock_auth_header, mock_request)
 
@@ -169,7 +171,7 @@ async def test_save_config_success(config_mocks):
     config_mocks['save_config_impl'].return_value = None
 
     # Execute
-    from backend.apps.config_sync_app import save_config
+    from management.api.configuration.config_sync import save_config
     result = await save_config(global_config, None, mock_auth_header)
 
     # Assert
@@ -201,7 +203,7 @@ async def test_save_config_with_error(config_mocks):
         "Authentication failed")
 
     # Execute and Assert
-    from backend.apps.config_sync_app import save_config
+    from management.api.configuration.config_sync import save_config
     with pytest.raises(HTTPException) as exc_info:
         await save_config(global_config, None, mock_auth_header)
 
@@ -226,7 +228,7 @@ async def test_load_config_missing_language(config_mocks):
     config_mocks['load_config_impl'].return_value = mock_config
 
     # Execute
-    from backend.apps.config_sync_app import load_config
+    from management.api.configuration.config_sync import load_config
     result = await load_config(mock_auth_header, mock_request)
 
     # Assert
@@ -256,7 +258,7 @@ async def test_save_config_empty_auth_header(config_mocks):
         "anonymous_user", "default_tenant")
 
     # Execute
-    from backend.apps.config_sync_app import save_config
+    from management.api.configuration.config_sync import save_config
     result = await save_config(global_config, None, mock_auth_header)
 
     # Assert
@@ -282,7 +284,7 @@ async def test_load_config_empty_auth_header(config_mocks):
     config_mocks['load_config_impl'].return_value = mock_config
 
     # Execute
-    from backend.apps.config_sync_app import load_config
+    from management.api.configuration.config_sync import load_config
     result = await load_config(mock_auth_header, mock_request)
 
     # Assert
@@ -301,12 +303,12 @@ async def test_load_config_empty_auth_header(config_mocks):
 @pytest.mark.asyncio
 async def test_save_config_token_expired(config_mocks):
     """Expired token on save_config maps to 401."""
-    from consts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     global_config = MagicMock()
     config_mocks['get_current_user_id'].side_effect = TokenExpiredError("expired")
 
-    from backend.apps.config_sync_app import save_config
+    from management.api.configuration.config_sync import save_config
 
     with pytest.raises(HTTPException) as exc_info:
         await save_config(global_config, None, "Bearer expired-token")
@@ -317,11 +319,11 @@ async def test_save_config_token_expired(config_mocks):
 @pytest.mark.asyncio
 async def test_load_config_token_expired(config_mocks):
     """Expired token on load_config maps to 401."""
-    from consts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     config_mocks['get_user_info'].side_effect = TokenExpiredError("expired")
 
-    from backend.apps.config_sync_app import load_config
+    from management.api.configuration.config_sync import load_config
 
     with pytest.raises(HTTPException) as exc_info:
         await load_config("Bearer expired-token", MagicMock())
@@ -343,7 +345,7 @@ async def test_save_config_emits_audit_entry(config_mocks, caplog):
         "models": {"llm_id": "gpt-x"},
     }
 
-    from backend.apps.config_sync_app import save_config
+    from management.api.configuration.config_sync import save_config
 
     with caplog.at_level(logging.INFO, logger="audit.security"):
         result = await save_config(global_config, None, "Bearer test-token")

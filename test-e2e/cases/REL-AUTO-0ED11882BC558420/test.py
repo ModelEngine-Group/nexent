@@ -1,12 +1,15 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import uuid
 
 import pytest
 
-from database.client import as_dict, get_db_session
-from database.db_models import AgentEvaluation, EvaluationSet, EvaluationSetCase
-from database.evaluation_set_db import cleanup_orphaned_virtual_evaluation_sets
+from management.utils.orm import as_dict
+from management.db.client import get_db_session
+from management.db.models import AgentEvaluation, EvaluationSet, EvaluationSetCase
+from management.db.evaluation.sets import cleanup_orphaned_virtual_evaluation_sets
 
 
 NO_SET_MARKER = '__no_set_virtual__'

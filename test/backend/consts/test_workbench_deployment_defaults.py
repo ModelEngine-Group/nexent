@@ -24,7 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 _PROBE = """
 import dotenv
 dotenv.load_dotenv = lambda *args, **kwargs: None
-import backend.consts.const as const
+import backend.contracts.constants.environment as const
 print(int(const.ENABLE_AGENT_WORKBENCH), int(const.HIDE_HOME_PAGE))
 """
 

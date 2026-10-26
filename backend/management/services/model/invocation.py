@@ -1,12 +1,15 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 import random
 import time
 from typing import Callable, List, Optional
 
-from consts.const import MESSAGE_ROLE, THINK_END_PATTERN, THINK_START_PATTERN
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
-from database.model_management_db import get_model_by_model_id
+from contracts.constants.constants import MESSAGE_ROLE
+from contracts.constants.constants import THINK_END_PATTERN, THINK_START_PATTERN
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
+from management.db.model.repository import get_model_by_model_id
 from management.services.model.adapter import get_llm_adapter_from_config
 from nexent.core.models.retry import get_retry_after_seconds
 from nexent.monitor import set_monitoring_context, set_monitoring_operation

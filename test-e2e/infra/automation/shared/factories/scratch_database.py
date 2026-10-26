@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Create/drop UUID-owned scratch databases; never DROP to make room."""
 import re
 from uuid import uuid4
@@ -99,7 +101,7 @@ def isolated_product_database():
     """
     from sqlalchemy import create_engine,text
     from sqlalchemy.orm import sessionmaker
-    from database import client as product
+    from management.db import client as product
     from shared.postgres import postgres_url
     with _product_connection_lock, isolated_schema_database() as name:
         engine=create_engine(postgres_url(),pool_pre_ping=True)

@@ -20,7 +20,7 @@ import httpx
 
 from ..concurrency import ManagedTaskSpec, RunCancellationScope, get_current_thread_manager
 
-# Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
+# Protocol type constants (must match backend/management/db/a2a/repository.py definitions)
 PROTOCOL_JSONRPC = "JSONRPC"
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_GRPC = "GRPC"
