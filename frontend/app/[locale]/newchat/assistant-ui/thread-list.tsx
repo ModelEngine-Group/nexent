@@ -1047,20 +1047,11 @@ const ThreadListItems: FC<ThreadListItemsProps> = ({
             <OverflowTooltipText className="min-w-0 truncate">
               {group.agentName}
             </OverflowTooltipText>
-            {isInjectingAgent ? (
+            {isInjectingAgent && (
               <LoaderCircle
                 className="size-3 shrink-0 animate-spin text-[#808080]"
                 aria-hidden
               />
-            ) : (
-              group.conversationCount != null && (
-                <span className="shrink-0 text-xs leading-none text-[#808080]">
-                  {t("chat.threadList.agentConversationCount", {
-                    value: group.conversationCount,
-                    defaultValue: "{{value}} 条",
-                  })}
-                </span>
-              )
             )}
             <ChevronRight
               className={`h-3.5 w-0 shrink-0 overflow-hidden text-[#808080] opacity-0 transition-all duration-200 group-hover:w-3.5 group-hover:opacity-100 group-focus-visible:w-3.5 group-focus-visible:opacity-100${isExpanded ? " rotate-90" : ""}`}

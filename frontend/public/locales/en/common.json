@@ -400,7 +400,6 @@
   "chat.threadList.running": "Running",
   "chat.threadList.completed": "Completed",
   "chat.threadList.recentConversations": "Recent conversations",
-  "chat.threadList.agentConversationCount": "{{value}} conversations",
   "chat.threadList.recentlyUsed": "Recently used",
   "chat.threadList.noHistory": "No conversation history",
   "chat.threadList.today": "Today",

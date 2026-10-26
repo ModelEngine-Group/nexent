@@ -400,7 +400,6 @@
   "chat.threadList.running": "正在运行中",
   "chat.threadList.completed": "已完成",
   "chat.threadList.recentConversations": "最近对话",
-  "chat.threadList.agentConversationCount": "{{value}} 条",
   "chat.threadList.recentlyUsed": "最近使用",
   "chat.threadList.noHistory": "无历史对话",
   "chat.threadList.today": "今天",
