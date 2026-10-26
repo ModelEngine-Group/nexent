@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from consts.model import WorkbenchSessionConfig
+from contracts.agent import WorkbenchSessionConfig
 from management.services.agent import workbench as workbench_service
 
 

@@ -5,13 +5,8 @@ import asyncio
 import logging
 from typing import Any, Dict, Hashable
 
-from consts.const import (
-    DREAMING_SCHEDULER_ENABLED,
-    DREAMING_SCHEDULER_LEASE_SECONDS,
-    DREAMING_SCHEDULER_MAX_CONCURRENCY,
-    DREAMING_SCHEDULER_POLL_SECONDS,
-)
-from database import memory_dreaming_db
+from contracts.constants.environment import DREAMING_SCHEDULER_ENABLED, DREAMING_SCHEDULER_LEASE_SECONDS, DREAMING_SCHEDULER_MAX_CONCURRENCY, DREAMING_SCHEDULER_POLL_SECONDS
+from management.db.memory import dreaming as memory_dreaming_db
 from nexent.scheduler import ClaimedJob, ExecutionLease, LeaseScheduler, SchedulerConfig
 from nexent.core.concurrency import run_blocking
 

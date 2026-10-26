@@ -26,7 +26,7 @@ class RedisConfigurationTests(unittest.TestCase):
             'data_process': package,
             'data_process.app': SimpleNamespace(app=Mock()),
             'management.services.knowledge_base.task_state': SimpleNamespace(get_redis_service=supplier),
-            'database.knowledge_file_lifecycle_db': SimpleNamespace(get_file_record=lookup),
+            'management.db.knowledge_base.file_lifecycle': SimpleNamespace(get_file_record=lookup),
         }
         spec = importlib.util.spec_from_file_location(
             'data_process.delete_fence_fixture_utils', repo / 'backend/data_process/utils.py')

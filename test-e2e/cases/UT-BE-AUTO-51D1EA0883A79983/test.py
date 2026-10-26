@@ -1,9 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 
 import pytest
 
-import management.services.model.resolver as resolver
-from consts.model import ModelConnectStatusEnum
+from management.services.model import resolver as resolver
+from contracts.model import ModelConnectStatusEnum
 
 
 class _FakeTenantConfigManager:

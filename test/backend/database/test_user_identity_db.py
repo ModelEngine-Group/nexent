@@ -7,7 +7,7 @@ from unittest.mock import Mock
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine
 from sqlalchemy.orm import Session, registry
 
-from database import user_identity_db as identity_db
+from management.db.identity import user_identity as identity_db
 
 
 def test_active_cas_bindings_only_and_no_writes(monkeypatch):

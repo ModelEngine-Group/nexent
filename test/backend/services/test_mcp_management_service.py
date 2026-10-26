@@ -23,21 +23,27 @@ db_client_mock.as_dict = MagicMock()
 db_client_mock.filter_property = MagicMock()
 db_client_mock.MinioClient = MagicMock()
 
-sys.modules['database.client'] = db_client_mock
-sys.modules['backend.database.client'] = db_client_mock
+sys.modules['management.db.client'] = db_client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = db_client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock database submodules
-sys.modules['database.market_mcp_db'] = MagicMock()
+sys.modules['management.db.mcp.market'] = MagicMock()
 sys.modules['database.market_review_db'] = MagicMock()
-sys.modules['database.remote_mcp_db'] = MagicMock()
-sys.modules['database.db_models'] = MagicMock()
-sys.modules['database.user_tenant_db'] = MagicMock()
+sys.modules['management.db.mcp.remote'] = MagicMock()
+sys.modules['management.db.models'] = MagicMock()
+sys.modules['management.db.identity.user_tenant'] = MagicMock()
 
-sys.modules['backend.database.market_mcp_db'] = sys.modules['database.market_mcp_db']
+sys.modules['management.db.mcp.market'] = sys.modules['management.db.mcp.market']
 sys.modules['backend.database.market_review_db'] = sys.modules['database.market_review_db']
-sys.modules['backend.database.remote_mcp_db'] = sys.modules['database.remote_mcp_db']
-sys.modules['backend.database.db_models'] = sys.modules['database.db_models']
-sys.modules['backend.database.user_tenant_db'] = sys.modules['database.user_tenant_db']
+sys.modules['management.db.mcp.remote'] = sys.modules['management.db.mcp.remote']
+sys.modules['management.db.models'] = sys.modules['management.db.models']
+sys.modules['management.db.identity.user_tenant'] = sys.modules['management.db.identity.user_tenant']
 
 storage_client_mock = MagicMock()
 minio_mock = MagicMock()
@@ -51,7 +57,7 @@ try:
 except Exception:
     pass
 
-from consts.exceptions import McpNotFoundError, McpNameConflictError, UnauthorizedError
+from contracts.errors.exceptions import McpNotFoundError, McpNameConflictError, UnauthorizedError
 
 from management.services.repository.mcp.service import (
     _to_community_card,
@@ -75,7 +81,7 @@ from management.services.repository.mcp.service import (
 )
 
 # Re-patch exception references in the module
-import management.services.repository.mcp.service as svc_mod
+from management.services.repository.mcp import service as svc_mod
 svc_mod.McpNotFoundError = McpNotFoundError
 svc_mod.McpNameConflictError = McpNameConflictError
 svc_mod.UnauthorizedError = UnauthorizedError
@@ -276,7 +282,7 @@ class TestToCommunityCard(unittest.TestCase):
 
     def test_container_port_included(self):
         """_to_community_card includes containerPort from source MCP record."""
-        with patch('database.remote_mcp_db.get_mcp_record_by_id_and_tenant') as mock_get:
+        with patch('management.db.mcp.remote.get_mcp_record_by_id_and_tenant') as mock_get:
             mock_get.return_value = {
                 "container_port": 8080,
                 "authorization_token": "tok",

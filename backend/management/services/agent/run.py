@@ -10,26 +10,18 @@ from typing import (
     Optional,
 )
 
-from agents.agent_run_manager import (
+from management.services.agent.lifecycle import (
     AgentRunAlreadyActiveError,
     agent_run_manager,
 )
-from agents.create_agent_info import (
-    create_agent_run_info,
-)
-from agents.preprocess_manager import (
+from management.services.agent.preparation.run import create_agent_run_info
+from management.services.agent.preprocessing import (
     preprocess_manager,
 )
-from consts.const import (
-    LANGUAGE,
-    MESSAGE_ROLE,
-)
-from consts.exceptions import (
-    MemoryPreparationException,
-)
-from consts.model import (
-    AgentRequest,
-)
+from contracts.constants.constants import LANGUAGE
+from contracts.constants.constants import MESSAGE_ROLE
+from contracts.errors.exceptions import MemoryPreparationException
+from contracts.agent import AgentRequest
 from management.services.agent.context import (
     build_agent_run_context,
     build_authorized_context_input,
@@ -43,7 +35,7 @@ from management.services.agent.execution import (
 from management.services.agent.stream import (
     safe_agent_stream_error_chunk as _safe_agent_stream_error_chunk,
 )
-from nexent.core.agents.run_agent import (
+from runtime.adapters.nexent.runner import (
     DeferredAgentRun,
 )
 from nexent.core.concurrency import (
