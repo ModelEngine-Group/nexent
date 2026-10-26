@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: AIDP-RET-MIGRATION-NUMERIC-20261026
+  change_type: bugfix
+  bug_id: AIDP-RET-MIGRATION-NUMERIC-20261026
+  title: Preserve accepted legacy numeric representations during AIDP migration
+  description: Normalize accepted legacy totals, use the existing versioned primary key, avoid unchanged writes and remove newly introduced frontend UT while retaining affected existing tests.
+  observed_behavior: A numeric top_k of 7.0 fails text-to-int conversion; a string top_k of '7' incorrectly produces candidates 10. Reapplying the SQL rewrites unchanged rows.
+  expected_behavior: Preserve the numeric meaning of legacy totals and fixed policies across tenants/versions; unchanged row values must not be rewritten by replay.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_boundary
+    description: Existing SDK/backend UT and AIDP D2/D3/D4 Cases do not execute the SQL with accepted legacy numeric representations or inspect physical row rewrites.
+  feature_contract_changed: false
+  affected_features:
+    existing: [AIDP-RETRIEVAL]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [AIDP-RET-MIGRATION]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+      - Preserve current fixed-value SDK defaults and integer/dependency validation.
+      - Adapt affected existing frontend UT normally; do not introduce frontend UT for this requirement.
+    test_selectors:
+      - test/sdk/test_aidp_retrieval_config.py
+      - frontend/tests/workbench/Composer.test.tsx
+      - frontend/tests/workbench/KnowledgePicker.test.tsx
+    reason: SQL execution, PostgreSQL casts, versioned updates and SQL replay require the D5 PostgreSQL boundary. Existing SDK UT is adjacent regression proof, not SQL acceptance; the unchanged runner has existing deploy/tests/test_sql_migrations.sh regression coverage. User-authorized frontend cleanup removes the two new component UT files while preserving changes to existing Workbench tests.
+  notes: 'Authorized follow-up to SQL-01/02 and simplifications recorded in local-docs/aidp-graph-retrieval/reviews/sql-review-20261026.md. Official v2.5.0 Dict[str, Any] input, validation-only numeric coercion and unchanged DB values establish the legacy formats. The user explicitly defers SQL-03 transaction changes. One D5 deployment Case is necessary because no existing AIDP Case executes SQL; no new D1 or Python business UT duplicates it. Synthetic fixtures do not replace the separately required old-UI upgrade chains. Shared Syncthing documents remain read-only.'

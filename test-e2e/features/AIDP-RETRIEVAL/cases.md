@@ -7,3 +7,4 @@
 - D3 [AIDP-RET-REAL](../../cases/AIDP-RET-REAL/case.yaml) · blocked
 - D3 [AIDP-RET-RUNTIME](../../cases/AIDP-RET-RUNTIME/case.yaml) · blocked
 - D4 [AIDP-RET-JOURNEY](../../cases/AIDP-RET-JOURNEY/case.yaml) · blocked
+- D5 [AIDP-RET-MIGRATION](../../cases/AIDP-RET-MIGRATION/case.yaml) · active

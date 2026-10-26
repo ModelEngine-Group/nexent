@@ -5,7 +5,7 @@
     "change_type": "requirement",
     "requirement_id": "AIDP-RET",
     "title": "AIDP graph and combined retrieval upgrade",
-    "description": "Implement the authorized local four-document contract; traditional UT owns validation arithmetic, component tests own controlled form state, protocol Case adds actual HTTP evidence. Existing UT and PW-KB-AIDP-01 do not cover advanced fields or fixed candidate values.",
+    "description": "Implement the authorized local four-document contract; traditional UT owns validation arithmetic, the browser journey owns controlled form state, and the protocol Case adds actual HTTP evidence. No new frontend UT is added; affected existing frontend UT is maintained normally. Existing UT and PW-KB-AIDP-01 do not cover advanced fields or fixed candidate values.",
     "affected_features": {
       "existing": [],
       "added": [

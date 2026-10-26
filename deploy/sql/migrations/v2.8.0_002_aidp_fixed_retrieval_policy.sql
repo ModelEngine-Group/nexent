@@ -4,11 +4,11 @@
 --
 -- Historical AIDP tool definitions (released <= 2.7.0) predate the graph and
 -- candidate fields. This migration:
---   1. appends the canonical missing parameter definitions to every AIDP tool
---      catalog row, preserving tool_id and all unrelated parameters;
+--   1. replaces the nine matching parameter definitions with canonical metadata
+--      on every AIDP catalog row, preserving tool_id and unrelated parameters;
 --   2. materializes fixed candidate/boolean values on every AIDP tool instance
 --      version, including soft-deleted rows, without overwriting explicit
---      values, and normalizes the legacy hybrid_search alias on instances.
+--      values, and normalizes legacy integer representations and hybrid_search.
 -- Conversation and Workbench scopes no longer contain retrieval parameters.
 --
 -- The migration is idempotent and must not be edited after release.
@@ -27,66 +27,65 @@ WITH new_defs AS (
     ]'::jsonb AS defs
 ),
 aidp_definitions AS (
-    SELECT t.tool_id, t.params::jsonb AS params
+    SELECT t.tool_id,
+           COALESCE(
+               (
+                   SELECT jsonb_agg(elem ORDER BY ord)
+                   FROM jsonb_array_elements(COALESCE(t.params::jsonb, '[]'::jsonb))
+                        WITH ORDINALITY AS e(elem, ord)
+                   WHERE elem->>'name' NOT IN (
+                       SELECT value->>'name' FROM jsonb_array_elements(nd.defs)
+                   )
+               ),
+               '[]'::jsonb
+           ) || nd.defs AS new_params
     FROM nexent.ag_tool_info_t AS t
+    CROSS JOIN new_defs AS nd
     WHERE t.class_name IN ('AidpSearchTool', 'IndependentAidpSearchTool')
        OR t.name IN ('aidp_search', 'ind_aidp_search')
 )
 UPDATE nexent.ag_tool_info_t AS t
-SET params = (
-    SELECT COALESCE(
-        (
-            SELECT jsonb_agg(elem ORDER BY ord)
-            FROM jsonb_array_elements(COALESCE(d.params, '[]'::jsonb))
-                 WITH ORDINALITY AS e(elem, ord)
-            WHERE elem->>'name' NOT IN (
-                SELECT value->>'name'
-                FROM jsonb_array_elements(nd.defs)
-            )
-        ),
-        '[]'::jsonb
-    ) || nd.defs
-    FROM new_defs AS nd
-)::json
+SET params = d.new_params::json
 FROM aidp_definitions AS d
-WHERE t.tool_id = d.tool_id;
+WHERE t.tool_id = d.tool_id
+  AND t.params::jsonb IS DISTINCT FROM d.new_params;
 
 WITH aidp_instances AS (
-    SELECT i.ctid, i.params::jsonb AS params
+    SELECT i.tool_instance_id, i.version_no, i.params::jsonb AS params,
+           CASE WHEN jsonb_typeof(i.params::jsonb->'top_k') IN ('number', 'string')
+                THEN (i.params::jsonb->>'top_k')::numeric::int END AS normalized_top_k
     FROM nexent.ag_tool_instance_t AS i
     JOIN nexent.ag_tool_info_t AS ti ON ti.tool_id = i.tool_id
     WHERE ti.class_name IN ('AidpSearchTool', 'IndependentAidpSearchTool')
        OR ti.name IN ('aidp_search', 'ind_aidp_search')
 ),
 fixed_instances AS (
-    SELECT ctid,
+    SELECT tool_instance_id, version_no,
            jsonb_build_object(
                'vector_candidates',
                    COALESCE(
                        CASE WHEN jsonb_typeof(params->'vector_candidates') = 'number'
-                            THEN (params->>'vector_candidates')::int END,
-                       CASE WHEN jsonb_typeof(params->'top_k') = 'number'
-                            THEN (params->>'top_k')::int END,
+                             THEN (params->>'vector_candidates')::numeric::int END,
+                        normalized_top_k,
                        10
                    ),
                'full_text_candidates',
                    COALESCE(
                        CASE WHEN jsonb_typeof(params->'full_text_candidates') = 'number'
-                            THEN (params->>'full_text_candidates')::int END,
-                       CASE WHEN jsonb_typeof(params->'top_k') = 'number'
-                            THEN (params->>'top_k')::int END,
+                             THEN (params->>'full_text_candidates')::numeric::int END,
+                        normalized_top_k,
                        10
                    ),
                'hybrid_top_k',
                    COALESCE(
                        CASE WHEN jsonb_typeof(params->'hybrid_top_k') = 'number'
-                            THEN (params->>'hybrid_top_k')::int END,
+                             THEN (params->>'hybrid_top_k')::numeric::int END,
                        0
                    ),
                'graph_top_k',
                    COALESCE(
                        CASE WHEN jsonb_typeof(params->'graph_top_k') = 'number'
-                            THEN (params->>'graph_top_k')::int END,
+                             THEN (params->>'graph_top_k')::numeric::int END,
                        0
                    ),
                'vector_score_threshold',
@@ -132,10 +131,14 @@ fixed_instances AS (
                'graph_top_k', 'vector_score_threshold', 'full_text_score_threshold',
                'graph_score_threshold', 'graph_reranking_enable',
                'query_expansion_enable', 'search_method'
-           ]) AS new_params
+            ]) || CASE WHEN normalized_top_k IS NOT NULL
+                       THEN jsonb_build_object('top_k', normalized_top_k)
+                       ELSE '{}'::jsonb END AS new_params
     FROM aidp_instances
 )
 UPDATE nexent.ag_tool_instance_t AS i
 SET params = f.new_params::json
 FROM fixed_instances AS f
-WHERE i.ctid = f.ctid;
+WHERE i.tool_instance_id = f.tool_instance_id
+  AND i.version_no = f.version_no
+  AND i.params::jsonb IS DISTINCT FROM f.new_params;
