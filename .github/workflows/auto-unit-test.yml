@@ -54,9 +54,28 @@ on:
 jobs:
   test:
     runs-on: ${{ fromJson(inputs.runner_label_json || '["self-hosted", "linux", "x64"]') }}
+    env:
+      UV_PYTHON_INSTALL_DIR: ${{ github.workspace }}/.ci-python
+      UV_PYTHON: "3.11.15"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.7"
+
+      - name: Set up managed Python
+        run: |
+          uv python install 3.11.15 --no-bin
+          managed_python_bin="$(dirname "$(uv python find --managed-python 3.11.15)")"
+          echo "$managed_python_bin" >> "$GITHUB_PATH"
+
+      - name: Install Helm test dependency
+        uses: azure/setup-helm@v4
+        with:
+          version: "v3.21.3"
 
       - name: Run deployment script tests
         run: |
@@ -67,20 +86,10 @@ jobs:
           bash deploy/tests/test_super_admin_init.sh
           bash deploy/tests/test_build_offline_package.sh
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
-        with:
-          version: "0.11.7"
-
       - name: Install dependencies
         run: |
           cd backend
-          uv sync --extra data-process --extra test
+          uv sync --managed-python --extra data-process --extra test
           cd ..
 
       - name: Run all tests and collect coverage

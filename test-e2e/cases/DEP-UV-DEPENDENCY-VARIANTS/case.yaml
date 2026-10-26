@@ -17,6 +17,7 @@ case:
   preconditions:
   - Docker, uv and Python 3.11 are available; package registries and image registries are reachable.
   - Use fresh task-owned environments, image tags and evidence directories. NVIDIA hardware is not required for installation acceptance.
+  - The UT workflow provisions uv-managed Python 3.11.15 and Helm v3.21.3; host/container platform branches in isolated tests are controlled explicitly.
   test_data:
     profiles:
     - base

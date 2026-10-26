@@ -68,3 +68,6 @@ Thumbs.db
 .task-evidence/
 backend/uv.lock
 sdk/uv.lock
+
+# CI toolchain is not application source.
+.ci-python/
