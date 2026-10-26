@@ -9,6 +9,8 @@ feature:
   description: Persisted visibility, normalized rename, agent-group batch selection
     and server-ID batch deletion preserve sidebar state.
   business_rules:
+  - rule_id: CHAT-SIDEBAR-RULE-010
+    description: Agent-chat saved-history activation and reload share one pending and settled detail GET across route guard, thread metadata/messages, knowledge scope, runtime metadata and resume checks. Active reselection adds no read; re-entry and explicit refresh obtain fresh detail. Authenticated page scopes isolate cached data, failures do not fan out, knowledge writes/deletion and live runs invalidate prior snapshots, and navigation performs no generation or persisted writes.
   - rule_id: CHAT-SIDEBAR-RULE-009
     description: Discovery history search matches Agent names or conversation titles and expands an Agent group when a conversation title matches the nonblank query. Inside a selected Agent's conversation page, search matches only that Agent's conversation titles. Matching only the Agent name in discovery preserves its manual expansion state. Users can collapse matching groups for the current query; every query change resets this temporary override, including repeated searches. Clearing search restores manual expansion without selecting or modifying conversations.
   - rule_id: CHAT-SIDEBAR-RULE-008
@@ -61,6 +63,7 @@ feature:
   - D5
   source:
     requirement_ids:
+    - CHAT-AGENT-DETAIL-20261026
     - CHAT-SIDEBAR-COLLAPSE-20261020
     - CHAT-SIDEBAR-REQ-001
     - WB-HISTORY-PINS-20261014

@@ -11,8 +11,6 @@ import {
   useAui,
 } from "@assistant-ui/react";
 import type {
-  ChatModelRunOptions,
-  ChatModelRunResult,
   CompleteAttachment,
   ExportedMessageRepositoryItem,
   GenericThreadHistoryAdapter,
@@ -58,7 +56,6 @@ import {
   searchImagesRegistry,
   isReasoningChunkType,
   skillFileUploadsRegistry,
-  remoteChatModelAdapter,
   parseStepTokenCount,
   parsePlan,
   parsePlanStepUpdate,
@@ -345,9 +342,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
     >
   ) {}
 
-  async load(): Promise<
-    ExportedMessageRepository & { unstable_resume?: boolean }
-  > {
+  async load(): Promise<ExportedMessageRepository> {
     const loadGeneration = ++this.loadGeneration;
     // Historical threads may be cached by assistant-ui, so plan state is
     // cached independently by backend conversation ID. Parsing below updates
@@ -1385,6 +1380,15 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         content.push({ type: "text", text: "" });
       }
 
+      // Preserve the running answer boundary before its first visible token.
+      if (
+        msg.role === "assistant" &&
+        detail.streaming_message?.status === "streaming" &&
+        msg.message_id === detail.streaming_message.message_id &&
+        content.length === 0
+      ) {
+        content.push({ type: "text", text: "" });
+      }
       if (content.length === 0 && attachments.length === 0) {
         // Still track assistant index even if no content (for registry alignment)
         if (msg.role === "assistant") assistantIdx++;
@@ -1442,41 +1446,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         planRegistry.set(restoredPlan);
       }
     }
-    return {
-      ...repository,
-      unstable_resume: detail.streaming_message?.status === "streaming",
-    };
-  }
-
-  async *resume(
-    options: ChatModelRunOptions
-  ): AsyncGenerator<ChatModelRunResult, void> {
-    const remoteId = this.getRemoteId();
-    if (!remoteId) {
-      log.warn(
-        "[history-adapter] Cannot resume without a remote conversation ID"
-      );
-      return;
-    }
-
-    const custom = (options.runConfig?.custom ?? {}) as Record<string, unknown>;
-    const resumedRun = remoteChatModelAdapter.run({
-      ...options,
-      runConfig: {
-        ...options.runConfig,
-        custom: {
-          ...custom,
-          threadId: remoteId,
-          resume: true,
-        },
-      },
-    });
-
-    if (Symbol.asyncIterator in resumedRun) {
-      yield* resumedRun;
-      return;
-    }
-    yield await resumedRun;
+    // The shared hook reconnects after loading; automatic resume appends
+    // another assistant below the head and breaks the retry branch.
+    return repository;
   }
 
   // `append` is intentionally a no-op: in the remote-thread-list flow, message
