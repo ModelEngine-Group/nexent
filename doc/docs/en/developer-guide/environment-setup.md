@@ -56,6 +56,14 @@ uv sync --extra nvidia --extra test
 
 For standalone SDK development, run `uv pip install -e ".[dev]"` from `sdk/` for CPU, or `uv pip install -e ".[quality,performance,nvidia]"` for NVIDIA. Use a fresh virtual environment when switching standalone `uv pip` profiles; unlike `uv sync`, it retains unrelated installed packages. NVIDIA is an alternative to SDK `data_process`/`dev`.
 
+
+For SDK packages installed from a registry, the wheel metadata does not carry the checkout's uv index configuration. Select the backend explicitly:
+
+```bash
+uv pip install "nexent[data-process]" --torch-backend cpu
+uv pip install "nexent[nvidia]" --torch-backend cu130
+```
+
 #### Optional: Use Package Mirrors
 
 When network access is limited, specify a package mirror for uv. For example:

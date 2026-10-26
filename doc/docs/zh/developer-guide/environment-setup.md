@@ -56,6 +56,14 @@ uv sync --extra nvidia --extra test
 
 独立开发 SDK 时，在 `sdk/` 下执行 `uv pip install -e ".[dev]"` 使用 CPU，或 `uv pip install -e ".[quality,performance,nvidia]"` 使用 NVIDIA。独立 `uv pip` 安装切换配置时请使用全新虚拟环境；它与 `uv sync` 不同，会保留无关的已安装依赖。NVIDIA 配置替代 SDK 的 `data_process`/`dev`。
 
+
+从包仓库安装已发布的 SDK 时，wheel 元数据不会携带源码目录中的 uv 索引配置，需要明确选择后端：
+
+```bash
+uv pip install "nexent[data-process]" --torch-backend cpu
+uv pip install "nexent[nvidia]" --torch-backend cu130
+```
+
 #### 可选：镜像加速
 
 网络受限时，可以为 uv 指定镜像。例如：
