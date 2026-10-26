@@ -401,11 +401,12 @@ export class AgentPage {
       const payload = await response.json();
       const tools = Array.isArray(payload) ? payload : payload.data || payload.tools || [];
       const owned = tools.filter((tool: any) => tool.source === "mcp" &&
-        tool.usage === serviceName && (tool.origin_name || tool.name) === toolName);
+        tool.usage === serviceName && [tool.origin_name, tool.name].includes(toolName));
       expect(owned).toHaveLength(1);
       expectedToolId = Number(owned[0].tool_id || owned[0].id);
     }
-    const row = dialog.getByRole("option", { name: toolName, exact: true });
+    const scope = serviceName ? dialog.getByRole("region", { name: serviceName, exact: true }) : dialog;
+    const row = scope.getByRole("option", { name: toolName, exact: true });
     await expect(row).toHaveCount(1);
     if ((await row.getAttribute("aria-selected")) !== "true") await row.click();
     await expect(row).toHaveAttribute("aria-selected", "true");

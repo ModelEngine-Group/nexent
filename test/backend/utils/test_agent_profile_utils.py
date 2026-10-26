@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Unit tests for ``backend.management.services.agent.profile``.
+"""Unit tests for ``management.services.agent.profile``.
 
 Targets
 -------
@@ -21,9 +21,9 @@ Targets
 The pattern mirrors ``test_evaluator_db.py``: sys.path injection, idempotent
 ``_register_package`` registration and permanent (never-uninstalled)
 ``sys.modules`` stubs for the module's transitive imports
-(``database.agent_db``, ``database.tool_db``, ``management.services.skill.service`` plus
-the lazy ``database.knowledge_db`` / ``database.client`` /
-``database.db_models`` imports inside ``_fetch_knowledge_bases``).
+(``management.db.agent.repository``, ``management.db.tool.repository``, ``management.services.skill.service`` plus
+the lazy ``management.db.knowledge_base.repository`` / ``management.db.client`` /
+``management.db.models`` imports inside ``_fetch_knowledge_bases``).
 """
 
 from __future__ import annotations
@@ -80,35 +80,39 @@ def _register_package(name: str) -> types.ModuleType:
 def _install_stubs():
     db_pkg = _register_package("database")
 
-    # database.agent_db
-    agent_db = types.ModuleType("database.agent_db")
+    # management.db.agent.repository
+    agent_db = types.ModuleType("management.db.agent.repository")
     agent_db.query_sub_agent_relations = MagicMock()
     agent_db.search_agent_info_by_agent_id = MagicMock()
-    sys.modules["database.agent_db"] = agent_db
+    sys.modules["management.db.agent.repository"] = agent_db
     db_pkg.agent_db = agent_db
 
-    # database.tool_db
-    tool_db = types.ModuleType("database.tool_db")
+    # management.db.tool.repository
+    tool_db = types.ModuleType("management.db.tool.repository")
     tool_db.search_tools_for_sub_agent = MagicMock()
-    sys.modules["database.tool_db"] = tool_db
+    sys.modules["management.db.tool.repository"] = tool_db
     db_pkg.tool_db = tool_db
 
-    # database.knowledge_db (lazy import inside _fetch_knowledge_bases)
-    knowledge_db = types.ModuleType("database.knowledge_db")
+    # management.db.knowledge_base.repository (lazy import inside _fetch_knowledge_bases)
+    knowledge_db = types.ModuleType("management.db.knowledge_base.repository")
     knowledge_db.get_knowledge_name_map_by_index_names = MagicMock()
-    sys.modules["database.knowledge_db"] = knowledge_db
+    sys.modules["management.db.knowledge_base.repository"] = knowledge_db
     db_pkg.knowledge_db = knowledge_db
 
-    # database.client (lazy import inside _fetch_knowledge_bases)
-    client = types.ModuleType("database.client")
+    # management.db.client (lazy import inside _fetch_knowledge_bases)
+    client = types.ModuleType("management.db.client")
     client.get_db_session = MagicMock()
-    sys.modules["database.client"] = client
+    sys.modules["management.db.client"] = client
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
     db_pkg.client = client
 
-    # database.db_models – KnowledgeRecord attribute access must not raise
-    db_models = types.ModuleType("database.db_models")
+    # management.db.models – KnowledgeRecord attribute access must not raise
+    db_models = types.ModuleType("management.db.models")
     db_models.KnowledgeRecord = MagicMock(name="KnowledgeRecord")
-    sys.modules["database.db_models"] = db_models
+    sys.modules["management.db.models"] = db_models
     db_pkg.db_models = db_models
 
     # management.services.skill.service – SkillService is a (mock) class

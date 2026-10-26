@@ -16,13 +16,7 @@ with pytest.MonkeyPatch.context() as import_mocks:
     import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
     from management.services.automation import runner as runner_module
 from management.services.automation.service import AgentAutomationFacade
-from contracts.automation import (
-    AutomationProposalConfirmRequest,
-    AutomationProposalCreateRequest,
-    CapabilityResolution,
-    CapabilityBinding,
-    CapabilityType,
-)
+from contracts.automation import AutomationProposalConfirmRequest, AutomationProposalCreateRequest, CapabilityResolution, CapabilityBinding, CapabilityType
 from management.services.automation.prompt import AutomationTaskContent
 
 

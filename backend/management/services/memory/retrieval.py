@@ -25,7 +25,9 @@ from nexent.memory.embedding_model import EmbeddingModelInfo
 from nexent.memory.models import MemoryLayer, MemorySearchRequest, MemorySearchResult
 from nexent.memory.policy import MemoryRetrievalPolicy
 
-from database import memory_long_term_db, memory_record_db, memory_retrieval_hit_db
+from management.db.memory import long_term as memory_long_term_db
+from management.db.memory import record as memory_record_db
+from management.db.memory import retrieval_hit as memory_retrieval_hit_db
 from management.services.memory.index import (
     MemoryIndexService,
     get_memory_index_service,

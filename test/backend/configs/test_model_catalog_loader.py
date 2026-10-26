@@ -29,7 +29,7 @@ class TestModelCatalogLoaderSmoke:
     """Minimal smoke-level tests that don't require a full venv sync."""
 
     def test_json_file_exists_and_is_readable(self):
-        from consts.const import MODEL_CATALOG_JSON_PATH
+        from contracts.constants.environment import MODEL_CATALOG_JSON_PATH
 
         path = Path(MODEL_CATALOG_JSON_PATH)
         assert path.exists(), (
@@ -50,7 +50,7 @@ class TestModelCatalogLoaderSmoke:
             "infer_provider_from_base_url",
             "MODEL_CATALOG_JSON_PATH",
         ):
-            # Note: MODEL_CATALOG_JSON_PATH lives in consts.const; the loader
+            # Note: MODEL_CATALOG_JSON_PATH lives in contracts.constants.environment; the loader
             # re-exports it from the consts module so tests/mocks can patch it.
             assert hasattr(model_catalog_loader, name), f"Missing symbol: {name}"
 
@@ -242,7 +242,7 @@ class TestModelCatalogLoaderSmoke:
         assert resolve_reasoning_capability(model_name, provider_hint=provider_hint) is None
 
     def test_pydantic_models_match_catalog(self):
-        from consts.model import ModelCatalogProfile, ModelCatalogProviderInfo
+        from contracts.model import ModelCatalogProfile, ModelCatalogProviderInfo
         from configs.model_catalog_loader import (
             list_catalog_providers,
             get_model_profile,
@@ -601,7 +601,7 @@ class TestModelsDevReasoningResolution:
 
     def test_catalog_profile_reasoning_overlay_keeps_profile_when_unmatched(self):
         import configs.model_catalog_loader as loader
-        from consts.model import ModelCatalogProfile
+        from contracts.model import ModelCatalogProfile
 
         profile = ModelCatalogProfile(
             model_name="model",
@@ -614,7 +614,7 @@ class TestModelsDevReasoningResolution:
             assert loader._enrich_catalog_profile_reasoning("provider", "model", profile) is profile
 
     def test_budget_control_accepts_zero_minimum(self):
-        from consts.model import ReasoningControl
+        from contracts.model import ReasoningControl
 
         control = ReasoningControl(type="budget_tokens", min=0, max=262144)
         assert control.min == 0

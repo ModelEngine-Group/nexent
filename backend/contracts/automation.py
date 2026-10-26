@@ -1,9 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
+from contracts.constants.constants import LANGUAGE
 from nexent.scheduler import ScheduleMode, ScheduleRuleType
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -170,11 +173,6 @@ class AutomationResponse(BaseModel):
     code: int = 0
     message: str = "success"
     data: Any = None
-
-
-from dataclasses import dataclass
-
-from consts.const import LANGUAGE
 
 
 @dataclass(frozen=True)

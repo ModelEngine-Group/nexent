@@ -6,13 +6,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps import workbench_pins_app as routes
-from consts.exceptions import (
-    ConversationNotFoundError,
-    TokenExpiredError,
-    UnauthorizedError,
-    ValidationError,
-)
+from management.api.conversation import workbench_pins as routes
+from contracts.errors.exceptions import ConversationNotFoundError, TokenExpiredError, UnauthorizedError, ValidationError
 
 
 @pytest.fixture

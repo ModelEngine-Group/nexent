@@ -16,20 +16,7 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 
-from consts.const import (
-    DISABLE_CELERY_FLOWER,
-    DOCKER_ENVIRONMENT,
-    DP_PARSE_MAX_PROCESSES,
-    DP_PARSE_MAX_TASKS_PER_CHILD,
-    DP_PARSE_MIN_PROCESSES,
-    DP_PARSE_THREADS_PER_PROCESS,
-    DP_PARSER_STARTUP_TIMEOUT_S,
-    DP_PRELOAD_MODELS,
-    FLOWER_PORT,
-    REDIS_BACKEND_URL,
-    REDIS_PORT,
-    REDIS_URL,
-)
+from contracts.constants.environment import DISABLE_CELERY_FLOWER, DOCKER_ENVIRONMENT, DP_PARSE_MAX_PROCESSES, DP_PARSE_MAX_TASKS_PER_CHILD, DP_PARSE_MIN_PROCESSES, DP_PARSE_THREADS_PER_PROCESS, DP_PARSER_STARTUP_TIMEOUT_S, DP_PRELOAD_MODELS, FLOWER_PORT, REDIS_BACKEND_URL, REDIS_PORT, REDIS_URL
 from infrastructure.logging import configure_logging, get_uvicorn_logging_config
 
 
@@ -756,7 +743,7 @@ async def lifespan(app: FastAPI):
 def create_app():
     """Create FastAPI application"""
     # Lazy import router to avoid overhead during module initialization
-    from apps.data_process_app import router as data_process_router
+    from data_process.api.tasks.routes import router as data_process_router
 
     app = FastAPI(root_path="/api", lifespan=lifespan)
     app.include_router(data_process_router)

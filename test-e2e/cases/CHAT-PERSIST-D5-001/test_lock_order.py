@@ -26,11 +26,8 @@ with patch(
     "nexent.storage.storage_client_factory.create_storage_client_from_config",
     return_value=MagicMock(),
 ), patch("nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None):
-    from database import conversation_db as db
-    from database.db_models import (
-        ConversationMessage, ConversationMessageUnit, ConversationRecord,
-        ConversationSourceImage, ConversationSourceSearch,
-    )
+    from management.db.conversation import repository as db
+    from management.db.models import ConversationMessage, ConversationMessageUnit, ConversationRecord, ConversationSourceImage, ConversationSourceSearch
 
 MODELS = (ConversationRecord, ConversationMessage, ConversationMessageUnit,
           ConversationSourceSearch, ConversationSourceImage)

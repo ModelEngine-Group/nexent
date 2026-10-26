@@ -15,7 +15,9 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps import agent_app, skill_app
+from runtime.api.agent import execution as agent_app_execution
+from runtime.api.skill import creation as skill_app_creation
+from management.services.agent.preparation import run as agent_preparation
 from model_controls.database import database_fixture
 from model_controls.provider import Provider
 from services import nl2agent_service as nl2agent_service
@@ -76,7 +78,7 @@ class RuntimeFixture:
 
     def draft(self):
         from sqlalchemy import select
-        from database.db_models import AgentInfo
+        from management.db.models import AgentInfo
         with self.storage["sessions"]() as session:
             row = session.scalars(select(AgentInfo).where(AgentInfo.agent_id == self.agent_id, AgentInfo.version_no == 0)).one()
             return {"description": row.description, "model_ids": list(row.model_ids), "model_params_override": row.model_params_override,
@@ -84,7 +86,7 @@ class RuntimeFixture:
 
     def model_records(self):
         from sqlalchemy import select
-        from database.db_models import ModelRecord
+        from management.db.models import ModelRecord
         with self.storage["sessions"]() as session:
             return {row.model_id: (row.model_name, row.base_url, row.temperature, row.top_p, row.extra_params)
                     for row in session.scalars(select(ModelRecord))}
@@ -101,8 +103,8 @@ def runtime_fixture(monkeypatch):
     provider = Provider()
     try:
         with database_fixture(monkeypatch, provider) as storage, mcp_server() as mcp_url, TemporaryDirectory(prefix="model-controls-workspaces-") as workspace:
-            from agents import create_agent_info
-            monkeypatch.setattr(create_agent_info, "AGENT_WORKSPACE_ROOT", workspace)
+            from management.services.agent.preparation import inputs
+            monkeypatch.setattr(inputs, "AGENT_WORKSPACE_ROOT", workspace)
             manager = ThreadManager("model-controls-case", runtime_thread_manager._policies)
             manager.start()
             for name, module in list(sys.modules.items()):
@@ -112,7 +114,7 @@ def runtime_fixture(monkeypatch):
             # Authentication is an external issuer boundary. RBAC, DAC, storage,
             # model resolution, capacity policy, services and SDK remain real.
             for name, module in list(sys.modules.items()):
-                if name.startswith(("utils.", "services.", "management.", "apps.", "permissions.", "tool_collection.")):
+                if name.startswith(("utils.", "services.", "management.", "runtime.", "apps.", "permissions.", "tool_collection.")):
                     if hasattr(module, "get_current_user_id"):
                         monkeypatch.setattr(module, "get_current_user_id", lambda *a, **k: (owner, tenant))
                     if hasattr(module, "get_current_user_info"):
@@ -124,9 +126,9 @@ def runtime_fixture(monkeypatch):
             rbac.init_rbac()
             # Ordinary Agent preparation resolves MCP through this imported
             # boundary as well. Never fall back to a developer's deployment URL.
-            _bind_case_mcp(monkeypatch, mcp_url, nl2agent_service, create_agent_info)
-            monkeypatch.setattr(agent_app, "ENABLE_AGENT_WORKBENCH", True)
-            monkeypatch.setattr(skill_app, "ENABLE_AGENT_WORKBENCH", True)
+            _bind_case_mcp(monkeypatch, mcp_url, nl2agent_service, agent_preparation)
+            monkeypatch.setattr(agent_app_execution, "ENABLE_AGENT_WORKBENCH", True)
+            monkeypatch.setattr(skill_app_creation, "ENABLE_AGENT_WORKBENCH", True)
             from management.services.agent import execution as ordinary
             runs = []
             for module in (nl2agent_service, nl2skill_service, ordinary):
@@ -136,7 +138,7 @@ def runtime_fixture(monkeypatch):
                     async for event in _original(run_info, *args, **kwargs):
                         yield event
                 monkeypatch.setattr(module, "agent_run", observe)
-            original_run = agent_app.run_agent_stream
+            original_run = agent_app_execution.run_agent_stream
             async def traced_run(*args, **kwargs):
                 try:
                     return await original_run(*args, **kwargs)
@@ -144,7 +146,7 @@ def runtime_fixture(monkeypatch):
                     import traceback
                     traceback.print_exc()
                     raise
-            monkeypatch.setattr(agent_app, "run_agent_stream", traced_run)
+            monkeypatch.setattr(agent_app_execution, "run_agent_stream", traced_run)
 
             def respond(body):
                 messages = json.dumps(body["messages"])
@@ -158,8 +160,8 @@ def runtime_fixture(monkeypatch):
 
             provider.responder = respond
             app = FastAPI()
-            app.include_router(agent_app.agent_runtime_router, prefix="/api")
-            app.include_router(skill_app.skill_creator_router, prefix="/api")
+            app.include_router(agent_app_execution.agent_runtime_router, prefix="/api")
+            app.include_router(skill_app_creation.skill_creator_router, prefix="/api")
             with TestClient(app) as http:
                 try:
                     yield RuntimeFixture(storage, provider, http, runs)
