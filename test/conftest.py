@@ -171,6 +171,9 @@ os.environ.setdefault('POSTGRES_USER', 'test_user')
 os.environ.setdefault('POSTGRES_PASSWORD', 'test_password')
 os.environ.setdefault('POSTGRES_DB', 'test_db')
 os.environ.setdefault('POSTGRES_PORT', '5432')
+# Keep internal MCP management requests deterministic in unit tests. Production
+# deployments must provide TOKEN or MCP_INTERNAL_TOKEN explicitly.
+os.environ.setdefault('TOKEN', 'token')
 
 
 class _PatchProxy:
