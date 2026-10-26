@@ -7,7 +7,7 @@ import time
 import traceback
 
 import httpx
-from consts.const import DATA_PROCESS_SERVICE
+from contracts.constants.environment import DATA_PROCESS_SERVICE
 
 logger = logging.getLogger(__name__)
 

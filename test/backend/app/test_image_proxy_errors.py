@@ -9,7 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps import image_app
+from management.api.file import image as image_app
 
 
 @pytest.fixture

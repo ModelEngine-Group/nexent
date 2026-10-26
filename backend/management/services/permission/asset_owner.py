@@ -4,15 +4,10 @@
 
 from typing import Any, Dict, List, Optional
 
-from consts.const import (
-    AGENT_PROMPTS_HIDDEN_FLAG,
-    ASSET_OWNER_ROLE,
-    ASSET_OWNER_TENANT_ID,
-    ENABLE_ASSET_OWNER_ROLE,
-    PERMISSION_EDIT,
-    PERMISSION_READ,
-)
-from consts.exceptions import ValidationError
+from contracts.constants.constants import AGENT_PROMPTS_HIDDEN_FLAG
+from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
+from contracts.constants.environment import ENABLE_ASSET_OWNER_ROLE
+from contracts.errors.exceptions import ValidationError
 
 
 _PROMPT_FIELDS = ("prompt",)

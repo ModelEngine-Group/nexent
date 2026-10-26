@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """HTTP regression tests for synchronous AIDP work on managed workers."""
 
 import asyncio
@@ -20,7 +22,7 @@ from test.backend.app import test_tool_config_app as legacy_tool
 from test.backend.app import test_agent_app as legacy_agent  # noqa: F401
 
 
-agent_app = importlib.import_module("apps.agent_app")
+agent_app = importlib.import_module("management.api.agent.agent")
 tool_app = legacy_tool.tool_config_app
 tool_service = importlib.import_module(tool_app.validate_tool_impl.__module__)
 

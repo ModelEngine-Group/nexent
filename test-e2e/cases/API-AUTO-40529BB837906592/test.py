@@ -1,8 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 '''D3 API-IT: 外部记忆提供者 test-search/test-ingest 绕过 enabled 开关并回写 last_error_code。
 
 用例 ID: API-AUTO-40529BB837906592（F-178 记忆/外部记忆提供者）
 
-覆盖 backend/apps/memory_provider_app.py:291-416 的连通性测试端点：
+覆盖 backend/management/api/memory/memory_provider.py:291-416 的连通性测试端点：
 - enabled=false 时 test-search/test-ingest 仍真实调用外部提供者（绕过开关）；
 - 成功路径清空 last_error_code；
 - 失败路径按错误矩阵回写 unauthorized / forbidden；

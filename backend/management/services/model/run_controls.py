@@ -8,14 +8,14 @@ from typing import Any
 
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 
-from consts.exceptions import RunModelControlsError
-from database.model_management_db import get_model_by_model_id
+from contracts.errors.exceptions import RunModelControlsError
+from management.db.model.repository import get_model_by_model_id
 from management.services.model.reasoning import reasoning_controls
 
 
 def _agent_record_for_run(request, tenant_id: str, lookup: Callable[..., dict]) -> dict:
     """Resolve the same version while retaining the caller's Agent lookup boundary."""
-    from database.agent_db import query_current_version_no
+    from management.db.agent.repository import query_current_version_no
 
     return lookup(
         agent_id=request.agent_id,
@@ -34,7 +34,7 @@ def validate_agent_model_selection(request, tenant_id: str, lookup: Callable[...
     if request.entrypoint != "workbench" and not request.is_debug and request.agent_id:
         configured = _agent_record_for_run(request, tenant_id, lookup).get("model_ids") or []
         if configured and selected_id not in configured:
-            from consts.exceptions import ForbiddenError
+            from contracts.errors.exceptions import ForbiddenError
 
             raise ForbiddenError("The selected model is not configured for this Agent")
 
@@ -135,7 +135,7 @@ def resolve_creator_model(
     """Bind a creator root to its actual record, preserving all other aliases."""
     record = validate_selected_model(model_id, tenant_id) if model_id is not None else default_record or {}
     if record:
-        from agents.create_agent_info import create_model_config_from_record
+        from management.services.model.run_bindings import create_model_config_from_record
         base = create_model_config_from_record(record)
     else:
         base = next((m for m in model_list if m.cite_name == record.get("display_name")), None)
@@ -165,14 +165,14 @@ def preflight_turn_controls(request, tenant_id: str, agent_record: dict | None =
         if configured:
             model_id = configured[0]
         else:
-            from consts.const import MODEL_CONFIG_MAPPING
+            from contracts.constants.constants import MODEL_CONFIG_MAPPING
             from management.services.configuration.tenant.settings import tenant_config_manager
             default_record = tenant_config_manager.get_model_config(MODEL_CONFIG_MAPPING["llm"], tenant_id)
             model_id = (default_record or {}).get("model_id")
         if model_id is None:
             raise RunModelControlsError("model_not_available")
     record = validate_selected_model(model_id, tenant_id)
-    from agents.create_agent_info import create_model_config_from_record
+    from management.services.model.run_bindings import create_model_config_from_record
     base = create_model_config_from_record(record)
     if agent_record:
         override = (agent_record.get("model_params_override") or {}).get(str(model_id), {})

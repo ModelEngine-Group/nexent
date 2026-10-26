@@ -1,10 +1,12 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import pytest
 from unittest.mock import MagicMock
 
 # Import the exception class
-from consts.exceptions import DataMateConnectionError
+from contracts.errors.exceptions import DataMateConnectionError
 
 # Setup common mocks
 from test.common.test_mocks import setup_common_mocks, patch_minio_client_initialization
@@ -53,7 +55,7 @@ concurrency_mock.run_blocking = _run_blocking
 consts_mock = MagicMock()
 consts_mock.DATAMATE_URL = "DATAMATE_URL"
 
-# Mock consts.exceptions
+# Mock contracts.errors.exceptions
 consts_exceptions_mock = MagicMock()
 consts_exceptions_mock.DataMateConnectionError = DataMateConnectionError
 
@@ -68,15 +70,20 @@ sqlalchemy_mock.exc = sqlalchemy_exc_mock
 sqlalchemy_mock.sql = sqlalchemy_sql_mock
 
 # Set up sys.modules mocks
-sys.modules['database.knowledge_db'] = knowledge_db_mock
-sys.modules['database.client'] = database_client_mock
-sys.modules['database.db_models'] = database_models_mock
-sys.modules['database.tenant_config_db'] = tenant_config_db_mock
-sys.modules['database.model_management_db'] = model_management_db_mock
+sys.modules['management.db.knowledge_base.repository'] = knowledge_db_mock
+sys.modules['management.db.client'] = database_client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.models'] = database_models_mock
+sys.modules['management.db.configuration.tenant'] = tenant_config_db_mock
+sys.modules['management.db.model.repository'] = model_management_db_mock
 sys.modules['nexent.vector_database.datamate_core'] = datamate_core_mock
 sys.modules['nexent.core.concurrency'] = concurrency_mock
-sys.modules['consts.const'] = consts_mock
-sys.modules['consts.exceptions'] = consts_exceptions_mock
+sys.modules['contracts.constants.environment'] = consts_mock
+install_business_constant_stubs(consts_mock)
+install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_exc_mock
 sys.modules['sqlalchemy.sql'] = sqlalchemy_sql_mock

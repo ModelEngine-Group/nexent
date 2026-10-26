@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Comprehensive unit tests for SDK monitoring module (OTLP-based).
 
@@ -1375,8 +1377,12 @@ class TestWriteBatchIsolation:
         mock_db_models = MagicMock()
         mock_db_client = MagicMock()
         sys.modules["database"] = MagicMock()
-        sys.modules["database.db_models"] = mock_db_models
-        sys.modules["database.client"] = mock_db_client
+        sys.modules["management.db.models"] = mock_db_models
+        sys.modules["management.db.client"] = mock_db_client
+        from test.common.database_stubs import install_serialization_stub
+        install_serialization_stub(sys.modules["management.db.client"])
+        from test.common.database_stubs import install_serialization_stub
+        install_serialization_stub(sys.modules["management.db.client"])
         return (
             mock_db_client.get_monitoring_db_session,
             mock_db_models.ModelMonitoringRecord,

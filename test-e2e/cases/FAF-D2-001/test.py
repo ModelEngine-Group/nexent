@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 import pytest
 from management.services.agent import run as agent_run_service
-import management.services.agent.execution as agent_execution
+from management.services.agent import execution as agent_execution
 from nexent.core.utils.observer import MessageObserver, ProcessType
 
 pytestmark = [pytest.mark.case_id("FAF-D2-001"), pytest.mark.stage("D2")]

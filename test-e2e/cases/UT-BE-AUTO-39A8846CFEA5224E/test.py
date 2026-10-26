@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import json
@@ -5,7 +7,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from consts.model import HybridSearchRequest
+from contracts.knowledge import HybridSearchRequest
 
 EXPECTED_FIELDS = {'query', 'index_names', 'top_k', 'weight_accurate', 'tag_predicates'}
 
