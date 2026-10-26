@@ -29,6 +29,7 @@ from report_ownership import enrich as enrich_ownership
 from ext_attach import ExtKnowledgeAttach
 from launch_runtime import test_python
 from local_preflight import live_service_problems, static_config_problems
+from node_preflight import node_toolchain_problems
 from static_assets import entries as static_entries, inventory as static_inventory
 from suite_runtime import BatchLock, config_fingerprint, finalize, fingerprint, logged, now, render_report, save
 from suite_resume import prepare_resume
@@ -139,6 +140,7 @@ def doctor(repo, home, records, *, live=False):
     ):
         if framework in frameworks and not (repo / "test-e2e/infra/automation" / relative).is_file():
             problems.append(f"missing locked {framework} toolchain")
+    problems.extend(node_toolchain_problems(repo, home, frameworks))
     if live and not problems:
         problems.extend(live_service_problems(home))
     return sorted(set(problems))
