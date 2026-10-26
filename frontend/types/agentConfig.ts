@@ -591,6 +591,8 @@ export interface AgentRefreshEvent extends CustomEvent {
 // MCP server interface definition
 export interface McpServer {
   service_name: string;
+  description?: string | null;
+  tags?: string[];
   mcp_url: string;
   status: boolean;
   enabled: boolean;
