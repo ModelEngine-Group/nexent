@@ -3,7 +3,9 @@
 
 import ast
 import importlib.util
+import os
 from pathlib import Path
+import tokenize
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -17,23 +19,53 @@ def load_file(relative, name):
     return module
 
 
+def _project_python_sources(root):
+    """Prune dependency/runtime artifacts before visiting project Python sources."""
+    for folder in ("backend", "test/backend", "test-e2e/cases", "test-e2e/infra/automation"):
+        for directory, directories, filenames in os.walk(root / folder):
+            directories[:] = [
+                name for name in directories
+                if not name.startswith(".") and name not in {"__pycache__", "node_modules"}
+                and not (Path(directory) / name / "pyvenv.cfg").is_file()
+            ]
+            for filename in filenames:
+                if filename.endswith(".py"):
+                    yield Path(directory) / filename
+
+
+def _legacy_agent_imports(root):
+    violations = []
+    for path in _project_python_sources(root):
+        with tokenize.open(path) as stream:
+            tree = ast.parse(stream.read(), filename=str(path))
+        for node in ast.walk(tree):
+            modules = []
+            if isinstance(node, ast.ImportFrom):
+                modules = [node.module or ""]
+            elif isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            for module in modules:
+                if module in {"agents", "backend.agents"} or module.startswith(
+                    ("agents.", "backend.agents.")
+                ):
+                    violations.append((path.relative_to(root).as_posix(), node.lineno, module))
+    return violations
+
+
 def test_ut_be_arb_001_product_callers_use_canonical_owners():
     assert not (ROOT / "backend/agents").exists()
-    violations = []
-    for folder in ("backend", "test/backend", "test-e2e/cases", "test-e2e/infra/automation"):
-        for path in (ROOT / folder).rglob("*.py"):
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                modules = []
-                if isinstance(node, ast.ImportFrom):
-                    modules = [node.module or ""]
-                elif isinstance(node, ast.Import):
-                    modules = [alias.name for alias in node.names]
-                for module in modules:
-                    if module in {"agents", "backend.agents"} or module.startswith(
-                        ("agents.", "backend.agents.")
-                    ):
-                        violations.append((str(path.relative_to(ROOT)), node.lineno, module))
-    assert not violations, violations
+    assert not _legacy_agent_imports(ROOT)
+
+
+def test_source_scan_ignores_dependencies_but_detects_owned_legacy_imports(tmp_path):
+    for folder in [".venv/site-packages", "node_modules/package", "__pycache__", ".pytest-tmp", "vendor-env/site-packages"]:
+        path = tmp_path / "backend" / folder / "non_utf8.py"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"\xa4\n")
+    (tmp_path / "backend/vendor-env/pyvenv.cfg").write_text("", encoding="utf-8")
+    owned = tmp_path / "backend/owned.py"
+    owned.write_text("# Owned source\nfrom agents import legacy\n", encoding="utf-8")
+    assert _legacy_agent_imports(tmp_path) == [("backend/owned.py", 2, "agents")]
 
 
 def test_ut_be_arb_002_factory_preserves_prepared_values(monkeypatch):

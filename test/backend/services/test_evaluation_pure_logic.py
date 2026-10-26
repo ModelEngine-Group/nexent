@@ -142,6 +142,7 @@ _MODULE_ROOTS = (
     "management",
     "nexent",
     "openjiuwen",
+    "runtime",
     "services",
     "sqlalchemy",
     "utils",
@@ -382,6 +383,8 @@ def _install_sys_modules_stubs() -> None:
     _services_pkg = _register_package("services")
     _as_mod = _mk_mod("management.services.agent.service", prepare_agent_run=MagicMock())
     _services_pkg.agent_service = _as_mod
+    # Engine invocation is outside the pure evaluation rules tested here.
+    _mk_mod("runtime.adapters.nexent.runner", agent_run=MagicMock())
     _ess_mod = _mk_mod(
         "management.services.evaluation.sets",
         resolve_latest_published_version_no=MagicMock(),
