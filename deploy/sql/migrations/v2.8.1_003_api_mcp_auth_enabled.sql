@@ -1,3 +1,5 @@
+-- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 -- Explicitly persist whether authentication headers are enabled for API-to-MCP services.
 ALTER TABLE nexent.ag_outer_api_services
     ADD COLUMN IF NOT EXISTS auth_enabled BOOLEAN NOT NULL DEFAULT FALSE;

@@ -1,3 +1,5 @@
+-- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 -- 1. Create custom Schema (if not exists)
 CREATE SCHEMA IF NOT EXISTS nexent;
 

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import i18n from 'i18next';
 
 import { ErrorCode } from '@/const/errorCode';
