@@ -1513,7 +1513,7 @@ def test_create_tool_invalid_config_type(nexent_agent_instance):
 
 
 def test_create_tool_exception_handling(nexent_agent_instance):
-    """create_tool should handle exceptions and raise ValueError with error message."""
+    """create_tool should propagate the original tool creation exception."""
     tool_config = ToolConfig(
         class_name="DummyTool",
         name="dummy",
@@ -1530,7 +1530,7 @@ def test_create_tool_exception_handling(nexent_agent_instance):
             "create_local_tool",
             side_effect=Exception("Tool creation failed"),
     ):
-        with pytest.raises(ValueError, match="Error in creating tool: Tool creation failed"):
+        with pytest.raises(Exception, match="Tool creation failed"):
             nexent_agent_instance.create_tool(tool_config)
 
 
@@ -2908,7 +2908,7 @@ class TestCreateToolExceptionHandling:
             source="builtin",
         )
 
-        with pytest.raises(ValueError, match=r"Error in creating tool: Unknown builtin tool: UnknownTool"):
+        with pytest.raises(ValueError, match=r"Unknown builtin tool: UnknownTool"):
             nexent_agent_instance.create_tool(tool_config)
 
 

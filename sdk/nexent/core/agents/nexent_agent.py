@@ -685,36 +685,33 @@ class NexentAgent:
         """create a tool instance according to the tool config"""
         if not isinstance(tool_config, ToolConfig):
             raise TypeError("tool_config must be a ToolConfig object")
-        try:
-            class_name = tool_config.class_name
-            source = tool_config.source
+        class_name = tool_config.class_name
+        source = tool_config.source
 
-            if source == "local":
-                tool_obj = self.create_local_tool(tool_config)
-            elif source == "mcp":
-                tool_obj = self.create_mcp_tool(class_name)
-                tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
-            elif source == "langchain":
-                tool_obj = self.create_langchain_tool(tool_config)
-            elif source == "builtin":
-                tool_obj = self.create_builtin_tool(tool_config)
-            else:
-                raise ValueError(f"unsupported tool source: {source}")
-            mapping = getattr(self, "workspace_mapping", None)
-            if mapping is not None and class_name in {
-                "CreateFileTool", "ReadFileTool", "DeleteFileTool", "DownloadFromS3Tool", "UploadToS3Tool",
-            }:
-                tool_obj.workspace_mapping = mapping
-                if class_name in {"CreateFileTool", "ReadFileTool", "DeleteFileTool"}:
-                    tool_obj.init_path = str(mapping.host_root / "outputs")
-            if source in {"local", "builtin", "mcp"}:
-                try:
-                    setattr(tool_obj, "_nexent_execute_on_host", True)
-                except (AttributeError, TypeError):
-                    pass
-            return tool_obj
-        except Exception as e:
-            raise ValueError(f"Error in creating tool: {e}")
+        if source == "local":
+            tool_obj = self.create_local_tool(tool_config)
+        elif source == "mcp":
+            tool_obj = self.create_mcp_tool(class_name)
+            tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
+        elif source == "langchain":
+            tool_obj = self.create_langchain_tool(tool_config)
+        elif source == "builtin":
+            tool_obj = self.create_builtin_tool(tool_config)
+        else:
+            raise ValueError(f"unsupported tool source: {source}")
+        mapping = getattr(self, "workspace_mapping", None)
+        if mapping is not None and class_name in {
+            "CreateFileTool", "ReadFileTool", "DeleteFileTool", "DownloadFromS3Tool", "UploadToS3Tool",
+        }:
+            tool_obj.workspace_mapping = mapping
+            if class_name in {"CreateFileTool", "ReadFileTool", "DeleteFileTool"}:
+                tool_obj.init_path = str(mapping.host_root / "outputs")
+        if source in {"local", "builtin", "mcp"}:
+            try:
+                setattr(tool_obj, "_nexent_execute_on_host", True)
+            except (AttributeError, TypeError):
+                pass
+        return tool_obj
 
     def _wrap_subagent(
         self,
