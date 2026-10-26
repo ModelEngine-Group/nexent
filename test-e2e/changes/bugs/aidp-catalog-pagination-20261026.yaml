@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: AIDP-CATALOG-PAGINATION-20261026
+  change_type: bugfix
+  bug_id: BUG-AIDP-CATALOG-INCOMPLETE-ROWS
+  title: Align AIDP catalog pagination with card columns
+  description: Default to 12 and offer 12/24/48 while preserving card/table pagination state.
+  observed_behavior: A full 10-item page renders two complete four-card rows and a partial third row.
+  expected_behavior: Full 12-item pages fill the four-column grid; view switching retains the current records and does not refetch.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing list component coverage did not assert page-size policy or same-record/no-request view switching.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-111]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AIDP-FE-LIST-01]
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Catalog options override shared pagination defaults without changing other consumers.
+      - Current values remain selectable and page-size callbacks preserve the controlled contract.
+    test_selectors:
+      - frontend/tests/component/aidpPagination.test.tsx
+    reason: Focused shared-component boundary assertions complement the existing full catalog collaboration Case; no Python changes.
+  notes: >-
+    User authorized this change and the earlier source performance fixes in one PR. Local design is in
+    auto-test/source-metadata-performance/aidp-catalog-pagination-design.md outside the product repository.
+    Reuse AIDP-FE-LIST-01; no new D1 quota or backend/provider tests. Other AIDP pagination consumers and ES catalog remain unchanged.

@@ -124,6 +124,7 @@ describe("AIDP-FE-LIST-01", () => {
       );
     mount(<AidpKnowledgeConfiguration />);
     await advance(5);
+    expect(matching(base).at(-1)!.url.searchParams.get("page_size")).toBe("12");
     fireEvent.click(document.querySelector(".ant-pagination-item-2")!);
     await advance(5);
     expect(matching(base).at(-1)!.url.searchParams.get("page")).toBe("2");
@@ -148,11 +149,90 @@ describe("AIDP-FE-LIST-01", () => {
       screen.getByRole("combobox", { name: t("aidpKnowledge.pageSize") }),
     );
     fireEvent.click(
-      screen.getByText(t("aidpKnowledge.pageSizeOption", { size: 20 })),
+      screen.getByText(t("aidpKnowledge.pageSizeOption", { size: 24 })),
     );
     await advance(5);
-    expect(matching(base).at(-1)!.url.searchParams.get("page_size")).toBe("20");
+    expect(matching(base).at(-1)!.url.searchParams.get("page_size")).toBe("24");
     expect(matching(base).at(-1)!.url.searchParams.get("page")).toBe("1");
+  });
+
+  it("card/table switching preserves catalog records, keyword and pagination without a list request", async () => {
+    vi.useFakeTimers();
+    const items = Array.from({ length: 73 }, (_, index) => ({
+      ...kb,
+      kds_id: `kb-${index + 1}`,
+      kds_name: `Knowledge ${index + 1}`,
+    }));
+    server.handler = (request) => {
+      const page = Number(request.url.searchParams.get("page"));
+      const size = Number(request.url.searchParams.get("page_size"));
+      return reply(
+        listResponse(items.slice((page - 1) * size, page * size), items.length),
+      );
+    };
+    mount(<AidpKnowledgeConfiguration />);
+    await advance(5);
+    expect(matching(base).at(-1)!.url.searchParams.get("page_size")).toBe("12");
+    expect(document.querySelectorAll("article[role='button']")).toHaveLength(
+      12,
+    );
+    const search = screen.getByPlaceholderText(
+      t("aidpKnowledge.searchPlaceholder"),
+    );
+    fireEvent.change(search, { target: { value: "  Knowledge  " } });
+    await advance(310);
+    fireEvent.click(document.querySelector(".ant-pagination-item-3")!);
+    await advance(5);
+    expect(screen.getByText("Knowledge 25")).toBeInTheDocument();
+    expect(screen.getByText("Knowledge 36")).toBeInTheDocument();
+    const before = matching(base).length;
+    const names = () =>
+      Array.from(
+        document.querySelectorAll(
+          "article[role='button'] h3, tbody button[class*='tableName']",
+        ),
+      ).map((element) => element.textContent);
+    const cardNames = names();
+    expect(cardNames).toEqual(items.slice(24, 36).map((item) => item.kds_name));
+    for (const view of ["viewTable", "viewCards"]) {
+      fireEvent.click(
+        document.querySelector(`[title="${t(`aidpKnowledge.${view}`)}"]`)!,
+      );
+      await advance(5);
+      expect(matching(base)).toHaveLength(before);
+      expect(screen.getByText("Knowledge 25")).toBeInTheDocument();
+      expect(screen.getByText("Knowledge 36")).toBeInTheDocument();
+      expect(names()).toEqual(cardNames);
+      expect(
+        document.querySelector(".ant-pagination-item-active"),
+      ).toHaveTextContent("3");
+    }
+    expect(names()).toEqual(cardNames);
+    for (const size of [24, 48]) {
+      fireEvent.mouseDown(
+        screen.getByRole("combobox", { name: t("aidpKnowledge.pageSize") }),
+      );
+      expect(
+        screen.queryByText(t("aidpKnowledge.pageSizeOption", { size: 10 })),
+      ).toBeNull();
+      fireEvent.click(
+        screen.getByText(t("aidpKnowledge.pageSizeOption", { size })),
+      );
+      await advance(5);
+      const parameters = matching(base).at(-1)!.url.searchParams;
+      expect(parameters.get("page_size")).toBe(String(size));
+      expect(parameters.get("page")).toBe("1");
+      expect(parameters.get("keyword")).toBe("Knowledge");
+      expect(document.querySelectorAll("article[role='button']")).toHaveLength(
+        size,
+      );
+    }
+    fireEvent.click(document.querySelector(".ant-pagination-item-2")!);
+    await advance(5);
+    expect(document.querySelectorAll("article[role='button']")).toHaveLength(
+      25,
+    );
+    expect(screen.getByText("Knowledge 73")).toBeInTheDocument();
   });
 
   it.each(["confirm", "close"])(
@@ -197,9 +277,12 @@ describe("AIDP-FE-LIST-01", () => {
   );
 
   it("cancelled deletion does nothing and confirmed deletion refreshes the list", async () => {
+    vi.useFakeTimers();
     let deleted = false;
     const original = server.handler;
     server.handler = (request) => {
+      if (request.url.pathname === base + "/kb-a/bound_agents")
+        return reply({ agents: [] });
       if (request.method === "DELETE") {
         deleted = true;
         return reply({});
@@ -208,18 +291,31 @@ describe("AIDP-FE-LIST-01", () => {
         return reply(listResponse(deleted ? [] : [kb]));
       return original(request);
     };
-    await ready();
-    await menu("common.delete");
-    fireEvent.click(await screen.findByRole("button", { name: /取\s*消/ }));
-    await settle();
+    mount(<AidpKnowledgeConfiguration />);
+    await advance(5);
+    const openDelete = async () => {
+      fireEvent.click(
+        screen.getByRole("button", { name: t("aidpKnowledge.moreOperations") }),
+      );
+      await advance(5);
+      fireEvent.click(screen.getByText(t("common.delete")));
+      await advance(50);
+    };
+    await openDelete();
+    fireEvent.click(screen.getByRole("button", { name: /取\s*消/ }));
+    await advance(400);
     expect(matching(base + "/kb-a", "DELETE")).toHaveLength(0);
-    await menu("common.delete");
-    await screen.findByRole("button", {
-      name: t("knowledgeBase.modal.deleteConfirm.confirm"),
-    });
+    expect(document.querySelector(".ant-modal-root")).toBeNull();
+    await openDelete();
+    expect(
+      screen.getByRole("button", {
+        name: t("knowledgeBase.modal.deleteConfirm.confirm"),
+      }),
+    ).toBeInTheDocument();
     const before = matching(base).length;
     confirmDeleteKb();
-    await screen.findByText(t("aidpKnowledge.listEmpty"));
+    await advance(50);
+    expect(screen.getByText(t("aidpKnowledge.listEmpty"))).toBeInTheDocument();
     expect(matching(base + "/kb-a", "DELETE")).toHaveLength(1);
     expect(matching(base)).toHaveLength(before + 1);
   });
