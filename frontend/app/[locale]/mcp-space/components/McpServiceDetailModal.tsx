@@ -425,7 +425,22 @@ export default function McpServiceDetailModal({
                 disabled={isReadOnly}
               />
             </Form.Item>
-            <div className="flex items-center gap-2">
+            <Form.Item
+              name="openApiJson"
+              rules={rules.openApiJson}
+              className="mb-0"
+              style={{ marginBottom: 0 }}
+            >
+              <Input.TextArea
+                placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
+                rows={6}
+                disabled={isReadOnly}
+              />
+            </Form.Item>
+            <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>
+              {t("mcpConfig.openApiToMcp.form.apiJsonHint")}
+            </span>
+            <div className="flex items-center gap-2 mt-3">
               <Form.Item
                 name="sslVerify"
                 valuePropName="checked"
@@ -455,21 +470,6 @@ export default function McpServiceDetailModal({
                 );
               }}
             </Form.Item>
-            <Form.Item
-              name="openApiJson"
-              rules={rules.openApiJson}
-              className="mb-0"
-              style={{ marginBottom: 0 }}
-            >
-              <Input.TextArea
-                placeholder={t("mcpConfig.openApiToMcp.jsonPlaceholder")}
-                rows={6}
-                disabled={isReadOnly}
-              />
-            </Form.Item>
-            <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>
-              {t("mcpConfig.openApiToMcp.form.apiJsonHint")}
-            </span>
           </>
         ) : null}
         {isLocalImage ? (
