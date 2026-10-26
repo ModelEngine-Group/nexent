@@ -464,8 +464,10 @@ class TestUpdateMcpService:
         mock_auth.return_value = ("uid", "tid", "en")
         resp = client.put("/mcp/update", json={
             "mcp_id": 1, "name": "new-name", "server_url": "http://new.url",
+            "ssl_verify": False,
         }, headers=AUTH_HEADER)
         assert resp.status_code == HTTPStatus.OK
+        assert mock_update.call_args.kwargs["ssl_verify"] is False
 
     @patch('management.api.mcp.remote_mcp.get_current_user_info')
     @patch('management.api.mcp.remote_mcp.update_mcp_service')
