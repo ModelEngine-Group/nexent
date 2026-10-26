@@ -425,19 +425,18 @@ export default function McpServiceDetailModal({
                 disabled={isReadOnly}
               />
             </Form.Item>
-            <Form.Item
-              name="sslVerify"
-              valuePropName="checked"
-              className="mb-0"
-              style={{ marginBottom: 0 }}
-            >
-              <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
+              <Form.Item
+                name="sslVerify"
+                valuePropName="checked"
+                noStyle
+              >
                 <Switch disabled={isReadOnly} />
-                <span className="text-sm text-slate-700">
-                  {t("mcpConfig.openapiService.form.sslVerifyLabel")}
-                </span>
-              </div>
-            </Form.Item>
+              </Form.Item>
+              <span className="text-sm text-slate-700">
+                {t("mcpConfig.openapiService.form.sslVerifyLabel")}
+              </span>
+            </div>
             <Form.Item noStyle shouldUpdate={(prev, current) =>
               prev.sslVerify !== current.sslVerify
             }>
