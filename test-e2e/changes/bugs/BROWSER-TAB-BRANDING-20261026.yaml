@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: BROWSER-TAB-BRANDING-20261026
+  change_type: bugfix
+  bug_id: BROWSER-TAB-BRANDING-20261026
+  title: Browser tab follows current project branding
+  description: Replace the hard-coded platform title and obsolete favicon with the current product name and navigation logo.
+  observed_behavior: Browser tabs always show AI Agent Platform and the old neon N favicon despite current project branding.
+  expected_behavior: Initial metadata uses Nexent and the base-path-aware navigation logo. Once locale configuration loads, the title follows its productName and subsequent configuration or locale changes; missing or blank names fall back to Nexent.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing WorkbenchGreeting tests cover configured names inside the page, but no existing assertion covers document title or layout icons.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/component/browserTabBranding.test.tsx
+    behaviors:
+    - Loaded Chinese and English configuration and later name or locale changes update document.title.
+    - Missing and blank product names fall back to Nexent and special characters remain literal text.
+    - Shared layout metadata uses the current default name and the base-path-aware configured navigation logo endpoint for each icon relation.
+    reason: Frontend configuration-to-document regression with real store, provider and layout metadata. No backend or API changes. Additional formal D1 duplicates this unit evidence; existing deployment persistence and Workbench journeys remain unchanged.
+  notes: >-
+    The current public favicon.png is the obsolete neon N; SideNavigation uses modelengine-logo.png, served with no-store and persisted configuration fallback by server.js. Reuse that endpoint rather than creating or modifying bitmap assets.
+    Searched Feature/Case assets and WB-GREETING-CONFIG-20261019; deployment persistence cases concern project-config volumes rather than browser metadata, so no formal Case changes or execution are selected. All historical Cases remain preserved.
+    Sibling nexent-doc and nexent-doc-new and the authoritative UI document are absent. A machine-local lightweight design records acceptance and evidence outside the product repository; no external SPEC is fabricated in Git.
