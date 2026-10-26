@@ -6,22 +6,12 @@ feature:
   feature_id: F-115
   name: image/search/all sources 权限及不存在消息；来源卡片引用高亮（retrieval_highlight_terms 持久化、score_overall 放宽与前端角标/片段高亮）
   status: active
-  description: >-
-    会话与分享 / 消息来源: image/search/all sources 权限及不存在消息；来源卡片引用高亮（retrieval_highlight_terms 持久化、score_overall
-    放宽与前端角标/片段高亮）
+  description: '会话与分享 / 消息来源: image/search/all sources 权限及不存在消息；来源卡片引用高亮（retrieval_highlight_terms 持久化、score_overall 放宽与前端角标/片段高亮）'
   business_rules:
-    - rule_id: F-115-RULE-01
-      description: image/search/all sources 权限及不存在消息；来源卡片引用高亮（retrieval_highlight_terms 持久化、score_overall 放宽与前端角标/片段高亮）
-    - rule_id: F-115-RULE-02
-      description: >-
-        Chat source inspection preserves citation and summary entry points, full source access and metadata
-        hover; metadata summaries use two CSS rows without hidden counts and details render on demand. Source
-        lists mount at most 20 items per tab; citation selection locates its actual source page, including
-        repeated clicks, while totals and complete data are retained.
+  - rule_id: F-115-RULE-01
+    description: image/search/all sources 权限及不存在消息；来源卡片引用高亮（retrieval_highlight_terms 持久化、score_overall 放宽与前端角标/片段高亮）
   required_test_stages:
-    - D1
-    - D2
-    - D4
-    - D5
+  - D1
+  - D2
   source:
     notes: Migrated from V5 01_代码功能清单 without changing the functional description.

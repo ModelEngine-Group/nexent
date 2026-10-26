@@ -4,4 +4,9 @@ implementations:
 - framework: vitest
   file: test.test.tsx
   selector: UT-FE-AUTO-A1A182D995AD0FC8
+acceptance_bindings:
+  AC-01:
+  - citation click-highlight feature gate > UT-FE-AUTO-A1A182D995AD0FC8 preserves citation selection while gating sentence context
+  AC-02:
+  - citation click-highlight feature gate > UT-FE-AUTO-A1A182D995AD0FC8 preserves citation selection while gating sentence context
 notes: V5 source binding migrated; runtime parity is not yet certified.

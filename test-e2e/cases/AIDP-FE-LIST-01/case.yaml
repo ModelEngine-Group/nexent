@@ -6,7 +6,6 @@ case:
   feature_id: F-111
   business_rule_ids:
   - F-111-RULE-01
-  - F-111-RULE-02
   title: AIDP 知识库列表操作、偏好保持与查询隔离
   type: FE-COMP
   priority: P0

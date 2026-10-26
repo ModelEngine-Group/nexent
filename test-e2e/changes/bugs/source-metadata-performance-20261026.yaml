@@ -14,53 +14,34 @@ change:
   expected_behavior: CSS clips to two rows without a hidden count; hover remains and detail rendering is lazy.
   escaped_stage: production
   coverage_gap:
-    type: missing_boundary
+    type: missing_assertion
     description: >-
-      Existing F-115 citation contracts cover marker selection, not bulk metadata layout or full-page
-      300-source interactions.
-  feature_contract_changed: true
+      Existing F-115 citation coverage did not assert source/image page boundaries or repeated
+      citation relocation after manual paging. Performance evidence remains local.
+  feature_contract_changed: false
   affected_features:
-    existing: []
+    existing: [F-115, CHAT-SIDEBAR]
     added: []
-    modified:
-      - F-115
-      - CHAT-SIDEBAR
+    modified: []
     retired: []
   affected_cases:
     existing: []
-    added:
-      - PW-SOURCES-300
-      - PERF-SOURCES-300
+    added: []
     modified:
       - UT-FE-AUTO-A1A182D995AD0FC8
-      - UT-FE-AUTO-0330CCC385F313B2
     retired: []
   traditional_ut:
-    decision: add
+    decision: reuse
     behaviors:
-      - >-
-        Closed metadata does not serialize JSON; collapsed groups do not instantiate descendants; hover and
-        pin interactions remain functional.
-      - >-
-        Pagination follows actual citation identity, repeated clicks and image tabs; cached source data
-        invalidates on content/provider changes; ordinary clicks do not refresh thread lists.
+      - Preserve existing activity reload, pin synchronization, mutation and failure behavior under the changed foreground trigger.
     test_selectors:
-      - frontend/tests/component/sourceMetadata.test.tsx
-      - frontend/tests/component/messageSources.test.tsx
-      - frontend/tests/component/sourcePagination.test.tsx
-      - frontend/tests/component/sourcePanelActions.test.tsx
-      - frontend/tests/component/foregroundRefresh.test.tsx
       - frontend/tests/workbench/ConversationActivitySync.test.tsx
       - frontend/tests/workbench/ConversationActivityRuntime.test.tsx
       - frontend/tests/workbench/ServerThreadPins.test.tsx
       - frontend/tests/workbench/WorkbenchPinHistorySync.test.tsx
-    reason: Frontend-only behavior requires focused component/browser regression; no Python boundary changes.
+    reason: User explicitly limits this PR to existing UT adaptation; no new frontend UT. Existing source Case owns pagination checks; performance diagnostics remain local.
   notes: >-
-    Local design is kept in the workspace auto-test/source-metadata-performance directory because shared
-    documents are read-only. AIDP/ES share SourceMetadata and SourcesPanel. Real ES retrieval, local
-    preview/download and image scenarios require follow-up runtime acceptance; provider-shaped browser
-    fixtures do not establish those results. Adjacent citation fixtures retain all assertions: HTML checks now
-    await the existing asynchronous preview effect, and the assistant-ui hook stub preserves unrelated exports
-    required by current dependencies. Continuation explicitly authorized in this chat on 2026-10-26; branch
-    532234ba0 is ahead 1 / behind 0 of freshly fetched develop. Add CHAT-SIDEBAR refresh coverage without
-    changing backend contracts.
+    User requested no new frontend UT, Case IDs or Feature changes. Extend only the existing source
+    citation/panel Case for pagination and adapt existing UT triggers broken by foreground policy changes.
+    Keep the 300-source diagnostic scripts and timing evidence local. Do not register cache/render/refresh performance
+    as E2E. Existing numeric citations, source/provider data and ES follow-up scope are unchanged.

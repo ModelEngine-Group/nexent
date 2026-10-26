@@ -6,7 +6,7 @@ case:
   feature_id: F-115
   business_rule_ids:
   - F-115-RULE-01
-  title: ENABLE_CITATION_CLICK_HIGHLIGHT 开关门控引用角标点击定位与片段高亮｜核心流程
+  title: ENABLE_CITATION_CLICK_HIGHLIGHT 引用定位、高亮与来源分页｜核心流程
   type: FE-COMP
   priority: P1
   status: active
@@ -46,10 +46,23 @@ case:
   - order: 8
     action: 对比开关 false/true 两次路径，断言 selectedCitationKey 定位行为保持一致，仅引用上下文派生高亮术语随开关变化。
     expected: 开关切换仅影响高亮术语，不影响来源卡选中与滚动定位；测试过程无未处理异常、无伪成功。
+  - order: 9
+    action: 将同一条消息设为45条文本来源和21条图片来源，显示编号1引用实际a45；点击该引用。
+    expected: 来源按每页20条显示；a45定位到第3页并选中，末页5条，完整45条来源保留。
+  - order: 10
+    action: 手动返回第1页，再次点击同一a45引用。
+    expected: 第1页显示20条；重复引用重新定位第3页的a45。
+  - order: 11
+    action: 点击b21图片引用，再切换到文本来源标签。
+    expected: 图片第2页仅1条，切换文本来源回第1页；来源身份和选择不依赖显示编号。
+  - order: 12
+    action: 将面板切换为不足20条的另一组来源，再切换为空列表。
+    expected: 页码回到1且分页器隐藏；剩余条目与空态正确。
   expected_results:
   - 开关为 false（默认）：点击引用角标仍选中并定位到对应来源卡（selectedCitationKey='a1'），但 citationContext 为 undefined，不产生引用上下文派生的句子级高亮术语。
   - 开关为 true：点击引用角标选中来源卡，且 citationContext 为标记前一整句非空文本，来源卡中与 citationContext 重叠的句子以 <mark> 渲染高亮。
   - 开关切换仅影响高亮术语，不影响来源卡选中与滚动定位；测试过程无未处理异常、无伪成功。
+  - 每页20条，实际引用键定位正确；重复点击可重新定位，来源/图片标签和短列表、空列表的分页边界正确。
   forbidden_side_effects: []
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
@@ -62,3 +75,13 @@ case:
   - 开关为 false（默认）：点击引用角标仍选中并定位到对应来源卡（selectedCitationKey='a1'），但 citationContext 为 undefined，不产生引用上下文派生的句子级高亮术语。
   - 开关为 true：点击引用角标选中来源卡，且 citationContext 为标记前一整句非空文本，来源卡中与 citationContext 重叠的句子以 <mark> 渲染高亮。
   - 开关切换仅影响高亮术语，不影响来源卡选中与滚动定位；测试过程无未处理异常、无伪成功。
+  - 每页20条，实际引用键定位正确；重复点击可重新定位，来源/图片标签和短列表、空列表的分页边界正确。
+  acceptance:
+  - id: AC-01
+    description: 既有引用高亮开关与定位行为保持
+    steps: [1, 2, 3, 4, 5, 6, 7, 8]
+    expected_results: [1, 2, 3]
+  - id: AC-02
+    description: 来源和图片分页及重复引用定位
+    steps: [9, 10, 11, 12]
+    expected_results: [4]

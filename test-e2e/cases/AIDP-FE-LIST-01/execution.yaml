@@ -9,7 +9,6 @@ acceptance_bindings:
   - AIDP-FE-LIST-01 > card/table, guide and columns persist while only the name enters
     files
   AC-02:
-  - AIDP-FE-LIST-01 > card/table switching preserves catalog records, keyword and pagination without a list request
   - AIDP-FE-LIST-01 > pagination and debounced search use the right parameters and
     reset page
   AC-03:

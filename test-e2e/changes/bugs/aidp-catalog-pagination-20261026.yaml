@@ -11,11 +11,11 @@ change:
   coverage_gap:
     type: missing_assertion
     description: Existing list component coverage did not assert page-size policy or same-record/no-request view switching.
-  feature_contract_changed: true
+  feature_contract_changed: false
   affected_features:
-    existing: []
+    existing: [F-111]
     added: []
-    modified: [F-111]
+    modified: []
     retired: []
   affected_cases:
     existing: []
@@ -23,14 +23,14 @@ change:
     modified: [AIDP-FE-LIST-01]
     retired: []
   traditional_ut:
-    decision: add
+    decision: reuse
     behaviors:
-      - Catalog options override shared pagination defaults without changing other consumers.
-      - Current values remain selectable and page-size callbacks preserve the controlled contract.
+      - Preserve existing table-header interactions when switching catalog views.
     test_selectors:
-      - frontend/tests/component/aidpPagination.test.tsx
-    reason: Focused shared-component boundary assertions complement the existing full catalog collaboration Case; no Python changes.
+      - frontend/tests/component/aidpResizableTitle.test.tsx
+    reason: Reuse the adjacent existing table unit checks; the existing catalog D1 proves pagination collaboration. User explicitly disallows new frontend UT.
   notes: >-
-    User authorized this change and the earlier source performance fixes in one PR. Local design is in
-    auto-test/source-metadata-performance/aidp-catalog-pagination-design.md outside the product repository.
-    Reuse AIDP-FE-LIST-01; no new D1 quota or backend/provider tests. Other AIDP pagination consumers and ES catalog remain unchanged.
+    Keep F-111 and its original rule IDs unchanged. Extend the existing pagination/search assertion
+    rather than add a new test or Case. The catalog defaults to 12 with 12/24/48 in both views;
+    other AIDP lists retain their defaults. Unrelated deletion-fixture changes are compared against
+    the base and excluded when not caused by this change. No Python/provider behavior changes.
