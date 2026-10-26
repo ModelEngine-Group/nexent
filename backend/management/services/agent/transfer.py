@@ -320,6 +320,8 @@ def _collect_skill_names_from_tree(
             version_no=current_version_no,
         )
         for inst in skill_instances:
+            if not inst.get("enabled", True):
+                continue
             skill_id = inst.get("skill_id")
             skill = skill_db.get_skill_by_id(skill_id, tenant_id)
             if skill:
@@ -394,6 +396,8 @@ async def export_agent_by_agent_id(
             agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
         )
         for inst in skill_instances:
+            if not inst.get("enabled", True):
+                continue
             skill_id = inst.get("skill_id")
             skill = skill_db.get_skill_by_id(skill_id, tenant_id)
             if skill:
