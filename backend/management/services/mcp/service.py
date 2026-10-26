@@ -162,6 +162,30 @@ def update_mcp_service(
         shared_fields=shared_fields,
     )
 
+    if (
+        isinstance(current_config_json, dict)
+        and "openapi" in current_config_json
+        and ssl_verify is not None
+    ):
+        try:
+            from management.services.tool.configuration import (
+                _refresh_openapi_services_in_mcp,
+            )
+
+            refresh_result = _refresh_openapi_services_in_mcp(tenant_id)
+            if (refresh_result or {}).get("error"):
+                logger.warning(
+                    "OpenAPI MCP runtime refresh failed after updating service '%s': %s",
+                    new_name,
+                    refresh_result["error"],
+                )
+        except Exception as exc:
+            logger.warning(
+                "Failed to refresh OpenAPI MCP runtime after updating service '%s': %s",
+                new_name,
+                exc,
+            )
+
 
 async def update_mcp_service_enabled(
     *,
