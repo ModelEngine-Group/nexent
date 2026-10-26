@@ -15,7 +15,7 @@ from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
 from management.db.tool.outer_api import query_available_openapi_services
-from contracts.constants.environment import TOKEN
+from contracts.constants.environment import MCP_INTERNAL_TOKEN, TOKEN
 from mcp.types import Tool as MCPTool
 from nexent.core.concurrency import (
     ManagedThreadSpec,

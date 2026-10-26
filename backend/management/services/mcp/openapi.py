@@ -5,7 +5,7 @@ import time
 from typing import Any, Dict, List
 
 import requests
-from contracts.constants.environment import MCP_MANAGEMENT_API
+from contracts.constants.environment import MCP_INTERNAL_TOKEN, MCP_MANAGEMENT_API
 from management.db.tool.outer_api import (
     delete_openapi_service as db_delete_openapi_service,
     query_openapi_services_by_tenant,
