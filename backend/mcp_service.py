@@ -14,7 +14,7 @@ from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
 from database.outer_api_tool_db import query_available_openapi_services
-from consts.const import TOKEN
+from consts.const import MCP_INTERNAL_TOKEN, TOKEN
 from mcp.types import Tool as MCPTool
 from nexent.core.concurrency import (
     ManagedThreadSpec,
@@ -249,9 +249,9 @@ def get_mcp_management_app():
 
 def _require_management_authorization(authorization: Optional[str]) -> None:
     """Require the configured internal token for management-only endpoints."""
-    if not TOKEN:
+    if not MCP_INTERNAL_TOKEN:
         raise HTTPException(status_code=403, detail="Internal token is not configured")
-    if authorization not in (TOKEN, f"Bearer {TOKEN}"):
+    if authorization not in (MCP_INTERNAL_TOKEN, f"Bearer {MCP_INTERNAL_TOKEN}"):
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
