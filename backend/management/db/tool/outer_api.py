@@ -195,6 +195,22 @@ def query_service_by_name(service_name: str, tenant_id: str) -> Optional[Dict[st
         return as_dict(service) if service else None
 
 
+def update_openapi_service_ssl_verify(
+    service_name: str, tenant_id: str, user_id: str, ssl_verify: bool
+) -> bool:
+    """Update the TLS certificate verification setting for an API service."""
+    with get_db_session() as session:
+        updated = session.query(OuterApiService).filter(
+            OuterApiService.mcp_service_name == service_name,
+            OuterApiService.tenant_id == tenant_id,
+            OuterApiService.delete_flag != 'Y',
+        ).update({
+            OuterApiService.ssl_verify: ssl_verify,
+            OuterApiService.updated_by: user_id,
+        })
+        return bool(updated)
+
+
 def query_service_by_id(service_id: int, tenant_id: str) -> Optional[Dict[str, Any]]:
     """
     Query OpenAPI service by ID.
