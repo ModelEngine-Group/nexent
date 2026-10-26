@@ -347,6 +347,7 @@ export const listMcpTools = async (params?: { tag?: string }) => {
       containerStatus: s.container_status as McpContainerStatus,
       authorizationToken: s.authorization_token,
       customHeaders: s.custom_headers ?? undefined,
+      sslVerify: s.ssl_verify ?? undefined,
       communityId: s.market_id ?? undefined,
       isListedInRepository: s.is_listed_in_repository ?? undefined,
       permission: s.permission ?? undefined,

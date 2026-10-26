@@ -245,6 +245,7 @@ async def add_container_mcp_service_endpoint(
             group_ids=payload.group_ids,
             ingroup_permission=payload.ingroup_permission,
             shared_fields=payload.shared_fields,
+            ssl_verify=payload.ssl_verify,
         )
 
         # mcp_config may carry credentials via env blocks and never reaches the log.
@@ -410,6 +411,7 @@ async def update_mcp_service_endpoint(
             group_ids=payload.group_ids,
             ingroup_permission=payload.ingroup_permission,
             shared_fields=payload.shared_fields,
+            ssl_verify=payload.ssl_verify,
         )
 
         # authorization_token/custom_headers/config_json never reach the log;
