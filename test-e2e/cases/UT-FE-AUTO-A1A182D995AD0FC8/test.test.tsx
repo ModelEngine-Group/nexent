@@ -43,7 +43,8 @@ vi.mock('@assistant-ui/react-markdown', () => ({
   useIsMarkdownCodeBlock: () => false,
 }));
 
-vi.mock('@assistant-ui/react', () => ({
+vi.mock('@assistant-ui/react', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@assistant-ui/react')>(),
   useAuiState: (selector: (s: any) => any) => selector(h.aui),
 }));
 

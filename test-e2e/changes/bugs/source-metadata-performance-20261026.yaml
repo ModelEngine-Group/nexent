@@ -1,0 +1,49 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-SOURCE-PERF-20261026
+  change_type: bugfix
+  bug_id: BUG-SOURCE-METADATA-PERF
+  title: Remove synchronous metadata layout and defer details
+  description: Simplify two-row source metadata and verify 300-source chat inspection.
+  observed_behavior: >-
+    Every source measures metadata chips repeatedly before paint; closed metadata creates serialized JSON
+    eagerly.
+  expected_behavior: CSS clips to two rows without a hidden count; hover remains and detail rendering is lazy.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_boundary
+    description: >-
+      Existing F-115 citation contracts cover marker selection, not bulk metadata layout or full-page
+      300-source interactions.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified:
+      - F-115
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+      - PW-SOURCES-300
+      - PERF-SOURCES-300
+    modified:
+      - UT-FE-AUTO-A1A182D995AD0FC8
+      - UT-FE-AUTO-0330CCC385F313B2
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - >-
+        Closed metadata does not serialize JSON; collapsed groups do not instantiate descendants; hover and
+        pin interactions remain functional.
+    test_selectors:
+      - frontend/tests/component/sourceMetadata.test.tsx
+    reason: Frontend-only behavior requires focused component/browser regression; no Python boundary changes.
+  notes: >-
+    Local design is kept in the workspace auto-test/source-metadata-performance directory because shared
+    documents are read-only. AIDP/ES share SourceMetadata and SourcesPanel. Real ES retrieval, local
+    preview/download and image scenarios require follow-up runtime acceptance; provider-shaped browser
+    fixtures do not establish those results. Adjacent citation fixtures retain all assertions: HTML checks now
+    await the existing asynchronous preview effect, and the assistant-ui hook stub preserves unrelated exports
+    required by current dependencies.

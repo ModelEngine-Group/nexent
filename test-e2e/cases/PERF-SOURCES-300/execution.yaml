@@ -1,0 +1,17 @@
+schema_version: '1.0'
+case_id: PERF-SOURCES-300
+implementations:
+  - framework: playwright
+    file: test.spec.ts
+    selector: PERF-SOURCES-300
+acceptance_bindings:
+  AC-01:
+    - PERF-SOURCES-300
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Deterministic browser transport fixture; actual Next.js history and source UI
+  execute. No existing backend data is read or written.

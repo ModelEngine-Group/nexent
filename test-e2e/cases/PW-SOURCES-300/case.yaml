@@ -1,0 +1,101 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-UI
+case:
+  feature_id: F-115
+  business_rule_ids:
+    - F-115-RULE-02
+  priority: P1
+  status: active
+  automation: automated
+  preconditions:
+    - An isolated Next.js frontend is running; all test API calls are intercepted by the browser fixture.
+  test_data:
+    sources: 300
+    attributes_per_source: 30
+    profiles:
+      - aidp
+      - es-shaped-frontend
+  forbidden_side_effects:
+    - >-
+      Do not access or mutate existing DEV backend data; do not truncate sources or change citation
+      identities.
+  case_id: PW-SOURCES-300
+  title: Chat source entry points and metadata with 300 results
+  type: E2E
+  objective: Preserve source inspection while removing synchronous metadata measurement.
+  steps:
+    - order: 1
+      action: Load a historical chat fixture containing 300 sources and citation markers.
+      expected: All source identities restore through the production history adapter.
+    - order: 2
+      action: Click an inline citation, close the panel, then click the search-results summary.
+      expected: >-
+        Both entry points open the source panel; the citation selects the matching card and all 300 sources
+        remain available.
+    - order: 3
+      action: >-
+        Select another citation, click a supported source link, hover metadata, move into the popup and pin
+        it.
+      expected: Selection changes correctly, the link remains actionable and complete metadata is readable.
+    - order: 4
+      action: Expand a nested property, select JSON, close with Escape and outside click, and repeat after resize.
+      expected: >-
+        Details are lazy, complete and closable; metadata chips remain within two rows without a hidden-count
+        badge.
+  expected_results:
+    - All source identities restore through the production history adapter.
+    - >-
+      Both entry points open the source panel; the citation selects the matching card and all 300 sources
+      remain available.
+    - Selection changes correctly, the link remains actionable and complete metadata is readable.
+    - >-
+      Details are lazy, complete and closable; metadata chips remain within two rows without a hidden-count
+      badge.
+  actor: Chat user
+  journey:
+    - Load a historical chat fixture containing 300 sources and citation markers.
+    - Click an inline citation, close the panel, then click the search-results summary.
+    - Select another citation, click a supported source link, hover metadata, move into the popup and pin it.
+    - Expand a nested property, select JSON, close with Escape and outside click, and repeat after resize.
+  final_business_result:
+    - All 300 sources can be inspected through both entry points and metadata hover remains usable.
+  failure_evidence:
+    - Screenshot, browser errors and timing output in the test result directory.
+  acceptance:
+    - id: AC-01
+      description: All source identities restore through the production history adapter.
+      steps:
+        - 1
+      expected_results:
+        - 1
+      forbidden_side_effects:
+        - 1
+    - id: AC-02
+      description: >-
+        Both entry points open the source panel; the citation selects the matching card and all 300 sources
+        remain available.
+      steps:
+        - 2
+      expected_results:
+        - 2
+      forbidden_side_effects:
+        - 1
+    - id: AC-03
+      description: Selection changes correctly, the link remains actionable and complete metadata is readable.
+      steps:
+        - 3
+      expected_results:
+        - 3
+      forbidden_side_effects:
+        - 1
+    - id: AC-04
+      description: >-
+        Details are lazy, complete and closable; metadata chips remain within two rows without a hidden-count
+        badge.
+      steps:
+        - 4
+      expected_results:
+        - 4
+      forbidden_side_effects:
+        - 1

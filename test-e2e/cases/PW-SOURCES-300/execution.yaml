@@ -1,0 +1,23 @@
+schema_version: '1.0'
+case_id: PW-SOURCES-300
+implementations:
+  - framework: playwright
+    file: test.spec.ts
+    selector: PW-SOURCES-300
+acceptance_bindings:
+  AC-01:
+    - PW-SOURCES-300
+  AC-02:
+    - PW-SOURCES-300
+  AC-03:
+    - PW-SOURCES-300
+  AC-04:
+    - PW-SOURCES-300
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Deterministic browser transport fixture; actual Next.js history and source UI
+  execute. No existing backend data is read or written.
