@@ -66,6 +66,14 @@ a339511b00b26522e11ae40534853089657015ccf1f7e2d48c331fc0367d3862  test-e2e/cases
 b783c709e46a453d5bebc9df36348f7bee71ad820e1374c09fa6b96bb5d91550  test-e2e/cases/NB-CHAT-DISCONNECT-001/test.py
 ```
 
+## Hotfix transplant verification — 2026-10-27
+
+Cherry-picked `555306ea7ac8477872f43f46121bfd16ed4b5c54` onto `hotfix/v2.8.1` at `11f516b60` without conflicts. The product, UT and formal Case files match the original fix; no develop merge or develop-specific lifecycle fixture adaptation is included.
+
+The same targeted commands above pass on this baseline: **50 passed, 449 deselected** for lifecycle/service UT and **66 passed** for proxy/channel UT. Copyright checks for all three changed Python files and `git diff --check` pass.
+
+Implementation asset validation with `--generate --require-ut-change NB-CHAT-DISCONNECT-20261026 --require-acceptance-case NB-CHAT-DISCONNECT-001` fails on one pre-existing baseline issue: `CHAT-AGENT-DETAIL-20261026` references missing `frontend/tests/workbench/ConversationResumeBranch.test.tsx`. The reference already exists and the file is absent in `11f516b60`; this transplant changes neither. Real D3 remains blocked by the runtime prerequisites described above.
+
 ## Verification limits
 
 Both documented sibling SPEC directories (`nexent-doc`, `nexent_SPEC`) are absent. The formal assets and actual UT/scripts in this repository were inspected; this is a delivery record, not a replacement external SPEC. Record UT, static validation and real runtime results separately. Missing runtime configuration or credentials blocks D3 acceptance and never counts as a pass.
