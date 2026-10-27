@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-CITATION-ORDER-20261027
+  change_type: bugfix
+  bug_id: CHAT-CITATION-ORDER-20261027
+  title: Order message source and image lists by their display numbers
+  description: Stable-sort shared message presentation arrays after building original-identity lookup maps so citation selection and pagination follow increasing display numbers.
+  observed_behavior: Answer-first citation numbers are rendered in retrieval-order lists, leaving small display numbers on later pages.
+  expected_behavior: Each tab lists increasing message-wide display numbers; original citation keys, numeric legacy resolution and unnumbered image order remain stable.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing numbering collaboration assertions check matching labels but not retrieval order differing from citation order or the resulting page location.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-065]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [UT-FE-AUTO-82166F602745F6D7]
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+      - First-appearance numbering, tool key separation, numeric aliases and unnumbered identity behavior remain unchanged.
+    reason: User prohibits new frontend UT. Reuse existing helper UT; strengthen the existing formal citation-to-panel collaboration test for the changed order and pagination behavior.
+    test_selectors:
+      - frontend/tests/component/citationDisplay.test.tsx
+      - frontend/tests/component/deepseekSearch.test.tsx
+  notes: >-
+    Local design: auto-test/citation-source-order/design.md outside the product repository.
+    Syncthing documents remain read-only. Preserve historical sessions and existing servers;
+    formal D1 execution is not deployed conversation acceptance. No API/provider or data migration changes.
