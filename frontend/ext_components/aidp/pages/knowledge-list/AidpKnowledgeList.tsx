@@ -61,6 +61,7 @@ import type { AidpKbColumnKey, AidpKbViewMode } from "./types";
 import {
   AIDP_KB_REQUIRED_COLUMNS,
   AIDP_KB_DEFAULT_COLUMNS,
+  AIDP_KB_PAGE_SIZE_OPTIONS,
   COLUMN_LABEL_KEYS,
 } from "./constants";
 
@@ -661,6 +662,7 @@ const AidpKnowledgeList: React.FC<AidpKnowledgeListProps> = ({
               <AidpPagination
                 currentPage={currentPage}
                 pageSize={pageSize}
+                pageSizeOptions={AIDP_KB_PAGE_SIZE_OPTIONS}
                 total={total}
                 totalReliable={totalReliable}
                 hasMore={hasMore}

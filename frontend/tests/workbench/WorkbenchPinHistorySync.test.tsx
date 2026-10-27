@@ -1,11 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { act, render, waitFor } from "@testing-library/react";
-import {
-  focusManager,
-  QueryClient,
-  QueryClientProvider,
-} from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { expect, it, vi } from "vitest";
 import { PinnedThreadsProvider } from "@/app/newchat/assistant-ui/thread-pins";
 import { WorkbenchPinHistorySync } from "@/app/newchat/assistant-ui/workbench-pin-history-sync";
@@ -89,10 +85,15 @@ it("refocus hydrates an unloaded remote pin using the confirmed snapshot, withou
   });
   await waitFor(() => expect(get).toHaveBeenCalledTimes(1));
   expect(runtime.reload).not.toHaveBeenCalled();
-  act(() => {
-    focusManager.setFocused(false);
-    focusManager.setFocused(true);
-  });
+  vi.useFakeTimers();
+  try {
+    act(() => window.dispatchEvent(new Event("focus")));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_050);
+    });
+  } finally {
+    vi.useRealTimers();
+  }
   await waitFor(() => expect(runtime.reload).toHaveBeenCalledTimes(1));
   await waitFor(() =>
     expect(
@@ -101,7 +102,6 @@ it("refocus hydrates an unloaded remote pin using the confirmed snapshot, withou
     ).toBe("900")
   );
   expect(get).toHaveBeenCalledTimes(2);
-  focusManager.setFocused(undefined);
   client.clear();
 });
 

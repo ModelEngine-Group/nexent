@@ -15,6 +15,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { workbenchPinsQueryKey } from "@/lib/workbenchPins";
 import type { WorkbenchPinItem } from "@/types/conversation";
 import { conversationService } from "@/services/conversationService";
+import { useForegroundRefresh } from "@/hooks/chat/useForegroundRefresh";
+import { CONVERSATION_SYNC_FRESHNESS_MS } from "@/const/conversationSync";
 
 export interface ThreadPinIdentity {
   id: string;
@@ -124,45 +126,17 @@ function ServerPinnedThreadsState({
     () => workbenchPinsQueryKey(storageKey),
     [storageKey]
   );
+  const pending = useRef(false);
+  useForegroundRefresh(queryKey, Boolean(storageKey), pending);
   const query = useQuery({
     queryKey,
+    staleTime: CONVERSATION_SYNC_FRESHNESS_MS,
     queryFn: () => conversationService.getWorkbenchPins(),
     enabled: Boolean(storageKey),
-    refetchOnMount: "always",
-    refetchOnWindowFocus: "always",
-    refetchOnReconnect: "always",
+    refetchOnMount: true,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
-  const pending = useRef(false);
-  useEffect(() => {
-    if (!storageKey) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let lastRefresh = 0;
-    const refreshOnActivity = () => {
-      // Embedded pages may stay visible when their host window regains focus.
-      if (document.visibilityState !== "visible" || timer !== undefined) return;
-      timer = setTimeout(
-        () => {
-          timer = undefined;
-          if (document.visibilityState !== "visible" || pending.current) return;
-          lastRefresh = Date.now();
-          void client.refetchQueries(
-            { queryKey, exact: true, type: "active" },
-            { cancelRefetch: false }
-          );
-        },
-        Math.max(0, 5_000 - (Date.now() - lastRefresh))
-      );
-    };
-    window.addEventListener("focus", refreshOnActivity);
-    document.addEventListener("focusin", refreshOnActivity);
-    document.addEventListener("pointerdown", refreshOnActivity);
-    return () => {
-      if (timer !== undefined) clearTimeout(timer);
-      window.removeEventListener("focus", refreshOnActivity);
-      document.removeEventListener("focusin", refreshOnActivity);
-      document.removeEventListener("pointerdown", refreshOnActivity);
-    };
-  }, [client, queryKey, storageKey]);
   const reportedError = useRef<Error | null>(null);
   const mutation = useMutation({
     mutationFn: ({ id, pinned }: { id: number; pinned: boolean }) =>

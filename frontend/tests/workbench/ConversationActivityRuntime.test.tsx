@@ -133,7 +133,15 @@ it("real same-adapter activity reload retains an active stream and the next comp
       },
       ...rows,
     ];
-    act(() => window.dispatchEvent(new Event("focus")));
+    vi.useFakeTimers();
+    try {
+      act(() => window.dispatchEvent(new Event("focus")));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_050);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
     await waitFor(() =>
       expect(
         Object.values(runtime.threads.getState().threadItems).some(

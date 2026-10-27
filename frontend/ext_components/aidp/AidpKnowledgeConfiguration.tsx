@@ -25,6 +25,7 @@ import {
 import AidpKnowledgeList from "./pages/knowledge-list/AidpKnowledgeList";
 import {
   AIDP_KB_DEFAULT_COLUMNS,
+  AIDP_KB_DEFAULT_PAGE_SIZE,
   AIDP_KB_REQUIRED_COLUMNS,
 } from "./pages/knowledge-list/constants";
 import type {
@@ -77,7 +78,7 @@ const AidpKnowledgeConfiguration: React.FC = () => {
   }, []);
   const [listParams, setListParams] = useState({
     page: 1,
-    pageSize: 10,
+    pageSize: AIDP_KB_DEFAULT_PAGE_SIZE,
     keyword: "",
   });
   const { page: kbPage, pageSize: kbPageSize } = listParams;
