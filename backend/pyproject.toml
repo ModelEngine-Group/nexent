@@ -41,17 +41,14 @@ dependencies = [
 data-process = [
     "celery>=5.3.6",
     "flower>=2.0.1",
-    "unstructured[all-docs]==0.18.14",
-    "unstructured-inference==1.2.0",
+    "unstructured[csv,docx,pdf,pptx,xlsx,md]==0.18.14",
     "openpyxl>=3.1.5",
     "xlrd>=2.0.1",
     "huggingface_hub>=0.30.0,<1.0",
-    "nexent[performance]",
-    "torch==2.11.0",
-    "torchvision==0.26.0",
+    "nexent-sdk[data_process,performance]",
 ]
 test = [
-    "nexent[quality,performance]",
+    "nexent-sdk[dev]",
     "pytest",
     "pytest-cov",
     "coverage",
@@ -78,7 +75,7 @@ preview-features = ["index-by-name"]
 index-strategy = "unsafe-first-match"
 
 [tool.uv.sources]
-nexent = { path = "../sdk", editable = true }
+nexent-sdk = { path = "../sdk", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

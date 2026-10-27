@@ -18,7 +18,7 @@ feature:
       slim/conda variants. Sandbox users can execute these tools without root privileges.
   - rule_id: F-173-RULE-04
     description: Document-processing and developer installations use CPU PyTorch by default; the preset pytorch-nvidia index selects CUDA PyTorch with the same extra.
-      Development, CI and image build installations use uv and share the dependency profiles; sandbox dynamic package-installation security behavior
+      The SDK distribution is nexent-sdk with the nexent import namespace; Torch remains transitive and test installations retain the complete SDK dev extra. Development, CI and image build installations use uv and share the dependency profiles; sandbox dynamic package-installation security behavior
       remains unchanged.
   required_test_stages: []
   source:

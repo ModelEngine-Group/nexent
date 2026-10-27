@@ -3,7 +3,7 @@ requires = ["setuptools>=75.1.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nexent"
+name = "nexent-sdk"
 version = "0.1.2"
 description = "Nexent Agent Framework"
 authors = [
@@ -76,8 +76,6 @@ quality = [
 data_process = [
     "unstructured[all-docs]==0.18.14",
     "unstructured-inference==1.2.0",
-    "torch==2.11.0",
-    "torchvision==0.26.0",
 ]
 performance = [
     "opentelemetry-api>=1.20.0",
@@ -89,7 +87,7 @@ performance = [
     "opentelemetry-exporter-otlp>=1.20.0",
 ]
 dev = [
-    "nexent[quality, data_process, performance]"
+    "nexent-sdk[quality, data_process, performance]"
 ]
 
 [tool.setuptools.packages.find]

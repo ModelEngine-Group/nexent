@@ -293,8 +293,8 @@ See `deploy/docker/assets/monitoring/otel-collector-config.yml` for full configu
 When OpenTelemetry dependencies are not installed, monitoring gracefully disables:
 
 ```python
-uv pip install nexent          # Basic package - no monitoring
-uv pip install nexent[performance]  # With OTLP support
+uv pip install nexent-sdk          # Basic package - no monitoring
+uv pip install nexent-sdk[performance]  # With OTLP support
 ```
 
 All monitoring methods work without errors when disabled - decorators pass through, context managers yield None.

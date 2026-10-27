@@ -5,7 +5,7 @@ change:
   requirement_id: CPU-DEFAULT-UV-20261026
   title: Default document processing to CPU and standardize uv installation
   description: Use preset CPU/NVIDIA indexes with uv 0.13.6 and unchanged Python across development, UT CI and data-process builds; migrate direct build/development pip commands
-    to uv without changing sandbox dynamic installation. User excludes deployment and application functional verification.
+    to uv without changing sandbox dynamic installation. Preserve SDK dev/parse dependency ownership, avoid new direct Torch requirements, and rename only the SDK distribution to nexent-sdk. User excludes deployment and application functional verification.
   affected_features:
     existing: []
     added: []
@@ -27,6 +27,7 @@ change:
     - test/backend/deploy/test_k8s_env_injection.py
     - test/backend/services/test_clarification_response.py
     - test/sdk/container/test_docker_client.py
+    - test/sdk/monitor/test_monitoring.py
     behaviors:
     - Execute the existing CI unit-test suite under both CPU and NVIDIA dependency installations without weakening assertions.
     - Missing Redis client returns failure without accessing cleanup services and provides uv installation guidance.

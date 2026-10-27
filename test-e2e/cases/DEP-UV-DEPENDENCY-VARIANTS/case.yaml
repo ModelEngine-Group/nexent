@@ -23,9 +23,9 @@ case:
     - base
     - data-process
     - data-process with --index pytorch-nvidia
-    torch_versions:
-    - 2.11.0
-    - 0.26.0
+    sdk_distribution: nexent-sdk
+    sdk_import: nexent
+    torch_resolution: Transitive parsing dependencies; no new direct Torch/Torchvision requirements
     images:
     - main
     - data-process-cpu
@@ -38,7 +38,7 @@ case:
     - a2a-agent
   steps:
   - order: 1
-    action: Install base, CPU document-processing and SDK developer dependencies in fresh environments using maintained uv commands. Inspect installed
+    action: Install base, CPU document-processing and SDK developer dependencies in fresh environments using maintained uv commands. Verify the complete SDK dev extra, new distribution metadata and unchanged import namespace. Inspect installed
       package metadata and import Torch/Torchvision.
     expected: Base has no Torch; CPU profiles use matching CPU builds, torch.version.cuda is None, and no nvidia-*, cuda-* or triton distribution
       is installed.

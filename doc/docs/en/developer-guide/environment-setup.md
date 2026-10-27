@@ -43,7 +43,7 @@ uv sync --extra data-process --extra test
 
 These commands create or update `backend/.venv`, install the backend dependencies, and install the local SDK in editable mode. Changes under `sdk/nexent/` do not require copying the package files again.
 
-The `data-process` extra (and SDK `dev`) installs CPU PyTorch and Torchvision by default. Use uv 0.13.6, matching CI and image builds. Python remains 3.11; CI pins 3.11.15. The backend extras include the local SDK.
+The `data-process` extra (and SDK `dev`) installs CPU PyTorch and Torchvision by default. Use uv 0.13.6, matching CI and image builds. Python remains 3.11; CI pins 3.11.15. The backend test extra installs the complete local `nexent-sdk[dev]` extra, including its parsing requirements; document processing uses the SDK parsing/performance extras. Torch/Torchvision remain transitive dependencies. The distribution is `nexent-sdk`, while Python imports remain `nexent`.
 
 CPU and NVIDIA use the same dependencies and differ only in the selected preset index:
 
@@ -63,8 +63,8 @@ For standalone SDK development, run `uv sync --python 3.11 --extra dev` from `sd
 For SDK packages installed from a registry, wheel metadata does not carry the checkout's uv index configuration. Select the backend explicitly:
 
 ```bash
-uv pip install "nexent[data-process]" --torch-backend cpu
-uv pip install "nexent[data-process]" --torch-backend cu130
+uv pip install "nexent-sdk[data-process]" --torch-backend cpu
+uv pip install "nexent-sdk[data-process]" --torch-backend cu130
 ```
 
 #### Optional: Use Package Mirrors
@@ -170,7 +170,7 @@ uv pip install -e .
 ### Install with uv
 
 ```bash
-uv add nexent
+uv add nexent-sdk
 ```
 
 ### Development Installation with Tooling
