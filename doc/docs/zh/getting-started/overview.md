@@ -17,7 +17,7 @@ Nexent 是一个基于 **Harness Engineering** 原则构建的零代码智能体
 
 > *If you want to go fast, go alone; if you want to go far, go together.*
 
-当前文档对应 **Nexent v2.5.0**。该版本增强了自然语言生成智能体（NL2Agent）、工具与 Skill 推荐、隔离沙箱执行、文件产物处理、分层记忆、个人知识库容量和北向 API 等能力。平台同时支持 A2A 智能体协作、MCP 工具、知识库检索、多模态交互、版本管理和多租户权限控制。
+当前文档对应 **Nexent v2.8.1**。该版本增强了自然语言生成智能体（NL2Agent）、工具与 Skill 推荐、隔离沙箱执行、文件产物处理、分层记忆、个人知识库容量和北向 API 等能力。平台同时支持 A2A 智能体协作、MCP 工具、知识库检索、多模态交互、版本管理和多租户权限控制。
 
 - **🗺️ 查看我们的 [功能地图](https://github.com/orgs/ModelEngine-Group/projects/6)** 探索当前和即将推出的功能。
 - **🔍 试用当前版本** 并在 [问题反馈](https://github.com/ModelEngine-Group/nexent/issues) 中留下想法或报告错误。
@@ -32,7 +32,7 @@ Nexent 是一个基于 **Harness Engineering** 原则构建的零代码智能体
 
 ## ✨ 核心特性
 
-Nexent v2.5.0 提供以下核心能力：
+Nexent v2.8.1 提供以下核心能力：
 
 - **⚙️ 多模型集成** — 统一管理 LLM、Embedding、Rerank、图像、视频、音频、STT 和 TTS 模型
 - **🤖 智能体零代码生成** — 通过多轮自然语言对话澄清需求、推荐资源并生成可调试的智能体配置
