@@ -32,6 +32,7 @@ change:
     - Keep pins and the active conversation reachable, deduplicate rows, and resolve all IDs for one Agent without selecting another Agent's history.
     - Render animated skeleton rows without visible loading copy; expose error/retry and retain the active row on history failure.
     - Validate authenticated endpoint routing, query limits, owner scope and malformed group/cursor behavior.
+    - Cover missing identity, HTTP error preservation, private-error sanitization, included groups, terminal pages, cursor boundaries and UTC pin serialization.
     - Preserve Workbench detail payloads, activity metadata and keyset pagination while isolating Agent-chat styles and history changes.
     - Recompute overflow shadows after expansion or viewport resizing so a fitting two-conversation group has no stale shadow; use the same page-scoped native scrollbar styling for Agent groups and conversations.
     - Load subsequent Agent groups near the outer viewport bottom, keep inner conversation scrolling independent, retain groups on errors with explicit retry, and stop pagination requests when exhausted with a localized transient end message.
@@ -39,6 +40,8 @@ change:
     - Keep inner history width within the outer viewport when native scrollbars reserve space, without horizontal scrolling or clipping the inner scrollbar; retain native scrollbar gutters instead of adding a custom overlay implementation.
     test_selectors:
     - test/backend/database/test_conversation_agent_history_db.py
+    - test/backend/services/test_conversation_agent_history.py
+    - test/backend/app/test_conversation_agent_history_errors.py
     - test/backend/app/test_conversation_management_app.py::test_agent_history_static_routes_forward_scoped_queries
     - test/backend/app/test_conversation_management_app.py::test_agent_history_routes_reject_invalid_scope_and_expired_identity
     - frontend/tests/workbench/AgentHistoryList.test.tsx

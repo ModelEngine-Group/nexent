@@ -190,3 +190,107 @@ def test_detail_activity_is_added_only_to_agent_chat(monkeypatch, session, workb
         assert result["last_activity_time"] == 9000
     else:
         assert "last_activity_time" not in result
+
+
+@pytest.mark.parametrize("limit", [0, 101])
+def test_conversation_page_rejects_invalid_limit(session, limit):
+    with pytest.raises(ValueError, match="Conversation limit"):
+        db.get_agent_group_conversation_page("owner", "agent:7", limit=limit)
+    session.execute.assert_not_called()
+
+
+def test_group_page_next_cursor_and_included_groups(session):
+    activity = datetime(2026, 10, 26, 8, 30)
+    session.execute.side_effect = [[], [
+        _group_row(7, 7, activity, "Seven", matched=True),
+        _group_row(6, 6, activity, "Six"),
+    ], [_group_row(None, -1, activity, None)]]
+    cursor = encode_agent_group_cursor(activity, 8, "budget")
+    result = db.get_agent_conversation_group_page(
+        "owner", "tenant", limit=1, cursor=cursor, search="budget",
+        include_agent_ids=[7], include_other=True,
+    )
+    assert decode_agent_group_cursor(result["next_cursor"], "budget")[1] == 7
+    assert result["items"][0]["matched_conversation"] is True
+    assert result["included_items"][0]["group_key"] == "other"
+    query = session.execute.call_args_list[1].args[0].compile(dialect=postgresql.dialect())
+    assert " < " in str(query) and " = " in str(query)
+    assert 8 in query.params.values()
+    assert "%budget%" in query.params.values()
+
+
+def test_other_group_terminal_page_and_pin_timestamp(session):
+    activity = datetime(2026, 10, 26, 8, 30)
+    row = _conversation_row(41, activity)
+    row.agent_id = None
+    row.pinned_at = activity
+    session.execute.side_effect = [[row], [row]]
+    cursor = encode_agent_conversation_cursor(activity, 42, "other", "")
+    result = db.get_agent_group_conversation_page("owner", "other", cursor=cursor)
+    assert result["next_cursor"] is None
+    assert result["items"][0]["agent_id"] is None
+    assert result["pinned_items"][0]["pinned_at"] == "2026-10-26T08:30:00+00:00"
+    sql = str(session.execute.call_args_list[0].args[0].compile(dialect=postgresql.dialect()))
+    assert "agent_id IS NULL" in sql and " < " in sql
+
+
+def test_group_page_search_escapes_wildcards(session):
+    session.execute.side_effect = [[], []]
+    assert db.get_agent_conversation_group_page("owner", "tenant", search="%_\\")['items'] == []
+    params = session.execute.call_args_list[1].args[0].compile(dialect=postgresql.dialect()).params
+    assert "%\\%\\_\\\\%" in params.values()
+
+
+@pytest.mark.parametrize("kind", ["group", "conversation"])
+@pytest.mark.parametrize("payload", [None, {}, [], ["invalid-date", 1, "x"], [1, 1, "x"], ["2026-01-01", 1, "x"]])
+def test_cursor_rejects_malformed_payloads(kind, payload):
+    import base64
+    import json
+
+    cursor = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    with pytest.raises(ValueError, match="Invalid agent"):
+        if kind == "group":
+            decode_agent_group_cursor(cursor, "")
+        else:
+            decode_agent_conversation_cursor(cursor, "agent:7", "")
+
+
+@pytest.mark.parametrize("kind", ["group", "conversation"])
+@pytest.mark.parametrize("cursor", ["", "x" * 513, "%%%"])
+def test_cursor_rejects_empty_oversized_and_invalid_base64(kind, cursor):
+    with pytest.raises(ValueError, match="Invalid agent"):
+        if kind == "group":
+            decode_agent_group_cursor(cursor, "")
+        else:
+            decode_agent_conversation_cursor(cursor, "agent:7", "")
+
+
+@pytest.mark.parametrize("kind", ["group", "conversation"])
+@pytest.mark.parametrize("identity", [0, -2, True, "7"])
+def test_cursor_rejects_invalid_identity(kind, identity):
+    activity = datetime(2026, 10, 26, tzinfo=timezone.utc)
+    with pytest.raises(ValueError, match="Invalid agent"):
+        if kind == "group":
+            decode_agent_group_cursor(encode_agent_group_cursor(activity, identity, ""), "")
+        else:
+            decode_agent_conversation_cursor(
+                encode_agent_conversation_cursor(activity, identity, "agent:7", ""), "agent:7", "",
+            )
+
+
+@pytest.mark.parametrize("kind", ["group", "conversation"])
+def test_cursor_rejects_naive_timestamp(kind):
+    import base64
+    import json
+    from contracts.conversation import _search_fingerprint
+
+    payload = ["2026-01-01T00:00:00", 7]
+    if kind == "conversation":
+        payload.append("agent:7")
+    payload.append(_search_fingerprint(""))
+    cursor = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    with pytest.raises(ValueError, match="Invalid agent"):
+        if kind == "group":
+            decode_agent_group_cursor(cursor, "")
+        else:
+            decode_agent_conversation_cursor(cursor, "agent:7", "")

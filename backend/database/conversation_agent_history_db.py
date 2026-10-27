@@ -146,8 +146,6 @@ def get_agent_conversation_group_page(
             group_activity < activity.replace(tzinfo=None),
             and_(group_activity == activity.replace(tzinfo=None), group_id < identity),
         ))
-    regular_rows = []
-    pinned_rows = []
     with get_db_session() as session:
         pinned_statement = statement.where(pinned_group).order_by(
             desc(statement.selected_columns.activity_time), desc(group_id)

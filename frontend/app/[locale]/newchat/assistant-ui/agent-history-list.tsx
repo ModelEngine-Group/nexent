@@ -15,6 +15,7 @@ import {
   useInfiniteQuery,
   useQuery,
   useQueryClient,
+  type QueryClient,
 } from "@tanstack/react-query";
 import { Checkbox, Dropdown, message } from "antd";
 import type { MenuProps } from "antd";
@@ -99,6 +100,15 @@ const GROUP_PAGE_SIZE = 10;
 const CONVERSATION_PAGE_SIZE = 10;
 const END_OF_HISTORY_MESSAGE_DURATION_MS = 1200;
 const EMPTY_GROUP_KEYS: ReadonlySet<string> = new Set();
+
+const invalidateAgentHistory = (queryClient: QueryClient) => {
+  for (const key of [
+    "agentConversationGroups",
+    "agentConversationGroupConversations",
+  ]) {
+    void queryClient.invalidateQueries({ queryKey: [key] });
+  }
+};
 
 const toGroupKey = (agentId: number | null): string =>
   agentId === null ? "other" : `agent:${agentId}`;
@@ -558,12 +568,7 @@ export function AgentHistoryList({
     const previous = previousPinSnapshotRef.current;
     previousPinSnapshotRef.current = pinSnapshot;
     if (previous === undefined || previous === pinSnapshot) return;
-    void queryClient.invalidateQueries({
-      queryKey: ["agentConversationGroups"],
-    });
-    void queryClient.invalidateQueries({
-      queryKey: ["agentConversationGroupConversations"],
-    });
+    invalidateAgentHistory(queryClient);
   }, [pinSnapshot, queryClient]);
 
   const lastActivityRef = useRef<string | undefined>(undefined);
@@ -576,12 +581,7 @@ export function AgentHistoryList({
     }
     if (lastActivityRef.current === activityKey) return;
     lastActivityRef.current = activityKey;
-    void queryClient.invalidateQueries({
-      queryKey: ["agentConversationGroups"],
-    });
-    void queryClient.invalidateQueries({
-      queryKey: ["agentConversationGroupConversations"],
-    });
+    invalidateAgentHistory(queryClient);
   }, [activeConversationId, activeTime, queryClient]);
 
   const toggleGroup = (group: AgentConversationGroup) => {
@@ -968,14 +968,16 @@ function AgentHistoryGroupSection({
     if (expanded) return apiRows;
     return [];
   }, [apiRows, expanded]);
+  const showEndOfHistory =
+    endMessageSearch === threadListSearch &&
+    !pageQuery.hasNextPage &&
+    !pageQuery.isError &&
+    !pageQuery.isFetching &&
+    visibleRows.length > 0;
   const showTailStatus =
     pageQuery.isFetchNextPageError ||
     pageQuery.isFetchingNextPage ||
-    (endMessageSearch === threadListSearch &&
-      !pageQuery.hasNextPage &&
-      !pageQuery.isError &&
-      !pageQuery.isFetching &&
-      visibleRows.length > 0);
+    showEndOfHistory;
   const hasScrollableContent =
     scrollState?.search === threadListSearch &&
     scrollState.pageCount === pageCount
@@ -1105,20 +1107,23 @@ function AgentHistoryGroupSection({
     visibleRows.length,
   ]);
 
-  const isConversationPinned = (item: AgentHistoryItem): boolean => {
-    const id = String(item.conversation_id);
-    return (
-      (pageQuery.data?.pages ?? []).some((page) =>
-        page.pinned_items.some(
-          (candidate) => candidate.conversation_id === item.conversation_id
-        )
-      ) ||
-      serverPins.some(
-        (candidate) => candidate.conversation_id === item.conversation_id
-      ) ||
-      (pinned?.isPinned({ id, remoteId: id }) ?? false)
-    );
-  };
+  const pinnedConversationIds = useMemo(
+    () =>
+      new Set(
+        [
+          ...(pageQuery.data?.pages ?? []).flatMap((page) => page.pinned_items),
+          ...serverPins,
+        ].map((item) => item.conversation_id)
+      ),
+    [pageQuery.data, serverPins]
+  );
+  const isConversationPinned = (item: AgentHistoryItem): boolean =>
+    pinnedConversationIds.has(item.conversation_id) ||
+    (pinned?.isPinned({
+      id: String(item.conversation_id),
+      remoteId: String(item.conversation_id),
+    }) ??
+      false);
 
   const showInitialSkeleton =
     expanded &&
@@ -1345,12 +1350,7 @@ function AgentHistoryGroupSection({
                     onRenameSuccess={onRenameSuccess}
                     onNewConversation={onNewConversation}
                     onInvalidate={() => {
-                      void queryClient.invalidateQueries({
-                        queryKey: ["agentConversationGroups"],
-                      });
-                      void queryClient.invalidateQueries({
-                        queryKey: ["agentConversationGroupConversations"],
-                      });
+                      invalidateAgentHistory(queryClient);
                       void queryClient.invalidateQueries({
                         queryKey: ["workbench-pins"],
                       });
@@ -1395,19 +1395,14 @@ function AgentHistoryGroupSection({
               />
             </div>
           )}
-          {expanded &&
-            endMessageSearch === threadListSearch &&
-            !pageQuery.hasNextPage &&
-            !pageQuery.isError &&
-            !pageQuery.isFetching &&
-            visibleRows.length > 0 && (
-              <div
-                role="status"
-                className="sticky bottom-0 z-10 flex h-8 items-center justify-center bg-[#f0f0f0]/90 text-xs text-muted-foreground dark:bg-[#191919]/90"
-              >
-                {t("chat.threadList.noMoreConversations")}
-              </div>
-            )}
+          {expanded && showEndOfHistory && (
+            <div
+              role="status"
+              className="sticky bottom-0 z-10 flex h-8 items-center justify-center bg-[#f0f0f0]/90 text-xs text-muted-foreground dark:bg-[#191919]/90"
+            >
+              {t("chat.threadList.noMoreConversations")}
+            </div>
+          )}
         </div>
         {expanded && hasScrollableContent && !isAtTop && (
           <div
