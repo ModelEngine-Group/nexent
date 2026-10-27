@@ -14,7 +14,9 @@ import {
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
 import { useAuiState } from "@assistant-ui/react";
-import { type FC, memo, useEffect, useMemo, useState } from "react";
+import { type FC, memo, useEffect, useMemo } from "react";
+import { message } from "antd";
+import { useClipboardCopy } from "@/hooks/useClipboardCopy";
 import { useTranslation } from "react-i18next";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import remarkGfm from "remark-gfm";
@@ -265,10 +267,15 @@ export const MarkdownText = memo(MarkdownTextImpl);
 
 const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
   const { t } = useTranslation();
-  const { isCopied, copyToClipboard } = useCopyToClipboard();
+  const { isCopied, isCopying, copy } = useClipboardCopy({
+    scopeKey: code,
+    onError: () => {
+      message.error(t("agentUsageGuide.copyFailed"));
+    },
+  });
   const onCopy = () => {
-    if (!code || isCopied) return;
-    copyToClipboard(code);
+    if (!code || isCopied || isCopying) return;
+    void copy(code);
   };
 
   return (
@@ -280,6 +287,7 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
         tooltip={t("chat.thread.copy")}
         tooltipDelayDuration={0}
         className="size-6 p-1"
+        disabled={!code || isCopying}
         onClick={onCopy}
       >
         {!isCopied && (
@@ -291,30 +299,6 @@ const CodeHeader: FC<CodeHeaderProps> = ({ language, code }) => {
       </TooltipIconButton>
     </div>
   );
-};
-
-const useCopyToClipboard = ({
-  copiedDuration = 3000,
-}: {
-  copiedDuration?: number;
-} = {}) => {
-  const [isCopied, setIsCopied] = useState<boolean>(false);
-
-  const copyToClipboard = (value: string) => {
-    if (!value || typeof navigator === "undefined" || !navigator.clipboard) {
-      return;
-    }
-
-    navigator.clipboard.writeText(value).then(
-      () => {
-        setIsCopied(true);
-        setTimeout(() => setIsCopied(false), copiedDuration);
-      },
-      () => {}
-    );
-  };
-
-  return { isCopied, copyToClipboard };
 };
 
 const MarkdownSyntaxHighlighter: FC<Omit<SyntaxHighlighterProps, "node">> = (
