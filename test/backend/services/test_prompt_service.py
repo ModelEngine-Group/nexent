@@ -33,6 +33,7 @@ _MODULE_PATCH_NAMES = [
     'management.services.agent.service',
     'nexent',
     'nexent.core',
+    'nexent.core.agent_names',
     'nexent.core.prompts',
     'nexent.core.agents.prompt',
     'nexent.core.agents.prompt.auxiliary',
@@ -74,8 +75,10 @@ class MockToolConfig:
         return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
 
 # Mock nexent module hierarchy BEFORE any backend imports that depend on it
-nexent_mock = MagicMock()
-nexent_core_mock = MagicMock()
+nexent_mock = types.ModuleType('nexent')
+nexent_mock.__path__ = [str(Path(__file__).resolve().parents[3] / 'sdk/nexent')]
+nexent_core_mock = types.ModuleType('nexent.core')
+nexent_core_mock.__path__ = [str(Path(__file__).resolve().parents[3] / 'sdk/nexent/core')]
 nexent_core_agents_mock = MagicMock()
 nexent_core_agents_mock.__path__ = [str(Path(__file__).resolve().parents[3] / 'sdk/nexent/core/agents')]
 nexent_agent_model_mock = MagicMock()

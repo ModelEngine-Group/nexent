@@ -64,6 +64,7 @@ change:
       - test/backend/management/test_api_db_directory_architecture.py
       - test/backend/management/test_agent_runtime_boundaries.py
       - test/backend/services/test_agent_name_contract.py
+      - test/backend/services/test_prompt_service.py
       - test/backend/services/test_agent_export_skills.py
       - test/backend/services/test_clarification_response.py
       - test/backend/agents/test_create_agent_info.py::TestMergeToolParams
@@ -143,6 +144,9 @@ change:
     HTTP validation regressions without relaxing their assertions. The callable
     D3 probe imports model bindings from their current owner; its live Docker/A2A
     execution remains a separate prerequisite and is not proved by architecture UT.
+    The prompt-service UT's SDK namespace mock retains the core package path so
+    contracts can load the real shared name validator, and restores that imported
+    module with its other patched modules; no validator stub replaces the rule.
 
     Clarification UT retains real inserts, RETURNING, rollback and stored-answer
     assertions. Older Linux x86_64 test runners use the test-only bundled SQLite
