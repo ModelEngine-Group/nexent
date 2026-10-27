@@ -2401,18 +2401,29 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const buildStreamResult = (content: any[]): ChatModelRunResult => ({
-      content: collapseSubAgentParts(
-        content.map((part) =>
-          part.type === "data" &&
-          part.name === "clarification" &&
-          (userAborted || content.some((item) => item.isError))
-            ? { ...part, data: { ...part.data, completed: false } }
-            : part
-        )
-      ),
-      metadata: nl2a ? { custom: { nl2a } } : undefined,
-    });
+    const buildStreamResult = (content: any[]): ChatModelRunResult => {
+      // Snapshot this run's accumulated per-step token counts onto the message
+      // metadata so every assistant message owns its own usage data. The local
+      // runtime rebuilds `metadata.custom` from the initial custom plus the
+      // latest yielded chunk, so all custom keys (nl2a included) must be
+      // resent on every yield to survive the next merge.
+      const custom: Record<string, unknown> = {};
+      if (nl2a) custom.nl2a = nl2a;
+      if (stepTokenCounts.length > 0)
+        custom.stepTokenCounts = [...stepTokenCounts];
+      return {
+        content: collapseSubAgentParts(
+          content.map((part) =>
+            part.type === "data" &&
+            part.name === "clarification" &&
+            (userAborted || content.some((item) => item.isError))
+              ? { ...part, data: { ...part.data, completed: false } }
+              : part
+          )
+        ),
+        metadata: Object.keys(custom).length > 0 ? { custom } : undefined,
+      };
+    };
 
     const streamStartTime = Date.now();
     let firstTokenTime: number | undefined;
