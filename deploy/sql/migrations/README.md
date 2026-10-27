@@ -41,7 +41,7 @@ all migrations applied after the v2.5.1 release, through v2.6.0),
 the v2.6.1 release, through v2.7.0), and `v2.8.0_merged_migrations.sql`
 (which merges every migration file still loose after the v2.7.0 release).
 The API-to-MCP migrations for v2.8.1 are consolidated in
-`v2.8.1_merged_migrations.sql`.
+`v2.8.1_api_mcp_merged_migrations.sql`.
 Newer migrations remain separate until their minor-version history is
 consolidated.
 
