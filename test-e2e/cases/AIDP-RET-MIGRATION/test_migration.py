@@ -12,7 +12,7 @@ import pytest
 pytestmark = [pytest.mark.case_id("AIDP-RET-MIGRATION"), pytest.mark.stage("D5")]
 
 ROOT = Path(__file__).resolve().parents[3]
-MIGRATION = ROOT / "deploy/sql/migrations/v2.8.0_002_aidp_fixed_retrieval_policy.sql"
+MIGRATION = ROOT / "deploy/sql/migrations/v2.8.0_aidp_fixed_retrieval_policy.sql"
 NEW_KEYS = {
     "vector_candidates", "full_text_candidates", "hybrid_top_k", "graph_top_k",
     "vector_score_threshold", "full_text_score_threshold", "graph_score_threshold",

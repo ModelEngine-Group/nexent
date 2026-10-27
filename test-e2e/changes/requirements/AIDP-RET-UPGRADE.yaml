@@ -12,7 +12,7 @@ change:
     scopes only; their retrieval parameter editors and overlays are retired.
     This is the single change record for the complete PR, including review fixes.
   affected_features:
-    existing: []
+    existing: [F-096]
     added: [AIDP-RETRIEVAL]
     modified: []
     retired: []
@@ -28,7 +28,7 @@ change:
       - AIDP-RET-RUNTIME
       - AIDP-RET-JOURNEY
       - AIDP-RET-MIGRATION
-    modified: []
+    modified: [AGENT-CALLABLE-D3-001]
     retired: []
   traditional_ut:
     decision: strengthen
@@ -59,6 +59,13 @@ change:
       - test/backend/services/test_agent_transfer_utils.py
       - test/backend/services/test_agent_service.py
       - test/backend/services/test_agent_subscription_lifecycle.py
+      - test/backend/app/test_agent_app.py
+      - test/backend/database/test_conversation_agent_history_db.py
+      - test/backend/management/test_api_db_directory_architecture.py
+      - test/backend/management/test_agent_runtime_boundaries.py
+      - test/backend/services/test_agent_name_contract.py
+      - test/backend/services/test_agent_export_skills.py
+      - test/backend/services/test_clarification_response.py
       - test/backend/agents/test_create_agent_info.py::TestMergeToolParams
       - test/backend/agents/test_create_agent_info_retrieval_isolation.py
       - test/backend/services/test_knowledge_scope_service.py
@@ -128,3 +135,22 @@ change:
     abort on an unset variable. Reuse deploy/tests/test_super_admin_init.sh with
     the host-jq absence variant and its existing signup/schema/INSERT assertions;
     do not change workflow or skip policies or create a separate repair record.
+
+    Develop integration: update stale test imports, patch targets and transfer
+    identity arguments to their canonical owners. Apply the existing shared
+    identifier rule to AgentInfoRequest; invalid names must fail before writes, while
+    omitted/null names remain valid partial drafts. Reuse the existing name and
+    HTTP validation regressions without relaxing their assertions. The callable
+    D3 probe imports model bindings from their current owner; its live Docker/A2A
+    execution remains a separate prerequisite and is not proved by architecture UT.
+
+    Clarification UT retains real inserts, RETURNING, rollback and stored-answer
+    assertions. Older Linux x86_64 test runners use the test-only bundled SQLite
+    driver when their stdlib SQLite predates RETURNING support; production database
+    code and runtime dependencies are unchanged. Do not skip transaction tests or
+    rewrite their SQL to hide an unsupported test-engine capability.
+
+    The unreleased AIDP migration uses the version-and-description filename
+    v2.8.0_aidp_fixed_retrieval_policy.sql, without a numeric sequence. Its SQL
+    contents and version-sorted position remain unchanged. The migration Case
+    follows this rename; released SQL and database migration ledgers are untouched.
