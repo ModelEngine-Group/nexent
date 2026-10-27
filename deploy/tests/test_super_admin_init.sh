@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -uo pipefail
 
@@ -223,6 +224,18 @@ test_docker_waits_before_insert() (
     "Docker must wait for the schema contract immediately before INSERT"
 )
 
+test_docker_without_jq_uses_fallback() (
+  # Exercise the supported fallback even when jq is installed on the test host.
+  command() {
+    if [ "$#" -eq 2 ] && [ "$1" = "-v" ] && [ "$2" = "jq" ]; then
+      return 1
+    fi
+    builtin command "$@"
+  }
+
+  test_docker_waits_before_insert
+)
+
 test_docker_timeout_prevents_insert() (
   prepare_case docker-timeout
   MOCK_SCHEMA_FAILURES=99
@@ -378,6 +391,7 @@ run_test() {
 }
 
 run_test "Docker waits for the schema before INSERT" test_docker_waits_before_insert || exit 1
+run_test "Docker initializes without jq using the fallback parser" test_docker_without_jq_uses_fallback || exit 1
 run_test "Docker timeout prevents INSERT" test_docker_timeout_prevents_insert || exit 1
 run_test "Docker INSERT failure is fatal" test_docker_insert_failure_is_fatal || exit 1
 run_test "Docker existing-user repair is idempotent" test_docker_existing_user_repairs_idempotently || exit 1

@@ -122,3 +122,9 @@ change:
     stays outside Git; UT and formal results are reported separately. Existing
     blocked/manual Cases remain required and must not be counted as passed from
     lower-boundary evidence. Shared Syncthing documents remain read-only.
+
+    Deployment prerequisite: initialize the administrator parser's temporary
+    user_id before the no-jq fallback, so strict-shell deployment prechecks do not
+    abort on an unset variable. Reuse deploy/tests/test_super_admin_init.sh with
+    the host-jq absence variant and its existing signup/schema/INSERT assertions;
+    do not change workflow or skip policies or create a separate repair record.

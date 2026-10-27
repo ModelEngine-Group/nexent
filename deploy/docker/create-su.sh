@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 # Script to create super admin user and insert into user_tenant_t table
 # This script should be called from deploy.sh with necessary environment variables
@@ -140,7 +141,7 @@ create_default_super_admin_user() {
     fi
 
     # Extract user.id from the response JSON.
-    local user_id
+    local user_id=""
     # Try using jq first (if available in the container or on host)
     if docker exec "$curl_container" command -v jq >/dev/null 2>&1; then
       user_id=$(echo "$response" | docker exec -i "$curl_container" jq -r '.user.id // empty' 2>/dev/null)
