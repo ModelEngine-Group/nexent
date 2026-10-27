@@ -1676,7 +1676,7 @@ class TestInternalOpenapiServiceToolMapEndpoint:
 
         class ParentServer:
             async def get_tools(self):
-                return [SimpleNamespace(name="weather_get_status")]
+                return [SimpleNamespace(name="weather_api_get_status")]
 
         child = ToolServer()
         child._nexent_service_id = 42
@@ -1696,7 +1696,7 @@ class TestInternalOpenapiServiceToolMapEndpoint:
         assert response.status_code == 200
         assert response.json()["data"] == [
             {"name": "get_status", "service_id": 42},
-            {"name": "weather_get_status", "service_id": 42},
+            {"name": "weather_api_get_status", "service_id": 42},
         ]
 
     @pytest.mark.asyncio
