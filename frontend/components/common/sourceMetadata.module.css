@@ -36,15 +36,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.measure {
-  position: absolute;
-  top: 0;
-  left: 0;
-  display: flex;
-  width: 100%;
-  visibility: hidden;
-  pointer-events: none;
-}
 .popover {
   width: min(420px, calc(100vw - 56px));
   max-height: min(560px, calc(100dvh - 80px));

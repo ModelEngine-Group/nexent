@@ -431,6 +431,7 @@
   "chat.modelSelector.effort.minimal": "Minimal",
   "chat.modelSelector.effort.xhigh": "Extra high",
   "chat.modelSelector.effort.max": "Maximum",
+  "chat.sources.pagination": "Source pagination",
   "chat.sources.panel": "Sources panel",
   "chat.sources.title": "Sources",
   "chat.sources.close": "Close sources panel",

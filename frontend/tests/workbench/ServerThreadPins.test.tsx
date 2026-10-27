@@ -7,11 +7,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import {
-  QueryClient,
-  QueryClientProvider,
-  focusManager,
-} from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { expect, it, vi } from "vitest";
 import {
   PinnedThreadsProvider,
@@ -69,6 +65,18 @@ function setup(scope: string | null = "user-a", error = vi.fn()) {
     </QueryClientProvider>
   );
   return { ...render(view(scope)), client, error, view };
+}
+
+async function resumeWindow() {
+  vi.useFakeTimers();
+  try {
+    act(() => window.dispatchEvent(new Event("focus")));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_050);
+    });
+  } finally {
+    vi.useRealTimers();
+  }
 }
 
 it("loads canonical server order and ignores old local Workbench state", async () => {
@@ -176,18 +184,14 @@ it("focus refresh reads changes from another device", async () => {
   await waitFor(() =>
     expect(screen.getByTestId("pins")).toHaveTextContent("42")
   );
-  act(() => {
-    focusManager.setFocused(false);
-    focusManager.setFocused(true);
-  });
+  await resumeWindow();
   await waitFor(() =>
     expect(screen.getByTestId("pins")).toHaveTextContent("43,42")
   );
-  focusManager.setFocused(undefined);
   client.clear();
 });
 
-it("refreshes from visible-page interaction without visibilitychange and coalesces activity", async () => {
+it("refreshes on foreground re-entry while ignoring ordinary visible-page interactions", async () => {
   const get = vi
     .spyOn(conversationService, "getWorkbenchPins")
     .mockResolvedValueOnce(snapshot([42]))
@@ -198,7 +202,8 @@ it("refreshes from visible-page interaction without visibilitychange and coalesc
   );
   fireEvent.pointerDown(document.body);
   fireEvent.focusIn(document.body);
-  fireEvent.focus(window);
+  expect(get).toHaveBeenCalledTimes(1);
+  await resumeWindow();
   await waitFor(() =>
     expect(screen.getByTestId("pins")).toHaveTextContent("43,42")
   );
@@ -218,18 +223,21 @@ it("queues a throttled trailing refresh and cancels it on unmount", async () => 
   await waitFor(() =>
     expect(screen.getByTestId("pins")).toHaveTextContent("42")
   );
-  fireEvent.pointerDown(document.body);
-  await waitFor(() => expect(get).toHaveBeenCalledTimes(2));
   vi.useFakeTimers();
   try {
+    fireEvent.focus(window);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_050);
+    });
+    expect(get).toHaveBeenCalledTimes(2);
     get.mockResolvedValue(snapshot([43]));
-    fireEvent.pointerDown(document.body);
-    fireEvent.focusIn(document.body);
+    fireEvent.focus(window);
+    fireEvent.focus(window);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_050);
     });
     expect(get).toHaveBeenCalledTimes(3);
-    fireEvent.pointerDown(document.body);
+    fireEvent.focus(window);
     unmount();
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_050);
@@ -277,10 +285,7 @@ it("does not start an activity read during an acknowledged pin mutation", async 
   const { client, unmount } = setup();
   await waitFor(() => expect(screen.getByText("Toggle")).toBeEnabled());
   fireEvent.click(screen.getByText("Toggle"));
-  fireEvent.pointerDown(document.body);
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  });
+  await resumeWindow();
   expect(get).toHaveBeenCalledTimes(1);
   await act(async () => finish(snapshot([42])));
   await waitFor(() =>
