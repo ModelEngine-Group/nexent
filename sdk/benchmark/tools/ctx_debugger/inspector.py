@@ -1,5 +1,3 @@
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """CLI inspector for ctx_debugger JSONL traces.
 
 Usage:

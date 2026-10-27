@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-
 """GSM8K dataset loader and Langfuse upload.
 
 GSM8K (Grade School Math 8K) is a dataset of ~8.5K grade school math
