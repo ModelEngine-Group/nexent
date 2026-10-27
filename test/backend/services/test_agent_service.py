@@ -12032,7 +12032,7 @@ async def test_import_agent_with_skills_impl_success(mock_get_user_info):
     mock_agent_info = types.SimpleNamespace(
         agent_id=1,
         agent_info={
-            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"], tools=[]),
+            "1": types.SimpleNamespace(agent_id=1, name="agent_one", skill_names=["NewSkill"], tools=[]),
         },
     )
 
@@ -12152,7 +12152,7 @@ async def test_import_agent_with_skills_impl_no_main_agent(mock_get_user_info):
     mock_agent_info = types.SimpleNamespace(
         agent_id=1,
         agent_info={
-            "1": types.SimpleNamespace(agent_id=1, skill_names=["NewSkill"], tools=[]),
+            "1": types.SimpleNamespace(agent_id=1, name="agent_one", skill_names=["NewSkill"], tools=[]),
         },
     )
 
@@ -12194,10 +12194,11 @@ async def test_import_agent_with_skills_impl_resolves_existing_and_renamed_per_a
         agent_id=1,
         agent_info={
             "1": types.SimpleNamespace(
-                agent_id=1, skill_names=["ExistingSkill"], tools=[]
+                agent_id=1, name="agent_one", skill_names=["ExistingSkill"], tools=[]
             ),
             "2": types.SimpleNamespace(
                 agent_id=2,
+                name="agent_two",
                 skill_names=["RenamedSkill", "NewSkill", "MissingSkill"],
                 tools=[],
             ),
@@ -12938,7 +12939,7 @@ async def test_import_agent_by_agent_id_invalid_name():
     mock_agent_info.business_logic_model_id = None
     mock_agent_info.business_logic_model_name = None
 
-    with pytest.raises(ValueError, match="Invalid agent name"):
+    with pytest.raises(ValueError, match="Python identifier"):
         await import_agent_by_agent_id(
             import_agent_info=mock_agent_info, tenant_id="tenant_1", user_id="user_1"
         )
@@ -21061,7 +21062,7 @@ async def test_import_agent_with_skills_rejects_parameters_before_dependency_wri
     }])
     skill_service = mocker.patch.object(agent_transfer, "SkillService")
     import_agents = mocker.patch.object(agent_transfer, "import_agent_impl", new_callable=AsyncMock)
-    snapshot = types.SimpleNamespace(agent_info={"1": types.SimpleNamespace(tools=[
+    snapshot = types.SimpleNamespace(agent_info={"1": types.SimpleNamespace(name="agent_one", tools=[
         types.SimpleNamespace(class_name="AidpSearchTool", source="local", params={"unknown": 1}),
     ])})
     with pytest.raises(AgentToolImportError, match="unknown"):

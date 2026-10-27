@@ -302,6 +302,8 @@ afterEach(async () => {
     }
     queryClients.length = 0;
   });
+  // Drain queued React scheduler work before jsdom is disposed.
+  await act(async () => { await new Promise<void>((resolve) => setTimeout(resolve, 0)); });
 });
 beforeEach(() => {
   fixture.items = [

@@ -47,6 +47,9 @@ const sidebarState = vi.hoisted(() => ({
 }));
 const queryClientMock = vi.hoisted(() => ({
   ensureQueryData: vi.fn().mockResolvedValue(undefined),
+  fetchQuery: vi.fn(({ queryFn }: { queryFn: () => Promise<unknown> }) => queryFn()),
+  getQueryState: vi.fn(),
+  removeQueries: vi.fn(),
   invalidateQueries: vi.fn().mockResolvedValue(undefined),
 }));
 

@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import quote, urljoin
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
+from nexent.core.agent_names import validate_agent_name
 from nexent.core.agents.context import (
     ContextItemInput,
     ContextItemType,
@@ -1403,11 +1404,10 @@ async def validate_agent_generation_complete_impl(
         user_id=user_id,
     )
     name = draft.get("name")
-    if (
-        not isinstance(name, str)
-        or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]{0,59}", name)
-    ):
-        raise Nl2AgentCompletionError("draft_fields_incomplete", ["name"])
+    try:
+        validate_agent_name(name)
+    except ValueError as exc:
+        raise Nl2AgentCompletionError("draft_fields_incomplete", ["name"]) from exc
     description = draft.get("description")
     if not isinstance(description, str) or not description.strip():
         raise Nl2AgentCompletionError("draft_fields_incomplete", ["description"])

@@ -81,7 +81,7 @@ MOCK_COPY_FILES = (
     "server.py", "control.py", "mock_common.py",
     "datamate_mock.py", "dify_mock.py", "ragflow_mock.py",
     "idata_mock.py", "haotian_mock.py", "assets_mock.py",
-    "fault_provider_mock.py",
+    "fault_provider_mock.py", "aidp_fixture.py",
 )
 SEED_FILES = ("assets.json", "datamate.json", "dify.json", "haotian.json", "idata.json", "ragflow.json")
 AIDP_COPY_FILES = ("aidp_mgmt_mock_server.py", "graph_config_template_chinese.json")

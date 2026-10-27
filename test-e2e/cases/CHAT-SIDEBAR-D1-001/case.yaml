@@ -10,7 +10,7 @@ case:
   - CHAT-SIDEBAR-RULE-001
   - CHAT-SIDEBAR-RULE-002
   - CHAT-SIDEBAR-RULE-009
-  - CHAT-SIDEBAR-RULE-010
+  - CHAT-SIDEBAR-RULE-011
   title: Preserve conversation sidebar and agent batch selection interactions
   type: FE-COMP
   priority: P1

@@ -46,7 +46,7 @@ change:
     - frontend/tests/workbench/ConversationActivitySync.test.tsx
     reason: Existing route/database and component unit coverage did not cover the new query boundaries; isolated UT detects cursor, owner-scope, skeleton, retry and over-100 pagination regressions while D3/D4 separately prove integration and browser behavior.
   notes: >-
-    Design: ../nexent-doc/docs/Developing/chat-agent-history-pagination/design.md. Rule CHAT-SIDEBAR-RULE-010 owns the two-level Agent history contract.
+    Design: ../nexent-doc/docs/Developing/chat-agent-history-pagination/design.md. Rule CHAT-SIDEBAR-RULE-011 owns the two-level Agent history contract.
     Changes are scoped to Agent chat; shared navigation and global CSS are unchanged, and the existing legacy Agent-group implementation is retained at the user's request.
     Additional indexes are deferred after the performance review, so no SQL migration is included; already-created local indexes were not dropped.
     Browser focus outlines were diagnosed independently and temporary outline overrides were removed. Markdown navigation files are excluded from delivery at the user's request.

@@ -6,4 +6,6 @@
 
 The ordinary page uses `ConversationLoadingBoundary` to retain mounted chat content while history is pending. Hidden content is inert and the page passes `readOnly` to Chat. The existing localized loading status remains accessible outside the inert subtree. Do not replace the children conditionally, or let loading submit a message or alter model configuration.
 
-Regression evidence belongs in `ConversationModelControls.test.tsx`, `ConversationLoadingBoundary.test.tsx`, and the cold-history journey in `WB-CONTROLS-D4-003`.
+When the first run returns a server conversation ID, bind it to the draft's original local thread key. A server-backed history entry resolves through that first binding, including edits made after the response. Register only new-conversation callbacks; existing histories must not be rebound. Duplicate and background callbacks must not replace the original anchor or another session's controls. The binding map shares the provider's account/page lifetime and does not copy or change turn snapshots or wire parameters. Callers without the ordinary page provider keep their local identity behavior.
+
+Regression evidence belongs in `ConversationModelControls.test.tsx`, `ConversationModelThreadIdentity.test.tsx`, `ConversationLoadingBoundary.test.tsx`, and the cold/new-history journeys in `WB-CONTROLS-D4-003`.

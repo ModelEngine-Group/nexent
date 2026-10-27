@@ -2,6 +2,7 @@
 
 import { t as translate } from "i18next";
 import type { RuntimeGenerationOverrides } from "@/features/model-controls/turnControls";
+import type { ClarificationResponse } from "@/types/clarification";
 import { API_ENDPOINTS, ApiError } from "./api";
 
 import { chatConfig } from "@/const/chatConfig";
@@ -1154,6 +1155,7 @@ export const conversationService = {
   async runAgent(
     params: {
       query: string;
+      clarification_response?: ClarificationResponse;
       conversation_id?: number;
       history: Array<{ role: string; content: string }>;
       files?: File[];
@@ -1215,6 +1217,13 @@ export const conversationService = {
         is_debug: params.is_debug || false,
         enable_plan: params.enable_plan || false,
       };
+      if (
+        !params.is_resume &&
+        !params.runtime_mode &&
+        params.clarification_response
+      ) {
+        requestParams.clarification_response = params.clarification_response;
+      }
       if (params.runtime_mode === "nl2skill") {
         requestParams.draft_snapshot = params.draft_snapshot;
         requestParams.language = params.language;

@@ -17,6 +17,8 @@ case:
   preconditions:
   - Local deployment running this branch, authenticated test tenant and configured
     real model.
+  - Owned fixture instructions are saved through the canonical prompt field and
+    read back from both draft and published version before runtime assertions.
   test_data:
     profile: real_smoke
     sequences:

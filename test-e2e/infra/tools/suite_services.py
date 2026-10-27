@@ -76,7 +76,8 @@ def controlled_services(repo, directory, env, enabled, required_mock_services=()
             process = subprocess.Popen(
                 [sys.executable,
                  str(repo / "test-e2e/infra/mock-services/ext-knowledge-mock/server.py"),
-                 "--host", "0.0.0.0", "--port", str(port)],
+                 "--host", "0.0.0.0", "--port", str(port),
+                 "--state-dir", str(directory / "runtime/ext-knowledge-state")],
                 cwd=repo, env=env, stdout=output, stderr=subprocess.STDOUT,
             )
             processes.append(process)

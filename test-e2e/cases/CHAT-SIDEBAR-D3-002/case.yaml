@@ -5,7 +5,7 @@ case:
   case_id: CHAT-SIDEBAR-D3-002
   feature_id: CHAT-SIDEBAR
   requirement_ids: [CHAT-SIDEBAR-REQ-001]
-  business_rule_ids: [CHAT-SIDEBAR-RULE-010]
+  business_rule_ids: [CHAT-SIDEBAR-RULE-011]
   title: Agent history group and conversation cursors cover isolated PostgreSQL history
   type: INTEGRATION
   priority: P1

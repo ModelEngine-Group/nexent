@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import types
 import importlib.machinery
 import pytest
@@ -16,7 +18,11 @@ boto3_module.resource = MagicMock()
 boto3_module.__spec__ = importlib.machinery.ModuleSpec("boto3", loader=None)
 sys.modules['boto3'] = boto3_module
 sys.modules['nexent'] = MagicMock()
-sys.modules['nexent.core'] = MagicMock()
+sys.modules['nexent.core'] = types.ModuleType('nexent.core')
+# Keep the real, dependency-free name validator importable beneath the SDK stub.
+sys.modules['nexent.core'].__path__ = [
+    os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../sdk/nexent/core'))
+]
 sys.modules['nexent.core.agents'] = MagicMock()
 # Create a mock ToolConfig class
 from pydantic import BaseModel

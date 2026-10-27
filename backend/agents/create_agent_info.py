@@ -1784,6 +1784,13 @@ async def create_agent_config(
     available_tools = tool_list + builtin_tools
 
     _inject_plan_tools(available_tools, enable_planning)
+    from nexent.core.agent_names import resolve_external_agent_configs
+
+    external_a2a_agents = resolve_external_agent_configs(
+        external_a2a_agents,
+        [tool.name for tool in available_tools]
+        + [agent.invocation_name or agent.name for agent in worker_agents],
+    )
     prompt_tools = {tool.name: tool for tool in available_tools}
     prompt_tool_policy_snapshot = agent_info.get("prompt_tool_policy_snapshot")
     if prompt_tool_policy_snapshot is not None:

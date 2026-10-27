@@ -161,12 +161,25 @@ def load_config(home: Path, repo: Path) -> dict:
     return payload
 
 
-def config_problems(home: Path, repo: Path) -> list[str]:
-    """Shape problems for the optional legacy external attach config."""
+def config_problems(home: Path, repo: Path, required_services=(), *, live=False) -> list[str]:
+    """Optional external-mode checks; the default suite never calls this."""
+    needed = sorted(set(required_services) & set(EXT_LOGICAL_SERVICES))
     if not (home / "config" / CONFIG_NAME).is_file():
-        return []
+        return [f"config/{CONFIG_NAME} is required by selected mock services: {', '.join(needed)}"] if needed else []
     try:
-        load_config(home, repo)
+        config = load_config(home, repo)
+        missing = set(needed) - set(config["logical_services"])
+        if missing:
+            raise AttachError("local instance does not serve " + ", ".join(sorted(missing)))
+        if live and needed:
+            _, identity = _request(f"{config['runner_url']}/_mock/identity")
+            for key in IDENTITY_KEYS:
+                if str(identity.get(key, "")) != str(config["owner_run_id" if key == "run_id" else key]):
+                    raise AttachError(f"identity mismatch for {key}; refusing foreign instance")
+            _, health = _request(f"{config['runner_url']}/health")
+            if health.get("status") != "ok" or any(
+                    health.get("services", {}).get(name) != "ok" for name in ALL_HEALTH_SERVICES):
+                raise AttachError("not all external knowledge route sets are healthy")
     except AttachError as exc:
         return [f"config/{CONFIG_NAME}: {exc}"]
     return []

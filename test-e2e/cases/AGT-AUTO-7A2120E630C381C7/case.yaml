@@ -13,6 +13,8 @@ case:
   automation: automated
   objective: ENABLE_AIDP_KNOWLEDGE 开启时 nl2agent 装配 aidp_search 工具并注入 kds 白名单，权限变更下次 run 生效(无缓存)｜核心流程
   preconditions:
+  - 独占知识库通过当前创建契约准备，包含 description 和目录解析的 embedding_model，不改变检索白名单和权限热更新断言。
+  - 由 aidp 部署例外组执行，产品 ENABLE_AIDP_KNOWLEDGE 与测试侧 aidp_knowledge 同时开启；外部 AIDP 使用用例所属 knowledge-provider Mock，产品权限、数据库、缓存和接口链路不被替换，结束后恢复 Local。
   - 本地集成测试环境可运行，ENABLE_AIDP_KNOWLEDGE=true 已开启，后端与 SDK 均已就绪。
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成，新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。

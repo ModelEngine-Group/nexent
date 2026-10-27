@@ -1,5 +1,9 @@
 schema_version: '1.0'
 case_id: AGENT-PROMPT-D5-001
+preparation:
+  anchors: false
+  families: []
+notes: The pytest fixture creates synthetic rows in a uniquely named no-network PostgreSQL container and removes only that container in finally.
 implementations:
 - framework: pytest
   file: test_migration.py

@@ -4661,7 +4661,7 @@
   "agent.validation.displayNameDuplicate": "智能体名称已存在",
   "agent.validation.displayNameConflictCheckFailed": "智能体名称重复校验失败",
   "agent.validation.nameMaxLength": "智能体变量名不能超过 {{max}} 个字符",
-  "agent.validation.namePattern": "变量名只能包含字母、数字和下划线，且必须以字母或下划线开头",
+  "agent.validation.namePattern": "变量名须为 1–100 个字符的合法 Python 标识符，支持中文等 Unicode 字符，不能使用 Python 关键字",
   "agent.validation.authorRequired": "请输入作者名称",
   "agent.validation.descriptionRequired": "请输入智能体描述",
   "agent.validation.descriptionMaxLength": "智能体描述不能超过 {{max}} 个字符",
