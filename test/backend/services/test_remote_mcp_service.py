@@ -830,6 +830,42 @@ class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("private-svc", names)
 
 
+class TestGetRemoteMcpServerListOpenapiMetadata(unittest.IsolatedAsyncioTestCase):
+    """Test API-to-MCP metadata enrichment in the MCP list response."""
+
+    @patch_import_context('management.services.mcp.service.query_service_by_name')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    async def test_openapi_record_loads_persisted_service_metadata(
+        self, mock_mgr, mock_records, mock_query_service
+    ):
+        mock_mgr.return_value.list_mcp_containers.return_value = []
+        mock_records.return_value = [{
+            "mcp_name": "weather-api",
+            "group_ids": "",
+            "created_by": "uid",
+            "mcp_id": 1,
+            "mcp_server": "https://api.example.com",
+            "status": True,
+            "enabled": True,
+            "source": "local",
+            "update_time": "",
+            "tags": [],
+            "container_port": None,
+            "registry_json": None,
+            "config_json": {"openapi": "3.0.0"},
+            "market_id": None,
+        }]
+        mock_query_service.return_value = {
+            "id": 77,
+            "mcp_service_name": "weather-api",
+        }
+
+        result = await get_remote_mcp_server_list(tenant_id="tid", user_id="uid")
+
+        assert result[0]["ssl_verify"] is True
+
+
 # ============================================================================
 # _is_container_record - API type tests
 # ============================================================================
@@ -1188,6 +1224,77 @@ class TestUpdateMcpServiceNameConflict(unittest.TestCase):
 
         mock_check.assert_called_once_with(mcp_name='new-unique-name', tenant_id='tid')
         mock_update.assert_called_once()
+
+
+class TestUpdateMcpServiceOpenapiSslVerify(unittest.TestCase):
+    """Test runtime refresh when an API MCP TLS setting changes."""
+
+    @patch_import_context('management.services.tool.configuration._refresh_openapi_services_in_mcp')
+    @patch_import_context('management.services.mcp.service.update_openapi_service_ssl_verify')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    def test_update_api_service_ssl_verify_and_refresh(
+        self, mock_get, mock_check, mock_update_record, mock_update_ssl, mock_refresh
+    ):
+        mock_get.return_value = {
+            "mcp_id": 1,
+            "mcp_name": "weather-api",
+            "source": "local",
+            "config_json": {"openapi": "3.0.0"},
+        }
+        mock_check.return_value = False
+        mock_refresh.return_value = {"status": "refreshed"}
+
+        update_mcp_service(
+            tenant_id="tenant1",
+            user_id="user1",
+            mcp_id=1,
+            new_name="weather-api",
+            description="Weather",
+            server_url="https://api.example.com",
+            authorization_token=None,
+            custom_headers=None,
+            config_json=None,
+            market_id=None,
+            tags=None,
+            ssl_verify=False,
+        )
+
+        mock_update_ssl.assert_called_once_with(
+            service_name="weather-api",
+            tenant_id="tenant1",
+            user_id="user1",
+            ssl_verify=False,
+        )
+        mock_refresh.assert_called_once_with("tenant1")
+
+    @patch_import_context('management.services.tool.configuration._refresh_openapi_services_in_mcp')
+    @patch_import_context('management.services.mcp.service.update_openapi_service_ssl_verify')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    def test_update_api_service_logs_refresh_error_without_failing(
+        self, mock_get, mock_check, mock_update_record, mock_update_ssl, mock_refresh
+    ):
+        mock_get.return_value = {
+            "mcp_id": 1,
+            "mcp_name": "weather-api",
+            "source": "local",
+            "config_json": {"openapi": "3.0.0"},
+        }
+        mock_check.return_value = False
+        mock_refresh.return_value = {"error": "MCP unavailable"}
+
+        update_mcp_service(
+            tenant_id="tenant1", user_id="user1", mcp_id=1,
+            new_name="weather-api", description=None,
+            server_url=None, authorization_token=None,
+            custom_headers=None, config_json=None, market_id=None, tags=None,
+            ssl_verify=True,
+        )
+
+        mock_refresh.assert_called_once_with("tenant1")
 
 
 # ============================================================================

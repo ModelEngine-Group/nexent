@@ -7,6 +7,7 @@ Tests MCP service for OpenAPI service registration and management.
 import os
 import sys
 import types
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 from threading import Thread
 
@@ -1662,6 +1663,105 @@ def test_run_mcp_server_with_management_starts_and_cleans_up_services():
         # Verify asyncio operations are present
         assert 'asyncio.new_event_loop()' in source
         assert 'asyncio.set_event_loop(loop)' in source
+
+
+class TestInternalOpenapiServiceToolMapEndpoint:
+    """Test the authenticated service-to-tool mapping endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_map_endpoint_returns_child_and_mounted_tools(self):
+        class ToolServer:
+            async def get_tools(self):
+                return {"child": SimpleNamespace(name="get_status")}
+
+        class ParentServer:
+            async def get_tools(self):
+                return [SimpleNamespace(name="weather_get_status")]
+
+        child = ToolServer()
+        child._nexent_service_id = 42
+        parent = ParentServer()
+        parent._nexent_openapi_services = {"weather-api": child}
+        mcp_service._tenant_mcp_servers["tenant1"] = parent
+        mcp_service.MCP_INTERNAL_TOKEN = "internal-token"
+
+        app = mcp_service.get_mcp_management_app()
+        async with AsyncTestClient(app) as client:
+            response = await client.get(
+                "/internal/tools/openapi-service-map",
+                params={"tenant_id": "tenant1"},
+                headers={"Authorization": "Bearer internal-token"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["data"] == [
+            {"name": "get_status", "service_id": 42},
+            {"name": "weather_get_status", "service_id": 42},
+        ]
+
+    @pytest.mark.asyncio
+    async def test_map_endpoint_rejects_invalid_token(self):
+        mcp_service.MCP_INTERNAL_TOKEN = "internal-token"
+        app = mcp_service.get_mcp_management_app()
+
+        async with AsyncTestClient(app) as client:
+            response = await client.get(
+                "/internal/tools/openapi-service-map",
+                params={"tenant_id": "tenant1"},
+                headers={"Authorization": "Bearer wrong-token"},
+            )
+
+        assert response.status_code == 403
+
+    def test_internal_authorization_requires_configured_token(self):
+        mcp_service.MCP_INTERNAL_TOKEN = None
+        with pytest.raises(RealHTTPException, match="Internal token is not configured"):
+            mcp_service._require_management_authorization(None)
+
+
+class TestOpenapiClientSslRefresh:
+    """Test in-place TLS updates and client reuse during refresh."""
+
+    def test_update_existing_client_transport(self):
+        client = real_httpx.AsyncClient()
+        try:
+            mcp_service._update_openapi_service_client_ssl_verify(
+                SimpleNamespace(_client=client), False
+            )
+            assert isinstance(client._transport, real_httpx.AsyncHTTPTransport)
+        finally:
+            import asyncio
+
+            asyncio.run(client.aclose())
+
+    def test_update_without_async_client_is_noop(self):
+        mcp_service._update_openapi_service_client_ssl_verify(
+            SimpleNamespace(_client=MagicMock()), False
+        )
+
+    @patch.object(mcp_service, "register_openapi_service", return_value=True)
+    def test_refresh_reuses_previous_async_client(self, mock_register):
+        import asyncio
+
+        previous_client = real_httpx.AsyncClient()
+        try:
+            previous_service = SimpleNamespace(_client=previous_client)
+            mcp_service._tenant_mcp_servers["tenant1"] = SimpleNamespace(
+                _nexent_openapi_services={"weather-api": previous_service}
+            )
+            mcp_service.query_available_openapi_services.return_value = [{
+                "mcp_service_name": "weather-api",
+                "openapi_json": {"openapi": "3.0.0", "paths": {}},
+                "server_url": "https://api.example.com",
+                "ssl_verify": False,
+            }]
+
+            result = mcp_service.refresh_openapi_services_by_tenant("tenant1")
+
+            assert result["registered"] == 1
+            assert mock_register.call_args.kwargs["client"] is previous_client
+        finally:
+            asyncio.run(previous_client.aclose())
 
 
 # ---------------------------------------------------------------------------

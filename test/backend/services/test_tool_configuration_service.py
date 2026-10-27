@@ -1377,6 +1377,32 @@ class TestGetAllMcpTools:
         calls = mock_get_tools.call_args_list
         assert calls[0].kwargs.get("custom_headers") is None
 
+    @patch_import_context('management.services.tool.configuration.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.tool.configuration.get_tool_from_remote_mcp_server')
+    @patch_import_context('management.services.tool.configuration.get_tenant_local_mcp_server', return_value="http://default-server.com/sse")
+    async def test_get_all_mcp_tools_skips_openapi_registration_records(
+        self, mock_get_tenant_url, mock_get_tools, mock_get_records
+    ):
+        """OpenAPI records are metadata and must not be probed as MCP endpoints."""
+        mock_get_records.return_value = [{
+            "mcp_name": "weather-api",
+            "mcp_server": "https://api.example.com",
+            "enabled": True,
+            "status": True,
+            "config_json": {"openapi": "3.0.0"},
+        }]
+        mock_get_tools.return_value = []
+
+        from management.services.tool.configuration import get_all_mcp_tools
+
+        await get_all_mcp_tools("tenant1")
+
+        mock_get_tools.assert_called_once_with(
+            mcp_server_name="outer-apis",
+            remote_mcp_server="http://default-server.com/sse",
+            tenant_id="tenant1",
+        )
+
 
 class TestGetToolFromRemoteMcpServer:
     """Test get_tool_from_remote_mcp_server function"""
@@ -4073,6 +4099,47 @@ class TestUpdateToolList:
         # Verify that combined list contains tools from all sources
         assert len(combined_tool_list) == 3
 
+    @pytest.mark.asyncio
+    @patch_import_context(
+        'management.services.mcp.openapi.get_openapi_service_tool_map',
+        return_value={"check_status": 42},
+    )
+    @patch_import_context(
+        'management.services.tool.configuration.query_openapi_services_by_tenant',
+        return_value=[{"mcp_service_name": "weather-api"}],
+    )
+    @patch_import_context(
+        'management.services.tool.configuration._refresh_openapi_services_in_mcp',
+        return_value={"status": "refreshed"},
+    )
+    @patch_import_context('management.services.tool.configuration.get_local_tools', return_value=[])
+    @patch_import_context('management.services.tool.configuration.get_langchain_tools', return_value=[])
+    @patch_import_context(
+        'management.services.tool.configuration.get_all_mcp_tools', new_callable=AsyncMock
+    )
+    @patch_import_context(
+        'management.services.tool.configuration.update_tool_table_from_scan_tool_list'
+    )
+    @patch_import_context(
+        'management.services.tool.configuration.get_mcp_records_by_tenant', return_value=[]
+    )
+    async def test_update_tool_list_binds_api_tools_to_service_ids(
+        self, mock_records, mock_update, mock_get_mcp, mock_langchain,
+        mock_local, mock_refresh, mock_services, mock_service_map,
+    ):
+        api_tool = MagicMock()
+        api_tool.usage = "outer-apis"
+        api_tool.origin_name = "check_status"
+        api_tool.name = "check_status"
+        mock_get_mcp.return_value = [api_tool]
+
+        from management.services.tool.configuration import update_tool_list
+
+        await update_tool_list("tenant1", "user1")
+
+        assert api_tool.outer_api_service_id == 42
+        mock_update.assert_called_once()
+
 
 if __name__ == '__main__':
     unittest.main()
@@ -5210,6 +5277,45 @@ class TestRefreshOpenapiServicesInMcp:
 
         assert "error" in result
         mock_logger.warning.assert_called_once()
+
+
+class TestOpenapiServiceToolMap:
+    """Test authenticated tool-to-service map loading and fallback behavior."""
+
+    @patch("requests.get")
+    @patch_import_context(
+        "management.services.mcp.openapi.query_openapi_services_by_tenant"
+    )
+    def test_map_uses_persisted_service_fallback(
+        self, mock_services, mock_get
+    ):
+        response = Mock()
+        response.raise_for_status = Mock()
+        response.json.return_value = {"data": []}
+        mock_get.return_value = response
+        mock_services.return_value = [
+            {"mcp_service_name": "weather-api", "id": 11},
+            {"mcp_service_name": "", "id": 12},
+            {"mcp_service_name": "missing-id"},
+        ]
+
+        from management.services.mcp.openapi import get_openapi_service_tool_map
+
+        result = get_openapi_service_tool_map("tenant1")
+
+        assert result == {"weather_api_": 11}
+        assert mock_get.call_args.kwargs["headers"]["Authorization"].startswith(
+            "Bearer "
+        )
+
+    @patch("requests.get", side_effect=ValueError("invalid response"))
+    @patch_import_context(
+        "management.services.mcp.openapi.query_openapi_services_by_tenant"
+    )
+    def test_map_returns_empty_on_invalid_response(self, mock_services, mock_get):
+        from management.services.mcp.openapi import get_openapi_service_tool_map
+
+        assert get_openapi_service_tool_map("tenant1") == {}
 
 
 class TestValidateLocalToolMonitoring:

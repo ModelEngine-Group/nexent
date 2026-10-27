@@ -1,4 +1,6 @@
 """
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 Unit tests for backend/database/outer_api_tool_db.py
 
 Tests CRUD operations for OpenAPI services (MCP service level).
@@ -51,6 +53,7 @@ from backend.database.outer_api_tool_db import (
     query_available_openapi_services,
     query_openapi_services_by_tenant,
     delete_openapi_service,
+    update_openapi_service_ssl_verify,
     create_openapi_service_with_tools,
     sync_openapi_service,
     create_outer_api_tool,
@@ -451,6 +454,33 @@ class TestQueryServiceById:
         result = query_service_by_id(999, "tenant1")
 
         assert result is None
+
+
+class TestUpdateOpenapiServiceSslVerify:
+    """Tests for updating the per-service TLS verification setting."""
+
+    def test_update_ssl_verify_returns_true_when_row_updated(self, monkeypatch, mock_session):
+        session, query = mock_session
+        mock_filter = MagicMock()
+        mock_filter.update.return_value = 1
+        query.filter.return_value = mock_filter
+        _setup_mock_context(monkeypatch, session)
+
+        assert update_openapi_service_ssl_verify(
+            "weather-api", "tenant1", "user1", False
+        ) is True
+        mock_filter.update.assert_called_once()
+
+    def test_update_ssl_verify_returns_false_when_service_missing(self, monkeypatch, mock_session):
+        session, query = mock_session
+        mock_filter = MagicMock()
+        mock_filter.update.return_value = 0
+        query.filter.return_value = mock_filter
+        _setup_mock_context(monkeypatch, session)
+
+        assert update_openapi_service_ssl_verify(
+            "missing-api", "tenant1", "user1", True
+        ) is False
 
 
 class TestUpdateService:

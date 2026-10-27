@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import types
 import importlib.machinery
@@ -629,6 +630,33 @@ class TestImportOpenAPIServiceAPI:
         )
         mock_refresh_mcp.assert_called_once_with("tenant456")
 
+    @patch('apps.tool_config_app.update_tool_list', new_callable=AsyncMock)
+    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.import_openapi_service')
+    def test_import_openapi_service_forwards_explicit_auth_enabled(
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp,
+        mock_update_tool_list
+    ):
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_import_service.return_value = {"tools_created": 1}
+        mock_refresh_mcp.return_value = {"status": "refreshed"}
+        headers_template = {"Authorization": "Bearer {{token}}"}
+
+        response = client.post(
+            "/tool/openapi_service",
+            json={
+                "service_name": "test_service",
+                "server_url": "https://api.example.com",
+                "openapi_json": {"openapi": "3.0.0", "info": {}, "paths": {}},
+                "headers_template": headers_template,
+                "auth_enabled": True,
+            },
+        )
+
+        assert response.status_code == HTTPStatus.OK
+        assert mock_import_service.call_args.kwargs["auth_enabled"] is True
+
     def test_import_openapi_service_rejects_non_boolean_ssl_verify(self):
         """Test ssl_verify must be an explicit boolean when provided."""
         response = client.post(
@@ -643,6 +671,23 @@ class TestImportOpenAPIServiceAPI:
 
         assert response.status_code == HTTPStatus.BAD_REQUEST
         assert response.json()["detail"] == "ssl_verify must be a boolean"
+
+    def test_import_openapi_service_requires_headers_when_auth_enabled(self):
+        """Authentication-enabled API services must provide header templates."""
+        response = client.post(
+            "/tool/openapi_service",
+            json={
+                "service_name": "test_service",
+                "server_url": "https://api.example.com",
+                "openapi_json": {"openapi": "3.0.0", "info": {}, "paths": {}},
+                "auth_enabled": True,
+            },
+        )
+
+        assert response.status_code == HTTPStatus.BAD_REQUEST
+        assert response.json()["detail"] == (
+            "headers_template is required when auth_enabled is true"
+        )
 
     @patch('apps.tool_config_app.get_current_user_id')
     def test_import_openapi_service_missing_service_name(self, mock_get_user_id):
@@ -1014,6 +1059,38 @@ class TestDeleteOpenAPIServiceAPI:
         assert response.status_code == HTTPStatus.OK
         mock_get_user_id.assert_called_with("Bearer test_token")
         mock_delete_service.assert_called_once_with("test_service", "tenant456", "user123")
+
+    @patch('apps.tool_config_app.update_tool_list', new_callable=AsyncMock)
+    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
+    @patch('apps.tool_config_app.delete_mcp_record_by_name_and_url')
+    @patch('apps.tool_config_app.list_openapi_services')
+    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('apps.tool_config_app.delete_openapi_service')
+    def test_delete_openapi_service_cleans_legacy_record_and_sync_errors_are_ignored(
+        self, mock_delete_service, mock_get_user_id, mock_list_services,
+        mock_delete_mcp_record, mock_refresh, mock_update_tool_list
+    ):
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_list_services.return_value = [{
+            "mcp_service_name": "test_service",
+            "server_url": "https://api.example.com",
+        }]
+        mock_delete_service.return_value = True
+        mock_refresh.return_value = {"status": "refreshed"}
+        mock_update_tool_list.side_effect = RuntimeError("catalog unavailable")
+
+        response = client.delete("/tool/openapi_service/test_service")
+
+        assert response.status_code == HTTPStatus.OK
+        mock_delete_mcp_record.assert_called_once_with(
+            mcp_name="test_service",
+            mcp_server="https://api.example.com",
+            tenant_id="tenant456",
+            user_id="user123",
+        )
+        mock_update_tool_list.assert_awaited_once_with(
+            tenant_id="tenant456", user_id="user123"
+        )
 
 
 # ============================================================================

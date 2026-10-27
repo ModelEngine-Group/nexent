@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import sys
 import pytest
@@ -765,6 +766,62 @@ def test_update_tool_table_api_tools_same_name_keep_service_rows_separate(monkey
 
     session.add.assert_called_once_with(mock_tool_info_instance)
     assert mock_tool_info_class.call_args.kwargs["outer_api_service_id"] == 202
+
+
+def test_update_tool_table_migrates_legacy_api_tool_to_oldest_row(monkeypatch, mock_session):
+    """A service-aware refresh should reuse the oldest legacy API tool row."""
+    session, query = mock_session
+
+    legacy_tool = MockToolInfo()
+    legacy_tool.tool_id = 1
+    legacy_tool.name = "check_status"
+    legacy_tool.origin_name = "check_status"
+    legacy_tool.source = "mcp"
+    legacy_tool.usage = "outer-apis"
+    legacy_tool.outer_api_service_id = None
+
+    current_service_tool = MockToolInfo()
+    current_service_tool.tool_id = 2
+    current_service_tool.name = "check_status"
+    current_service_tool.origin_name = "check_status"
+    current_service_tool.source = "mcp"
+    current_service_tool.usage = "outer-apis"
+    current_service_tool.outer_api_service_id = 42
+
+    mock_all = MagicMock(return_value=[legacy_tool, current_service_tool])
+    mock_filter = MagicMock()
+    mock_filter.all = mock_all
+    query.filter.return_value = mock_filter
+    session.add = MagicMock()
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(
+        "backend.database.tool_db.filter_property", lambda data, model: data
+    )
+
+    incoming = MockToolInfo()
+    incoming.name = "check_status"
+    incoming.origin_name = "check_status"
+    incoming.source = "mcp"
+    incoming.usage = "outer-apis"
+    incoming.outer_api_service_id = 42
+    incoming.__dict__.update(
+        {
+            "name": "check_status",
+            "origin_name": "check_status",
+            "source": "mcp",
+            "usage": "outer-apis",
+            "outer_api_service_id": 42,
+        }
+    )
+
+    update_tool_table_from_scan_tool_list("tenant1", "user1", [incoming])
+
+    assert legacy_tool.description == incoming.description
+    assert legacy_tool.updated_by == "user1"
+    session.add.assert_not_called()
 
 
 def test_update_tool_table_mcp_tools_empty_usage(monkeypatch, mock_session):
