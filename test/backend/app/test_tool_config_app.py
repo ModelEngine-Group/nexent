@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import types
 import importlib.machinery
 from unittest.mock import patch, MagicMock, AsyncMock

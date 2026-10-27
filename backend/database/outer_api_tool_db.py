@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Database access layer for outer API services (OpenAPI to MCP conversion).
 Stores one record per MCP service instead of per tool.
