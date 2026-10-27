@@ -1,24 +1,28 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { useQuery } from "@tanstack/react-query";
 import { conversationService } from "@/services/conversationService";
-import { getConversationDateBoundaries } from "@/lib/conversationViewport";
-import type { ConversationListItem } from "@/types/conversation";
+import type { AgentConversationGroup } from "@/types/conversation";
 
 /**
- * Loads the user's recent conversations (most recent first) so the agent
- * landing can derive which agents have had conversations.
+ * Loads all Agent history summaries so the landing can show every recently
+ * used Agent without inferring groups from a truncated conversation page.
  */
-export function useConversationAgentHistory(limit = 50) {
-  return useQuery<ConversationListItem[]>({
-    queryKey: ["conversationAgentHistory", limit],
+export function useConversationAgentHistory(pageSize = 100) {
+  return useQuery<AgentConversationGroup[]>({
+    queryKey: ["conversationAgentHistory", pageSize],
     queryFn: async () => {
-      const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
-      const page = await conversationService.getList({
-        offset: 0,
-        limit,
-        todayStartMs,
-        weekStartMs,
-      });
-      return page.items;
+      const groups: AgentConversationGroup[] = [];
+      let cursor: string | null | undefined;
+      do {
+        const page = await conversationService.getAgentGroups({
+          limit: pageSize,
+          cursor,
+        });
+        groups.push(...page.items);
+        cursor = page.next_cursor;
+      } while (cursor);
+      return groups;
     },
     staleTime: 30_000,
   });

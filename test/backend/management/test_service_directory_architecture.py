@@ -70,6 +70,7 @@ MIGRATED_MODULES = {
     'configuration/tenant/settings.py',
     'configuration/user/memory.py',
     'configuration/user/quotas.py',
+    'conversation/agent_history.py',
     'conversation/creation_history.py',
     'conversation/pins.py',
     'conversation/service.py',

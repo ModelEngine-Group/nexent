@@ -43,7 +43,22 @@ patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import target endpoints with all external dependencies patched
-from management.api.conversation.conversation_management import create_new_conversation_endpoint, list_conversations_endpoint, rename_conversation_endpoint, delete_conversation_endpoint, delete_conversations_batch_endpoint, get_conversation_history_endpoint, get_sources_endpoint, generate_conversation_title_endpoint, update_opinion_endpoint, get_message_id_endpoint, router
+from management.api.conversation.conversation_management import (
+    create_new_conversation_endpoint,
+    list_conversations_endpoint,
+    rename_conversation_endpoint,
+    delete_conversation_endpoint,
+    delete_conversations_batch_endpoint,
+    get_conversation_history_endpoint,
+    get_sources_endpoint,
+    generate_conversation_title_endpoint,
+    update_opinion_endpoint,
+    get_message_id_endpoint,
+    list_agent_groups_endpoint,
+    list_agent_group_conversations_endpoint,
+    list_agent_group_conversation_ids_endpoint,
+    router,
+)
 
 
 # -----------------------------
@@ -65,6 +80,9 @@ def conversation_mocks():
             patch('management.api.conversation.conversation_management.generate_conversation_title_service') as mock_generate_title_service, \
             patch('management.api.conversation.conversation_management.update_message_opinion_service') as mock_update_opinion_service, \
             patch('management.api.conversation.conversation_management.get_message_id_by_index_impl') as mock_get_msg_id_impl, \
+            patch('management.api.conversation.conversation_management.list_agent_groups') as mock_agent_groups, \
+            patch('management.api.conversation.conversation_management.list_agent_group_conversations') as mock_agent_group_conversations, \
+            patch('management.api.conversation.conversation_management.list_agent_group_conversation_ids') as mock_agent_group_ids, \
             patch('management.api.conversation.conversation_management.get_current_user_info') as mock_get_user_info:
 
         yield {
@@ -80,6 +98,9 @@ def conversation_mocks():
             'generate_title_service': mock_generate_title_service,
             'update_opinion_service': mock_update_opinion_service,
             'get_message_id_impl': mock_get_msg_id_impl,
+            'list_agent_groups': mock_agent_groups,
+            'list_agent_group_conversations': mock_agent_group_conversations,
+            'list_agent_group_conversation_ids': mock_agent_group_ids,
             'get_user_info': mock_get_user_info,
         }
 
@@ -787,3 +808,69 @@ async def test_update_conversation_knowledge_scope_token_expired(conversation_mo
             1, request_obj, authorization="Bearer x")
 
     assert exc_info.value.status_code == 401
+
+
+def test_agent_history_static_routes_forward_scoped_queries(conversation_mocks):
+    """New static history routes must resolve before the integer detail route."""
+    conversation_mocks["get_current_user_id"].return_value = ("owner", "tenant")
+    groups = {
+        "items": [],
+        "pinned_items": [],
+        "included_items": [],
+        "next_cursor": None,
+    }
+    conversations = {"items": [], "pinned_items": [], "next_cursor": None}
+    ids = {"items": [41, 42]}
+    conversation_mocks["list_agent_groups"].return_value = groups
+    conversation_mocks["list_agent_group_conversations"].return_value = conversations
+    conversation_mocks["list_agent_group_conversation_ids"].return_value = ids
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    client = TestClient(app, headers={"Authorization": "Bearer owner"})
+
+    group_response = client.get(
+        "/api/conversation/agent_groups?limit=10&search=budget&include_agent_id=7&include_other=true"
+    )
+    assert group_response.status_code == 200, group_response.text
+    assert group_response.json()["data"] == groups
+    conversation_mocks["list_agent_groups"].assert_called_once_with(
+        "owner", "tenant", 10, None, "budget", [7], True
+    )
+
+    history_response = client.get(
+        "/api/conversation/agent_groups/agent:7/conversations?limit=10&search=budget"
+    )
+    assert history_response.status_code == 200, history_response.text
+    assert history_response.json()["data"] == conversations
+    conversation_mocks["list_agent_group_conversations"].assert_called_once_with(
+        "owner", "agent:7", 10, None, "budget"
+    )
+
+    ids_response = client.get("/api/conversation/agent_groups/7/conversation_ids")
+    assert ids_response.status_code == 200, ids_response.text
+    assert ids_response.json()["data"] == ids
+    conversation_mocks["list_agent_group_conversation_ids"].assert_called_once_with(
+        "owner", 7
+    )
+
+
+def test_agent_history_routes_reject_invalid_scope_and_expired_identity(conversation_mocks):
+    """Invalid history scope and expired auth return explicit client errors."""
+    conversation_mocks["get_current_user_id"].return_value = ("owner", "tenant")
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    client = TestClient(app, headers={"Authorization": "Bearer owner"})
+
+    invalid_include = client.get(
+        "/api/conversation/agent_groups?include_agent_id=0"
+    )
+    assert invalid_include.status_code == 400
+    conversation_mocks["list_agent_groups"].assert_not_called()
+
+    from contracts.errors.exceptions import TokenExpiredError
+
+    conversation_mocks["get_current_user_id"].side_effect = TokenExpiredError(
+        "expired"
+    )
+    expired = client.get("/api/conversation/agent_groups")
+    assert expired.status_code == 401

@@ -18,6 +18,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from nexent.core.agent_names import allocate_external_agent_names
+
 from ..concurrency import ManagedTaskSpec, RunCancellationScope, get_current_thread_manager
 
 # Protocol type constants (must match backend/management/db/a2a/repository.py definitions)
@@ -75,6 +77,7 @@ class A2AAgentInfo:
     raw_card: Optional[Dict[str, Any]] = None
     custom_headers: Optional[Dict[str, str]] = None
     ssl_verify: bool = True
+    invocation_name: Optional[str] = None
 
     def get_protocol_type(self) -> str:
         """Get the protocol type for calling this agent.
@@ -882,7 +885,10 @@ class ExternalA2AAgentWrapper:
                 forwarded to the external agent via message metadata so it
                 can authorize before accessing data.
         """
-        self.name = agent_info.name
+        self.name = agent_info.invocation_name or allocate_external_agent_names(
+            [(agent_info.agent_id, agent_info.name)]
+        )[str(agent_info.agent_id)]
+        self.display_name = agent_info.name
         # Use skills description if available
         self.description = agent_info.get_skills_description()
         self.agent_info = agent_info
