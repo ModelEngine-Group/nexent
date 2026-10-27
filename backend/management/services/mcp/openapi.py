@@ -126,7 +126,10 @@ def _refresh_openapi_services_in_mcp(tenant_id: str) -> Dict[str, Any]:
     for attempt in range(max_retries):
         try:
             response = requests.post(
-                refresh_url, params={"tenant_id": tenant_id}, timeout=30
+                refresh_url,
+                params={"tenant_id": tenant_id},
+                headers={"Authorization": f"Bearer {MCP_INTERNAL_TOKEN}"},
+                timeout=30,
             )
             response.raise_for_status()
             result = response.json()
