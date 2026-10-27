@@ -8,8 +8,8 @@ import pytest
 from sqlalchemy import Column, Integer, MetaData, String, Table, create_engine, event
 from sqlalchemy.orm import Session
 
-import database.agent_db as agent_db
-from consts.const import ASSET_OWNER_TENANT_ID
+from management.db.agent import repository as agent_db
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 
 
 @pytest.fixture

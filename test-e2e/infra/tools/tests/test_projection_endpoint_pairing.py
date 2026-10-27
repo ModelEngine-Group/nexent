@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Auto-discovered endpoints must use credentials from the same deployment."""
 import ast
 from contextlib import contextmanager
@@ -18,6 +19,7 @@ class EndpointPairingTests(unittest.TestCase):
         calls = []
         constants = SimpleNamespace(ES_HOST='original', ES_API_KEY='original')
         common = SimpleNamespace(ES_HOST='original', ES_API_KEY='original')
+        constants_package = SimpleNamespace(environment=constants)
 
         class Elasticsearch:
             def __init__(self, host, *, api_key, request_timeout):
@@ -37,7 +39,9 @@ class EndpointPairingTests(unittest.TestCase):
         namespace = {'contextmanager': contextmanager, 'os': os, 'urlsplit': urlsplit,
                      'patch': patch, '_inspect_deployment': inspect}
         modules = {'elasticsearch': SimpleNamespace(Elasticsearch=Elasticsearch),
-                   'consts': SimpleNamespace(const=constants),
+                   'contracts': SimpleNamespace(constants=constants_package),
+                   'contracts.constants': constants_package,
+                   'contracts.constants.environment': constants,
                    'management.services.knowledge_base': SimpleNamespace(common=common)}
         with patch.dict(sys.modules, modules), patch.dict(os.environ, environment, clear=True):
             exec(compile(ast.Module(body=[node], type_ignores=[]), str(SOURCE), 'exec'), namespace)

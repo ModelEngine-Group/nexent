@@ -111,7 +111,10 @@ export default function UserProfileComp() {
   const [newPasswordValue, setNewPasswordValue] = useState("");
 
   // AK/SK state
+  // akInfo is what the user sees (always masked) and akCopyValue is the secret
+  // written to the clipboard, so display and copy never diverge.
   const [akInfo, setAkInfo] = useState<string | null>(null);
+  const [akCopyValue, setAkCopyValue] = useState<string | null>(null);
   const [canCopyAk, setCanCopyAk] = useState(false);
   const [existingTokenIds, setExistingTokenIds] = useState<number[]>([]);
   const [isLoadingAkSk, setIsLoadingAkSk] = useState(false);
@@ -174,11 +177,13 @@ export default function UserProfileComp() {
       try {
         const tokens = await getUserTokens(user.id);
         if (tokens.length > 0) {
-          setAkInfo(tokens[0].access_key);
+          setAkInfo(tokens[0].masked_access_key ?? tokens[0].access_key);
+          setAkCopyValue(tokens[0].can_copy ? tokens[0].access_key : null);
           setCanCopyAk(tokens[0].can_copy);
           setExistingTokenIds(tokens.map((t) => t.token_id));
         } else {
           setAkInfo(null);
+          setAkCopyValue(null);
           setCanCopyAk(false);
           setExistingTokenIds([]);
         }
@@ -201,7 +206,8 @@ export default function UserProfileComp() {
       }
 
       const newToken = await createUserToken();
-      setAkInfo(newToken.access_key);
+      setAkInfo(newToken.masked_access_key ?? newToken.access_key);
+      setAkCopyValue(newToken.access_key);
       setCanCopyAk(true);
       setExistingTokenIds([newToken.token_id]);
       antdMessage.success(
@@ -218,9 +224,10 @@ export default function UserProfileComp() {
 
   // Handle copy AK to clipboard
   const handleCopyAk = async () => {
-    if (akInfo) {
+    const valueToCopy = akCopyValue ?? akInfo;
+    if (valueToCopy) {
       try {
-        await copyToClipboard(akInfo);
+        await copyToClipboard(valueToCopy);
         antdMessage.success(
           t("profile.copyAkSuccess") || "Access key copied to clipboard"
         );

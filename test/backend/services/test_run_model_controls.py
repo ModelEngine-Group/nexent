@@ -8,13 +8,8 @@ import pytest
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 from pydantic import ValidationError
 
-from consts.exceptions import ForbiddenError, RunModelControlsError
-from consts.model import (
-    AgentRequest,
-    NL2AgentRunRequest,
-    NL2SkillRunRequest,
-    RuntimeGenerationOverrides,
-)
+from contracts.errors.exceptions import ForbiddenError, RunModelControlsError
+from contracts.agent import AgentRequest, NL2AgentRunRequest, NL2SkillRunRequest, RuntimeGenerationOverrides
 from management.services.model import run_controls
 
 EFFORTS = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -120,7 +115,7 @@ def test_creator_alias_preserves_independent_models_and_real_record(mocker):
               "model_repo": "", "model_name": "provider-B", "base_url": base.url,
               "temperature": 0.43, "top_p": 0.78, "max_input_tokens": 7000,
               "extra_params": {"enable_thinking": True, "reasoning_effort": "medium"}}
-    from agents import create_agent_info
+    from management.services.model import run_bindings as create_agent_info
     mocker.patch.object(create_agent_info, "_resolve_reasoning_capability", return_value=base.reasoning_capability)
     mocker.patch.object(run_controls, "get_model_by_model_id", return_value=record)
     models = [base, independent]
@@ -135,7 +130,7 @@ def test_creator_alias_preserves_independent_models_and_real_record(mocker):
 def test_native_selection_preserves_agent_version_and_tenant(mocker, version_no, current, expected):
     request = AgentRequest(agent_id=42, query="fixture", model_id=9, version_no=version_no)
     catalog = mocker.patch.object(run_controls, "validate_selected_model")
-    published = mocker.patch("database.agent_db.query_current_version_no", return_value=current)
+    published = mocker.patch("management.db.agent.repository.query_current_version_no", return_value=current)
     lookup = Mock(return_value={"model_ids": [9]})
     run_controls.validate_agent_model_selection(request, "tenant", lookup)
     catalog.assert_called_once_with(9, "tenant")
@@ -199,7 +194,7 @@ def test_preflight_preserves_each_explicit_intent_and_entrypoint_defaults(mocker
 @pytest.fixture
 def preflight_models(mocker):
     """Keep catalog/conversion external while executing the actual overlay policy."""
-    from agents import create_agent_info
+    from management.services.model import run_bindings as create_agent_info
 
     catalog = mocker.patch.object(run_controls, "get_model_by_model_id", return_value={"model_id": 9})
     converted = []
@@ -241,7 +236,7 @@ def test_preflight_uses_agent_default_and_overrides_without_mutating_catalog(pre
 
 @pytest.mark.parametrize("default", [{"model_id": 9}, {}, None])
 def test_preflight_resolves_tenant_default_or_rejects_missing_default(mocker, preflight_models, default):
-    from consts.const import MODEL_CONFIG_MAPPING
+    from contracts.constants.constants import MODEL_CONFIG_MAPPING
     from management.services.configuration.tenant.settings import tenant_config_manager
 
     catalog, _factory, _bases, roots = preflight_models

@@ -2,8 +2,8 @@
 
 """Workbench pin service identity and relationship boundary."""
 
-from consts.exceptions import UnauthorizedError, ValidationError
-from database.workbench_pin_db import list_workbench_pins, set_workbench_pin
+from contracts.errors.exceptions import UnauthorizedError, ValidationError
+from management.db.conversation.pins import list_workbench_pins, set_workbench_pin
 
 
 def _validate_identity(user_id: str, tenant_id: str) -> None:

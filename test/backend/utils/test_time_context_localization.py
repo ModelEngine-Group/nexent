@@ -42,6 +42,7 @@ def time_context(monkeypatch):
     user_spec.loader.exec_module(user_module)
 
     for name, values in {
+        "contracts.agent": {"AgentRunContext": object},
         "nexent.core.agents.context": {"ContextItemInput": object},
         "nexent.core.agents.context_input": {"ContextInput": object},
         "nexent.monitor": {"AgentRunMetadata": object},

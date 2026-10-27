@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from consts.const import EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES
+from contracts.constants.constants import EXTERNAL_MEMORY_DEFAULT_ALLOWED_UNIT_TYPES
 from nexent.memory.models import MemoryIngestResult, MemoryIngestUnit
 from management.services.memory.ingestion import MemoryIngestionEventService
 

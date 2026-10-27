@@ -114,6 +114,4 @@ def record_security_event(
         except Exception:
             pass
 
-from management.api.permission.request_context import (
-    get_client_ip,
-)
+from management.utils.request_context import get_client_ip

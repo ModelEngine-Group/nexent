@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -29,12 +31,28 @@ class _ContextConfig:
             }
 
 
-def test_build_manifest_records_resolved_values(monkeypatch, tmp_path):
+@pytest.fixture
+def isolated_provenance(monkeypatch):
+    """Payload tests substitute Git I/O; Git helper behavior has dedicated tests below."""
     monkeypatch.setattr(
         "sdk.benchmark.generic.provenance.experiment_manifest.resolve_code_commit",
         lambda _: "abc123",
     )
+    monkeypatch.setattr(
+        "sdk.benchmark.generic.provenance.experiment_manifest.compute_source_tree_hash",
+        lambda _: "tree123",
+    )
+    monkeypatch.setattr(
+        "sdk.benchmark.generic.provenance.experiment_manifest.check_untracked_risk",
+        lambda _: {
+            "tracked_worktree_dirty": False,
+            "relevant_untracked_files": [],
+            "source_snapshot_method": "temporary_index_write_tree_v1",
+        },
+    )
 
+
+def test_build_manifest_records_resolved_values(isolated_provenance, tmp_path):
     manifest = build_manifest(
         dataset_name="gaia",
         dataset_version="v1",
@@ -81,12 +99,7 @@ def test_write_manifest_exclusive_refuses_overwrite(tmp_path):
         write_manifest_exclusive(manifest, tmp_path)
 
 
-def test_manifest_redacts_secrets_and_endpoint_credentials(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "sdk.benchmark.generic.provenance.experiment_manifest.resolve_code_commit",
-        lambda _: "abc123",
-    )
-
+def test_manifest_redacts_secrets_and_endpoint_credentials(isolated_provenance, tmp_path):
     manifest = build_manifest(
         dataset_name="dataset",
         dataset_version=None,
@@ -146,12 +159,7 @@ def test_jsonable_stops_cyclic_runtime_objects():
     assert _jsonable(cyclic) == {"self": "[CYCLE:dict]"}
 
 
-def test_tool_schema_hash_ignores_runtime_metadata(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "sdk.benchmark.generic.provenance.experiment_manifest.resolve_code_commit",
-        lambda _: "abc123",
-    )
-
+def test_tool_schema_hash_ignores_runtime_metadata(isolated_provenance, tmp_path):
     class Tool:
         class_name = "SearchTool"
         name = "search"

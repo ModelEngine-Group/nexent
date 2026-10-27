@@ -7,13 +7,10 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from consts.evaluation_status import EvalRunStatus
-from database.agent_evaluation_db import (
-    claim_agent_evaluation_run,
-    list_dispatchable_pending_runs,
-)
-from database.client import get_db_session
-from database.db_models import AgentEvaluation
+from contracts.evaluation import EvalRunStatus
+from management.db.evaluation.runs import claim_agent_evaluation_run, list_dispatchable_pending_runs
+from management.db.client import get_db_session
+from management.db.models import AgentEvaluation
 from management.services.evaluation import maintenance as evaluation_maintenance
 from management.services.agent import runtime_client as runtime_proxy_service
 

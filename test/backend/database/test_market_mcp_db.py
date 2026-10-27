@@ -1,7 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
-Unit tests for backend/database/market_mcp_db.py
+Unit tests for backend/management/db/mcp/market.py
 """
 
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 
@@ -24,9 +27,10 @@ consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_mock.const.POSTGRES_DB = "test_db"
 consts_mock.const.POSTGRES_PORT = 5432
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
-# Mock database.client
+# Mock management.db.client
 def _as_dict(obj):
     """Convert an object to a dict, handling both real objects and MagicMock."""
     if obj is None:
@@ -40,7 +44,11 @@ client_mock = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = _as_dict
 client_mock.filter_property = MagicMock(side_effect=lambda data, model: data)
-sys.modules['database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock Column helper for SQLAlchemy-style model comparisons
 class _MockColumn:
@@ -81,26 +89,12 @@ for _col in [
 
 db_models_mock = MagicMock()
 db_models_mock.McpMarketRecord = _MockMcpMarketRecord
-sys.modules['database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
-from backend.database.market_mcp_db import (
-    get_mcp_market_records,
-    get_mcp_market_tag_stats,
-    create_mcp_market_record,
-    get_mcp_market_record_by_id,
-    check_mcp_market_name_exists,
-    update_mcp_market_record,
-    delete_mcp_market_record_by_id,
-    list_mcp_market_records_by_tenant_and_user,
-    increment_mcp_market_download_count,
-    get_mcp_market_tag_stats_by_tenant,
-    _apply_group_permission_filter,
-    update_mcp_market_status,
-    list_mcp_market_records_by_status,
-)
+from management.db.mcp.market import get_mcp_market_records, get_mcp_market_tag_stats, create_mcp_market_record, get_mcp_market_record_by_id, check_mcp_market_name_exists, update_mcp_market_record, delete_mcp_market_record_by_id, list_mcp_market_records_by_tenant_and_user, increment_mcp_market_download_count, get_mcp_market_tag_stats_by_tenant, _apply_group_permission_filter, update_mcp_market_status, list_mcp_market_records_by_status
 
 # Override as_dict in the module to avoid MagicProxy descriptor bug in mock 3.15.1
-import backend.database.market_mcp_db as _market_mcp_db_mod
+from management.db.mcp import market as _market_mcp_db_mod
 _market_mcp_db_mod.as_dict = _as_dict
 
 
@@ -194,7 +188,7 @@ class MockSession:
 class TestGetMcpMarketRecords:
     """Test get_mcp_market_records with cursor pagination."""
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_no_records(self, mock_session):
         session = MockSession()
         session.all = lambda: []
@@ -203,7 +197,7 @@ class TestGetMcpMarketRecords:
         result = get_mcp_market_records(tenant_id="tid")
         assert result["count"] == 0
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_with_records(self, mock_session):
         row = MagicMock()
         row.market_id = 1
@@ -219,7 +213,7 @@ class TestGetMcpMarketRecords:
         result = get_mcp_market_records(tenant_id="tid")
         assert result["count"] == 1
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_cursor_pagination(self, mock_session):
         rows = []
         for i in range(5, 0, -1):
@@ -238,7 +232,7 @@ class TestGetMcpMarketRecords:
         result = get_mcp_market_records(tenant_id="tid", cursor="3", limit=2)
         assert result["count"] <= 2
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_page_pagination_returns_total_and_page(self, mock_session):
         rows = []
         for market_id in (4, 3):
@@ -265,8 +259,8 @@ class TestGetMcpMarketRecords:
 class TestCreateMcpMarketRecord:
     """Test create_mcp_market_record."""
 
-    @patch('backend.database.market_mcp_db.get_db_session')
-    @patch('backend.database.market_mcp_db.filter_property', side_effect=lambda d, m: d)
+    @patch('management.db.mcp.market.get_db_session')
+    @patch('management.db.mcp.market.filter_property', side_effect=lambda d, m: d)
     def test_create(self, mock_filter, mock_get_session):
         session = MockSession()
         session.add = MagicMock(side_effect=lambda obj: setattr(obj, 'market_id', 42))
@@ -284,7 +278,7 @@ class TestCreateMcpMarketRecord:
 class TestGetMcpMarketRecordById:
     """Test get_mcp_market_record_by_id."""
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_found(self, mock_session):
         row = MagicMock()
         row.market_id = 1
@@ -299,7 +293,7 @@ class TestGetMcpMarketRecordById:
         assert result is not None
         assert result.get("market_id") == 1
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_not_found(self, mock_session):
         session = MockSession()
         session.first = lambda: None
@@ -312,7 +306,7 @@ class TestGetMcpMarketRecordById:
 class TestCheckMcpMarketNameExists:
     """Test check_mcp_market_name_exists."""
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_name_exists(self, mock_session):
         session = MockSession()
         session.first = lambda: MagicMock()
@@ -320,7 +314,7 @@ class TestCheckMcpMarketNameExists:
 
         assert check_mcp_market_name_exists("existing", "tid") is True
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_name_not_exists(self, mock_session):
         session = MockSession()
         session.first = lambda: None
@@ -332,7 +326,7 @@ class TestCheckMcpMarketNameExists:
 class TestUpdateMcpMarketRecord:
     """Test update_mcp_market_record."""
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_update_partial_fields(self, mock_session):
         session = MockSession()
         session.update = MagicMock()
@@ -343,7 +337,7 @@ class TestUpdateMcpMarketRecord:
             mcp_name="new-name", description="new-desc",
         )
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_update_all_fields(self, mock_session):
         session = MockSession()
         session.update = MagicMock()
@@ -356,7 +350,7 @@ class TestUpdateMcpMarketRecord:
             config_json={"cfg": "val"}, transport_type="url",
         )
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_update_with_shared_fields(self, mock_session):
         """Test update_mcp_market_record with shared_fields."""
         session = MockSession()
@@ -368,7 +362,7 @@ class TestUpdateMcpMarketRecord:
             shared_fields={"serverUrl": True, "authorizationToken": False},
         )
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_update_with_group_permissions(self, mock_session):
         """Test update_mcp_market_record with group_ids and ingroup_permission."""
         session = MockSession()
@@ -381,7 +375,7 @@ class TestUpdateMcpMarketRecord:
             ingroup_permission="EDIT",
         )
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_update_with_content(self, mock_session):
         """Test update_mcp_market_record persists listing content/note."""
         session = MockSession()
@@ -399,37 +393,37 @@ class TestUpdateMcpMarketRecord:
 class TestApplyGroupPermissionFilter:
     """Test _apply_group_permission_filter directly with mocked or_."""
 
-    @patch('backend.database.market_mcp_db.or_')
+    @patch('management.db.mcp.market.or_')
     def test_without_user_groups(self, mock_or):
         """_apply_group_permission_filter should build 3 conditions when user_group_ids is empty."""
-        from backend.database.market_mcp_db import _apply_group_permission_filter
+        from management.db.mcp.market import _apply_group_permission_filter
         query = MagicMock()
         result = _apply_group_permission_filter(query, "uid", [])
         # filter should be called once with or_ result
         assert query.filter.called
 
-    @patch('backend.database.market_mcp_db.or_')
+    @patch('management.db.mcp.market.or_')
     def test_with_user_groups(self, mock_or):
         """_apply_group_permission_filter should handle user_group_ids provided."""
-        from backend.database.market_mcp_db import _apply_group_permission_filter
+        from management.db.mcp.market import _apply_group_permission_filter
         query = MagicMock()
         result = _apply_group_permission_filter(query, "uid", [2, 4])
         assert query.filter.called
 
     def test_without_user_id_skipped(self):
         """get_mcp_market_records should skip filter when user_id is None."""
-        from backend.database.market_mcp_db import get_mcp_market_records
-        with patch('backend.database.market_mcp_db.get_db_session') as mock_session:
+        from management.db.mcp.market import get_mcp_market_records
+        with patch('management.db.mcp.market.get_db_session') as mock_session:
             session = MockSession()
             mock_session.return_value = session
             result = get_mcp_market_records(tenant_id="tid")
             assert result is not None
 
-    @patch('backend.database.market_mcp_db.or_')
+    @patch('management.db.mcp.market.or_')
     def test_with_user_id_and_groups(self, mock_or):
         """get_mcp_market_records should apply filter when user_id and user_group_ids provided."""
-        from backend.database.market_mcp_db import get_mcp_market_records
-        with patch('backend.database.market_mcp_db.get_db_session') as mock_session:
+        from management.db.mcp.market import get_mcp_market_records
+        with patch('management.db.mcp.market.get_db_session') as mock_session:
             session = MockSession()
             mock_session.return_value = session
             result = get_mcp_market_records(
@@ -441,7 +435,7 @@ class TestApplyGroupPermissionFilter:
 class TestDeleteMcpMarketRecord:
     """Test delete_mcp_market_record_by_id (soft delete)."""
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_soft_delete(self, mock_session):
         session = MockSession()
         session.update = MagicMock()
@@ -453,7 +447,7 @@ class TestDeleteMcpMarketRecord:
 class TestListMcpMarketRecordsByTenantAndUser:
     """Test list_mcp_market_records_by_tenant_and_user."""
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_list(self, mock_session):
         row = MagicMock()
         row.market_id = 1
@@ -467,7 +461,7 @@ class TestListMcpMarketRecordsByTenantAndUser:
         result = list_mcp_market_records_by_tenant_and_user("tid", "uid")
         assert len(result) == 1
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_empty(self, mock_session):
         session = MockSession()
         session.all = lambda: []
@@ -481,7 +475,7 @@ class TestListMcpMarketRecordsByTenantAndUser:
 class TestIncrementMcpMarketDownloadCount:
     """Test increment_mcp_market_download_count."""
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_increment(self, mock_session):
         session = MockSession()
         session.update = MagicMock()
@@ -493,7 +487,7 @@ class TestIncrementMcpMarketDownloadCount:
 class TestGetMcpMarketTagStats:
     """Test get_mcp_market_tag_stats."""
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_tag_stats(self, mock_session):
         row = MagicMock()
         row.tag = "python"
@@ -506,7 +500,7 @@ class TestGetMcpMarketTagStats:
         assert len(result) == 1
         assert result[0]["tag"] == "python"
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_tag_stats_empty(self, mock_session):
         session = MockSession()
         session.all = lambda: []
@@ -519,7 +513,7 @@ class TestGetMcpMarketTagStats:
 class TestGetMcpMarketTagStatsByTenant:
     """Test get_mcp_market_tag_stats_by_tenant."""
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_tag_stats_scoped(self, mock_session):
         row = MagicMock()
         row.tag = "python"
@@ -535,7 +529,7 @@ class TestGetMcpMarketTagStatsByTenant:
 class TestUpdateMcpMarketStatus:
     """Test update_mcp_market_status."""
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_update_status_only(self, mock_session):
         session = MockSession()
         session.update = MagicMock()
@@ -546,7 +540,7 @@ class TestUpdateMcpMarketStatus:
             market_id=1, user_id="uid", review_status="shared",
         )
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_update_status_with_submitter(self, mock_session):
         session = MockSession()
         session.update = MagicMock()
@@ -558,7 +552,7 @@ class TestUpdateMcpMarketStatus:
             submitted_by="user@example.com",
         )
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_update_status_with_content(self, mock_session):
         session = MockSession()
         session.update = MagicMock()
@@ -577,7 +571,7 @@ class TestUpdateMcpMarketStatus:
 class TestListMcpMarketRecordsByStatus:
     """Test list_mcp_market_records_by_status."""
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_empty(self, mock_session):
         session = MockSession()
         session.all = lambda: []
@@ -587,7 +581,7 @@ class TestListMcpMarketRecordsByStatus:
         result = list_mcp_market_records_by_status(review_status="pending_review")
         assert result["count"] == 0
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_with_records(self, mock_session):
         row = MagicMock()
         row.market_id = 1
@@ -608,7 +602,7 @@ class TestListMcpMarketRecordsByStatus:
         )
         assert result["count"] == 1
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_cursor_pagination(self, mock_session):
         rows = [MagicMock() for i in range(3)]
         for i, r in enumerate(rows, start=1):
@@ -634,7 +628,7 @@ class TestListMcpMarketRecordsByStatus:
             review_status="pending_review", cursor="2", limit=2,
         )
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_filter_by_transport(self, mock_session):
         row = MagicMock()
         row.market_id = 1
@@ -655,7 +649,7 @@ class TestListMcpMarketRecordsByStatus:
         )
         assert result["count"] == 1
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_filter_by_search(self, mock_session):
         row = MagicMock()
         row.market_id = 1
@@ -676,7 +670,7 @@ class TestListMcpMarketRecordsByStatus:
         )
         assert result["count"] == 1
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_filter_by_tag(self, mock_session):
         row = MagicMock()
         row.market_id = 1
@@ -697,7 +691,7 @@ class TestListMcpMarketRecordsByStatus:
         )
         assert result["count"] == 1
 
-    @patch('backend.database.market_mcp_db.get_db_session')
+    @patch('management.db.mcp.market.get_db_session')
     def test_invalid_cursor(self, mock_session):
         row = MagicMock()
         row.market_id = 1

@@ -6,8 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from consts.exceptions import ValidationError, WorkbenchConfigVersionConflict
-from consts.model import WorkbenchSessionConfig
+from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict
+from contracts.agent import WorkbenchSessionConfig
 from management.services.agent import workbench as workbench_service
 from nexent.core.agents.agent_model import AgentConfig
 from nexent.core.agents.agent_model import ToolConfig

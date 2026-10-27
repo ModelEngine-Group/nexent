@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Audit entries recorded on successful user account lifecycle operations.
 
 Feature-scoped companion to ``test_user_management_app.py``: audit assertions
@@ -30,9 +32,9 @@ minio_mock.client = MagicMock()
 patch("nexent.storage.storage_client_factory.create_storage_client_from_config",
       return_value=storage_client_mock).start()
 patch("nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None).start()
-patch("backend.database.client.MinioClient", return_value=minio_mock).start()
-patch("database.client.MinioClient", return_value=minio_mock).start()
-patch("backend.database.client.minio_client", minio_mock).start()
+patch("management.db.client.MinioClient", return_value=minio_mock).start()
+patch("management.db.client.MinioClient", return_value=minio_mock).start()
+patch("management.db.client.minio_client", minio_mock).start()
 patch("elasticsearch.Elasticsearch", return_value=MagicMock()).start()
 
 from http import HTTPStatus  # noqa: E402
@@ -40,7 +42,7 @@ from http import HTTPStatus  # noqa: E402
 from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from apps.user_management_app import router  # noqa: E402
+from management.api.identity.user_management import router
 
 app = FastAPI()
 app.include_router(router)
@@ -56,7 +58,7 @@ def _audit_messages(caplog):
 
 def test_signup_success_records_audit_entry(caplog, mocker):
     """Successful registration records the operator identity, never the password."""
-    mock_signup = mocker.patch("apps.user_management_app.signup_user_with_invitation")
+    mock_signup = mocker.patch("management.api.identity.user_management.signup_user_with_invitation")
     mock_signup.return_value = {
         "user": {"id": "u-1", "email": "new@example.com", "role": "USER"},
         "session": None,
@@ -87,7 +89,7 @@ def test_signup_success_records_audit_entry(caplog, mocker):
 
 def test_signin_success_records_audit_entry(caplog, mocker):
     """Successful login records the operator identity, never the session tokens."""
-    mock_signin = mocker.patch("apps.user_management_app.signin_user")
+    mock_signin = mocker.patch("management.api.identity.user_management.signin_user")
     mock_signin.return_value = {
         "message": "Login successful",
         "data": {
@@ -114,8 +116,8 @@ def test_signin_success_records_audit_entry(caplog, mocker):
 
 def test_logout_success_records_audit_entry(caplog, mocker):
     """Successful logout records the resolved operator and tenant."""
-    mocker.patch("apps.user_management_app.get_authorized_client", return_value=MagicMock())
-    mocker.patch("apps.user_management_app.get_current_user_id", return_value=("u-3", "t-3"))
+    mocker.patch("management.api.identity.user_management.get_authorized_client", return_value=MagicMock())
+    mocker.patch("management.api.identity.user_management.get_current_user_id", return_value=("u-3", "t-3"))
 
     with caplog.at_level(logging.INFO, logger=AUDIT_LOGGER):
         response = client.post("/user/logout", headers={"Authorization": "Bearer token"})
@@ -132,9 +134,9 @@ def test_account_revoke_success_records_audit_entry(caplog, mocker):
     """Successful account revocation records the revoked account owner."""
     user = MagicMock()
     user.user_metadata = {"role": "user"}
-    mocker.patch("apps.user_management_app.delete_user_and_cleanup", new_callable=AsyncMock)
-    mocker.patch("apps.user_management_app.validate_token", return_value=(True, user))
-    mocker.patch("apps.user_management_app.get_current_user_id", return_value=("user123", "tenant456"))
+    mocker.patch("management.api.identity.user_management.delete_user_and_cleanup", new_callable=AsyncMock)
+    mocker.patch("management.api.identity.user_management.validate_token", return_value=(True, user))
+    mocker.patch("management.api.identity.user_management.get_current_user_id", return_value=("user123", "tenant456"))
 
     with caplog.at_level(logging.INFO, logger=AUDIT_LOGGER):
         response = client.post("/user/revoke", headers={"Authorization": "Bearer token"})
@@ -149,13 +151,13 @@ def test_account_revoke_success_records_audit_entry(caplog, mocker):
 
 def test_token_create_records_token_id_but_not_secret(caplog, mocker):
     """Token creation records only the token id; the access key never reaches the log."""
-    mock_create_token = mocker.patch("apps.user_management_app.create_token")
+    mock_create_token = mocker.patch("management.api.identity.user_management.create_token")
     mock_create_token.return_value = {
         "token_id": 7,
         "access_key": "nexent-secret-key",
         "user_id": "u-4",
     }
-    mocker.patch("apps.user_management_app.get_current_user_id", return_value=("u-4", "t-4"))
+    mocker.patch("management.api.identity.user_management.get_current_user_id", return_value=("u-4", "t-4"))
 
     with caplog.at_level(logging.INFO, logger=AUDIT_LOGGER):
         response = client.post("/user/tokens", headers={"Authorization": "Bearer test-jwt-token"})
@@ -172,8 +174,8 @@ def test_token_create_records_token_id_but_not_secret(caplog, mocker):
 
 def test_token_delete_success_records_audit_entry(caplog, mocker):
     """Successful token deletion records the operator and the deleted token id."""
-    mocker.patch("apps.user_management_app.delete_token", return_value=True)
-    mocker.patch("apps.user_management_app.get_current_user_id", return_value=("u-5", "t-5"))
+    mocker.patch("management.api.identity.user_management.delete_token", return_value=True)
+    mocker.patch("management.api.identity.user_management.get_current_user_id", return_value=("u-5", "t-5"))
 
     with caplog.at_level(logging.INFO, logger=AUDIT_LOGGER):
         response = client.delete("/user/tokens/3", headers={"Authorization": "Bearer test-jwt-token"})
@@ -188,8 +190,8 @@ def test_token_delete_success_records_audit_entry(caplog, mocker):
 
 def test_password_update_success_records_audit_entry(caplog, mocker):
     """Password change records the operator identity, never the passwords."""
-    mocker.patch("apps.user_management_app.update_password", new_callable=AsyncMock)
-    mocker.patch("apps.user_management_app.get_current_user_id", return_value=("u-6", "t-6"))
+    mocker.patch("management.api.identity.user_management.update_password", new_callable=AsyncMock)
+    mocker.patch("management.api.identity.user_management.get_current_user_id", return_value=("u-6", "t-6"))
 
     with caplog.at_level(logging.INFO, logger=AUDIT_LOGGER):
         response = client.put(

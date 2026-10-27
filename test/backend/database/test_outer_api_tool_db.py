@@ -1,9 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
-Unit tests for backend/database/outer_api_tool_db.py
+Unit tests for backend/management/db/tool/outer_api.py
 
 Tests CRUD operations for OpenAPI services (MCP service level).
 """
 
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import pytest
 from unittest.mock import MagicMock
@@ -23,47 +26,28 @@ consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 client_mock = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
-sys.modules['database.client'] = client_mock
-sys.modules['backend.database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 db_models_mock = MagicMock()
 db_models_mock.OuterApiService = MagicMock()
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
-from backend.database.outer_api_tool_db import (
-    create_openapi_service,
-    upsert_openapi_service,
-    query_services_by_tenant,
-    query_available_services,
-    query_service_by_name,
-    query_service_by_id,
-    update_service,
-    delete_service,
-    delete_service_by_id,
-    delete_all_services,
-    query_available_openapi_services,
-    query_openapi_services_by_tenant,
-    delete_openapi_service,
-    create_openapi_service_with_tools,
-    sync_openapi_service,
-    create_outer_api_tool,
-    batch_create_outer_api_tools,
-    query_outer_api_tools_by_tenant,
-    query_available_outer_api_tools,
-    query_outer_api_tool_by_id,
-    query_outer_api_tool_by_name,
-    update_outer_api_tool,
-    delete_outer_api_tool,
-    delete_all_outer_api_tools,
-    sync_outer_api_tools,
-)
+from management.db.tool.outer_api import create_openapi_service, upsert_openapi_service, query_services_by_tenant, query_available_services, query_service_by_name, query_service_by_id, update_service, delete_service, delete_service_by_id, delete_all_services, query_available_openapi_services, query_openapi_services_by_tenant, delete_openapi_service, create_openapi_service_with_tools, sync_openapi_service, create_outer_api_tool, batch_create_outer_api_tools, query_outer_api_tools_by_tenant, query_available_outer_api_tools, query_outer_api_tool_by_id, query_outer_api_tool_by_name, update_outer_api_tool, delete_outer_api_tool, delete_all_outer_api_tools, sync_outer_api_tools
 
 
 class MockOuterApiService:
@@ -90,7 +74,7 @@ def _setup_mock_context(monkeypatch, session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.outer_api_tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.outer_api.get_db_session", lambda: mock_ctx)
     return mock_ctx
 
 
@@ -99,10 +83,10 @@ def _setup_mock_service(monkeypatch, mock_session, service_attrs=None):
     session, query = mock_session
     _setup_mock_context(monkeypatch, session)
     monkeypatch.setattr(
-        "backend.database.outer_api_tool_db.as_dict",
+        "management.db.tool.outer_api.as_dict",
         lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj)
     monkeypatch.setattr(
-        "backend.database.outer_api_tool_db.filter_property",
+        "management.db.tool.outer_api.filter_property",
         lambda data, model: data)
 
     class MockServiceClass:
@@ -115,7 +99,7 @@ def _setup_mock_service(monkeypatch, mock_session, service_attrs=None):
             self.__dict__.update(kwargs)
 
     monkeypatch.setattr(
-        "backend.database.outer_api_tool_db.OuterApiService", MockServiceClass)
+        "management.db.tool.outer_api.OuterApiService", MockServiceClass)
 
     if service_attrs:
         return MockServiceClass(**service_attrs)
@@ -243,10 +227,10 @@ class TestUpsertOpenapiService:
 
         _setup_mock_context(monkeypatch, session)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.as_dict",
+            "management.db.tool.outer_api.as_dict",
             lambda obj: obj.__dict__)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.filter_property",
+            "management.db.tool.outer_api.filter_property",
             lambda data, model: data)
 
         result = upsert_openapi_service(
@@ -283,7 +267,7 @@ class TestQueryServicesByTenant:
 
         _setup_mock_context(monkeypatch, session)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.as_dict",
+            "management.db.tool.outer_api.as_dict",
             lambda obj: obj.__dict__)
 
         results = query_services_by_tenant("tenant1")
@@ -304,7 +288,7 @@ class TestQueryServicesByTenant:
 
         _setup_mock_context(monkeypatch, session)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.as_dict",
+            "management.db.tool.outer_api.as_dict",
             lambda obj: obj.__dict__)
 
         results = query_services_by_tenant("empty_tenant")
@@ -331,7 +315,7 @@ class TestQueryAvailableServices:
 
         _setup_mock_context(monkeypatch, session)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.as_dict",
+            "management.db.tool.outer_api.as_dict",
             lambda obj: obj.__dict__)
 
         results = query_available_services("tenant1")
@@ -351,7 +335,7 @@ class TestQueryAvailableServices:
 
         _setup_mock_context(monkeypatch, session)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.as_dict",
+            "management.db.tool.outer_api.as_dict",
             lambda obj: obj.__dict__)
 
         results = query_available_services("tenant1")
@@ -378,7 +362,7 @@ class TestQueryServiceByName:
 
         _setup_mock_context(monkeypatch, session)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.as_dict",
+            "management.db.tool.outer_api.as_dict",
             lambda obj: obj.__dict__)
 
         result = query_service_by_name("specific_service", "tenant1")
@@ -398,7 +382,7 @@ class TestQueryServiceByName:
 
         _setup_mock_context(monkeypatch, session)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.as_dict",
+            "management.db.tool.outer_api.as_dict",
             lambda obj: obj.__dict__)
 
         result = query_service_by_name("nonexistent", "tenant1")
@@ -425,7 +409,7 @@ class TestQueryServiceById:
 
         _setup_mock_context(monkeypatch, session)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.as_dict",
+            "management.db.tool.outer_api.as_dict",
             lambda obj: obj.__dict__)
 
         result = query_service_by_id(42, "tenant1")
@@ -445,7 +429,7 @@ class TestQueryServiceById:
 
         _setup_mock_context(monkeypatch, session)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.as_dict",
+            "management.db.tool.outer_api.as_dict",
             lambda obj: obj.__dict__)
 
         result = query_service_by_id(999, "tenant1")
@@ -475,7 +459,7 @@ class TestUpdateService:
 
         _setup_mock_context(monkeypatch, session)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.as_dict",
+            "management.db.tool.outer_api.as_dict",
             lambda obj: obj.__dict__)
 
         result = update_service(
@@ -528,7 +512,7 @@ class TestUpdateService:
 
         _setup_mock_context(monkeypatch, session)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.as_dict",
+            "management.db.tool.outer_api.as_dict",
             lambda obj: obj.__dict__)
 
         result = update_service(
@@ -682,7 +666,7 @@ class TestBackwardCompatibilityAliases:
 
         _setup_mock_context(monkeypatch, session)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.as_dict",
+            "management.db.tool.outer_api.as_dict",
             lambda obj: obj.__dict__)
 
         results = query_available_openapi_services("tenant1")
@@ -705,7 +689,7 @@ class TestBackwardCompatibilityAliases:
 
         _setup_mock_context(monkeypatch, session)
         monkeypatch.setattr(
-            "backend.database.outer_api_tool_db.as_dict",
+            "management.db.tool.outer_api.as_dict",
             lambda obj: obj.__dict__)
 
         results = query_openapi_services_by_tenant("tenant1")
