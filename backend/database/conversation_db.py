@@ -1671,7 +1671,9 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             _optional_conversation_column("workbench_config", None),
             _optional_conversation_column("workbench_config_version", 0),
             (func.extract('epoch', ConversationRecord.create_time)
-             * 1000).label('create_time')
+             * 1000).label('create_time'),
+            (func.extract('epoch', _activity_time_expression())
+             * 1000).label('last_activity_time'),
         ).where(
             ConversationRecord.conversation_id == conversation_id,
             ConversationRecord.delete_flag == 'N'
@@ -1769,7 +1771,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
 
             message_list.append(message_data)
 
-        return {
+        history = {
             'conversation_id': conversation['conversation_id'],
             'conversation_title': conversation.get('conversation_title'),
             'agent_id': conversation.get('agent_id'),
@@ -1784,6 +1786,11 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             'search_records': [as_dict(record) for record in search_records],
             'image_records': [as_dict(record) for record in image_records]
         }
+        if conversation.get('workbench_config') is None:
+            history['last_activity_time'] = int(
+                conversation.get('last_activity_time') or conversation['create_time']
+            )
+        return history
 
 
 def _image_exists(session, message_id: int, image_url: str) -> bool:

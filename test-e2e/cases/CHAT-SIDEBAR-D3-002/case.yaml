@@ -1,0 +1,60 @@
+schema_version: '1.0'
+stage: D3
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-SIDEBAR-D3-002
+  feature_id: CHAT-SIDEBAR
+  requirement_ids: [CHAT-SIDEBAR-REQ-001]
+  business_rule_ids: [CHAT-SIDEBAR-RULE-010]
+  title: Agent history group and conversation cursors cover isolated PostgreSQL history
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove the real authenticated router, service and PostgreSQL queries page Agent groups and one Agent's 101 conversations independently, including pin and owner boundaries.
+  preconditions:
+  - Reachable PostgreSQL configured through the existing backend connection; use a disposable isolated schema and controlled authentication identities.
+  test_data:
+    profile: mock
+    identities: [owner, other-user]
+    agents: 12
+    conversations: 101 under one Agent, one each under 11 other Agents, one Workbench conversation and one deleted Agent-chat conversation
+  steps:
+  - order: 1
+    action: Request the first ten Agent groups while one older group and its pinned conversation fall outside the ordinary group page; follow the next group cursor and request the excluded group through the independent active-group include parameter.
+    expected: The pinned group is included separately without consuming ordinary page quota, the cursor reaches all remaining groups without duplicates, and the included group does not advance the regular cursor.
+  - order: 2
+    action: Request the 101-conversation Agent group in pages of ten and follow every conversation cursor; independently query the same Agent's complete ID set and a title search.
+    expected: All 101 owned active Agent-chat IDs appear exactly once in stable activity order; the older pin appears in the pin snapshot outside the ordinary page; search matches before paging; no message body or Workbench/deleted/foreign record is returned.
+  - order: 3
+    action: Read groups and conversation IDs as another authenticated user and submit invalid group, cursor and limit values.
+    expected: Another owner sees no history; malformed scope/cursor values return 400, out-of-range limits return 422, and no query escapes the authenticated owner.
+  expected_results:
+  - Group and conversation cursors are independent and provide stable complete pagination for the seeded distribution.
+  - Pinned and current-group inclusions do not consume ordinary page quota; pins are included once.
+  - Search, owner scope, active Agent-chat filtering and error contracts are enforced by the actual API/database path.
+  forbidden_side_effects:
+  - No message bodies, other-owner histories, Workbench conversations or deleted conversations are exposed; no model invocation or conversation mutation occurs.
+  integration_boundary:
+  - Real FastAPI conversation router, history service, SQLAlchemy queries and isolated PostgreSQL schema; only user/tenant authentication identities are controlled.
+  observations:
+  - Authenticated HTTP status, response schema, stable group/session IDs and cursors
+  - Ordinary page, out-of-page pinned snapshot and complete single-Agent ID set
+  - SQL rows remain owner-scoped and fixture conversations remain unchanged
+  cleanup:
+  - Drop only the generated isolated schema containing the test Agent and conversation records.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Real group and per-Agent conversation routes paginate the seeded history independently and retain an out-of-page pin.
+    steps: [1, 2]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Owner isolation and invalid query contracts remain enforced.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1]

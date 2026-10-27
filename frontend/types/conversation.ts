@@ -9,6 +9,32 @@ export interface ConversationListItem {
   last_activity_time?: number;
 }
 
+export interface AgentConversationGroup {
+  group_key: string;
+  agent_id: number | null;
+  agent_name: string | null;
+  agent_available: boolean;
+  last_activity_time: number;
+  matched_conversation: boolean;
+}
+
+export interface AgentConversationGroupPage {
+  /** Regular group page; pinned groups are returned separately. */
+  items: AgentConversationGroup[];
+  pinned_items: AgentConversationGroup[];
+  /** Active thread groups that are outside the regular group page. */
+  included_items: AgentConversationGroup[];
+  next_cursor?: string | null;
+}
+
+export interface AgentGroupConversationPage {
+  /** Activity-ordered conversation page. */
+  items: Array<ConversationListItem & { pinned_at?: string | null }>;
+  /** Full pin snapshot for this group, independent of the activity cursor. */
+  pinned_items: Array<ConversationListItem & { pinned_at?: string | null }>;
+  next_cursor?: string | null;
+}
+
 export type ConversationDetailReader = (
   id: string
 ) => Promise<ApiConversationDetail>;
@@ -110,6 +136,7 @@ export interface StreamingMessage {
 
 export interface ApiConversationDetail {
   create_time: number;
+  last_activity_time?: number;
   // The history endpoint currently serializes this id as a string, while
   // other conversation endpoints return a number.
   conversation_id: number | string;

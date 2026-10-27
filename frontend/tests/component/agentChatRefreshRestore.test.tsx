@@ -32,10 +32,28 @@ let runtimeState = {
   threads: {
     mainThreadId: "main-thread" as string | undefined,
     isLoading: false,
-    threadItems: [] as Array<{ id: string; remoteId?: string }>,
+    threadItems: [] as Array<{
+      id: string;
+      remoteId?: string;
+      custom?: { agentId?: number | string };
+    }>,
   },
   thread: { isLoading: false, isRunning: false },
 };
+
+const sidebarState = vi.hoisted(() => ({
+  isRestoringView: undefined as boolean | undefined,
+  selectedAgentId: undefined as string | undefined,
+}));
+const queryClientMock = vi.hoisted(() => ({
+  ensureQueryData: vi.fn().mockResolvedValue(undefined),
+  invalidateQueries: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@tanstack/react-query", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@tanstack/react-query")>();
+  return { ...actual, useQueryClient: () => queryClientMock };
+});
 
 const agent = {
   id: "41",
@@ -83,6 +101,10 @@ vi.mock("next/navigation", () => ({
   useParams: vi.fn(() => ({ locale: "zh" })),
 }));
 
+vi.mock("@/components/providers/AuthorizationProvider", () => ({
+  useAuthorizationContext: () => ({ user: undefined }),
+}));
+
 vi.mock("../../app/[locale]/newchat/assistant-ui/chat", () => ({
   Chat: ({
     selectedAgent,
@@ -116,7 +138,25 @@ vi.mock("../../app/[locale]/newchat/assistant-ui/chat", () => ({
 }));
 
 vi.mock("../../app/[locale]/newchat/assistant-ui/threadlist-sidebar", () => ({
-  ThreadListSidebar: () => <div>thread list</div>,
+  ThreadListSidebar: ({
+    selectedAgent,
+    isRestoringView,
+  }: {
+    selectedAgent?: PageAgent | null;
+    isRestoringView?: boolean;
+  }) => {
+    sidebarState.isRestoringView = isRestoringView;
+    sidebarState.selectedAgentId = selectedAgent?.id;
+    return (
+      <div>
+        {isRestoringView
+          ? "sidebar restoring"
+          : selectedAgent
+            ? "agent history sidebar"
+            : "discovery sidebar"}
+      </div>
+    );
+  },
 }));
 
 vi.mock("@/hooks/agent/usePublishedAgentList", () => ({
@@ -167,13 +207,17 @@ describe("newchat refresh restore wiring", () => {
   it("still gates chat on missing identity and active history loading", async () => {
     runtimeState.threads.mainThreadId = undefined;
     const page = render(<Home />);
-    expect(screen.queryByText("Agent list")).toBeNull();
+    expect(
+      screen.getByText("Agent list").closest("[aria-busy]")
+    ).toHaveAttribute("aria-busy", "true");
     runtimeState.threads.mainThreadId = "main-thread";
     page.rerender(<Home />);
     await userEvent.click(await screen.findByText("select agent"));
     runtimeState.thread.isLoading = true;
     page.rerender(<Home />);
-    expect(screen.queryByRole("textbox", { name: "chat draft" })).toBeNull();
+    expect(
+      screen.getByRole("textbox", { name: "chat draft" }).closest("[aria-busy]")
+    ).toHaveAttribute("aria-busy", "true");
     runtimeState.thread.isLoading = false;
     page.rerender(<Home />);
     expect(screen.getByRole("textbox", { name: "chat draft" })).toBeVisible();
@@ -186,6 +230,10 @@ describe("newchat refresh restore wiring", () => {
     updateThreadCustom.mockClear();
     capturedRuntimeOptions = undefined;
     chatProps = undefined;
+    sidebarState.isRestoringView = undefined;
+    sidebarState.selectedAgentId = undefined;
+    queryClientMock.ensureQueryData.mockClear().mockResolvedValue(undefined);
+    queryClientMock.invalidateQueries.mockClear().mockResolvedValue(undefined);
     vi.mocked(conversationService.getKnowledgeCapabilities)
       .mockReset()
       .mockResolvedValue(null as unknown as KnowledgeCapabilities);
@@ -207,6 +255,30 @@ describe("newchat refresh restore wiring", () => {
 
     expect(capturedRuntimeOptions?.threadId).toBeUndefined();
     expect(capturedRuntimeOptions?.initialThreadId).toBe("77");
+  });
+
+  it("keeps the discovery sidebar hidden until the saved conversation restores", async () => {
+    window.sessionStorage.setItem(CONVERSATION_KEY, "77");
+    const page = render(<Home />);
+
+    expect(await screen.findByText("sidebar restoring")).toBeVisible();
+    expect(screen.queryByText("discovery sidebar")).toBeNull();
+
+    runtimeState = {
+      threads: {
+        mainThreadId: "77",
+        isLoading: false,
+        threadItems: [{ id: "77", remoteId: "77", custom: { agentId: 41 } }],
+      },
+      thread: { isLoading: false, isRunning: false },
+    };
+    page.rerender(<Home />);
+
+    await waitFor(() =>
+      expect(screen.getByText("agent history sidebar")).toBeVisible()
+    );
+    expect(sidebarState.selectedAgentId).toBe(agent.id);
+    expect(sidebarState.isRestoringView).toBe(false);
   });
 
   it("starts on the landing when the user returns via navigation, not refresh", () => {
