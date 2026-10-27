@@ -1783,15 +1783,15 @@ def test_update_existing_relations_returns_early_when_empty():
     assert mock_rel.selected_agent_version_no == 1  # unchanged
 
 
-def test_batch_get_agent_main_flags_returns_flag_map(monkeypatch, mock_session):
-    """Batch main-agent lookup maps each agent id to its is_main_agent flag."""
-    from management.db.agent.repository import batch_get_agent_main_flags
+def test_batch_get_agent_version_main_flags_returns_flag_map(monkeypatch, mock_session):
+    """Batch main-agent lookup maps each (agent_id, version_no) to its flag."""
+    from management.db.agent.repository import batch_get_agent_version_main_flags
 
     session, query = mock_session
     mock_filter = MagicMock()
     mock_filter.all.return_value = [
-        SimpleNamespace(agent_id=10, is_main_agent=True),
-        SimpleNamespace(agent_id=11, is_main_agent=False),
+        SimpleNamespace(agent_id=10, version_no=1, is_main_agent=True),
+        SimpleNamespace(agent_id=11, version_no=2, is_main_agent=False),
     ]
     query.filter.return_value = mock_filter
 
@@ -1800,16 +1800,20 @@ def test_batch_get_agent_main_flags_returns_flag_map(monkeypatch, mock_session):
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr("management.db.agent.repository.get_db_session", lambda: mock_ctx)
 
-    assert batch_get_agent_main_flags([10, 11]) == {10: True, 11: False}
+    assert batch_get_agent_version_main_flags([(10, 1), (11, 2)]) == {
+        (10, 1): True,
+        (11, 2): False,
+    }
 
 
-def test_batch_get_agent_main_flags_returns_empty_without_ids(mock_session):
-    """No ids (or only None entries) short-circuits without querying the DB."""
-    from management.db.agent.repository import batch_get_agent_main_flags
+def test_batch_get_agent_version_main_flags_returns_empty_without_pairs(mock_session):
+    """No usable pairs short-circuit without querying the DB."""
+    from management.db.agent.repository import batch_get_agent_version_main_flags
 
     session, query = mock_session
-    assert batch_get_agent_main_flags([]) == {}
-    assert batch_get_agent_main_flags([None]) == {}
+    assert batch_get_agent_version_main_flags([]) == {}
+    assert batch_get_agent_version_main_flags([(None, 1)]) == {}
+    assert batch_get_agent_version_main_flags([(10, None)]) == {}
     query.filter.assert_not_called()
 
 

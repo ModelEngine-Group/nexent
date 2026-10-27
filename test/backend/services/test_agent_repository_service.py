@@ -47,7 +47,7 @@ sys.modules["management.db.identity.user_tenant"] = _user_tenant_db_mock
 
 _agent_db_mock = MagicMock()
 _agent_db_mock.search_agent_info_by_agent_id = MagicMock()
-_agent_db_mock.batch_get_agent_main_flags = MagicMock(return_value={})
+_agent_db_mock.batch_get_agent_version_main_flags = MagicMock(return_value={})
 sys.modules["management.db.agent.repository"] = _agent_db_mock
 
 _agent_version_db_mock = MagicMock()
@@ -191,6 +191,7 @@ def _repository_record(
     *,
     agent_repository_id: int = 1,
     agent_id: int = 10,
+    version_no: int = 1,
     status: str = "not_shared",
     publisher_tenant_id: str = "tenant_a",
     publisher_user_id: str = "user_a",
@@ -198,6 +199,7 @@ def _repository_record(
     return {
         "agent_repository_id": agent_repository_id,
         "agent_id": agent_id,
+        "version_no": version_no,
         "author": "author",
         "name": "agent_one",
         "display_name": "Agent One",
@@ -542,7 +544,9 @@ def test_list_repository_listings_exposes_main_agent_flag():
     with patch.object(
         ars, "list_agent_repository_summaries", return_value=records
     ), patch.object(
-        ars, "batch_get_agent_main_flags", return_value={10: True, 11: False}
+        ars,
+        "batch_get_agent_version_main_flags",
+        return_value={(10, 1): True, (11, 1): False},
     ):
         result = ars.list_agent_repository_listings_impl("tenant_a", status="shared")
 
@@ -550,12 +554,30 @@ def test_list_repository_listings_exposes_main_agent_flag():
     assert flags == {10: True, 11: False}
 
 
+def test_list_repository_listings_reads_flag_from_published_version():
+    """A draft toggle must not change an already-published listing badge."""
+    records = [_listing_record(1, 10, datetime(2024, 1, 1), version_no=2)]
+    # The draft row (version 0) was switched to a non-main agent after publish;
+    # the published version row still carries the main-agent flag.
+    version_flags = {(10, 0): False, (10, 2): True}
+
+    with patch.object(
+        ars, "list_agent_repository_summaries", return_value=records
+    ), patch.object(
+        ars, "batch_get_agent_version_main_flags", return_value=version_flags
+    ) as mock_flags:
+        result = ars.list_agent_repository_listings_impl("tenant_a", status="shared")
+
+    assert result["items"][0]["is_main_agent"] is True
+    mock_flags.assert_called_once_with([(10, 2)])
+
+
 def test_list_repository_listings_defaults_main_agent_flag_when_unknown():
     records = [_listing_record(1, 10, datetime(2024, 1, 1))]
 
     with patch.object(
         ars, "list_agent_repository_summaries", return_value=records
-    ), patch.object(ars, "batch_get_agent_main_flags", return_value={}):
+    ), patch.object(ars, "batch_get_agent_version_main_flags", return_value={}):
         result = ars.list_agent_repository_listings_impl("tenant_a", status="shared")
 
     assert result["items"][0]["is_main_agent"] is True
@@ -568,22 +590,38 @@ def test_get_agent_repository_listing_detail_exposes_main_agent_flag():
     with patch.object(
         ars, "get_agent_repository_by_id", return_value=record
     ), patch.object(
-        ars, "batch_get_agent_main_flags", return_value={10: False}
+        ars, "batch_get_agent_version_main_flags", return_value={(10, 1): False}
     ):
         result = ars.get_agent_repository_listing_detail_impl(1, "tenant_a")
 
     assert result["is_main_agent"] is False
 
 
-def test_get_agent_main_flags_degrades_to_empty_on_lookup_error():
+def test_apply_agent_main_flags_degrades_to_default_on_lookup_error():
+    records = [{"agent_id": 1, "version_no": 2}]
+
     with patch.object(
         ars,
-        "batch_get_agent_main_flags",
+        "batch_get_agent_version_main_flags",
         side_effect=RuntimeError("database unavailable"),
     ):
-        assert ars._get_agent_main_flags([1, 2]) == {}
+        ars._apply_agent_main_flags(records)
 
-    assert ars._get_agent_main_flags([]) == {}
+    assert records[0]["is_main_agent"] is True
+
+
+def test_apply_agent_main_flags_skips_records_without_usable_version():
+    records = [
+        {"agent_id": None, "version_no": 2},
+        {"agent_id": 1, "version_no": None},
+        {"agent_id": 1, "version_no": "v1"},
+    ]
+
+    with patch.object(ars, "batch_get_agent_version_main_flags") as mock_flags:
+        ars._apply_agent_main_flags(records)
+
+    mock_flags.assert_not_called()
+    assert [record["is_main_agent"] for record in records] == [True, True, True]
 
 
 def test_repository_id_sort_key_defaults_unusable_ids_to_minus_one():
