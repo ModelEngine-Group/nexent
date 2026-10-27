@@ -10,7 +10,7 @@ import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import type { ConversationListPage } from "@/types/conversation";
 import log from "@/lib/logger";
 
-/** Observe the first page; reload metadata on the same adapter only on changes. */
+/** Observe Workbench's first page; reload metadata only when it changes. */
 export function useConversationActivitySync(
   scopeKey: string | null,
   conversationType: "workbench" | "agent_chat"
@@ -20,7 +20,8 @@ export function useConversationActivitySync(
     (state) => state.threads.isLoading || state.threads.isLoadingMore
   );
   const [visible, setVisible] = useState(
-    () => typeof document !== "undefined" && document.visibilityState === "visible"
+    () =>
+      typeof document !== "undefined" && document.visibilityState === "visible"
   );
   const applied = useRef<ConversationListPage | undefined>(undefined);
   const pending = useRef(false);
@@ -36,7 +37,7 @@ export function useConversationActivitySync(
   }, [scopeKey, conversationType]);
   const query = useQuery({
     queryKey: ["conversation-activity", scopeKey, conversationType],
-    enabled: Boolean(scopeKey) && visible,
+    enabled: conversationType === "workbench" && Boolean(scopeKey) && visible,
     queryFn: async () => {
       const lifetime = lifecycle.current;
       try {
@@ -61,7 +62,12 @@ export function useConversationActivitySync(
   });
   const refetch = query.refetch;
   useAuiEvent({ scope: "*", event: "thread.runEnd" }, () => {
-    if (scopeKey && document.visibilityState === "visible" && navigator.onLine)
+    if (
+      conversationType === "workbench" &&
+      scopeKey &&
+      document.visibilityState === "visible" &&
+      navigator.onLine
+    )
       void refetch({ cancelRefetch: false });
   });
   useEffect(() => {
@@ -69,7 +75,12 @@ export function useConversationActivitySync(
     const refresh = () => {
       const active = document.visibilityState === "visible";
       setVisible(active);
-      if (scopeKey && active && navigator.onLine)
+      if (
+        conversationType === "workbench" &&
+        scopeKey &&
+        active &&
+        navigator.onLine
+      )
         void refetch({ cancelRefetch: false });
     };
     document.addEventListener("visibilitychange", refresh);

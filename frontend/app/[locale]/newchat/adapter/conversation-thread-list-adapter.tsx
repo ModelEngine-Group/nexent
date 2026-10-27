@@ -1733,6 +1733,10 @@ export const createConversationThreadListAdapter = (
 
     async list({ after } = {}): Promise<RemoteThreadListResponse> {
       const currentGeneration = after === undefined ? ++generation : generation;
+      if (conversationType === "agent_chat") {
+        // Agent-chat history is fetched by Agent group and per-group cursors.
+        return { threads: [] };
+      }
       const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
       const keyset = after?.startsWith("activity:")
         ? after.slice(9)
@@ -1907,6 +1911,10 @@ export const createConversationThreadListAdapter = (
       const detail = await (detailLoader?.load ?? conversationService.getById)(
         threadId
       );
+      const lastActivityTime =
+        conversationType === "agent_chat"
+          ? detail.last_activity_time
+          : undefined;
 
       return toRemoteThreadMetadata({
         conversation_id: Number(detail.conversation_id),
@@ -1914,7 +1922,10 @@ export const createConversationThreadListAdapter = (
           detail.conversation_title ?? "Untitled conversation",
         agent_id: detail.agent_id,
         create_time: detail.create_time,
-        update_time: detail.create_time,
+        update_time: lastActivityTime ?? detail.create_time,
+        ...(lastActivityTime === undefined
+          ? {}
+          : { last_activity_time: lastActivityTime }),
       });
     },
 

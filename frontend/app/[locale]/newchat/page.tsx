@@ -168,6 +168,9 @@ const PersistentChatHome: FC = () => {
   const [deepLinkedAgentId, setDeepLinkedAgentId] = useState<number | null>(
     null
   );
+  const [restoreViewTarget, setRestoreViewTarget] = useState<
+    LastChatViewState | null | undefined
+  >(undefined);
   const consumedDeepLinkRef = useRef(false);
   // Read once at mount: what (if anything) should this refresh restore? Deep
   // links win, so this is null whenever the URL carries linking parameters.
@@ -188,10 +191,17 @@ const PersistentChatHome: FC = () => {
     conversationDetails.activate(threadId || lastChatView?.conversationId);
     setRequestedThreadId(threadId || undefined);
     const agentId = searchParams.get("agent_id");
-    setDeepLinkedAgentId(
+    const validAgentId =
       agentId && Number.isInteger(Number(agentId)) && Number(agentId) > 0
         ? Number(agentId)
-        : null
+        : null;
+    setDeepLinkedAgentId(validAgentId);
+    setRestoreViewTarget(
+      threadId
+        ? { conversationId: threadId }
+        : validAgentId
+          ? { agentId: String(validAgentId) }
+          : lastChatView
     );
   }, [conversationDetails, lastChatView]);
 
@@ -270,6 +280,7 @@ const PersistentChatHome: FC = () => {
 
   const handleBack = useCallback(() => {
     setSelectedAgent(null);
+    setRestoreViewTarget(null);
     log.log(`[Home] Back to agent list`);
   }, []);
 
@@ -283,6 +294,7 @@ const PersistentChatHome: FC = () => {
             conversationDetails={conversationDetails}
             runtime={runtime}
             selectedAgent={selectedAgent}
+            restoreViewTarget={restoreViewTarget}
             setSelectedAgent={setSelectedAgent}
             isLoadingAgents={isLoadingAgents}
             agents={agents}
@@ -304,6 +316,7 @@ const HomeContent: FC<{
   conversationDetails: ConversationDetailLoader;
   runtime: AssistantRuntime;
   selectedAgent: Agent | null;
+  restoreViewTarget: LastChatViewState | null | undefined;
   setSelectedAgent: (agent: Agent | null) => void;
   isLoadingAgents: boolean;
   agents: Agent[];
@@ -314,6 +327,7 @@ const HomeContent: FC<{
   conversationDetails,
   runtime,
   selectedAgent,
+  restoreViewTarget,
   setSelectedAgent,
   isLoadingAgents,
   agents,
@@ -490,6 +504,44 @@ const HomeContent: FC<{
     serverConversationIdForActiveThread ??
     activeThread?.remoteId ??
     activeThreadId;
+  const restoredAgentId = restoreViewTarget?.agentId
+    ? Number(restoreViewTarget.agentId)
+    : restoreViewTarget?.conversationId &&
+        String(activeConversationId) === restoreViewTarget.conversationId &&
+        activeAgentId != null
+      ? Number(activeAgentId)
+      : null;
+  const restoredSidebarAgent =
+    restoredAgentId && Number.isSafeInteger(restoredAgentId)
+      ? (agents.find((agent) => Number(agent.id) === restoredAgentId) ?? null)
+      : null;
+  const sidebarSelectedAgent = selectedAgent ?? restoredSidebarAgent;
+  const [restoreFallbackReady, setRestoreFallbackReady] = useState(false);
+  useEffect(() => {
+    if (
+      !restoreViewTarget?.conversationId ||
+      sidebarSelectedAgent ||
+      isLoadingAgents
+    ) {
+      return;
+    }
+    const timer = setTimeout(() => setRestoreFallbackReady(true), 3000);
+    return () => clearTimeout(timer);
+  }, [
+    isLoadingAgents,
+    restoreViewTarget?.conversationId,
+    sidebarSelectedAgent,
+  ]);
+  const isRestoringSidebar =
+    restoreViewTarget === undefined ||
+    Boolean(
+      restoreViewTarget?.agentId && !sidebarSelectedAgent && isLoadingAgents
+    ) ||
+    Boolean(
+      restoreViewTarget?.conversationId &&
+      !sidebarSelectedAgent &&
+      !restoreFallbackReady
+    );
 
   useEffect(() => {
     if (!selectedAgent?.id) {
@@ -1034,13 +1086,16 @@ const HomeContent: FC<{
             onHistoryAgentSelected={handleHistoryAgentSelected}
             collapseToFloatingButton
             newChatDesign
-            activeThreadId={selectedAgent ? runtimeMainThreadId : undefined}
+            activeThreadId={
+              sidebarSelectedAgent ? runtimeMainThreadId : undefined
+            }
             generatedTitles={generatedTitles}
             serverConversationIds={serverConversationIds}
             onRenameSuccess={handleConversationRenamed}
             onPrepareNewConversation={handlePrepareNewConversation}
             onNewConversation={handleNewConversation}
-            selectedAgent={selectedAgent}
+            selectedAgent={sidebarSelectedAgent}
+            isRestoringView={isRestoringSidebar}
             onAgentSelected={handleAgentSwitched}
           />
         </ConversationSidebarProvider>
