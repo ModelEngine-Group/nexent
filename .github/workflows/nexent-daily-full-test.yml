@@ -17,7 +17,7 @@ concurrency:
 jobs:
   daily-full-test:
     name: Daily D0-D6
-    runs-on: [self-hosted, linux, x64]
+    runs-on: [e2e]
     # Includes up to 12 hours waiting for the local Daily lock.
     timeout-minutes: 1440
     defaults:
