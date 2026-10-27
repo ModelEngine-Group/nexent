@@ -6,6 +6,7 @@ import pytest
 
 from test.backend.app import test_a2a_client_app as legacy
 from management.api.a2a import a2a_client as app
+from contracts.errors.codes import ErrorCode
 from contracts.errors.exceptions import AgentNotFoundError, ForbiddenError
 
 
@@ -31,6 +32,23 @@ def test_binding_persistence_error_mapping(mocker, error, status):
     mocker.patch.object(app.a2a_agent_db, "add_external_agent_relation", side_effect=error("failed"))
     assert legacy.client.post("/a2a/client/relations", json={
         "local_agent_id": 1, "external_agent_id": 2}).status_code == status
+
+
+def test_duplicate_relation_returns_already_exists_code(mocker):
+    """Duplicate relation must surface the machine-readable code (000502) so the
+    frontend can show a precise hint instead of a generic failure message."""
+    mocker.patch.object(app, "require_external_relation_edit")
+    mocker.patch.object(
+        app.a2a_agent_db,
+        "add_external_agent_relation",
+        side_effect=ValueError("Relation already exists"),
+    )
+    response = legacy.client.post("/a2a/client/relations", json={
+        "local_agent_id": 1, "external_agent_id": 2})
+    assert response.status_code == 409
+    body = response.json()
+    assert body["code"] == ErrorCode.COMMON_RESOURCE_ALREADY_EXISTS.value
+    assert body["message"] == "Relation already exists"
 
 
 def test_owned_relationship_success(mocker):

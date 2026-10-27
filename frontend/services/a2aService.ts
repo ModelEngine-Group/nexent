@@ -2,6 +2,7 @@
 
 import i18n from 'i18next';
 import log from '@/lib/logger';
+import { ErrorCode } from '@/const/errorCode';
 import { API_ENDPOINTS, ApiError, fetchWithErrorHandling } from './api';
 
 const t = (key: string, options?: any): string => {
@@ -381,7 +382,16 @@ export const a2aClientService = {
       return { success: false, message: data.detail || t('a2a.service.addRelationFailed') };
     } catch (error) {
       log.error('Failed to add relation:', error);
-      return { success: false, message: t('a2a.service.addRelationFailed') };
+      // Duplicate relation: backend answers 409 with code 000502 ("Relation
+      // already exists"); surface a precise hint instead of a generic failure.
+      if (
+        error instanceof ApiError &&
+        (String(error.code) === ErrorCode.RESOURCE_ALREADY_EXISTS ||
+          error.message.includes('already exists'))
+      ) {
+        return { success: false, message: t('a2a.service.relationAlreadyExists') };
+      }
+      return { success: false, message: discoveryErrorMessage(error, 'a2a.service.addRelationFailed') };
     }
   },
 
