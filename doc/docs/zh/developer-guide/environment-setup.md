@@ -43,25 +43,28 @@ uv sync --extra data-process --extra test
 
 以上命令会创建或更新 `backend/.venv`，安装后端依赖，并以可编辑模式安装本地 SDK。修改 `sdk/nexent/` 后无需重复复制包文件。
 
-`data-process` extra（以及 SDK `dev`）默认选择 CPU 版 PyTorch 和 Torchvision。请使用与 CI、镜像构建一致的 uv 0.11.7。backend extras 已包含本地 SDK，无需再次单独安装。
+`data-process` extra（以及 SDK `dev`）默认安装 CPU 版 PyTorch 和 Torchvision。请使用与 CI、镜像构建一致的 uv 0.13.6。Python 保持 3.11，CI 仍固定为 3.11.15。backend extras 已包含本地 SDK。
 
-需要 NVIDIA CUDA 13.0 依赖时，使用替代配置：
+CPU 和 NVIDIA 共用依赖列表，仅通过预置 index 区分：
 
 ```bash
-# 在 backend/ 下执行
-uv sync --extra nvidia --extra test
+# 在 backend/ 中执行：默认 CPU
+uv sync --extra data-process --extra test
+# 显式选择 CPU
+uv sync --extra data-process --extra test --index pytorch-cpu --upgrade-package torch --upgrade-package torchvision
+# NVIDIA CUDA 13.0
+uv sync --extra data-process --extra test --index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision
 ```
 
-`data-process` 与 `nvidia` 互斥，不要使用 `--all-extras`。`uv sync` 会移除仅属于上一配置的依赖。两者均不选择时，基础安装不会引入 PyTorch。普通依赖可以使用镜像源，PyTorch CPU/CUDA wheel 仍使用显式配置的官方索引。安装 CUDA 依赖不代表已验证 GPU 硬件或驱动兼容性。
+项目启用了 uv 的 `index-by-name` 预览功能。默认优先使用 CPU index；`--index` 将选中的预置源提升至最高优先级。NVIDIA index 设为 explicit，仅在显式选择后参与解析。启用的源参与`unsafe-first-match` 解析，包括 Torch 以外的依赖：优先选择首个包含兼容版本的源，遇到不满足约束的旧版通用依赖时继续查找下一源。`--default-index` 仅设置后备镜像源，不会覆盖所选 PyTorch index。未选择文档处理 extra 的基础安装不引入 PyTorch。已有锁文件可能保留之前的 Torch 构建，即使 index 优先级已改变。上面的显式命令通过 `--upgrade-package` 重新解析 Torch 和 Torchvision；不要使用 `--frozen` 切换配置；`uv sync` 会移除不再需要的依赖。安装 CUDA 依赖不代表已验证 GPU 硬件或驱动兼容性。
 
-独立开发 SDK 时，在 `sdk/` 下执行 `uv pip install -e ".[dev]"` 使用 CPU，或 `uv pip install -e ".[quality,performance,nvidia]"` 使用 NVIDIA。独立 `uv pip` 安装切换配置时请使用全新虚拟环境；它与 `uv sync` 不同，会保留无关的已安装依赖。NVIDIA 配置替代 SDK 的 `data_process`/`dev`。
+独立开发 SDK 时，在 `sdk/` 下执行 `uv sync --extra dev` 使用 CPU，添加 `--index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision` 使用 NVIDIA。切回 CPU 时使用 `--index pytorch-cpu` 并保留这两个 upgrade 参数。不再提供单独的 `nvidia` extra。
 
-
-从包仓库安装已发布的 SDK 时，wheel 元数据不会携带源码目录中的 uv 索引配置，需要明确选择后端：
+从包仓库安装 SDK 时，wheel 元数据不包含本地项目的 uv index 配置，需要显式指定后端：
 
 ```bash
 uv pip install "nexent[data-process]" --torch-backend cpu
-uv pip install "nexent[nvidia]" --torch-backend cu130
+uv pip install "nexent[data-process]" --torch-backend cu130
 ```
 
 #### 可选：镜像加速
@@ -76,7 +79,7 @@ uv sync --extra data-process --extra test --default-index https://pypi.tuna.tsin
 uv sync --extra data-process --extra test --default-index https://mirrors.aliyun.com/pypi/simple/
 
 # 多源（推荐）
-uv sync --extra data-process --extra test --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
+uv sync --extra data-process --extra test --index pytorch-cpu --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/ --upgrade-package torch --upgrade-package torchvision
 ```
 
 :::: info 镜像参考

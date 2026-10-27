@@ -26,7 +26,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
-          version: "0.11.7"
+          version: "0.13.6"
 
       - name: Update version if specified
         if: ${{ inputs.version != '' }}

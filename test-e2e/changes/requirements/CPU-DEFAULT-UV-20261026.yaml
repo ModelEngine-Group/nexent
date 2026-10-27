@@ -4,7 +4,7 @@ change:
   change_type: requirement
   requirement_id: CPU-DEFAULT-UV-20261026
   title: Default document processing to CPU and standardize uv installation
-  description: Use alternative CPU/NVIDIA extras across development, UT CI and data-process builds; migrate direct build/development pip commands
+  description: Use preset CPU/NVIDIA indexes with uv 0.13.6 and unchanged Python across development, UT CI and data-process builds; migrate direct build/development pip commands
     to uv without changing sandbox dynamic installation. User excludes deployment and application functional verification.
   affected_features:
     existing: []

@@ -53,7 +53,7 @@ ARG MIRROR
 ARG TARGETARCH
 ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /usr/local/bin/
 WORKDIR /opt/backend
 
 # Layer 0: install base dependencies

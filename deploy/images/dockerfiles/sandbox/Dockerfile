@@ -40,7 +40,7 @@ RUN --mount=type=cache,id=nexent-sandbox-apt-cache-${TARGETARCH},target=/var/cac
     apt-get update && \
     apt-get install -y --no-install-recommends curl build-essential
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /usr/local/bin/
 
 WORKDIR /opt
 
@@ -66,7 +66,7 @@ RUN --mount=type=cache,id=nexent-sandbox-uv-${TARGETARCH},target=/root/.cache/uv
 # ---------------------------------------------------------------------
 FROM python:3.11-slim AS runtime
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /usr/local/bin/
 
 ARG APT_MIRROR
 ARG TARGETARCH

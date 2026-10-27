@@ -43,25 +43,28 @@ uv sync --extra data-process --extra test
 
 These commands create or update `backend/.venv`, install the backend dependencies, and install the local SDK in editable mode. Changes under `sdk/nexent/` do not require copying the package files again.
 
-CPU PyTorch and Torchvision are selected by the `data-process` extra (and SDK `dev`). Use uv 0.11.7, matching CI and image builds. The local SDK is included by the backend extras; a second SDK install is unnecessary.
+The `data-process` extra (and SDK `dev`) installs CPU PyTorch and Torchvision by default. Use uv 0.13.6, matching CI and image builds. Python remains 3.11; CI pins 3.11.15. The backend extras include the local SDK.
 
-For NVIDIA CUDA 13.0 dependencies, use the alternative profile:
+CPU and NVIDIA use the same dependencies and differ only in the selected preset index:
 
 ```bash
-# From backend/
-uv sync --extra nvidia --extra test
+# From backend/: CPU is the default
+uv sync --extra data-process --extra test
+# Explicit CPU selection
+uv sync --extra data-process --extra test --index pytorch-cpu --upgrade-package torch --upgrade-package torchvision
+# NVIDIA CUDA 13.0
+uv sync --extra data-process --extra test --index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision
 ```
 
-`data-process` and `nvidia` are mutually exclusive; do not use `--all-extras`. `uv sync` removes dependencies belonging only to the previously selected profile. Base installs without either profile do not install PyTorch. PyTorch CPU/CUDA wheels use their explicit upstream indexes even when other packages use a mirror. CUDA installation does not verify GPU hardware or driver compatibility.
+The project enables uv's `index-by-name` preview feature. The CPU index is first by default; `--index` promotes the selected preset. The NVIDIA index is explicit and only participates when selected. Active indexes participate in `unsafe-first-match` resolution, including dependencies other than Torch: the first source with compatible versions wins; incompatible old shared dependencies fall through to the next source. `--default-index` changes the fallback package mirror and does not override the selected PyTorch index. Base installations without document-processing extras do not install PyTorch. An existing lockfile can retain its previous Torch build despite a different index priority. The explicit commands above re-resolve Torch and Torchvision with `--upgrade-package`; do not use `--frozen` to switch variants. `uv sync` removes obsolete dependencies. CUDA installation does not verify GPU hardware or driver compatibility.
 
-For standalone SDK development, run `uv pip install -e ".[dev]"` from `sdk/` for CPU, or `uv pip install -e ".[quality,performance,nvidia]"` for NVIDIA. Use a fresh virtual environment when switching standalone `uv pip` profiles; unlike `uv sync`, it retains unrelated installed packages. NVIDIA is an alternative to SDK `data_process`/`dev`.
+For standalone SDK development, run `uv sync --extra dev` from `sdk/` for CPU, or add `--index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision` for NVIDIA. Use `--index pytorch-cpu` with the same upgrade flags to switch back. There is no separate `nvidia` extra.
 
-
-For SDK packages installed from a registry, the wheel metadata does not carry the checkout's uv index configuration. Select the backend explicitly:
+For SDK packages installed from a registry, wheel metadata does not carry the checkout's uv index configuration. Select the backend explicitly:
 
 ```bash
 uv pip install "nexent[data-process]" --torch-backend cpu
-uv pip install "nexent[nvidia]" --torch-backend cu130
+uv pip install "nexent[data-process]" --torch-backend cu130
 ```
 
 #### Optional: Use Package Mirrors
@@ -76,7 +79,7 @@ uv sync --extra data-process --extra test --default-index https://pypi.tuna.tsin
 uv sync --extra data-process --extra test --default-index https://mirrors.aliyun.com/pypi/simple/
 
 # Multiple sources (recommended)
-uv sync --extra data-process --extra test --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
+uv sync --extra data-process --extra test --index pytorch-cpu --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/ --upgrade-package torch --upgrade-package torchvision
 ```
 
 :::: info Mirror References

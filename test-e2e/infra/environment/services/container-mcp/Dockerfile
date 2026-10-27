@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /usr/local/bin/
 
 # mcp-proxy 0.12 imports request_ctx, which the MCP SDK 2.x removed.
 # This image is a test asset, not the Nexent application image.

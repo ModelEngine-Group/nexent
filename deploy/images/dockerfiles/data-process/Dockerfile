@@ -46,21 +46,21 @@ ARG MIRROR
 ARG TARGETARCH
 ARG DATA_PROCESS_DEPENDENCY_VARIANT
 
-COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /usr/local/bin/
 WORKDIR /opt/backend
 # Layer 1: install base dependencies
 COPY backend/pyproject.toml /opt/backend/pyproject.toml
 COPY sdk /opt/sdk
 RUN --mount=type=cache,id=nexent-data-process-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     if [ "$DATA_PROCESS_DEPENDENCY_VARIANT" = "cpu" ]; then \
-        dependency_extra="data-process"; \
+        dependency_index="pytorch-cpu"; \
     elif [ "$DATA_PROCESS_DEPENDENCY_VARIANT" = "gpu" ]; then \
-        dependency_extra="nvidia"; \
+        dependency_index="pytorch-nvidia"; \
     else \
         echo "Unsupported DATA_PROCESS_DEPENDENCY_VARIANT: ${DATA_PROCESS_DEPENDENCY_VARIANT}" >&2; \
         exit 1; \
     fi && \
-    uv sync --no-editable --link-mode copy --extra "$dependency_extra" \
+    uv sync --no-editable --link-mode copy --extra data-process --index "$dependency_index" \
         $(test -n "$MIRROR" && echo "--default-index $MIRROR")
 
 FROM data-process-base AS final

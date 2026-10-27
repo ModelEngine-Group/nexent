@@ -8,7 +8,7 @@ case:
   - CPU-DEFAULT-UV-20261026
   business_rule_ids:
   - F-173-RULE-04
-  title: CPU and NVIDIA dependency profiles across development, CI and image builds
+  title: CPU and NVIDIA named dependency indexes across development, CI and image builds
   type: DEPLOYMENT
   priority: P1
   status: manual
@@ -22,7 +22,7 @@ case:
     profiles:
     - base
     - data-process
-    - nvidia
+    - data-process with --index pytorch-nvidia
     torch_versions:
     - 2.11.0
     - 0.26.0
@@ -43,9 +43,8 @@ case:
     expected: Base has no Torch; CPU profiles use matching CPU builds, torch.version.cuda is None, and no nvidia-*, cuda-* or triton distribution
       is installed.
   - order: 2
-    action: Install the alternative NVIDIA profile; inspect package metadata and import Torch/Torchvision. Try selecting both parsing profiles.
-    expected: NVIDIA profile contains CUDA-enabled matching builds and required NVIDIA distributions; conflicting CPU/NVIDIA combinations fail
-      before installation.
+    action: Install using the preset NVIDIA index; inspect metadata and import Torch/Torchvision. Switch CPU/GPU in both directions using --upgrade-package torch --upgrade-package torchvision, and try an unknown index.
+    expected: NVIDIA index selects matching CUDA builds and required NVIDIA distributions; switching removes obsolete dependencies; an unknown index fails.
   - order: 3
     action: Run the existing UT CI installation and test sequence locally with CPU and NVIDIA profiles. Record each test result separately and
       inspect remote CPU CI install logs after push.
@@ -61,7 +60,7 @@ case:
     expected: Build/development commands and guidance use uv; uv bootstrap does not use pip. Dynamic sandbox pip allowlisting and security fixtures
       retain their existing contract.
   expected_results:
-  - CPU, NVIDIA, base and conflicting-profile installation results match their contracts.
+  - CPU, NVIDIA, base, switching and invalid-index installation results match their contracts.
   - CPU/NVIDIA UT results and remote CI installation observations are retained separately.
   - Changed image builds and final dependency inventories match the selected profiles.
   - No new installer script or recurring CI dependency assertion is introduced; sandbox dynamic installation behavior is preserved.

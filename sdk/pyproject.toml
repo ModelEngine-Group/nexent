@@ -63,11 +63,10 @@ dependencies = [
 ]
 
 [tool.uv]
-required-version = ">=0.11.7"
-conflicts = [
-    [{ extra = "data-process" }, { extra = "nvidia" }],
-    [{ extra = "dev" }, { extra = "nvidia" }],
-]
+required-version = ">=0.13.6"
+preview-features = ["index-by-name"]
+# PyTorch also hosts older shared dependencies; fall through when incompatible.
+index-strategy = "unsafe-first-match"
 
 [project.optional-dependencies]
 quality = [
@@ -75,12 +74,6 @@ quality = [
     "pytest>=8.1.0"
 ]
 data_process = [
-    "unstructured[all-docs]==0.18.14",
-    "unstructured-inference==1.2.0",
-    "torch==2.11.0",
-    "torchvision==0.26.0",
-]
-nvidia = [
     "unstructured[all-docs]==0.18.14",
     "unstructured-inference==1.2.0",
     "torch==2.11.0",
@@ -122,22 +115,12 @@ lint.select = ["E", "F", "I", "W"]
 known-first-party = ["nexent"]
 lines-after-imports = 2
 
-[tool.uv.sources]
-torch = [
-    { index = "pytorch-cpu", extra = "data-process" },
-    { index = "pytorch-nvidia", extra = "nvidia" },
-]
-torchvision = [
-    { index = "pytorch-cpu", extra = "data-process" },
-    { index = "pytorch-nvidia", extra = "nvidia" },
-]
-
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
-explicit = true
 
 [[tool.uv.index]]
 name = "pytorch-nvidia"
 url = "https://download.pytorch.org/whl/cu130"
+# Opt in with --index pytorch-nvidia; never use this as a default fallback.
 explicit = true
