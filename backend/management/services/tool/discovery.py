@@ -444,6 +444,7 @@ async def get_tool_from_remote_mcp_server(
     tenant_id: Optional[str] = None,
     authorization_token: Optional[str] = None,
     custom_headers: Optional[Dict[str, Any]] = None,
+    outer_api_service_id: Optional[int] = None,
 ):
     """
     Get the tool information from the remote MCP server, avoid blocking the event loop
@@ -454,6 +455,7 @@ async def get_tool_from_remote_mcp_server(
         tenant_id: Optional tenant ID for database lookup of authorization_token
         authorization_token: Optional authorization token for authentication (if not provided and tenant_id is given, will be fetched from database)
         custom_headers: Optional custom HTTP headers
+        outer_api_service_id: Optional source API-to-MCP service ID
     """
     # Get authorization token from database if not provided
     if authorization_token is None and tenant_id:
@@ -525,6 +527,7 @@ async def get_tool_from_remote_mcp_server(
                     origin_name=tool.name,
                     category=None,
                     is_user_selectable=True,
+                    outer_api_service_id=outer_api_service_id,
                 )
                 tools_info.append(tool_info)
             return tools_info

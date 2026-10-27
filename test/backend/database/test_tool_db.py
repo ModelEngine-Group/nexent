@@ -707,6 +707,66 @@ def test_update_tool_table_mcp_tools_same_name_same_usage(monkeypatch, mock_sess
     assert existing_tool.is_available is True
 
 
+def test_update_tool_table_api_tools_same_name_keep_service_rows_separate(monkeypatch, mock_session):
+    """API-to-MCP tools with the same name must be separated by service ID."""
+    session, query = mock_session
+
+    existing_tool = MockToolInfo()
+    existing_tool.name = "check_status"
+    existing_tool.origin_name = "check_status"
+    existing_tool.source = "mcp"
+    existing_tool.usage = "outer-apis"
+    existing_tool.outer_api_service_id = 101
+    existing_tool.__dict__.update(
+        {
+            "name": "check_status",
+            "origin_name": "check_status",
+            "source": "mcp",
+            "usage": "outer-apis",
+            "outer_api_service_id": 101,
+        }
+    )
+
+    mock_all = MagicMock(return_value=[existing_tool])
+    mock_filter = MagicMock()
+    mock_filter.all = mock_all
+    query.filter.return_value = mock_filter
+    session.add = MagicMock()
+
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr(
+        "backend.database.tool_db.filter_property", lambda data, model: data
+    )
+
+    new_tool = MockToolInfo()
+    new_tool.name = "check_status"
+    new_tool.origin_name = "check_status"
+    new_tool.source = "mcp"
+    new_tool.usage = "outer-apis"
+    new_tool.outer_api_service_id = 202
+    new_tool.__dict__.update(
+        {
+            "name": "check_status",
+            "origin_name": "check_status",
+            "source": "mcp",
+            "usage": "outer-apis",
+            "outer_api_service_id": 202,
+        }
+    )
+
+    mock_tool_info_instance = MagicMock()
+    mock_tool_info_class = MagicMock(return_value=mock_tool_info_instance)
+    monkeypatch.setattr("backend.database.tool_db.ToolInfo", mock_tool_info_class)
+
+    update_tool_table_from_scan_tool_list("tenant1", "user1", [new_tool])
+
+    session.add.assert_called_once_with(mock_tool_info_instance)
+    assert mock_tool_info_class.call_args.kwargs["outer_api_service_id"] == 202
+
+
 def test_update_tool_table_mcp_tools_empty_usage(monkeypatch, mock_session):
     """Test MCP tools with empty/null usage should be handled correctly"""
     session, query = mock_session

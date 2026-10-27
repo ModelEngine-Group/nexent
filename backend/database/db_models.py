@@ -684,6 +684,12 @@ class ToolInfo(TableBase):
     labels = Column(JSONB, default=[], doc="JSON array of label strings for filtering/grouping tools")
     is_user_selectable = Column(
         Boolean, default=True, nullable=False, doc="Whether users can actively select the tool in agent configuration")
+    outer_api_service_id = Column(
+        BigInteger,
+        nullable=True,
+        index=True,
+        doc="Source API-to-MCP service ID; NULL for non-OpenAPI tools",
+    )
     is_available = Column(
         Boolean, doc="Whether the tool can be used under the current main service")
 

@@ -314,8 +314,12 @@ def update_tool_table_from_scan_tool_list(
         existing_tool_dict = {}
         for tool in existing_tools:
             if tool.source == ToolSourceEnum.MCP.value:
-                # For MCP tools, use name + source + usage (MCP server name) as unique key
-                key = f"{tool.name}&{tool.source}&{tool.usage or ''}"
+                service_id = getattr(tool, "outer_api_service_id", None)
+                if service_id:
+                    key = f"{getattr(tool, 'origin_name', None) or tool.name}&{tool.source}&outer-api:{service_id}"
+                else:
+                    # For legacy MCP tools, use name + source + usage as unique key.
+                    key = f"{tool.name}&{tool.source}&{tool.usage or ''}"
             else:
                 # For other tools, use name + source as unique key
                 key = f"{tool.name}&{tool.source}"
@@ -347,7 +351,10 @@ def update_tool_table_from_scan_tool_list(
                 r'^[a-zA-Z_][a-zA-Z0-9_]*$', tool.name) is not None else False
 
             # Build key for lookup - same logic as existing_tool_dict
-            if tool.source == ToolSourceEnum.MCP.value:
+            service_id = getattr(tool, "outer_api_service_id", None)
+            if tool.source == ToolSourceEnum.MCP.value and service_id:
+                key = f"{getattr(tool, 'origin_name', None) or tool.name}&{tool.source}&outer-api:{service_id}"
+            elif tool.source == ToolSourceEnum.MCP.value:
                 key = f"{tool.name}&{tool.source}&{tool.usage or ''}"
             else:
                 key = f"{tool.name}&{tool.source}"
@@ -365,9 +372,9 @@ def update_tool_table_from_scan_tool_list(
                         if candidate.tool_id != existing_tool.tool_id
                         and candidate.source == ToolSourceEnum.MCP.value
                         and candidate.usage == tool.usage
-                        and candidate.outer_api_service_id is None
-                        and (candidate.origin_name or candidate.name)
-                        == (tool.origin_name or tool.name)
+                        and getattr(candidate, "outer_api_service_id", None) is None
+                        and (getattr(candidate, "origin_name", None) or candidate.name)
+                        == (getattr(tool, "origin_name", None) or tool.name)
                     ),
                     None,
                 )
