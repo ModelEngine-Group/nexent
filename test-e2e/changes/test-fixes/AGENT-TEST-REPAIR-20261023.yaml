@@ -1,0 +1,87 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-TEST-REPAIR-20261023
+  change_type: test-fix
+  title: Repair 13 Agent configuration tests while retaining business assertions
+  description: Update incomplete mocks and draft-loading boundaries, collapsed guide navigation, read-only batch request fixtures, current
+    card/menu/drawer interactions and scoped generation composer. Retain all existing assertions and restore current requirement semantics
+    for explicit model reselection after invalidation. Product code is unchanged.
+  affected_features:
+    existing:
+    - AGENT-EDITOR-WORKFLOWS
+    - AGENT-PUBLICATION
+    - F-043
+    - F-054
+    - NL2AGENT-PROTOCOL
+    - V5-PW-A2A-DISCOVERY-01
+    - V5-PW-A2A-PUBLISH-01
+    - V5-PW-AGENT-01
+    - V5-PW-AGENT-02
+    - V5-PW-AGENT-03
+    - V5-PW-AGENT-IMPORT-01
+    - V5-PW-KB-AIDP-01
+    - V5-PW-KB-LOCAL-01
+    - V5-PW-MARKET-AGENT-01
+    - V5-PW-MCP-API-01
+    - V5-PW-MCP-CONTAINER-01
+    - V5-PW-MCP-REMOTE-01
+    - V5-PW-MODEL-01
+    - V5-PW-MODEL-02
+    - V5-PW-NL2AGENT-01
+    - V5-PW-PROMPT-01
+    - V5-PW-PROMPT-02
+    - V5-PW-SHARE-01
+    - V5-PW-SKILL-01
+    - V5-PW-SKILL-02
+    - V5-PW-VERSION-01
+    - WB-CONTROLS
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - AGENT-EDITOR-D4-001
+    - AGENT-EDITOR-D4-002
+    - AGENT-EDITOR-D4-005
+    - AGENT-EDITOR-D4-006
+    - AGENT-PUBLICATION-D4-001
+    - AGENT-PUBLICATION-D4-002
+    - NL2AGENT-PROTOCOL-D4-001
+    - PW-A2A-DISCOVERY-01
+    - PW-A2A-PUBLISH-01
+    - PW-AGENT-COPY-01
+    - PW-KB-AIDP-01
+    - PW-KB-LOCAL-01
+    - PW-MARKET-AGENT-01
+    - PW-MCP-API-01
+    - PW-MCP-CONTAINER-01
+    - PW-MCP-REMOTE-01
+    - PW-MODEL-01
+    - PW-MODEL-02
+    - PW-PROMPT-01
+    - PW-PROMPT-02
+    - PW-SHARE-01
+    - PW-SKILL-01
+    - PW-SKILL-02
+    - PW-VERSION-01
+    - WB-CONTROLS-D4-004
+    added: []
+    modified:
+    - UT-FE-002
+    - UT-FE-AUTO-3D13A0DB24D58E7C
+    - UT-FE-AUTO-583566BA85F098F1
+    - UT-FE-AUTO-A2A0CB86E6D3E2F3
+    - UT-FE-AUTO-A60EF4DAA250E60E
+    - UT-FE-AUTO-CC79D2BB8D78E346
+    - AGENT-EDITOR-D4-003
+    - AGENT-EDITOR-D4-004
+    - PW-AGENT-01
+    - PW-AGENT-02
+    - PW-AGENT-03
+    - PW-AGENT-IMPORT-01
+    - PW-NL2AGENT-01
+    retired: []
+  notes: Shared AgentPage and editor fixture consumers were inventoried. No skip, xfail, or unconditional success replaces a business
+    assertion. Current model invalidation behavior follows nexent-doc-new/nexent/agent-workbench/specs/model-controls/spec.md. D1 and
+    D4 execution outcomes are recorded separately in the local repair report. Historical script/contract coverage gaps remain unreviewed
+    and are not certified by a PASS.

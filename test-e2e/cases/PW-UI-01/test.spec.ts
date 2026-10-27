@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { BrowserContext } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
@@ -5,6 +7,7 @@ import { appPath } from "../../infra/automation/d4/runner/runtime-config";
 import { loginCurrent, loginIsolated } from "../../infra/automation/d4/runner/sessions";
 import { resolveReadyAsset } from "../../infra/automation/d4/runner/assets";
 import { ChatPage } from "../../infra/automation/d4/pages/chat.page";
+import { AuthPage } from "../../infra/automation/d4/pages/auth.page";
 
 async function accessibleRoutes(page: import("playwright/test").Page): Promise<string[]> {
   const response = await page.request.get("/api/user/current_user_info");
@@ -26,6 +29,7 @@ function productRoute(pathname: string): string {
 
 journey("PW-UI-01", async (context) => {
   const { page, contract, expect } = context;
+  const auth = new AuthPage(page);
   let userContext: BrowserContext | undefined;
   let routes: string[] = [];
   let navigated = 0;
@@ -77,9 +81,7 @@ journey("PW-UI-01", async (context) => {
         return "a module-local search value did not leak into another module; return behavior remained owned by that page";
       },
       async () => {
-        const switcher = page.getByText(/简体中文|中文/).last();
-        await switcher.click();
-        await page.getByText(/English/).last().click();
+        await auth.switchLanguageTo("English");
         await page.waitForURL((url) => url.pathname.startsWith("/en/"));
         return "used the real top-navigation language menu to switch zh to en";
       },
@@ -92,9 +94,7 @@ journey("PW-UI-01", async (context) => {
         return "three representative English routes rendered and retained interactive buttons/navigation";
       },
       async () => {
-        const switcher = page.getByText(/English/).last();
-        await switcher.click();
-        await page.getByText(/简体中文|中文/).last().click();
+        await auth.switchLanguageTo("简体中文");
         await page.waitForURL((url) => url.pathname.startsWith("/zh/"));
         await page.reload({ waitUntil: "domcontentloaded" });
         return "switched back through the real language menu and refreshed the zh route";

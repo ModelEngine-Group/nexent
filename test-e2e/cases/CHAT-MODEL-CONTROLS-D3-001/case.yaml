@@ -16,6 +16,7 @@ case:
     - run actual local HTTP services, model records, resolver, runtime, capacity policy and SDK.
     - Isolated model A is tenant default; model B has distinct provider wire model, endpoint and capacity; both hold distinctive backend sampling/output/custom parameters.
     - Test Agent has a configured child and tool-specific model; controlled NL2 output modifies only non-model draft fields.
+    - The case-owned MCP server address is injected into both ordinary Agent and creator preparation consumers; no host deployment address is required.
   test_data:
     profile: mock
     model_roles: [default-A, selected-B, budget-B, child-model, independent-business-model, embedding-model, stt-model, tts-model]

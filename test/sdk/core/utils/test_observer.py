@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import threading
 
@@ -594,7 +596,7 @@ class TestMessageObserver:
         content = (
             '{"status":"error","code":"draft_save_failed"}\n'
             '<nl2a_state>{"event":"prompt_generation_failed","agent_id":1042,'
-            '"failed_fields":["duty_prompt"]}</nl2a_state>'
+            '"failed_fields":["prompt"]}</nl2a_state>'
         )
 
         observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
@@ -603,7 +605,7 @@ class TestMessageObserver:
         assert json.loads(messages[0]["content"]) == {
             "event": "prompt_generation_failed",
             "agent_id": 1042,
-            "failed_fields": ["duty_prompt"],
+            "failed_fields": ["prompt"],
         }
         assert messages[1]["content"] == (
             '{"status":"error","code":"draft_save_failed"}'
@@ -636,7 +638,7 @@ class TestMessageObserver:
         content = (
             '{"status":"success"}\n'
             '<nl2a_state>{"event":"agent_draft_fields_saved","agent_id":1042,'
-            '"updated_fields":["duty_prompt"]}</nl2a_state>'
+            '"updated_fields":["prompt"]}</nl2a_state>'
         )
 
         observer.add_message("nl2agent", ProcessType.EXECUTION_LOGS, content)
@@ -652,7 +654,7 @@ class TestMessageObserver:
         assert json.loads(messages[0]["content"]) == {
             "event": "agent_draft_fields_saved",
             "agent_id": 1042,
-            "updated_fields": ["duty_prompt"],
+            "updated_fields": ["prompt"],
         }
         assert messages[0]["content"] == messages[2]["content"]
 

@@ -16,6 +16,9 @@ class _FakeCursor:
 
     def execute(self, query, params=None):
         assert "prompt_template_id" not in query
+        assert "duty_prompt" not in query
+        if "SELECT" in query and "max_steps" in query:
+            assert "prompt" in query
         self.last_query = query
 
     def fetchone(self):
@@ -106,7 +109,7 @@ def test_export_agent_config_externalizes_tool_secrets(
     config = yaml.safe_load(raw_output)
     assert "prompt_template_id" not in config["agent_config"]
     assert config["agent_config"]["version_no"] == 1
-    assert config["prompts"] == {"duty_prompt": "Duty\n\n# Constraints\nConstraint"}
+    assert config["prompts"] == {"prompt": "Duty\n\n# Constraints\nConstraint"}
     exa_params = config["tools"][0]["tool_params"]
     terminal_params = config["tools"][1]["tool_params"]
     console_output = capsys.readouterr().out

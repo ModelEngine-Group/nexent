@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Feed real runtime output through the production stream and isolated PostgreSQL DAL."""
 
 import asyncio
@@ -9,8 +11,9 @@ from jiuwen_context_runtime import context_database
 
 
 async def persist_output(monkeypatch, info, output):
-    from consts.model import AgentRequest, HistoryItem
-    from database.conversation_db import create_conversation, create_conversation_message, get_conversation_history
+    from contracts.agent import AgentRequest
+    from contracts.conversation import HistoryItem
+    from management.db.conversation.repository import create_conversation, create_conversation_message, get_conversation_history
     from management.services.agent import execution as application
 
     conversation = create_conversation("Output contract", "owner", agent_id=42)["conversation_id"]

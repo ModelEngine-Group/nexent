@@ -10,11 +10,12 @@ import pytest_asyncio
 from shared.auth import sign_in
 from shared.config import load_yaml
 from shared.http import assert_status, client, response_message
-from database import group_db
+from management.db.identity import group as group_db
 from ext_components.aidp.database import aidp_permission_db
 from shared.factories.aidp_permission import create_owned_permission, delete_owned_permission
 from shared.factories.tenant import isolated_accounts
 from shared.asset_registry import AssetDependencyError
+from shared.aidp import create_payload
 
 CASE_ID = 'API-AUTO-3B8A8FB947806F0E'
 _MANAGEMENT_ROLES = ('SU', 'ADMIN')
@@ -35,11 +36,11 @@ async def isolated_aidp_users():
         yield users
 
 
-def _management_endpoints(kds_id):
+def _management_endpoints(kds_id, create_body):
     return [
         ('GET', '/aidp-mgmt/knowledge-bases', {}),
         ('GET', '/aidp-mgmt/knowledge-bases/count', {}),
-        ('POST', '/aidp-mgmt/knowledge-bases', {'json': {'name': 'auth-sweep'}}),
+        ('POST', '/aidp-mgmt/knowledge-bases', {'json': create_body}),
         ('GET', f'/aidp-mgmt/knowledge-bases/{kds_id}', {}),
         ('PUT', f'/aidp-mgmt/knowledge-bases/{kds_id}', {'json': {'name': 'auth-sweep'}}),
         ('DELETE', f'/aidp-mgmt/knowledge-bases/{kds_id}', {}),
@@ -120,8 +121,9 @@ async def test_aidp_mgmt_auth_and_permission_surface(isolated_aidp_users):
             tenant_id=tenant_id, ingroup_permission='READ_ONLY', group_ids=[group_id],
         )
         owned_rows.append((kb_shared, shared_row_id))
+        create_body = await create_payload(management, 'auth-sweep', ingroup_permission='PRIVATE')
         async with client('config') as anon:
-            for method, path, kwargs in _management_endpoints(missing_kds_id):
+            for method, path, kwargs in _management_endpoints(missing_kds_id, create_body):
                 response = await anon.request(method, path, **kwargs)
                 assert_status(response, 401)
                 _assert_no_data_leak(response)

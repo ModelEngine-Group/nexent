@@ -1,3 +1,4 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import { existsSync, readFileSync } from "node:fs";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
@@ -82,8 +83,7 @@ journey("PW-MCP-REMOTE-01", async (context) => {
         await mcp.delete(name);
         await agents.open();
         await agents.select(agentName);
-        await page.getByRole("tab", { name: "工具与技能", exact: true }).click();
-        const section = page.getByRole("tabpanel", { name: "工具与技能", exact: true });
+        const section = await agents.openSection("工具管理");
         await expect(section.getByText("get_test_code", { exact: true })).toHaveCount(0);
         mcpCardRemoved = true;
         agentBindingRemoved = true;

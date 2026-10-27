@@ -1,11 +1,12 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { act, renderHook } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";
 import { snapshotTurnModelControls } from "@/features/model-controls/turnControls";
 import { rejectModelSelection } from "@/features/model-controls/rejectedSelection";
 import type { ModelOption } from "@/app/newchat/ui/model-selector";
+import { ConversationModelControlsProvider } from "@/features/model-controls/ConversationModelControlsProvider";
 
 const models: ModelOption[] = [
   {
@@ -25,6 +26,81 @@ const models: ModelOption[] = [
 ];
 
 describe("shared conversation model controls", () => {
+  it("retains scoped controls and immutable snapshots across history consumer remounts", () => {
+    let controls: ReturnType<typeof useConversationModelControls>;
+    function Consumer({
+      scope,
+      options,
+    }: {
+      scope: string;
+      options: ModelOption[];
+    }) {
+      controls = useConversationModelControls(options, scope, "1");
+      return null;
+    }
+    function Page({
+      scope,
+      visible = true,
+      options = models,
+      owner = "user-a",
+    }: {
+      scope: string;
+      visible?: boolean;
+      options?: ModelOption[];
+      owner?: string;
+    }) {
+      return (
+        <ConversationModelControlsProvider key={owner}>
+          {visible && <Consumer scope={scope} options={options} />}
+        </ConversationModelControlsProvider>
+      );
+    }
+    const scope = "tenant:user-a:agent-a:thread-a";
+    const view = render(<Page scope={scope} />);
+    act(() => controls.onModelChange("2"));
+    act(() => controls.onThinkingEffortChange("auto"));
+    act(() =>
+      controls.modelParameterSettings.onChange({ temperature: 0, top_p: 0.8 })
+    );
+    const earlier = controls!.snapshot;
+    const earlierCopy = structuredClone(earlier);
+    const remount = (next: string, options = models) => {
+      view.rerender(<Page scope={next} visible={false} />);
+      view.rerender(<Page scope={next} options={options} />);
+    };
+    for (const other of [
+      "tenant:user-a:agent-a:thread-b",
+      "tenant:user-a:agent-b:thread-a",
+      "tenant:user-b:agent-a:thread-a",
+    ]) {
+      remount(other);
+      expect(controls!.selectedModelId).toBe("1");
+      expect(
+        controls!.modelParameterSettings.value.temperature
+      ).toBeUndefined();
+      remount(scope);
+      expect(controls!.selectedModelId).toBe("2");
+      expect(controls!.deepThinking).toBe(true);
+      expect(controls!.thinkingEffort).toBe("auto");
+      expect(controls!.snapshot).toEqual(earlierCopy);
+    }
+    act(() => rejectModelSelection(2));
+    remount(scope);
+    expect(controls!.canSend).toBe(false);
+    act(() => controls.onModelChange("2"));
+    expect(controls!.canSend).toBe(true);
+    remount(scope, [models[0]]);
+    expect(controls!.selectedModelId).toBe("2");
+    expect(controls!.canSend).toBe(false);
+    expect(controls!.snapshot).toBeUndefined();
+    remount(scope);
+    act(() => controls.onDeepThinkingChange(false));
+    expect(earlier).toEqual(earlierCopy);
+    view.rerender(<Page scope={scope} owner="user-b" />);
+    expect(controls!.selectedModelId).toBe("1");
+    expect(controls!.modelParameterSettings.value.temperature).toBeUndefined();
+  });
+
   it("re-enabling thinking restores current configured effort and budget, not temporary values", () => {
     const { result, rerender } = renderHook(
       ({ options }) => useConversationModelControls(options, "reset"),

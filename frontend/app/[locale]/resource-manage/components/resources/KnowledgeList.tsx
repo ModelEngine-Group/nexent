@@ -28,7 +28,7 @@ import {
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
-import { useAuthorization } from "@/hooks/auth/useAuthorization";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import quotaService from "@/services/quotaService";
@@ -78,7 +78,7 @@ export default function KnowledgeList({
   >(null);
 
   // Get actual user role from auth context
-  const { user } = useAuthorization();
+  const { user } = useAuthorizationContext();
   const userRole = user?.role ?? "";
   // Only ADMIN can edit per-KB soft quotas
   const isAdmin = userRole === "ADMIN";

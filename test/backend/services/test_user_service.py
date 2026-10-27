@@ -45,18 +45,18 @@ sys.modules['nexent.core.agents.agent_model'].ToolConfig = MockToolConfig
 # Patch storage client factory before imports
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=MagicMock()).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=MagicMock()).start()
+patch('management.db.client.MinioClient', return_value=MagicMock()).start()
 
 # Mock database functions before importing the service
-patch('database.user_tenant_db.get_users_by_tenant_id').start()
-patch('database.user_tenant_db.update_user_tenant_role').start()
-patch('database.user_tenant_db.get_user_tenant_by_user_id').start()
-patch('database.user_tenant_db.soft_delete_user_tenant_by_user_id').start()
-patch('database.group_db.remove_user_from_all_groups').start()
-patch('database.group_db.query_groups_by_users', return_value={}).start()
+patch('management.db.identity.user_tenant.get_users_by_tenant_id').start()
+patch('management.db.identity.user_tenant.update_user_tenant_role').start()
+patch('management.db.identity.user_tenant.get_user_tenant_by_user_id').start()
+patch('management.db.identity.user_tenant.soft_delete_user_tenant_by_user_id').start()
+patch('management.db.identity.group.remove_user_from_all_groups').start()
+patch('management.db.identity.group.query_groups_by_users', return_value={}).start()
 
 # Import unit under test
-from consts.exceptions import ForbiddenError, NotFoundException
+from contracts.errors.exceptions import ForbiddenError, NotFoundException
 from management.services.permission.identity.users import (
     delete_user_and_cleanup,
     get_users,
@@ -990,7 +990,7 @@ class TestCoverageGaps:
             "management.services.permission.identity.users.soft_delete_user_tenant_by_user_id",
             return_value=True,
         )
-        mock_revoke = mocker.patch("database.token_db.soft_delete_tokens_by_user")
+        mock_revoke = mocker.patch("management.db.identity.token.soft_delete_tokens_by_user")
         mock_get_admin = mocker.patch("management.services.permission.identity.users.get_supabase_admin_client")
 
         await delete_user_and_cleanup("user-1", "tenant-1")

@@ -146,7 +146,7 @@ class _ServiceStub:
 
     async def convert_office_to_pdf_impl(self, object_name: str, pdf_object_name: str) -> None:
         """Stub: raise OfficeConversionException for sentinel inputs, otherwise succeed."""
-        from consts.exceptions import OfficeConversionException
+        from contracts.errors.exceptions import OfficeConversionException
         if object_name == "fail.docx":
             raise OfficeConversionException("conversion failed")
         if object_name == "err.docx":
@@ -158,12 +158,12 @@ def stub_modules(monkeypatch):
     # monkeypatch.setitem restores the real modules after each test; direct
     # sys.modules assignment would leak the stubs into later test files that
     # share the same pytest process.
-    # consts.model
-    model_mod = types.ModuleType("consts.model")
+    # contracts.agent
+    model_mod = types.ModuleType("contracts.agent")
     model_mod.TaskRequest = _TaskRequest
     model_mod.BatchTaskRequest = _BatchTaskRequest
     model_mod.ConvertStateRequest = _ConvertStateRequest
-    monkeypatch.setitem(sys.modules, "consts.model", model_mod)
+    monkeypatch.setitem(sys.modules, "contracts.agent", model_mod)
 
     # data_process.tasks
     tasks_mod = types.ModuleType("data_process.tasks")
@@ -225,7 +225,7 @@ def stub_modules(monkeypatch):
 
 
 def _build_app():
-    from backend.apps import data_process_app as app_module
+    from data_process.api.tasks import routes as app_module
     app = FastAPI()
     app.include_router(app_module.router)
     return app
@@ -249,7 +249,7 @@ def test_create_task_success():
 def test_create_task_returns_service_unavailable_when_chain_enqueue_fails(monkeypatch):
     app = _build_app()
     client = TestClient(app)
-    from backend.apps import data_process_app as app_module
+    from data_process.api.tasks import routes as app_module
 
     monkeypatch.setattr(app_module, "submit_process_forward_chain", lambda **_: "")
     resp = client.post(
@@ -277,7 +277,7 @@ def test_process_sync_endpoint_success():
 
 def test_process_sync_endpoint_error(monkeypatch):
     # Reconfigure tasks stub to raise when getting result
-    from backend.apps import data_process_app as app_module
+    from data_process.api.tasks import routes as app_module
 
     class _ErrResult(_DummyResult):
         def get(self, timeout=None):
@@ -299,7 +299,7 @@ def test_process_sync_endpoint_error(monkeypatch):
 
 
 def test_process_sync_endpoint_http_exception(monkeypatch):
-    from backend.apps import data_process_app as app_module
+    from data_process.api.tasks import routes as app_module
 
     class _PSyncHTTP:
         def apply_async(self, **kwargs):
@@ -332,7 +332,7 @@ def test_batch_tasks_success():
 
 
 def test_batch_tasks_preserves_per_file_submission_results(monkeypatch):
-    from backend.apps import data_process_app as app_module
+    from data_process.api.tasks import routes as app_module
 
     async def detailed_result(*args, **kwargs):
         return {
@@ -370,7 +370,7 @@ def test_batch_tasks_preserves_per_file_submission_results(monkeypatch):
 
 def test_batch_tasks_error(monkeypatch):
     # Make service raise
-    from backend.apps import data_process_app as app_module
+    from data_process.api.tasks import routes as app_module
 
     async def err(*args, **kwargs):
         raise RuntimeError("x")
@@ -385,7 +385,7 @@ def test_batch_tasks_error(monkeypatch):
 
 
 def test_batch_tasks_http_exception(monkeypatch):
-    from backend.apps import data_process_app as app_module
+    from data_process.api.tasks import routes as app_module
 
     async def err_http(*args, **kwargs):
         raise HTTPException(
@@ -412,7 +412,7 @@ def test_load_image_success_and_not_found():
 
 
 def test_load_image_internal_error(monkeypatch):
-    from backend.apps import data_process_app as app_module
+    from data_process.api.tasks import routes as app_module
 
     async def err(url: str):
         raise RuntimeError("bad")
@@ -425,7 +425,7 @@ def test_load_image_internal_error(monkeypatch):
 
 
 def test_filter_important_image_http_exception(monkeypatch):
-    from backend.apps import data_process_app as app_module
+    from data_process.api.tasks import routes as app_module
 
     async def err_http(*args, **kwargs):
         raise HTTPException(
@@ -499,7 +499,7 @@ def test_process_text_file_success_and_error(tmp_path):
 
 
 def test_process_text_file_http_exception(monkeypatch):
-    from backend.apps import data_process_app as app_module
+    from data_process.api.tasks import routes as app_module
 
     async def err_http(*args, **kwargs):
         raise HTTPException(
@@ -523,7 +523,7 @@ def test_convert_state_success_and_error(monkeypatch):
     assert ok.status_code == 200 and ok.json()["state"] == "COMPLETED"
 
     # Make service raise
-    from backend.apps import data_process_app as app_module
+    from data_process.api.tasks import routes as app_module
     def raise_convert(*args, **kwargs):
         raise RuntimeError("x")
     monkeypatch.setattr(
@@ -536,7 +536,7 @@ def test_convert_state_http_exception(monkeypatch):
     app = _build_app()
     client = TestClient(app)
 
-    from backend.apps import data_process_app as app_module
+    from data_process.api.tasks import routes as app_module
 
     def raise_convert_http(*args, **kwargs):
         raise HTTPException(

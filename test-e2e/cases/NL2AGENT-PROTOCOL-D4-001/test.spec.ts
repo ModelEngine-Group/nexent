@@ -44,7 +44,7 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
     Object.fromEntries(
       [
         "description",
-        "duty_prompt",
+        "prompt",
         "greeting_message",
         "example_questions",
         "tools",
@@ -149,10 +149,12 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
     await agents.openAdvanced();
     await page.getByRole("button", { name: "更多配置", exact: true }).click();
     const dialog = page.getByRole("dialog", { name: "更多配置", exact: true });
-    const control = dialog
-      .locator(".ant-form-item")
-      .filter({ hasText: "严格输出协议与静默修复" })
-      .getByRole("switch");
+    // The current editor exposes this policy as an accessible checkbox.
+    // Keep the persisted-boolean assertions; do not infer state from CSS.
+    const control = dialog.getByRole("checkbox", {
+      name: "严格输出协议与静默修复",
+      exact: true,
+    });
     if (enabled) await expect(control).toBeChecked();
     else await expect(control).not.toBeChecked();
     if (screenshot)
@@ -215,7 +217,7 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
     }
     expect(stream).toContain("agent_generation_completed");
     const draft = await read(id);
-    expect(draft.duty_prompt.trim().length).toBeGreaterThan(0);
+    expect(draft.prompt.trim().length).toBeGreaterThan(0);
     expect(draft.enable_protocol_repair_retry).toBe(true);
     generatedIds.push(id);
   };
@@ -275,7 +277,7 @@ journey("NL2AGENT-PROTOCOL-D4-001", async (context) => {
         );
         const initialDraft = await read(id);
         expect(initialDraft.description ?? "").toBe("");
-        expect(initialDraft.duty_prompt ?? "").toBe("");
+        expect(initialDraft.prompt ?? "").toBe("");
         expect(initialDraft.greeting_message ?? "").toBe("");
         expect(initialDraft.example_questions ?? []).toEqual([]);
         const before = stable(initialDraft);

@@ -62,6 +62,12 @@ not a valid observed mapping.
 Set `langfuse.url` to that deployment's project API URL and configure the two
 named keys in `config/secrets.env`. The JSON records key **names**, never key
 values. The API account needs read access to traces and observations.
+Set `langfuse.api_version` to `v2` for Langfuse Cloud/v4 observations, or
+`v1` for self-hosted v3 (the backward-compatible default). For v2, configure
+the runtime's `OTEL_EXPORTER_OTLP_LANGFUSE_INGESTION_VERSION=4` so direct OTEL
+exports are promptly available. The oracle follows all cursor pages and
+requires a completed `agent.run` with the run's final marker and its completed
+HTTP root, including child spans without session attributes.
 Authenticated trace preflight occurs before any model or Agent creation.
 Incomplete trace pagination, absent completed trace, empty telemetry, failed
 warm-up or a local fallback all fail acceptance.

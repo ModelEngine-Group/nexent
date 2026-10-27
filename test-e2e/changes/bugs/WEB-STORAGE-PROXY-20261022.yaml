@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: WEB-STORAGE-PROXY-20261022
+  change_type: bugfix
+  bug_id: WEB-STORAGE-PROXY-20261022
+  title: Route storage management requests to their owning Config service
+  description: Keep only storage uploads on Runtime while routing file listing, deletion and batch URL requests to Config.
+  observed_behavior: The Web prefix proxy sends every file/storage request to Runtime, causing an authenticated browser DELETE to return route 404 without deleting the object.
+  expected_behavior: POST file/storage remains on Runtime; GET file/storage, DELETE file/storage/object and POST file/storage/batch-urls reach Config with existing authentication intact.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing D4 downloads use Web but cleanup uses direct Config APIs. Add explicit browser-proxy deletion and subsequent missing-download assertions.
+  feature_contract_changed: false
+  affected_features:
+    existing: [TFP-001]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [TFP-D4-001]
+    added: []
+    modified: [TFP-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - File management routes dispatch to Config while storage uploads still dispatch to Runtime
+    - Existing authentication interception, conversation routing and streaming timeout remain unchanged
+    test_selectors:
+    - frontend/tests/apiProxyRouting.test.mjs
+    reason: Execute the actual production proxy handler with controlled destinations; the three broken routes fail before the fix and pass after it.
+  notes: >-
+    The original missing-object service fix and all existing D3/D4 assertions are
+    preserved. D4 additionally requires DELETE HTTP 200 through Web before
+    accepting a subsequent download HTTP 404. No 404 deletion response is treated
+    as success in this browser regression check.

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import os
 import uuid
 
@@ -6,6 +8,7 @@ import pytest
 from shared.http import assert_status, client
 from shared.factories.ownership import register_owned_http
 from shared.asset_registry import mark_asset_state
+from shared.aidp import create_payload
 
 _CASE_ID = 'API-AUTO-0210A73052FA9CE0'
 _AIDP = '/aidp-mgmt'
@@ -28,7 +31,7 @@ async def _create_private_kb(identity, name):
     async with client('config', token=identity.access_token) as api:
         response = await api.post(
             f'{_AIDP}/knowledge-bases',
-            json={'name': name, 'description': name, 'ingroup_permission': 'PRIVATE'},
+            json=await create_payload(identity, name, ingroup_permission='PRIVATE'),
         )
     assert_status(response, 200)
     payload = response.json()

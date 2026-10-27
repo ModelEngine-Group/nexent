@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Validate the case-centric formal test assets and their generated views."""
 
 from __future__ import annotations
@@ -19,7 +21,8 @@ from test_asset_lib import ValidationIssue, case_index, change_index, discover_d
 
 def validate(root: Path, phase: str, regenerate: bool,
              require_acceptance_cases: list[str] | None = None,
-             require_ut_changes: list[str] | None = None) -> list[ValidationIssue]:
+             require_ut_changes: list[str] | None = None,
+             require_preparation_cases: list[str] | None = None) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     issues.extend(validate_features.validate(root))
     issues.extend(validate_cases.validate(root))
@@ -44,7 +47,13 @@ def validate(root: Path, phase: str, regenerate: bool,
                 _, case, path = cases[case_id]
                 if not case.get("acceptance"):
                     issues.append(ValidationIssue(path, "acceptance", "Current-change Case requires explicit acceptance obligations"))
-    execution_issues, registry = validate_execution.inspect(root, phase)
+    if require_preparation_cases:
+        cases, _ = case_index(discover_documents(root, "cases"))
+        for case_id in require_preparation_cases:
+            if case_id not in cases:
+                issues.append(ValidationIssue(root / "test-e2e/cases", case_id, "Selected preparation Case does not exist"))
+    execution_issues, registry = validate_execution.inspect(
+        root, phase, require_preparation_cases=require_preparation_cases or ())
     issues.extend(execution_issues)
     if issues:
         return issues
@@ -81,9 +90,12 @@ def main() -> int:
                         help="Require obligation metadata for an added or acceptance-modified Case; repeat per Case")
     parser.add_argument("--require-ut-change", action="append", default=[], metavar="CHANGE_ID",
                         help="Require traditional UT assessment for a current product Change; repeat per Change")
+    parser.add_argument("--require-preparation-case", action="append", default=[], metavar="CASE_ID",
+                        help="Require an explicit preparation declaration for a changed online Case; repeat per Case")
     args = parser.parse_args()
     root = repository_root(args.root)
-    issues = validate(root, args.phase, args.generate, args.require_acceptance_case, args.require_ut_change)
+    issues = validate(root, args.phase, args.generate, args.require_acceptance_case, args.require_ut_change,
+                      args.require_preparation_case)
     if issues:
         print(render_issues(root, issues))
         print(f"Case-centric validation failed with {len(issues)} issue(s).")

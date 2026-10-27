@@ -1,44 +1,8 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 from test.backend.management.import_patching import set_import_attribute
-from backend.consts.exceptions import (
-    AppException,
-    AgentRunException,
-    LimitExceededError,
-    MCPConnectionError,
-    MCPNameIllegal,
-    McpNotFoundError,
-    McpValidationError,
-    McpNameConflictError,
-    McpPortConflictError,
-    MemoryPreparationException,
-    NoInviteCodeException,
-    IncorrectInviteCodeException,
-    OfficeConversionException,
-    UnsupportedFileTypeException,
-    FileTooLargeException,
-    UserRegistrationException,
-    TimeoutException,
-    SignatureValidationError,
-    UnauthorizedError,
-    TokenExpiredError,
-    ValidationError,
-    NotFoundException,
-    MEConnectionException,
-    VoiceServiceException,
-    VoiceConfigException,
-    STTConnectionException,
-    TTSConnectionException,
-    ToolExecutionException,
-    MCPContainerError,
-    DuplicateError,
-    DataMateConnectionError,
-    SkillDuplicateError,
-    SkillException,
-    OAuthProviderError,
-    OAuthLinkError,
-    TaskNotFoundError,
-    UnsupportedOperationError,
-)
+from contracts.errors.exceptions import AppException, AgentRunException, LimitExceededError, MCPConnectionError, MCPNameIllegal, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError, MemoryPreparationException, NoInviteCodeException, IncorrectInviteCodeException, OfficeConversionException, UnsupportedFileTypeException, FileTooLargeException, UserRegistrationException, TimeoutException, SignatureValidationError, UnauthorizedError, TokenExpiredError, ValidationError, NotFoundException, MEConnectionException, VoiceServiceException, VoiceConfigException, STTConnectionException, TTSConnectionException, ToolExecutionException, MCPContainerError, DuplicateError, DataMateConnectionError, SkillDuplicateError, SkillException, OAuthProviderError, OAuthLinkError, TaskNotFoundError, UnsupportedOperationError
 import time
 import sys
 import os
@@ -59,7 +23,7 @@ sys.path.insert(0, str(_REPO_ROOT / "sdk"))
 # ---------------------------------------------------------------------------
 # Pre-mock heavy dependencies BEFORE importing the module under test.
 # This avoids side-effects such as Minio/S3 network calls that are triggered
-# during import time of database.client when auth_utils is imported.
+# during import time of management.db.client when auth_utils is imported.
 # ---------------------------------------------------------------------------
 
 # Stub `nexent.storage.*` modules early so unittest.mock.patch does not import the real
@@ -86,11 +50,12 @@ sys.modules["nexent.storage"] = _nexent_storage_mod
 sys.modules["nexent.storage.storage_client_factory"] = _nexent_storage_factory_mod
 sys.modules["nexent.storage.minio_config"] = _nexent_minio_config_mod
 
-# Stub `backend.database.client` early so patch() can resolve the target even when
+# Stub `management.db.client` early so patch() can resolve the target even when
 # backend/ and backend/database/ are namespace packages (no __init__.py).
 _backend_mod = sys.modules.get("backend") or types.ModuleType("backend")
+_backend_mod.__path__ = [str(Path(__file__).resolve().parents[3] / "backend")]
 _backend_database_mod = types.ModuleType("backend.database")
-_backend_database_client_mod = types.ModuleType("backend.database.client")
+_backend_database_client_mod = types.ModuleType("management.db.client")
 _backend_database_client_mod.MinioClient = MagicMock()
 
 _backend_mod.database = _backend_database_mod
@@ -98,7 +63,9 @@ _backend_database_mod.client = _backend_database_client_mod
 
 sys.modules["backend"] = _backend_mod
 sys.modules["backend.database"] = _backend_database_mod
-sys.modules["backend.database.client"] = _backend_database_client_mod
+sys.modules["management.db.client"] = _backend_database_client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
@@ -106,7 +73,7 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
 
 # Stub out the database package hierarchy expected by auth_utils
 sys.modules['database'] = MagicMock()
@@ -115,9 +82,9 @@ sys.modules['database'] = MagicMock()
 mock_minio_class = MagicMock()
 mock_minio_class.return_value = MagicMock()
 
-# Provide a lightweight module for database.client with the attributes used
+# Provide a lightweight module for management.db.client with the attributes used
 # by auth_utils so that any direct attribute access works as expected.
-db_client_stub = types.ModuleType("database.client")
+db_client_stub = types.ModuleType("management.db.client")
 db_client_stub.MinioClient = mock_minio_class
 db_client_stub.get_db_session = MagicMock()
 db_client_stub.as_dict = MagicMock()
@@ -127,22 +94,26 @@ mock_minio_instance = MagicMock()
 db_client_stub.minio_client = mock_minio_instance
 db_client_stub.db_client = MagicMock()
 
-sys.modules['database.client'] = db_client_stub
+sys.modules['management.db.client'] = db_client_stub
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
-# Stub database.user_tenant_db to avoid real DB interactions
-sys.modules['database.user_tenant_db'] = MagicMock(
+# Stub management.db.identity.user_tenant to avoid real DB interactions
+sys.modules['management.db.identity.user_tenant'] = MagicMock(
     get_user_tenant_by_user_id=MagicMock(return_value=None))
 
-# Stub database.token_db to avoid real DB interactions (used by auth_utils)
-sys.modules['database.token_db'] = MagicMock(
+# Stub management.db.identity.token to avoid real DB interactions (used by auth_utils)
+sys.modules['management.db.identity.token'] = MagicMock(
     get_token_by_access_key=MagicMock(return_value=None))
 
-# Mock consts.const but provide real LANGUAGE values for tests.
+# Mock contracts.constants.environment but provide real LANGUAGE values for tests.
 # We must keep the real ``UnauthorizedError``/``SignatureValidationError``/
 # ``LimitExceededError`` classes on the mock so tests that catch them can
 # still match; we also expose ``AppException`` and other exception classes
 # used by sibling test files so that imports like
-# ``from consts.exceptions import AppException`` succeed later in the
+# ``from contracts.errors.exceptions import AppException`` succeed later in the
 # pytest run. ``run_all_test.py`` runs every test file in a separate
 # pytest process, so this mock is only visible inside this test file.
 consts_const_mock = MagicMock()
@@ -150,12 +121,13 @@ consts_const_mock.LANGUAGE = {"ZH": "zh", "EN": "en"}
 consts_const_mock.DEFAULT_USER_ID = "user_id"
 consts_const_mock.DEFAULT_TENANT_ID = "tenant_id"
 consts_const_mock.IS_SPEED_MODE = False
-sys.modules['consts.const'] = consts_const_mock
+sys.modules['contracts.constants.environment'] = consts_const_mock
+install_business_constant_stubs(consts_const_mock)
 
 # Mock exceptions module with real exception classes. All known exception
-# classes from ``backend.consts.exceptions`` are imported above and re-
+# classes from ``contracts.errors.exceptions`` are imported above and re-
 # exported on the mock below, so any code (in this file or in modules it
-# imports) that does ``from consts.exceptions import SomeException`` still
+# imports) that does ``from contracts.errors.exceptions import SomeException`` still
 # gets a real class rather than a MagicMock. ``run_all_test.py`` runs
 # every test file in a separate pytest process, so this mock only affects
 # this file's own session.
@@ -200,7 +172,7 @@ for _exc_name in (
     "UnsupportedOperationError",
 ):
     setattr(consts_exceptions_mock, _exc_name, locals()[_exc_name])
-sys.modules['consts.exceptions'] = consts_exceptions_mock
+install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 sys.modules['nexent'] = MagicMock()
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
@@ -218,11 +190,14 @@ sys.modules['sqlalchemy'] = MagicMock()
 sys.modules['sqlalchemy.orm'] = MagicMock()
 
 # Now import the module under test
-from management.services.permission.identity import authentication_helpers as au
+import gateway.authentication.auth as au
+import gateway.authentication.northbound_auth as nb_auth
 
 # Ensure exceptions in module under test are real exception classes, not mocks
 au.UnauthorizedError = UnauthorizedError
 au.SignatureValidationError = SignatureValidationError
+nb_auth.SignatureValidationError = SignatureValidationError
+nb_auth.UnauthorizedError = UnauthorizedError
 
 # Ensure constants in module under test are real values, not mocks
 au.LANGUAGE = {"ZH": "zh", "EN": "en"}
@@ -248,7 +223,7 @@ def test_validate_timestamp_window(monkeypatch):
 
 
 def test_extract_aksk_headers_success():
-    access_key, ts, sig = au.extract_aksk_headers({
+    access_key, ts, sig = nb_auth.extract_aksk_headers({
         "X-Access-Key": "ak",
         "X-Timestamp": "123",
         "X-Signature": "sig",
@@ -258,27 +233,27 @@ def test_extract_aksk_headers_success():
 
 def test_extract_aksk_headers_missing():
     with pytest.raises(UnauthorizedError):
-        au.extract_aksk_headers({})
+        nb_auth.extract_aksk_headers({})
 
 
 def test_verify_aksk_signature_success(monkeypatch):
     # Arrange matching ak and computed signature
-    set_import_attribute(monkeypatch, au, "get_aksk_config", lambda tenant_id: ("ak", "sk"))
+    set_import_attribute(monkeypatch, nb_auth, "get_aksk_config", lambda tenant_id: ("ak", "sk"))
     ts = str(int(time.time()))
-    expected = au.calculate_hmac_signature("sk", "ak", ts, "body")
-    ok = au.verify_aksk_signature("ak", ts, expected, "body")
+    expected = nb_auth.calculate_hmac_signature("sk", "ak", ts, "body")
+    ok = nb_auth.verify_aksk_signature("ak", ts, expected, "body")
     assert ok is True
 
 
 def test_verify_aksk_signature_invalid(monkeypatch):
-    set_import_attribute(monkeypatch, au, "get_aksk_config", lambda tenant_id: ("ak", "sk"))
+    set_import_attribute(monkeypatch, nb_auth, "get_aksk_config", lambda tenant_id: ("ak", "sk"))
     ts = str(int(time.time()))
-    assert au.verify_aksk_signature("wrong", ts, "sig", "") is False
+    assert nb_auth.verify_aksk_signature("wrong", ts, "sig", "") is False
 
 
 def test_validate_aksk_authentication(monkeypatch):
-    set_import_attribute(monkeypatch, au, "verify_aksk_signature", lambda a, b, c, d: True)
-    ok = au.validate_aksk_authentication({
+    set_import_attribute(monkeypatch, nb_auth, "verify_aksk_signature", lambda a, b, c, d: True)
+    ok = nb_auth.validate_aksk_authentication({
         "X-Access-Key": "ak",
         "X-Timestamp": str(int(time.time())),
         "X-Signature": "sig",
@@ -287,9 +262,9 @@ def test_validate_aksk_authentication(monkeypatch):
 
 
 def test_validate_aksk_authentication_invalid(monkeypatch):
-    set_import_attribute(monkeypatch, au, "verify_aksk_signature", lambda a, b, c, d: False)
+    set_import_attribute(monkeypatch, nb_auth, "verify_aksk_signature", lambda a, b, c, d: False)
     with pytest.raises(SignatureValidationError):
-        au.validate_aksk_authentication({
+        nb_auth.validate_aksk_authentication({
             "X-Access-Key": "ak",
             "X-Timestamp": str(int(time.time())),
             "X-Signature": "sig",
@@ -678,7 +653,7 @@ def test_get_current_user_id_rejects_revoked_cas_session(monkeypatch):
     set_import_attribute(monkeypatch, au, "SUPABASE_URL", "http://localhost:54321")
     set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id",
                         lambda u: {"tenant_id": "tenant-a"})
-    sys.modules["database.cas_session_db"] = MagicMock(
+    sys.modules["management.db.identity.cas_session"] = MagicMock(
         is_cas_session_active=MagicMock(return_value=False)
     )
 
@@ -775,11 +750,11 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
     def mock_verify_aksk_signature(*args):
         raise Exception("Unexpected error")
 
-    set_import_attribute(monkeypatch, au, "verify_aksk_signature",
+    set_import_attribute(monkeypatch, nb_auth, "verify_aksk_signature",
                         mock_verify_aksk_signature)
 
     with pytest.raises(UnauthorizedError, match="Authentication failed"):
-        au.validate_aksk_authentication({
+        nb_auth.validate_aksk_authentication({
             "X-Access-Key": "ak",
             "X-Timestamp": str(int(time.time())),
             "X-Signature": "sig",
@@ -841,9 +816,9 @@ class TestValidateBearerToken:
             "user_id": "user123",
             "delete_flag": "N"
         }
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
 
-        is_valid, token_info = au.validate_bearer_token("Bearer nexent-abc123")
+        is_valid, token_info = nb_auth.validate_bearer_token("Bearer nexent-abc123")
 
         assert is_valid is True
         assert token_info is not None
@@ -857,39 +832,39 @@ class TestValidateBearerToken:
             "user_id": "user123",
             "delete_flag": "N"
         }
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
 
-        is_valid, token_info = au.validate_bearer_token("nexent-abc123")
+        is_valid, token_info = nb_auth.validate_bearer_token("nexent-abc123")
 
         assert is_valid is True
         assert token_info is not None
 
     def test_validate_bearer_token_empty_authorization(self):
         """Test Bearer token validation with empty authorization header."""
-        is_valid, token_info = au.validate_bearer_token(None)
+        is_valid, token_info = nb_auth.validate_bearer_token(None)
 
         assert is_valid is False
         assert token_info is None
 
     def test_validate_bearer_token_empty_string(self):
         """Test Bearer token validation with empty string."""
-        is_valid, token_info = au.validate_bearer_token("")
+        is_valid, token_info = nb_auth.validate_bearer_token("")
 
         assert is_valid is False
         assert token_info is None
 
     def test_validate_bearer_token_empty_token(self):
         """Test Bearer token validation with 'Bearer ' only."""
-        is_valid, token_info = au.validate_bearer_token("Bearer ")
+        is_valid, token_info = nb_auth.validate_bearer_token("Bearer ")
 
         assert is_valid is False
         assert token_info is None
 
     def test_validate_bearer_token_invalid_token(self, monkeypatch):
         """Test Bearer token validation with non-existent token."""
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: None)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: None)
 
-        is_valid, token_info = au.validate_bearer_token("Bearer nexent-nonexistent")
+        is_valid, token_info = nb_auth.validate_bearer_token("Bearer nexent-nonexistent")
 
         assert is_valid is False
         assert token_info is None
@@ -902,9 +877,9 @@ class TestValidateBearerToken:
             "user_id": "user123",
             "delete_flag": "Y"
         }
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
 
-        is_valid, token_info = au.validate_bearer_token("Bearer nexent-deleted")
+        is_valid, token_info = nb_auth.validate_bearer_token("Bearer nexent-deleted")
 
         assert is_valid is False
         assert token_info is None
@@ -914,9 +889,9 @@ class TestValidateBearerToken:
         def mock_get_token_raises(key):
             raise Exception("Database error")
 
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", mock_get_token_raises)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", mock_get_token_raises)
 
-        is_valid, token_info = au.validate_bearer_token("Bearer nexent-error")
+        is_valid, token_info = nb_auth.validate_bearer_token("Bearer nexent-error")
 
         assert is_valid is False
         assert token_info is None
@@ -935,10 +910,10 @@ class TestGetUserAndTenantByAccessKey:
         }
         mock_user_tenant = {"tenant_id": "tenant456"}
 
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
-        set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
 
-        result = au.get_user_and_tenant_by_access_key("nexent-abc123")
+        result = nb_auth.get_user_and_tenant_by_access_key("nexent-abc123")
 
         assert result["user_id"] == "user123"
         assert result["tenant_id"] == "tenant456"
@@ -953,11 +928,11 @@ class TestGetUserAndTenantByAccessKey:
             "delete_flag": "N"
         }
 
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
-        set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda uid: None)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_user_tenant_by_user_id", lambda uid: None)
 
-        with pytest.raises(au.UnauthorizedError, match="No active tenant relationship"):
-            au.get_user_and_tenant_by_access_key("nexent-abc123")
+        with pytest.raises(nb_auth.UnauthorizedError, match="No active tenant relationship"):
+            nb_auth.get_user_and_tenant_by_access_key("nexent-abc123")
 
     def test_get_user_and_tenant_empty_tenant_id_raises(self, monkeypatch):
         """Test that UnauthorizedError is raised when tenant_id is empty."""
@@ -969,28 +944,28 @@ class TestGetUserAndTenantByAccessKey:
         }
         mock_user_tenant = {"tenant_id": ""}
 
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
-        set_import_attribute(monkeypatch, au, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_user_tenant_by_user_id", lambda uid: mock_user_tenant)
 
-        with pytest.raises(au.UnauthorizedError, match="No active tenant relationship"):
-            au.get_user_and_tenant_by_access_key("nexent-abc123")
+        with pytest.raises(nb_auth.UnauthorizedError, match="No active tenant relationship"):
+            nb_auth.get_user_and_tenant_by_access_key("nexent-abc123")
 
     def test_get_user_and_tenant_empty_access_key(self):
         """Test with empty access key."""
         with pytest.raises(UnauthorizedError, match="Invalid access key"):
-            au.get_user_and_tenant_by_access_key("")
+            nb_auth.get_user_and_tenant_by_access_key("")
 
     def test_get_user_and_tenant_none_access_key(self):
         """Test with None access key."""
         with pytest.raises(UnauthorizedError, match="Invalid access key"):
-            au.get_user_and_tenant_by_access_key(None)
+            nb_auth.get_user_and_tenant_by_access_key(None)
 
     def test_get_user_and_tenant_token_not_found(self, monkeypatch):
         """Test when token is not found."""
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: None)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: None)
 
         with pytest.raises(UnauthorizedError, match="Invalid or inactive access key"):
-            au.get_user_and_tenant_by_access_key("nexent-nonexistent")
+            nb_auth.get_user_and_tenant_by_access_key("nexent-nonexistent")
 
     def test_get_user_and_tenant_deleted_token(self, monkeypatch):
         """Test when token is deleted."""
@@ -1000,10 +975,10 @@ class TestGetUserAndTenantByAccessKey:
             "user_id": "user123",
             "delete_flag": "Y"
         }
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
 
         with pytest.raises(UnauthorizedError, match="Invalid or inactive access key"):
-            au.get_user_and_tenant_by_access_key("nexent-deleted")
+            nb_auth.get_user_and_tenant_by_access_key("nexent-deleted")
 
     def test_get_user_and_tenant_no_user_id(self, monkeypatch):
         """Test when token has no user_id."""
@@ -1013,10 +988,10 @@ class TestGetUserAndTenantByAccessKey:
             "user_id": None,
             "delete_flag": "N"
         }
-        set_import_attribute(monkeypatch, au, "get_token_by_access_key", lambda key: mock_token_info)
+        set_import_attribute(monkeypatch, nb_auth, "get_token_by_access_key", lambda key: mock_token_info)
 
         with pytest.raises(UnauthorizedError, match="No user associated with this access key"):
-            au.get_user_and_tenant_by_access_key("nexent-abc123")
+            nb_auth.get_user_and_tenant_by_access_key("nexent-abc123")
 
 
 class TestResolveTenantIdFromUserTenantRecord:
@@ -1086,12 +1061,12 @@ def test_validate_timestamp_rejects_non_numeric_value():
 
 def test_verify_aksk_signature_returns_false_when_configuration_fails(monkeypatch):
     set_import_attribute(monkeypatch,
-        au,
+        nb_auth,
         "get_aksk_config",
         lambda tenant_id: (_ for _ in ()).throw(RuntimeError("not configured")),
     )
 
-    assert au.verify_aksk_signature("ak", "1", "signature", "body") is False
+    assert nb_auth.verify_aksk_signature("ak", "1", "signature", "body") is False
 
 
 def test_extract_session_id_from_authorization_handles_valid_and_invalid_tokens():
@@ -1132,14 +1107,14 @@ def test_get_current_user_info_combines_authentication_and_language(monkeypatch)
 def test_get_aksk_config_raises_token_expired():
     """The get_aksk_config stub raises TokenExpiredError when not configured."""
     with pytest.raises(TokenExpiredError, match="not configured"):
-        au.get_aksk_config("tenant-1")
+        nb_auth.get_aksk_config("tenant-1")
 
 
 def test_validate_aksk_authentication_invalid_timestamp(monkeypatch):
     """Expired AK/SK timestamps raise TokenExpiredError."""
     old = int(time.time()) - (au.TIMESTAMP_VALIDITY_WINDOW + 10)
     with pytest.raises(TokenExpiredError, match="Invalid or expired timestamp"):
-        au.validate_aksk_authentication({
+        nb_auth.validate_aksk_authentication({
             "X-Access-Key": "ak",
             "X-Timestamp": str(old),
             "X-Signature": "sig",
@@ -1151,9 +1126,9 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    set_import_attribute(monkeypatch, au, "validate_timestamp", boom)
+    set_import_attribute(monkeypatch, nb_auth, "validate_timestamp", boom)
     with pytest.raises(TokenExpiredError, match="Authentication failed"):
-        au.validate_aksk_authentication({
+        nb_auth.validate_aksk_authentication({
             "X-Access-Key": "ak",
             "X-Timestamp": str(int(time.time())),
             "X-Signature": "sig",

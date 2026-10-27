@@ -5,8 +5,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.consts.model import ConversationKnowledgeScopeRequest, ToolParamsRequest
-from consts.exceptions import ValidationError
+from contracts.knowledge import ConversationKnowledgeScopeRequest
+from contracts.tool import ToolParamsRequest
+from contracts.errors.exceptions import ValidationError
 from management.services.knowledge_base.scope import (
     ResolvedKnowledgeScope,
     STATIC_SCOPE_PATTERN,
@@ -323,7 +324,7 @@ def test_list_and_tool_default_parsing_is_defensive():
 @patch(
     "management.services.knowledge_base.scope.search_agent_info_by_agent_id",
     side_effect=[
-        {"name": "root", "duty_prompt": 'index_names: ["fixed"]'},
+        {"name": "root", "prompt": 'index_names: ["fixed"]'},
         {"name": "child"},
     ],
 )

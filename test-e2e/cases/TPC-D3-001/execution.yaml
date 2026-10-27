@@ -11,7 +11,7 @@ required_mock_services:
 - model-provider
 preparation:
   families: []
-  anchors: false
+  anchors: true
   special_assets: false
   d4_groups: []
 acceptance_bindings:
@@ -20,3 +20,5 @@ acceptance_bindings:
   AC-02:
   - test_tpc_d3_001_marked_exhaustion_never_executes_or_finalizes
 timeout_seconds: 600
+
+notes: TPC uses a run-owned sequenced provider on the controlled HTTP service and creates its own Skills and published Agents.

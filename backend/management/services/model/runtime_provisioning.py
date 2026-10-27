@@ -34,7 +34,7 @@ def build_runtime_outlet_snapshot(record):
         encode_resolved_model_profile,
     )
     from nexent.core.model_service.registry import model_service_references
-    from services.model_outlet_migration_service import build_legacy_outlet_snapshot
+    from management.services.model.outlet_migration import build_legacy_outlet_snapshot
     from management.services.model.names import add_repo_to_name
 
     fingerprint = model_source_fingerprint(record)
@@ -98,13 +98,13 @@ def build_runtime_outlet_snapshot(record):
 
 def create_model_record(model_data, user_id, tenant_id):
     """Provision the snapshot in the same management transaction as insertion."""
-    from database.model_management_db import create_model_record as persist
+    from management.db.model.repository import create_model_record as persist
 
     return persist(model_data, user_id, tenant_id, runtime_profile_builder=build_runtime_outlet_snapshot)
 
 
 def update_model_record(model_id, update_data, user_id=None, tenant_id=None):
     """Provision under the management row lock, retaining the legacy return contract."""
-    from database.model_management_db import update_model_record as persist
+    from management.db.model.repository import update_model_record as persist
 
     return persist(model_id, update_data, user_id, tenant_id, runtime_profile_builder=build_runtime_outlet_snapshot)

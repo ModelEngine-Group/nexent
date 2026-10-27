@@ -1093,7 +1093,11 @@ export default function UserManageComp() {
     data: tenantData,
     isLoading: tenantsLoading,
     refetch: refetchTenants,
-  } = useTenantList({ page: currentPage, page_size: DEFAULT_PAGE_SIZE });
+  } = useTenantList({
+    page: currentPage,
+    page_size: DEFAULT_PAGE_SIZE,
+    enabled: isSuperAdmin,
+  });
 
   // For non-super admins, automatically select their own tenant based on user.tenantId
   // This must be declared before useQuery that uses tenantId

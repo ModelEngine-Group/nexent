@@ -4,14 +4,11 @@
 
 from typing import Dict, Optional
 
-from consts.agent_unavailable_reasons import AgentUnavailableReason
+from contracts.agent import AgentUnavailableReason
 from contracts.agent import AgentModelProjection
-from database.agent_db import search_agent_info_by_agent_id
-from database.model_management_db import (
-    get_model_by_model_id_ignore_delete,
-    get_valid_model_ids,
-)
-from database.tool_db import check_tool_is_available, search_tools_for_sub_agent
+from management.db.agent.repository import search_agent_info_by_agent_id
+from management.db.model.repository import get_model_by_model_id_ignore_delete, get_valid_model_ids
+from management.db.tool.repository import check_tool_is_available, search_tools_for_sub_agent
 from management.services.model.resolver import is_model_available, resolve_model_record
 
 

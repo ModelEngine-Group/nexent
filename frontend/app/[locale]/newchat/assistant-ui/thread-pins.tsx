@@ -9,7 +9,6 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState,
   type ReactNode,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -45,6 +44,7 @@ export function getThreadPinKey(
   return undefined;
 }
 
+/** Parse legacy serialized IDs without reading or writing browser storage. */
 export function parsePinnedThreadIds(raw: string | null): ReadonlySet<string> {
   try {
     const value: unknown = JSON.parse(raw ?? "[]");
@@ -58,21 +58,6 @@ export function parsePinnedThreadIds(raw: string | null): ReadonlySet<string> {
     );
   } catch {
     return new Set();
-  }
-}
-
-export function readPinnedConversationIds(storageKey: string): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    return [
-      ...new Set(
-        [...parsePinnedThreadIds(window.localStorage.getItem(storageKey))]
-          .map((remoteId) => getThreadPinKey({ id: "", remoteId }, true))
-          .filter((id): id is string => id !== undefined)
-      ),
-    ];
-  } catch {
-    return [];
   }
 }
 
@@ -109,37 +94,21 @@ interface PinnedThreadsValue {
 }
 
 const PinnedThreadsContext = createContext<PinnedThreadsValue | null>(null);
-const LEGACY_STORAGE_KEY = "chat.pinnedThreadIds";
 
 interface PinnedThreadsProviderProps {
   children: ReactNode;
-  /** Null disables pinning while Workbench identity is loading. */
+  /** Null disables pinning while the authenticated identity is loading. */
   storageKey?: string | null;
   persistedConversationIds?: boolean;
   serverConversationIds?: ReadonlyMap<string, string>;
   onStorageError?: () => void;
   serverBacked?: boolean;
+  conversationType?: "agent_chat" | "workbench";
 }
 
-export function PinnedThreadsProvider({
-  storageKey = LEGACY_STORAGE_KEY,
-  ...props
-}: PinnedThreadsProviderProps) {
-  if (props.serverBacked) {
-    return (
-      <ServerPinnedThreadsState
-        key={storageKey ?? "disabled"}
-        storageKey={storageKey}
-        {...props}
-      />
-    );
-  }
+export function PinnedThreadsProvider(props: PinnedThreadsProviderProps) {
   return (
-    <PinnedThreadsState
-      key={storageKey ?? "disabled"}
-      storageKey={storageKey}
-      {...props}
-    />
+    <ServerPinnedThreadsState key={props.storageKey ?? "disabled"} {...props} />
   );
 }
 
@@ -148,6 +117,7 @@ function ServerPinnedThreadsState({
   storageKey,
   serverConversationIds,
   onStorageError,
+  conversationType = "workbench",
 }: PinnedThreadsProviderProps) {
   const client = useQueryClient();
   const queryKey = useMemo(
@@ -213,12 +183,16 @@ function ServerPinnedThreadsState({
         : undefined,
     [storageKey, serverConversationIds]
   );
-  const pinnedIds = useMemo(
+  const pagePins = useMemo(
     () =>
-      new Set(
-        query.data?.items.map((item) => String(item.conversation_id)) ?? []
+      query.data?.items.filter(
+        (item) => (item.conversation_type ?? "workbench") === conversationType
       ),
-    [query.data]
+    [query.data, conversationType]
+  );
+  const pinnedIds = useMemo(
+    () => new Set(pagePins?.map((item) => String(item.conversation_id)) ?? []),
+    [pagePins]
   );
   const togglePin = useCallback(
     (thread: ThreadPinIdentity) => {
@@ -240,7 +214,7 @@ function ServerPinnedThreadsState({
     );
     return {
       pinnedIds,
-      serverPins: query.isSuccess ? query.data.items : undefined,
+      serverPins: query.isSuccess ? pagePins : undefined,
       serverPinsRevision: query.dataUpdatedAt,
       togglePin,
       canPin: (thread: ThreadPinIdentity) =>
@@ -255,6 +229,7 @@ function ServerPinnedThreadsState({
     };
   }, [
     query.isSuccess,
+    pagePins,
     query.data,
     query.dataUpdatedAt,
     pinnedIds,
@@ -263,73 +238,6 @@ function ServerPinnedThreadsState({
     mutation.isPending,
     resolveKey,
   ]);
-  return (
-    <PinnedThreadsContext.Provider value={value}>
-      {children}
-    </PinnedThreadsContext.Provider>
-  );
-}
-
-function PinnedThreadsState({
-  children,
-  storageKey,
-  persistedConversationIds = false,
-  serverConversationIds,
-  onStorageError,
-}: PinnedThreadsProviderProps) {
-  const [pinnedIds, setPinnedIds] = useState<ReadonlySet<string>>(() => {
-    if (typeof window === "undefined" || !storageKey) return new Set();
-    try {
-      return parsePinnedThreadIds(window.localStorage.getItem(storageKey));
-    } catch {
-      return new Set();
-    }
-  });
-  const latestPins = useRef(pinnedIds);
-  const resolveKey = useCallback(
-    (thread: ThreadPinIdentity) =>
-      storageKey
-        ? getThreadPinKey(
-            thread,
-            persistedConversationIds,
-            serverConversationIds
-          )
-        : undefined,
-    [storageKey, persistedConversationIds, serverConversationIds]
-  );
-  const togglePin = useCallback(
-    (thread: ThreadPinIdentity) => {
-      const key = resolveKey(thread);
-      if (!key || !storageKey) return;
-      const next = new Set(latestPins.current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      latestPins.current = next;
-      setPinnedIds(next);
-      try {
-        window.localStorage.setItem(storageKey, JSON.stringify([...next]));
-      } catch {
-        onStorageError?.();
-      }
-    },
-    [resolveKey, storageKey, onStorageError]
-  );
-  const value = useMemo(() => {
-    const order = new Map([...pinnedIds].map((id, index) => [id, index]));
-    return {
-      pinnedIds,
-      togglePin,
-      getPinOrder: persistedConversationIds
-        ? (thread: ThreadPinIdentity) =>
-            order.get(resolveKey(thread) ?? "") ?? -1
-        : undefined,
-      canPin: (thread: ThreadPinIdentity) => resolveKey(thread) !== undefined,
-      isPinned: (thread: ThreadPinIdentity) => {
-        const key = resolveKey(thread);
-        return key !== undefined && pinnedIds.has(key);
-      },
-    };
-  }, [pinnedIds, togglePin, resolveKey, persistedConversationIds]);
   return (
     <PinnedThreadsContext.Provider value={value}>
       {children}

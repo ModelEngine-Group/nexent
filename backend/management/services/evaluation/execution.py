@@ -2,11 +2,11 @@
 
 from typing import Any
 
-from consts.error_code import ErrorCode
-from consts.evaluation_limits import DEFAULT_PASS_THRESHOLD
-from consts.evaluation_status import EvalCaseStatus, EvalPassStatus, EvalRunStatus
-from consts.exceptions import AppException
-from consts.model import AgentRequest
+from contracts.errors.codes import ErrorCode
+from contracts.constants.constants import DEFAULT_PASS_THRESHOLD
+from contracts.evaluation import EvalCaseStatus, EvalPassStatus, EvalRunStatus
+from contracts.errors.exceptions import AppException
+from contracts.agent import AgentRequest
 
 try:
     from adapters.jiuwen_sdk_adapter import JiuwenSDKAdapter
@@ -20,21 +20,12 @@ from datetime import datetime
 from statistics import mean
 
 from adapters.exception import JiuwenSDKUnavailableError
-from consts.evaluation_limits import MAX_TURNS_PER_SESSION
-from database.agent_evaluation_db import (
-    create_agent_evaluation_cases,
-    get_agent_evaluation,
-    list_agent_evaluation_cases,
-    update_agent_evaluation_case_result,
-    update_agent_evaluation_status,
-)
-from database.client import get_db_session
-from database.db_models import ModelRecord
-from database.evaluation_set_db import (
-    get_evaluation_set_cases_all,
-    materialize_virtual_evaluation_set_for_run,
-)
-from database.evaluator_db import get_evaluator
+from contracts.constants.constants import MAX_TURNS_PER_SESSION
+from management.db.evaluation.runs import create_agent_evaluation_cases, get_agent_evaluation, list_agent_evaluation_cases, update_agent_evaluation_case_result, update_agent_evaluation_status
+from management.db.client import get_db_session
+from management.db.models import ModelRecord
+from management.db.evaluation.sets import get_evaluation_set_cases_all, materialize_virtual_evaluation_set_for_run
+from management.db.evaluation.evaluator import get_evaluator
 from infrastructure.concurrency import runtime_thread_manager
 from management.services.agent.service import prepare_agent_run
 from management.services.evaluation.common import (
@@ -43,7 +34,7 @@ from management.services.evaluation.common import (
 )
 from management.services.model.invocation import call_llm_for_system_prompt
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
-from nexent.core.agents.run_agent import agent_run
+from runtime.adapters.nexent.runner import agent_run
 
 
 def _is_llm_related_error(exc: Exception) -> bool:
@@ -149,7 +140,7 @@ async def _run_agent_to_final_answer(
     try:
         run_manager = agent_run_manager
         if run_manager is None:
-            from agents.agent_run_manager import agent_run_manager as run_manager
+            from management.services.agent.lifecycle import agent_run_manager as run_manager
 
         agent_run_info, _memory_context = await prepare_agent_run(
             agent_request=agent_request,

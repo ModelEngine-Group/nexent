@@ -44,7 +44,7 @@ def test_ut_sdk_fps_023_layout_order_preserves_priority():
     """UT-SDK-FPS-023: display order is independent from compaction priority."""
     composer = _composer("zh", "manager")
     items = composer.compose_context_inputs(
-        language="zh", is_manager=True, duty_prompt="任务\n限制\n示例",
+        language="zh", is_manager=True, prompt="任务\n限制\n示例",
         tools={"search": {"description": "检索"}},
         skills=[{"name": "writer", "description": "写作"}],
         worker_agents={"researcher": {"description": "研究"}},

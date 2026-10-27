@@ -11,15 +11,27 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "infra" / "automati
 from shared.postgres import postgres_sql
 
 
+ROOT = Path(__file__).resolve().parents[3]
+MERGED = ROOT / "deploy/sql/migrations/v2.8.0_merged_migrations.sql"
+SECTION = "v2.7.1_007_conversation_activity_and_source.sql"
+
+
+def migration_source():
+    """Read this case's section out of the consolidated v2.8.0 migration bundle."""
+    text = MERGED.read_text(encoding="utf-8")
+    marker = f"-- Source migration: {SECTION}"
+    start = text.index(marker)
+    end = text.find("-- Source migration: ", start + len(marker))
+    return text[start:] if end == -1 else text[start:end]
+
+
 @pytest.mark.case_id("CHAT-ACTIVITY-D5-001")
 @pytest.mark.stage("D5")
 @pytest.mark.parametrize("zone", ["UTC", "Asia/Shanghai", "America/New_York"])
 @pytest.mark.parametrize("existing_activity", [False, True])
 def test_additive_migration_and_repeatability(zone, existing_activity):
     schema = "activity_migration_" + uuid4().hex
-    root = Path(__file__).resolve().parents[3]
-    migration = root / "deploy/sql/migrations/v2.7.1_007_conversation_activity_and_source.sql"
-    source = migration.read_text(encoding="utf-8")
+    source = migration_source()
     assert "CREATE TABLE" not in source.upper()
     sql = f"SET TIME ZONE '{zone}';\n" + source.replace("nexent.", schema + ".")
     try:

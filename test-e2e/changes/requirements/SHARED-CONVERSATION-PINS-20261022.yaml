@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: SHARED-CONVERSATION-PINS-20261022
+  change_type: requirement
+  requirement_id: SHARED-CONVERSATION-PINS-REQ-001
+  title: Share server pin persistence across conversation pages
+  description: Reuse the existing pin timestamp and endpoints for all personally owned conversations, filter snapshots by page type on the frontend, and retire Agent-chat local pin storage without migration.
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-SIDEBAR]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+      - test/backend/database/test_workbench_pin_db.py
+      - test/backend/services/test_workbench_pin_service.py
+      - test/backend/apps/test_workbench_pins_app.py
+      - frontend/tests/workbench/ServerThreadPins.test.tsx
+      - frontend/tests/workbench/WorkbenchPinHistorySync.test.tsx
+    behaviors:
+      - Preserve ownership and deleted-record validation, identity errors, pin ordering and audit isolation.
+      - Preserve saved-ID resolution, loading/error handling and missing-history hydration.
+    reason: Strengthened the existing database suite for both conversation types and retained pin transition, ownership, deletion and audit assertions. Backend database, service and API suites passed 48 tests. Frontend mixed-type and retired local-storage test coverage still requires follow-up and is not certified by backend UT.
+  notes: Design and evidence are documented in ../nexent-doc/docs/Developing/conversation-server-pins/design.md. No SQL source changes or historical pin migration. Updated and restarted the local runtime container; live unauthenticated GET and PUT pin requests returned 401. Startup required a verified baseline ledger entry for an existing merged migration whose ten constituent checksums were already applied. Frontend and formal acceptance execution are not claimed.

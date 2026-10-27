@@ -43,14 +43,14 @@ def test_management_snapshot_uses_canonical_codec_without_credentials(saved):
 
 
 def test_unchanged_management_write_and_runtime_do_not_recompose(saved, mocker):
-    mocker.patch("services.model_profile_service.get_model_profile_catalog", side_effect=AssertionError)
+    mocker.patch("management.services.model.profile.get_model_profile_catalog", side_effect=AssertionError)
     assert build_runtime_outlet_snapshot(saved) == saved["runtime_outlet_snapshot"]
     assert restore_runtime_model_snapshot(saved, "tenant").config_revision == 1
 
 
 def test_changed_settings_create_next_revision_without_mutating_prior_snapshot(saved, mocker):
     before = deepcopy(saved)
-    mocker.patch("services.model_profile_service.get_model_profile_catalog", side_effect=AssertionError)
+    mocker.patch("management.services.model.profile.get_model_profile_catalog", side_effect=AssertionError)
     changed = {**saved, "temperature": .2}
     changed["runtime_outlet_snapshot"] = build_runtime_outlet_snapshot(changed)
     assert restore_runtime_model_snapshot(changed, "tenant").config_revision == 2
@@ -184,7 +184,7 @@ def test_clearing_an_explicit_capacity_column_does_not_restore_a_catalog_default
 
 def test_record_factory_and_request_overlay_preserve_trusted_outlet(saved):
     """The refactored record factory must retain the Jiuwen outlet binding."""
-    from agents.create_agent_info import create_model_config_from_record
+    from management.services.model.run_bindings import create_model_config_from_record
     from management.services.model.run_controls import overlay_root_model
 
     base = create_model_config_from_record(saved, "tenant")

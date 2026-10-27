@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Unit tests for backend.apps.skill_repository_app module."""
+"""Unit tests for management.api.skill.skill_repository module."""
 
+from test.common.contract_stubs import install_business_contract_stubs
 import json
 import os
 import sys
@@ -18,9 +19,9 @@ backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.insert(0, backend_dir)
 
 sys.modules.setdefault("services.skill_repository_service", MagicMock())
-sys.modules.setdefault("management.services.permission.identity.authentication_helpers", MagicMock())
+sys.modules.setdefault("gateway.authentication.auth", MagicMock())
 
-consts_model = types.ModuleType("consts.model")
+consts_model = types.ModuleType("contracts.agent")
 
 
 class _SkillRepositoryListingCreateRequest(BaseModel):
@@ -42,9 +43,9 @@ class _TagAssignmentFilter(BaseModel):
 consts_model.SkillRepositoryListingCreateRequest = _SkillRepositoryListingCreateRequest
 consts_model.SkillRepositoryInstallRequest = _SkillRepositoryInstallRequest
 consts_model.TagAssignmentFilter = _TagAssignmentFilter
-sys.modules["consts.model"] = consts_model
+install_business_contract_stubs(consts_model)
 
-import consts.exceptions as exceptions_module
+from contracts.errors import exceptions as exceptions_module
 
 
 def _ensure_exception(name):
@@ -70,8 +71,8 @@ if not _has_duplicate_names:
 
     exceptions_module.SkillDuplicateError = SkillDuplicateError
 
-from apps.skill_repository_app import skill_repository_router
-import apps.skill_repository_app as app_module
+from management.api.skill.skill_repository import skill_repository_router
+from management.api.skill import skill_repository as app_module
 
 app = FastAPI()
 app.include_router(skill_repository_router)
@@ -85,11 +86,11 @@ def mock_auth_header():
 
 def test_list_skill_repository_listings_api_passes_filters(mocker, mock_auth_header):
     mock_get_user_id = mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mock_list = mocker.patch(
-        "apps.skill_repository_app.list_skill_repository_listings_impl",
+        "management.api.skill.skill_repository.list_skill_repository_listings_impl",
         return_value={"items": [], "pagination": {"total": 0}},
     )
 
@@ -116,11 +117,11 @@ def test_list_skill_repository_listings_api_passes_filters(mocker, mock_auth_hea
 
 def test_list_skill_repository_listings_api_passes_tag_filter(mocker, mock_auth_header):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mock_list = mocker.patch(
-        "apps.skill_repository_app.list_skill_repository_listings_impl",
+        "management.api.skill.skill_repository.list_skill_repository_listings_impl",
         return_value={"items": [], "pagination": {"total": 0}},
     )
 
@@ -146,11 +147,11 @@ def test_list_skill_repository_listings_api_passes_tag_predicates(
 ):
     """Test repository API forwards structured tag filters."""
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mock_list = mocker.patch(
-        "apps.skill_repository_app.list_skill_repository_listings_impl",
+        "management.api.skill.skill_repository.list_skill_repository_listings_impl",
         return_value={"items": [], "pagination": {"total": 0}},
     )
 
@@ -172,12 +173,12 @@ def test_list_skill_repository_listings_api_passes_tag_predicates(
 
 def test_list_skill_repository_tag_stats_api(mocker, mock_auth_header):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
-    mocker.patch("apps.skill_repository_app.ensure_skill_repository_access")
+    mocker.patch("management.api.skill.skill_repository.ensure_skill_repository_access")
     mock_stats = mocker.patch(
-        "apps.skill_repository_app.list_skill_repository_tag_stats_impl",
+        "management.api.skill.skill_repository.list_skill_repository_tag_stats_impl",
         return_value=[{"tag": "operations", "count": 2}],
     )
 
@@ -193,12 +194,12 @@ async def test_list_skill_repository_tag_stats_api_converts_unexpected_errors_to
     mocker, mock_auth_header
 ):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
-    mocker.patch("apps.skill_repository_app.ensure_skill_repository_access")
+    mocker.patch("management.api.skill.skill_repository.ensure_skill_repository_access")
     mocker.patch(
-        "apps.skill_repository_app.list_skill_repository_tag_stats_impl",
+        "management.api.skill.skill_repository.list_skill_repository_tag_stats_impl",
         side_effect=RuntimeError("database unavailable"),
     )
 
@@ -213,11 +214,11 @@ async def test_list_skill_repository_tag_stats_api_converts_unexpected_errors_to
 
 def test_list_my_editable_skills_api_passes_filters(mocker, mock_auth_header):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mock_list = mocker.patch(
-        "apps.skill_repository_app.list_my_editable_skills_impl",
+        "management.api.skill.skill_repository.list_my_editable_skills_impl",
         return_value={"items": [], "counts": {}, "pagination": {"total": 0}},
     )
 
@@ -241,11 +242,11 @@ def test_list_my_editable_skills_api_passes_filters(mocker, mock_auth_header):
 
 def test_list_my_editable_skills_api_passes_tag_predicates(mocker, mock_auth_header):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mock_list = mocker.patch(
-        "apps.skill_repository_app.list_my_editable_skills_impl",
+        "management.api.skill.skill_repository.list_my_editable_skills_impl",
         return_value={"items": [], "counts": {}, "pagination": {"total": 0}},
     )
 
@@ -266,11 +267,11 @@ def test_list_my_editable_skills_api_passes_tag_predicates(mocker, mock_auth_hea
 
 def test_count_my_editable_skills_api(mocker, mock_auth_header):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mock_count = mocker.patch(
-        "apps.skill_repository_app.count_my_editable_skills_impl",
+        "management.api.skill.skill_repository.count_my_editable_skills_impl",
         return_value={"counts": {"all": 2, "created": 1, "others": 1}},
     )
 
@@ -291,7 +292,7 @@ def test_count_my_editable_skills_api(mocker, mock_auth_header):
 
 def test_count_my_editable_skills_api_maps_unauthorized(mocker, mock_auth_header):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         side_effect=app_module.UnauthorizedError("expired"),
     )
 
@@ -306,11 +307,11 @@ def test_count_my_editable_skills_api_maps_unauthorized(mocker, mock_auth_header
 
 def test_create_skill_repository_listing_api_maps_forbidden(mocker, mock_auth_header):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mocker.patch(
-        "apps.skill_repository_app.create_skill_repository_listing_impl",
+        "management.api.skill.skill_repository.create_skill_repository_listing_impl",
         side_effect=ForbiddenError("not allowed"),
     )
 
@@ -325,11 +326,11 @@ def test_create_skill_repository_listing_api_maps_forbidden(mocker, mock_auth_he
 
 def test_update_skill_repository_status_api_success(mocker, mock_auth_header):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mock_update = mocker.patch(
-        "apps.skill_repository_app.update_skill_repository_status_impl",
+        "management.api.skill.skill_repository.update_skill_repository_status_impl",
         return_value={"skill_repository_id": 7, "status": "shared"},
     )
 
@@ -366,14 +367,14 @@ def test_user_is_forbidden_from_skill_repository_api(
     service_name,
 ):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mocker.patch(
-        "apps.skill_repository_app.ensure_skill_repository_access",
+        "management.api.skill.skill_repository.ensure_skill_repository_access",
         side_effect=ForbiddenError("User role USER is not authorized"),
     )
-    service = mocker.patch(f"apps.skill_repository_app.{service_name}")
+    service = mocker.patch(f"management.api.skill.skill_repository.{service_name}")
 
     request_kwargs = {"headers": mock_auth_header}
     if payload is not None:
@@ -389,11 +390,11 @@ def test_install_skill_from_repository_api_duplicate_returns_conflict(
     mock_auth_header,
 ):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mocker.patch(
-        "apps.skill_repository_app.install_skill_from_repository_impl",
+        "management.api.skill.skill_repository.install_skill_from_repository_impl",
         side_effect=SkillDuplicateError(["Skill A"]),
     )
 
@@ -412,11 +413,11 @@ def test_install_skill_from_repository_api_duplicate_returns_conflict(
 
 def test_get_skill_repository_listing_detail_api_not_found(mocker, mock_auth_header):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mocker.patch(
-        "apps.skill_repository_app.get_skill_repository_listing_detail_impl",
+        "management.api.skill.skill_repository.get_skill_repository_listing_detail_impl",
         side_effect=ValueError("Repository listing not found"),
     )
 
@@ -434,10 +435,10 @@ def test_get_skill_repository_listing_detail_api_not_found(mocker, mock_auth_hea
 )
 def test_list_apis_map_auth_errors(mocker, mock_auth_header, path, service_name):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         side_effect=app_module.UnauthorizedError("expired"),
     )
-    service = mocker.patch(f"apps.skill_repository_app.{service_name}")
+    service = mocker.patch(f"management.api.skill.skill_repository.{service_name}")
 
     response = client.get(path, headers=mock_auth_header)
 
@@ -447,11 +448,11 @@ def test_list_apis_map_auth_errors(mocker, mock_auth_header, path, service_name)
 
 def test_list_repository_api_maps_invalid_filter(mocker, mock_auth_header):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mocker.patch(
-        "apps.skill_repository_app.list_skill_repository_listings_impl",
+        "management.api.skill.skill_repository.list_skill_repository_listings_impl",
         side_effect=ValueError("invalid status"),
     )
 
@@ -465,11 +466,11 @@ def test_list_repository_api_maps_invalid_filter(mocker, mock_auth_header):
 
 def test_detail_api_success(mocker, mock_auth_header):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mocker.patch(
-        "apps.skill_repository_app.get_skill_repository_listing_detail_impl",
+        "management.api.skill.skill_repository.get_skill_repository_listing_detail_impl",
         return_value={"skill_repository_id": 7},
     )
 
@@ -494,11 +495,11 @@ def test_update_status_api_maps_errors(
     expected_status,
 ):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mocker.patch(
-        "apps.skill_repository_app.update_skill_repository_status_impl",
+        "management.api.skill.skill_repository.update_skill_repository_status_impl",
         side_effect=error,
     )
 
@@ -513,11 +514,11 @@ def test_update_status_api_maps_errors(
 
 def test_create_listing_api_success(mocker, mock_auth_header):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     create = mocker.patch(
-        "apps.skill_repository_app.create_skill_repository_listing_impl",
+        "management.api.skill.skill_repository.create_skill_repository_listing_impl",
         return_value={"skill_repository_id": 7},
     )
 
@@ -545,11 +546,11 @@ def test_create_listing_api_maps_errors(
     expected_status,
 ):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mocker.patch(
-        "apps.skill_repository_app.create_skill_repository_listing_impl",
+        "management.api.skill.skill_repository.create_skill_repository_listing_impl",
         side_effect=error,
     )
 
@@ -577,11 +578,11 @@ def test_install_api_maps_errors(
     expected_status,
 ):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     mocker.patch(
-        "apps.skill_repository_app.install_skill_from_repository_impl",
+        "management.api.skill.skill_repository.install_skill_from_repository_impl",
         side_effect=error,
     )
 
@@ -599,11 +600,11 @@ def test_install_api_rejects_target_name_over_100_characters(
     mock_auth_header,
 ):
     mocker.patch(
-        "apps.skill_repository_app.get_current_user_id",
+        "management.api.skill.skill_repository.get_current_user_id",
         return_value=("user-1", "tenant-1"),
     )
     install = mocker.patch(
-        "apps.skill_repository_app.install_skill_from_repository_impl"
+        "management.api.skill.skill_repository.install_skill_from_repository_impl"
     )
 
     response = client.post(

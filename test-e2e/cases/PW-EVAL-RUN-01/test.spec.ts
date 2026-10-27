@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { Locator } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
@@ -80,6 +82,15 @@ journey("PW-EVAL-RUN-01", async (context) => {
         return `selected configured real Judge ${judge}`;
       },
       async () => {
+        // The product only lists custom evaluators in reference-answer mode;
+        // switch the dialog and select the owned Set before the Evaluator.
+        // Ant RadioButton hides the native input; click its visible label.
+        await drawer.getByText("有评测集评测", { exact: true }).click();
+        await expect(drawer.getByRole("radio", { name: "有评测集评测", exact: true })).toBeChecked();
+        await choose(card(/^评测配置$/).getByRole("combobox").first(), `${setName} (1)`);
+        return "selected owned one-case Set in reference-answer mode; query/expected/actual use the product's automatic mappings";
+      },
+      async () => {
         const response = await page.request.get("/api/evaluators");
         expect(response.ok()).toBe(true);
         const payload = await response.json();
@@ -88,17 +99,8 @@ journey("PW-EVAL-RUN-01", async (context) => {
         expect(selected[0].status).toBe("PUBLISHED");
         expect(selected[0].evaluator_type).toBe("code");
         await choose(card(/^评估器/).getByRole("combobox"), evaluator);
-        return "selected published code Evaluator and verified catalog type/status without inventing CRUD controls";
-      },
-      async () => {
-        // Ant RadioButton hides the native input; click its visible label.
-        await drawer.getByText("有评测集评测", { exact: true }).click();
-        await expect(drawer.getByRole("radio", { name: "有评测集评测", exact: true })).toBeChecked();
-        await choose(card(/^评测配置$/).getByRole("combobox").first(), `${setName} (1)`);
-        // Switching modes intentionally clears evaluators and field mappings.
-        await choose(card(/^评估器/).getByRole("combobox"), evaluator);
         await expect(card(/^评估器/).locator(".ant-select-selection-item")).toContainText(evaluator);
-        return "selected owned one-case Set; query/expected/actual use the product's automatic mappings";
+        return "selected published code Evaluator in reference-answer mode and verified catalog type/status without inventing CRUD controls";
       },
       async () => {
         await expect(card(/^评估器/).locator(".ant-select-selection-item")).toContainText(evaluator);

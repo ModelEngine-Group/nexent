@@ -122,7 +122,7 @@ Config, Runtime, Northbound, and Data Process are intentionally single-replica w
 | `--reconfigure` | Run interactive configuration using saved local config as defaults | Flag |
 | `--config` | Open the interactive deployment configuration | Flag |
 | `--is-mainland` | Legacy network location option | `Y` maps to `--image-source mainland`; `N` maps to `general` |
-| `--version` | Application version | Version tag (auto-detected from `backend/consts/const.py` if not set) |
+| `--version` | Application version | Version tag (auto-detected from `backend/contracts/constants/environment.py` if not set) |
 | `--deployment-version` | Legacy deployment version | `speed` maps to `infrastructure,application`; `full` adds `supabase` |
 | `--persistence-mode` | Persistent volume mode | `local`, `dynamic`, or `existing`; default `local` |
 | `--storage-class` | StorageClass for PV/PVC binding | StorageClass name; aliases `--storageclass`, `--storage-class-name`, `--sc` |

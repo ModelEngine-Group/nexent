@@ -1298,6 +1298,7 @@ class KnowledgeBaseService {
           typeof file.total_chunk_num === "number"
             ? file.total_chunk_num
             : null,
+        tags: Array.isArray(file.tags) ? file.tags : [],
       }));
     } catch (error) {
       log.error("Failed to get all files:", error);

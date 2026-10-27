@@ -7,8 +7,8 @@ import sys
 import time
 
 import httpx
-from database.client import get_db_session
-from database.db_models import AgentInfo, ConversationMessage, ConversationRecord
+from management.db.client import get_db_session
+from management.db.models import AgentInfo, ConversationMessage, ConversationRecord
 from management.services.permission.identity.authentication_helpers import generate_session_jwt
 
 

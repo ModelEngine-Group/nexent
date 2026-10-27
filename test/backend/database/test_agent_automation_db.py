@@ -1,13 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
-from database import agent_automation_db
-from database.db_models import (
-    AgentAutomationProposal,
-    AgentAutomationRun,
-    AgentAutomationTask,
-)
+from management.db.automation import repository as agent_automation_db
+from management.db.models import AgentAutomationProposal, AgentAutomationRun, AgentAutomationTask
 
 AGENT_AUTOMATION_MIGRATION = Path("deploy/sql/migrations/v2.4_merged_migrations.sql")
 AGENT_AUTOMATION_TOOL_MIGRATION = AGENT_AUTOMATION_MIGRATION

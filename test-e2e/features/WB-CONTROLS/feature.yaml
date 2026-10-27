@@ -24,6 +24,8 @@ feature:
   - rule_id: WB-CONTROLS-RULE-004
     description: Both entry points derive available reasoning controls from model capability regardless of saved enablement,
       forwarding supported effort enum values through existing generation paths while preserving other model parameters.
+      All unavailable states provide the same localized unsupported-mode message on hover or explicit activation without changing configuration, permanent visible text or focus-triggered tooltips; switching models clears transient feedback. Toggle-only models omit
+      effort rows, and narrow composers retain visible model selection and send actions.
   - rule_id: WB-CONTROLS-RULE-005
     description: Workbench, newchat and NL2Agent share the white Composer and transparent paper-plane send defaults without
       presentation opt-ins; supported mode and resource actions are configured independently of appearance. Newchat uses a direct

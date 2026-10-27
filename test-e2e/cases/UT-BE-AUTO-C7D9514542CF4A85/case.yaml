@@ -13,13 +13,13 @@ case:
   automation: automated
   objective: 按 agent_id 的 Agent 并发容量准入 reserve/release：超限抛异常、幂等释放与计数回退｜核心流程
   preconditions:
-  - 本地 Python 组件测试环境可运行，可直接导入 backend/agents/agent_run_manager.py 的 AgentRunManager 单例及 AgentRunConcurrencyExceededError，不要求外部模型/数据库服务在线。
+  - 本地 Python 组件测试环境可运行，可直接导入 backend/management/services/agent/lifecycle.py 的 AgentRunManager 单例及 AgentRunConcurrencyExceededError，不要求外部模型/数据库服务在线。
   - 每个测试用例启动前隔离/清空 AgentRunManager 内部容量计数 _agent_capacity_counts 与 _agent_capacity_tokens，确保用例间无状态污染、可重复执行。
   test_data:
     legacy_asset_declaration: 无外部资产；直接使用 AgentRunManager 内存单例构造 agent_id 与 max_concurrent_runs 输入。
   steps:
   - order: 1
-    action: 导入 backend/agents/agent_run_manager.py 的 AgentRunManager 与 AgentRunConcurrencyExceededError，获取管理器实例并清空 _agent_capacity_counts/_agent_capacity_tokens。
+    action: 导入 backend/management/services/agent/lifecycle.py 的 AgentRunManager 与 AgentRunConcurrencyExceededError，获取管理器实例并清空 _agent_capacity_counts/_agent_capacity_tokens。
     expected: 首次 reserve 返回非空字符串 token1，get_agent_capacity_count(101) 等于 1。
   - order: 2
     action: 对同一 agent_id=101 以 max_concurrent_runs=1 连续两次调用 reserve_agent_capacity，记录第一次返回值 token1 与第二次抛出的异常，并调用 get_agent_capacity_count(101)。

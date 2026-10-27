@@ -3,8 +3,8 @@
 
 from typing import Any, Dict, List, Optional
 
-from database import memory_long_term_db
-from database.memory_dreaming_db import try_scope_lock
+from management.db.memory import long_term as memory_long_term_db
+from management.db.memory.dreaming import try_scope_lock
 
 MAX_LONG_TERM_CHARS = 10_000
 

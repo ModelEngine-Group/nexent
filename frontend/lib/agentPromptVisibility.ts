@@ -5,7 +5,7 @@ import type { TFunction } from "i18next";
 /** Agent-like object that may include prompts_hidden from /agent/search_info. */
 export type AgentPromptVisibilitySource = {
   prompts_hidden?: boolean;
-  duty_prompt?: string | null;
+  prompt?: string | null;
 };
 
 export function isAgentPromptsHidden(
@@ -20,7 +20,7 @@ export function isAgentPromptsHidden(
  */
 export function renderAgentPromptFieldValue(
   agent: AgentPromptVisibilitySource | null | undefined,
-  field: "duty_prompt",
+  field: "prompt",
   t: TFunction,
   noneLabel?: string
 ): string {

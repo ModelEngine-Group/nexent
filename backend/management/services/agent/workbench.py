@@ -13,20 +13,20 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 from nexent.core.agents.agent_model import AgentConfig
 
-from consts.exceptions import ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
-from consts.const import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
-from consts.model import WorkbenchSessionConfig
-from database import skill_db
-from database.tool_db import query_tools_by_ids
-from database.agent_db import search_agent_info_by_agent_id
-from database.model_management_db import get_model_by_model_id
+from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
+from contracts.agent import WorkbenchSessionConfig
+from management.db.skill import repository as skill_db
+from management.db.tool.repository import query_tools_by_ids
+from management.db.agent.repository import search_agent_info_by_agent_id
+from management.db.model.repository import get_model_by_model_id
 from management.services.agent.system import (
     system_agent_provider,
 )
 from management.services.model.resolver import is_model_available
 from management.services.skill.service import SkillService
 from management.services.skill.permission import can_view_skill, _get_user_role, _to_group_id_set
-from database.group_db import query_group_ids_by_user
+from management.db.identity.group import query_group_ids_by_user
 from infrastructure.serialization.containers import clone_runtime_config
 from management.services.knowledge_base.scope import (
     ResolvedKnowledgeScope,
@@ -301,7 +301,7 @@ class RuntimeMountService:
         Callers consume the returned tree and scope summary before starting a
         model. Resource checks are separate from the pure root compilation.
         """
-        from consts.model import ConversationKnowledgeScopeRequest
+        from contracts.knowledge import ConversationKnowledgeScopeRequest
         from management.services.knowledge_base.scope import resolve_executable_knowledge_scope
 
         scope = ConversationKnowledgeScopeRequest.model_validate(dict(tree.overlay.knowledge_scope or {}))

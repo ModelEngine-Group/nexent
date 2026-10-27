@@ -21,17 +21,14 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema, DropSchema
 
-from apps import conversation_management_app as routes
-from consts.exceptions import AppException
-from consts.model import MessageRequest, MessageUnit
+from management.api.conversation import conversation_management as routes
+from contracts.errors.exceptions import AppException
+from contracts.conversation import MessageRequest, MessageUnit
 from contracts.conversation import MessageSource, encode_activity_cursor
-from database import conversation_db as db
-from database import workbench_pin_db as pins
-from database.client import db_client
-from database.db_models import (
-    ConversationMessage, ConversationMessageUnit, ConversationRecord,
-    ConversationSourceImage, ConversationSourceSearch,
-)
+from management.db.conversation import repository as db
+from management.db.conversation import pins as pins
+from management.db.client import db_client
+from management.db.models import ConversationMessage, ConversationMessageUnit, ConversationRecord, ConversationSourceImage, ConversationSourceSearch
 from management.services.automation.conversation import AutomationConversationAdapter
 from management.services.conversation.service import save_message
 

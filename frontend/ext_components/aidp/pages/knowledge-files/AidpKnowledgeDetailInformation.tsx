@@ -52,6 +52,8 @@ interface AidpKnowledgeDetailInformationProps {
   canConfigureGroupPermissions: boolean;
   /** Friendly embedding model label resolved from AIDP ModelService. */
   embeddingModelLabel?: string;
+  llmModelLabel?: string;
+  vlmModelLabel?: string;
   formatDateTime: (value: unknown) => string;
   onEditSetting: (setting: AidpDetailSetting) => void;
   onEditPermissions: () => void;
@@ -68,6 +70,8 @@ const AidpKnowledgeDetailInformation = ({
   groupNames,
   canConfigureGroupPermissions,
   embeddingModelLabel,
+  llmModelLabel,
+  vlmModelLabel,
   formatDateTime,
   onEditSetting,
   onEditPermissions,
@@ -167,7 +171,7 @@ const AidpKnowledgeDetailInformation = ({
               <>
                 <Tag color="green">{t("common.enabled")}</Tag>
                 <span className="ml-2">
-                  {detail.vlm_model || AIDP_UNKNOWN_VALUE}
+                  {vlmModelLabel || detail.vlm_model || AIDP_UNKNOWN_VALUE}
                 </span>
               </>
             ) : (
@@ -208,7 +212,9 @@ const AidpKnowledgeDetailInformation = ({
         ) : (
           <dl className={FIELD_GRID}>
             <AidpDetailField label={t("aidpKnowledge.detailGraphModel")}>
-              <span>{detail.llm_model_name || AIDP_UNKNOWN_VALUE}</span>
+              <span>
+                {llmModelLabel || detail.llm_model_name || AIDP_UNKNOWN_VALUE}
+              </span>
               {editButton("graph_llm", t("aidpKnowledge.detailEditGraphModel"))}
             </AidpDetailField>
             <AidpDetailField label={t("aidpKnowledge.detailGraphHops")}>

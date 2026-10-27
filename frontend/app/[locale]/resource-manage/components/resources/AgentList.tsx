@@ -44,7 +44,7 @@ const { Text } = Typography;
 const { TextArea } = Input;
 
 interface AgentDetail extends Agent {
-  duty_prompt?: string;
+  prompt?: string;
   group_ids?: number[];
 }
 
@@ -84,7 +84,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
     visible: boolean;
     field:
       | "description"
-      | "duty_prompt"
+      | "prompt"
       | null;
     title: string;
     value: string;
@@ -234,7 +234,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
         form.setFieldsValue({
           display_name: detail.display_name,
           description: detail.description,
-          duty_prompt: detail.duty_prompt,
+          prompt: detail.prompt,
           group_ids: detail.group_ids || [],
         });
       } else {
@@ -258,7 +258,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   // Fullscreen view handlers
   const openFullscreenEdit = (
     field:
-      "description" | "duty_prompt",
+      "description" | "prompt",
     title: string
   ) => {
     const value = form.getFieldValue(field) || "";
@@ -515,13 +515,17 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               danger
               icon={<Trash2 className="h-4 w-4" />}
               size="small"
-              onClick={() => confirm({
-                title: t("businessLogic.config.modal.deleteTitle"),
-                content: t("businessLogic.config.modal.deleteContent", { name: record.display_name }),
-                okText: t("common.confirm"),
-                cancelText: t("common.cancel"),
-                onOk: () => handleDelete(record),
-              })}
+              onClick={() =>
+                confirm({
+                  title: t("businessLogic.config.modal.deleteTitle"),
+                  content: t("businessLogic.config.modal.deleteContent", {
+                    name: record.display_name,
+                  }),
+                  okText: t("common.confirm"),
+                  cancelText: t("common.cancel"),
+                  onOk: () => handleDelete(record),
+                })
+              }
             />
           </Tooltip>
         </div>
@@ -576,8 +580,11 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
           className="w-48"
         />
         {canManageOfficialAgents && (
-          <Button className="ml-auto" onClick={() => setOfficialModalOpen(true)}>
-            管理官方智能体
+          <Button
+            className="ml-auto"
+            onClick={() => setOfficialModalOpen(true)}
+          >
+            {t("ui.localization.manageOfficialAgents")}
           </Button>
         )}
       </div>
@@ -650,13 +657,13 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
             <Form.Item noStyle shouldUpdate>
               {() => (
                 <Form.Item
-                  name="duty_prompt"
-                  label={t("systemPrompt.card.duty.title")}
+                  name="prompt"
+                  label={t("systemPrompt.card.prompt.title")}
                 >
                   <div style={{ position: "relative" }}>
                     <TextArea
-                      value={form.getFieldValue("duty_prompt")}
-                      placeholder={t("systemPrompt.card.duty.title")}
+                      value={form.getFieldValue("prompt")}
+                      placeholder={t("systemPrompt.card.prompt.title")}
                       autoSize={{ minRows: 5, maxRows: 8 }}
                       style={{ resize: "none", paddingRight: 32 }}
                       readOnly
@@ -667,8 +674,8 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                         icon={<Maximize2 className="h-4 w-4" />}
                         onClick={() =>
                           openFullscreenEdit(
-                            "duty_prompt",
-                            t("systemPrompt.card.duty.title")
+                            "prompt",
+                            t("systemPrompt.card.prompt.title")
                           )
                         }
                         style={{

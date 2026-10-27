@@ -1,4 +1,6 @@
-"""Direct unit tests for backend/apps/permission_utils.py.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Direct unit tests for backend/management/utils/knowledge_permission.py.
 
 This module is the FastAPI adapter layer that translates domain exceptions raised
 by ``ElasticSearchService.require_knowledge_base_{edit,read}_permission`` into the
@@ -23,7 +25,7 @@ from fastapi import HTTPException
 # that backend packages import successfully without a live venv/runtime):
 # - backend/ and backend/apps/ are added to sys.path
 # - management.services.knowledge_base.service is stubbed (no DB / ES dependency)
-# The real ``apps.permission_utils`` module is then imported and tested
+# The real ``management.utils.knowledge_permission`` module is then imported and tested
 # against the stubbed ``ElasticSearchService``.
 # ---------------------------------------------------------------------------
 
@@ -41,7 +43,7 @@ with MagicMock() as _stub_es:
     _stub_es.require_knowledge_base_read_permission = MagicMock(return_value="READ_ONLY")
     sys.modules["management.services.knowledge_base.service"].ElasticSearchService = _stub_es
 
-from apps import permission_utils  # noqa: E402
+from management.utils import knowledge_permission as permission_utils
 
 
 # ---------------------------------------------------------------------------

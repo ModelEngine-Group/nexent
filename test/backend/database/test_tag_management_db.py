@@ -1,10 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from consts.exceptions import TagManagementConflictError, TagManagementNotFoundError
-from database.db_models import ResourceTagAssignment, TagDefinition
-from database.tag_management_db import NO_VALUE_TAG_NORMALIZED_VALUE, TagManagementDB
+from contracts.errors.exceptions import TagManagementConflictError, TagManagementNotFoundError
+from management.db.models import ResourceTagAssignment, TagDefinition
+from contracts.constants.constants import NO_VALUE_TAG_NORMALIZED_VALUE
+from management.db.tag.repository import TagManagementDB
 
 
 def record(**values):
@@ -44,7 +47,7 @@ def db_context(*queries):
 
 
 def install_context(monkeypatch, context):
-    monkeypatch.setattr("database.tag_management_db.get_db_session", lambda: context)
+    monkeypatch.setattr("management.db.tag.repository.get_db_session", lambda: context)
 
 
 def filter_keys(query_mock):

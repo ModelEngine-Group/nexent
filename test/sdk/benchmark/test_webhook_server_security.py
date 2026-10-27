@@ -186,7 +186,7 @@ def test_run_experiment_task_executes_scoring_tracing_and_compression(
     caplog,
 ):
     import evaluators
-    import runtime.task_adapter as runtime_task_adapter
+    from runtime import task_adapter as runtime_task_adapter
 
     item = FakeItem("item-1")
     fake_langfuse = FakeLangfuse([item])
@@ -250,7 +250,7 @@ def test_run_experiment_task_executes_scoring_tracing_and_compression(
 agent_info:
   display_name: Test agent
 prompts:
-  duty_prompt: Solve the task with secret-prompt-value; Be exact; Example
+  prompt: Solve the task with secret-prompt-value; Be exact; Example
 agent_config:
   max_steps: 12
   enable_context_manager: true
@@ -271,7 +271,7 @@ agent_config:
 
     trace = fake_langfuse.traces[0]
     assert task_configuration["max_steps"] == 12
-    assert task_configuration["duty_prompt"] == "Solve the task with secret-prompt-value; Be exact; Example"
+    assert task_configuration["prompt"] == "Solve the task with secret-prompt-value; Be exact; Example"
     assert (
         task_configuration["context_manager_config"].policy_layers.platform[
             "processing_mode"
@@ -321,7 +321,7 @@ def test_run_experiment_task_redacts_task_exception_from_logs_and_trace(
     caplog,
 ):
     import evaluators
-    import runtime.task_adapter as runtime_task_adapter
+    from runtime import task_adapter as runtime_task_adapter
 
     item = FakeItem("item-1")
     fake_langfuse = FakeLangfuse([item])

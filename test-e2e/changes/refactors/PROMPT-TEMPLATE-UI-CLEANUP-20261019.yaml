@@ -16,8 +16,8 @@ change:
     existing: []
     added: []
     modified: []
-    retired:
-    - API-059
+    retired: []
+  no_case_change_reason: API-059 was retired by this change and explicitly deleted on 2026-10-22; no surviving Case is changed by this historical record.
   feature_contract_changed: true
   traditional_ut:
     decision: strengthen

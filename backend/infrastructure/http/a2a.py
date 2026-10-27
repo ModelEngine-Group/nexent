@@ -37,14 +37,17 @@ class A2AHttpClient:
     def __init__(
         self,
         timeout: float = DEFAULT_TIMEOUT,
-        max_retries: int = DEFAULT_MAX_RETRIES
+        max_retries: int = DEFAULT_MAX_RETRIES,
+        ssl_verify: bool = True,
     ):
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self.max_retries = max_retries
+        self.ssl_verify = ssl_verify
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def __aenter__(self):
         connector = aiohttp.TCPConnector(
+            ssl=self.ssl_verify,
             limit=100,
             limit_per_host=20,
             ttl_dns_cache=300,

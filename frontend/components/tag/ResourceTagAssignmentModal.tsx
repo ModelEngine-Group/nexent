@@ -1,6 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   App,
@@ -38,6 +40,8 @@ interface ResourceTagAssignmentModalProps {
   resourceType: string;
   resourceId: string;
   definitions: TagDefinition[];
+  /** True while the tag definitions are still being read. */
+  definitionsLoading?: boolean;
   canEdit: boolean;
   provider?: string | null;
   knowledgeBaseId?: string | null;
@@ -61,6 +65,7 @@ export default function ResourceTagAssignmentModal({
   resourceType,
   resourceId,
   definitions,
+  definitionsLoading = false,
   canEdit,
   provider,
   knowledgeBaseId,
@@ -87,6 +92,31 @@ export default function ResourceTagAssignmentModal({
   );
   const [definitionPage, setDefinitionPage] = useState(1);
   const [definitionSearch, setDefinitionSearch] = useState("");
+  // Track which resource the loaded assignments belong to so a stale snapshot
+  // from the previously opened resource can never be saved.
+  const assignmentKey = open ? `${resourceType}:${resourceId}` : null;
+  const [loadedAssignmentKey, setLoadedAssignmentKey] = useState<string | null>(
+    null
+  );
+  const lastAssignmentDataRef = useRef(assignmentState.data);
+
+  useEffect(() => {
+    if (!assignmentKey) {
+      lastAssignmentDataRef.current = assignmentState.data;
+      setLoadedAssignmentKey(null);
+      return;
+    }
+    // Only a snapshot that arrived after opening counts: the hook keeps the
+    // previous resource's data until this request finishes.
+    if (
+      !assignmentState.loading &&
+      assignmentState.data &&
+      assignmentState.data !== lastAssignmentDataRef.current
+    ) {
+      lastAssignmentDataRef.current = assignmentState.data;
+      setLoadedAssignmentKey(assignmentKey);
+    }
+  }, [assignmentKey, assignmentState.data, assignmentState.loading]);
 
   useEffect(() => {
     if (!open) {
@@ -182,7 +212,13 @@ export default function ResourceTagAssignmentModal({
     [selected]
   );
 
+  const assignmentsReady =
+    assignmentKey !== null &&
+    loadedAssignmentKey === assignmentKey &&
+    !assignmentState.loading;
+
   const saveSingle = useCallback(async () => {
+    if (!assignmentsReady || definitionsLoading) return;
     const valueIds = Object.values(selected).flat();
     if (valueIds.length > 100) {
       message.warning(t("tagManagement.warning.assignmentCapacity"));
@@ -207,9 +243,19 @@ export default function ResourceTagAssignmentModal({
     } finally {
       setSaving(false);
     }
-  }, [assignmentState, message, onClose, onSaved, selected, t]);
+  }, [
+    assignmentState,
+    assignmentsReady,
+    definitionsLoading,
+    message,
+    onClose,
+    onSaved,
+    selected,
+    t,
+  ]);
 
   const saveBulk = useCallback(async () => {
+    if (!assignmentsReady || definitionsLoading) return;
     const targets = bulkTargets.filter((target) => target.resourceId.trim());
     if (targets.length === 0) return;
     const valueIds = Object.values(selected).flat();
@@ -245,7 +291,16 @@ export default function ResourceTagAssignmentModal({
     } finally {
       setSaving(false);
     }
-  }, [bulkTargets, message, onClose, resourceType, selected, t]);
+  }, [
+    assignmentsReady,
+    bulkTargets,
+    definitionsLoading,
+    message,
+    onClose,
+    resourceType,
+    selected,
+    t,
+  ]);
 
   const outcomeColumns: ColumnsType<TagAssignmentBulkOutcome> = [
     {
@@ -363,6 +418,9 @@ export default function ResourceTagAssignmentModal({
       okText={t("tagManagement.action.save")}
       cancelText={t("common.cancel")}
       confirmLoading={saving}
+      okButtonProps={{
+        disabled: saving || !assignmentsReady || definitionsLoading,
+      }}
       width={880}
       zIndex={1100}
       centered

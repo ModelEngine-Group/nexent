@@ -19,7 +19,7 @@ def test_user_save_uses_database_index(monkeypatch, history):
 
 
 def test_request_boundary_is_private_and_cannot_be_submitted():
-    from consts.model import AgentRequest
+    from contracts.agent import AgentRequest
     request = AgentRequest(query="Current", _runtime_user_message_id=999, _runtime_user_message_index=99)
     assert request._runtime_user_message_id is None and request._runtime_user_message_index is None
     request._runtime_user_message_id = 401

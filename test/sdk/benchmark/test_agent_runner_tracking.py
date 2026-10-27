@@ -349,7 +349,7 @@ def test_build_agent_run_info_maps_prompts_model_and_context_components(monkeypa
     run_info = agent_runner.build_agent_run_info(
         query="question",
         history=[],
-        duty_prompt="duty\nconstraint\nfew shots",
+        prompt="duty\nconstraint\nfew shots",
         tools=[tool],
         max_steps=7,
         temperature=0,
@@ -359,7 +359,7 @@ def test_build_agent_run_info_maps_prompts_model_and_context_components(monkeypa
         model_factory="openai",
         prompt_components={
             "basic_information": {"content": "custom header"},
-            "duty_prompt": "custom duty",
+            "prompt": "custom duty",
             "final_answer_contract": {"content": {"suffix": "FINAL ANSWER"}},
         },
     )
@@ -379,7 +379,7 @@ def test_build_agent_run_info_maps_prompts_model_and_context_components(monkeypa
         "suffix": "FINAL ANSWER"
     }
     assert captured_context["tools"] == {"search": tool}
-    assert captured_context["duty_prompt"] == "duty\nconstraint\nfew shots"
+    assert captured_context["prompt"] == "duty\nconstraint\nfew shots"
     assert "constraint" not in captured_context and "few_shots" not in captured_context
 
 

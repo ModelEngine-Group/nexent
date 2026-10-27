@@ -1,5 +1,7 @@
 schema_version: '1.0'
 case_id: API-AUTO-7513FEF9904B9F3F
+required_mock_services:
+- knowledge-provider
 implementations:
 - framework: pytest
   file: test.py

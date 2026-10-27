@@ -1,0 +1,24 @@
+schema_version: '1.0'
+change:
+  change_id: REMOVE-API059-20261022
+  change_type: test-fix
+  title: Remove the retired private prompt-template CRUD Case at user request
+  description: >-
+    Delete API-059 definition, retired execution binding, independent script and
+    shared scenario dispatch and helpers. Preserve the retired F-049 Feature as
+    historical product context, but clear its required D3 coverage declaration.
+    Remove the dangling Case reference from the earlier retirement change while
+    retaining its descriptive history. Regenerate navigation and derived assets.
+    Historical migration receipts and execution reports remain unchanged.
+    This deletion is not a PASS and does not remove active prompt-generation Cases.
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-049]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: API-059 is explicitly deleted, not retained as a retired placeholder; no surviving Case is changed.

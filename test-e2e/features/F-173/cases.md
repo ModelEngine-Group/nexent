@@ -3,4 +3,3 @@
 此页由结构化用例生成，不手工编辑。
 
 - D5 [DEP-IMAGE-BASE-TOOLS](../../cases/DEP-IMAGE-BASE-TOOLS/case.yaml) · manual
-- D5 [K8S-ENV-D5-001](../../cases/K8S-ENV-D5-001/case.yaml) · active

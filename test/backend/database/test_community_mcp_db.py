@@ -1,9 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
-Unit tests for backend/database/community_mcp_db.py
+Unit tests for backend/management/db/mcp/community.py
 
 Tests community MCP record database operations.
 """
 
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 
@@ -26,17 +29,22 @@ consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_mock.const.POSTGRES_DB = "test_db"
 consts_mock.const.POSTGRES_PORT = 5432
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 client_mock = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
-sys.modules['database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 db_models_mock = MagicMock()
 db_models_mock.McpCommunityRecord = MagicMock()
-sys.modules['database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
 
 class _MockColumn:
@@ -73,18 +81,7 @@ db_models_mock.McpCommunityRecord.config_json = _MockColumn()
 db_models_mock.McpCommunityRecord.registry_json = _MockColumn()
 
 
-from backend.database.community_mcp_db import (
-    get_mcp_community_records,
-    get_mcp_community_tag_stats,
-    create_mcp_community_record,
-    get_mcp_community_record_by_id_and_tenant,
-    update_mcp_community_record_by_id,
-    delete_mcp_community_record_by_id,
-    list_mcp_community_records_by_tenant_and_user,
-    get_mcp_community_tag_stats_by_tenant,
-    list_mcp_community_review_records,
-    update_mcp_community_review_status,
-)
+from management.db.mcp.community import get_mcp_community_records, get_mcp_community_tag_stats, create_mcp_community_record, get_mcp_community_record_by_id_and_tenant, update_mcp_community_record_by_id, delete_mcp_community_record_by_id, list_mcp_community_records_by_tenant_and_user, get_mcp_community_tag_stats_by_tenant, list_mcp_community_review_records, update_mcp_community_review_status
 
 
 class MockCommunityRecord:
@@ -133,8 +130,8 @@ def test_get_community_records(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
         "description": obj.description, "tags": obj.tags,
         "transport_type": obj.transport_type, "mcp_server": obj.mcp_server,
@@ -166,8 +163,8 @@ def test_get_community_records_pagination(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
         "description": obj.description, "tags": obj.tags,
         "transport_type": obj.transport_type, "mcp_server": obj.mcp_server,
@@ -208,7 +205,7 @@ def test_get_community_tag_stats(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
 
     result = get_mcp_community_tag_stats()
     assert len(result) == 2
@@ -228,12 +225,12 @@ def test_create_community_record(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.filter_property", lambda data, model: data)
 
     mock_record = MagicMock()
     mock_record.community_id = 42
-    monkeypatch.setattr("backend.database.community_mcp_db.McpCommunityRecord", lambda **kw: mock_record)
+    monkeypatch.setattr("management.db.mcp.community.McpCommunityRecord", lambda **kw: mock_record)
 
     result = create_mcp_community_record(
         {"mcp_name": "test", "mcp_server": "http://srv"},
@@ -262,8 +259,8 @@ def test_get_community_record_by_id_found(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {"community_id": obj.community_id, "mcp_name": obj.mcp_name})
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {"community_id": obj.community_id, "mcp_name": obj.mcp_name})
 
     result = get_mcp_community_record_by_id_and_tenant(1, "tid")
     assert result is not None
@@ -284,7 +281,7 @@ def test_get_community_record_by_id_not_found(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
 
     result = get_mcp_community_record_by_id_and_tenant(999, "tid")
     assert result is None
@@ -305,7 +302,7 @@ def test_update_community_record(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
 
     update_mcp_community_record_by_id(
         community_id=1, tenant_id="tid", user_id="uid",
@@ -329,7 +326,7 @@ def test_update_community_record_partial(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
 
     update_mcp_community_record_by_id(
         community_id=1, tenant_id="tid", user_id="uid",
@@ -355,7 +352,7 @@ def test_delete_community_record(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
 
     delete_mcp_community_record_by_id(community_id=1, tenant_id="tid", user_id="uid")
     mock_update.assert_called_once_with({"delete_flag": "Y", "updated_by": "uid"})
@@ -381,8 +378,8 @@ def test_list_community_records_by_tenant(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
     })
 
@@ -413,7 +410,7 @@ def test_get_community_tag_stats_by_tenant(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
 
     result = get_mcp_community_tag_stats_by_tenant("tid")
     assert len(result) == 1
@@ -426,7 +423,7 @@ def test_get_community_tag_stats_by_tenant(monkeypatch, mock_session):
 
 def test_get_community_records_with_search(monkeypatch, mock_session):
     """Test get_mcp_community_records with search keyword filter."""
-    monkeypatch.setattr("backend.database.community_mcp_db.or_", lambda *args: MagicMock())
+    monkeypatch.setattr("management.db.mcp.community.or_", lambda *args: MagicMock())
     session, query = mock_session
     r = MockCommunityRecord(1, "svc1")
 
@@ -443,8 +440,8 @@ def test_get_community_records_with_search(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
     })
 
@@ -471,8 +468,8 @@ def test_get_community_records_with_tag(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name, "tags": obj.tags,
     })
 
@@ -498,8 +495,8 @@ def test_get_community_records_with_transport_type(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
     })
 
@@ -526,8 +523,8 @@ def test_get_community_records_with_valid_cursor(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
     })
 
@@ -551,8 +548,8 @@ def test_get_community_records_with_invalid_cursor(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
     })
 
@@ -577,8 +574,8 @@ def test_get_community_record_by_id_tenant_none(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {"community_id": obj.community_id})
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {"community_id": obj.community_id})
 
     result = get_mcp_community_record_by_id_and_tenant(1, None)
     assert result is not None
@@ -602,7 +599,7 @@ def test_update_review_status_with_tenant(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
 
     update_mcp_community_review_status(
         community_id=1, tenant_id="tid", user_id="uid", review_status="approved",
@@ -619,7 +616,7 @@ def test_update_review_status_without_tenant(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
 
     update_mcp_community_review_status(
         community_id=1, tenant_id=None, user_id="uid", review_status="rejected",
@@ -648,8 +645,8 @@ def test_list_review_records_basic(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
     })
 
@@ -660,7 +657,7 @@ def test_list_review_records_basic(monkeypatch, mock_session):
 
 def test_list_review_records_with_filters(monkeypatch, mock_session):
     """Test review records with status, tag, and transport_type filters."""
-    monkeypatch.setattr("backend.database.community_mcp_db.or_", lambda *args: MagicMock())
+    monkeypatch.setattr("management.db.mcp.community.or_", lambda *args: MagicMock())
     session, query = mock_session
     r = MockCommunityRecord(1, "svc1")
 
@@ -676,8 +673,8 @@ def test_list_review_records_with_filters(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
     })
 
@@ -689,7 +686,7 @@ def test_list_review_records_with_filters(monkeypatch, mock_session):
 
 def test_list_review_records_with_search(monkeypatch, mock_session):
     """Test review records with search keyword."""
-    monkeypatch.setattr("backend.database.community_mcp_db.or_", lambda *args: MagicMock())
+    monkeypatch.setattr("management.db.mcp.community.or_", lambda *args: MagicMock())
     session, query = mock_session
     r = MockCommunityRecord(1, "svc1")
 
@@ -705,8 +702,8 @@ def test_list_review_records_with_search(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
     })
 
@@ -733,8 +730,8 @@ def test_list_review_records_with_cursor(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
     })
 
@@ -758,8 +755,8 @@ def test_list_review_records_with_invalid_cursor(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
     })
 
@@ -783,8 +780,8 @@ def test_list_review_records_pagination(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.community_mcp_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.community_mcp_db.as_dict", lambda obj: {
+    monkeypatch.setattr("management.db.mcp.community.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.mcp.community.as_dict", lambda obj: {
         "community_id": obj.community_id, "mcp_name": obj.mcp_name,
     })
 

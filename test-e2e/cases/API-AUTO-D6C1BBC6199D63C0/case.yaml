@@ -17,7 +17,9 @@ case:
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
   - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
   - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env。
-  - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录；测试租户内预置若干带结构化标签的 Agent 与已共享仓库 listing 数据，且测试数据可清理。
+  - users.yaml 中 Admin/UserA/UserB 等隔离账号可登录；测试自行创建三个 Agent、两个标签定义与受控赋值并发布共享 listing，不读取历史 Agent 的私有标签，不依赖历史数据数量。
+  - 正向谓词检查使用创建资源的租户管理员；普通用户验证列表和输入错误；跨租户检查只针对本用例创建的资源，公共官方 Agent 不视为租户泄露。
+  - 文本搜索使用本用例独占 Agent 的 display_name，不将经过标准化的内部 name 当成同一查询字符串。
   test_data:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
 

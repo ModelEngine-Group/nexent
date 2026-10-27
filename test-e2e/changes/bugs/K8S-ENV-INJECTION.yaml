@@ -19,7 +19,7 @@ change:
     retired: []
   affected_cases:
     existing: [DEP-AUTO-7177AC18CCE799DD]
-    added: [K8S-ENV-D5-001]
+    added: []
     modified: []
     retired: []
   traditional_ut:
@@ -32,4 +32,4 @@ change:
     reason: The new renderer and manifest composition have isolated contracts suitable for traditional UT. Real Kubernetes env resolution and replacement need separate D5 evidence; no additional D1-D4 boundary is introduced.
     test_selectors:
       - test/backend/deploy/test_k8s_env_injection.py
-  notes: 'User explicitly waived the external nexent-doc SPEC requirement for this change. Repository-local design and evidence: test-e2e/changes/bugs/K8S-ENV-INJECTION/design.md. Do not change the local deployment .env, existing clusters, SQL, HTTP interfaces or CI. The D5 case requires an explicitly selected isolated test cluster and mutation gates; missing prerequisites remain BLOCKED.'
+  notes: 'Historical change and UT evidence are retained. K8S-ENV-D5-001 was physically removed from the formal baseline at user request on 2026-10-23; the linked design records historical, not current, D5 coverage. Product Kubernetes code and traditional UT remain unchanged. The retained sandbox Case now covers Docker/local configuration only.'

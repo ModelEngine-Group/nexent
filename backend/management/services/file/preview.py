@@ -15,23 +15,23 @@ def build_preview_pdf_object_key(object_name: str, *, temporary: bool = False) -
     extension = "pdf.tmp" if temporary else "pdf"
     return f"preview/{directory}/{stem}_{suffix}.{extension}"
 
-from consts.const import DATA_PROCESS_SERVICE
-from consts.const import FILE_PREVIEW_SIZE_LIMIT
-from consts.exceptions import FileTooLargeException
-from consts.exceptions import NotFoundException
-from consts.const import OFFICE_MIME_TYPES
-from consts.exceptions import OfficeConversionException
+from contracts.constants.environment import DATA_PROCESS_SERVICE
+from contracts.constants.constants import FILE_PREVIEW_SIZE_LIMIT
+from contracts.errors.exceptions import FileTooLargeException
+from contracts.errors.exceptions import NotFoundException
+from contracts.constants.constants import OFFICE_MIME_TYPES
+from contracts.errors.exceptions import OfficeConversionException
 from typing import Optional
 from typing import Tuple
-from consts.exceptions import UnsupportedFileTypeException
+from contracts.errors.exceptions import UnsupportedFileTypeException
 import asyncio
-from database.attachment_db import copy_file
-from database.attachment_db import delete_file
-from database.attachment_db import file_exists
-from database.attachment_db import get_content_type
-from database.attachment_db import get_file_range
-from database.attachment_db import get_file_size_from_minio
-from database.attachment_db import get_file_stream_raw
+from management.db.file.attachment import copy_file
+from management.db.file.attachment import delete_file
+from management.db.file.attachment import file_exists
+from management.db.file.attachment import get_content_type
+from management.db.file.attachment import get_file_range
+from management.db.file.attachment import get_file_size_from_minio
+from management.db.file.attachment import get_file_stream_raw
 import httpx
 
 _conversion_locks: dict[str, asyncio.Lock] = {}

@@ -8,7 +8,7 @@ import pytest
 
 
 conversation_db = __import__(
-    "backend.database.conversation_db", fromlist=["create_conversation"]
+    "management.db.conversation.repository", fromlist=["create_conversation"]
 )
 
 

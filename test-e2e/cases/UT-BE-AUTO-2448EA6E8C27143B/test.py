@@ -2,8 +2,8 @@
 import pytest
 from unittest import mock
 
-import management.services.repository.agent.publishing as svc
-import management.services.repository.agent.common as shared
+from management.services.repository.agent import publishing as svc
+from management.services.repository.agent import common as shared
 
 CASE_ID = 'UT-BE-AUTO-2448EA6E8C27143B'
 

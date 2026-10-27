@@ -91,18 +91,18 @@ export function MySkill({ active }: { active: boolean }) {
             return;
           }
           if (page >= result.pagination.total_pages) {
-            message.warning("Skill 不存在或没有编辑权限");
+            message.warning(t("ui.localization.skillEditDenied"));
             return;
           }
         }
       } catch {
-        if (!cancelled) message.error("Skill 加载失败");
+        if (!cancelled) message.error(t("ui.localization.skillLoadFailed"));
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [active, searchParams, message]);
+  }, [active, searchParams, message, t]);
   const [skillDetailLoaded, setSkillDetailLoaded] = useState(false);
   const [viewingSkill, setViewingSkill] = useState<MyEditableSkillItem | null>(
     null

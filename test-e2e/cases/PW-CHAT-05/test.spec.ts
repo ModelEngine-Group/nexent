@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { existsSync, readFileSync } from "node:fs";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
@@ -38,7 +40,7 @@ journey("PW-CHAT-05", async (context) => {
       async () => { const changed = `${token}-changed`; await chat.setRuntimeMetadata({ test_run_id: changed }); const response = await chat.sendAndWait(`调用 require_metadata 并只回复返回值。`); await expect(response).toContainText(`METADATA_OK:${changed}`); return "a later turn consumed the changed metadata value"; },
     ],
     assertions: [
-      async () => { await expect(chat.metadataButton()).toBeVisible(); await expect(page.getByRole("button", { name: /知识库：/ })).toBeVisible(); return "Metadata and Knowledge Scope are real Composer controls"; },
+      async () => { await expect(chat.metadataButton()).toBeVisible(); await expect(page.getByRole("button", { name: "知识库", exact: true })).toBeVisible(); return "Metadata and Knowledge Scope are real Composer controls"; },
       async () => { await chat.assertRuntimeMetadata({ test_run_id: `${token}-changed` }); return "conversation-scoped metadata persisted independently"; },
       async () => { await expect(page.getByText(/tool_params/i)).toHaveCount(0); return "Northbound tool_params was not invented as a Composer field"; },
     ],

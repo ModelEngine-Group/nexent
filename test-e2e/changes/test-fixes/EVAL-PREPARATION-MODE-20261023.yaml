@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: EVAL-PREPARATION-MODE-20261023
+  change_type: test-fix
+  title: Declare EVAL-LEGACY preparation and gate Evaluator selection behind reference-answer mode
+  description: >-
+    The 2026-10-22 Ubuntu batch blocked EVAL-LEGACY-D5-001 before execution
+    because its binding omitted the mandatory per-case preparation
+    declaration; the case is self-contained (disposable Docker container, no
+    platform anchors, business asset families, mock services or D4
+    preparation) and now declares empty preparation explicitly. The same
+    batch failed PW-EVAL-RUN-01 at the Evaluator step: the Create Evaluation
+    dialog only lists custom Evaluators in reference-answer (有评测集评测)
+    mode, while the journey still selected the Evaluator in the default
+    mode. Move the mode switch and owned Set selection ahead of the
+    Evaluator selection and align the case contract order. Preserve all
+    assertions, timeouts and product behavior; no product code, deployment
+    or unrelated Case is changed.
+  affected_features:
+    existing: [V5-PW-EVAL-RUN-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [PW-EVAL-RUN-01, EVAL-LEGACY-D5-001]
+    retired: []
+  notes: >-
+    Static validation only; runtime acceptance rerun on the Ubuntu daily is
+    pending. EVAL-LEGACY-D5-001 preparation declares no families, anchors,
+    special assets or D4 groups, matching its disposable-container design.

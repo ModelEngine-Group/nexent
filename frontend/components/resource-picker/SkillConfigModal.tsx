@@ -2,6 +2,8 @@
 
 "use client";
 
+import { useTranslation } from "react-i18next";
+
 import { useState } from "react";
 
 import {
@@ -25,6 +27,7 @@ export function SkillConfigModal({
   onConfirm,
   skillName = "search-web-tavily",
 }: SkillConfigModalProps) {
+  const { t } = useTranslation();
   const [apiKey, setApiKey] = useState("aqVLa_4z7T…");
   const [maxResults, setMaxResults] = useState("");
   const [imageFilter, setImageFilter] = useState(true);
@@ -33,7 +36,7 @@ export function SkillConfigModal({
     <ParamDialog
       variant="skill"
       open={open}
-      title={`${skillName} 配置`}
+      title={t("ui.localization.resourceConfiguration", { name: skillName })}
       onClose={onClose}
       onConfirm={() =>
         onConfirm?.({ tavily_api_key: apiKey, max_results: maxResults })
@@ -48,7 +51,7 @@ export function SkillConfigModal({
 
       <ParamField label="max_results" info>
         <ParamInput
-          placeholder="查询数量"
+          placeholder={t("ui.localization.resultCount")}
           value={maxResults}
           onChange={(e) => setMaxResults(e.target.value)}
         />

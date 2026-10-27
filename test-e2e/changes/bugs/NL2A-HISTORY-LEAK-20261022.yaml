@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: NL2A-HISTORY-LEAK-20261022
+  change_type: bugfix
+  bug_id: NL2A-HISTORY-LEAK-20261022
+  title: Enable strict output validation for the NL2Agent creator
+  description: Opt the ephemeral creator into existing code_action validation and bounded repair.
+  observed_behavior: The creator uses legacy parsing and can publish echoed completed-action history as an answer.
+  expected_behavior: Both creator languages enable strict validation; invalid history is repaired without replaying completed actions, independently of target Agent policy.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing creator tests verify tools and context but do not assert strict output policy; runtime protocol tests need history-echo variants.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-045]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AGT-003]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Both creator languages enable strict code_action validation while ordinary and target Agent policies remain independent
+    - History echoes roll back and repair without executing recorded save code
+    - Three invalid echoes exhaust the retry budget without raw final output or max-step summarization
+    - A successful action preceding repair is executed exactly once
+    test_selectors:
+    - test/backend/agents/test_nl2agent_output_policy.py
+    - test/backend/agents/test_nl2agent_agent.py
+    - test/sdk/core/agents/test_nl2agent_history_repair.py
+    - test/sdk/core/agents/test_pr4005_continuation.py
+    - test/sdk/core/agents/test_output_protocol.py
+    reason: Configuration and substituted-model runtime regressions belong in UT; no duplicate formal D1 case is needed.
+  notes: >-
+    Design: nexent-doc/docs/Developing/chat-nl2agent-history-leak/design.md,
+    local checkout follow-up dated 2026-10-22. Reuse AGT-003 as optional environment-dependent
+    runtime regression, without claiming that its broad legacy journey deterministically
+    detects model history echoes. D2/HTTP, D4/UI and D5/deployment contracts are unchanged.

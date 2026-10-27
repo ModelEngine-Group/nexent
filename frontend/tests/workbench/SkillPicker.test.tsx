@@ -1,5 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import i18n from "i18next";
+import { initReactI18next } from "react-i18next";
+import zh from "@/public/locales/zh/common.json";
 import { beforeEach, expect, it, vi } from "vitest";
 import {
   act,
@@ -178,10 +181,7 @@ it("selects and deselects search results without losing hidden selections", asyn
     />
   );
   await screen.findByRole("option", { name: /Default Skill/ });
-  await userEvent.type(
-    screen.getByPlaceholderText("搜索 Skill 名称或描述"),
-    "New"
-  );
+  await userEvent.type(screen.getByRole("searchbox"), "New");
   await userEvent.click(screen.getByRole("checkbox", { name: "全选" }));
   expect(confirm).not.toHaveBeenCalled();
   expect(screen.getByRole("option", { name: /New Skill/ })).toHaveAttribute(
@@ -456,7 +456,7 @@ it("overlapping skill repository requests keep confirmation blocked until the cu
   await userEvent.click(screen.getByRole("tab", { name: "仓库" }));
   const confirm = screen.getByRole("button", { name: "确认" });
   expect(confirm).toBeDisabled();
-  fireEvent.change(screen.getByPlaceholderText("搜索 Skill 名称或描述"), {
+  fireEvent.change(screen.getByRole("searchbox"), {
     target: { value: "Latest" },
   });
   await waitFor(() =>
@@ -526,4 +526,14 @@ it("repository page_size follows the shared 10/20/50 selector", async () => {
       )
     );
   }
+});
+
+beforeEach(async () => {
+  await i18n.use(initReactI18next).init({
+    lng: "zh",
+    defaultNS: "common",
+    keySeparator: false,
+    resources: { zh: { common: zh } },
+    interpolation: { escapeValue: false },
+  });
 });

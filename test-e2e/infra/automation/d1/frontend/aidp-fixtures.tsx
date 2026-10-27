@@ -67,7 +67,10 @@ vi.mock("next/navigation", () => ({
   useParams: () => ({ locale: "zh" }),
   useSearchParams: () => new URLSearchParams(),
 }));
-vi.mock("@/lib/auth", () => ({ getAuthHeaders: () => ({}) }));
+vi.mock("@/lib/auth", () => ({
+  getAuthHeaders: () => ({}),
+  fetchWithAuth: vi.fn(),
+}));
 vi.mock("@/lib/session", () => ({ handleSessionExpired: vi.fn() }));
 vi.mock("@/lib/logger", () => ({
   default: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },

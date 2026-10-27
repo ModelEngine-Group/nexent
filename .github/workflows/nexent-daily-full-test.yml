@@ -17,7 +17,7 @@ concurrency:
 jobs:
   daily-full-test:
     name: Daily D0-D6
-    runs-on: [self-hosted, linux, x64]
+    runs-on: [e2e]
     # Includes up to 12 hours waiting for the local Daily lock.
     timeout-minutes: 1440
     defaults:
@@ -25,7 +25,7 @@ jobs:
         shell: bash
     env:
       TEST_ROOT: /home/jason/nexent-test-suite
-      REPO_ROOT: /root/project/nexent
+      REPO_ROOT: /home/jason/projects/nexent
       TEST_PYTHON: /home/jason/nexent-test-suite/runtime/test-venv/bin/python
 
     steps:

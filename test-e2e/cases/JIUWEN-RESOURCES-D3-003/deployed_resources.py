@@ -13,8 +13,8 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import httpx
-from database.client import get_db_session, minio_client
-from database.db_models import AgentInfo, AgentRelation, ConversationRecord
+from management.db.client import get_db_session, minio_client
+from management.db.models import AgentInfo, AgentRelation, ConversationRecord
 from management.services.permission.identity.authentication_helpers import (
     generate_session_jwt,
 )
@@ -84,7 +84,7 @@ def main():
         if terminal:
             assert len(terminal) == 1 and terminal[0]["status"] == "completed"
         else:
-            from database.db_models import ConversationMessage
+            from management.db.models import ConversationMessage
 
             with get_db_session() as session:
                 final = session.query(ConversationMessage).filter_by(message_id=rows[-1]["id"]).one().message_content
@@ -243,7 +243,7 @@ def main():
                 for source, (row_hash, export_hash) in snapshots.items():
                     assert helper.digest(helper.source_rows(source)) == row_hash, "Original source changed"
                     assert helper.digest(helper.export_agent(config, source)) == export_hash, "Original bindings changed"
-                from database.db_models import ConversationMessage
+                from management.db.models import ConversationMessage
 
                 with get_db_session() as session:
                     conversations = [r.conversation_id for r in session.query(ConversationRecord).filter(

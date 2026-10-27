@@ -29,18 +29,18 @@ def test_recover_runtime_tasks_finishes_database_and_redis_state(monkeypatch):
     runtime_state = MagicMock()
     _install_module(
         monkeypatch,
-        "database.conversation_db",
+        "management.db.conversation.repository",
         fail_streaming_assistant_messages=fail_messages,
     )
     _install_module(
         monkeypatch,
-        "database.agent_automation_db",
+        "management.db.automation.repository",
         recover_orphaned_runs=MagicMock(return_value=4),
         release_all_task_locks=MagicMock(return_value=5),
     )
     _install_module(
         monkeypatch,
-        "database.agent_evaluation_db",
+        "management.db.evaluation.runs",
         list_evaluation_tenant_ids=MagicMock(return_value=["tenant-1", "tenant-2"]),
         reap_stale_runs=reap,
     )
@@ -71,23 +71,23 @@ def test_recover_runtime_tasks_finishes_database_and_redis_state(monkeypatch):
 def test_recover_config_tasks_uses_existing_failure_states(monkeypatch):
     _install_module(
         monkeypatch,
-        "database.agent_evaluation_db",
+        "management.db.evaluation.runs",
         fail_interrupted_no_set_runs_on_startup=MagicMock(return_value=2),
     )
     _install_module(
         monkeypatch,
-        "database.evaluation_set_db",
+        "management.db.evaluation.sets",
         recover_interrupted_generations=MagicMock(return_value=3),
         cleanup_orphaned_virtual_evaluation_sets=MagicMock(return_value=4),
     )
     _install_module(
         monkeypatch,
-        "database.model_management_db",
+        "management.db.model.repository",
         fail_detecting_models_on_startup=MagicMock(return_value=5),
     )
     _install_module(
         monkeypatch,
-        "database.memory_dreaming_db",
+        "management.db.memory.dreaming",
         recover_stale=MagicMock(return_value=6),
     )
 
@@ -117,7 +117,7 @@ def test_recover_data_process_tasks_marks_each_celery_id_cancelled_once(monkeypa
     redis_service.mark_task_cancelled.side_effect = [True, True, False, True]
     _install_module(
         monkeypatch,
-        "database.knowledge_file_lifecycle_db",
+        "management.db.knowledge_base.file_lifecycle",
         fail_interrupted_file_tasks=MagicMock(return_value=records),
     )
     _install_module(
@@ -139,7 +139,7 @@ def test_recover_northbound_tasks_fails_active_a2a_tasks(monkeypatch):
     fail_active = MagicMock(return_value=6)
     _install_module(
         monkeypatch,
-        "database.a2a_agent_db",
+        "management.db.a2a.repository",
         fail_active_tasks_on_startup=fail_active,
     )
 
@@ -165,11 +165,11 @@ def test_fail_interrupted_uploads_claims_before_deleting_partial_object(monkeypa
     ]
     transition = MagicMock(side_effect=[{"file_id": "claimed", "version": 3}, None])
     delete_object = MagicMock(return_value={"success": True})
-    _install_module(monkeypatch, "database.attachment_db", delete_file=delete_object)
-    _install_module(monkeypatch, "database.client", minio_client=MagicMock())
+    _install_module(monkeypatch, "management.db.file.attachment", delete_file=delete_object)
+    _install_module(monkeypatch, "management.db.client", minio_client=MagicMock())
     _install_module(
         monkeypatch,
-        "database.knowledge_file_lifecycle_db",
+        "management.db.knowledge_base.file_lifecycle",
         list_uploading_files_created_before=MagicMock(return_value=records),
         transition_file_record=transition,
     )
@@ -179,7 +179,7 @@ def test_fail_interrupted_uploads_claims_before_deleting_partial_object(monkeypa
         "nexent-config",
     ) == 1
     list_uploads = sys.modules[
-        "database.knowledge_file_lifecycle_db"
+        "management.db.knowledge_base.file_lifecycle"
     ].list_uploading_files_created_before
     list_uploads.assert_called_once_with(cutoff, "nexent-config")
     delete_object.assert_called_once_with("knowledge/a.pdf", "files")
@@ -210,13 +210,13 @@ def test_fail_interrupted_uploads_records_storage_cleanup_failure(monkeypatch):
     minio_client.file_exists.return_value = True
     _install_module(
         monkeypatch,
-        "database.attachment_db",
+        "management.db.file.attachment",
         delete_file=MagicMock(return_value={"success": False, "error": "storage down"}),
     )
-    _install_module(monkeypatch, "database.client", minio_client=minio_client)
+    _install_module(monkeypatch, "management.db.client", minio_client=minio_client)
     _install_module(
         monkeypatch,
-        "database.knowledge_file_lifecycle_db",
+        "management.db.knowledge_base.file_lifecycle",
         list_uploading_files_created_before=MagicMock(return_value=[record]),
         transition_file_record=transition,
     )

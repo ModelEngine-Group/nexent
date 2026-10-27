@@ -1,10 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Regression tests for atomic long-term-memory activation ordering."""
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-from database import memory_long_term_db
+from management.db.memory import long_term as memory_long_term_db
 
 
 class _VersionRow:

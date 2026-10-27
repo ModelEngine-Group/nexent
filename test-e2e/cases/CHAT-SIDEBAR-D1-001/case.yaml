@@ -9,6 +9,7 @@ case:
   business_rule_ids:
   - CHAT-SIDEBAR-RULE-001
   - CHAT-SIDEBAR-RULE-002
+  - CHAT-SIDEBAR-RULE-009
   title: Preserve conversation sidebar and agent batch selection interactions
   type: FE-COMP
   priority: P1
@@ -45,6 +46,9 @@ case:
   - order: 6
     action: Make a later conversation-list page fail while selecting an agent group.
     expected: No partial group selection is applied and no deletion is submitted.
+  - order: 7
+    action: Keep one Agent manually expanded and another collapsed, search for a conversation under the collapsed Agent, manually collapse the matching group and repeat searches three times, clear and repeat the same query, search by Agent name and by an unmatched keyword, then clear search. Enter a selected Agent and verify name-only, conversation-title and cleared searches within its recent conversations.
+    expected: Conversation-title matches expand their Agent group; manual collapse applies only to the current query and every subsequent search expands matching conversations again. Agent-name-only matches preserve manual expansion. A query matching both Agent and conversation also expands the group. Unmatched groups disappear, empty results are indicated and clearing search restores manual expansion.
   expected_results:
   - Only persisted conversation and its server title are visible.
   - Runtime receives normalized title; parent callback receives local ID, remote ID
@@ -53,9 +57,11 @@ case:
   - Agent selection includes conversations from all list pages and excludes other agents.
   - The existing batch-delete service receives only the selected agent's server IDs.
   - A pagination failure leaves the selection unchanged and does not submit a deletion.
+  - Conversation-title matches expand their Agent group; Agent-name-only matches and clearing search preserve manual expansion.
   forbidden_side_effects:
   - No unsent draft displayed and no deletion of an unrelated conversation.
   - No partial selection or deletion when an agent-list page fails to load.
+  - Searching does not rename or delete a conversation.
   unit_boundary: Actual sidebar components with mocked external assistant runtime
     and conversation service.
   inputs:
@@ -71,6 +77,7 @@ case:
   - Agent selection includes conversations from all list pages and excludes other agents.
   - The existing batch-delete service receives only the selected agent's server IDs.
   - A failed page load does not commit partial group selection or call batch deletion.
+  - Search reveals matching conversations under previously collapsed Agent groups; Agent-name-only matches and clearing search preserve manual expansion.
   acceptance:
   - id: AC-01
     description: Visibility, rename and batch deletion preserve the existing contracts.
@@ -102,3 +109,8 @@ case:
     - 6
     forbidden_side_effects:
     - 2
+  - id: AC-04
+    description: Conversation-title matches expand their Agent group, while Agent-name-only matches and clearing search preserve manual expansion without business writes.
+    steps: [7]
+    expected_results: [7]
+    forbidden_side_effects: [3]

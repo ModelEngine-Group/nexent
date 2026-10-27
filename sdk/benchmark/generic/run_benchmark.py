@@ -1,7 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 #!/usr/bin/env python3
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """
 Unified benchmark runner for Nexent Agent evaluation.
@@ -51,7 +50,7 @@ YAML config file structure (see export_agent_config.py):
       enable_context_manager: true
       ...
     prompts:
-      duty_prompt: |
+      prompt: |
         You are a professional mathematics assistant...
     tools: [...]
     sub_agents: [...]
@@ -646,7 +645,7 @@ def main():
     )
     parser.add_argument("--language", type=str, choices=["en", "zh"],
                         help="Prompt language (overrides YAML)")
-    parser.add_argument("--duty-prompt", type=str,
+    parser.add_argument("--prompt", type=str,
                         help="Complete business prompt including constraints and examples (overrides YAML)")
 
 
@@ -796,11 +795,11 @@ def main():
 
     # Merge config: CLI args override YAML
     prompts = agent_config.get("prompts", {})
-    if set(prompts) - {"duty_prompt"}:
-        raise ValueError("Agent prompts only supports duty_prompt; migrate legacy configuration first")
+    if set(prompts) - {"prompt"}:
+        raise ValueError("Agent prompts only supports prompt; migrate legacy configuration first")
     agent_cfg = agent_config.get("agent_config", {})
 
-    duty_prompt = args.duty_prompt or prompts.get("duty_prompt", "")
+    prompt = args.prompt or prompts.get("prompt", "")
     max_steps = args.max_steps or agent_cfg.get("max_steps", 10)
     temperature = args.temperature if args.temperature is not None else agent_cfg.get("temperature", 0.1)
     language = args.language or "en"
@@ -935,7 +934,7 @@ def main():
 
     task_fn = make_nexent_task(
         system_prompt=system_prompt,
-        duty_prompt=duty_prompt,
+        prompt=prompt,
         max_steps=max_steps,
         temperature=temperature,
         language=language,
@@ -977,8 +976,8 @@ def main():
           f"hard_budget={cm_config.hard_input_budget_tokens or int(cm_config.token_threshold * 1.1)}, "
           f"keep_steps={cm_config.keep_recent_steps}")
     print(f"  Tools:        {len(tools)} ({', '.join(t.name for t in tools) if tools else 'none'})")
-    if duty_prompt:
-        print(f"  Duty prompt:  {duty_prompt[:60]}...")
+    if prompt:
+        print(f"  Prompt:       {prompt[:60]}...")
 
     run_experiment(
         dataset_name=args.dataset,

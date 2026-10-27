@@ -89,8 +89,8 @@ async def test_delete_fence_cancels_process_forward_cleanup_chain(tenant_a_admin
     file_id = uuid.uuid4().hex
     deleted_file_id = uuid.uuid4().hex
 
-    from database.knowledge_db import create_knowledge_record, delete_knowledge_record
-    from database.knowledge_file_lifecycle_db import create_file_record, delete_file_record
+    from management.db.knowledge_base.repository import create_knowledge_record, delete_knowledge_record
+    from management.db.knowledge_base.file_lifecycle import create_file_record, delete_file_record
 
     redis_service = _redis_service()
     task_id = None
@@ -176,8 +176,8 @@ async def test_delete_fence_cancels_process_forward_cleanup_chain(tenant_a_admin
         assert source_cleanup.get('skipped_reason') == 'document_delete_requested'
 
         from data_process.utils import is_document_delete_requested
-        import database.knowledge_file_lifecycle_db as lifecycle_db
-        import management.services.knowledge_base.task_state as redis_module
+        from management.db.knowledge_base import file_lifecycle as lifecycle_db
+        from management.services.knowledge_base import task_state as redis_module
 
         class _RedisUnavailable:
             def is_document_delete_requested(self, **kwargs):

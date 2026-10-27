@@ -1,5 +1,6 @@
-# -*- coding: utf-8 -*-
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+# -*- coding: utf-8 -*-
 
 """
 Shared utilities for building and running nexent agents in benchmarks.
@@ -68,7 +69,7 @@ THINKING_OFF_EXTRA_BODY = {
 }
 
 # ============ Default Prompt Templates ============
-DEFAULT_DUTY_PROMPT = """You are an intelligent assistant focused on helping users solve problems. You need to:
+DEFAULT_AGENT_PROMPT = """You are an intelligent assistant focused on helping users solve problems. You need to:
 1. Understand the user's needs and provide accurate answers
 2. Maintain a friendly and professional attitude
 3. Remember key information from the conversation
@@ -107,7 +108,7 @@ def build_prompt_templates(
 def build_agent_run_info(
     query: str,
     history: list[AgentHistory],
-    duty_prompt: str = "",
+    prompt: str = "",
     fallback_prompt: str = "",
     tools: list = None,
     managed_agents: list = None,
@@ -131,7 +132,7 @@ def build_agent_run_info(
     Args:
         query: User query
         history: Conversation history
-        duty_prompt: Complete business prompt, including constraints and examples (empty uses default)
+        prompt: Complete business prompt, including constraints and examples (empty uses default)
         fallback_prompt: Optional single custom system component used when no
                          business prompt is supplied
         tools: Tool list
@@ -155,7 +156,7 @@ def build_agent_run_info(
         AgentRunInfo object
     """
     # Use defaults
-    complete_prompt = duty_prompt or DEFAULT_DUTY_PROMPT
+    complete_prompt = prompt or DEFAULT_AGENT_PROMPT
     tools = tools or []
     managed_agents = managed_agents or []
 
@@ -176,7 +177,7 @@ def build_agent_run_info(
         language=language,
     )
     context_items = build_context_inputs(
-        duty_prompt=complete_prompt,
+        prompt=complete_prompt,
         language=language,
         is_manager=is_manager,
         tools={tool.name: tool for tool in tools},
@@ -190,7 +191,7 @@ def build_agent_run_info(
     if prompt_components:
         component_item_ids = {
             "basic_information": "system:header",
-            "duty_prompt": "system:duty",
+            "prompt": "system:duty",
             "execution_prompt": "system:execution_flow",
             "resource_prompt": "system:available_resources_header",
             "code_rules_prompt": "system:code_norms",
@@ -213,7 +214,7 @@ def build_agent_run_info(
             else item
             for item in context_items
         ]
-    if fallback_prompt and not duty_prompt:
+    if fallback_prompt and not prompt:
         context_items = [ContextItemInput(
             id="system:fallback",
             type="system",

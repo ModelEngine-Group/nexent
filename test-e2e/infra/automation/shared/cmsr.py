@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Owned CMSR fixtures; existing runner owns the HTTP service lifetime."""
 import asyncio
 import json
@@ -159,8 +161,9 @@ def verify_history(body, nonce):
     checks = {
         'failed_fragment_present': False, 'empty_code_present': False,
         'committed_marker_present': True, 'final_marker_present': True,
-        # One code action at Step 1, followed by the explicit final-answer turn.
-        'parse_count': 1, 'step_count': 2,
+        # Only the code action owns a persisted reasoning step. The pure final
+        # answer's Step 2 marker is projected away by the final-answer contract.
+        'parse_count': 1, 'step_count': 1,
     }
     for key, expected in checks.items():
         if diagnostics[key] != expected:

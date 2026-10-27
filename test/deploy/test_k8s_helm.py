@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 import shlex
 import shutil
@@ -128,9 +129,10 @@ def chart_dirs(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Path]:
 def isolated_k8s_project(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
     project = tmp_path / "project"
     shutil.copytree(PROJECT_ROOT / "deploy", project / "deploy")
-    const_dir = project / "backend" / "consts"
+    const_dir = project / "backend" / "contracts" / "constants"
     const_dir.mkdir(parents=True)
-    shutil.copy2(PROJECT_ROOT / "backend" / "consts" / "const.py", const_dir / "const.py")
+    shutil.copy2(PROJECT_ROOT / "backend" / "contracts" / "constants" / "environment.py", const_dir / "environment.py")
+    shutil.copy2(PROJECT_ROOT / "VERSION", project / "VERSION")
     (project / "deploy" / "k8s" / "deploy.options").unlink(missing_ok=True)
     (project / "deploy" / "env" / ".env").write_text(
         'MINIO_ACCESS_KEY="test-access"\n'
@@ -667,7 +669,8 @@ def test_web_mounts_persistent_project_configuration(chart_dirs: dict[str, Path]
         and document["metadata"]["name"] == "nexent-web"
     )
     container = web["spec"]["template"]["spec"]["containers"][0]
-    env = {item["name"]: item["value"] for item in container["env"]}
+    assert all(("value" in item) != ("valueFrom" in item) for item in container["env"])
+    env = {item["name"]: item["value"] for item in container["env"] if "value" in item}
     mounts = {item["name"]: item["mountPath"] for item in container["volumeMounts"]}
     volumes = {
         item["name"]: item["persistentVolumeClaim"]["claimName"]

@@ -1107,11 +1107,11 @@ def test_provider_document_helpers_for_local_and_aidp_providers(monkeypatch):
 
     # aidp provider
     monkeypatch.setattr(
-        "consts.const.AIDP_SERVER_URL",
+        "contracts.constants.environment.AIDP_SERVER_URL",
         "http://aidp",
     )
     monkeypatch.setattr(
-        "consts.const.AIDP_API_KEY",
+        "contracts.constants.environment.AIDP_API_KEY",
         "key",
     )
     aidp_list = MagicMock(

@@ -4,9 +4,9 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from consts.const import AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS
-from consts.model import AgentRequest
-from database import agent_automation_db
+from contracts.constants.environment import AGENT_AUTOMATION_DEFAULT_TIMEOUT_SECONDS
+from contracts.agent import AgentRequest
+from management.db.automation import repository as agent_automation_db
 from management.services.agent.service import is_agent_running, run_agent_background, stop_agent_tasks
 
 from management.services.automation.capabilities import validate_bindings_available

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for durable knowledge-base file lifecycle persistence."""
 
 import contextlib
@@ -26,7 +28,7 @@ def _install_storage_import_stubs() -> None:
 
 
 _install_storage_import_stubs()
-lifecycle_db = importlib.import_module("backend.database.knowledge_file_lifecycle_db")
+lifecycle_db = importlib.import_module("management.db.knowledge_base.file_lifecycle")
 
 
 def _session_context(session):

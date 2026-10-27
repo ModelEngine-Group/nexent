@@ -11,8 +11,8 @@ from urllib.parse import quote, unquote, urljoin, urlparse, urlunparse
 
 import httpx
 
-from consts.const import IND_AIDP_IMAGE_SIGNING_KEY
-from database.tool_db import query_tool_instances_by_id, query_tools_by_ids
+from contracts.constants.environment import IND_AIDP_IMAGE_SIGNING_KEY
+from management.db.tool.repository import query_tool_instances_by_id, query_tools_by_ids
 
 logger = logging.getLogger("ind_aidp_service")
 

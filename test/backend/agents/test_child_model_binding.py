@@ -3,7 +3,7 @@
 """Capture child version options before parent request overlays."""
 
 import pytest
-from agents import create_agent_info as service
+import management.services.agent.preparation.run as service
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 
 

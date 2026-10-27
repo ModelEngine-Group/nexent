@@ -32,7 +32,7 @@ STAGE = pytest.mark.stage("D1")
 @pytest.mark.case_id("UT-BE-021")
 @pytest.mark.asyncio
 async def test_northbound_idempotency_rejects_inflight_and_allows_replay_after_end(monkeypatch: pytest.MonkeyPatch) -> None:
-    from consts.exceptions import LimitExceededError
+    from contracts.errors.exceptions import LimitExceededError
     from services import northbound_service as service
 
     monkeypatch.setattr(type(service.runtime_state_service), "enabled", property(lambda _self: False))

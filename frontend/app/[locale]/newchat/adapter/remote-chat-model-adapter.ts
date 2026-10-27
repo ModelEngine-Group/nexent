@@ -42,7 +42,10 @@ import { createFinalAnswerProjection } from "@/lib/finalAnswerProjection";
 import { parseAutomationProposal } from "@/features/agentAutomation/parseProposal";
 import { unwrapFinalAnswer } from "@/lib/finalAnswerEnvelope";
 import type { SkillParam, ToolParam } from "@/types/agentConfig";
-import type { HumanInteractionEvent } from "@/types/clarification";
+import type {
+  ClarificationResponse,
+  HumanInteractionEvent,
+} from "@/types/clarification";
 import { extractMinioFiles } from "../utils/history-attachments";
 
 // Backend SSE chunk format
@@ -207,7 +210,7 @@ export interface Nl2aAgentDraftPayload {
   name: string;
   display_name: string;
   description: string;
-  duty_prompt: string;
+  prompt: string;
   greeting_message: string;
   example_questions: string[];
 }
@@ -261,11 +264,20 @@ export interface Nl2aInstallableResource {
   default_option_id: string;
 }
 
+export interface Nl2aKnowledgeRecommendation {
+  id: string;
+  binding_value: string;
+  name: string;
+  score: number;
+}
+
 export type Nl2aRecommendedResource =
   | {
       candidate: Nl2aResourceCandidate & { resource_type: "tool" };
       recommendation: "recommended" | "optional";
       is_bound: boolean;
+      knowledge_recommendations?: Nl2aKnowledgeRecommendation[];
+      knowledge_bound_values?: string[];
       form_kind: "TOOL_CONFIG";
       config: ToolParam[];
     }
@@ -273,12 +285,14 @@ export type Nl2aRecommendedResource =
       candidate: Nl2aResourceCandidate & { resource_type: "skill" };
       recommendation: "recommended" | "optional";
       is_bound: boolean;
+      knowledge_recommendations?: Nl2aKnowledgeRecommendation[];
+      knowledge_bound_values?: string[];
       form_kind: "SKILL_CONFIG";
       config: SkillParam[];
     };
 
 export type Nl2aPromptField =
-  "duty_prompt" | "greeting_message" | "example_questions";
+  "prompt" | "greeting_message" | "example_questions";
 
 export type Nl2aPayload =
   | Nl2aRequirementClarificationPayload
@@ -845,6 +859,21 @@ export function parseNl2aMessage(chunk: SseChunk): Nl2aMessage | null {
             !["tool", "skill"].includes(resource.candidate.resource_type) ||
             !["recommended", "optional"].includes(resource.recommendation) ||
             typeof resource.is_bound !== "boolean" ||
+            (resource.knowledge_bound_values !== undefined &&
+              (!Array.isArray(resource.knowledge_bound_values) ||
+                resource.knowledge_bound_values.some(
+                  (value) => typeof value !== "string"
+                ))) ||
+            (resource.knowledge_recommendations !== undefined &&
+              (!Array.isArray(resource.knowledge_recommendations) ||
+                resource.knowledge_recommendations.length > 5 ||
+                resource.knowledge_recommendations.some(
+                  (kb) =>
+                    !kb ||
+                    typeof kb.id !== "string" ||
+                    typeof kb.binding_value !== "string" ||
+                    typeof kb.name !== "string"
+                ))) ||
             !Array.isArray(resource.config)
         )
       ) {
@@ -897,7 +926,7 @@ export function parseNl2AgentState(content: string): Nl2AgentStateEvent | null {
       return null;
     }
     const promptFields = new Set<Nl2aPromptField>([
-      "duty_prompt",
+      "prompt",
       "greeting_message",
       "example_questions",
     ]);
@@ -1510,6 +1539,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       minio_files: minioFiles.length > 0 ? minioFiles : null,
       is_debug: isAgentDebug,
     };
+    const clarificationResponse =
+      lastUserIndex >= 0
+        ? messages[lastUserIndex].metadata?.custom?.clarificationResponse
+        : undefined;
+    if (!isResume && !isNl2Agent && clarificationResponse) {
+      requestBody.clarification_response = clarificationResponse;
+    }
     const numericServerThreadId = Number(serverThreadId);
     const hasServerConversationId =
       Number.isInteger(numericServerThreadId) && numericServerThreadId > 0;
@@ -1721,6 +1757,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         {
           ...requestBody,
           query: String(requestBody.query || ""),
+          clarification_response: requestBody.clarification_response as
+            ClarificationResponse | undefined,
           history: (requestBody.history || []) as Array<{
             role: string;
             content: string;

@@ -102,16 +102,19 @@ vi.mock("next/navigation", () => ({
   useParams: vi.fn(() => ({ locale: "zh" })),
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
+vi.mock("react-i18next", () => {
+  const translation = {
     t: (key: string, fallback?: string) => fallback ?? key,
     i18n: { language: "zh" },
-  }),
-  initReactI18next: { type: "3rdParty", init: () => {} },
-  I18nextProvider: ({ children }: { children?: React.ReactNode }) => (
-    <>{children}</>
-  ),
-}));
+  };
+  return {
+    useTranslation: () => translation,
+    initReactI18next: { type: "3rdParty", init: () => {} },
+    I18nextProvider: ({ children }: { children?: React.ReactNode }) => (
+      <>{children}</>
+    ),
+  };
+});
 
 vi.mock("@/app/newchat/assistant-ui/chat", () => ({
   Chat: () => <div>workbench chat</div>,
@@ -145,9 +148,10 @@ vi.mock("@/hooks/useConfig", () => ({
   useConfig: () => ({ modelConfig: undefined }),
 }));
 
-vi.mock("@/hooks/model/useModelList", () => ({
-  useModelList: () => ({ availableLlmModels: [], isLoading: false }),
-}));
+vi.mock("@/hooks/model/useModelList", () => {
+  const models = { availableLlmModels: [], isLoading: false };
+  return { useModelList: () => models };
+});
 
 vi.mock("@/services/conversationService", () => ({
   conversationService: {

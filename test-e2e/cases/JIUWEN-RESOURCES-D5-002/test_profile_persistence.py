@@ -49,12 +49,12 @@ def test_trusted_outlet_postgres_lifecycle(monkeypatch):
         else:
             raise AssertionError("Isolated PostgreSQL did not become ready")
         engine = create_engine(f"postgresql://postgres@127.0.0.1:{port}/postgres", echo=False)
-        from database import client
-        from database.db_models import ModelRecord
-        from database.model_management_db import create_model_record as create_legacy
-        from database.model_management_db import get_model_by_model_id
-        from database.model_management_db import update_model_record as update_legacy
-        from database.model_runtime_profile_db import provision_runtime_outlet_batch
+        from management.db import client
+        from management.db.models import ModelRecord
+        from management.db.model.repository import create_model_record as create_legacy
+        from management.db.model.repository import get_model_by_model_id
+        from management.db.model.repository import update_model_record as update_legacy
+        from management.db.model.runtime_profile import provision_runtime_outlet_batch
         from management.services.model.runtime_provisioning import (
             build_runtime_outlet_snapshot,
             create_model_record,
@@ -112,7 +112,7 @@ def test_trusted_outlet_postgres_lifecycle(monkeypatch):
         current = restore_runtime_model_snapshot(after, "tenant")
         assert current.config_revision == 2 and current.parameter_values["temperature"] == .2
         assert captured.config_revision == 1 and captured.parameter_values["temperature"] is None
-        monkeypatch.setattr("services.model_profile_service.get_model_profile_catalog",
+        monkeypatch.setattr("management.services.model.profile.get_model_profile_catalog",
                             lambda: pytest.fail("Saved outlet was reinterpreted against catalog"))
         from nexent.core.concurrency import LanePolicy, ManagedTaskSpec, ThreadManager
 

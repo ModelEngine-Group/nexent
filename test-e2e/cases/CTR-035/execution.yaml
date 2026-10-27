@@ -10,3 +10,6 @@ preparation:
   anchors: false
   special_assets: false
   d4_groups: []
+acceptance_bindings:
+  AC-01: [test_nacos_timeout_and_recovery]
+  AC-02: [test_nacos_timeout_and_recovery]

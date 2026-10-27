@@ -10,7 +10,8 @@ feature:
     and four creator entries; sampling overrides use canonical provider-scale values.
   business_rules:
   - rule_id: CHAT-MODEL-CONTROLS-RULE-001
-    description: Shared capability-derived reasoning choices preserve each entry's candidate model scope.
+    description: Shared capability-derived reasoning choices preserve each entry's candidate model scope. Unknown and unsupported
+      capabilities prevent changes and provide the same localized accessible unsupported-mode message on hover or explicit activation, without permanent visible text or focus-triggered tooltips; switching models clears transient feedback. Toggle-only models never show empty effort controls.
   - rule_id: CHAT-MODEL-CONTROLS-RULE-002
     description: One validated session selection supplies initial and subsequent composers, immutable turn requests and creation
       snapshots.

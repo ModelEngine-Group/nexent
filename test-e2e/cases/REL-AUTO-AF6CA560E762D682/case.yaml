@@ -6,99 +6,107 @@ case:
   feature_id: V5-REL-AUTO-AF6CA560E762D682
   business_rule_ids:
   - V5-REL-AUTO-AF6CA560E762D682-RULE-01
-  title: config_lifespan 启动恢复顺序与失败容错及关闭优雅停止
+  title: config_lifespan 启动校验、强制重启恢复、就绪状态与正常资源回收
   type: RELIABILITY
   priority: P1
   status: active
   automation: automated
-  objective: 配置服务启动时 recover_config_tasks、evaluation_maintenance.start、schedule_interrupted_upload_cleanup 若顺序错乱或异常被吞，将导致运行中任务恢复缺失、评估维护未启动、中断上传清理遗漏；关闭时未按序停止
-    dreaming/eval maintenance 且未清理 config_thread_manager，会使线程残留、调度器泄漏并令 /health/ready 返回错误健康态。
+  objective: >-
+    验证配置服务生命周期的启动顺序、外部配置校验、健康状态、启动失败后的进程重启恢复与正常退出资源回收。
+    执行真实 config_lifespan、任务恢复编排、ThreadManager 和健康路由；启动失败使用独立子进程及真实评估维护线程，持久化操作受控。
+    按用户确认的验收标准，允许终止失败原进程后强制重启恢复，不要求原进程自行完成资源清理或自动重启。
+    私有默认 Prompt 模板同步已在 #4134 退役，不再作为现行验收要求。
   preconditions:
-  - '- ${NEXENT_TEST_HOME}/config/secrets.env
-
-    - ${NEXENT_TEST_HOME}/config/environment.yaml（本地测试环境参数，含 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS）
-
-    - 进程级 config_thread_manager（backend/infrastructure/concurrency.py:79-115）
-
-    - consts.task_recovery.CONFIG_SERVICE_NAME'
+  - 使用测试专用 Python 环境和仓库统一执行入口；机器配置从 test-home 加载，不依赖 SQL 文件。
+  - 每个参数场景创建独立的真实 ThreadManager，配置有限容量的 control-io lane。
+  - 不访问实际数据库、模型 Provider 或上传服务；只允许测试子进程运行受控评估维护线程，测试后终止并等待全部自建进程退出。
+  - 启动失败探针只监听回环地址的动态空闲端口，不操作现有服务、容器、业务数据或机器配置。
   test_data:
-    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/secrets.env
-
-      - ${NEXENT_TEST_HOME}/config/environment.yaml（本地测试环境参数，含 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS）
-
-      - 进程级 config_thread_manager（backend/infrastructure/concurrency.py:79-115）
-
-      - consts.task_recovery.CONFIG_SERVICE_NAME'
+    workbench_enabled: [false, true]
+    aidp_configuration: [disabled, configured, missing_url, missing_key]
+    startup_failure: [recover_config_tasks, upload_cleanup, external_configuration]
+    exit_failure: [body_exception, manager_shutdown]
+    credentials: synthetic test-only values; never machine-local secrets
   steps:
   - order: 1
-    action: 在本地后端测试环境导入 backend/apps/config_app.py 的 config_lifespan 与 recover_config_tasks_on_startup，令 config_thread_manager
-      处于 ManagerState.CREATED，monkeypatch management.recovery.recover_config_tasks / schedule_interrupted_upload_cleanup
-      与 management.services.evaluation.maintenance.start，记录各调用时间戳以还原顺序。
-    expected: 启动顺序与源码一致：recover_config_tasks 经 control-io lane 执行在前，接着 evaluation_maintenance.start(config_thread_manager)，最后
-      schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)，顺序不可颠倒。
+    action: 分别关闭和开启 Workbench，进入真实 config_lifespan，记录管理器启动、默认注册、恢复、评估维护、上传清理、回填、配置校验和 Dreaming 启动。
+    expected: 使用 control-io、recover-config-tasks、apps.config_app 执行一次恢复；各步骤按依赖顺序执行；回填仅在 Workbench 开启时执行一次。
   - order: 2
-    action: 通过 async with config_lifespan(app) 进入启动路径，断言启动顺序：先执行 recover_config_tasks（经 config_thread_manager.run 的 control-io
-      lane，task_name=recover-config-tasks），随后 evaluation_maintenance.start(config_thread_manager)，最后 schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)。
-    expected: 就绪态下 /health/ready 返回 200 且 manager_state=running、stuck_count=0；当 recover_config_tasks 或 schedule_interrupted_upload_cleanup
-      抛异常时进程不进入可用状态。
+    action: 分别设置 AIDP 关闭、已配置、缺少 URL、缺少 Key，调用实际配置校验并经生命周期验证错误路径。
+    expected: 关闭或已配置时可继续启动；开启但缺配置时抛出明确错误，不进入 yield、不启动 Dreaming、不输出配置值。
   - order: 3
-    action: 断言 config_thread_manager.state 已由 CREATED 转为 running，并通过 set_default_thread_manager(config_thread_manager) 设为进程默认线程管理器；随后调用
-      GET /health/ready，断言 HTTP 200 且响应体 manager_state=running、stuck_count=0。
-    expected: 默认 prompt 模板同步失败被捕获、记录 error 日志但不阻断启动；关闭按序执行 stop_dreaming_scheduler、evaluation_maintenance.stop、config_thread_manager.shutdown
-      并最终 clear_default_thread_manager，退出后 /health/ready 返回 503。
+    action: 通过进程内 ASGI 请求检查管理器创建前、运行中、stuck_count 非零和正常关闭后的 /health/ready。
+    expected: 创建前及关闭后为503；正常运行且无卡死任务为200；卡死任务为503；响应准确反映管理器状态和 stuck_count。
   - order: 4
-    action: 失败容错：分别令 recover_config_tasks、schedule_interrupted_upload_cleanup 抛出异常，断言异常自启动阶段向上传播、应用不进入 yield（启动失败），且不留下 manager
-      状态为 running 的虚假可用态。
-    expected: 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。
+    action: 在独立服务子进程分别注入恢复、上传清理和外部配置错误，记录错误及线程状态；确认不对外就绪后终止并等待原进程退出，撤去故障并启动独立新进程，实际请求其健康接口。
+    expected: 原始启动错误保留且不进入服务；允许强制结束原进程，不要求原进程管理器关闭或默认注册解除；原进程确认退出后，故障解除的新进程在45秒内恢复ready=200且manager_state=running；仅清理旧进程而未验证新服务不得通过。
   - order: 5
-    action: 令 sync_system_default_prompt_template 抛异常，验证 sync_default_prompt_template_on_startup 内 try/except 捕获并记录 error
-      日志，不阻断后续 start_dreaming_scheduler 与 yield。
-    expected: 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。
+    action: 分别正常退出和在 yield 内抛出业务异常，记录关闭调用顺序与实际线程管理器状态。
+    expected: Dreaming停止、评估维护停止、管理器shutdown、解除默认注册按序各执行一次；使用配置的关闭预算；业务异常继续传播；最终无管理器工作线程残留。
   - order: 6
-    action: 正常退出异步上下文，断言 finally 块按 stop_dreaming_scheduler → evaluation_maintenance.stop → config_thread_manager.shutdown(timeout=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
-      → clear_default_thread_manager(config_thread_manager) 顺序执行；退出后再调 GET /health/ready 断言返回 503（manager_state 非 running）。
-    expected: 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。
+    action: 在实际管理器关闭完成后注入 shutdown 异常，检查 finally 解除默认注册及错误传播。
+    expected: 关闭异常不被吞，clear_default_thread_manager 仍执行，管理器不再注册为默认。
+  - order: 7
+    action: 在上述生命周期场景记录日志和脱敏文本观察；检查测试专用敏感标记是否被写入日志。
+    expected: 每个场景均有脱敏日志及文本观察；证据区分原进程状态、自然或强制退出、新进程健康检查与测试最终清理；不将强制恢复描述为自动恢复。
   expected_results:
-  - 启动顺序与源码一致：recover_config_tasks 经 control-io lane 执行在前，接着 evaluation_maintenance.start(config_thread_manager)，最后 schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)，顺序不可颠倒。
-  - 就绪态下 /health/ready 返回 200 且 manager_state=running、stuck_count=0；当 recover_config_tasks 或 schedule_interrupted_upload_cleanup
-    抛异常时进程不进入可用状态。
-  - 默认 prompt 模板同步失败被捕获、记录 error 日志但不阻断启动；关闭按序执行 stop_dreaming_scheduler、evaluation_maintenance.stop、config_thread_manager.shutdown
-    并最终 clear_default_thread_manager，退出后 /health/ready 返回 503。
-  - 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。
-  forbidden_side_effects: []
+  - 正常启动及 Workbench 条件回填顺序、真实 control-io 执行元数据和默认注册正确。
+  - 当前外部配置校验的成功和失败分支正确，不再验证已退役模板同步。
+  - 就绪接口在 CREATED、RUNNING、stuck 和 CLOSED 状态返回正确 HTTP 状态及响应。
+  - 三类启动失败均保留原始错误且不进入服务；允许强制终止旧进程并在故障解除后以独立新进程恢复健康，无需自动重启或原进程清理。
+  - 正常及业务异常退出的关闭顺序、预算、线程回收和异常传播正确。
+  - shutdown 异常时仍解除默认注册，原异常向上传播。
+  - 所有场景有文本证据，敏感标记不进入日志，测试清理不掩盖产品失败。
+  forbidden_side_effects:
+  - 不触发真实数据库写入、上传清理、Workbench回填或Dreaming任务；评估维护只在专用子进程运行且查询受控，不操作现有服务。
+  - 不输出 API Key、Token、密码或测试敏感标记。
+  - 不遗留本用例创建的管理器工作线程或默认管理器注册，不污染其他参数场景。
+  acceptance:
+  - id: AC-01
+    description: 正常启动顺序及 Workbench 条件回填
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: 当前 AIDP 外部配置校验成功及拒绝路径
+    steps: [2]
+    expected_results: [2]
+  - id: AC-03
+    description: 实际健康路由在各管理器状态下的就绪契约
+    steps: [3]
+    expected_results: [3]
+  - id: AC-04
+    description: 启动失败不进入服务且允许强制结束旧进程后恢复健康
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [3]
+  - id: AC-05
+    description: 正常及业务异常退出的关闭顺序和资源回收
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [3]
+  - id: AC-06
+    description: 管理器关闭异常时仍解除默认注册并传播异常
+    steps: [6]
+    expected_results: [6]
+  - id: AC-07
+    description: 场景文本证据、敏感日志检查及测试隔离
+    steps: [7]
+    expected_results: [7]
+    forbidden_side_effects: [1, 2, 3]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 04_安全性能可靠性
     legacy_row: 57
+    notes: '#4134 retired private prompt-template synchronization. User approved forced-process restart as sufficient startup-failure recovery on 2026-10-22; retain normal shutdown guarantees.'
   risk_type: RELIABILITY
-  risk: 配置服务启动时 recover_config_tasks、evaluation_maintenance.start、schedule_interrupted_upload_cleanup 若顺序错乱或异常被吞，将导致运行中任务恢复缺失、评估维护未启动、中断上传清理遗漏；关闭时未按序停止
-    dreaming/eval maintenance 且未清理 config_thread_manager，会使线程残留、调度器泄漏并令 /health/ready 返回错误健康态。
+  risk: 启动失败后仍对外就绪、强制重启后不能恢复或测试自建进程未回收；正常关闭的资源泄漏仍独立判失败。
   condition:
-  - '- ${NEXENT_TEST_HOME}/config/secrets.env
-
-    - ${NEXENT_TEST_HOME}/config/environment.yaml（本地测试环境参数，含 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS）
-
-    - 进程级 config_thread_manager（backend/infrastructure/concurrency.py:79-115）
-
-    - consts.task_recovery.CONFIG_SERVICE_NAME'
+  - 正常关闭采用进程内真实生命周期；启动失败采用真实Uvicorn及独立进程，持久化和外部副作用受控。
   metrics:
-  - 启动顺序与源码一致：recover_config_tasks 经 control-io lane 执行在前，接着 evaluation_maintenance.start(config_thread_manager)，最后 schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)，顺序不可颠倒。
-  - 就绪态下 /health/ready 返回 200 且 manager_state=running、stuck_count=0；当 recover_config_tasks 或 schedule_interrupted_upload_cleanup
-    抛异常时进程不进入可用状态。
-  - 默认 prompt 模板同步失败被捕获、记录 error 日志但不阻断启动；关闭按序执行 stop_dreaming_scheduler、evaluation_maintenance.stop、config_thread_manager.shutdown
-    并最终 clear_default_thread_manager，退出后 /health/ready 返回 503。
-  - 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。
+  - 启动/关闭序列、control-io元数据、旧/新进程PID及退出码、自然/强制退出方式、恢复耗时、就绪HTTP状态和敏感日志检查。
   thresholds:
-  - 启动顺序与源码一致：recover_config_tasks 经 control-io lane 执行在前，接着 evaluation_maintenance.start(config_thread_manager)，最后 schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)，顺序不可颠倒。
-  - 就绪态下 /health/ready 返回 200 且 manager_state=running、stuck_count=0；当 recover_config_tasks 或 schedule_interrupted_upload_cleanup
-    抛异常时进程不进入可用状态。
-  - 默认 prompt 模板同步失败被捕获、记录 error 日志但不阻断启动；关闭按序执行 stop_dreaming_scheduler、evaluation_maintenance.stop、config_thread_manager.shutdown
-    并最终 clear_default_thread_manager，退出后 /health/ready 返回 503。
-  - 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。
+  - 七项验收均有实际测试映射；恢复等待最多45秒、进程终止等待最多10秒；敏感标记泄漏为0；测试结束自建进程及进程内资源残留为0。
   recovery_expectations:
-  - 启动顺序与源码一致：recover_config_tasks 经 control-io lane 执行在前，接着 evaluation_maintenance.start(config_thread_manager)，最后 schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)，顺序不可颠倒。
-  - 就绪态下 /health/ready 返回 200 且 manager_state=running、stuck_count=0；当 recover_config_tasks 或 schedule_interrupted_upload_cleanup
-    抛异常时进程不进入可用状态。
-  - 默认 prompt 模板同步失败被捕获、记录 error 日志但不阻断启动；关闭按序执行 stop_dreaming_scheduler、evaluation_maintenance.stop、config_thread_manager.shutdown
-    并最终 clear_default_thread_manager，退出后 /health/ready 返回 503。
-  - 全程无吞异常后伪成功，日志不输出明文 API Key/Token/密码/模型密钥。
+  - 启动失败允许强制重启：先确认旧进程退出，撤去注入故障后以新进程实际提供健康服务；持续配置错误不要求靠重启自行修复。
+  - 正常及运行期异常关闭仍须由生命周期释放资源；测试安全清理不能替代新进程恢复验收，也不能掩盖正常关闭失败。

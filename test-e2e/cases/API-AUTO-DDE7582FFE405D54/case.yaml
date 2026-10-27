@@ -17,7 +17,7 @@ case:
   - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内；当次 run_id 已生成，新建资源名称带 run_id。
   - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
   - users.yaml 中 SU/Admin/UserA/UserB 等隔离账号可登录，测试租户数据可被清理。
-  - 测试租户内已准备固定 Agent 数据用于构造冲突：两个 name=dup_name、display_name=Dup Name 的 Agent（AgentA、AgentB）与一个不冲突的 name=free_name；用于 regenerate
+  - 测试自行创建唯一前缀的 AgentA，再以同名请求创建 AgentB，并读回确认自动改名；不假定数据库允许持久化两个完全同名 Agent。用于 regenerate
     成功路径的租户 quick-config LLM 模型已配置。
   test_data:
     legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
@@ -30,19 +30,17 @@ case:
     action: 以测试租户 SU/Admin 账号登录获取 authorization token，记录 run_id、被测 commit 与租户 ID，确认后端 /agent 路由可用。
     expected: check_name 对每个 item 返回 {name_conflict, display_name_conflict, conflict_agents}，布尔与冲突记录与租户内实际重名情况一致，并正确排除自身 agent_id。
   - order: 2
-    action: 在测试租户内准备已知 Agent 数据：创建 name=dup_name、display_name=Dup Name 的两个 Agent（AgentA、AgentB），再准备一个 name=free_name 的不冲突
-      Agent。
+    action: 在测试租户内创建 AgentA，再以同名请求创建 AgentB；读回确认 AgentA 保留原名、AgentB 获得唯一后缀，另选择未使用的 free_name。
     expected: check_name 检测范围限于当前租户，不返回跨租户 Agent 信息。
   - order: 3
     action: 调用 POST /agent/check_name，请求体 items=[{"name":"dup_name","display_name":"Dup Name"}]（不带 agent_id）；断言 HTTP 200。
     expected: regenerate_name 返回数组长度与 items 一致，每个元素含 name/display_name；冲突字段被再生为租户内唯一、批内唯一且不同于原值的新值。
   - order: 4
-    action: 断言响应为数组且长度与 items 一致；首个元素 name_conflict=true、display_name_conflict=true，conflict_agents 至少包含两条记录，每条含 name 与 display_name
+    action: 断言响应为数组且长度与 items 一致；首个元素 name_conflict=true、display_name_conflict=true，conflict_agents 恰好包含保留原名的 AgentA 一条记录，每条含 name 与 display_name
       字段。
     expected: quick-config LLM 调用失败时，再生值回退为 {原值}_{数字后缀} 且租户内唯一，接口不因此返回 500。
   - order: 5
-    action: 调用 POST /agent/check_name，请求体 items=[{"name":"dup_name","agent_id":AgentA 的 ID}]；断言该元素排除自身后 name_conflict=true，且
-      conflict_agents 只包含 AgentB 相关记录、不含 AgentA。
+    action: 分别携带 AgentA、AgentB 的 ID 检查原名；排除 AgentA 时 name_conflict=false 且冲突数组为空；排除已改名的 AgentB 时 name_conflict=true 且只返回 AgentA。
     expected: 未配置可用 LLM 时，regenerate_name 返回 HTTP 400，message 含 "No available model for regeneration. Please configure an
       LLM model first."。
   - order: 6
@@ -95,12 +93,11 @@ case:
     protocol: HTTP API
     request_expectations:
     - 以测试租户 SU/Admin 账号登录获取 authorization token，记录 run_id、被测 commit 与租户 ID，确认后端 /agent 路由可用。
-    - 在测试租户内准备已知 Agent 数据：创建 name=dup_name、display_name=Dup Name 的两个 Agent（AgentA、AgentB），再准备一个 name=free_name 的不冲突 Agent。
+    - 在测试租户内创建 AgentA，再以同名请求创建 AgentB；读回确认 AgentA 保留原名、AgentB 获得唯一后缀，另选择未使用的 free_name。
     - 调用 POST /agent/check_name，请求体 items=[{"name":"dup_name","display_name":"Dup Name"}]（不带 agent_id）；断言 HTTP 200。
-    - 断言响应为数组且长度与 items 一致；首个元素 name_conflict=true、display_name_conflict=true，conflict_agents 至少包含两条记录，每条含 name 与 display_name
+    - 断言响应为数组且长度与 items 一致；首个元素 name_conflict=true、display_name_conflict=true，conflict_agents 恰好包含保留原名的 AgentA 一条记录，每条含 name 与 display_name
       字段。
-    - 调用 POST /agent/check_name，请求体 items=[{"name":"dup_name","agent_id":AgentA 的 ID}]；断言该元素排除自身后 name_conflict=true，且 conflict_agents
-      只包含 AgentB 相关记录、不含 AgentA。
+    - 分别携带 AgentA、AgentB 的 ID 检查原名；排除 AgentA 时无冲突；排除已改名的 AgentB 时只返回 AgentA。
     - 调用 POST /agent/check_name，请求体 items=[{"name":"free_name"}]；断言该元素 name_conflict=false、display_name_conflict=false、conflict_agents
       为空数组。
     - 配置租户 quick-config LLM 模型；调用 POST /agent/regenerate_name，请求体 items=[{"name":"dup_name","display_name":"Dup Name"}]；断言
@@ -124,3 +121,36 @@ case:
     - 空 items 数组返回 HTTP 200 与空数组，接口对无输入幂等、无副作用。
     - 所有接口状态码/错误码符合 controller 契约：ValueError→400，其余异常→500；失败路径不产生半写入、重复副作用或跨租户泄露。
     - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  acceptance:
+  - id: AC-01
+    description: Creation uniqueness and exact conflicts exclude the current Agent.
+    steps: [1, 2, 3, 4, 5, 6]
+    expected_results: [1]
+  - id: AC-02
+    description: Name checks never expose another tenant's Agents.
+    steps: [13]
+    expected_results: [2]
+  - id: AC-03
+    description: Configured generation returns tenant-unique and batch-unique names.
+    steps: [7, 8, 9]
+    expected_results: [3]
+  - id: AC-04
+    description: Provider failure falls back to a unique numeric suffix over HTTP.
+    steps: [10]
+    expected_results: [4]
+  - id: AC-05
+    description: Missing quick-config model returns the declared HTTP 400 error without calling the provider.
+    steps: [11]
+    expected_results: [5]
+  - id: AC-06
+    description: An empty name-check batch returns an empty array.
+    steps: [12]
+    expected_results: [6]
+  - id: AC-07
+    description: Expected domain errors and unexpected infrastructure errors retain controller status mapping.
+    steps: [14]
+    expected_results: [7]
+  - id: AC-08
+    description: Fixed tests use configured credentials and preserve sanitized failure evidence.
+    steps: [14]
+    expected_results: [8]

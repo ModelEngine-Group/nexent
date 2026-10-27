@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Regression coverage for the Agent creation context policy contract."""
 
 from unittest.mock import MagicMock
@@ -5,14 +7,13 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic import ValidationError
 
-from consts.model import AgentInfoRequest
+from contracts.agent import AgentInfoRequest
+from contracts.authentication import AuthenticatedIdentity
 from management.services.agent import service
 
 
 @pytest.fixture
 def create_boundary(monkeypatch):
-    monkeypatch.setattr(service, "get_current_user_info", lambda _: ("user", "tenant", "DEV"))
-    monkeypatch.setattr(service, "get_prompt_template_summary", lambda **_: (0, "system_default"))
     monkeypatch.setattr(service, "build_reasoning_snapshot", lambda **_: None)
     monkeypatch.setattr(service, "_get_user_group_ids", lambda *_: "")
     monkeypatch.setattr(service, "query_all_agent_info_by_tenant_id", lambda *_: [])
@@ -28,7 +29,7 @@ async def test_create_preserves_context_manager_flag(create_boundary, core, flag
     payload = {"name": "context-test", "display_name": "Context test", "agent_core": core}
     if flag is not None:
         payload["enable_context_manager"] = flag
-    result = await service.update_agent_info_impl(AgentInfoRequest(**payload), "Bearer test")
+    result = await service.update_agent_info_impl(AgentInfoRequest(**payload), AuthenticatedIdentity("user", "tenant"))
     assert result["agent_id"] == 42
     config = create_boundary.call_args.kwargs["agent_info"]
     assert config["enable_context_manager"] is expected
@@ -40,7 +41,8 @@ async def test_create_database_failure_is_not_reported_as_success(create_boundar
     create_boundary.side_effect = RuntimeError("database unavailable")
     with pytest.raises(ValueError, match="database unavailable"):
         await service.update_agent_info_impl(
-            AgentInfoRequest(name="test", display_name="Test", agent_core="jiuwen", enable_context_manager=False), "Bearer test"
+            AgentInfoRequest(name="test", display_name="Test", agent_core="jiuwen", enable_context_manager=False),
+            AuthenticatedIdentity("user", "tenant"),
         )
 
 

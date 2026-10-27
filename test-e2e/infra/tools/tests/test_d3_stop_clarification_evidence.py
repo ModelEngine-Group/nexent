@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Test-side oracles protect cancellation and sanitized stream evidence."""
 from __future__ import annotations
 
@@ -15,6 +17,16 @@ sys.path.insert(0, str(ROOT / 'test-e2e/infra/automation'))
 from shared import case_evidence, stop_observation
 
 class EvidenceTests(unittest.TestCase):
+    def test_deleted_api059_has_no_formal_assets_or_shared_template_dispatch(self):
+        for filename in ('case.yaml', 'test.py', 'execution.yaml', 'execution.retired.yaml'):
+            self.assertFalse((ROOT / 'test-e2e/cases/API-059' / filename).exists())
+        from d3.scenarios import scenario_agent_configuration_scenarios as scenarios
+        self.assertNotIn('API-059', scenarios.AGENT_CONFIG_CASES)
+        self.assertFalse(hasattr(scenarios, '_template_crud'))
+        self.assertFalse(hasattr(scenarios, '_template_content'))
+        self.assertIn('API-060', scenarios.AGENT_CONFIG_CASES)
+        self.assertIn('API-066', scenarios.AGENT_CONFIG_CASES)
+
     def test_deleted_agt005_has_no_formal_definition_script_binding_or_dispatch(self):
         for filename in ('case.yaml', 'test.py', 'execution.yaml'):
             self.assertFalse((ROOT / 'test-e2e/cases/AGT-005' / filename).exists())

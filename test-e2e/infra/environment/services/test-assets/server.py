@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Controlled HTTP assets and failure providers for the isolated daily suite."""
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Str
 from prompt_fault_provider import router as prompt_fault_router
 from runtime_fault_provider import router as runtime_fault_router
 from tool_fastpath_provider import router as tool_fastpath_router
+from tpc_provider import router as tpc_router
 
 
 app = FastAPI(title="nexent-controlled-test-assets")
@@ -23,6 +26,7 @@ app.include_router(cmsr_router)
 app.include_router(runtime_fault_router)
 app.include_router(prompt_fault_router)
 app.include_router(tool_fastpath_router)
+app.include_router(tpc_router)
 TEST_ROOT = Path(
     os.environ.get("NEXENT_TEST_HOME", str(Path(__file__).resolve().parents[2]))
 ).resolve()

@@ -61,8 +61,9 @@ def context_database(monkeypatch):
         else:
             raise AssertionError("Isolated history PostgreSQL did not start")
         engine = create_engine(f"postgresql://postgres@127.0.0.1:{port}/postgres")
-        from database import client, conversation_db
-        from database.db_models import (
+        from management.db import client
+        from management.db.conversation import repository as conversation_db
+        from management.db.models import (
             AgentInfo,
             ConversationMessage,
             ConversationMessageUnit,
@@ -87,7 +88,7 @@ def context_database(monkeypatch):
 
 
 def seed_agent(engine, core):
-    from database.db_models import AgentInfo
+    from management.db.models import AgentInfo
     with engine.begin() as connection:
         for version in (0, 1):
             connection.execute(insert(AgentInfo).values(agent_id=42, version_no=version, agent_core=core,
@@ -96,11 +97,11 @@ def seed_agent(engine, core):
 
 
 def save_configuration(engine, core, cm):
-    from database.agent_db import (
+    from management.db.agent.repository import (
         search_agent_info_by_agent_id,
         update_agent_draft_fields,
     )
-    from database.db_models import AgentInfo
+    from management.db.models import AgentInfo
     assert update_agent_draft_fields(42, "spike-tenant", {"agent_core": core, "enable_context_manager": cm}) == 1
     assert search_agent_info_by_agent_id(42, "spike-tenant", 1)["agent_core"] != core
     # Publishing is an existing external boundary: prepare its immutable new snapshot,
@@ -113,13 +114,13 @@ def save_configuration(engine, core, cm):
 
 
 def message(conversation, index, role, content, files=None, status="completed"):
-    from database.conversation_db import create_conversation_message
+    from management.db.conversation.repository import create_conversation_message
     return create_conversation_message({"conversation_id": conversation, "message_idx": index,
         "role": role, "content": content, "minio_files": files}, "owner", status=status)
 
 
 def record_output(conversation, index, output):
-    from database.conversation_db import create_message_units
+    from management.db.conversation.repository import create_message_units
     from management.services.agent.stream import serialize_stream_unit_content
     answer = "".join(event.get("content", "") for event in output if event.get("type") == "final_answer")
     mid = message(conversation, index, "assistant", answer)
@@ -134,7 +135,7 @@ def record_output(conversation, index, output):
             "unit_index": len(units), "unit_type": event["type"],
             "unit_content": serialize_stream_unit_content(event, content), "unit_status": "completed",
             "tool_call_id": event.get("tool_call_id"), "invocation_id": event.get("invocation_id")})
-    from database.conversation_db import update_message_unit_status
+    from management.db.conversation.repository import update_message_unit_status
     for unit_id in create_message_units(units, mid, conversation, "owner"):
         update_message_unit_status(unit_id, "completed", user_id="owner")
     return mid
@@ -142,14 +143,14 @@ def record_output(conversation, index, output):
 
 async def run_context_scenario(monkeypatch, engine, original="smolagents", protocol="native", cm=False,
                                fault=None, existing_checkpoint=False):
-    from database.agent_db import search_agent_info_by_agent_id
-    from database.agent_version_db import query_current_version_no
-    from database.conversation_db import (
+    from management.db.agent.repository import search_agent_info_by_agent_id
+    from management.db.agent.version import query_current_version_no
+    from management.db.conversation.repository import (
         create_conversation,
         get_conversation_history,
         get_historical_context,
     )
-    from database.db_models import ConversationMessageUnit
+    from management.db.models import ConversationMessageUnit
     from nexent.core.agents import nexent_agent
     from management.services.conversation.service import (
         persist_history_summary_candidate,
@@ -253,7 +254,7 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
     async def info_for(query, current_mid):
         version = query_current_version_no(42, "spike-tenant")
         saved = search_agent_info_by_agent_id(42, "spike-tenant", version)
-        from agents.create_agent_info import build_agent_context_policy
+        from management.services.agent.preparation.compiler import build_agent_context_policy
         cm_config = ContextManagerConfig(effective_input_limit_tokens=200000,
             compaction_trigger_threshold_tokens=35000, compaction_target_tokens=30000,
             max_summary_input_tokens=120000,
@@ -267,7 +268,8 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
             agent_config=AgentConfig(name="history_agent", description="History fixture", agent_core=saved["agent_core"],
                 version_no=version, model_name="fixture", max_steps=3, context_manager_config=cm_config,
                 tools=[ToolConfig(name="remember", class_name="RememberTool", source="local", params={})]))
-        from consts.model import AgentRequest, HistoryItem
+        from contracts.agent import AgentRequest
+        from contracts.conversation import HistoryItem
         from management.services.agent import run as application
         from unittest.mock import AsyncMock
 

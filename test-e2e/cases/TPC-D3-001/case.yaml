@@ -22,23 +22,23 @@ case:
     profile: mock
   steps:
   - order: 1
-    action: Drive all seven compatible reasoning prefixes with complete code and legacy
-      run skill actions at first attempt and after two rejected generations through
-      deployed Agent.
+    action: Drive all seven compatible reasoning prefixes with complete code and legacy run skill actions at first attempt
+      and after two rejected generations through deployed Agent.
     expected: Read executes once and returns skill text.
   - order: 2
     action: Return a separate explicit final and reload history.
     expected: Exactly one final payload and one read result are persisted.
   - order: 3
-    action: Exhaust three malformed action, thinking-only, invalid final or length-truncated
-      action responses without executing a tool.
-    expected: No skill effect or raw protocol final is emitted or stored.
+    action: Exhaust three malformed action, thinking-only, invalid final or length-truncated action responses without executing
+      a tool.
+    expected: No skill effect or completed/committed raw protocol final is emitted or stored. Provisional final deltas must
+      roll back in their exact attempts before the terminal error.
   expected_results:
   - Runtime executes the skill read.
   - History matches committed stream.
-  - Every rejected exhaustion is bounded to three generations, reports an error, has
-    no skill effect or SSE final, and contains only empty compatibility final placeholders
-    in history.
+  - Every rejected exhaustion is bounded to three generations and reports an error, with no skill effect or completed/committed
+    SSE final. Provisional final deltas are allowed only when their exact attempts explicitly roll back; history contains
+    only strictly empty compatibility final placeholders.
   forbidden_side_effects:
   - No unexecuted action final.
   - No duplicate tool effects.
@@ -62,8 +62,7 @@ case:
       - model-provider
   acceptance:
   - id: AC-01
-    description: Controlled provider drives one actual skill effect, committed SSE/history
-      and one explicit final.
+    description: Controlled provider drives one actual skill effect, committed SSE/history and one explicit final.
     steps:
     - 1
     - 2
@@ -74,9 +73,9 @@ case:
     - 1
     - 2
   - id: AC-02
-    description: Malformed, thinking-only, invalid final and truncated exhaustion
-      stays within three generations, reports an error, emits no SSE final or skill
-      effect, and any history final placeholder is strictly empty.
+    description: Malformed, thinking-only, invalid final and truncated exhaustion stays within three generations, reports
+      an error, never executes a skill or completes/commits a final, rolls back any provisional answer fragments in their
+      own attempts, and retains only empty history final placeholders.
     steps:
     - 3
     expected_results:

@@ -11,6 +11,11 @@ const scenario = (name: string, run: (fixture: any) => Promise<void>) => scenari
 const baseUrl = process.env.NEXENT_BASE_URL ?? "http://localhost:3000";
 const labels = JSON.parse(fs.readFileSync(path.join(process.env.NEXENT_REPO, "frontend/public/locales/zh/common.json"), "utf8"));
 
+function defaultApiBody(route) {
+  // listLibraries has an array wire contract; an object crashes real pages.
+  return new URL(route.request().url()).pathname === "/api/tag-libraries" ? [] : {};
+}
+
 async function expectReferenceColor(locator, property, reference) {
   await expect.poll(() => locator.evaluate((element, args) => {
     const canvas = document.createElement('canvas');
@@ -35,10 +40,10 @@ scenario("[NAV-MENU-D4-001] permitted children retain actual navigation without 
     const request = route.request();
     const pathname = new URL(request.url()).pathname;
     if (request.method() !== "GET" && pathname !== "/api/groups/list") writes.push(pathname);
-    return json(route, {});
+    return json(route, defaultApiBody(route));
   });
   await page.route("**/api/tenant_config/deployment_version", (route) => json(route, { deployment_version: "speed", app_version: "test", status: "success", enable_agent_workbench: false }));
-  await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "navigation-fixture", tenant_id: "navigation-tenant", user_email: "navigation@nexent.test", user_role: "SPEED", auth_provider: "local", groupIds: [], permissions: [], accessibleRoutes: ["/agents", "/newchat", "/agent-space"] } } }));
+  await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "navigation-fixture", tenant_id: "navigation-tenant", user_email: "navigation@nexent.test", user_role: "SPEED", auth_provider: "local", group_ids: [], permissions: [], accessibleRoutes: ["/agents", "/newchat", "/agent-space"] } } }));
   await page.route("**/api/memory/config/load", (route) => json(route, { MEMORY_SWITCH: "N" }));
   await page.route("**/api/groups/list", (route) => json(route, { data: [], total: 0 }));
   await page.route("**/api/agent/list/page?*", (route) => json(route, { items: [], pagination: { page: 1, page_size: 10, total: 0, total_pages: 0 } }));
@@ -67,9 +72,9 @@ for (const locale of ["zh", "en"]) {
   scenario(`[NAV-MENU-D4-001] ${locale} Workbench follows Home and preserves its route`, async ({ page }) => {
     const text = JSON.parse(fs.readFileSync(path.join(process.env.NEXENT_REPO, `frontend/public/locales/${locale}/common.json`), "utf8"));
     const json = (route, body) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
-    await page.route("**/api/**", (route) => json(route, {}));
+    await page.route("**/api/**", (route) => json(route, defaultApiBody(route)));
     await page.route("**/api/tenant_config/deployment_version", (route) => json(route, { deployment_version: "speed", app_version: "test", status: "success", enable_agent_workbench: true }));
-    await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "navigation-fixture", tenant_id: "navigation-tenant", user_email: "navigation@nexent.test", user_role: "SPEED", auth_provider: "local", groupIds: [], permissions: [], accessibleRoutes: ["/", "/agents", "/newchat", "/workbench"] } } }));
+    await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "navigation-fixture", tenant_id: "navigation-tenant", user_email: "navigation@nexent.test", user_role: "SPEED", auth_provider: "local", group_ids: [], permissions: [], accessibleRoutes: ["/", "/agents", "/newchat", "/workbench"] } } }));
     await page.route("**/api/memory/config/load", (route) => json(route, { MEMORY_SWITCH: "N" }));
   await page.route("**/api/groups/list", (route) => json(route, { data: [], total: 0 }));
     await page.route("**/api/agent/list/page?*", (route) => json(route, { items: [], pagination: { page: 1, page_size: 10, total: 0, total_pages: 0 } }));
@@ -92,14 +97,14 @@ scenario("[NAV-MENU-D4-001] account menu replaces bars and switches language on 
   const json = (route, body) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   await page.route("**/api/**", (route) => {
     if (route.request().method() !== "GET" && !route.request().url().includes("/groups/list")) writes.push(new URL(route.request().url()).pathname);
-    return json(route, {});
+    return json(route, defaultApiBody(route));
   });
   await page.route("**/locales/*/custom.json", async (route) => {
     const response = await route.fetch();
     return json(route, { ...await response.json(), aboutConfig: "open" });
   });
   await page.route("**/api/tenant_config/deployment_version", (route) => json(route, { deployment_version: "speed", app_version: "v2.6.0", status: "success", enable_agent_workbench: false }));
-  await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "navigation-fixture", tenant_id: "navigation-tenant", user_email: "navigation@nexent.test", user_role: "SPEED", auth_provider: "local", groupIds: [], permissions: [], accessibleRoutes: ["/agents", "/newchat", "/agent-space"] } } }));
+  await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "navigation-fixture", tenant_id: "navigation-tenant", user_email: "navigation@nexent.test", user_role: "SPEED", auth_provider: "local", group_ids: [], permissions: [], accessibleRoutes: ["/agents", "/newchat", "/agent-space"] } } }));
   await page.route("**/api/memory/config/load", (route) => json(route, { MEMORY_SWITCH: "N" }));
   await page.route("**/api/groups/list", (route) => json(route, { data: [], total: 0 }));
   await page.route("**/api/monitoring/status", (route) => json(route, { code: 0, data: { telemetry_enabled: true, dashboard_url: "https://monitoring.nexent.test", dashboard_allowed_roles: ["SPEED"] } }));
@@ -204,11 +209,11 @@ scenario("[NAV-MENU-D4-001] hover rail overlays content and holds account popup"
   page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/users')) profileRequests += 1; });
   const json = (route, body) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   await page.setViewportSize({ width: 1280, height: 800 });
-  await page.route("**/api/**", (route) => json(route, {}));
+  await page.route("**/api/**", (route) => json(route, defaultApiBody(route)));
   await page.route("**/locales/en/common.json", (route) => json(route, { ...text, "sidebar.knowledgeBaseConfig": longLabel }));
   await page.route("**/locales/*/custom.json", (route) => json(route, { ...brandConfig, productName: longBrand }));
   await page.route("**/api/tenant_config/deployment_version", (route) => json(route, { deployment_version: "speed", app_version: "v2.6.0", status: "success" }));
-  await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "hover-fixture", tenant_id: "hover-tenant", user_email: "hover@nexent.test", user_role: "SPEED", role: "SPEED", auth_provider: "local", groupIds: [], permissions: [], accessibleRoutes: ["/agents", "/models", "/knowledges", "/agent-space", "/skill-space", "/resource-manage"] } } }));
+  await page.route("**/api/user/current_user_info", (route) => json(route, { data: { user: { user_id: "hover-fixture", tenant_id: "hover-tenant", user_email: "hover@nexent.test", user_role: "SPEED", role: "SPEED", auth_provider: "local", group_ids: [], permissions: [], accessibleRoutes: ["/agents", "/models", "/knowledges", "/agent-space", "/skill-space", "/resource-manage"] } } }));
   await page.route("**/api/groups/list", (route) => json(route, { data: [], total: 0 }));
   await page.route("**/api/tag-libraries**", (route) => json(route, []));
   await page.route("**/api/monitoring/status", (route) => {

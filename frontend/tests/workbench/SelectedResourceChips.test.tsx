@@ -1,3 +1,7 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import { beforeEach as beforeEachI18n } from "vitest";
+import { initializeTestI18n } from "./i18n";
 import { expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -60,4 +64,8 @@ it("UT-FE-WB-029 clicking a Skill label opens configuration instead of removing 
   );
   expect(edit).toHaveBeenCalledOnce();
   expect(remove).not.toHaveBeenCalled();
+});
+
+beforeEachI18n(async () => {
+  await initializeTestI18n();
 });

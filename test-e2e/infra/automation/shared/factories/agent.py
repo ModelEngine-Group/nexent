@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Extracted asset operations; scenario assertions remain in the test modules."""
 from __future__ import annotations
 from shared.http import assert_status, client
@@ -83,7 +85,7 @@ async def prepare_relationship_agent(identity):
                     updated = await api.post('/agent/update', json={
                         **parent,
                         'related_agent_ids': [child_a_id, child_b_id],
-                        'duty_prompt': 'Delegate the user request to both related agents and combine their replies.',
+                        'prompt': 'Delegate the user request to both related agents and combine their replies.',
                     })
                     assert_status(updated, 200)
                     relationship = await api.get(f'/agent/call_relationship/{parent_id}')

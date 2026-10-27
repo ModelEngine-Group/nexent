@@ -372,7 +372,7 @@ describe("configuration resource grouping and preserved workflow gates", () => {
     mocks.flow.configFocusRequest = {
       agentId: 42,
       requestId: 2,
-      target: { section: "role_model", promptTab: "constraint" },
+      target: { section: "role_model" },
     };
     view.rerender(agentConfigTree());
     await waitFor(() =>

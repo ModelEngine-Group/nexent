@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: NAV-LOADING-20261021
+  change_type: bugfix
+  bug_id: NAV-LOADING-20261021
+  title: Show shimmer skeletons during route transitions
+  description: Keep sidebar usable while route resources are pending and replace all content including the title with shimmer skeletons, retaining a localized accessible heading.
+  observed_behavior: Slow navigation retains old content with no waiting feedback.
+  expected_behavior: Show animated placeholders until navigation settles, then display the real page.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing sidebar journey asserts completed routing but does not delay route resources or assert pending feedback.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [NAV-MENU-VISIBILITY]
+    retired: []
+  affected_cases:
+    existing: []
+    added: [NAV-MENU-D4-002]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/component/routeLoadingSkeleton.test.tsx
+    - frontend/tests/component/accountMenu.test.tsx
+    behaviors:
+    - Pending navigation hides stale interactions while preserving mounted source state and available sidebar
+    - Completion and repeated selection settle feedback; latest target wins
+    - All skeleton families expose only a title and accessible loading status
+    reason: Frontend component UT covers local state and rendering; D4 covers actual delayed App Router navigation. No Python code is affected.
+  notes: Design at ../nexent-doc/docs/Developing/nav-route-loading/design.md. No new D1 duplicates unit assertions; existing D1 contracts preserved.

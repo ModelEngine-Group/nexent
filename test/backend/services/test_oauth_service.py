@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import sys
 import os
 import unittest
@@ -10,6 +12,7 @@ sys.path.insert(0, backend_dir)
 
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
+consts_mock.const.GET_OAUTH_SETTING = os.getenv
 consts_mock.const.DEFAULT_TENANT_ID = "default-tenant-id"
 consts_mock.const.OAUTH_CALLBACK_BASE_URL = "http://localhost:3000"
 consts_mock.const.OAUTH_SSL_VERIFY = True
@@ -17,7 +20,8 @@ consts_mock.const.OAUTH_CA_BUNDLE = ""
 consts_mock.const.OAUTH_LOGIN_MODE = "button"
 consts_mock.const.JWT_EXPIRY_SECONDS = 7200
 sys.modules["consts"] = consts_mock
-sys.modules["consts.const"] = consts_mock.const
+sys.modules["contracts.constants.environment"] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 
 class _OAuthProviderError(Exception):
@@ -31,17 +35,17 @@ class _OAuthLinkError(Exception):
 exceptions_mock = MagicMock()
 exceptions_mock.OAuthProviderError = _OAuthProviderError
 exceptions_mock.OAuthLinkError = _OAuthLinkError
-sys.modules["consts.exceptions"] = exceptions_mock
+install_shared_contract_stub(exceptions_mock, 'exceptions')
 
 oauth_account_db_mock = MagicMock()
-sys.modules["database.oauth_account_db"] = oauth_account_db_mock
+sys.modules["management.db.identity.oauth_account"] = oauth_account_db_mock
 
 db_pkg = MagicMock()
 db_pkg.oauth_account_db = oauth_account_db_mock
 sys.modules["database"] = db_pkg
 
 user_tenant_db_mock = MagicMock()
-sys.modules["database.user_tenant_db"] = user_tenant_db_mock
+sys.modules["management.db.identity.user_tenant"] = user_tenant_db_mock
 db_pkg.user_tenant_db = user_tenant_db_mock
 
 model_mock = MagicMock()
@@ -57,7 +61,7 @@ class _FakeOAuthProviderDefinition:
 
 
 model_mock.OAuthProviderDefinition = _FakeOAuthProviderDefinition
-sys.modules["consts.model"] = model_mock
+install_business_contract_stubs(model_mock)
 
 GITHUB_DEF = _FakeOAuthProviderDefinition(
     name="github",
@@ -257,25 +261,16 @@ oauth_providers_mock.is_provider_enabled = _is_provider_enabled
 oauth_providers_mock.get_all_provider_definitions = _get_all_provider_definitions
 oauth_providers_mock.GITHUB_PROVIDER = GITHUB_DEF
 oauth_providers_mock.WECHAT_PROVIDER = WECHAT_DEF
-sys.modules["consts.oauth_providers"] = oauth_providers_mock
+sys.modules["management.utils.oauth_providers"] = oauth_providers_mock
+for _provider_export in (
+    "OAUTH_PROVIDER_REGISTRY", "get_provider_definition", "is_provider_enabled",
+    "get_all_provider_definitions", "GITHUB_PROVIDER", "WECHAT_PROVIDER",
+):
+    setattr(consts_mock.const, _provider_export, getattr(oauth_providers_mock, _provider_export))
 
 import management.services.permission.identity.oauth as oauth_service_module
-from management.services.permission.identity.oauth import (
-    create_or_update_oauth_account,
-    ensure_user_tenant_exists,
-    exchange_code_for_provider_token,
-    find_supabase_user_id_by_email,
-    get_authorize_url,
-    get_enabled_providers,
-    get_oauth_config,
-    get_provider_user_info,
-    get_supported_providers,
-    list_linked_accounts,
-    parse_state,
-    unlink_account,
-    _resolve_field,
-    _build_ssl_context,
-)
+from management.services.permission.identity.oauth import create_or_update_oauth_account, ensure_user_tenant_exists, exchange_code_for_provider_token, find_supabase_user_id_by_email, get_authorize_url, get_enabled_providers, get_oauth_config, get_provider_user_info, get_supported_providers, list_linked_accounts, unlink_account, _resolve_field, _build_ssl_context
+from gateway.authentication.auth import parse_state
 
 
 class TestParseState(unittest.TestCase):

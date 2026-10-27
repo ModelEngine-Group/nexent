@@ -1,8 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 from typing import Dict, List
 
 import aiohttp
-from consts.const import DEFAULT_LLM_MAX_TOKENS
+from contracts.constants.constants import DEFAULT_LLM_MAX_TOKENS
 from management.services.model.providers.base import (
     AbstractModelProvider,
     _classify_provider_error,

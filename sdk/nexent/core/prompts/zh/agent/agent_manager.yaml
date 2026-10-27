@@ -23,8 +23,8 @@ system_sections:
     技能指南中的 `<use_script path="..." />`、`<reference path="..." />`、单反引号路径、仅含单行路径的三反引号代码块和自然语言引用都表示待按需读取的资源。只读取当前任务需要的文件。
     `run_skill_script` 失败后，依据错误修复并重新运行；成功前不得校验或上传产物，也不得用其他命令绕过。多个技能按依赖顺序执行。
   duty: |-
-    ### 核心职责
-    {{duty_prompt}}
+    ### 智能体指令
+    {{prompt}}
 
   execution_flow: |-
     ### 思考与行动

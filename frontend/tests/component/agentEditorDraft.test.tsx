@@ -9,12 +9,9 @@ import {
   updateAgentInfo,
 } from "@/services/agentConfigService";
 import { useAgentStore } from "@/stores/agentStore";
+import { useAgentConfigStore } from "@/stores/agentConfigStore";
 import type { Agent } from "@/types/agentConfig";
-import {
-  clearAgentGenerationCache,
-  getAgentGenerationCache,
-  saveGeneratedField,
-} from "@/lib/agentGenerationCache";
+
 
 vi.mock("@/services/agentConfigService", () => ({
   searchAgentInfo: vi.fn(),
@@ -31,7 +28,7 @@ function draft(id = 42, displayName = "Generated assistant"): Agent {
     name: "generated_assistant",
     display_name: displayName,
     description: "Generated description",
-    duty_prompt: "Generated prompt",
+    prompt: "Generated prompt",
     greeting_message: "Generated greeting",
     example_questions: ["Generated question"],
     permission: "EDIT",
@@ -64,6 +61,20 @@ afterEach(() => {
 });
 
 describe("Agent editor entry draft synchronization", () => {
+  it("uses database instructions instead of a retired generation cache", () => {
+    const key = "nexent_agent_generation_cache_v2_42";
+    localStorage.setItem(key, JSON.stringify({
+      agentId: 42, prompt: "Stale generated instructions", isGenerating: false,
+      timestamp: Date.now(), expiryMs: 1800000,
+    }));
+    try {
+      useAgentConfigStore.getState().setCurrentAgent({ ...draft(), id: "42" } as unknown as Agent);
+      expect(useAgentConfigStore.getState().editedAgent.prompt).toBe("Generated prompt");
+    } finally {
+      localStorage.removeItem(key);
+    }
+  });
+
   it("persists a complete prompt without legacy fields or unrelated edits", async () => {
     useAgentStore.getState().initialize(draft());
     vi.mocked(updateAgentInfo).mockResolvedValue({ success: true } as never);
@@ -72,34 +83,22 @@ describe("Agent editor entry draft synchronization", () => {
     expect(initial).not.toHaveProperty("few_shots_prompt");
 
     act(() => {
-      useAgentStore.getState().updateDraft({ duty_prompt: "Complete updated prompt" });
+      useAgentStore.getState().updateDraft({ prompt: "Complete updated prompt" });
       useAgentStore.getState().flushDraft();
     });
     await waitFor(() => expect(updateAgentInfo).toHaveBeenCalledOnce());
-    expect(updateAgentInfo).toHaveBeenCalledWith({ agent_id: 42, duty_prompt: "Complete updated prompt" });
-    await waitFor(() => expect(useAgentStore.getState().savedAgent?.duty_prompt).toBe("Complete updated prompt"));
+    expect(updateAgentInfo).toHaveBeenCalledWith({ agent_id: 42, prompt: "Complete updated prompt" });
+    await waitFor(() => expect(useAgentStore.getState().savedAgent?.prompt).toBe("Complete updated prompt"));
     expect(useAgentStore.getState().editedAgent?.description).toBe(initial?.description);
   });
 
-  it("caches only the unified generated prompt", () => {
-    clearAgentGenerationCache(42);
-    try {
-      saveGeneratedField(42, "dutyPrompt", "Generated complete prompt");
-      const cache = getAgentGenerationCache(42);
-      expect(cache?.dutyPrompt).toBe("Generated complete prompt");
-      expect(cache).not.toHaveProperty("constraintPrompt");
-      expect(cache).not.toHaveProperty("fewShotsPrompt");
-    } finally {
-      clearAgentGenerationCache(42);
-    }
-  });
 
   it("reloads a Workbench preloaded ID and replaces all generated fields without autosave", async () => {
     useAgentStore.getState().initialize({
       ...draft(),
       display_name: "Workbench Draft",
       description: "",
-      duty_prompt: "",
+      prompt: "",
       greeting_message: "",
     });
     const { result } = renderHook(() => useAgentEditorDraft(42));
@@ -110,7 +109,7 @@ describe("Agent editor entry draft synchronization", () => {
       name: "generated_assistant",
       display_name: "Generated assistant",
       description: "Generated description",
-      duty_prompt: "Generated prompt",
+      prompt: "Generated prompt",
       greeting_message: "Generated greeting",
       example_questions: ["Generated question"],
     });

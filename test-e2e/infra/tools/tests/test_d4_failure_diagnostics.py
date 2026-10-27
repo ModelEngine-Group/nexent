@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Verify strict asset choice and credential-free persisted-history checks."""
 from pathlib import Path
 import sys
@@ -26,8 +27,8 @@ class FailureDiagnosticsTests(unittest.TestCase):
         class API:
             async def get(self, path):
                 return response({'data': rows})
-            async def post(self, path, json):
-                posts.append((path, dict(json)))
+            async def post(self, path, json=None, params=None):
+                posts.append((path, dict(json or params or {})))
                 if path == '/model/create': rows.append({**json, 'id': 2})
                 return response({'data': {'connectivity': True}})
         @asynccontextmanager
@@ -42,6 +43,8 @@ class FailureDiagnosticsTests(unittest.TestCase):
             asyncio.run(exercise())
         self.assertEqual(select.await_count, 2)
         self.assertEqual(sum(path == '/model/create' for path, _ in posts), 1)
+        self.assertEqual(sum(path == '/model/healthcheck' for path, _ in posts), 1)
+        self.assertFalse(any(path == '/model/temporary_healthcheck' for path, _ in posts))
         self.assertEqual(rows[0]['model_name'], 'old-bge')
         self.assertEqual(rows[1]['expected_chunk_size'], 2560)
         self.assertEqual(rows[1]['display_name'], 'configured-qwen')
@@ -62,7 +65,6 @@ class FailureDiagnosticsTests(unittest.TestCase):
         body = {'data': [{'message': [{'role': 'assistant', 'message': [
             {'type': 'parse', 'content': 'private-secret CMSR_OK_n'},
             {'type': 'step_count', 'content': '1'},
-            {'type': 'step_count', 'content': '2'},
             {'type': 'final_answer', 'content': 'CMSR_FINAL_n'}]}]}]}
         verify_history(body, 'n')
         body['data'][0]['message'][0]['message'].append({'type': 'parse', 'content': 'private-secret'})
@@ -70,6 +72,15 @@ class FailureDiagnosticsTests(unittest.TestCase):
             verify_history(body, 'n')
         self.assertNotIn('private-secret', str(caught.exception))
         self.assertNotIn('private-secret', str(history_diagnostics(body, 'n')))
+
+    def test_history_rejects_a_persisted_final_answer_step(self):
+        body = {'data': [{'message': [{'role': 'assistant', 'message': [
+            {'type': 'parse', 'content': 'CMSR_OK_n'},
+            {'type': 'step_count', 'content': '1'},
+            {'type': 'step_count', 'content': '2'},
+            {'type': 'final_answer', 'content': 'CMSR_FINAL_n'}]}]}]}
+        with self.assertRaisesRegex(HistoryVerificationError, 'step_count: expected 1, observed 2'):
+            verify_history(body, 'n')
 
     def test_missing_commit_and_failed_fragment_are_not_passes(self):
         for content, expected in [('CMSR_FINAL_n', 'committed_marker_present'),

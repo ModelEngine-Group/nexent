@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import asyncio
 import base64
 import io
@@ -22,9 +24,13 @@ os.environ['REDIS_BACKEND_URL'] = 'redis://mock:6379/0'
 sys.modules['data_process.app'] = MagicMock()
 sys.modules['data_process.app'].app = MagicMock()
 sys.modules['data_process.tasks'] = MagicMock()
-sys.modules['database.attachment_db'] = MagicMock()
-sys.modules['database.client'] = MagicMock()
-sys.modules['database.client'].minio_client = MagicMock()
+sys.modules['management.db.file.attachment'] = MagicMock()
+sys.modules['management.db.client'] = MagicMock()
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'].minio_client = MagicMock()
 sys.modules['transformers'] = MagicMock()
 sys.modules['transformers'].CLIPProcessor = MagicMock()
 sys.modules['transformers'].CLIPModel = MagicMock()
@@ -39,14 +45,15 @@ sys.modules['nexent.data_process'] = MagicMock()
 sys.modules['nexent.data_process.core'] = MagicMock()
 sys.modules['nexent.data_process.core'].DataProcessCore = MagicMock()
 
-# Mock constants from consts.const
+# Mock constants from contracts.constants.environment
 mock_const = MagicMock()
 mock_const.CLIP_MODEL_PATH = "mock_clip_path"
 mock_const.IMAGE_FILTER = True
 mock_const.REDIS_BACKEND_URL = "redis://mock:6379/0"
 mock_const.REDIS_URL = "redis://mock:6379/0"
 mock_const.MAX_CONCURRENT_CONVERSIONS = 3
-sys.modules['consts.const'] = mock_const
+sys.modules['contracts.constants.environment'] = mock_const
+install_business_constant_stubs(mock_const)
 
 # Stub torch (data_process_service.py imports it unconditionally).
 _torch_mod = types.ModuleType('torch')
@@ -55,12 +62,12 @@ _torch_mod.float16 = 'float16'
 _torch_mod.no_grad = lambda: (_ for _ in ()).throw(StopIteration)  # callable that acts as context manager decorator
 sys.modules.setdefault('torch', _torch_mod)
 
-# Stub consts.model — data_process_service.py imports BatchTaskRequest from it.
-_model_mod = types.ModuleType('consts.model')
+# Stub contracts.agent — data_process_service.py imports BatchTaskRequest from it.
+_model_mod = types.ModuleType('contracts.agent')
 
 
 class _BatchTaskRequest:
-    """Lightweight stand-in for consts.model.BatchTaskRequest.
+    """Lightweight stand-in for contracts.knowledge.BatchTaskRequest.
 
     Implements just enough to support `request.sources` iteration that
     production code uses inside `create_batch_tasks_impl`.
@@ -70,10 +77,10 @@ class _BatchTaskRequest:
         self.sources = sources or []
 
 _model_mod.BatchTaskRequest = _BatchTaskRequest
-sys.modules.setdefault('consts.model', _model_mod)
+sys.modules.setdefault('contracts.agent', _model_mod)
 
-# Stub consts.exceptions with real exception classes so assertRaises works correctly
-_exceptions_mod = types.ModuleType('consts.exceptions')
+# Stub contracts.errors.exceptions with real exception classes so assertRaises works correctly
+_exceptions_mod = types.ModuleType('contracts.errors.exceptions')
 
 
 class AppException(Exception):
@@ -106,7 +113,7 @@ _exceptions_mod.OfficeConversionException = OfficeConversionException
 _exceptions_mod.FileTooLargeException = FileTooLargeException
 _exceptions_mod.UnsupportedFileTypeException = UnsupportedFileTypeException
 _exceptions_mod.QuotaExceededError = QuotaExceededError
-sys.modules['consts.exceptions'] = _exceptions_mod
+install_shared_contract_stub(_exceptions_mod, 'exceptions')
 
 # Stub management.services.file.upload (new import in data_process_service)
 if 'management.services.file.upload' not in sys.modules:
@@ -1720,7 +1727,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.side_effect = ["task_id_1", "task_id_2"]
 
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1791,7 +1798,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.return_value = "task_id_1"
 
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1837,7 +1844,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.return_value = "task_id_1"
 
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1881,7 +1888,7 @@ class TestDataProcessService(unittest.TestCase):
         3. No tasks are created when all sources are invalid
         4. The method returns an empty list
         """
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1918,7 +1925,7 @@ class TestDataProcessService(unittest.TestCase):
         2. The method returns an empty list
         3. No errors occur during processing
         """
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(sources=[])
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
@@ -1942,7 +1949,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.return_value = "task_id_1"
 
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1979,7 +1986,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.return_value = "task_id_1"
 
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -2029,7 +2036,7 @@ class TestDataProcessService(unittest.TestCase):
         """A single Celery submission exception must not discard later files."""
         mock_submit_chain.side_effect = [RuntimeError("broker unavailable"), "task_id_2"]
 
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(sources=[
             {"source": "/tmp/a.txt", "source_type": "local", "index_name": "idx", "file_id": "fid-a"},
             {"source": "/tmp/b.txt", "source_type": "local", "index_name": "idx", "file_id": "fid-b"},
@@ -2050,7 +2057,7 @@ class TestDataProcessService(unittest.TestCase):
     @pytest.mark.asyncio
     async def async_test_create_batch_tasks_impl_empty_task_id(self, mock_submit_chain):
         """An empty task id is reported as a durable per-file submission failure."""
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(sources=[{
             "source": "/tmp/a.txt",
             "source_type": "local",
@@ -2302,7 +2309,7 @@ class TestDataProcessService(unittest.TestCase):
     ):
         """Source file missing → OfficeConversionException."""
         # Prevent cleanup path from calling real delete_file
-        sys.modules['database.attachment_db'].file_exists = MagicMock(
+        sys.modules['management.db.file.attachment'].file_exists = MagicMock(
             return_value=False
         )
         with self.assertRaises(OfficeConversionException) as ctx:
@@ -2325,7 +2332,7 @@ class TestDataProcessService(unittest.TestCase):
         """LibreOffice error → OfficeConversionException."""
         mock_get_stream.return_value = self._make_stream(b'DOC data')
         mock_convert.side_effect = RuntimeError('soffice not found')
-        sys.modules['database.attachment_db'].file_exists = MagicMock(
+        sys.modules['management.db.file.attachment'].file_exists = MagicMock(
             return_value=False
         )
         with patch('builtins.open', MagicMock()):
@@ -2352,7 +2359,7 @@ class TestDataProcessService(unittest.TestCase):
         mock_get_stream.return_value = self._make_stream(b'DOC data')
         mock_convert.return_value = '/tmp/test_cv/doc.pdf'
         mock_upload.return_value = {'success': False, 'error': 'quota exceeded'}
-        sys.modules['database.attachment_db'].file_exists = MagicMock(
+        sys.modules['management.db.file.attachment'].file_exists = MagicMock(
             return_value=False
         )
         with patch('builtins.open', MagicMock()):
@@ -2450,7 +2457,7 @@ class TestDataProcessService(unittest.TestCase):
         mock_get_size.return_value = 0
         mock_upload.return_value = {'success': True}
         mock_convert.return_value = '/tmp/test_cv/doc.pdf'
-        sys.modules['database.attachment_db'].file_exists = MagicMock(return_value=False)
+        sys.modules['management.db.file.attachment'].file_exists = MagicMock(return_value=False)
         with patch('builtins.open', MagicMock()):
             with self.assertRaises(OfficeConversionException) as ctx:
                 asyncio.run(
@@ -2477,7 +2484,7 @@ class TestDataProcessService(unittest.TestCase):
         mock_get_size.return_value = 50
         mock_upload.return_value = {'success': True}
         mock_convert.return_value = '/tmp/test_cv/doc.pdf'
-        sys.modules['database.attachment_db'].file_exists = MagicMock(return_value=False)
+        sys.modules['management.db.file.attachment'].file_exists = MagicMock(return_value=False)
         with patch('builtins.open', MagicMock()):
             with self.assertRaises(OfficeConversionException) as ctx:
                 asyncio.run(
@@ -2507,7 +2514,7 @@ class TestDataProcessService(unittest.TestCase):
         mock_get_size.return_value = 208
         mock_upload.return_value = {'success': True}
         mock_convert.return_value = '/tmp/test_cv/doc.pdf'
-        sys.modules['database.attachment_db'].file_exists = MagicMock(return_value=False)
+        sys.modules['management.db.file.attachment'].file_exists = MagicMock(return_value=False)
         with patch('builtins.open', MagicMock()):
             with self.assertRaises(OfficeConversionException) as ctx:
                 asyncio.run(

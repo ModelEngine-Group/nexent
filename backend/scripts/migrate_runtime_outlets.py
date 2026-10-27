@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "sdk"))
 
 
 def main():
-    from database.model_runtime_profile_db import provision_runtime_outlet_batch
+    from management.db.model.runtime_profile import provision_runtime_outlet_batch
     from management.services.model.runtime_provisioning import (
         build_runtime_outlet_snapshot,
     )

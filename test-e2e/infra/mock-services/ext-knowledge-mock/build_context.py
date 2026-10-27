@@ -48,6 +48,7 @@ MOCK_FILES = (
     "haotian_mock.py",
     "assets_mock.py",
     "fault_provider_mock.py",
+    "aidp_fixture.py",
     "requirements.txt",
 )
 MOCK_SEED_FILES = (

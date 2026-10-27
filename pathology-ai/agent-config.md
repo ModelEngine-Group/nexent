@@ -36,7 +36,7 @@
 
 ## Prompt 配置
 
-### duty_prompt (角色提示词)
+### prompt (智能体提示词)
 
 ```
 # 🏥 病理学AI助手

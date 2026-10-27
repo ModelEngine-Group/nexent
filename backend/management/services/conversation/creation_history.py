@@ -6,9 +6,10 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
-from consts.model import MessageRequest, MessageUnit, WorkbenchSessionConfig
-from database.agent_db import query_agent_records_for_nl2agent
-from database.conversation_db import get_conversation_history, rebind_conversation_agent_id
+from contracts.conversation import MessageRequest, MessageUnit
+from contracts.agent import WorkbenchSessionConfig
+from management.db.agent.repository import query_agent_records_for_nl2agent
+from management.db.conversation.repository import get_conversation_history, rebind_conversation_agent_id
 from management.services.conversation.service import (
     create_new_conversation,
     save_message,

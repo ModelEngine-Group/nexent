@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import yaml
 from jsonschema import Draft202012Validator
 
 from acceptance_integrity import binding_issues, contract_issues
@@ -43,7 +44,7 @@ def _mock_service_issues(execution_path, raw) -> list[ValidationIssue]:
     return issues
 
 
-def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationIssue], dict]:
+def inspect(root: Path, phase: str = "implementation", *, require_preparation_cases=()) -> tuple[list[ValidationIssue], dict]:
     cases, issues = case_index(discover_documents(root, "cases"))
     entries = {}
     entrypoints: dict[str, str] = {}
@@ -77,6 +78,11 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
             issues.append(ValidationIssue(execution_path, "timeout_seconds", "Case timeout must be an integer from 1 to 7200 seconds"))
         if case.get("status") in {"retired", "skipped_by_policy", "manual"}:
             issues.append(ValidationIssue(execution_path, "", "Inactive or manual case must not have executable metadata"))
+        if (phase == "implementation" and case_id in require_preparation_cases
+                and stage != "D1" and case.get("status") == "active"
+                and "preparation" not in raw):
+            issues.append(ValidationIssue(execution_path, "preparation",
+                                          "Active online case requires an explicit preparation declaration"))
         implementations = raw.get("implementations")
         if not isinstance(implementations, list) or not implementations:
             issues.append(ValidationIssue(execution_path, "implementations", "At least one implementation is required"))
@@ -131,6 +137,12 @@ def inspect(root: Path, phase: str = "implementation") -> tuple[list[ValidationI
                 else:
                     record["execution"]["preparation"] = raw["preparation"]
     registry = {"schema_version": "1.0", "cases": [entries[key] for key in sorted(entries)]}
+    from deployment_exceptions import CATALOG, catalog
+    try:
+        catalog(root, registry["cases"])
+    except (ValueError, OSError, yaml.YAMLError):
+        issues.append(ValidationIssue(root / CATALOG, "deployment_exceptions",
+                                      "Invalid deployment exception catalog or Case/profile reference"))
     return issues, registry
 
 

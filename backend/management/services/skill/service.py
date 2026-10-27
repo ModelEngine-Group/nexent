@@ -8,15 +8,11 @@ import os
 import zipfile
 from typing import Any, Dict, List, Optional, Union
 
-from consts.const import (
-    MAX_SKILL_UPLOAD_SIZE_BYTES,
-    MAX_SKILL_UPLOAD_SIZE_MB,
-    ROOT_DIR,
-)
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException, ForbiddenError, SkillException
-from database import skill_db
-from database.group_db import query_group_ids_by_user
+from contracts.constants.environment import MAX_SKILL_UPLOAD_SIZE_BYTES, MAX_SKILL_UPLOAD_SIZE_MB, ROOT_DIR
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, ForbiddenError, SkillException
+from management.db.skill import repository as skill_db
+from management.db.identity.group import query_group_ids_by_user
 from nexent.skills import SkillManager
 from nexent.skills.skill_loader import SkillLoader
 from nexent.skills.text_codec import DecodedSkillFile, decode_skill_text
@@ -1209,7 +1205,7 @@ class SkillService(SkillArchiveOperations):
         Returns:
             Created or updated skill instance dict
         """
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
 
         return skill_db_module.create_or_update_skill_by_skill_info(
             skill_info=skill_info,
@@ -1231,7 +1227,7 @@ class SkillService(SkillArchiveOperations):
         Returns:
             List of skill instance dicts
         """
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
 
         return skill_db_module.query_skill_instances_by_agent_id(
             agent_id=agent_id, tenant_id=tenant_id, version_no=version_no
@@ -1251,7 +1247,7 @@ class SkillService(SkillArchiveOperations):
         Returns:
             Skill instance dict or None if not found
         """
-        from database import skill_db as skill_db_module
+        from management.db.skill import repository as skill_db_module
 
         return skill_db_module.query_skill_instance_by_id(
             agent_id=agent_id,

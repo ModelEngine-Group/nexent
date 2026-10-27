@@ -1,4 +1,7 @@
-import { test } from 'vitest';
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import { test, vi } from 'vitest';
+import { startAgentConversation } from '@/app/newchat/adapter/thread-agent-registry';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -41,28 +44,29 @@ function assertOrdered(src: string, markers: string[], label: string): void {
   }
 }
 
-test('UT-FE-AUTO-4DE990B773C33378 landing agent selection restores agent and binds agentId via initialize + updateCustom', () => {
+test('UT-FE-AUTO-4DE990B773C33378 landing selection initializes its new thread before binding the agent', async () => {
   const src = readSource(REL_SOURCES.page);
-  const start = src.indexOf('handleAgentSelectedFromLanding');
-  assert.ok(start !== -1, 'handleAgentSelectedFromLanding should exist in page.tsx');
-  const end = src.indexOf('setSelectedAgent(agent);', start);
-  assert.ok(end !== -1, 'selected agent should be committed after thread metadata');
-  const block = src.slice(start, end + 'setSelectedAgent(agent);'.length);
-  assertOrdered(
-    block,
-    [
-      'shouldRestoreAgentRef.current = true',
-      'runtime.threads.getItemById(',
-      'mainThreadId',
-      'thread.initialize()',
-      'thread.updateCustom({ agentId: agent.id })',
-      'setSelectedAgent(agent)',
-    ],
-    'handleAgentSelectedFromLanding',
-  );
-  // Product change 0c9ff869c intentionally preserves the current landing
-  // thread. Starting another thread here would discard its metadata.
-  assert.ok(!block.includes('switchToNewThread()'));
+  const start = src.indexOf('const handleAgentSelectedFromLanding');
+  const end = src.indexOf('const handleAgentSwitched', start);
+  assert.ok(start >= 0 && end > start);
+  assertOrdered(src.slice(start, end), ['shouldRestoreAgentRef.current = true', 'await onAgentSelected(agent)'], 'landing delegation');
+  const calls: string[] = [];
+  let selected = 'previous';
+  const thread = {
+    initialize: vi.fn(async () => { calls.push('initialize'); }),
+    updateCustom: vi.fn(async () => { calls.push('bind'); }),
+  };
+  const runtime = { threads: {
+    switchToNewThread: vi.fn(async () => { calls.push('new'); selected = 'landing-draft'; }),
+    getState: () => ({ mainThreadId: selected }),
+    getItemById: vi.fn(() => thread),
+  } };
+  await startAgentConversation(runtime as any, 7);
+  assert.deepEqual(calls, ['new', 'initialize', 'bind']);
+  assert.deepEqual(runtime.threads.getItemById.mock.calls, [['landing-draft']]);
+  assert.deepEqual(thread.updateCustom.mock.calls, [[{ agentId: 7 }]]);
+  await assert.rejects(startAgentConversation(runtime as any, 0), /valid agent ID/);
+  assert.equal(runtime.threads.switchToNewThread.mock.calls.length, 1);
 });
 
 test('handleThreadBack clears restore flag then switches thread and returns to landing', () => {
@@ -99,12 +103,12 @@ test('adapter updateCustom is a no-op with nullable custom metadata signature', 
 
 test('adapter initialize returns empty remoteId/externalId without backend creation', () => {
   const src = readSource(REL_SOURCES.adapter);
-  const start = src.indexOf('async initialize(_threadId: string)');
+  const start = src.indexOf('async initialize(', src.indexOf('export const createConversationThreadListAdapter'));
   assert.ok(start !== -1, 'initialize should exist in conversation-thread-list-adapter.tsx');
   const end = src.indexOf('async updateCustom(', start);
   assert.ok(end !== -1, 'updateCustom should follow initialize');
   const block = src.slice(start, end);
-  assert.ok(block.includes('remoteId: ""'), 'initialize should return empty remoteId');
+  assert.match(block, /conversationType === \"workbench\"[\s\S]*?`workbench-draft:\$\{_threadId\}`[\s\S]*?: \"\"/, 'agent drafts stay lazy while Workbench drafts retain unique local IDs');
   assert.ok(block.includes('externalId: ""'), 'initialize should return empty externalId');
   assert.ok(!/\bawait\s+conversationService\.create/.test(block), 'initialize must not create a backend conversation eagerly');
 });

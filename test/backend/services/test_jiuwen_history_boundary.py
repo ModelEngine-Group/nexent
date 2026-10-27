@@ -1,10 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """An existing chat cannot fall back to client history when its DB boundary is unknown."""
 
 from unittest.mock import AsyncMock
 
 import pytest
-from consts.exceptions import ForbiddenError
-from consts.model import AgentRequest
+from contracts.errors.exceptions import ForbiddenError
+from contracts.agent import AgentRequest
 from management.services.agent import run as service
 
 

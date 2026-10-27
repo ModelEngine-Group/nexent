@@ -28,19 +28,18 @@ case:
     expected: disabled/lightweight/full 三态均可被解析为合法值，缺省回退为 lightweight。
   - order: 2
     action: 不传 --sandbox-mode 时调用 deployment_prepare_config，断言 DEPLOYMENT_SANDBOX_MODE 回退为默认值 lightweight（DEPLOYMENT_SANDBOX_MODE_DEFAULT）。
-    expected: 非法 sandbox mode 被拒绝并输出 "Unsupported sandbox mode" 错误（返回非零）。
+    expected: 缺省模式为 lightweight。
   - order: 3
     action: '以 --sandbox-mode unsupported 调用 deployment_prepare_config，断言 deployment_validate 返回失败且错误信息包含 "Unsupported sandbox
       mode: unsupported"。'
-    expected: 执行级别与镜像选择符合契约：disabled→local+nexent-sandbox、lightweight→docker+nexent-sandbox、full→docker+nexent-sandbox-full。
+    expected: 非法 sandbox mode 被拒绝并输出 "Unsupported sandbox mode" 错误（返回非零）。
   - order: 4
     action: 分别对 disabled/lightweight/full 调用 deployment_apply_image_source，断言 NEXENT_SANDBOX_DEFAULT_LEVEL 依次为 local/docker/docker，且
       full 选择 nexent-sandbox-full 镜像、disabled 与 lightweight 保留 nexent-sandbox 镜像（含版本 tag）。
-    expected: sandboxMode 正确持久化到 local-config.yaml 并渲染进 Helm values，重载后取值一致。
+    expected: 执行级别与镜像选择符合契约：disabled→local+nexent-sandbox、lightweight→docker+nexent-sandbox、full→docker+nexent-sandbox-full。
   - order: 5
-    action: 调用 deployment_persist_local_config 与 deployment_render_helm_values，断言 local-config.yaml 的 sandboxMode 与 Helm values
-      的 sandboxMode 字段正确写出；以 --defaults --local-config 重新加载后 DEPLOYMENT_SANDBOX_MODE 恢复一致。
-    expected: 沙箱模式或镜像变更时固定沙箱容器被重建（rm -f），disabled 跳过镜像拉取。
+    action: 调用 deployment_persist_local_config，断言 local-config.yaml 的 sandboxMode 正确写出；以 --defaults --local-config 重新加载后 DEPLOYMENT_SANDBOX_MODE 恢复一致。
+    expected: sandboxMode 正确持久化到 local-config.yaml，重载后取值一致。
   - order: 6
     action: 检查 reconcile_sandbox_container：现有 nexent-runtime-sandbox 容器镜像与目标 NEXENT_SANDBOX_IMAGE 一致且模式非 disabled 时保留；否则 docker
       rm -f 重建并保留工作区卷。
@@ -52,9 +51,22 @@ case:
   - disabled/lightweight/full 三态均可被解析为合法值，缺省回退为 lightweight。
   - 非法 sandbox mode 被拒绝并输出 "Unsupported sandbox mode" 错误（返回非零）。
   - 执行级别与镜像选择符合契约：disabled→local+nexent-sandbox、lightweight→docker+nexent-sandbox、full→docker+nexent-sandbox-full。
-  - sandboxMode 正确持久化到 local-config.yaml 并渲染进 Helm values，重载后取值一致。
+  - sandboxMode 正确持久化到 local-config.yaml，重载后取值一致。
   - 沙箱模式或镜像变更时固定沙箱容器被重建（rm -f），disabled 跳过镜像拉取。
   forbidden_side_effects: []
+  acceptance:
+  - id: AC-01
+    description: 三态与缺省值解析正确，非法模式明确失败。
+    steps: [1, 2, 3]
+    expected_results: [1, 2]
+  - id: AC-02
+    description: Docker 执行级别、镜像及本地配置持久化符合模式，重新加载一致。
+    steps: [4, 5]
+    expected_results: [3, 4]
+  - id: AC-03
+    description: Docker 沙箱容器匹配保留、失配移除与 disabled 跳过拉取的脚本契约仍有断言。
+    steps: [6, 7]
+    expected_results: [5]
   source:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 04_安全性能可靠性
@@ -70,17 +82,17 @@ case:
   - disabled/lightweight/full 三态均可被解析为合法值，缺省回退为 lightweight。
   - 非法 sandbox mode 被拒绝并输出 "Unsupported sandbox mode" 错误（返回非零）。
   - 执行级别与镜像选择符合契约：disabled→local+nexent-sandbox、lightweight→docker+nexent-sandbox、full→docker+nexent-sandbox-full。
-  - sandboxMode 正确持久化到 local-config.yaml 并渲染进 Helm values，重载后取值一致。
+  - sandboxMode 正确持久化到 local-config.yaml，重载后取值一致。
   - 沙箱模式或镜像变更时固定沙箱容器被重建（rm -f），disabled 跳过镜像拉取。
   thresholds:
   - disabled/lightweight/full 三态均可被解析为合法值，缺省回退为 lightweight。
   - 非法 sandbox mode 被拒绝并输出 "Unsupported sandbox mode" 错误（返回非零）。
   - 执行级别与镜像选择符合契约：disabled→local+nexent-sandbox、lightweight→docker+nexent-sandbox、full→docker+nexent-sandbox-full。
-  - sandboxMode 正确持久化到 local-config.yaml 并渲染进 Helm values，重载后取值一致。
+  - sandboxMode 正确持久化到 local-config.yaml，重载后取值一致。
   - 沙箱模式或镜像变更时固定沙箱容器被重建（rm -f），disabled 跳过镜像拉取。
   recovery_expectations:
   - disabled/lightweight/full 三态均可被解析为合法值，缺省回退为 lightweight。
   - 非法 sandbox mode 被拒绝并输出 "Unsupported sandbox mode" 错误（返回非零）。
   - 执行级别与镜像选择符合契约：disabled→local+nexent-sandbox、lightweight→docker+nexent-sandbox、full→docker+nexent-sandbox-full。
-  - sandboxMode 正确持久化到 local-config.yaml 并渲染进 Helm values，重载后取值一致。
+  - sandboxMode 正确持久化到 local-config.yaml，重载后取值一致。
   - 沙箱模式或镜像变更时固定沙箱容器被重建（rm -f），disabled 跳过镜像拉取。

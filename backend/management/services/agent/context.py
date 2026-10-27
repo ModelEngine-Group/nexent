@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
-from consts.const import MESSAGE_ROLE
+from contracts.constants.constants import MESSAGE_ROLE
 from contracts.agent import AgentRunContext
 from nexent.core.agents.context import ContextItemInput
 from nexent.core.agents.context_input import ContextInput
@@ -90,7 +90,7 @@ def _composer(language: str, is_manager: bool, prompt_bundle):
 
 
 def build_context_inputs(
-    duty_prompt: Optional[str] = None,
+    prompt: Optional[str] = None,
     language: str = "zh",
     is_manager: bool = True,
     enable_planning: bool = False,

@@ -32,12 +32,12 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
-patch('backend.database.client.minio_client', minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
-from consts.exceptions import MCPContainerError, MCPConnectionError
+from contracts.errors.exceptions import MCPContainerError, MCPConnectionError
 from management.services.mcp.containers import MCPContainerManager
 from nexent.container import ContainerError, ContainerConnectionError
 

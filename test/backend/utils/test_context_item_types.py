@@ -9,10 +9,10 @@ from nexent.core.agents.context import ContextItemRenderer, ContextItemType
 from nexent.core.agents.context import ContextManager as RealContextManager
 from nexent.core.agents.context.models import normalize_context_inputs
 
-from backend.management.services.agent.prompt import (
+from management.services.agent.prompt import (
     load_agent_prompt_bundle,
 )
-from backend.management.services.agent.context import (
+from management.services.agent.context import (
     build_context_inputs as _runtime_build_context_inputs,
 )
 
@@ -71,7 +71,7 @@ PHASE_2_FULL_MESSAGE_DIGESTS = {
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_every_backend_item_payload_serializes_and_renders(language):
     items = _items(
-        duty_prompt="duty\nconstraint\nexample",
+        prompt="duty\nconstraint\nexample",
         language=language,
         tools={"tool": {"description": "desc", "inputs": {"q": "str"}, "output_type": "str"}},
         skills=[{"name": "skill", "description": "desc"}],
@@ -119,7 +119,7 @@ def test_every_backend_item_payload_serializes_and_renders(language):
 )
 def test_each_item_type_has_explicit_role(item_type, expected_role):
     items = _items(
-        duty_prompt="duty",
+        prompt="duty",
         tools={"tool": {"description": "desc"}},
         skills=[{"name": "skill", "description": "desc"}],
         memory_list=[{"memory": "fact", "memory_level": "user", "score": 1.0}],
@@ -146,7 +146,7 @@ def test_group_handler_failure_has_stable_error_payload():
 @pytest.mark.parametrize("language", ["zh", "en"])
 def test_default_rendering_has_deterministic_class_defined_order(language):
     items = build_context_inputs(
-        duty_prompt="Duty <&> 职责\nConstraint\n第二行\nUser: {x}\nAssistant: ✓",
+        prompt="Duty <&> 职责\nConstraint\n第二行\nUser: {x}\nAssistant: ✓",
         language=language,
         is_manager=True,
         tools={

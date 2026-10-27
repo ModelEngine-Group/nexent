@@ -1,5 +1,6 @@
 schema_version: '1.0'
 case_id: SEARCH-DEEPSEEK-D4-001
+notes: Browser fixtures intercept API traffic with synthetic state; no live tenant, Agent or Provider assets are created.
 implementations:
   - framework: playwright
     file: test.spec.ts
@@ -7,3 +8,8 @@ implementations:
 acceptance_bindings:
   AC-01: [SEARCH-DEEPSEEK-D4-001]
 timeout_seconds: 240
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

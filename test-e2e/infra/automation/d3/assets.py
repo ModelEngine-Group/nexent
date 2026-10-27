@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Shared D3 asset helpers with explicit skip reasons and cleanup support."""
 
 from __future__ import annotations
@@ -58,7 +59,11 @@ def configured_model(model_type: str) -> dict:
 
 
 async def model_id(model_type: str, identity, *, force_health: bool = False) -> int:
-    """Use only the configured model name/type within the authenticated tenant."""
+    """Resolve a tenant model without requiring model-management permission.
+
+    Business tests verify Provider behavior through their actual operations.
+    Only an explicitly requested diagnostic performs a connectivity probe.
+    """
     from shared.model_selection import select_configured_model
     from shared.model_catalog import load_model_catalog
     model = configured_model(model_type)
@@ -69,9 +74,10 @@ async def model_id(model_type: str, identity, *, force_health: bool = False) -> 
             {'multi_embedding':'multiEmbedding'}.get(model_type,model_type)) or {}
         selected_id = selected.get('id') or selected.get('model_id')
     numeric = select_configured_model(model, model_type, rows, selected_id=selected_id)
-    from shared.model_health import ensure_model_health
-    row = next(row for row in rows if int(row.get('model_id') or row.get('id') or 0) == numeric)
-    await ensure_model_health(reader, model, row, force=force_health)
+    if force_health:
+        from shared.model_health import ensure_model_health
+        row = next(row for row in rows if int(row.get('model_id') or row.get('id') or 0) == numeric)
+        await ensure_model_health(reader, model, row, force=True)
     return numeric
 
 

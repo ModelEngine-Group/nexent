@@ -1,6 +1,7 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
+
 import { ResourcePickerPresentation } from "@/features/workbench/components/ResourcePickerPresentation";
 import { ResourceTagFilter } from "@/features/workbench/components/ResourceTagFilter";
 import { useResourceTags } from "@/features/workbench/hooks/useResourceTags";
@@ -799,14 +800,16 @@ export const ConversationKnowledgeScopeModal: FC<
                       actions={
                         <Button
                           size="small"
-                          aria-label="编辑"
+                          aria-label={t("ui.localization.edit")}
                           onClick={() => router.push("/knowledges")}
                         >
-                          编辑
+                          {t("ui.localization.edit")}
                         </Button>
                       }
                       badges={[
-                        source === "local" ? "本地" : "AIDP",
+                        source === "local"
+                          ? t("ui.localization.local")
+                          : "AIDP",
                         knowledgeBase.permission,
                         ...(source === "local" &&
                         knowledgeBase.embeddingModel &&
@@ -1084,10 +1087,10 @@ export const ConversationKnowledgeScopeModal: FC<
                   showFilter={false}
                   search={
                     <Input.Search
-                      aria-label="搜索知识库"
+                      aria-label={t("workbench.controls.searchKnowledgeLabel")}
                       value={search}
                       onChange={(event) => setSearch(event.target.value)}
-                      placeholder="搜索名称或描述"
+                      placeholder={t("workbench.controls.searchKnowledge")}
                       allowClear
                     />
                   }

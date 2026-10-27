@@ -15,6 +15,7 @@ case:
   preconditions:
     - real model lookup, runtime cancellation and event/draft synchronization execute against controlled HTTP provider fixtures.
     - Isolated conversations and valid drafts have recorded original configuration; providers can delay output, fail after streaming begins and record all model calls.
+    - Both ordinary Agent and creator preparation use the case-owned MCP address before provider failure or cancellation is injected.
   test_data:
     profile: mock
     paths: [ordinary-workbench, ordinary-agent-chat, nl2agent-direct, nl2agent-workbench, nl2skill-direct, nl2skill-workbench]

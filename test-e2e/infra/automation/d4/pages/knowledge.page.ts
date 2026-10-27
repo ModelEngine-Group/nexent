@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, Locator, Page } from "playwright/test";
 import { appPath } from "../runner/runtime-config";
 import { knowledgeRetrievalFailure } from "../runner/knowledge-diagnostics";
@@ -13,13 +15,16 @@ export class KnowledgePage {
 
   async open(requireConfiguredEmbedding = true): Promise<void> {
     await this.page.goto(appPath("/knowledges"), { waitUntil: "domcontentloaded" });
+    // No role=heading title here; assert one of the two mutually exclusive states.
     if (requireConfiguredEmbedding) {
-      await expect(this.page.getByRole("heading", { name: "知识库", exact: true })).toBeVisible();
       await expect(this.createButton()).toBeVisible();
       return;
     }
-    await expect(this.page.getByRole("heading", { name: "知识库", exact: true })
-      .or(this.page.getByText(/尚未配置向量模型|需要配置向量化模型/)).first()).toBeVisible();
+    await expect(
+      this.createButton()
+        .or(this.page.getByText(/尚未配置向量模型|需要配置向量化模型/))
+        .first()
+    ).toBeVisible();
   }
 
   async beginCreate(name: string, embeddingDisplayName: string): Promise<void> {
@@ -37,9 +42,11 @@ export class KnowledgePage {
   }
 
   private createButton(): Locator {
-    // Knowledge cards also have role=button and include a creation date.
-    // Only the native toolbar action can start the creation journey.
-    return this.page.locator("button").filter({ hasText: /^\s*创\s*建\s*$/ });
+    // The catalog toolbar owns the sole create entry. Cards also expose
+    // role=button but are navigation targets, not creation actions.
+    return this.page
+      .getByTestId("knowledge-catalog-toolbar")
+      .getByRole("button", { name: "新建知识库", exact: true });
   }
 
   private uploadInput(): Locator {

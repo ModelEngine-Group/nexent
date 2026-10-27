@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from contracts.authentication import AuthenticatedIdentity
 import asyncio
 import threading
 from types import SimpleNamespace
@@ -12,8 +13,8 @@ import pytest
 import services.nl2agent_service as service
 
 
-@pytest.mark.stage("D5")
-@pytest.mark.case_id("REL-AUTO-D8CA17756DF9BC52")
+@pytest.mark.stage('D5')
+@pytest.mark.case_id('REL-AUTO-D8CA17756DF9BC52')
 @pytest.mark.asyncio
 async def test_nl2agent_stream_sets_stop_event_on_close_and_cancellation(monkeypatch) -> None:
     stop_event = threading.Event()
@@ -26,16 +27,12 @@ async def test_nl2agent_stream_sets_stop_event_on_close_and_cancellation(monkeyp
         assert thread_manager is service.runtime_thread_manager
         yield '{"type":"progress","content":"started"}'
         await asyncio.Event().wait()
-
-    monkeypatch.setattr(service, "build_nl2agent_run_info", build)
-    monkeypatch.setattr(service, "agent_run", one_chunk)
-    stream = await service.create_nl2agent_stream(
-        request=SimpleNamespace(), tenant_id="tenant-a", language="zh", authorization="token"
-    )
-    assert "started" in await anext(stream)
+    monkeypatch.setattr(service, 'build_nl2agent_run_info', build)
+    monkeypatch.setattr(service, 'agent_run', one_chunk)
+    stream = await service.create_nl2agent_stream(request=SimpleNamespace(), tenant_id='tenant-a', language='zh', authorization='token', identity=AuthenticatedIdentity('test_user', 'test_tenant'))
+    assert 'started' in await anext(stream)
     await stream.aclose()
     assert stop_event.is_set()
-
     cancelled_stop = threading.Event()
     cancelled_info = SimpleNamespace(stop_event=cancelled_stop)
 
@@ -44,14 +41,11 @@ async def test_nl2agent_stream_sets_stop_event_on_close_and_cancellation(monkeyp
 
     async def cancelled_run(_run_info, *, thread_manager):
         if False:
-            yield ""
+            yield ''
         raise asyncio.CancelledError
-
-    monkeypatch.setattr(service, "build_nl2agent_run_info", build_cancelled)
-    monkeypatch.setattr(service, "agent_run", cancelled_run)
-    cancelled_stream = await service.create_nl2agent_stream(
-        request=SimpleNamespace(), tenant_id="tenant-a", language="zh", authorization="token"
-    )
+    monkeypatch.setattr(service, 'build_nl2agent_run_info', build_cancelled)
+    monkeypatch.setattr(service, 'agent_run', cancelled_run)
+    cancelled_stream = await service.create_nl2agent_stream(request=SimpleNamespace(), tenant_id='tenant-a', language='zh', authorization='token', identity=AuthenticatedIdentity('test_user', 'test_tenant'))
     with pytest.raises(asyncio.CancelledError):
         await anext(cancelled_stream)
     assert cancelled_stop.is_set()

@@ -14,13 +14,13 @@ from nexent.core.agents.context import (
 from nexent.core.agents.context.models import normalize_context_inputs
 from nexent.core.agents.prompt import AgentPromptComposer
 
-from backend.management.services.agent.prompt import (
+from management.services.agent.prompt import (
     load_agent_prompt_bundle,
 )
-from backend.management.services.agent.context import (
+from management.services.agent.context import (
     build_authorized_context_input,
 )
-from backend.management.services.agent.context import (
+from management.services.agent.context import (
     build_context_inputs as _runtime_build_context_inputs,
 )
 
@@ -142,7 +142,7 @@ def test_empty_inputs_do_not_emit_empty_resource_sections():
 def test_ut_be_fps_012_backend_adapter_preserves_outline_and_priorities():
     """UT-BE-FPS-012: Backend data enters the SDK outline without reordering by priority."""
     items = build_context_inputs(
-        language="en", duty_prompt="Investigate\nUse approved sources\nExample response", tools={"search": Value()},
+        language="en", prompt="Investigate\nUse approved sources\nExample response", tools={"search": Value()},
     )
     ordered = normalize_context_inputs(items)
     rendered = ContextItemRenderer().render(ordered)
@@ -226,7 +226,7 @@ def test_retrieval_citation_prompt_requires_sentence_level_marks(
 
 def test_all_sources_are_naturally_granular_and_keep_stable_order():
     items = build_context_inputs(
-        duty_prompt="duty\nconstraint\nexample",
+        prompt="duty\nconstraint\nexample",
         tools={"one": Value(), "two": Value()},
         skills=[{"name": "skill-one", "description": "one"}, {"name": "skill-two", "description": "two"}],
         worker_agents={"worker": Value()},
@@ -421,18 +421,24 @@ def test_group_rendering_uses_only_selected_tool_items():
     assert "must disappear" not in str(messages)
 
 
-def test_rendered_roles_and_sections_match_context_semantics():
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_rendered_roles_and_sections_match_context_semantics(language):
+    prompt = "Answer questions about the user's travel plans."
     messages = _messages(
-        duty_prompt="duty",
+        prompt=prompt,
         memory_list=[{"memory": "fact", "memory_level": "user", "score": 1.0}],
         knowledge_base_summaries=[{"index_name": "kb", "display_name": "KB", "summary": "kb"}],
-        language="en",
+        language=language,
     )
 
     assert messages[0]["role"] == "system"
     first_user = next(index for index, message in enumerate(messages) if message["role"] == "user")
     assert all(message["role"] == "system" for message in messages[:first_user])
-    assert any(message["role"] == "system" and "Core Responsibilities" in str(message) for message in messages)
+    assert any(
+        message["role"] == "system" and prompt in block.get("text", "")
+        for message in messages
+        for block in message.get("content", ())
+    )
     assert any(message["role"] == "system" and "knowledge_base_search" in str(message) for message in messages)
 
 

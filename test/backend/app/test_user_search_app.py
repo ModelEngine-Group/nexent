@@ -7,8 +7,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 
-from apps import user_app
-from consts.exceptions import UnauthorizedError
+from management.api.identity import user as user_app
+from contracts.errors.exceptions import UnauthorizedError
 
 
 @pytest.mark.parametrize("sid,search,expected_flag", [

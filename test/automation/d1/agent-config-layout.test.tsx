@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { App } from "antd";
 import {
   fireEvent,
@@ -294,7 +296,7 @@ describe("AGENT-CONFIG-D1-001 four-card composition and preserved workflow gates
     mocks.flow.configFocusRequest = {
       agentId: 42,
       requestId: 2,
-      target: { section: "role_model", promptTab: "constraint" },
+      target: { section: "role_model" },
     };
     view.rerender(agentConfigTree());
     await waitFor(() =>

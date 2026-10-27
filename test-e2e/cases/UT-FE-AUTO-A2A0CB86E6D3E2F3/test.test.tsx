@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, beforeAll, afterEach } from 'vitest';
 import { render, screen, act, cleanup } from '@testing-library/react';
@@ -78,6 +80,7 @@ vi.mock('@/components/providers/deploymentProvider', () => ({
 
 vi.mock('@/contexts/nl2AgentFlow', () => ({
   useNl2AgentFlow: () => ({ configFocusRequest: null }),
+  useNl2AgentFormLock: () => false,
 }));
 
 vi.mock('@/components/common/ExpandEditModal', () => ({
@@ -91,7 +94,8 @@ vi.mock('@/components/ui/tabs', () => ({
   TabsContent: ({ children }: any) => <div>{children}</div>,
 }));
 
-vi.mock('react-i18next', () => ({
+vi.mock('react-i18next', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-i18next')>()),
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: 'en' } }),
 }));
 
@@ -151,9 +155,7 @@ function setAgent(opts: { model_ids?: number[]; defaultLlmConfigId?: number | nu
     model_ids: modelIds,
     model: nameById(modelIds[0]),
     model_names: modelIds.map((id) => nameById(id)),
-    duty_prompt: '',
-    constraint_prompt: '',
-    few_shots_prompt: '',
+    prompt: '',
   };
   if (opts.defaultLlmConfigId === null) {
     store.state.defaultLlmConfig = { id: null, name: '', displayName: '' };

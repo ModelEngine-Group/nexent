@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Database-owned turn indices, independent of frontend message counts."""
 from contextlib import contextmanager
 from unittest.mock import MagicMock
@@ -7,7 +9,7 @@ import pytest
 
 @pytest.fixture
 def store(monkeypatch):
-    import database.conversation_db as module
+    import management.db.conversation.repository as module
     session = MagicMock()
     @contextmanager
     def current():

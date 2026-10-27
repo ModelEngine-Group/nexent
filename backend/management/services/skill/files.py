@@ -10,8 +10,8 @@ import re
 import zipfile
 from typing import Any, Dict, List, Optional, Tuple
 
-from consts.const import CONTAINER_SKILLS_PATH
-from consts.exceptions import ForbiddenError, SkillException
+from contracts.constants.environment import CONTAINER_SKILLS_PATH
+from contracts.errors.exceptions import ForbiddenError, SkillException
 from nexent.skills import SkillManager
 from nexent.skills.paths import (
     InvalidSkillNameError,

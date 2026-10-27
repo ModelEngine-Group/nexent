@@ -8,7 +8,7 @@ import re
 import pytest
 
 from management.services.agent import transfer as agent_management
-import management.services.agent.transfer as agent_transfer
+from management.services.agent import transfer as agent_transfer
 
 
 CASE_ID = 'UT-BE-AUTO-93D927CF4107FF6F'

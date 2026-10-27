@@ -12,7 +12,7 @@ from .experiment_manifest import _jsonable, sha256_value
 
 PROMPT_COMPONENT_IDS = {
     "basic_information": "system:header",
-    "duty_prompt": "system:duty",
+    "prompt": "system:duty",
     "execution_prompt": "system:execution_flow",
     "resource_prompt": "system:available_resources_header",
     "code_rules_prompt": "system:code_norms",

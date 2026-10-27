@@ -63,7 +63,7 @@ export interface MarketAgentDetail extends MarketAgentListItem {
   business_description: string;
   max_steps: number;
   provide_run_summary: boolean;
-  duty_prompt: string;
+  prompt: string;
   prompts_hidden?: boolean;
   enabled: boolean;
   model_id: number;

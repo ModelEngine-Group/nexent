@@ -30,9 +30,11 @@ export function ResourceSelectionActions({
           : "workbench.controls.pageAll",
         allSelected ? "取消本页全选" : "本页全选"
       )
-    : allSelected
-      ? "取消全选"
-      : "全选";
+    : t(
+        allSelected
+          ? "workbench.controls.deselectAll"
+          : "workbench.controls.selectAll"
+      );
   return (
     <div className="ml-auto flex shrink-0 items-center gap-3">
       <Button
@@ -41,7 +43,11 @@ export function ResourceSelectionActions({
         className="h-auto p-0 font-medium"
         aria-label={label}
         disabled={disabled || empty || toggleAllDisabled}
-        title={toggleAllDisabled ? "当前环境未启用多智能体模式" : undefined}
+        title={
+          toggleAllDisabled
+            ? t("workbench.controls.multiAgentUnavailable")
+            : undefined
+        }
         onClick={onToggleAll}
       >
         {label}
@@ -50,11 +56,11 @@ export function ResourceSelectionActions({
         type="link"
         size="small"
         className="h-auto p-0 font-medium"
-        aria-label="清空"
+        aria-label={t("workbench.controls.clear")}
         disabled={disabled || !hasSelection}
         onClick={onClear}
       >
-        清空
+        {t("workbench.controls.clear")}
       </Button>
     </div>
   );

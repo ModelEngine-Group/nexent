@@ -1,0 +1,121 @@
+schema_version: '1.0'
+change:
+  change_id: NL2A-UNIFIED-PROMPT-20261022
+  requirement_id: NL2A-UNIFIED-PROMPT-20261022
+  change_type: requirement
+  title: Expose the unified NL2Agent prompt contract
+  description: Use prompt exclusively in internal APIs, tools, events, cache and marketplace
+    snapshots. Migrate stored marketplace JSON once; retain legacy field consolidation
+    only when importing external JSON files. Rename the physical duty_prompt column
+    to prompt and remove ORM/raw-SQL aliases. At the user request, append all three
+    prompt migration sections to v2.7.0_merged_migrations.sql in deployment order. Ordinary models have
+    no prompt-specific legacy rejection validator. Remove stale split-prompt UI state,
+    unused translations/types, fixtures and current documentation. Retire the unused /prompt/generate API and its standalone
+    generation hook/cache/backend pipeline; NL2Agent is the only generation entry.
+  feature_contract_changed: true
+  affected_features:
+    existing:
+    - F-047
+    - F-048
+    - F-054
+    - F-069
+    - F-178
+    - FAF-001
+    - NL2AGENT-PROTOCOL
+    added: []
+    modified:
+    - F-045
+    retired:
+    - F-046
+  affected_cases:
+    existing:
+    - AGT-010
+    - AGT-012
+    - AGT-071
+    - AGT-AUTO-6A6BC7594487E771
+    - API-AUTO-79430DB80E20AF3D
+    - FAF-D3-001
+    - NL2AGENT-PROTOCOL-D4-001
+    - UT-FE-AUTO-A2A0CB86E6D3E2F3
+    - UT-FE-AUTO-A60EF4DAA250E60E
+    - PW-PROMPT-01
+    - TFP-D3-001
+    added: []
+    modified:
+    - AGENT-PROMPT-D5-001
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Ordinary Agent models use prompt directly without legacy-specific rejection
+      or conversion; tool and event schema validation remains unchanged
+    - External JSON import consolidates responsibilities, constraints and examples,
+      including historical spelling variants; conflicts fail without mutation
+    - Marketplace detail and installation consume canonical snapshots without legacy
+      conversion
+    - Frontend file parsing normalizes before the wizard; removed generation cache
+      cannot replace the saved Agent prompt
+    - ORM and raw SQL read/write the physical prompt column directly; retired ORM
+      constructor keys are rejected
+    - Single-prompt UI focus has no retired tab state; ordinary fixtures use canonical
+      fields; import/migration/negative regression examples retain legacy inputs
+    - Removed generation route returns 404 without authentication/model work; NL2Agent
+      canonical draft persistence and existing optimization routes remain functional
+    reason: Strengthen existing bounded validation/import and frontend tests. Extend
+      existing deployment Case for real PostgreSQL migration, rollback and idempotence;
+      no duplicate D1 Case.
+    test_selectors:
+    - test/backend/agents/test_agent_prompt_contract.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/backend/agents/test_nl2agent_agent.py
+    - test/backend/agents/test_nl2agent_single_prompt.py
+    - test/backend/app/test_agent_app.py
+    - test/backend/database/test_agent_db.py
+    - test/backend/database/test_agent_knowledge_bindings.py
+    - test/backend/database/test_agent_prompt_storage.py
+    - test/backend/management/test_system_agent_provider.py
+    - test/backend/services/test_agent_evaluation_service.py
+    - test/backend/services/test_agent_repository_service.py
+    - test/backend/services/test_agent_service.py
+    - test/backend/services/test_agent_version_service.py
+    - test/backend/services/test_asset_owner_visibility.py
+    - test/backend/services/test_default_generation_prompts.py
+    - test/backend/services/test_knowledge_scope_service.py
+    - test/backend/services/test_mcp_internal_tool_search.py
+    - test/backend/services/test_nl2agent_service.py
+    - test/backend/services/test_official_agent_sync_service.py
+    - test/backend/services/test_prompt_service.py
+    - test/backend/test_model_import_prompt.py
+    - test/backend/utils/test_agent_profile_utils.py
+    - test/backend/utils/test_agent_prompt_bundle.py
+    - test/backend/utils/test_context_item_types.py
+    - test/backend/utils/test_context_utils.py
+    - test/sdk/benchmark/test_agent_runner_tracking.py
+    - test/sdk/benchmark/test_export_agent_config.py
+    - test/sdk/benchmark/test_run_benchmark_execution.py
+    - test/sdk/benchmark/test_single_prompt_entrypoints.py
+    - test/sdk/benchmark/test_webhook_server_security.py
+    - test/sdk/core/agents/test_agent_prompt_composer.py
+    - test/sdk/core/agents/test_auxiliary_prompt_composition.py
+    - test/sdk/core/agents/test_prompt_outline.py
+    - test/sdk/core/agents/test_prompt_sdk_assembly.py
+    - test/sdk/core/agents/test_sdk_prompt_template_catalog.py
+    - test/sdk/core/agents/test_single_business_prompt.py
+    - test/sdk/core/utils/test_observer.py
+    - test/backend/services/test_unified_prompt_contract.py
+    - test/backend/services/test_nl2agent_name_validation.py
+    - test/backend/services/test_nl2agent_protocol_repair.py
+    - test/sdk/core/utils/test_observer_nl2agent_protocol.py
+    - test/backend/test_model_consts.py
+    - test/backend/services/test_official_agent_service.py
+    - test/backend/services/test_official_agent_bundle_service.py
+    - frontend/tests/component/agentImportPrompt.test.tsx
+    - frontend/tests/component/agentEditorDraft.test.tsx
+    - frontend/tests/component/agentSinglePrompt.test.tsx
+    - test/backend/app/test_prompt_app.py
+  notes: 'SPEC: nexent-doc/docs/Developing/chat-nl2agent-unified-prompt. 2026-10-22
+    follow-up removes runtime compatibility; existing API/model/browser regressions
+    are retained. Deployment Case adds market snapshot migration proof with isolated
+    synthetic data. The retired standalone-generation Cases AGT-006, AGT-007 and
+    AGT-008 were subsequently deleted at user request by REMOVE-RETIRED-PROMPT-20261026;
+    their original retirement history remains in Git and execution reports.'

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for sdk.nexent.core.agents.a2a_agent_proxy module.
 
@@ -249,6 +251,17 @@ def _load_a2a_agent_proxy_module():
 
 
 a2a_agent_proxy = _load_a2a_agent_proxy_module()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preference", [{}, {"ssl_verify": True}, {"ssl_verify": False}])
+async def test_proxy_configures_certificate_verification(preference):
+    info = a2a_agent_proxy.A2AAgentInfo("id", "Peer", "https://peer", **preference)
+    client = MagicMock()
+    client.aclose = AsyncMock()
+    with patch.object(a2a_agent_proxy.httpx, "AsyncClient", return_value=client) as constructor:
+        async with a2a_agent_proxy.ExternalA2AAgentProxy(info):
+            assert constructor.call_args.kwargs["verify"] is preference.get("ssl_verify", True)
 
 # ---------------------------------------------------------------------------
 # Import symbols for convenience

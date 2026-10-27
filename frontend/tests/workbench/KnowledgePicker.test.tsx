@@ -2,6 +2,7 @@
 
 import { beforeEach, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
+import zh from "@/public/locales/zh/common.json";
 import userEvent from "@testing-library/user-event";
 import { ConversationKnowledgeScopeModal } from "@/app/newchat/assistant-ui/conversation-knowledge-scope-modal";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
@@ -12,7 +13,18 @@ import type {
 import type { KnowledgeBase } from "@/types/knowledgeBase";
 
 const fixtures = vi.hoisted(() => ({
-  t: (key: string) => key,
+  t: (key: string, options?: { name?: string }) => {
+    if (key === "ui.localization.removeResource") {
+      return zh["ui.localization.removeResource"].replace(
+        "{{name}}",
+        options?.name ?? ""
+      );
+    }
+    return key.startsWith("workbench.controls.") &&
+      key !== "workbench.controls.confirm"
+      ? ((zh as unknown as Record<string, string>)[key] ?? key)
+      : key;
+  },
   groups: { groups: [] },
   predicates: [],
   deployment: { enableAidpKnowledge: false, isDeploymentReady: true },

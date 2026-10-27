@@ -1,10 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Unit tests for ``apps.evaluation_annotation_app``.
+"""Unit tests for ``management.api.evaluation.evaluation_annotation``.
 
 Directly invoke each async endpoint, patching the 8
-``database.evaluation_annotation_db`` helpers plus the lazily-imported
-``database.agent_evaluation_db.count_active_runs_using_schema`` and the
-``management.services.permission.identity.authentication_helpers`` identity resolver.  ``consts`` and the two database
+``management.db.evaluation.annotation`` helpers plus the lazily-imported
+``management.db.evaluation.runs.count_active_runs_using_schema`` and the
+``gateway.authentication.auth`` identity resolver.  ``consts`` and the two database
 modules are stubbed at ``sys.modules`` level (idempotent
 ``_register_package`` registration); the app module is loaded with
 ``spec_from_file_location`` so the FastAPI decorators run against the real
@@ -32,7 +32,7 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-MODULE_UNDER_TEST = "apps.evaluation_annotation_app"
+MODULE_UNDER_TEST = "management.api.evaluation.evaluation_annotation"
 
 _DB_IMPL_NAMES = [
     "batch_upsert_annotations",
@@ -83,10 +83,10 @@ def _install_stubs():
         pass
 
     _consts_pkg = _register_package("consts")
-    _ec_mod = mk_mod("consts.error_code", ErrorCode=_ErrorCode)
+    _ec_mod = mk_mod("contracts.errors.codes", ErrorCode=_ErrorCode)
     _consts_pkg.error_code = _ec_mod
     _ex_mod = mk_mod(
-        "consts.exceptions",
+        "contracts.errors.exceptions",
         AppException=_AppException,
         UnauthorizedError=_UnauthorizedError,
     )
@@ -95,19 +95,19 @@ def _install_stubs():
     # ---- database stubs --------------------------------------------------
     _db_pkg = _register_package("database")
     _eadb_mod = mk_mod(
-        "database.evaluation_annotation_db",
+        "management.db.evaluation.annotation",
         **{n: MagicMock(name=n) for n in _DB_IMPL_NAMES},
     )
     _db_pkg.evaluation_annotation_db = _eadb_mod
     _aedb_mod = mk_mod(
-        "database.agent_evaluation_db",
+        "management.db.evaluation.runs",
         count_active_runs_using_schema=MagicMock(name="count_active_runs_using_schema"),
     )
     _db_pkg.agent_evaluation_db = _aedb_mod
 
-    # ---- management.services.permission.identity.authentication_helpers ------------------------------------------------
+    # ---- gateway.authentication.auth ------------------------------------------------
     _utils_pkg = _register_package("utils")
-    _au_mod = mk_mod("management.services.permission.identity.authentication_helpers", get_current_user_id=MagicMock(name="get_current_user_id"))
+    _au_mod = mk_mod("gateway.authentication.auth", get_current_user_id=MagicMock(name="get_current_user_id"))
     _utils_pkg.auth_utils = _au_mod
     return _ErrorCode, _AppException, _UnauthorizedError
 
@@ -129,11 +129,11 @@ def bundle():
     auth = MagicMock(name="get_current_user_id")
     auth.return_value = ("u1", "t1")
 
-    _eadb = sys.modules["database.evaluation_annotation_db"]
+    _eadb = sys.modules["management.db.evaluation.annotation"]
     for n, m in db_impls.items():
         setattr(_eadb, n, m)
-    sys.modules["database.agent_evaluation_db"].count_active_runs_using_schema = in_use
-    sys.modules["management.services.permission.identity.authentication_helpers"].get_current_user_id = auth
+    sys.modules["management.db.evaluation.runs"].count_active_runs_using_schema = in_use
+    sys.modules["gateway.authentication.auth"].get_current_user_id = auth
 
     if MODULE_UNDER_TEST in sys.modules:
         del sys.modules[MODULE_UNDER_TEST]
@@ -141,7 +141,7 @@ def bundle():
     if hasattr(apps_pkg, "evaluation_annotation_app"):
         delattr(apps_pkg, "evaluation_annotation_app")
 
-    src = _BACKEND_DIR / "apps" / "evaluation_annotation_app.py"
+    src = _BACKEND_DIR / 'management' / 'api' / 'evaluation' / 'evaluation_annotation.py'
     spec = _ilu.spec_from_file_location(MODULE_UNDER_TEST, str(src))
     assert spec is not None and spec.loader is not None, f"cannot locate {src}"
     mod = _ilu.module_from_spec(spec)

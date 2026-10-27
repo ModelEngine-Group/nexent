@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Routing and Git provenance are evidence, not inferred defect attribution."""
 import json
 from pathlib import Path
@@ -36,6 +37,15 @@ class OwnershipTests(unittest.TestCase):
         self.assertEqual(route(record, feature, rules)['owner'], '@夏一辰')
         rules['case_overrides']['TEST-01'] = 'runtime'
         self.assertEqual(route(record, feature, rules)['owner'], '@潘业宏')
+
+    def test_config_lifespan_is_system_management_not_automation_scheduler(self):
+        rules = load_rules(REPO)
+        record = {'case_id': 'REL-AUTO-AF6CA560E762D682',
+                  'feature_id': 'V5-REL-AUTO-AF6CA560E762D682'}
+        result = route(record, {'description': '系统管理 / 配置服务生命周期'}, rules)
+        self.assertEqual(result['status'], 'ASSIGNED')
+        self.assertEqual(result['domain'], '系统管理整体')
+        self.assertEqual(result['owner'], '@武兆福')
 
     def test_unknown_and_ambiguous_are_not_guessed(self):
         rules = load_rules(REPO)

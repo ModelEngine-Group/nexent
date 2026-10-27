@@ -206,7 +206,10 @@ export const AgentLandingPage: FC<AgentLandingPageProps> = ({
 
   return (
     <div className="flex h-full flex-col gap-4 overflow-y-auto p-6">
-      <h1 className="text-[20px] leading-[28px] text-[#191919]">
+      <h1
+        data-agent-landing-title
+        className="text-[20px] leading-[28px] text-[#191919]"
+      >
         {t("chat.agentLanding.discoverTitle")}
       </h1>
 

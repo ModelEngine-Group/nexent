@@ -10,14 +10,21 @@ import pytest
 
 from shared.http import assert_status, client, response_message
 from shared.factories.ownership import register_owned_http
+from shared.aidp import create_payload
 
 CASE_ID = 'API-AUTO-7513FEF9904B9F3F'
+EMPTY_UPDATE_MESSAGE = 'At least one supported knowledge base field must be provided for update'
 
 _LIST_PAGE_SIZE = 100
 
 
 def _new_run_id() -> str:
     return uuid.uuid4().hex[:12]
+
+
+def assert_empty_update_rejected(response):
+    assert_status(response, 400)
+    assert response_message(response) == EMPTY_UPDATE_MESSAGE
 
 
 async def _list_visible_kbs(api) -> dict[str, dict]:
@@ -79,11 +86,7 @@ async def test_aidp_kb_update_delete_core_api_auto_7513fef9904b9f3f(
         async with client('config', token=tenant_a_admin.access_token) as api:
             create = await api.post(
                 '/aidp-mgmt/knowledge-bases',
-                json={
-                    'name': name,
-                    'description': '初始描述',
-                    'ingroup_permission': 'PRIVATE',
-                },
+                json=await create_payload(tenant_a_admin, name, description='初始描述', ingroup_permission='PRIVATE'),
             )
             assert_status(create, 200)
             created = create.json() or {}
@@ -136,9 +139,7 @@ async def test_aidp_kb_update_delete_core_api_auto_7513fef9904b9f3f(
             await _wait_until('updated name not synced to list/detail', _name_synced)
 
             empty = await api.put(f'/aidp-mgmt/knowledge-bases/{kds_id}', json={})
-            assert_status(empty, 400)
-            detail_msg = response_message(empty)
-            assert 'name or description' in detail_msg, f'unexpected 400 detail: {empty.text}'
+            assert_empty_update_rejected(empty)
 
             still_name = await _kb_name(api, kds_id)
             assert still_name == new_name, f'empty update overwrote kds_name: {still_name!r}'

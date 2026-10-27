@@ -11,7 +11,6 @@ feature:
   business_rules:
   - rule_id: V5-DEP-AUTO-00C24E57476D8253-RULE-01
     description: 离线 k8s 目标镜像经 ctr 导入 containerd(k8s.io)、ctr 缺失 Docker 回退、sudo/非 root 分支，以及 k8s 目标强制打包官方技能 zip
-  required_test_stages:
-  - D5
+  required_test_stages: []
   source:
-    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'
+    notes: 'Product behavior retained. Its K8s D5 Case was removed from the formal baseline at user request on 2026-10-23; no runtime acceptance is claimed.'

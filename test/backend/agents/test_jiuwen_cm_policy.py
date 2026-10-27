@@ -1,7 +1,9 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """The saved CM checkbox is authoritative at Agent policy precedence."""
 
 import pytest
-from agents.create_agent_info import build_agent_context_policy
+from management.services.agent.preparation.compiler import build_agent_context_policy
 from nexent.core.agents.context.policy import resolve_policy
 
 

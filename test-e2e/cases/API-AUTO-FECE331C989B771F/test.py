@@ -10,6 +10,7 @@ import pytest
 import pytest_asyncio
 
 from shared.http import assert_status, client
+from shared.aidp import create_payload
 from shared.factories.ownership import register_owned_http
 
 CASE_ID = 'API-AUTO-FECE331C989B771F'
@@ -33,7 +34,7 @@ async def aidp_kb(tenant_a_admin):
     async with client('config', token=tenant_a_admin.access_token) as api:
         created = await api.post(
             '/aidp-mgmt/knowledge-bases',
-            json={'name': name, 'ingroup_permission': 'PRIVATE'},
+            json=await create_payload(tenant_a_admin, name, ingroup_permission='PRIVATE'),
         )
         assert_status(created, 200)
         body = created.json()

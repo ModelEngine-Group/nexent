@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D3 tenant deletion and Northbound API end-to-end scenarios."""
 
 from __future__ import annotations
@@ -15,6 +17,8 @@ from shared.sse import assert_terminal_event, read_sse
 from shared.postgres import postgres_scalar, postgres_sql
 from shared.factories.ownership import register_owned_http
 from shared.asset_registry import mark_asset_state
+from shared.factories.agent import _draft_agent
+from shared.runtime_fault import owned_failure_model, fault_control
 
 
 CASES = [
@@ -133,11 +137,24 @@ async def _northbound_chat(api_key: str, identity, mode: str) -> None:
             )
         return
     if mode == "dependency":
-        events, _ = await _nb_run(
-            api_key, query="Provider dependency failure probe", model_override=absent_numeric_id(__name__),
-        )
-        text = json.dumps(events, ensure_ascii=False).lower()
-        assert "error" in text or "fail" in text
+        # An absent model is a preflight 404, not an inference dependency fault.
+        await _nb_run(api_key, query="Absent model preflight probe",
+                      model_override=absent_numeric_id(__name__), expected=404)
+        async with owned_failure_model(identity, 'AGT-066') as (selected_id, nonce):
+            async with _draft_agent(identity, name_prefix='nb-provider-failure',
+                                    model_ids=[selected_id]) as (agent_id, agent):
+                async with client('config', token=identity.access_token) as api:
+                    published = await api.post(f'/agent/{agent_id}/publish',
+                                               json={'version_name': 'dependency-probe'})
+                assert_status(published, 200)
+                events, _ = await _nb_run(
+                    api_key, query="Provider dependency failure probe",
+                    model_override=selected_id, agent_name=agent['name'],
+                )
+                assert (await fault_control(nonce))['calls'] >= 1, 'Northbound did not reach the failure provider'
+                payloads = [event.get('data') for event in events if isinstance(event.get('data'), dict)]
+                assert payloads and payloads[-1].get('type') == 'error', 'Missing root provider error terminal'
+                assert_terminal_event(events, allow_error=True)
         return
     events, conversation_id = await _nb_run(
         api_key, query="Reply with the exact marker NB_D3_OK.", model_override=await model_id("llm", identity),

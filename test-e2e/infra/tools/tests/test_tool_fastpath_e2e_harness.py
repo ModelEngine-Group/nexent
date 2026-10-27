@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Negative checks for test oracles; these do not count as deployed E2E runs."""
 
 import importlib.util
@@ -164,6 +165,38 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 
 
 class OracleTests(unittest.TestCase):
+    def test_persisted_attachments_use_structured_metadata_and_preserve_scope(self):
+        body = history(units(True)[:-1])
+        body['data'][0]['message'][0]['minio_files'] = [
+            {'object_name': KEY, 'url': URL, 'name': f'tfp-{NONCE}.txt'}]
+        parts = deployed.history_units(body)
+        self.assertEqual(deployed.artifact_objects(parts, IDENTITY, NONCE)[KEY]['s3_url'], URL)
+        self.assertFalse(deployed.artifact_objects(parts, IDENTITY, OTHER))
+        self.assertFalse(deployed.artifact_objects(parts, SimpleNamespace(user_id='outsider'), NONCE))
+        self.assertFalse(deployed.artifact_objects(units(True)[:-1], IDENTITY, NONCE))
+
+    def test_multiline_trace_answer_and_flattened_otel_backend_are_preserved(self):
+        marker = "FINAL\n[report](s3://bucket/report)"
+        self.assertTrue(observation.output_contains(marker, marker))
+        self.assertFalse(observation.output_contains("FINAL", marker))
+        observation.verify_warmups([{"name": "agent.sandbox.warmup", "endTime": "ended",
+            "level": "DEFAULT", "metadata": {"attributes.sandbox.backend": "docker"}}], True)
+        with self.assertRaises(AssertionError):
+            observation.verify_warmups([{"name": "agent.sandbox.warmup", "endTime": "ended",
+                "level": "DEFAULT", "metadata": {"attributes.sandbox.backend": "local"}}], True)
+
+    def test_streamed_answer_requires_one_completion_and_matches_persisted_result(self):
+        parts = units(False)
+        answer = parts.pop()["content"]
+        streamed = [*parts, *({"type": "final_answer", "content": chunk, "answer_phase": "delta", "step_id": "s"}
+                              for chunk in (answer[:4], answer[4:])),
+                    {"type": "final_answer", "content": "", "answer_phase": "complete", "step_id": "s"}]
+        self.assertEqual(deployed.verify_result(streamed, CFG, NONCE, False),
+                         deployed.verify_result(units(False), CFG, NONCE, False))
+        for broken in (streamed[:-1], [*streamed, streamed[-1]], [*streamed, streamed[-2]]):
+            with self.assertRaises(AssertionError):
+                deployed.verify_result(broken, CFG, NONCE, False)
+
     def test_success_requires_exact_results_but_allows_json_key_order(self):
         for promoted in (False, True):
             parts = units(promoted)
@@ -228,6 +261,13 @@ class OracleTests(unittest.TestCase):
         self.assertEqual(list(deployed.artifact_objects(units(True), IDENTITY, NONCE)), [KEY])
         self.assertFalse(deployed.artifact_objects(units(True), IDENTITY, OTHER))
         self.assertFalse(deployed.artifact_objects(units(True), SimpleNamespace(user_id="outsider"), NONCE))
+        parts = units(True)
+        artifact = parts[-1]
+        artifact.update(type="files", content=json.dumps({"file_uploads": artifact["content"]["artifacts"]}))
+        self.assertEqual(list(deployed.artifact_objects(parts, IDENTITY, NONCE)), [KEY])
+        self.assertFalse(deployed.artifact_objects(parts, IDENTITY, OTHER))
+        with self.assertRaises(AssertionError):
+            deployed.verify_result([*units(False), artifact], CFG, NONCE, False)
 
     def test_sandbox_activation_counts_and_reclamation_detect_leaks(self):
         observation.verify_sandbox_events([], False)
@@ -272,6 +312,50 @@ class OracleTests(unittest.TestCase):
 
 
 class AsyncOracleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_v2_waits_for_delayed_warmup_indexing(self):
+        agent = {'id': 'agent', 'traceId': 't', 'sessionId': '12', 'name': 'agent.run',
+                 'endTime': 'ended', 'output': 'FINAL', 'parentObservationId': 'root'}
+        root = {'id': 'root', 'traceId': 't', 'endTime': 'ended'}
+        warm = {'id': 'warm', 'traceId': 't', 'name': 'agent.sandbox.warmup', 'endTime': 'ended'}
+        with (patch.object(observation, 'observation_pages', AsyncMock(side_effect=[
+                [agent], [root, agent], [agent], [root, agent, warm]])),
+              patch.object(observation.asyncio, 'sleep', AsyncMock()) as sleep):
+            result = await observation.trace_observations_v2(
+                {'url': 'http://trace.invalid'}, ('a', 'b'), 12, 'FINAL', expected_warmups=1)
+        self.assertEqual(result, [root, agent, warm])
+        sleep.assert_awaited_once()
+
+    async def test_v2_reads_child_pages_and_requires_completed_root(self):
+        agent = {"id": "agent", "traceId": "t", "sessionId": "12", "name": "agent.run",
+                 "endTime": "ended", "output": "FINAL", "parentObservationId": "root"}
+        root = {"id": "root", "traceId": "t", "endTime": "ended", "parentObservationId": None}
+        warm = {"id": "warm", "traceId": "t", "name": "agent.sandbox.warmup", "parentObservationId": "agent"}
+        api = AsyncMock()
+        api.get.side_effect = [
+            response(body={"data": [agent], "meta": {}}),
+            response(body={"data": [agent], "meta": {}}),  # Root not exported yet.
+            response(body={"data": [agent], "meta": {}}),
+            response(body={"data": [root, agent], "meta": {"cursor": "next"}}),
+            response(body={"data": [warm], "meta": {}}),
+        ]
+        with patch.object(observation.httpx, "AsyncClient") as make, patch.object(observation.asyncio, "sleep", AsyncMock()):
+            make.return_value.__aenter__.return_value = api
+            result = await observation.trace_observations_v2({"url": "http://trace.invalid"}, ("a", "b"), 12, "FINAL")
+        self.assertEqual(result, [root, agent, warm])
+        self.assertEqual(api.get.call_args_list[-1].kwargs["params"]["cursor"], "next")
+
+    async def test_v2_repeated_cursor_and_duplicate_observation_fail_closed(self):
+        for pages in (
+            [{"data": [{"id": "a"}], "meta": {"cursor": "same"}},
+             {"data": [{"id": "b"}], "meta": {"cursor": "same"}}],
+            [{"data": [{"id": "a"}], "meta": {"cursor": "next"}},
+             {"data": [{"id": "a"}], "meta": {}}],
+        ):
+            api = AsyncMock()
+            api.get.side_effect = [response(body=page) for page in pages]
+            with self.assertRaises(AssertionError):
+                await observation.observation_pages(api, {})
+
     async def test_artifact_requires_matching_final_link_bytes_and_cross_tenant_denial(self):
         outsider = SimpleNamespace(access_token="other", tenant_id="tenant-b")
         api = AsyncMock()

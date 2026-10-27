@@ -6,7 +6,6 @@ import { Tag } from "antd";
 import { Clock3 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
-import { StandardButton } from "@/components/common/StandardButton";
 import { getAgentRepositoryTagLabel } from "@/lib/agentRepositoryLabels";
 import { normalizeTags } from "@/services/agentConfigService";
 import type { Agent } from "@/types/agentConfig";
@@ -102,9 +101,12 @@ export default function AgentListCard({
 
       <div
         data-testid="agent-card-footer"
-        className="flex h-8 shrink-0 items-center gap-[clamp(12px,calc(100%_-_314px),78px)] text-[12px] leading-[18px] ![letter-spacing:0px]"
+        className="flex h-8 w-full shrink-0 items-center justify-between gap-3 text-[12px] leading-[18px] ![letter-spacing:0px]"
       >
-        <span className="inline-flex min-w-0 items-center gap-1 overflow-hidden text-[rgba(25,25,25,0.7)]">
+        <span
+          data-testid="agent-card-date"
+          className="inline-flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-[rgba(25,25,25,0.7)]"
+        >
           <Clock3 className="size-3 shrink-0" aria-hidden="true" />
           {date ? (
             <span className="truncate">
@@ -132,20 +134,6 @@ export default function AgentListCard({
             ? t("agentConfig.list.online")
             : t("agentConfig.list.offline")}
         </span>
-        <div className="pointer-events-none invisible ml-auto flex shrink-0 items-center gap-2 self-end group-hover:pointer-events-auto group-hover:visible group-focus-within:pointer-events-auto group-focus-within:visible">
-          <StandardButton
-            variant="primary"
-            onClick={() => onConfigure(agentId)}
-          >
-            {t("agentConfig.list.configure")}
-          </StandardButton>
-          <StandardButton
-            disabled={agent.permission === "READ_ONLY"}
-            onClick={() => onPublish(agentId)}
-          >
-            {t("agentConfig.list.publish")}
-          </StandardButton>
-        </div>
       </div>
 
       <div className="absolute right-[14px] top-[6px]">
@@ -154,6 +142,8 @@ export default function AgentListCard({
           agentName={title}
           readOnly={agent.permission === "READ_ONLY"}
           variant="menu"
+          onConfigure={onConfigure}
+          onPublish={onPublish}
           onManageVersions={onManageVersions}
         />
       </div>

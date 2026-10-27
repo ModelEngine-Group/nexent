@@ -5,8 +5,8 @@
 import logging
 from unittest.mock import AsyncMock, MagicMock
 
-import database.client as db_client
-import management.services.knowledge_base.management as local_management
+from management.db import client as db_client
+from management.services.knowledge_base import management as local_management
 import pytest
 
 

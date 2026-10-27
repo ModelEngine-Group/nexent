@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Shared lightweight database stubs for isolated database unit tests."""
 
 import sys
@@ -23,15 +25,21 @@ class FakeColumn:
 
 def install_database_stubs(model_name, model_class):
     """Register the client and model modules required by an isolated DB test."""
-    client_module = types.ModuleType("database.client")
+    client_module = types.ModuleType("management.db.client")
     client_module.get_db_session = MagicMock(name="get_db_session")
     client_module.filter_property = MagicMock(
         name="filter_property", side_effect=lambda data, _model: data
     )
-    sys.modules["database.client"] = client_module
-    sys.modules["backend.database.client"] = client_module
+    sys.modules["management.db.client"] = client_module
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
+    sys.modules["management.db.client"] = client_module
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
 
-    models_module = types.ModuleType("database.db_models")
+    models_module = types.ModuleType("management.db.models")
     setattr(models_module, model_name, model_class)
-    sys.modules["database.db_models"] = models_module
-    sys.modules["backend.database.db_models"] = models_module
+    sys.modules["management.db.models"] = models_module
+    sys.modules["management.db.models"] = models_module

@@ -147,6 +147,12 @@ def selected_files(batch, rows):
     """Select evidence, not entire runtime/config/data directories."""
     selected, excluded = [], []
     outcomes = {row["case_id"]: row["result"] for row in rows}
+    deployment_profiles = set()
+    if (batch / "deployment-plan.json").is_file():
+        plan = json.loads((batch / "deployment-plan.json").read_text(encoding="utf-8"))
+        if not isinstance(plan, dict) or any(not re.fullmatch(r"[a-z][a-z0-9-]*", key) for key in plan):
+            raise ValueError("Invalid deployment publication plan")
+        deployment_profiles = set(plan) | {"restore-local"}
     for path in sorted(batch.rglob("*")):
         relative = path.relative_to(batch)
         if path.is_symlink():
@@ -156,6 +162,10 @@ def selected_files(batch, rows):
         parts = relative.parts
         allowed = parts[0] == "logs" and path.suffix == ".log" and path.name != "notification.log"
         allowed |= relative.as_posix() == "d0/static-assets.json"
+        allowed |= relative.as_posix() in {"deployment-plan.json", "restoration.json"}
+        if parts[0] in deployment_profiles:
+            allowed |= len(parts) == 2 and parts[1] == "mode-verification.json"
+            allowed |= len(parts) == 3 and parts[1] == "logs" and path.suffix == ".log" and path.name != "notification.log"
         if len(parts) >= 3 and parts[0] == "cases" and parts[1] in outcomes:
             outcome = outcomes[parts[1]]
             if path.suffix in {".png", ".jpg", ".jpeg", ".webp", ".zip", ".webm", ".mp4"}:

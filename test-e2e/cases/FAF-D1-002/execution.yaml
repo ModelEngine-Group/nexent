@@ -2,7 +2,7 @@ schema_version: '1.0'
 case_id: FAF-D1-002
 implementations:
 - framework: vitest
-  file: test.ts
+  file: test.test.ts
   selector: FAF-D1-002
   profiles:
   - mock

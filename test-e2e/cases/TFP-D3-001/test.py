@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Real API/provider/official-tool/Docker/persistence/storage TFP acceptance."""
 
 import time
@@ -36,24 +37,31 @@ async def exercise(promoted, *, fail_after_verification=False):
     fixture = await setup("TFP-D3-001")
     conversation = None
     primary = None
+    scenario = "failed-assertion" if fail_after_verification else "promoted" if promoted else "cold"
     started = time.time()
     try:
         responses = responses_for(cfg, fixture["nonce"], promoted)
         await control(fixture["nonce"], "reset", responses=responses)
         conversation = await _create_conversation(identity, "Owned TFP acceptance " + fixture["nonce"])
         events = await run_agent(identity, fixture, conversation)
+        write_case_evidence("tfp-live-" + scenario, events)
         persisted = history_units(await wait_history(identity, conversation))
+        write_case_evidence("tfp-history-" + scenario, persisted)
         live = verify_result(events, cfg, fixture["nonce"], promoted)
         assert verify_result(persisted, cfg, fixture["nonce"], promoted) == live
         state = await control(fixture["nonce"], "state")
         assert state["calls"] == len(responses), "Unexpected protocol retry or duplicate model turn"
-        observations = await trace_observations(cfg, conversation, live["final"])
+        observations = await trace_observations(cfg, conversation, live["final"], expected_warmups=int(promoted))
+        write_case_evidence("tfp-trace-" + scenario, [
+            {key: item.get(key) for key in ("id", "traceId", "name", "endTime", "level", "metadata")}
+            for item in observations
+        ])
         verify_warmups(observations, promoted)
         artifact = (
             await verify_artifact(identity, persisted, cfg, fixture["nonce"], "TFP-D3-001") if promoted else None
         )
         write_case_evidence(
-            "tfp-runtime-" + ("promoted" if promoted else "cold"),
+            "tfp-runtime-" + scenario,
             {
                 "profile": "mock",
                 "source_fingerprints": fixture["fingerprints"],
@@ -77,7 +85,7 @@ async def exercise(promoted, *, fail_after_verification=False):
                 failures.append(type(error).__name__)
         try:
             records = sandbox_events(cfg, started)
-            write_case_evidence("tfp-sandbox-events", records)
+            write_case_evidence("tfp-sandbox-events-" + scenario, records)
             verify_sandbox_events(records, promoted)
         except Exception as error:
             failures.append(type(error).__name__)

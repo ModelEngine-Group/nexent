@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """AGENT-CORE-D2-001: Actual Agent configuration route and version contracts."""
 
 import ast
@@ -12,9 +14,9 @@ from fastapi import APIRouter, FastAPI, Header, HTTPException, Request
 from fastapi.testclient import TestClient
 from starlette.responses import JSONResponse
 
-from consts.exceptions import ForbiddenError, TenantResourceLimitError
-from consts.model import AgentInfoRequest, ExportAndImportAgentInfo
-from database.db_models import AgentInfo
+from contracts.errors.exceptions import ForbiddenError, TenantResourceLimitError
+from contracts.agent import AgentInfoRequest, ExportAndImportAgentInfo
+from management.db.models import AgentInfo
 
 
 def test_AGENT_CORE_D2_001_config_route_and_version(monkeypatch):
@@ -63,7 +65,7 @@ def test_AGENT_CORE_D2_001_config_route_and_version(monkeypatch):
 
     skill_db = SimpleNamespace(query_skill_instances_by_agent_id=lambda **kwargs: [])
     monkeypatch.setattr(database, "skill_db", skill_db, raising=False)
-    monkeypatch.setitem(sys.modules, "database.skill_db", skill_db)
+    monkeypatch.setitem(sys.modules, "management.db.skill.repository", skill_db)
     namespace = {"Optional": __import__("typing").Optional, "SOURCE_TYPE_NORMAL": "NORMAL",
                  "_ensure_system_agent_mutation_allowed": lambda *args: None,
                  "query_agent_draft": lambda *args: ({"agent_id": 1, "agent_core": "jiuwen", "version_no": 0}, [], []),

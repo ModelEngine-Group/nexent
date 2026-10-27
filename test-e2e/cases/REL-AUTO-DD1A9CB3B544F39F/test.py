@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import contextlib
@@ -8,8 +10,8 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-import database.evaluation_set_db as evaluation_set_db
-from database.db_models import EvaluationSet, EvaluationSetCase
+from management.db.evaluation import sets as evaluation_set_db
+from management.db.models import EvaluationSet, EvaluationSetCase
 from shared.postgres import postgres_sql, postgres_url
 
 

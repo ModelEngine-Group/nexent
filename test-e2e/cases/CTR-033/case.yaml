@@ -19,7 +19,7 @@ case:
   steps:
   - order: 1
     action: 通过真实 Nexent 发现接口访问延迟 305 秒的卡片
-    expected: 产品每次约 300 秒，最多三次尝试后返回明确 400，非测试客户端先超时
+    expected: 产品约 10 秒内结束单次发现并返回明确 504 超时提示，非测试客户端先超时
   - order: 2
     action: 恢复 Mock，读取 Agent 列表
     expected: 失败发现无新增或半写入资源
@@ -27,7 +27,7 @@ case:
     action: 重新发现并删除本用例 Agent
     expected: 真实恢复成功，删除后详情 404
   expected_results:
-  - 产品每次约 300 秒，最多三次尝试后返回明确 400，非测试客户端先超时
+  - 产品约 10 秒内结束单次发现并返回明确 504 超时提示，非测试客户端先超时
   - 失败发现无新增或半写入资源
   - 真实恢复成功，删除后详情 404
   forbidden_side_effects:
@@ -36,7 +36,6 @@ case:
     legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
     legacy_sheet: 02_测试用例基线
     legacy_row: 176
-  integration_boundary:
   integration_boundary: [Nexent A2A discovery API, controlled A2A HTTP server]
   observations: [redacted Mock request wire, Agent list before and after timeout]
   cleanup: [restore happy-jsonrpc scenario, delete owned external Agent and verify 404]
@@ -47,6 +46,17 @@ case:
     - 恢复 Mock，读取 Agent 列表
     - 重新发现并删除本用例 Agent
     response_expectations:
-    - 产品每次约 300 秒，最多三次尝试后返回明确 400，非测试客户端先超时
+    - 产品约 10 秒内结束单次发现并返回明确 504 超时提示，非测试客户端先超时
     - 失败发现无新增或半写入资源
     - 真实恢复成功，删除后详情 404
+  acceptance:
+  - id: AC-01
+    description: One discovery attempt ends near 10 seconds with an actionable 504 before the client deadline.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Failed discovery creates no Agent; recovery and owned-resource deletion succeed.
+    steps: [2, 3]
+    expected_results: [2, 3]
+    forbidden_side_effects: [1]

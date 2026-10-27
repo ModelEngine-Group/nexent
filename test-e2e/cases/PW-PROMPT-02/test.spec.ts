@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { Locator } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
@@ -72,10 +74,13 @@ journey("PW-PROMPT-02", async (context) => {
         return `first compare round produced two isolated rendered answers containing ${oldMarker}`;
       },
       async () => {
+        await page.getByRole("group", { name: "智能体开发步骤", exact: true })
+          .getByRole("button", { name: "智能体配置", exact: true }).click();
         await agents.setPrompts({ duty: `任何问题都只回复固定标记 ${newMarker}` });
         return `updated the behavior-affecting duty Prompt to ${newMarker} and observed autosave`;
       },
       async () => {
+        await agents.openDebug();
         secondRound = await agents.sendDebugCompare(question, newMarker);
         expect(secondRound).toHaveLength(2);
         for (const answer of secondRound) expect(answer).toContain(newMarker);

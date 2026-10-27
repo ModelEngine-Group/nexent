@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 import types
 from contextlib import contextmanager
@@ -7,15 +9,21 @@ from unittest.mock import MagicMock
 import pytest
 
 
-client_mod = types.ModuleType("database.client")
+client_mod = types.ModuleType("management.db.client")
 client_mod.get_db_session = MagicMock(name="get_db_session")
 client_mod.as_dict = MagicMock(name="as_dict")
 client_mod.filter_property = MagicMock(name="filter_property")
-sys.modules["database.client"] = client_mod
-sys.modules["backend.database.client"] = client_mod
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 
-db_models_mod = types.ModuleType("database.db_models")
+db_models_mod = types.ModuleType("management.db.models")
 
 
 class _ComparableColumn:
@@ -51,11 +59,11 @@ class ConversationShareAsset:
 
 db_models_mod.ConversationShare = ConversationShare
 db_models_mod.ConversationShareAsset = ConversationShareAsset
-sys.modules["database.db_models"] = db_models_mod
-sys.modules["backend.database.db_models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
 
 
-from backend.database import conversation_share_db as db
+from management.db.conversation import share as db
 
 
 @pytest.fixture

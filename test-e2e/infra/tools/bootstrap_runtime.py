@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Standard-library-only bootstrap for a fresh developer or Ubuntu machine."""
 import argparse
 import json
@@ -10,10 +11,18 @@ from suite_runtime import BatchLock, logged
 
 
 def bootstrap_commands(repo):
+    frontend = repo / "frontend"
+    frontend_commands = []
+    # The product lock remains machine-local; never refresh an existing graph silently.
+    if not (frontend / "package-lock.json").is_file():
+        frontend_commands.append((["npm", "install", "--package-lock-only", "--ignore-scripts",
+                                   "--legacy-peer-deps"], frontend))
+    frontend_commands.append((["npm", "ci", "--legacy-peer-deps"], frontend))
     return [
         (["uv", "sync", "--frozen", "--extra", "test", "--extra", "data-process"], repo / "backend"),
         (["uv", "pip", "install", "--python", "{runtime_python}", "--editable", str(repo / "sdk")], repo),
-        (["npm", "ci"], repo / "frontend"),
+        *frontend_commands,
+        (["node", str(repo / "frontend/node_modules/playwright/cli.js"), "install", "chromium"], repo),
         (["npm", "ci"], repo / "test-e2e/infra/automation/d1/frontend"),
         (["node", "ensure-product-react.mjs"], repo / "test-e2e/infra/automation/d1/frontend"),
         (["npm", "ci"], repo / "test-e2e/infra/automation/d4"),

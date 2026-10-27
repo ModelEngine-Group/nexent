@@ -5,7 +5,7 @@ import asyncio
 
 import pytest
 
-import management.services.memory.providers.service as svc
+from management.services.memory.providers import service as svc
 from management.services.memory.providers.service import MemoryExternalProviderService
 from nexent.memory.models import (
     MemoryIngestRequest,

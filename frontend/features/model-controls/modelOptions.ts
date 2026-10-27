@@ -64,6 +64,25 @@ export function selectWorkbenchModel(
   );
 }
 
+/**
+ * Resolve the fallback model for a session without an explicit model_id.
+ * Prefer the tenant-configured default LLM while it stays selectable, then the
+ * first available model, so a fresh session always resolves a model.
+ */
+function resolveWorkbenchFallbackModelId(
+  availableLlmModels: readonly Pick<CatalogModelOption, "id">[],
+  preferredModelId?: number
+): number | undefined {
+  if (
+    preferredModelId != null &&
+    preferredModelId > 0 &&
+    availableLlmModels.some((model) => model.id === preferredModelId)
+  ) {
+    return preferredModelId;
+  }
+  return availableLlmModels[0]?.id;
+}
+
 /** Keep the model displayed in Workbench identical to the model sent at run time. */
 export function withDefaultWorkbenchModel(
   config: WorkbenchSessionConfig,
@@ -74,9 +93,12 @@ export function withDefaultWorkbenchModel(
     | "defaultReasoningEffort"
     | "enableThinking"
     | "extraParams"
-  >[]
+  >[],
+  preferredModelId?: number
 ): WorkbenchSessionConfig {
-  const modelId = config.model_id ?? availableLlmModels[0]?.id;
+  const modelId =
+    config.model_id ??
+    resolveWorkbenchFallbackModelId(availableLlmModels, preferredModelId);
   if (modelId == null) return config;
   const model = availableLlmModels.find((item) => item.id === modelId);
   if (!model) return config;

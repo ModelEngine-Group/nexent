@@ -47,6 +47,8 @@ feature:
       and logout preserves danger styling. Profile and language setting inherit default
       menu typography, without custom font family, size or line height; About and
       version keep compact secondary typography.
+  - rule_id: NAV-MENU-RULE-009
+    description: Pending sidebar navigation shows animated left-to-right skeleton placeholders for the entire content including the title, retains a localized accessible destination heading, preserves sidebar access, and reveals the actual page on completion. Latest navigation replaces pending feedback. Reduced motion disables shimmer.
   required_test_stages:
   - D1
   - D4
@@ -59,4 +61,5 @@ feature:
     - NAV-MENU-REQ-005
     - NAV-MENU-REQ-006
     - NAV-MENU-REQ-007
+    - NAV-MENU-REQ-008
     spec_path: ../nexent-doc/docs/Developing/nav-sidebar-menu-visibility/proposal.md

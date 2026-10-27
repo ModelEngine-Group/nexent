@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from consts.model import HistoryItem, MessageRequest, MessageUnit
+from contracts.conversation import HistoryItem, MessageRequest, MessageUnit
 from contracts.conversation import MessageSource
 from management.services.conversation.service import (
     get_conversation_history_service,

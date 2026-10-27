@@ -17,7 +17,10 @@ beforeEach(async () => {
   });
 });
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 const operations = [
   [
@@ -113,3 +116,124 @@ describe.each(operations)("%s errors", (_label, operation) => {
     expect(await operation()).toEqual({ success: true, data });
   });
 });
+
+describe.each(operations.slice(0, 2))(
+  "%s backend timeouts",
+  (_label, operation) => {
+    it.each(["zh", "en"])(
+      "localizes backend timeouts in %s",
+      async (locale) => {
+        await i18n.changeLanguage(locale);
+        vi.stubGlobal(
+          "fetch",
+          vi.fn().mockResolvedValue(
+            new Response(
+              JSON.stringify({
+                detail: "Agent discovery timed out after 10 seconds",
+              }),
+              { status: 504 }
+            )
+          )
+        );
+        expect(await operation()).toEqual({
+          success: false,
+          message: i18n.t("a2a.service.discoveryTimeout"),
+        });
+      }
+    );
+
+    it.each(["pending fetch", "pending success body", "pending error body"])(
+      "waits for the backend without a frontend deadline for %s",
+      async (stage) => {
+        vi.useFakeTimers();
+        let resolveFetch!: (response: Response) => void;
+        let completeBody!: () => void;
+        const response = new Response("", {
+          status: stage === "pending error body" ? 504 : 200,
+        });
+        if (stage === "pending error body") {
+          vi.spyOn(response, "text").mockImplementation(
+            () =>
+              new Promise<string>((resolve) => {
+                completeBody = () =>
+                  resolve(
+                    JSON.stringify({
+                      detail: "Agent discovery timed out after 10 seconds",
+                    })
+                  );
+              })
+          );
+        } else {
+          vi.spyOn(response, "json").mockImplementation(
+            () =>
+              new Promise<unknown>((resolve) => {
+                completeBody = () =>
+                  resolve({ status: "error", detail: "Invalid Agent Card" });
+              })
+          );
+        }
+        const fetchMock = vi.fn().mockImplementation(() =>
+          stage === "pending fetch"
+            ? new Promise<Response>((resolve) => {
+                resolveFetch = resolve;
+              })
+            : Promise.resolve(response)
+        );
+        vi.stubGlobal("fetch", fetchMock);
+        let settled = false;
+        const result = operation().then((value) => {
+          settled = true;
+          return value;
+        });
+        await vi.advanceTimersByTimeAsync(60_000);
+        expect(settled).toBe(false);
+        expect(vi.getTimerCount()).toBe(0);
+        expect(fetchMock.mock.calls[0][1].signal).toBeUndefined();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        if (stage === "pending fetch") {
+          resolveFetch(
+            new Response(
+              JSON.stringify({
+                detail: "Agent discovery timed out after 10 seconds",
+              }),
+              { status: 504 }
+            )
+          );
+        } else {
+          completeBody();
+        }
+        expect(await result).toEqual({
+          success: false,
+          message:
+            stage === "pending success body"
+              ? "Invalid Agent Card"
+              : i18n.t("a2a.service.discoveryTimeout"),
+        });
+      }
+    );
+
+    it("permits retry after a backend timeout", async () => {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              detail: "Agent discovery timed out after 10 seconds",
+            }),
+            { status: 504 }
+          )
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ status: "success", data: { id: 2 } }))
+        );
+      vi.stubGlobal("fetch", fetchMock);
+      expect(await operation()).toEqual({
+        success: false,
+        message: i18n.t("a2a.service.discoveryTimeout"),
+      });
+      expect(await operation()).toEqual({ success: true, data: { id: 2 } });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1][1].signal).toBeUndefined();
+    });
+  }
+);

@@ -169,11 +169,11 @@ stub_backend.database = types.ModuleType("backend.database")
 sys.modules['backend'] = stub_backend
 sys.modules['backend.database'] = stub_backend.database
 
-# Stub database.outer_api_tool_db
-stub_outer_api_tool_db = types.ModuleType("database.outer_api_tool_db")
+# Stub management.db.tool.outer_api
+stub_outer_api_tool_db = types.ModuleType("management.db.tool.outer_api")
 stub_outer_api_tool_db.query_available_openapi_services = MagicMock()
-sys.modules['database.outer_api_tool_db'] = stub_outer_api_tool_db
-sys.modules['backend.database.outer_api_tool_db'] = stub_outer_api_tool_db
+sys.modules['management.db.tool.outer_api'] = stub_outer_api_tool_db
+sys.modules['management.db.tool.outer_api'] = stub_outer_api_tool_db
 
 # Stub the managed concurrency boundary used by the MCP entrypoint.
 stub_nexent = types.ModuleType("nexent")
@@ -1399,9 +1399,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_path_tenant_must_match_authenticated_tenant(self, monkeypatch):
-        auth_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = lambda authorization: ("user1", "tenant2")
-        monkeypatch.setitem(sys.modules, "management.services.permission.identity.authentication_helpers", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         sent = []
 
         async def send(message):
@@ -1439,9 +1439,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_invalid_authorization_returns_forbidden(self, monkeypatch):
-        auth_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = MagicMock(side_effect=ValueError("invalid token"))
-        monkeypatch.setitem(sys.modules, "management.services.permission.identity.authentication_helpers", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         sent = []
 
         async def send(message):
@@ -1461,9 +1461,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_lazy_initialization_delegates_to_tenant_app(self, monkeypatch):
-        auth_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = lambda authorization: ("user1", "tenant1")
-        monkeypatch.setitem(sys.modules, "management.services.permission.identity.authentication_helpers", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         delegated = []
 
         async def tenant_app(scope, receive, send):
@@ -1496,9 +1496,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_lazy_initialization_failure_returns_not_found(self, monkeypatch):
-        auth_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = lambda authorization: ("user1", "tenant1")
-        monkeypatch.setitem(sys.modules, "management.services.permission.identity.authentication_helpers", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         sent = []
 
         async def send(message):
@@ -1523,9 +1523,9 @@ class TestTenantMCPRouter:
 
     @pytest.mark.asyncio
     async def test_lazy_initialization_without_app_returns_not_found(self, monkeypatch):
-        auth_module = types.ModuleType("management.services.permission.identity.authentication_helpers")
+        auth_module = types.ModuleType("gateway.authentication.auth")
         auth_module.get_current_user_id = lambda authorization: ("user1", "tenant1")
-        monkeypatch.setitem(sys.modules, "management.services.permission.identity.authentication_helpers", auth_module)
+        monkeypatch.setitem(sys.modules, "gateway.authentication.auth", auth_module)
         sent = []
 
         async def send(message):

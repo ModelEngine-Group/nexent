@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from agents.nl2agent_agent import build_nl2agent_system_prompt
+from management.services.agent.creation import build_nl2agent_system_prompt
 
 
 @pytest.mark.parametrize("language", ["zh", "en"])
@@ -26,17 +26,17 @@ def test_prompt_examples_save_only_visible_content(language):
                         [ast.literal_eval(key) for key in keyword.value.keys],
                         keyword.value.values,
                     ))
-                    if "duty_prompt" in fields:
+                    if "prompt" in fields:
                         saves.append(fields)
                     elif {"constraint_prompt", "few_shots_prompt"} & fields.keys():
                         pytest.fail("An example still saves a separate hidden prompt")
     assert len(saves) == 2
     for fields in saves:
-        assert set(fields) == {"duty_prompt"}
+        assert set(fields) == {"prompt"}
     assert "constraint_prompt" not in prompt
     assert "few_shots_prompt" not in prompt
-    assert ('`updated_fields` 是 `["duty_prompt"]`' in prompt
-            or 'equal to `["duty_prompt"]`' in prompt)
+    assert ('`updated_fields` 是 `["prompt"]`' in prompt
+            or 'equal to `["prompt"]`' in prompt)
     assert ('只生成并同时保存 `greeting_message` 和 `example_questions`' in prompt
             or 'save only `greeting_message` and `example_questions` together' in prompt)
     assert ('限制、运行规则、演示或示例均对应单输入框' in prompt

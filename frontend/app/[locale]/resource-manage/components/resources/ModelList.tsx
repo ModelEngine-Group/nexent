@@ -4,14 +4,7 @@
 
 import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Table,
-  Button,
-  message,
-  Tag,
-  Segmented,
-  Tooltip,
-} from "antd";
+import { Table, Button, message, Tag, Segmented, Tooltip } from "antd";
 import {
   CheckCircle,
   CircleEllipsis,
@@ -34,7 +27,8 @@ import { type ModelOption, type ModelType } from "@/types/modelConfig";
 import type { ModelMonitoringItem } from "@/types/monitoring";
 import { MODEL_TYPES } from "@/const/modelConfig";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
-import { ModelAddDialogV2 } from "../../../models/components/model/ModelAddDialogV2";
+import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
+import { ModelEditDialog } from "../../../models/components/model/ModelEditDialog";
 import ModelCapacityCoverageWidget from "./ModelCapacityCoverageWidget";
 interface UnifiedModelRow extends ModelOption {
   request_count?: number;
@@ -75,7 +69,6 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
 
   const [editingModel, setEditingModel] = useState<ModelOption | null>(null);
   const [addDialogVisible, setAddDialogVisible] = useState(false);
-  const [editDialogVisible, setEditDialogVisible] = useState(false);
 
   const [checkingConnectivity, setCheckingConnectivity] = useState<Set<string>>(
     new Set()
@@ -118,19 +111,16 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   };
 
   const handleEditDialogClose = () => {
-    setEditDialogVisible(false);
     setEditingModel(null);
   };
 
   const handleEditDialogSuccess = async () => {
     await refetch();
-    setEditDialogVisible(false);
     setEditingModel(null);
   };
 
   const openEdit = (model: ModelOption) => {
     setEditingModel(model);
-    setEditDialogVisible(true);
   };
 
   const handleDelete = async (displayName: string, _provider?: string) => {
@@ -549,19 +539,18 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         className="min-h-0 flex-1 [&_.ant-table]:h-full [&_.ant-table-thead>tr>th]:whitespace-nowrap [&_.ant-table-thead>tr>th.ant-table-column-has-sorters_.ant-table-column-title]:mr-3 [&_.ant-table-thead>tr>th.ant-table-column-has-sorters_.ant-table-column-sorter]:shrink-0"
       />
 
-      <ModelAddDialogV2
+      <ModelAddDialog
         isOpen={addDialogVisible}
         onClose={handleAddDialogClose}
         onSuccess={handleAddDialogSuccess}
         tenantId={tenantId || undefined}
       />
 
-      <ModelAddDialogV2
-        isOpen={editDialogVisible}
+      <ModelEditDialog
         model={editingModel}
+        tenantId={tenantId || undefined}
         onClose={handleEditDialogClose}
         onSuccess={handleEditDialogSuccess}
-        tenantId={tenantId || undefined}
       />
     </div>
   );

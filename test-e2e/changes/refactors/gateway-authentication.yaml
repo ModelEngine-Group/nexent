@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: GATEWAY-AUTH-20261021
+  change_type: refactor
+  title: Centralize inbound authentication in gateway
+  description: Preserve inbound authentication policies while moving credential parsing
+    to gateway and passing identity to services.
+  affected_features:
+    existing:
+    - V5-UT-BE-007
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - UT-BE-007
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Preserve existing RBAC formal regression. Gateway policy/identity
+    ownership and credential rejection regressions are tested in traditional UT; no
+    public protocol change.
+  notes: Continuation of API/database ownership refactor on PR 4160.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve session and API key validation, tenant identity and CAS revocation
+    - Reject mismatched credential policies and preserve API error mapping
+    - Business services use authenticated identity without token parsing
+    reason: Reuse authentication/API/service UT and add focused gateway policy and
+      architecture regression coverage.
+    test_selectors:
+    - test/backend/management/test_gateway_authentication.py
+    - test/backend/permissions/test_depends.py
+    - test/backend/utils/test_auth_utils.py
+    - test/backend/app/test_agent_app.py
+    - test/backend/app/test_northbound_app.py
+    - test/backend/services/test_agent_service.py
+    - test/backend/services/test_nl2agent_service.py
+    - test/backend/services/test_user_management_service.py

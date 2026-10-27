@@ -64,9 +64,9 @@ case:
   - order: 4
     action: Restore an inaccessible model snapshot or return an explicit model-unavailable API error; change to a valid model
       and retry. Repeat entry visibility/disabled checks without each create permission and under a tenant change.
-    expected: Invalid selection shows an actionable error and blocks sending until reselection without discarding input/draft;
-      no silent fallback. Missing permissions follow existing visibility/read-only rules and never permit a creator run; tenant
-      changes do not retain another tenant's controls.
+    expected: Invalid selection shows the required reselection state through the model selector and blocks sending until reselection
+      without discarding input/draft; no silent fallback. Missing permissions follow existing visibility/read-only rules and
+      never permit a creator run; tenant changes do not retain another tenant's controls.
   expected_results:
   - Candidate scope, thread isolation and existing reset/restore behavior remain correct across all entries.
   - Running/invalid states guard changes and recover after permitted cancel/reselection with original input and valid drafts

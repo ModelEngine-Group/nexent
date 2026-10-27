@@ -19,14 +19,13 @@ import {
 } from 'lucide-react';
 import { OutlineItem, PdfViewerProps, ScaleMode, ViewportAnchor } from '@/types/file';
 import { ignoreAbortError, getPageWrapperStyle } from '@/lib/filePreviewUtils';
+import { PDF_DOCUMENT_OPTIONS } from '@/lib/pdfPreviewOptions.mjs';
 import log from '@/lib/logger';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
   import.meta.url,
 ).toString();
-
-const PDF_DOCUMENT_OPTIONS = { rangeChunkSize: 65536 };
 
 const OVERSCAN = 3;
 const CONTAINER_TOP_PADDING = 24;

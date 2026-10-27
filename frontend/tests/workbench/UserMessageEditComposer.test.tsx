@@ -73,7 +73,7 @@ function Harness({ readOnly = false, shareMode = false } = {}) {
 beforeEach(() => run.mockClear());
 
 async function openEditor(user: ReturnType<typeof userEvent.setup>) {
-  await user.hover(screen.getByText(originalQuestion));
+  await user.hover(await screen.findByText(originalQuestion));
   await user.click(
     await screen.findByRole("button", { name: "chat.thread.edit" })
   );
@@ -83,7 +83,7 @@ async function openEditor(user: ReturnType<typeof userEvent.setup>) {
 it("opens the original message in the registered inline edit composer", async () => {
   const user = userEvent.setup();
   const { container } = render(<Harness />);
-  expect(screen.getByText(originalQuestion)).toBeVisible();
+  expect(await screen.findByText(originalQuestion)).toBeVisible();
   const input = await openEditor(user);
   expect(input).toHaveValue(originalQuestion);
   expect(container.querySelectorAll("textarea")).toHaveLength(1);
@@ -107,7 +107,7 @@ it.each(["button", "Escape"])(
       await user.keyboard("{Escape}");
     }
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
-    expect(screen.getByText(originalQuestion)).toBeVisible();
+    expect(await screen.findByText(originalQuestion)).toBeVisible();
     expect(screen.getByText(originalAnswer)).toBeVisible();
     expect(runtime.thread.getState().messages).toEqual(originalMessages);
     expect(run).not.toHaveBeenCalled();
@@ -151,7 +151,7 @@ it.each([{ readOnly: true }, { readOnly: true, shareMode: true }])(
   async (props) => {
     const user = userEvent.setup();
     render(<Harness {...props} />);
-    await user.hover(screen.getByText(originalQuestion));
+    await user.hover(await screen.findByText(originalQuestion));
     expect(
       screen.queryByRole("button", { name: "chat.thread.edit" })
     ).not.toBeInTheDocument();

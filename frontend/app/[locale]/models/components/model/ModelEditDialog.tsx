@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useState } from "react";
@@ -62,12 +64,15 @@ import {
 
 export interface ModelEditDialogProps {
   model: ModelOption | null;
+  /** When set, the update is routed to the tenant-manage endpoint (resource-manage). */
+  tenantId?: string;
   onClose: () => void;
   onSuccess: () => void;
 }
 
 export const ModelEditDialog = ({
   model,
+  tenantId,
   onClose,
   onSuccess,
 }: ModelEditDialogProps) => {
@@ -315,7 +320,19 @@ export const ModelEditDialog = ({
         params.maxTokens = advanced.max_tokens;
       }
 
-      await modelService.updateSingleModel(params as any);
+      // Tenant admins edit through the manage endpoint (resource-manage).
+      // model_type is accepted there and written through for non-multi-
+      // embedding records; connect_status is not part of the manage request
+      // model, so the row-level healthcheck refreshes the status after
+      // identity changes instead of this save.
+      if (tenantId) {
+        await modelService.updateManageTenantModel({
+          tenantId,
+          ...params,
+        } as any);
+      } else {
+        await modelService.updateSingleModel(params as any);
+      }
       onSuccess();
       onClose();
     } catch (error: any) {

@@ -1,7 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { AssistantRuntime } from "@assistant-ui/react";
 import { useConversationResume } from "@/features/workbench/hooks/useConversationResume";
+import { createConversationDetailLoader } from "@/lib/conversationDetails";
+import { QueryClient } from "@tanstack/react-query";
 
 const service = vi.hoisted(() => ({ getById: vi.fn() }));
 vi.mock("@/services/conversationService", () => ({
@@ -11,6 +15,46 @@ vi.mock("@/app/newchat/adapter/remote-chat-model-adapter", () => ({
   remoteChatModelAdapter: { run: vi.fn() },
 }));
 vi.mock("@/lib/logger", () => ({ default: { error: vi.fn() } }));
+
+it.each(["completed", "streaming"])(
+  "uses shared %s restore state, then reads fresh state after a live run without replaying",
+  async (status) => {
+    service.getById
+      .mockReset()
+      .mockResolvedValueOnce({ streaming_message: { status } })
+      .mockResolvedValue({ streaming_message: { status: "completed" } });
+    const client = new QueryClient();
+    const details = createConversationDetailLoader(client, "resume-test");
+    await details.load("12");
+    const resume = vi.fn();
+    const props = {
+      runtime: {
+        thread: { getState: () => ({ messages: [] }), resumeRun: resume },
+      } as unknown as AssistantRuntime,
+      activeConversationId: "12",
+      activeThreadId: "a",
+      ready: true,
+      isThreadRunning: false,
+      selectedAgent: null,
+      chatMode: "execution" as const,
+      resumedConversationIdsRef: { current: new Set<number>() },
+      handleGenerationStopped: vi.fn(),
+      loadDetail: details.load,
+      invalidateDetail: details.invalidate,
+    };
+    const { rerender, unmount } = renderHook(useConversationResume, {
+      initialProps: props,
+    });
+    await act(async () => {});
+    expect(service.getById).toHaveBeenCalledTimes(1);
+    rerender({ ...props, isThreadRunning: true });
+    rerender(props);
+    await waitFor(() => expect(service.getById).toHaveBeenCalledTimes(2));
+    expect(resume).toHaveBeenCalledTimes(status === "streaming" ? 1 : 0);
+    unmount();
+    client.clear();
+  }
+);
 
 it("UT-FE-WB-003 a late history lookup cannot resume the wrong thread", async () => {
   let finishA!: (value: unknown) => void;

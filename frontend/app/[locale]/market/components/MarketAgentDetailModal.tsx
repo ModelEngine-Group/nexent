@@ -226,18 +226,18 @@ export default function MarketAgentDetailModal({
           <div>
             <h4 className="font-semibold mb-2 flex items-center gap-2">
               <Sparkles className="h-4 w-4" />
-              {t("market.detail.dutyPrompt", "Duty Prompt")}
+              {t("market.detail.prompt", "Prompt")}
             </h4>
             <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
               {isAgentPromptsHidden(agentDetails) ? (
                 <span className="text-sm text-slate-500">
-                  {renderAgentPromptFieldValue(agentDetails, "duty_prompt", t)}
+                  {renderAgentPromptFieldValue(agentDetails, "prompt", t)}
                 </span>
-              ) : needsConfig(agentDetails?.duty_prompt) ? (
-                renderFieldValue(agentDetails?.duty_prompt)
+              ) : needsConfig(agentDetails?.prompt) ? (
+                renderFieldValue(agentDetails?.prompt)
               ) : (
                 <pre className="whitespace-pre-wrap text-sm">
-                  {agentDetails?.duty_prompt || t("common.none", "None")}
+                  {agentDetails?.prompt || t("common.none", "None")}
                 </pre>
               )}
             </div>

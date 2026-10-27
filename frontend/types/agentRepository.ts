@@ -77,7 +77,7 @@ export interface AgentRepositoryListingDetail {
   downloads?: number;
   created_at?: string | null;
   model_name?: string | null;
-  duty_prompt?: string | null;
+  prompt?: string | null;
   tools?: string[];
   is_official?: boolean;
   /** Whether the bundle's root agent is a main agent; absent means main. */

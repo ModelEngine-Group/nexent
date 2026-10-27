@@ -13,7 +13,17 @@ import pytest
 
 pytestmark = [pytest.mark.case_id("EVAL-LEGACY-D5-001"), pytest.mark.stage("D5")]
 ROOT = Path(__file__).resolve().parents[3]
-MIGRATION = ROOT / "deploy/sql/migrations/v2.7.1_006_remove_legacy_space_permissions.sql"
+MERGED = ROOT / "deploy/sql/migrations/v2.8.0_merged_migrations.sql"
+SECTION = "v2.7.1_006_remove_legacy_space_permissions.sql"
+
+
+def migration_sql():
+    """Read this case's section out of the consolidated v2.8.0 migration bundle."""
+    text = MERGED.read_text(encoding="utf-8")
+    marker = f"-- Source migration: {SECTION}"
+    start = text.index(marker)
+    end = text.find("-- Source migration: ", start + len(marker))
+    return text[start:] if end == -1 else text[start:end]
 
 
 def docker(*args, source=None):
@@ -34,7 +44,8 @@ def postgres():
     try:
         for _ in range(40):
             result = subprocess.run(
-                ["docker", "exec", name, "pg_isready", "-U", "postgres"], capture_output=True,
+                # Do not mistake the entrypoint's temporary Unix-socket server for readiness.
+                ["docker", "exec", name, "pg_isready", "-h", "127.0.0.1", "-U", "postgres"], capture_output=True, timeout=10,
             )
             if result.returncode == 0:
                 break
@@ -43,7 +54,7 @@ def postgres():
             pytest.fail("Temporary PostgreSQL did not become ready")
 
         def sql(source):
-            return docker("exec", "--interactive", name, "psql", "-X", "-qAt",
+            return docker("exec", "--interactive", name, "psql", "-h", "127.0.0.1", "-X", "-qAt",
                           "-v", "ON_ERROR_STOP=1", "-U", "postgres", source=source)
 
         sql("""CREATE SCHEMA nexent;
@@ -81,7 +92,7 @@ def test_cleanup_preserves_modern_permissions_and_is_transactional_and_repeatabl
         postgres("INSERT INTO nexent.role_permission_t VALUES (" + ",".join(literal(x) for x in row) + ");")
     snapshot = "SELECT row_to_json(t) FROM nexent.role_permission_t t ORDER BY role_permission_id;"
     before = postgres(snapshot)
-    migration = MIGRATION.read_text(encoding="utf-8")
+    migration = migration_sql()
     assert migration.count("COMMIT;") == 1
     with pytest.raises(subprocess.CalledProcessError):
         postgres(migration.replace("COMMIT;", "SELECT 1 / 0; COMMIT;"))

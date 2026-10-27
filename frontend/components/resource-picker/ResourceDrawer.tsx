@@ -186,6 +186,7 @@ export function ListHeader({
   extra,
   partiallySelected,
   selectAllDisabled,
+  selectAllLabel,
   refreshDisabled,
 }: {
   title: string;
@@ -196,6 +197,7 @@ export function ListHeader({
   extra?: ReactNode;
   partiallySelected?: boolean;
   selectAllDisabled?: boolean;
+  selectAllLabel?: string;
   refreshDisabled?: boolean;
 }) {
   const { t } = useTranslation("common");
@@ -228,9 +230,11 @@ export function ListHeader({
               indeterminate={partiallySelected}
               disabled={selectAllDisabled}
               onToggle={() => onSelectAll(!allSelected)}
-              ariaLabel={t("resourcePicker.selectAll", "全选")}
+              ariaLabel={
+                selectAllLabel ?? t("resourcePicker.selectAll", "全选")
+              }
             />
-            {t("resourcePicker.selectAll", "全选")}
+            {selectAllLabel ?? t("resourcePicker.selectAll", "全选")}
           </span>
         )}
       </div>
@@ -503,6 +507,7 @@ export interface ResourceDrawerProps {
   allSelected?: boolean;
   partiallySelected?: boolean;
   selectAllDisabled?: boolean;
+  selectAllLabel?: string;
   refreshDisabled?: boolean;
   selectedTrailing?: ReactNode;
   children: ReactNode;
@@ -565,6 +570,7 @@ export function ResourceDrawer({
   allSelected,
   partiallySelected,
   selectAllDisabled,
+  selectAllLabel,
   refreshDisabled,
   selectedTrailing,
   children,
@@ -664,6 +670,7 @@ export function ResourceDrawer({
               allSelected={allSelected}
               partiallySelected={partiallySelected}
               selectAllDisabled={selectAllDisabled}
+              selectAllLabel={selectAllLabel}
               refreshDisabled={refreshDisabled}
               onRefresh={onRefresh}
               refreshLoading={refreshLoading}
@@ -723,7 +730,7 @@ export function ResourceDrawer({
           type="button"
           onClick={handleClose}
           disabled={confirmLoading}
-          className="h-8 w-[89px] cursor-pointer rounded-[2px] border border-[#C9C9C9] bg-white text-[14px] leading-[22px] text-[#191919]"
+          className="h-8 min-w-[89px] shrink-0 cursor-pointer whitespace-nowrap rounded-[2px] border border-[#C9C9C9] bg-white px-4 text-[14px] leading-[22px] text-[#191919]"
         >
           {closeText ?? t("resourcePicker.close", "关闭")}
         </button>
@@ -733,7 +740,7 @@ export function ResourceDrawer({
             onClick={onConfirm}
             disabled={disabled || confirmDisabled || confirmLoading}
             aria-busy={confirmLoading}
-            className="inline-flex h-8 w-[89px] cursor-pointer items-center justify-center gap-2 rounded-[2px] border-0 bg-[#1476FF] text-[14px] leading-[22px] text-white"
+            className="inline-flex h-8 min-w-[89px] shrink-0 cursor-pointer items-center justify-center gap-2 whitespace-nowrap rounded-[2px] border-0 bg-[#1476FF] px-4 text-[14px] leading-[22px] text-white"
           >
             {confirmLoading && (
               <RefreshCw aria-hidden size={14} className="animate-spin" />

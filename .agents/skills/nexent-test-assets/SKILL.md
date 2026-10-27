@@ -23,6 +23,7 @@ Paths are relative to the repository root. Authoritative assets live under `test
 - In bugfix mode, reuse existing coverage before adding Cases; zero additions is valid. A missing SPEC or unavailable test baseline does not trigger whole-feature test generation. Follow [bugfix.md](references/bugfix.md) for impact selection.
 - Do not edit the generated Excel workbook directly.
 - Do not encode secrets, personal absolute paths, or environment-specific runtime IDs in formal cases or scripts.
+- Ordinary Cases need no deployment grouping fields. Only Cases requiring a different product deployment belong in the small repository `test-e2e/infra/config/deployment-exceptions.yaml` catalog; read [deployment-exceptions.md](references/deployment-exceptions.md) for mode-sensitive design or execution. Requiring a Mock alone does not imply a deployment switch.
 - Business tests must not depend on a specific SQL file path. Test migration behavior only at the D5 deployment boundary.
 - Store change records by type under `test-e2e/changes/{requirements,bugs,refactors,test-fixes}/`. Changes record affected IDs; the lasting Feature and Case definitions remain in their respective directories.
 

@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from agents import create_agent_info as service
-from consts.model import HistoryItem
+import management.services.agent.preparation.run as service
+from contracts.conversation import HistoryItem
 from nexent.core.agents.agent_model import AgentConfig, ModelConfig
 
 
@@ -30,7 +30,7 @@ async def test_current_query_preserves_history_without_reactivating_uploads(mock
     mocker.patch.object(service, "filter_mcp_servers_and_tools", return_value=[])
     mocker.patch.object(service, "get_tenant_local_mcp_server", return_value="http://fixture/mcp")
     mocker.patch.object(service, "get_redis_client", return_value=None)
-    mocker.patch("agents.sandbox_config.resolve_sandbox_config", return_value=None)
+    mocker.patch("runtime.adapters.nexent.sandbox.resolve_sandbox_config", return_value=None)
     mocker.patch("management.services.agent.service.build_sandbox_policy", return_value=None)
     info = await service.create_agent_run_info(
         agent_id=1, minio_files=[new_file] if current_upload else [], query="What can you do?",

@@ -102,6 +102,17 @@ async function openMenu() {
   await waitFor(() => expect(screen.getByRole("menu")).toBeVisible());
 }
 
+test("profile navigation uses the shared transition and keeps modified clicks native", async () => {
+  const navigate = vi.fn();
+  render(<AvatarDropdown onNavigate={navigate} />);
+  await openMenu();
+  const profile = screen.getByRole("link", { name: "profile.title" });
+  fireEvent.click(profile, { ctrlKey: true });
+  expect(navigate).not.toHaveBeenCalled();
+  fireEvent.click(profile);
+  expect(navigate).toHaveBeenCalledWith("/zh/users");
+});
+
 test.each([
   ["cas", "  CAS User  ", "CAS User"],
   ["cas", " \t", "admin@nexent.test"],

@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import { t as translate } from "i18next";
 import type { RuntimeGenerationOverrides } from "@/features/model-controls/turnControls";
+import type { ClarificationResponse } from "@/types/clarification";
 import { API_ENDPOINTS, ApiError } from "./api";
 
 import { chatConfig } from "@/const/chatConfig";
@@ -261,7 +263,11 @@ export const conversationService = {
 
       // If the signal is aborted before the request returns, return early
       if (signal?.aborted) {
-        return { code: -1, message: "请求已取消", data: [] };
+        return {
+          code: -1,
+          message: translate("ui.localization.requestCancelled"),
+          data: [],
+        };
       }
 
       const data = await response.json();
@@ -277,7 +283,11 @@ export const conversationService = {
         (error instanceof Error && error.name === "AbortError") ||
         signal?.aborted
       ) {
-        return { code: -1, message: "请求已取消", data: [] };
+        return {
+          code: -1,
+          message: translate("ui.localization.requestCancelled"),
+          data: [],
+        };
       }
       throw error;
     }
@@ -380,7 +390,7 @@ export const conversationService = {
 
     throw new ApiError(
       data.code || -1,
-      data.message || data.detail || "停止失败"
+      data.message || data.detail || translate("ui.localization.stopFailed")
     );
   },
 
@@ -1076,6 +1086,7 @@ export const conversationService = {
   async runAgent(
     params: {
       query: string;
+      clarification_response?: ClarificationResponse;
       conversation_id?: number;
       history: Array<{ role: string; content: string }>;
       files?: File[];
@@ -1137,6 +1148,13 @@ export const conversationService = {
         is_debug: params.is_debug || false,
         enable_plan: params.enable_plan || false,
       };
+      if (
+        !params.is_resume &&
+        !params.runtime_mode &&
+        params.clarification_response
+      ) {
+        requestParams.clarification_response = params.clarification_response;
+      }
       if (params.runtime_mode === "nl2skill") {
         requestParams.draft_snapshot = params.draft_snapshot;
         requestParams.language = params.language;
@@ -1320,7 +1338,7 @@ export const conversationService = {
       // If the error is caused by canceling the request, return a specific response instead of throwing an error
       if (error instanceof Error && error.name === "AbortError") {
         log.log("Agent请求已被取消");
-        throw new Error("请求已被取消");
+        throw new Error(translate("ui.localization.requestWasCancelled"));
       }
       // Other errors are thrown normally
       throw error;

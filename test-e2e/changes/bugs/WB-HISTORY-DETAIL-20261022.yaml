@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: WB-HISTORY-DETAIL-20261022
+  change_type: bugfix
+  bug_id: WB-HISTORY-DETAIL-20261022
+  title: Share Workbench conversation detail during history restoration
+  description: Share one authenticated restoration result across history, configuration, metadata, route and resume consumers.
+  observed_behavior: First history activation sends four identical detail GETs, returning sends three, and document reload sends six; all succeed.
+  expected_behavior: Each saved-history activation or reload performs one detail GET; clicking the active history performs none. Preserve drafts, snapshots, parameters, conflict refresh and stream recovery.
+  escaped_stage: production
+  coverage_gap:
+    type: missing_assertion
+    description: Existing URL journey and restore UT verify state but do not count duplicate detail requests across consumers or after completion.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-SIDEBAR]
+    retired: []
+  affected_cases:
+    existing: [CHAT-ACTIVITY-D4-001, WB-CONTROLS-D4-003]
+    added: []
+    modified: [CHAT-ROUTE-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Share pending and completed detail results, with one fresh result per activation and authenticated scope.
+    - Isolate late responses, failed loads, departure and re-entry; forced conflict refresh bypasses prior data.
+    - Keep model configuration, metadata versions, live first persistence and stream resume/stop behavior unchanged.
+    reason: Frontend data ownership changes only; add query-loader regression and strengthen real provider/runtime coverage. No Python behavior changes or duplicate D1 needed.
+    test_selectors:
+    - frontend/tests/workbench/ConversationDetails.test.ts
+    - frontend/tests/workbench/WorkbenchDetailRequests.test.tsx
+    - frontend/tests/workbench/ConversationResume.test.tsx
+    - frontend/tests/workbench/WorkbenchPageLifecycle.test.tsx
+    - frontend/tests/workbench/WorkbenchConversationUrl.test.tsx
+    - frontend/tests/workbench/WorkbenchBootstrapLoading.test.tsx
+  notes: >-
+    Reuse ../nexent-doc/docs/Developing/chat-workbench-session-state/design.md,
+    WB-HISTORY-DETAIL-20261022 appendix. Source baseline 33494e934. Existing
+    ConversationResume, WorkbenchPageLifecycle, WorkbenchConversationUrl and
+    CHAT-ROUTE-D4-001 assertions inspected. Strengthen the existing route D4
+    with request counts; no new Case. D2/D3/D5 have no changed API, model or
+    deployment contract. Evidence and test results remain outside Git.

@@ -1,9 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Preserve expected lookup misses through the Agent service boundary."""
 
 import pytest
 
 from test.backend.services import test_agent_service as legacy
-from consts.exceptions import AgentNotFoundError
+from contracts.errors.exceptions import AgentNotFoundError
 from management.services.agent import management, service
 
 
