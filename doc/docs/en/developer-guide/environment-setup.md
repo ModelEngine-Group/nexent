@@ -58,7 +58,7 @@ uv sync --extra data-process --extra test --index pytorch-nvidia --upgrade-packa
 
 The project enables uv's `index-by-name` preview feature. The CPU index is first by default; `--index` promotes the selected preset. The NVIDIA index is explicit and only participates when selected. Active indexes participate in `unsafe-first-match` resolution, including dependencies other than Torch: the first source with compatible versions wins; incompatible old shared dependencies fall through to the next source. `--default-index` changes the fallback package mirror and does not override the selected PyTorch index. Base installations without document-processing extras do not install PyTorch. An existing lockfile can retain its previous Torch build despite a different index priority. The explicit commands above re-resolve Torch and Torchvision with `--upgrade-package`; do not use `--frozen` to switch variants. `uv sync` removes obsolete dependencies. CUDA installation does not verify GPU hardware or driver compatibility.
 
-For standalone SDK development, run `uv sync --extra dev` from `sdk/` for CPU, or add `--index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision` for NVIDIA. Use `--index pytorch-cpu` with the same upgrade flags to switch back. There is no separate `nvidia` extra.
+For standalone SDK development, run `uv sync --python 3.11 --extra dev` from `sdk/` for CPU, or add `--index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision` for NVIDIA. Use `--index pytorch-cpu` with the same upgrade flags to switch back. There is no separate `nvidia` extra.
 
 For SDK packages installed from a registry, wheel metadata does not carry the checkout's uv index configuration. Select the backend explicitly:
 

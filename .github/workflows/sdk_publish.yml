@@ -36,7 +36,7 @@ jobs:
 
       - name: Build package
         working-directory: sdk
-        run: uv build
+        run: uv build --python python
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1

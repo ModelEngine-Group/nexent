@@ -58,7 +58,7 @@ uv sync --extra data-process --extra test --index pytorch-nvidia --upgrade-packa
 
 项目启用了 uv 的 `index-by-name` 预览功能。默认优先使用 CPU index；`--index` 将选中的预置源提升至最高优先级。NVIDIA index 设为 explicit，仅在显式选择后参与解析。启用的源参与`unsafe-first-match` 解析，包括 Torch 以外的依赖：优先选择首个包含兼容版本的源，遇到不满足约束的旧版通用依赖时继续查找下一源。`--default-index` 仅设置后备镜像源，不会覆盖所选 PyTorch index。未选择文档处理 extra 的基础安装不引入 PyTorch。已有锁文件可能保留之前的 Torch 构建，即使 index 优先级已改变。上面的显式命令通过 `--upgrade-package` 重新解析 Torch 和 Torchvision；不要使用 `--frozen` 切换配置；`uv sync` 会移除不再需要的依赖。安装 CUDA 依赖不代表已验证 GPU 硬件或驱动兼容性。
 
-独立开发 SDK 时，在 `sdk/` 下执行 `uv sync --extra dev` 使用 CPU，添加 `--index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision` 使用 NVIDIA。切回 CPU 时使用 `--index pytorch-cpu` 并保留这两个 upgrade 参数。不再提供单独的 `nvidia` extra。
+独立开发 SDK 时，在 `sdk/` 下执行 `uv sync --python 3.11 --extra dev` 使用 CPU，添加 `--index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision` 使用 NVIDIA。切回 CPU 时使用 `--index pytorch-cpu` 并保留这两个 upgrade 参数。不再提供单独的 `nvidia` extra。
 
 从包仓库安装 SDK 时，wheel 元数据不包含本地项目的 uv index 配置，需要显式指定后端：
 
