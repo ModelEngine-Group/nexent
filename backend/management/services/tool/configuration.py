@@ -80,6 +80,7 @@ from management.services.knowledge_base.service import (
     get_vector_db_core,
 )
 from management.services.mcp.addressing import get_tenant_local_mcp_server
+from management.services.mcp.openapi import get_openapi_service_tool_map
 from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
 from management.services.model.resolver import get_rerank_model
 from management.services.tool.catalog import (
@@ -397,8 +398,6 @@ async def update_tool_list(tenant_id: str, user_id: str):
 
     try:
         mcp_tools = await get_all_mcp_tools(tenant_id)
-        from management.services.mcp.openapi import get_openapi_service_tool_map
-
         service_ids = (
             get_openapi_service_tool_map(tenant_id)
             if not (refresh_result or {}).get("error")
