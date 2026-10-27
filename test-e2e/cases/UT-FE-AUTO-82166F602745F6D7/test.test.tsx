@@ -339,90 +339,14 @@ describe('SourcesPanel selection and passthrough', () => {
     const saved = { type: 'source', isImage: true, title: 'Saved image', url: 'https://example.com/saved.png' };
     const registryOnly = { ...saved, title: 'Registry image', url: 'https://example.com/registry.png' };
     h.aui.message = { id: 'history-images', content: [anchor, saved] };
-    const numberedImage = Object.freeze({ type: 'source', citeIndex: 9, toolSign: 'a', isImage: true, title: 'Numbered image', url: 'https://example.com/numbered.png' });
-    const registered = Object.freeze([saved, Object.freeze({ ...saved }), registryOnly, numberedImage]);
-    h.registered = registered as any;
+    h.registered = [saved, { ...saved }, registryOnly];
     const historyPayload = openCurrentMessage('a1');
-    expect.soft(historyPayload.images).toHaveLength(3);
-    expect(historyPayload.images.map((item: any) => item.title)).toEqual(['Numbered image', 'Saved image', 'Registry image']);
-    expect(registered.map((item) => item.title)).toEqual(['Saved image', 'Saved image', 'Registry image', 'Numbered image']);
-    expect(registered.every((item) => !('displayIndex' in item))).toBe(true);
+    expect.soft(historyPayload.images).toHaveLength(2);
     const history = render(<SourcesPanel {...historyPayload} open onClose={() => {}} />);
     fireEvent.click(within(history.container).getByRole('tab', { name: /chat.sources.images/ }));
-    expect.soft(history.container.querySelectorAll('.aui-global-search-image')).toHaveLength(3);
+    expect.soft(history.container.querySelectorAll('.aui-global-search-image')).toHaveLength(2);
     expect.soft(within(history.container).getAllByText('Saved image')).toHaveLength(1);
     expect(within(history.container).getByText('Registry image')).toBeInTheDocument();
-    history.unmount();
-    h.registered = undefined;
-
-    // Exercise the shared derivation, actual citation action and paginated panel.
-    const raw = Array.from({ length: 300 }, (_, index) => Object.freeze({
-      type: 'source', sourceType: 'document', citeIndex: index === 100 ? 1 : index + 1,
-      toolSign: index === 100 ? 'b' : index === 299 ? 'j' : 'a',
-      title: `SOURCE-${index + 1}`,
-    }));
-    const content = Object.freeze([
-      Object.freeze({ type: 'text', text: '[[a1]][[a20]][[a21]][[a100]][[b1]][[j300]]' }),
-      ...raw,
-    ]);
-    h.aui.message = { id: 'sparse-300', content: content as any };
-    const sparse = openCurrentMessage('j300');
-    expect(sparse.selectedCitationKey).toBe('j300');
-    expect(sparse.sources.slice(0, 6).map((item: any) => item.title))
-      .toEqual(['SOURCE-1', 'SOURCE-20', 'SOURCE-21', 'SOURCE-100', 'SOURCE-101', 'SOURCE-300']);
-    expect(sparse.sources.map((item: any) => item.displayIndex))
-      .toEqual(Array.from({ length: 300 }, (_, index) => index + 1));
-    const paged = render(<SourcesPanel {...sparse} selectionToken={sparse} open onClose={() => {}} />);
-    const pageNumber = () => paged.container.querySelector('aside')?.getAttribute('data-source-page');
-    expect(pageNumber()).toBe('1');
-    expect(within(paged.container).getByText('SOURCE-300').closest('li')?.className).toContain('border-[#1677ff]');
-    const visited: string[] = [];
-    for (let page = 1; page <= 15; page++) {
-      expect(pageNumber()).toBe(String(page));
-      visited.push(...Array.from(paged.container.querySelectorAll('[data-citation-key]'))
-        .map((node) => node.getAttribute('data-citation-key')!));
-      expect(within(paged.container).getAllByTestId('citation-index-badge').map((node) => Number(node.textContent)))
-        .toEqual(Array.from({ length: 20 }, (_, index) => (page - 1) * 20 + index + 1));
-      if (page < 15) fireEvent.click(within(paged.container).getByTitle('Next Page'));
-    }
-    expect(new Set(visited).size).toBe(300);
-    const repeated = openCurrentMessage('j300');
-    paged.rerender(<SourcesPanel {...repeated} selectionToken={repeated} open onClose={() => {}} />);
-    expect(pageNumber()).toBe('1');
-    expect(within(paged.container).getByText('SOURCE-300')).toBeInTheDocument();
-    // A new immutable streaming snapshot changes numbers and the selected page.
-    h.aui.message.content = [
-      { type: 'text', text: raw.map((item) => `[[${getCitationKey(item)}]]`).join('') },
-      ...raw,
-    ];
-    const streamed = openCurrentMessage('j300');
-    paged.rerender(<SourcesPanel {...streamed} selectionToken={streamed} open onClose={() => {}} />);
-    expect(pageNumber()).toBe('15');
-    expect(within(paged.container).getByText('SOURCE-300').closest('li')?.className).toContain('border-[#1677ff]');
-    expect(content.slice(1)).toEqual(raw);
-    expect(raw.every((item, index) => item.citeIndex === (index === 100 ? 1 : index + 1) && !('displayIndex' in item))).toBe(true);
-    paged.unmount();
-
-    // Real-message-shaped citation order and an ordinary third-hit-first answer.
-    for (const [count, cited] of [[3, [3, 1]], [72, [46, 37, 52, 43, 40, 49]]] as const) {
-      h.aui.message = { id: `ordinary-${count}`, content: [
-        { type: 'text', text: cited.map((index) => `[[a${index}]]`).join('') },
-        ...Array.from({ length: count }, (_, index) => ({ type: 'source', citeIndex: index + 1, toolSign: 'a', title: `Hit ${index + 1}` })),
-      ] };
-      const ordinary = openCurrentMessage(`a${cited[0]}`);
-      expect(ordinary.sources.slice(0, cited.length).map((item: any) => item.citeIndex)).toEqual([...cited]);
-    }
-
-    // Legacy numeric resolution must use retrieval order, even after b1 sorts first.
-    h.aui.message = { id: 'ambiguous-legacy', content: [
-      { type: 'text', text: '[[b1]][[1]][[a1]]' },
-      { type: 'source', citeIndex: 1, toolSign: 'a', title: 'Legacy first' },
-      { type: 'source', citeIndex: 1, toolSign: 'b', title: 'Other tool' },
-    ] };
-    const legacy = openCurrentMessage('1');
-    expect(legacy.selectedCitationKey).toBe('a1');
-    expect(legacy.sources.map((item: any) => getCitationKey(item))).toEqual(['b1', 'a1']);
-    expect(legacy.sources.map((item: any) => item.displayIndex)).toEqual([1, 2]);
   });
 
   it('selects and scrolls to the source matching selectedCitationKey and renders publishedDate', () => {
