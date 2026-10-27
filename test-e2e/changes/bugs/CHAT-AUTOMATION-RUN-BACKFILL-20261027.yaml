@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-AUTOMATION-RUN-BACKFILL-20261027
+  change_type: bugfix
+  bug_id: CHAT-AUTOMATION-RUN-BACKFILL-20261027
+  title: Backfill automation message sources using run references only
+  description: Replace correlated source classification with deduplicated run message references, without accessing message units.
+  observed_behavior: Source backfill scans the large message-unit table and repeatedly checks automation runs for ordinary messages.
+  expected_behavior: Extract both run message IDs once, deduplicate conversation/message pairs and update only matching CHAT messages; leave unlinked historical messages unchanged.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: Existing migration fixtures always create the unit table and omit duplicate, NULL, missing and wrong-conversation run references.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [CHAT-SIDEBAR]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CHAT-ACTIVITY-D5-001]
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+    - Ordinary CHAT quota enforcement and trusted AUTOMATION writes retain their existing behavior.
+    - Automation prompt writes retain their explicit AUTOMATION source; public requests cannot choose that source.
+    reason: Product changes are confined to deployment SQL. Reuse runtime policy and provenance UT as adjacent regressions; the real PostgreSQL D5 fixture detects the migration defect without duplicating it as a SQL-text UT.
+    test_selectors:
+    - test/backend/database/test_conversation_activity.py
+    - test/backend/services/test_agent_automation_conversation_adapter.py
+  notes: >-
+    Baseline b759b23cf on djb/bugfix-aotumation-sql-check. Maintain the existing
+    automation/activity SPEC in the separate nexent-doc repository at
+    nexent/chat-automation-activity-and-quota/design.md.
+    The user's explicit instruction authorizes replacing this identified backfill
+    inside the consolidated v2.8.0 migration despite the default immutable-SQL rule;
+    a later migration would still execute after the original slow backfill.
+    Preserve all other migration sections, runtime code, existing D1 Cases and
+    historical evidence. Only disposable PostgreSQL fixtures are mutated.
+    Failure-status interpretation and early run/message association are explicitly
+    deferred. Product deployment remains outside this change's scope.
