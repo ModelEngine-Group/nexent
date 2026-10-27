@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -euo pipefail
 
@@ -150,7 +151,7 @@ echo "$WORKFLOW_CONTENT" | grep -A2 -- '- name: Upload to Huawei Cloud OBS' | gr
 echo "$WORKFLOW_CONTENT" | grep -q "region: 'ap-southeast-1'" || fail "offline package workflow should use the Huawei Cloud Hong Kong region"
 echo "$WORKFLOW_CONTENT" | grep -q "bucket_name: 'modelengine-software'" || fail "offline package workflow should upload to the modelengine-software bucket"
 echo "$WORKFLOW_CONTENT" | grep -q 'SOURCE_SUFFIX="-with-source"' || fail "offline package workflow should append with-source when source is included"
-echo "$WORKFLOW_CONTENT" | grep -q 'package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}${FULL_SANDBOX_SUFFIX}' || fail "offline package workflow package name should include selected feature suffixes"
+grep -q 'package-name=nexent-${VERSION}-${PLATFORM}${SOURCE_SUFFIX}${FULL_SANDBOX_SUFFIX}' <<< "$WORKFLOW_CONTENT" || fail "offline package workflow package name should include selected feature suffixes"
 echo "$WORKFLOW_CONTENT" | grep -q -- '--package-name "${{ steps.set-vars.outputs.package-name }}"' || fail "offline package workflow should pass the final package name to the build script"
 echo "$WORKFLOW_CONTENT" | grep -q -- '--compress true' || fail "offline package workflow should create the named final zip"
 echo "$WORKFLOW_CONTENT" | grep -q "local_file_path: './\${{ steps.set-vars.outputs.package-name }}.zip'" || fail "offline package workflow should upload the named zip to OBS"
