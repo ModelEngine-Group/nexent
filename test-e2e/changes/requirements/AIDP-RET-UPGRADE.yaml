@@ -58,6 +58,7 @@ change:
       - test/backend/services/test_tool_configuration_service.py
       - test/backend/services/test_agent_transfer_utils.py
       - test/backend/services/test_agent_service.py
+      - test/backend/services/test_agent_subscription_lifecycle.py
       - test/backend/agents/test_create_agent_info.py::TestMergeToolParams
       - test/backend/agents/test_create_agent_info_retrieval_isolation.py
       - test/backend/services/test_knowledge_scope_service.py

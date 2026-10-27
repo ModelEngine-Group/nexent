@@ -170,6 +170,7 @@ def list_agent_repository_summaries(
         query = session.query(
             AgentRepository.agent_repository_id,
             AgentRepository.agent_id,
+            AgentRepository.version_no,
             AgentRepository.author,
             AgentRepository.submitted_by,
             AgentRepository.name,
@@ -196,6 +197,7 @@ def list_agent_repository_summaries(
             {
                 "agent_repository_id": row.agent_repository_id,
                 "agent_id": row.agent_id,
+                "version_no": row.version_no,
                 "author": row.author,
                 "submitted_by": row.submitted_by,
                 "name": row.name,

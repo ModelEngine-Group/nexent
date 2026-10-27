@@ -937,10 +937,19 @@ class NexentAgent:
 
             # Create wrapper agents for external A2A agents in the worker-agent call set.
             # so model can call them like: external_agent_name(task="...")
+            from nexent.core.agent_names import resolve_external_agent_configs, validate_callable_names
+
+            validate_callable_names(
+                ["final_answer"] + [tool.name for tool in tool_list] + [agent.name for agent in worker_agents_list]
+            )
+            external_a2a_agents = resolve_external_agent_configs(
+                agent_config.external_a2a_agents,
+                [tool.name for tool in tool_list] + [agent.name for agent in worker_agents_list],
+            )
             if agent_config.external_a2a_agents:
                 try:
                     from .a2a_agent_proxy import ExternalA2AAgentWrapper
-                    for ext_agent_config in agent_config.external_a2a_agents:
+                    for ext_agent_config in external_a2a_agents:
                         a2a_agent_info = ext_agent_config.to_a2a_agent_info()
                         wrapper = ExternalA2AAgentWrapper(
                             agent_info=a2a_agent_info,
@@ -977,6 +986,19 @@ class NexentAgent:
                 else list(getattr(agent_config, "context_items", None) or []),
                 tool_list,
             )
+            resolved_external = {agent.agent_id: agent for agent in external_a2a_agents}
+            for index, item in enumerate(context_items):
+                item_type = getattr(item, "type", None)
+                if getattr(item_type, "value", item_type) != "external_agent":
+                    continue
+                config = resolved_external.get(str(item.content.get("agent_id", "")))
+                if config is not None:
+                    context_items[index] = item.model_copy(update={"content": {
+                        **item.content,
+                        "name": config.invocation_name,
+                        "invocation_name": config.invocation_name,
+                        "display_name": config.name,
+                    }})
             from .context import ContextItemInput, ContextItemType
 
             enable_clarification = (

@@ -3,7 +3,7 @@
 from management.utils.orm import as_dict, filter_property
 from contracts.errors.exceptions import AgentNotFoundError, TenantResourceLimitError
 import logging
-from typing import List, Optional, Sequence
+from typing import List, Optional, Sequence, Tuple
 from sqlalchemy import String, and_, cast, func, or_, text, tuple_, update
 from sqlalchemy.orm import aliased
 
@@ -632,35 +632,50 @@ def batch_search_agent_display_names(agent_ids: List[int], tenant_id: str) -> di
         return {a.agent_id: (a.display_name or a.name) for a in agents}
 
 
-def batch_get_agent_main_flags(agent_ids: List[int]) -> dict:
+def batch_get_agent_version_main_flags(
+    agent_versions: Sequence[Tuple[int, int]],
+) -> dict:
     """
-    Batch query the main-agent flag by agent IDs.
-    Returns a dict mapping agent_id -> is_main_agent.
+    Batch query the main-agent flag for specific agent versions.
 
-    Agent IDs are globally unique (the primary key is ``(agent_id, version_no)``),
-    so no tenant filter is applied; this lets the lookup resolve both caller-tenant
-    listings and official listings published under the system tenant.
+    Returns a dict mapping ``(agent_id, version_no)`` -> is_main_agent.  The
+    repository listing freezes the published version number, so callers must
+    resolve the flag on that version row instead of the editable draft
+    (``version_no = 0``), which can change independently of the published copy.
+
+    Agent IDs are globally unique, so no tenant filter is applied; this lets the
+    lookup resolve both caller-tenant listings and official listings published
+    under the system tenant.
 
     Args:
-        agent_ids: List of agent IDs to query
+        agent_versions: (agent_id, version_no) pairs to resolve
     """
-    unique_ids = {int(agent_id) for agent_id in agent_ids if agent_id is not None}
-    if not unique_ids:
+    unique_pairs = {
+        (int(agent_id), int(version_no))
+        for agent_id, version_no in agent_versions
+        if agent_id is not None and version_no is not None
+    }
+    if not unique_pairs:
         return {}
     with get_db_session() as session:
         agents = (
             session.query(
                 AgentInfo.agent_id,
+                AgentInfo.version_no,
                 AgentInfo.is_main_agent,
             )
             .filter(
-                AgentInfo.agent_id.in_(list(unique_ids)),
-                AgentInfo.version_no == 0,
+                tuple_(AgentInfo.agent_id, AgentInfo.version_no).in_(
+                    list(unique_pairs)
+                ),
                 AgentInfo.delete_flag != "Y",
             )
             .all()
         )
-        return {a.agent_id: a.is_main_agent for a in agents}
+        return {
+            (agent.agent_id, agent.version_no): agent.is_main_agent
+            for agent in agents
+        }
 
 
 def _ensure_system_relation_mutation_allowed(

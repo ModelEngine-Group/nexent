@@ -60,11 +60,17 @@ class RedisConfigurationTests(unittest.TestCase):
         management.services = services
         services.knowledge_base = knowledge
         knowledge.task_state = service
+        contracts = ModuleType('contracts')
+        constants = ModuleType('contracts.constants')
+        contracts.constants = constants
+        constants.environment = canonical
         with patch.dict(sys.modules, {'management': management,
                                      'management.services': services,
                                      'management.services.knowledge_base': knowledge,
                                      'management.services.knowledge_base.task_state': service,
-                                     'consts': SimpleNamespace(const=canonical)}), \
+                                     'contracts': contracts,
+                                     'contracts.constants': constants,
+                                     'contracts.constants.environment': canonical}), \
                 patch.object(redis_target, 'deployed_redis_urls', return_value=(general, backend)):
             with pytest.MonkeyPatch.context() as monkeypatch:
                 generator = fixtures.isolated_migration_database.__wrapped__(request, monkeypatch)

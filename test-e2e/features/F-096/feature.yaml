@@ -10,8 +10,11 @@ feature:
   business_rules:
   - rule_id: F-096-RULE-01
     description: 认证 header/idkey/JWT/custom metadata 实际 wire 传输；A2A 代理主动取消/超时；Agent 运行时过载 429 响应
+  - rule_id: F-096-RULE-02
+    description: External Agent original names remain display metadata; unique legal legacy callable names remain unchanged. Invalid, reserved or conflicting names receive deterministic ID-based callable aliases shared by prompt context, wrappers and sandbox proxies; no alias overwrites another tool or Agent.
   required_test_stages:
   - D1
   - D2
+  - D3
   source:
     notes: Migrated from V5 01_代码功能清单 without changing the functional description.

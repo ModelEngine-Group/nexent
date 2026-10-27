@@ -3,7 +3,6 @@
 """Define and implement the internal Local MCP tools used by NL2Agent."""
 
 import json
-import keyword
 import logging
 import re
 import unicodedata
@@ -11,6 +10,7 @@ from typing import Annotated, Any, Literal
 
 from fastmcp.server.dependencies import get_http_request
 from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agent_names import validate_agent_name
 from pydantic import (
     BaseModel, ConfigDict, Field, StrictBool, StringConstraints,
     ValidationError, field_validator, model_validator,
@@ -420,9 +420,7 @@ class AgentDraftFields(BaseModel):
     @classmethod
     def validate_name_as_runtime_identifier(cls, value: str) -> str:
         """Match backend import and runtime identifier rules without trimming names."""
-        if not value.isidentifier() or keyword.iskeyword(value):
-            raise ValueError("Agent name must be a valid Python identifier and not a Python keyword")
-        return value
+        return validate_agent_name(value)
 
     @model_validator(mode="before")
     @classmethod
