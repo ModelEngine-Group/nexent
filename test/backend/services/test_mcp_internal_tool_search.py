@@ -1615,3 +1615,39 @@ async def test_public_mcp_scanner_skips_internal_tools(mocker):
     transport.assert_called_once_with("http://mcp.example/sse", None, None)
     client_class.assert_called_once()
     assert [tool.name for tool in result] == ["public_weather"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "config_json",
+    [json.dumps({"openapi": "3.0.0"}), "{invalid-json"],
+)
+async def test_mcp_scanner_skips_openapi_registration_records(config_json, mocker):
+    """OpenAPI registration records must not be probed as remote MCP servers."""
+    from management.services.tool import discovery as tool_discovery
+
+    mocker.patch.object(
+        tool_discovery,
+        "get_mcp_records_by_tenant",
+        return_value=[{"mcp_name": "api-service", "config_json": config_json}],
+    )
+    mocker.patch.object(
+        tool_discovery,
+        "get_tenant_local_mcp_server",
+        return_value="http://tenant-mcp/sse",
+    )
+    get_tools = mocker.patch.object(
+        tool_discovery,
+        "get_tool_from_remote_mcp_server",
+        new_callable=AsyncMock,
+        return_value=[],
+    )
+
+    result = await tool_discovery.get_all_mcp_tools("tenant1")
+
+    assert result == []
+    get_tools.assert_awaited_once_with(
+        mcp_server_name="outer-apis",
+        remote_mcp_server="http://tenant-mcp/sse",
+        tenant_id="tenant1",
+    )

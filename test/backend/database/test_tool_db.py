@@ -708,6 +708,38 @@ def test_update_tool_table_mcp_tools_same_name_same_usage(monkeypatch, mock_sess
     assert existing_tool.is_available is True
 
 
+def test_update_tool_table_marks_newer_duplicate_unavailable(monkeypatch, mock_session):
+    """When duplicate persisted rows exist, the row with the larger ID is disabled."""
+    session, query = mock_session
+
+    older_tool = MockToolInfo()
+    older_tool.tool_id = 1
+    older_tool.name = "get_tickets"
+    older_tool.source = "mcp"
+    older_tool.usage = "mcp_server_1"
+    older_tool.is_available = True
+
+    newer_tool = MockToolInfo()
+    newer_tool.tool_id = 2
+    newer_tool.name = "get_tickets"
+    newer_tool.source = "mcp"
+    newer_tool.usage = "mcp_server_1"
+    newer_tool.is_available = True
+
+    mock_filter = MagicMock()
+    mock_filter.all.return_value = [older_tool, newer_tool]
+    query.filter.return_value = mock_filter
+    mock_ctx = MagicMock()
+    mock_ctx.__enter__.return_value = session
+    mock_ctx.__exit__.return_value = None
+    monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
+
+    update_tool_table_from_scan_tool_list("tenant1", "user1", [])
+
+    assert older_tool.is_available is False
+    assert newer_tool.is_available is False
+
+
 def test_update_tool_table_api_tools_same_name_keep_service_rows_separate(monkeypatch, mock_session):
     """API-to-MCP tools with the same name must be separated by service ID."""
     session, query = mock_session

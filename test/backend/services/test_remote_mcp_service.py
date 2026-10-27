@@ -1296,6 +1296,32 @@ class TestUpdateMcpServiceOpenapiSslVerify(unittest.TestCase):
 
         mock_refresh.assert_called_once_with("tenant1")
 
+    @patch_import_context('management.services.tool.configuration._refresh_openapi_services_in_mcp')
+    @patch_import_context('management.services.mcp.service.update_openapi_service_ssl_verify')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    def test_update_api_service_ignores_refresh_exception(
+        self, mock_get, mock_check, mock_update_record, mock_update_ssl, mock_refresh
+    ):
+        mock_get.return_value = {
+            "mcp_id": 1,
+            "mcp_name": "weather-api",
+            "source": "local",
+            "config_json": {"openapi": "3.0.0"},
+        }
+        mock_check.return_value = False
+        mock_refresh.side_effect = RuntimeError("MCP unavailable")
+
+        update_mcp_service(
+            tenant_id="tenant1", user_id="user1", mcp_id=1,
+            new_name="weather-api", description=None,
+            server_url=None, authorization_token=None, custom_headers=None,
+            config_json=None, market_id=None, tags=None, ssl_verify=True,
+        )
+
+        mock_refresh.assert_called_once_with("tenant1")
+
 
 # ============================================================================
 # update_mcp_service_enabled - custom_headers tests (lines 530, 599, 656)

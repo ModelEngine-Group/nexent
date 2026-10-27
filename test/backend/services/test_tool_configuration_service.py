@@ -4141,6 +4141,47 @@ class TestUpdateToolList:
         mock_update.assert_called_once()
 
 
+    @pytest.mark.asyncio
+    @patch_import_context(
+        'management.services.mcp.openapi.get_openapi_service_tool_map',
+        return_value={"weather_api_": 42},
+    )
+    @patch_import_context(
+        'management.services.tool.configuration.query_openapi_services_by_tenant',
+        return_value=[{"mcp_service_name": "weather-api"}],
+    )
+    @patch_import_context(
+        'management.services.tool.configuration._refresh_openapi_services_in_mcp',
+        return_value={"status": "refreshed"},
+    )
+    @patch_import_context('management.services.tool.configuration.get_local_tools', return_value=[])
+    @patch_import_context('management.services.tool.configuration.get_langchain_tools', return_value=[])
+    @patch_import_context(
+        'management.services.tool.configuration.get_all_mcp_tools', new_callable=AsyncMock
+    )
+    @patch_import_context(
+        'management.services.tool.configuration.update_tool_table_from_scan_tool_list'
+    )
+    @patch_import_context(
+        'management.services.tool.configuration.get_mcp_records_by_tenant', return_value=[]
+    )
+    async def test_update_tool_list_falls_back_to_sanitized_service_prefix(
+        self, mock_records, mock_update, mock_get_mcp, mock_langchain,
+        mock_local, mock_refresh, mock_services, mock_service_map,
+    ):
+        api_tool = MagicMock()
+        api_tool.usage = "outer-apis"
+        api_tool.origin_name = "weather-api_get_status"
+        api_tool.name = "weather-api_get_status"
+        mock_get_mcp.return_value = [api_tool]
+
+        from management.services.tool.configuration import update_tool_list
+
+        await update_tool_list("tenant1", "user1")
+
+        assert api_tool.outer_api_service_id == 42
+
+
 if __name__ == '__main__':
     unittest.main()
 

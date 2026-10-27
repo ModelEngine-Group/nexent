@@ -1713,6 +1713,31 @@ class TestInternalOpenapiServiceToolMapEndpoint:
 
         assert response.status_code == 403
 
+    @pytest.mark.asyncio
+    async def test_map_endpoint_skips_services_without_tools_or_service_id(self):
+        class ParentServer:
+            async def get_tools(self):
+                return []
+
+        parent = ParentServer()
+        parent._nexent_openapi_services = {
+            "without-tools": SimpleNamespace(_nexent_service_id=42),
+            "without-id": SimpleNamespace(),
+        }
+        mcp_service._tenant_mcp_servers["tenant1"] = parent
+        mcp_service.MCP_INTERNAL_TOKEN = "internal-token"
+
+        app = mcp_service.get_mcp_management_app()
+        async with AsyncTestClient(app) as client:
+            response = await client.get(
+                "/internal/tools/openapi-service-map",
+                params={"tenant_id": "tenant1"},
+                headers={"Authorization": "Bearer internal-token"},
+            )
+
+        assert response.status_code == 200
+        assert response.json()["data"] == []
+
     def test_internal_authorization_requires_configured_token(self):
         mcp_service.MCP_INTERNAL_TOKEN = None
         with pytest.raises(RealHTTPException, match="Internal token is not configured"):
@@ -1762,6 +1787,24 @@ class TestOpenapiClientSslRefresh:
             assert mock_register.call_args.kwargs["client"] is previous_client
         finally:
             asyncio.run(previous_client.aclose())
+
+    @patch.object(mcp_service, "register_openapi_service", return_value=True)
+    def test_refresh_does_not_reuse_non_async_client(self, mock_register):
+        previous_service = SimpleNamespace(_client=MagicMock())
+        mcp_service._tenant_mcp_servers["tenant1"] = SimpleNamespace(
+            _nexent_openapi_services={"weather-api": previous_service}
+        )
+        mcp_service.query_available_openapi_services.return_value = [{
+            "mcp_service_name": "weather-api",
+            "openapi_json": {"openapi": "3.0.0", "paths": {}},
+            "server_url": "https://api.example.com",
+            "ssl_verify": True,
+        }]
+
+        result = mcp_service.refresh_openapi_services_by_tenant("tenant1")
+
+        assert result["registered"] == 1
+        assert "client" not in mock_register.call_args.kwargs
 
 
 # ---------------------------------------------------------------------------
