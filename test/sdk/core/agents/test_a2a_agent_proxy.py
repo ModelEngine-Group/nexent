@@ -22,6 +22,7 @@ from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from nexent.core.agent_names import allocate_external_agent_names
 
 
 # ---------------------------------------------------------------------------
@@ -1789,6 +1790,12 @@ class TestExternalA2AAgentWrapper:
         assert wrapper.description == "External A2A agent: WrapperAgent"
         assert wrapper._proxy is None
         assert wrapper.get_runtime_metadata() == {}
+
+    def test_invalid_display_name_uses_shared_alias_without_changing_card(self):
+        info = self._make_info(agent_id="7", name="agent-one")
+        wrapper = ExternalA2AAgentWrapper(info)
+        assert wrapper.name == allocate_external_agent_names([("7", "agent-one")])["7"]
+        assert wrapper.display_name == info.name == "agent-one"
 
     def test_call_forwards_runtime_metadata_to_message_context(self):
         """The parent run snapshot is forwarded without model-supplied arguments."""
