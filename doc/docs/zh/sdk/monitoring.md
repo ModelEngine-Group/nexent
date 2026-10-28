@@ -436,8 +436,8 @@ service:
 未安装 OpenTelemetry 依赖时，监控自动禁用：
 
 ```python
-uv pip install nexent-sdk          # 基础包 - 无监控
-uv pip install nexent-sdk[performance]  # 包含 OTLP 支持
+uv pip install nexent          # 基础包 - 无监控
+uv pip install nexent[performance]  # 包含 OTLP 支持
 ```
 
 禁用时所有监控方法均正常工作 - 装饰器透传，上下文管理器返回 None。

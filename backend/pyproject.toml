@@ -45,10 +45,10 @@ data-process = [
     "openpyxl>=3.1.5",
     "xlrd>=2.0.1",
     "huggingface_hub>=0.30.0,<1.0",
-    "nexent-sdk[data_process,performance]",
+    "nexent[data_process,performance]",
 ]
 test = [
-    "nexent-sdk[dev]",
+    "nexent[dev]",
     "pytest",
     "pytest-cov",
     "coverage",
@@ -75,7 +75,7 @@ preview-features = ["index-by-name"]
 index-strategy = "unsafe-first-match"
 
 [tool.uv.sources]
-nexent-sdk = { path = "../sdk", editable = true }
+nexent = { path = "../sdk", editable = true }
 
 [[tool.uv.index]]
 name = "pytorch-cpu"

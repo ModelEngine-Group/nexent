@@ -71,6 +71,3 @@ sdk/uv.lock
 
 # CI toolchain is not application source.
 .ci-python/
-
-# SDK distribution metadata is regenerated after package renames.
-sdk/*.egg-info

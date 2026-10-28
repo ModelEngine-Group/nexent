@@ -43,7 +43,7 @@ uv sync --extra data-process --extra test
 
 以上命令会创建或更新 `backend/.venv`，安装后端依赖，并以可编辑模式安装本地 SDK。修改 `sdk/nexent/` 后无需重复复制包文件。
 
-`data-process` extra（以及 SDK `dev`）默认安装 CPU 版 PyTorch 和 Torchvision。请使用与 CI、镜像构建一致的 uv 0.13.6。Python 保持 3.11，CI 仍固定为 3.11.15。backend 的 test extra 安装完整的本地 `nexent-sdk[dev]`；文档处理安装 SDK 的解析及监控 extras。Torch/Torchvision 保持为传递依赖，不在项目中新增直接声明。分发包名为 `nexent-sdk`，Python 导入仍为 `nexent`。
+`data-process` extra（以及 SDK `dev`）默认安装 CPU 版 PyTorch 和 Torchvision。请使用与 CI、镜像构建一致的 uv 0.13.6。Python 保持 3.11，CI 仍固定为 3.11.15。backend 的 test extra 安装完整的本地 `nexent[dev]`；文档处理安装 SDK 的解析及监控 extras。Torch/Torchvision 保持为传递依赖，不在项目中新增直接声明。SDK 包名和 Python 导入名均保持为 `nexent`。
 
 CPU 和 NVIDIA 共用依赖列表，仅通过预置 index 区分：
 
@@ -63,8 +63,8 @@ uv sync --extra data-process --extra test --index pytorch-nvidia --upgrade-packa
 从包仓库安装 SDK 时，wheel 元数据不包含本地项目的 uv index 配置，需要显式指定后端：
 
 ```bash
-uv pip install "nexent-sdk[data-process]" --torch-backend cpu
-uv pip install "nexent-sdk[data-process]" --torch-backend cu130
+uv pip install "nexent[data-process]" --torch-backend cpu
+uv pip install "nexent[data-process]" --torch-backend cu130
 ```
 
 #### 可选：镜像加速
@@ -169,7 +169,7 @@ uv pip install -e .
 ### 使用 uv 安装
 
 ```bash
-uv add nexent-sdk
+uv add nexent
 ```
 
 ### 开发者安装（含工具链）

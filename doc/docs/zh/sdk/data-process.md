@@ -208,7 +208,7 @@ print(f"支持的处理器类型: {processors}")
 |----------|----------|----------|
 | `ValueError` | 参数无效（如不支持的分块策略或处理器类型） | 检查参数取值 |
 | `UnsupportedFileFormatError` | 文件扩展名不受支持，或内存字节无法识别出类型（未安装 libmagic 时从内存检测类型会失败） | 检查文件扩展名是否受支持；处理内存字节前确认已安装 libmagic |
-| `ImportError` | 缺少必需的处理依赖（如 unstructured） | 安装 `nexent-sdk[data_process]` extra |
+| `ImportError` | 缺少必需的处理依赖（如 unstructured） | 安装 `nexent[data_process]` extra |
 | `RuntimeError` | `file_split()` 拆分失败 | 查看日志定位拆分错误 |
 
 > 💡 **libmagic 依赖提示**：`file_process()` 仅支持内存字节数据输入，unstructured 从内存字节检测文件类型依赖系统 libmagic。Linux/macOS 一般默认可用；Windows 默认无 libmagic，需要先安装（如 `uv pip install python-magic-bin`），否则处理 `.txt` 等格式会抛出 `UnsupportedFileFormatError`。

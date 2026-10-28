@@ -208,7 +208,7 @@ print(f"Supported processor types: {processors}")
 |-----------|-------------------|----------|
 | `ValueError` | Invalid parameters (e.g., an unsupported chunking strategy or processor type) | Check the parameter values |
 | `UnsupportedFileFormatError` | The file extension is unsupported, or the type cannot be identified from the in-memory bytes (type detection from memory fails when libmagic is not installed) | Check that the file extension is supported; make sure libmagic is installed before processing in-memory bytes |
-| `ImportError` | A required processing dependency is missing (e.g., unstructured) | Install the `nexent-sdk[data_process]` extra |
+| `ImportError` | A required processing dependency is missing (e.g., unstructured) | Install the `nexent[data_process]` extra |
 | `RuntimeError` | `file_split()` failed | Check the logs to locate the split error |
 
 > 💡 **libmagic dependency note**: `file_process()` only accepts in-memory byte data, and unstructured relies on the system libmagic to detect the file type from memory bytes. Linux/macOS usually provide it by default; Windows does not ship libmagic by default, so install it first (e.g., `uv pip install python-magic-bin`), otherwise processing formats such as `.txt` will raise `UnsupportedFileFormatError`.
