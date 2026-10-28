@@ -1,0 +1,19 @@
+schema_version: '1.0'
+case_id: AUTH-LOCAL-D2-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: AUTH-LOCAL-D2-001
+acceptance_bindings:
+  AC-01:
+  - test_native_http_identity_password_and_api_keys
+  - test_native_http_invalid_duplicate_disabled_and_refresh
+  - test_native_http_cas_sid_revocation_remains_effective
+  - test_native_account_bootstrap_and_cas_provisioning
+  - test_native_http_revoke_disables_credentials_and_api_keys
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Isolated PostgreSQL fixture; uses NEXENT_AUTH_TEST_DSN and no deployed Supabase.

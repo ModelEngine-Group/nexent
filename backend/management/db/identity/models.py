@@ -2,6 +2,7 @@
 
 from sqlalchemy import (
     TIMESTAMP,
+    Boolean,
     Column,
     Index,
     Integer,
@@ -9,10 +10,12 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     text,
+    select,
 )
 
 
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import column_property
 
 
 from management.db.base import SCHEMA, SimpleTableBase, TableBase
@@ -29,9 +32,6 @@ class UserTenant(TableBase):
                             primary_key=True, nullable=False, doc="User tenant relationship ID, unique primary key")
     user_id = Column(String(100), nullable=False, doc="User ID")
     tenant_id = Column(String(100), nullable=False, doc="Tenant ID")
-    user_role = Column(
-        String(30), doc="User role: SUPER_ADMIN, ADMIN, DEV, USER")
-    user_email = Column(String(255), doc="User email address")
 
 
 class PartnerMappingId(TableBase):
@@ -197,7 +197,7 @@ class UserOAuthAccount(TableBase):
         nullable=False,
         doc="OAuth account ID, primary key",
     )
-    user_id = Column(String(100), nullable=False, doc="Supabase user UUID")
+    user_id = Column(String(100), nullable=False, doc="Platform user UUID")
     provider = Column(
         String(30), nullable=False, doc="OAuth provider name: github, wechat, gde, link_app"
     )
@@ -228,9 +228,49 @@ class UserCasSession(TableBase):
         doc="CAS session record ID",
     )
     session_id = Column(String(100), nullable=False, unique=True, doc="JWT session ID")
-    user_id = Column(String(100), nullable=False, doc="Supabase user UUID")
+    user_id = Column(String(100), nullable=False, doc="Platform user UUID")
     cas_user_id = Column(String(200), nullable=False, doc="User ID from CAS")
     cas_session_index = Column(String(500), doc="CAS SessionIndex or service ticket")
     status = Column(String(30), nullable=False, default="active", doc="active/revoked")
     expires_at = Column(TIMESTAMP(timezone=False), nullable=False, doc="Session expiration time")
     revoked_at = Column(TIMESTAMP(timezone=False), doc="Revocation time")
+
+
+
+
+class UserAccount(TableBase):
+    """Authentication identity independent of tenant membership and provider bindings."""
+
+    __tablename__ = "user_account_t"
+    __table_args__ = (
+        Index("ix_user_account_user_id", "user_id"),
+        Index("ix_user_account_email", "user_email"),
+        {"schema": SCHEMA},
+    )
+    account_id = Column(Integer, Sequence("user_account_t_account_id_seq", schema=SCHEMA),
+                        primary_key=True, comment="Technical account record identifier")
+    user_id = Column(String(100), nullable=False, comment="Stable UUID; service-serialized identity uniqueness")
+    user_email = Column(String(255), comment="Normalized login email; null only for disabled legacy identities pending credential migration")
+    user_role = Column(String(30), comment="Canonical account role transferred from membership and maintained by identity services")
+    password_hash = Column(String(512), comment="Encoded local or imported password hash; never returned to API callers")
+    password_hash_scheme = Column(String(30), comment="Password encoding scheme: scrypt or imported bcrypt")
+    password_login_enabled = Column(Boolean, nullable=False, server_default=text("false"),
+                                    comment="Whether this identity permits password authentication")
+    account_status = Column(String(30), nullable=False, server_default=text("'active'"),
+                            comment="Authentication state: active or disabled")
+    token_version = Column(Integer, nullable=False, server_default=text("0"),
+                           comment="Credential revision; password changes invalidate earlier JWTs")
+    email_confirmed_at = Column(TIMESTAMP(timezone=False), comment="UTC email confirmation time, null if unconfirmed")
+    source_metadata = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+                             comment="Migration-only provider/user metadata snapshot; never grants permissions")
+
+# Read projections preserve established association query/response contracts.
+# These expressions create no role/email columns on the association table.
+UserTenant.user_role = column_property(
+    select(UserAccount.user_role).where(UserAccount.user_id == UserTenant.user_id,
+                                      UserAccount.delete_flag == "N").correlate_except(UserAccount).scalar_subquery().label("user_role")
+)
+UserTenant.user_email = column_property(
+    select(UserAccount.user_email).where(UserAccount.user_id == UserTenant.user_id,
+                                       UserAccount.delete_flag == "N").correlate_except(UserAccount).scalar_subquery().label("user_email")
+)

@@ -187,6 +187,15 @@ function setAuthCookies(res, session) {
     );
   }
 
+  if (!session.refresh_token) {
+    cookies.push(
+      cookie.serialize(COOKIE_NAMES.REFRESH_TOKEN, "", {
+        ...buildCookieOptions(true),
+        maxAge: 0,
+      })
+    );
+  }
+
   if (session.expires_at) {
     cookies.push(
       cookie.serialize(COOKIE_NAMES.EXPIRES_AT, String(session.expires_at), {

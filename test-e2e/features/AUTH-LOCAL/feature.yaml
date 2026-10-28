@@ -1,0 +1,21 @@
+schema_version: '1.0'
+module:
+  id: AUTH-IDENTITY
+  name: Authentication
+feature:
+  feature_id: AUTH-LOCAL
+  name: PostgreSQL local accounts and legacy credential migration
+  status: active
+  description: Authenticate without Supabase while retaining existing identities and
+    CAS behavior.
+  business_rules:
+  - rule_id: AUTH-LOCAL-RULE-01
+    description: Native password/JWT authentication rejects invalid or inactive accounts; canonical role/email are account-owned.
+  - rule_id: AUTH-LOCAL-RULE-02
+    description: Atomic idempotent migration preserves IDs and compatible password
+      hashes without changing permissions; source audit records are neither read nor archived.
+  required_test_stages:
+  - D2
+  - D5
+  source:
+    notes: User-approved removal and historical migration; SPEC auth-local-account-migration.

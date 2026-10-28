@@ -1,0 +1,22 @@
+schema_version: '1.0'
+case_id: AUTH-LOCAL-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: AUTH-LOCAL-D5-001
+acceptance_bindings:
+  AC-01:
+  - test_account_migration_retains_original_password_and_repeat_safety
+  - test_account_migration_conflict_rolls_back_all_users
+  - test_account_migration_keeps_orphans_disabled
+  - test_account_migration_source_snapshot_without_audit_import
+  - test_account_migration_database_error_rolls_back_partial_inserts
+  - test_account_migration_serializes_online_creation_with_one_writer_lock
+  - test_account_profile_single_sql_upgrade_and_replay
+  - test_account_profile_conflict_rolls_back_single_sql
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: Isolated PostgreSQL fixture; uses NEXENT_AUTH_TEST_DSN and no deployed Supabase.

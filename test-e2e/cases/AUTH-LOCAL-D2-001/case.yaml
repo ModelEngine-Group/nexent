@@ -1,0 +1,49 @@
+schema_version: '1.0'
+stage: D2
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-LOCAL-D2-001
+  feature_id: AUTH-LOCAL
+  business_rule_ids:
+  - AUTH-LOCAL-RULE-01
+  title: Local authentication HTTP contract
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove auth works without GoTrue
+  preconditions:
+  - Isolated PostgreSQL available via NEXENT_AUTH_TEST_DSN; real FastAPI router and
+    persistence.
+  test_data:
+    profile: local isolated synthetic users, no external credentials
+  steps:
+  - order: 1
+    action: Run successful credential/JWT request through actual router.
+    expected: Valid account is returned and protected requests succeed.
+  - order: 2
+    action: Exercise invalid/expired/disabled credentials and legacy refresh.
+    expected: Invalid authentication is rejected and refresh does not extend credentials.
+  expected_results:
+  - Successful identity behavior matches the preserved HTTP/data contract.
+  - Negative paths reject access or writes deterministically.
+  forbidden_side_effects:
+  - No plaintext password/hash/token/DSN in returned errors or logs; no writes to
+    unrelated users.
+  acceptance:
+  - id: AC-01
+    description: Success, negative and no-leak contracts hold.
+    steps:
+    - 1
+    - 2
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - Existing user routes and Authorization headers.
+    response_expectations:
+    - Stable envelopes; invalid auth is rejected.

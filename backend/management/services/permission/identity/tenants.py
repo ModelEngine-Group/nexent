@@ -499,7 +499,7 @@ async def delete_tenant(tenant_id: str, deleted_by: Optional[str] = None) -> boo
         f"Starting cascade deletion for tenant {tenant_id} by {deleted_by}")
 
     try:
-        # 1. Deactivate all users in the tenant (full cleanup including Supabase deletion)
+        # 1. Deactivate all users in the tenant (full cleanup including local identity disablement)
         logger.info(f"Deactivating users for tenant {tenant_id}")
         users_result = get_users_by_tenant_id(
             tenant_id, page=1, page_size=10000, email_required=False)

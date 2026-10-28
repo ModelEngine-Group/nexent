@@ -1,0 +1,75 @@
+schema_version: '1.0'
+stage: D5
+module: AUTH-IDENTITY
+case:
+  case_id: AUTH-LOCAL-D5-001
+  feature_id: AUTH-LOCAL
+  business_rule_ids:
+  - AUTH-LOCAL-RULE-02
+  title: Historical account migration atomicity and repeat safety
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Prove account-only migration preserves credentials and ownership without
+    reading source audit logs
+  preconditions:
+  - Isolated test process and dependency runtime available.
+  - Disposable PostgreSQL source and target databases available.
+  test_data:
+    profile: local isolated synthetic users, no external credentials
+  steps:
+  - order: 1
+    action: Import synthetic source accounts, preserving original IDs/hash and tenant
+      ownership.
+    expected: Original password verifies after import; ownership is unchanged.
+  - order: 2
+    action: Repeat import, then exercise duplicate/conflict and dry-run failure.
+    expected: Repeat skips existing data; conflicts roll back and dry-run writes nothing.
+  - order: 3
+    action: Make the source audit relation fail on reads and migrate accounts through
+      the host CLI.
+    expected: Migration succeeds without reading audit rows, creating an audit archive
+      or reporting audit counts.
+  - order: 4
+    action: Replay the single account SQL against old account/membership schemas and
+      conflicting metadata.
+    expected: Role/email move to account, original associations and credentials survive,
+      replay preserves local edits, and conflicts roll back all schema/data changes.
+  expected_results:
+  - Successful identity behavior matches the preserved HTTP/data contract.
+  - Negative paths reject access or writes deterministically.
+  - No authentication audit history is read or imported; CLI output contains only
+    account counters.
+  - Canonical user_email/user_role exist only on accounts; old membership columns
+    are removed atomically and credential-pending rows are hydrated safely.
+  forbidden_side_effects:
+  - No plaintext password/hash/token/DSN in returned errors or logs; no writes to
+    unrelated users.
+  acceptance:
+  - id: AC-01
+    description: Success, negative and no-leak contracts hold.
+    steps:
+    - 1
+    - 2
+    - 3
+    - 4
+    expected_results:
+    - 1
+    - 2
+    - 3
+    - 4
+    forbidden_side_effects:
+    - 1
+  risk_type: DEPLOYMENT
+  risk: Credential loss or duplicate activation during cutover
+  condition:
+  - Fresh target and repeated/conflicting import
+  metrics:
+  - Preserved IDs and password verification
+  - Partial writes on failure
+  thresholds:
+  - All eligible accounts preserved
+  - Zero partial writes
+  recovery_expectations:
+  - Rollback target transaction and keep original source backup.

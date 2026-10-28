@@ -10,15 +10,18 @@ from fastapi.responses import JSONResponse
 from http import HTTPStatus
 from typing import Optional
 
-from supabase_auth.errors import AuthApiError, AuthWeakPasswordError
+from contracts.errors.exceptions import AccountConflictError
 
 from contracts.constants.constants import ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
 from contracts.identity import UserSignInRequest, UserSignUpRequest, UpdatePasswordRequest
 from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, AppException, UnauthorizedError, TenantResourceLimitError, ValidationError, tenant_resource_limit_error_payload
 from contracts.errors.codes import ErrorCode
 from management.services.permission.identity.cas import build_logout_url, CasAuthenticationError
-from gateway.authentication.auth import get_authorized_client, validate_token, get_session_by_authorization
-from management.services.permission.identity.authentication import check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, get_user_info, create_token, list_tokens_by_user, delete_token, update_password, get_provider_username
+from gateway.authentication.auth import validate_token, get_session_by_authorization
+from management.services.permission.identity.authentication import \
+    check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
+    get_user_info, create_token, list_tokens_by_user, delete_token, \
+    update_password, get_provider_username
 from management.services.permission.identity.users import delete_user_and_cleanup
 from management.services.monitor.audit import record_security_event
 from gateway.authentication.auth import extract_session_id_from_authorization, get_current_user_context, get_current_user_id
@@ -87,14 +90,14 @@ async def signup(request: UserSignUpRequest, http_request: Request):
             logging.warning(f"User registration rejected by validation: {detail}")
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=detail)
     except UserRegistrationException as e:
-        logging.error(f"User registration failed by registration service: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="REGISTRATION_SERVICE_ERROR")
-    except AuthWeakPasswordError as e:
-        logging.error(f"User registration failed by weak password: {str(e)}")
-        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="WEAK_PASSWORD")
-    except AuthApiError as e:
-        logging.error(f"User registration failed by auth error: {str(e)}")
+        logging.error(
+            f"User registration failed by registration service: {str(e)}")
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+                            detail="REGISTRATION_SERVICE_ERROR")
+    except AccountConflictError:
         raise HTTPException(status_code=HTTPStatus.CONFLICT, detail="EMAIL_ALREADY_EXISTS")
+    except AppException:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail="WEAK_PASSWORD")
     except Exception as e:
         logging.error(f"User registration failed, unknown error: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail="UNKNOWN_ERROR")
@@ -107,14 +110,12 @@ async def signin(request: UserSignInRequest, http_request: Request):
         signin_content = await signin_user(email=request.email, password=request.password)
         signin_data = (signin_content or {}).get("data") or {}
         signin_user_info = signin_data.get("user") or {}
-        record_security_event(
-            "user_signin",
-            request=http_request,
-            user_id=signin_user_info.get("id"),
-            user_email=signin_user_info.get("email") or request.email,
-        )
-        return JSONResponse(status_code=HTTPStatus.OK, content=signin_content)
-    except AuthApiError as e:
+        record_security_event("user_signin", request=http_request,
+                              user_id=signin_user_info.get("id"),
+                              user_email=signin_user_info.get("email") or request.email)
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content=signin_content)
+    except UnauthorizedError as e:
         logging.error(f"User login failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail="Email or password error")
     except ValidationError as e:
@@ -137,10 +138,10 @@ async def user_refresh_token(request: Request):
         if not refresh_token:
             raise ValueError("No refresh token provided")
         session_info = await refresh_user_token(extract_bearer_token(authorization), refresh_token)
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={"message": "Token refresh successful", "data": {"session": session_info}},
-        )
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={"message": "Token refresh successful", "data": {"session": session_info}})
+    except UnauthorizedError as e:
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(e))
     except ValueError as e:
         logging.error(f"Refresh token failed: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail="No refresh token provided")
@@ -165,7 +166,7 @@ async def logout(request: Request):
             except Exception:
                 pass
         if authorization:
-            session_id = extract_session_id_from_authorization(authorization)
+            session_id = extract_session_id_from_authorization(authorization) if logout_user_id else None
             if session_id:
                 from management.db.identity.cas_session import revoke_cas_session_by_session_id
 
@@ -174,19 +175,16 @@ async def logout(request: Request):
                     cas_logout_url = build_logout_url()
                 except CasAuthenticationError as cas_err:
                     logging.warning(f"CAS logout URL is unavailable: {str(cas_err)}")
-            client = get_authorized_client(authorization)
-            try:
-                client.auth.sign_out()
-            except Exception as signout_err:
-                # Ignore sign out errors to keep logout idempotent
-                logging.warning(f"Sign out encountered an error but will be ignored: {str(signout_err)}")
-        record_security_event(
-            "user_logout", request=request, user_id=logout_user_id, tenant_id=logout_tenant_id, session_id=session_id
-        )
-        return JSONResponse(
-            status_code=HTTPStatus.OK,
-            content={"message": "Logout successful", "data": {"cas_logout_url": cas_logout_url}},
-        )
+        record_security_event("user_logout", request=request,
+                              user_id=logout_user_id, tenant_id=logout_tenant_id,
+                              session_id=session_id)
+        return JSONResponse(status_code=HTTPStatus.OK,
+                            content={
+                                "message": "Logout successful",
+                                "data": {
+                                    "cas_logout_url": cas_logout_url
+                                }
+                            })
 
     except Exception as e:
         logging.error(f"User logout failed: {str(e)}")
@@ -257,7 +255,7 @@ async def get_user_id(request: Request):
             status_code=HTTPStatus.OK, content={"message": "User not logged in", "data": {"user_id": None}}
         )
     try:
-        # Use the unified token validation function (validates signature via Supabase)
+        # Use the unified token validation function (validates the local JWT and active account)
         is_valid, user = validate_token(authorization)
         if is_valid and user:
             return JSONResponse(
@@ -281,7 +279,7 @@ async def revoke_user_account(request: Request):
 
     Notes:
     - Tenant admin (role=admin) is not allowed to be revoked via this endpoint.
-    - Idempotent: local deletions are soft deletes; Supabase deletion may already have occurred.
+    - Idempotent: local deletions are soft deletes; local identity may already be disabled.
     """
     authorization = request.headers.get("Authorization")
     if not authorization:
@@ -301,10 +299,9 @@ async def revoke_user_account(request: Request):
             user_role = user.user_metadata["role"]
 
         # Disallow admin revocation by this endpoint
-        if user_role == "admin":
-            raise HTTPException(
-                status_code=HTTPStatus.FORBIDDEN, detail="Admin account cannot be deleted via this endpoint"
-            )
+        if user_role.upper() in {"ADMIN", "SU"}:
+            raise HTTPException(status_code=HTTPStatus.FORBIDDEN,
+                                detail="Admin account cannot be deleted via this endpoint")
 
         # Orchestrate revoke for regular user
         await delete_user_and_cleanup(user_id=user_id, tenant_id=tenant_id)

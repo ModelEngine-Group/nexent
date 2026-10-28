@@ -1,0 +1,54 @@
+schema_version: '1.0'
+change:
+  change_id: AUTH-LOCAL-20261026
+  change_type: requirement
+  requirement_id: AUTH-LOCAL-20261026
+  title: Remove Supabase using PostgreSQL local identities and account import
+  description: Native JWT authentication, unchanged CAS SLO, stable user IDs and password
+    hash migration.
+  affected_features:
+    existing: []
+    added:
+    - AUTH-LOCAL
+    modified:
+    - F-003
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - AUTH-LOCAL-D2-001
+    - AUTH-LOCAL-D5-001
+    modified:
+    - API-005
+    - API-006
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/management/test_gateway_authentication.py
+    - test/backend/management/test_api_db_directory_architecture.py
+    - test/backend/services/test_auth_migration_legacy_stack.py
+    - test/backend/services/test_auth_migration_settings.py
+    - test/backend/services/test_auth_migration_container.py
+    - test/backend/services/test_account_bootstrap_preflight.py
+    - test/backend/database/test_user_tenant_db.py
+    - test/backend/services/test_account_profile.py
+    - test/backend/database/test_user_tenant_search_db.py
+    - test/backend/services/test_local_credentials.py
+    - test/backend/services/test_native_authentication.py
+    - test/backend/services/test_user_management_service.py
+    - test/backend/utils/test_auth_utils.py
+    - test/backend/services/test_oauth_service.py
+    - test/backend/services/test_cas_service.py
+    - test/backend/services/test_user_service.py
+    - test/backend/app/test_user_management_app.py
+    - test/backend/app/test_oauth_app.py
+    - test/backend/app/test_cas_app.py
+    behaviors:
+    - Password success/invalid/boundary and legacy hash compatibility.
+    - JWT expiry/tamper/disabled/deleted account rejection and provider provisioning.
+    - Migration dry-run/idempotence/conflict and no secret disclosure.
+    reason: Existing Supabase-mocked UT must follow native storage; D2 proves HTTP
+      and D5 proves PostgreSQL migration beyond isolated UT.
+  notes: SPEC ../nexent-doc/docs/Developing/auth-local-account-migration. CAS/OAuth
+    journeys remain policy-skipped; provider UT required. No generic session table.

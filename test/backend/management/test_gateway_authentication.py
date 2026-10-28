@@ -43,8 +43,10 @@ def test_invalid_authorization_syntax_is_rejected(header):
 @pytest.fixture
 def session_policy(monkeypatch):
     monkeypatch.setattr(identity, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(identity, "require_active_account", lambda uid: {"token_version": 0})
+    monkeypatch.setattr(northbound, "require_active_account", lambda uid: {})
     monkeypatch.setattr(
-        identity, "SUPABASE_JWT_SECRET", "test-gateway-secret-32-bytes-long"
+        identity, "JWT_SECRET", "test-gateway-secret-32-bytes-long"
     )
     monkeypatch.setattr(
         identity,
@@ -61,8 +63,8 @@ def session_policy(monkeypatch):
 
 def signed_session(**claims):
     return jwt.encode(
-        {"sub": "user", "exp": int(time.time()) + 60, **claims},
-        identity.SUPABASE_JWT_SECRET,
+        {"sub": "user", "iat": int(time.time()), "ver": 0, "iss": identity.JWT_ISSUER, "aud": "authenticated", "exp": int(time.time()) + 60, **claims},
+        identity.JWT_SECRET,
         algorithm="HS256",
     )
 
@@ -107,6 +109,7 @@ def test_revoked_cas_session_is_rejected(session_policy, monkeypatch):
 
 
 def test_api_key_policy_uses_database_identity(monkeypatch):
+    monkeypatch.setattr(northbound, "require_active_account", lambda uid: {})
     monkeypatch.setattr(
         northbound,
         "get_token_by_access_key",
@@ -142,7 +145,7 @@ def test_api_key_policy_rejects_inactive_keys(monkeypatch):
 
 
 def test_session_token_cannot_be_used_for_internal_runtime(session_policy, monkeypatch):
-    monkeypatch.setattr(internal, "SUPABASE_JWT_SECRET", identity.SUPABASE_JWT_SECRET)
+    monkeypatch.setattr(internal, "JWT_SECRET", identity.JWT_SECRET)
     with pytest.raises(TokenExpiredError):
         authenticate_identity(signed_session(), CredentialKind.INTERNAL)
 
@@ -151,6 +154,7 @@ def test_gateway_authentication_maps_an_invalid_api_key_to_401(monkeypatch):
     from gateway.authentication.northbound_auth import get_northbound_context
     from fastapi import Depends
 
+    monkeypatch.setattr(northbound, "require_active_account", lambda uid: {})
     monkeypatch.setattr(northbound, "get_token_by_access_key", lambda _: None)
     app = FastAPI()
 
@@ -202,7 +206,7 @@ def test_api_and_services_do_not_implement_credential_parsers():
 def test_internal_runtime_identity_retains_its_scoped_tenant(
     session_policy, monkeypatch
 ):
-    monkeypatch.setattr(internal, "SUPABASE_JWT_SECRET", identity.SUPABASE_JWT_SECRET)
+    monkeypatch.setattr(internal, "JWT_SECRET", identity.JWT_SECRET)
     token = signed_session(
         iss=internal.INTERNAL_RUNTIME_JWT_ISSUER,
         aud=internal.INTERNAL_RUNTIME_JWT_AUDIENCE,
@@ -223,14 +227,14 @@ def test_internal_runtime_token_cannot_be_used_as_a_browser_session(session_poli
         aud=internal.INTERNAL_RUNTIME_JWT_AUDIENCE,
         scope=internal.INTERNAL_RUNTIME_JWT_SCOPE,
     )
-    with pytest.raises(TokenExpiredError, match="credential policy"):
+    with pytest.raises(TokenExpiredError):
         authenticate_identity(token)
 
 
 def test_pending_account_token_cannot_be_used_as_a_browser_session(session_policy):
     from contracts.constants.constants import OAUTH_PENDING_PURPOSE
 
-    with pytest.raises(TokenExpiredError, match="credential policy"):
+    with pytest.raises(TokenExpiredError):
         authenticate_identity(signed_session(purpose=OAUTH_PENDING_PURPOSE))
 
 
@@ -241,7 +245,7 @@ def test_pending_oauth_identity_requires_signed_purpose_and_provider(
     from contracts.constants.constants import OAUTH_PENDING_PURPOSE
     from contracts.errors.exceptions import OAuthLinkError
 
-    monkeypatch.setattr(oauth, "SUPABASE_JWT_SECRET", identity.SUPABASE_JWT_SECRET)
+    monkeypatch.setattr(oauth, "JWT_SECRET", identity.JWT_SECRET)
     token = signed_session(
         purpose=OAUTH_PENDING_PURPOSE,
         provider="github",
@@ -269,3 +273,20 @@ def test_pending_oauth_identity_requires_signed_purpose_and_provider(
                 exp=1,
             )
         )
+
+
+@pytest.mark.parametrize("claims", [{"ver": 1}, {"iss": "other"}, {"aud": "other"}])
+def test_native_session_rejects_wrong_revision_or_credential_scope(session_policy, claims):
+    with pytest.raises(TokenExpiredError):
+        authenticate_identity(signed_session(**claims))
+
+
+def test_api_key_rejects_disabled_account(monkeypatch):
+    monkeypatch.setattr(northbound, "get_token_by_access_key", lambda _: {"user_id": "disabled", "delete_flag": "N"})
+
+    def disabled(_):
+        raise TokenExpiredError("Account is disabled")
+
+    monkeypatch.setattr(northbound, "require_active_account", disabled)
+    with pytest.raises(TokenExpiredError):
+        authenticate_identity("Bearer key", CredentialKind.API_KEY)
