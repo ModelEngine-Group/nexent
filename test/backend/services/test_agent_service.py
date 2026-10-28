@@ -10578,6 +10578,7 @@ async def test_run_agent_background_consumes_stream_and_returns_assistant_messag
 
     memory_context = MagicMock(user_config=MagicMock(memory_switch=False))
     with (
+        patch("management.services.agent.run.agent_run_manager") as run_manager,
         patch(
             "management.services.configuration.user.memory.build_memory_context",
             return_value=memory_context,
@@ -10605,6 +10606,10 @@ async def test_run_agent_background_consumes_stream_and_returns_assistant_messag
     }
     assert request._message_source == "AUTOMATION"
     mock_save_messages.assert_not_called()
+    run_manager.reserve_agent_run.assert_called_once_with(99, "user")
+    run_manager.release_agent_run_reservation.assert_called_once_with(
+        99, "user", run_manager.reserve_agent_run.return_value,
+    )
 
 
 # =============================================================================
