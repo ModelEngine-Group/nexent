@@ -21,7 +21,7 @@ async def lifecycle(monkeypatch):
     service = service_tests.agent_subscription
     producer = service_tests.agent_execution
     # Load a fresh real manager without changing the legacy suite's SDK/DB stubs.
-    path = Path(__file__).resolve().parents[3] / "backend/agents/agent_run_manager.py"
+    path = Path(__file__).resolve().parents[3] / "backend/management/services/agent/lifecycle.py"
     spec = importlib.util.spec_from_file_location("subscription_lifecycle_manager", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
