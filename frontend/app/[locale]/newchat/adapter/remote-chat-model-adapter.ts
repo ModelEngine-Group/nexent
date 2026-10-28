@@ -1460,7 +1460,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       ? JSON.stringify(structuredNl2AgentInput)
       : visibleQuery;
 
-    if (!isResume && !query) {
+    // Extract MinIO file metadata from the last user message's attachments.
+    // The attachment adapter has already uploaded them by the time `run`
+    // is called (assistant-ui calls `send()` before `run()`).
+    const minioFiles = isResume
+      ? []
+      : extractMinioFiles(messages[lastUserIndex], (name) =>
+          log.warn(
+            "[ChatModelAdapter] Attachment missing upload metadata, skipping:",
+            name
+          )
+        );
+
+    // A turn may consist of attachments only. The backend accepts an empty
+    // query and joins the file descriptions into the agent input, so such
+    // turns must still be sent instead of being dropped silently.
+    if (!isResume && !query && minioFiles.length === 0) {
       log.warn("[ChatModelAdapter] No user query found in messages");
       return;
     }
@@ -1510,18 +1525,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         ...(historicalFiles.length > 0 ? { minio_files: historicalFiles } : {}),
       };
     });
-
-    // Extract MinIO file metadata from the last user message's attachments.
-    // The attachment adapter has already uploaded them by the time `run`
-    // is called (assistant-ui calls `send()` before `run()`).
-    const minioFiles = isResume
-      ? []
-      : extractMinioFiles(messages[lastUserIndex], (name) =>
-          log.warn(
-            "[ChatModelAdapter] Attachment missing upload metadata, skipping:",
-            name
-          )
-        );
 
     // Build request payload. Resume only needs the conversation identity; the
     // backend owns the original query and execution state.
