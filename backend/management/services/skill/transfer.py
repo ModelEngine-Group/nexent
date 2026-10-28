@@ -8,9 +8,9 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 
 import aiofiles
-from consts.const import OFFICIAL_SKILLS_ZIP_PATH
-from consts.exceptions import AppException
-from database import skill_db
+from contracts.constants.environment import OFFICIAL_SKILLS_ZIP_PATH
+from contracts.errors.exceptions import AppException
+from management.db.skill import repository as skill_db
 from management.services.skill.files import (
     _local_skill_schema_yaml_path,
     _resolve_local_skill_path,
@@ -36,7 +36,7 @@ async def init_skill_list_for_tenant(tenant_id: str, user_id: str):
     Returns:
         Dictionary containing initialization result
     """
-    from database import skill_db as skill_db_module
+    from management.db.skill import repository as skill_db_module
 
     if skill_db_module.check_skill_list_initialized(tenant_id):
         logger.info(f"Skill list already initialized for tenant {tenant_id}, skipping")
@@ -56,7 +56,7 @@ async def update_skill_list(tenant_id: str, user_id: str):
         tenant_id: Tenant ID for the tenant
         user_id: User ID for tracking who initiated the scan
     """
-    from database import skill_db as skill_db_module
+    from management.db.skill import repository as skill_db_module
 
     skill_manager = get_skill_manager()
     # Use the resolved tenant-scoped local path for schema/config file reading
@@ -130,7 +130,7 @@ def install_skills_for_tenant(
     Returns:
         List of skill IDs that were successfully installed.
     """
-    from database import skill_db as skill_db_module
+    from management.db.skill import repository as skill_db_module
 
     if not skill_ids:
         return []
@@ -391,7 +391,7 @@ def get_official_skills_with_status(
         List of dicts with skill_id, name, description, source, and status
         ("installable" | "installed" | "resource_missing").
     """
-    from database import skill_db as skill_db_module
+    from management.db.skill import repository as skill_db_module
 
     result: List[Dict[str, Any]] = []
 

@@ -8,37 +8,17 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from management.services.automation import service as facade_module
-from consts.exceptions import (
-    AutomationCapabilityBindingInvalidError,
-    AutomationCapabilityNotReadyError,
-    AutomationConversationAlreadyBoundError,
-    AutomationNotFoundError,
-    AutomationScheduleInvalidError,
-)
+from contracts.errors.exceptions import AutomationCapabilityBindingInvalidError, AutomationCapabilityNotReadyError, AutomationConversationAlreadyBoundError, AutomationNotFoundError, AutomationScheduleInvalidError
 from management.services.automation.service import AgentAutomationFacade
 from management.services.automation.intent import AutomationIntentContext
-from contracts.automation import (
-    AutomationProposalCreateRequest,
-    AutomationProposalPatchRequest,
-    AutomationProposalConfirmRequest,
-    AutomationProposalStatus,
-    AutomationRunStatus,
-    AutomationTaskCreateRequest,
-    AutomationTaskPatchRequest,
-    CapabilityBinding,
-    CapabilityResolution,
-    CapabilityType,
-    ScheduleMode,
-    ScheduleRuleType,
-    ScheduleTrigger,
-)
+from contracts.automation import AutomationProposalCreateRequest, AutomationProposalPatchRequest, AutomationProposalConfirmRequest, AutomationProposalStatus, AutomationRunStatus, AutomationTaskCreateRequest, AutomationTaskPatchRequest, CapabilityBinding, CapabilityResolution, CapabilityType, ScheduleMode, ScheduleRuleType, ScheduleTrigger
 from management.services.automation.prompt import AutomationTaskContent
 
 
 @pytest.fixture
 def automation_runner(monkeypatch):
     """Isolate runner calls while testing facade orchestration and failures."""
-    import management.services.automation as automation_package
+    from management.services import automation as automation_package
 
     module = types.ModuleType("management.services.automation.runner")
     module.agent_automation_runner = MagicMock()

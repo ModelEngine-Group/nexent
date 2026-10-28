@@ -2,15 +2,17 @@
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAui, useAuiEvent, useAuiState } from "@assistant-ui/react";
 import { conversationService } from "@/services/conversationService";
 import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import type { ConversationListPage } from "@/types/conversation";
 import log from "@/lib/logger";
+import { useForegroundRefresh } from "./useForegroundRefresh";
+import { CONVERSATION_SYNC_FRESHNESS_MS } from "@/const/conversationSync";
 
-/** Observe the first page; reload metadata on the same adapter only on changes. */
+/** Observe Workbench's first page; reload metadata only when it changes. */
 export function useConversationActivitySync(
   scopeKey: string | null,
   conversationType: "workbench" | "agent_chat"
@@ -20,7 +22,8 @@ export function useConversationActivitySync(
     (state) => state.threads.isLoading || state.threads.isLoadingMore
   );
   const [visible, setVisible] = useState(
-    () => typeof document !== "undefined" && document.visibilityState === "visible"
+    () =>
+      typeof document !== "undefined" && document.visibilityState === "visible"
   );
   const applied = useRef<ConversationListPage | undefined>(undefined);
   const pending = useRef(false);
@@ -34,9 +37,15 @@ export function useConversationActivitySync(
       lifetime.active = false;
     };
   }, [scopeKey, conversationType]);
+  const queryKey = useMemo(
+    () => ["conversation-activity", scopeKey, conversationType],
+    [scopeKey, conversationType]
+  );
+  useForegroundRefresh(queryKey, Boolean(scopeKey));
   const query = useQuery({
-    queryKey: ["conversation-activity", scopeKey, conversationType],
-    enabled: Boolean(scopeKey) && visible,
+    queryKey,
+    staleTime: CONVERSATION_SYNC_FRESHNESS_MS,
+    enabled: conversationType === "workbench" && Boolean(scopeKey) && visible,
     queryFn: async () => {
       const lifetime = lifecycle.current;
       try {
@@ -55,13 +64,18 @@ export function useConversationActivitySync(
     },
     refetchInterval: () => Math.min(5_000 * 2 ** failures.current, 60_000),
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: "always",
-    refetchOnReconnect: "always",
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     retry: false,
   });
   const refetch = query.refetch;
   useAuiEvent({ scope: "*", event: "thread.runEnd" }, () => {
-    if (scopeKey && document.visibilityState === "visible" && navigator.onLine)
+    if (
+      conversationType === "workbench" &&
+      scopeKey &&
+      document.visibilityState === "visible" &&
+      navigator.onLine
+    )
       void refetch({ cancelRefetch: false });
   });
   useEffect(() => {
@@ -69,16 +83,17 @@ export function useConversationActivitySync(
     const refresh = () => {
       const active = document.visibilityState === "visible";
       setVisible(active);
-      if (scopeKey && active && navigator.onLine)
+      if (
+        conversationType === "workbench" &&
+        scopeKey &&
+        active &&
+        navigator.onLine
+      )
         void refetch({ cancelRefetch: false });
     };
     document.addEventListener("visibilitychange", refresh);
-    window.addEventListener("focus", refresh);
-    window.addEventListener("online", refresh);
     return () => {
       document.removeEventListener("visibilitychange", refresh);
-      window.removeEventListener("focus", refresh);
-      window.removeEventListener("online", refresh);
     };
   }, [scopeKey, conversationType, refetch]);
 

@@ -1,0 +1,53 @@
+schema_version: '1.0'
+change:
+  change_id: DAILY-RUNTIME-ENVIRONMENT-20261026
+  change_type: test-fix
+  title: Repair Daily runtime preflight and isolated test fixtures without product changes
+  description: >-
+    The October 26 Daily exposed inaccessible nested jsdom dependencies and independently
+    locked Playwright browser caches. Bootstrap installs both browser toolchains and
+    doctor exercises actual jsdom CSS resolution and the selected browser launches
+    under the caller identity, including D4's full Chromium channel and the product
+    frontend's default headless-shell. Reuse the runner's locked Chromium for clarification history
+    rather than requiring an undeclared system Chrome installation. A2A timeout tests
+    read the app factory's established message envelope, retaining deadlines, wire
+    counts, no-partial-resource assertions and recovery. Prompt D5 reads the current
+    v2.8 bundle and bounds its full-chain proof to the three prompt sections. Disposable
+    PostgreSQL fixtures probe the final TCP server rather than the entrypoint's temporary
+    initialization socket. Freeze D4 terminal evidence against late callbacks and
+    recheck unexpected 5xx after asynchronous cleanup; a recorded 500 is not a PASS.
+    Keep failure traces through the final late-response check and execute deferred
+    cleanup only once, even when that check enters the failure-evidence path.
+    Deployment campaigns freeze the product head in ownership metadata so the
+    publication version guard accepts valid same-revision reports. Keep the product
+    frontend npm lock machine-local and scope legacy-peer handling to bootstrap commands,
+    without adding a project npmrc or silently refreshing an existing lock. Switch the Daily workflow repository root for the authorized
+    jason-owned checkout migration; timing and dispatch semantics are unchanged.
+    Scope tool selection to the owned service region instead of globally matching
+    duplicate names, and use the current tag-dialog searchbox accessible name.
+    Inspect a removed MCP binding in the maintained tool-management section;
+    open the imported agent's basic-information section before editing its description.
+    Align the graph model selector with merged PR4197 c250eb8f6: display_name is
+    shown while the single-field request still submits the native model_name.
+    Resource-management dialog verification cancels through the visible Cancel button;
+    the maintained Dialog intentionally prevents Escape dismissal.
+  affected_features:
+    existing: [CHAT-CLARIFICATION-HISTORY, F-045, F-069, F-111]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [PDF-PREVIEW-D1-001, PW-MEDIA-VLM-01]
+    added: []
+    modified: [CTR-033, CTR-035, CHAT-CLARIFICATION-HISTORY-D4-001, AGENT-PROMPT-D5-001, EVAL-LEGACY-D5-001, USER-MODEL-READ-D5-001, UT-BE-AUTO-1B0108BB27372242, PW-AGENT-03, PW-MCP-REMOTE-01, PW-MARKET-AGENT-01, AIDP-FE-GRAPH-01, PW-RESOURCE-04]
+    retired: []
+  notes: >-
+    The existing tag case now follows merged PR4173 optional-card-tag behavior;
+    direct normalizer type errors, upper limits, ordering and icon boundaries remain.
+    Offline regressions are infrastructure proof, not a replacement for formal case reruns.
+    Original campaign evidence remains immutable. Product assertions, deployment data,
+    production SQL and notification behavior are unchanged. Environment cutover and live
+    reruns require an idle Runner, backups and the migration maintenance locks.
+    After integrating backend refactor PR4160, align infrastructure test doubles with
+    contracts.constants.environment and the agent_preparation MCP consumer. These
+    changes repair regression-test wiring, not the product's Redis/ES or MCP behavior.

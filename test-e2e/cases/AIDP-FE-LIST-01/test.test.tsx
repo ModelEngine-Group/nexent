@@ -115,25 +115,87 @@ describe("AIDP-FE-LIST-01", () => {
 
   it("pagination and debounced search use the right parameters and reset page", async () => {
     vi.useFakeTimers();
-    server.handler = (request) =>
-      reply(
+    const items = Array.from({ length: 73 }, (_, index) => ({
+      ...kb,
+      kds_id: `kb-${index + 1}`,
+      kds_name: `Knowledge ${index + 1}`,
+    }));
+    server.handler = (request) => {
+      const keyword = request.url.searchParams.get("keyword");
+      const page = Number(request.url.searchParams.get("page"));
+      const size = Number(request.url.searchParams.get("page_size"));
+      return reply(
         listResponse(
-          request.url.searchParams.get("keyword") ? [] : [kb],
-          request.url.searchParams.get("keyword") ? 0 : 21,
+          keyword === "missing"
+            ? []
+            : items.slice((page - 1) * size, page * size),
+          keyword === "missing" ? 0 : items.length,
         ),
       );
+    };
     mount(<AidpKnowledgeConfiguration />);
     await advance(5);
-    fireEvent.click(document.querySelector(".ant-pagination-item-2")!);
-    await advance(5);
-    expect(matching(base).at(-1)!.url.searchParams.get("page")).toBe("2");
+    expect(matching(base).at(-1)!.url.searchParams.get("page_size")).toBe("12");
+    const cards = () => document.querySelectorAll("article[role='button']");
+    expect(cards()).toHaveLength(12);
     const search = screen.getByPlaceholderText(
       t("aidpKnowledge.searchPlaceholder"),
     );
+    fireEvent.change(search, { target: { value: "  Knowledge  " } });
+    await advance(310);
+    fireEvent.click(document.querySelector(".ant-pagination-item-3")!);
+    await advance(5);
+    const names = () =>
+      Array.from(
+        document.querySelectorAll(
+          "article[role='button'] h3, tbody button[class*='tableName']",
+        ),
+      ).map((element) => element.textContent);
+    const expected = items.slice(24, 36).map((item) => item.kds_name);
+    expect(names()).toEqual(expected);
+    const beforeSwitch = matching(base).length;
+    for (const view of ["viewTable", "viewCards"]) {
+      fireEvent.click(
+        document.querySelector(`[title="${t(`aidpKnowledge.${view}`)}"]`)!,
+      );
+      await advance(5);
+      expect(names()).toEqual(expected);
+      expect(
+        document.querySelector(".ant-pagination-item-active"),
+      ).toHaveTextContent("3");
+      expect(matching(base)).toHaveLength(beforeSwitch);
+    }
+    for (const size of [24, 48]) {
+      fireEvent.mouseDown(
+        screen.getByRole("combobox", { name: t("aidpKnowledge.pageSize") }),
+      );
+      for (const option of [12, 24, 48])
+        expect(
+          screen.getAllByText(
+            t("aidpKnowledge.pageSizeOption", { size: option }),
+          ).length,
+        ).toBeGreaterThan(0);
+      expect(
+        screen.queryByText(t("aidpKnowledge.pageSizeOption", { size: 10 })),
+      ).toBeNull();
+      fireEvent.click(
+        screen.getByText(t("aidpKnowledge.pageSizeOption", { size })),
+      );
+      await advance(5);
+      const parameters = matching(base).at(-1)!.url.searchParams;
+      expect(parameters.get("page_size")).toBe(String(size));
+      expect(parameters.get("page")).toBe("1");
+      expect(parameters.get("keyword")).toBe("Knowledge");
+      expect(cards()).toHaveLength(size);
+    }
+    fireEvent.click(document.querySelector(".ant-pagination-item-2")!);
+    await advance(5);
+    expect(cards()).toHaveLength(25);
+    expect(screen.getByText("Knowledge 73")).toBeInTheDocument();
     fireEvent.change(search, { target: { value: "  missing  " } });
-    const before = matching(base).length;
+    const beforeSearch = matching(base).length;
     await advance(200);
-    expect(matching(base)).toHaveLength(before);
+    expect(matching(base)).toHaveLength(beforeSearch);
     await advance(110);
     expect(matching(base).at(-1)!.url.searchParams.get("keyword")).toBe(
       "missing",
@@ -142,17 +204,6 @@ describe("AIDP-FE-LIST-01", () => {
     expect(
       screen.getByText(t("aidpKnowledge.searchEmpty")),
     ).toBeInTheDocument();
-    fireEvent.change(search, { target: { value: "" } });
-    await advance(310);
-    fireEvent.mouseDown(
-      screen.getByRole("combobox", { name: t("aidpKnowledge.pageSize") }),
-    );
-    fireEvent.click(
-      screen.getByText(t("aidpKnowledge.pageSizeOption", { size: 20 })),
-    );
-    await advance(5);
-    expect(matching(base).at(-1)!.url.searchParams.get("page_size")).toBe("20");
-    expect(matching(base).at(-1)!.url.searchParams.get("page")).toBe("1");
   });
 
   it.each(["confirm", "close"])(

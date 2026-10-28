@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: CHAT-SIDEBAR-D3-002
+implementations:
+- framework: pytest
+  file: test_api_history_groups.py
+  selector: test_authenticated_agent_history_group_and_conversation_paging
+timeout_seconds: 180
+acceptance_bindings:
+  AC-01: [test_authenticated_agent_history_group_and_conversation_paging]
+  AC-02: [test_authenticated_agent_history_group_and_conversation_paging]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

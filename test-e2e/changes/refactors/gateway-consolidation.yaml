@@ -1,0 +1,55 @@
+schema_version: '1.0'
+change:
+  change_id: GATEWAY-LAYOUT-20261022
+  change_type: refactor
+  title: Consolidate gateway routes, authentication and remaining constants
+  description: Preserve HTTP and authentication contracts while consolidating Gateway
+    routes, two authentication implementations and removing non-environment definitions
+    from consts.const.
+  affected_features:
+    existing:
+    - F-013
+    - MSRF-001
+    - V5-REL-AUTO-BCE0AAF43667C67B
+    - V5-REL-AUTO-ECAC7A02C22B21FF
+    - V5-UT-BE-006
+    - V5-UT-BE-007
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - MSRF-D1-002
+    - REL-AUTO-BCE0AAF43667C67B
+    - REL-AUTO-ECAC7A02C22B21FF
+    - UT-BE-001
+    - UT-BE-002
+    - UT-BE-006
+    - UT-BE-007
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Source ownership changes preserve the existing route, identity,
+    configuration and lifecycle contracts.
+  notes: Continue PR 4160. Reuse affected D1 and process lifecycle regressions. Higher-stage
+    scripts receive import changes only; their live acceptance is not claimed.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve all original HTTP paths, methods, payloads and auth failure behavior
+    - Preserve session/API-key/internal/OAuth policy isolation and expiry/revocation
+      handling
+    - Preserve dynamic OAuth configuration and audio asset paths
+    - Enforce one northbound routing module and two authentication modules
+    reason: Reuse existing HTTP and authentication tests and add route inventory,
+      ownership, path and dynamic-provider regressions.
+    test_selectors:
+    - test/backend/management/test_gateway_layout.py
+    - test/backend/management/test_gateway_authentication.py
+    - test/backend/app/test_northbound_app.py
+    - test/backend/app/test_northbound_knowledge_app.py
+    - test/backend/app/test_northbound_base_app.py
+    - test/backend/app/test_oauth_app.py
+    - test/backend/services/test_oauth_service.py
+    - test/backend/utils/test_auth_utils.py

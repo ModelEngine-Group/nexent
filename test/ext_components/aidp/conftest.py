@@ -17,7 +17,7 @@ BACKEND_ROOT = os.path.join(PROJECT_ROOT, "backend")
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
-# Ensure env vars are set so consts.const can load without .env
+# Ensure env vars are set so contracts.constants.environment can load without .env
 for var in (
     "POSTGRES_HOST", "POSTGRES_USER", "POSTGRES_PASSWORD",
     "POSTGRES_DB", "POSTGRES_PORT", "NEXENT_POSTGRES_PASSWORD",

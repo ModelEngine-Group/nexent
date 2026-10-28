@@ -1,9 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Functional acceptance tests for Workbench wire contracts."""
 
 import pytest
 from pydantic import ValidationError
 
-from backend.consts.model import AgentRequest, WorkbenchSessionConfig
+from contracts.agent import AgentRequest, WorkbenchSessionConfig
 
 
 def _single_agent_payload() -> dict:

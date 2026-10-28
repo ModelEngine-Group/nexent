@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 backend unit contracts derived from the functional baseline.
 
 These tests import production modules directly and never import Nexent's old
@@ -50,7 +52,7 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
 @STAGE
 @pytest.mark.case_id("UT-BE-011")
 def test_range_header_accepts_single_range_and_rejects_invalid_ranges() -> None:
-    from apps.file_management_app import _parse_range_header
+    from management.utils.file_http import _parse_range_header
 
     assert _parse_range_header("bytes=0-9", 100) == (0, 9)
     assert _parse_range_header("bytes=90-", 100) == (90, 99)

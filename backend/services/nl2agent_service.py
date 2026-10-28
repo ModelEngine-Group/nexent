@@ -5,6 +5,7 @@
 import ast
 import asyncio
 import json
+from contracts.authentication import AuthenticatedIdentity
 import logging
 import re
 import threading
@@ -14,39 +15,32 @@ from typing import Any
 from urllib.parse import quote, urljoin
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
+from nexent.core.agent_names import validate_agent_name
 from nexent.core.agents.context import (
     ContextItemInput,
     ContextItemType,
     ContextManagerConfig,
 )
-from nexent.core.agents.run_agent import agent_run
+from runtime.adapters.nexent.runner import agent_run
 from nexent.core.concurrency import run_blocking
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from rapidfuzz import fuzz
 
-from agents.create_agent_info import (
-    _resolve_input_budget,
-    _resolve_context_budget,
-    create_model_config_list,
-    join_minio_file_description_to_query,
-)
-from agents.nl2agent_agent import create_nl2agent_agent_config
-from consts.const import (
-    TOKEN,
-    ENABLE_AIDP_KNOWLEDGE,
-    LOCAL_MCP_SERVER,
-    MCP_REQUEST_TIMEOUT_SECONDS,
-    MODEL_CONFIG_MAPPING,
-)
+from management.services.model.run_budget import _resolve_input_budget
+from management.services.model.run_budget import _resolve_context_budget
+from management.services.model.run_bindings import create_model_config_list
+from management.services.agent.preparation.inputs import join_minio_file_description_to_query
+from management.services.agent.creation import create_nl2agent_agent_config
+from contracts.constants.environment import TOKEN, ENABLE_AIDP_KNOWLEDGE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.services.mcp.addressing import get_tenant_local_mcp_server
-from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
-from database.agent_db import (
-    query_all_agent_info_by_tenant_id,
-    update_agent_draft_fields,
-)
-from database.skill_db import query_enabled_skill_instances
-from database.tool_db import query_all_enabled_tool_instances, query_all_tools
-from consts.exceptions import AgentDraftEditError
+from contracts.conversation import HistoryItem
+from contracts.agent import NL2AgentRunRequest
+from contracts.tool import ToolSourceEnum
+from management.db.agent.repository import query_all_agent_info_by_tenant_id, update_agent_draft_fields
+from management.db.skill.repository import query_enabled_skill_instances
+from management.db.tool.repository import query_all_enabled_tool_instances, query_all_tools
+from contracts.errors.exceptions import AgentDraftEditError
 from management.services.agent.authorization import require_agent_draft_edit
 from infrastructure.concurrency import runtime_thread_manager
 from management.services.model.run_controls import resolve_creator_model, preflight_turn_controls
@@ -68,7 +62,6 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     SEARCH_UNINSTALLED_RESOURCES_NAME,
     UNINSTALLED_RESOURCE_SOURCES,
 )
-from management.services.permission.identity.authentication_helpers import get_current_user_id
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.agent.context import (
     build_authorized_context_input,
@@ -1403,11 +1396,10 @@ async def validate_agent_generation_complete_impl(
         user_id=user_id,
     )
     name = draft.get("name")
-    if (
-        not isinstance(name, str)
-        or not re.fullmatch(r"[a-zA-Z_][a-zA-Z0-9_]{0,59}", name)
-    ):
-        raise Nl2AgentCompletionError("draft_fields_incomplete", ["name"])
+    try:
+        validate_agent_name(name)
+    except ValueError as exc:
+        raise Nl2AgentCompletionError("draft_fields_incomplete", ["name"]) from exc
     description = draft.get("description")
     if not isinstance(description, str) or not description.strip():
         raise Nl2AgentCompletionError("draft_fields_incomplete", ["description"])
@@ -1447,16 +1439,20 @@ async def build_nl2agent_run_info(
     request: NL2AgentRunRequest,
     tenant_id: str,
     language: str,
-    authorization: str | None,
+    authorization: str | None = None,
+    *,
+    identity: AuthenticatedIdentity,
 ) -> AgentRunInfo:
     """Build all request-scoped NL2Agent runtime objects in memory."""
 
     action_agent_id = _parse_nl2agent_card_action_agent_id(request.query)
     if action_agent_id is not None and request.agent_id != action_agent_id:
         raise Nl2AgentDraftSaveError("agent_context_mismatch")
-    user_id, authenticated_tenant_id = get_current_user_id(authorization)
-    if authenticated_tenant_id != tenant_id:
+    if identity.tenant_id != tenant_id:
         raise PermissionError("tenant mismatch")
+    user_id = identity.user_id
+    if not user_id or not tenant_id:
+        raise PermissionError("Authenticated user and tenant are required")
     preflight_turn_controls(request, tenant_id)
     binding_context = await _build_verified_bound_resources_context(
         agent_id=request.agent_id,
@@ -1567,7 +1563,9 @@ async def create_nl2agent_stream(
     request: NL2AgentRunRequest,
     tenant_id: str,
     language: str,
-    authorization: str | None,
+    authorization: str | None = None,
+    *,
+    identity: AuthenticatedIdentity,
 ) -> AsyncIterator[str]:
     """Create an SSE-compatible stream for one ephemeral NL2Agent run."""
 
@@ -1575,6 +1573,7 @@ async def create_nl2agent_stream(
         request=request,
         tenant_id=tenant_id,
         language=language,
+        identity=identity,
         authorization=authorization,
     )
 

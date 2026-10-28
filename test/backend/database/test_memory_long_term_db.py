@@ -1,10 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Coverage and contract tests for versioned long-term memory persistence."""
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
-from database import memory_long_term_db
+from management.db.memory import long_term as memory_long_term_db
 
 
 def _row(**overrides):

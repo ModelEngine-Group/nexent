@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Execute the history projection against isolated relational rows."""
 import importlib
 import json
@@ -13,7 +15,7 @@ from sqlalchemy.pool import StaticPool
 @pytest.fixture
 def history_db(monkeypatch):
     monkeypatch.setattr("nexent.storage.storage_client_factory.create_storage_client_from_config", lambda *_: MagicMock())
-    module = importlib.import_module("database.conversation_db")
+    module = importlib.import_module("management.db.conversation.repository")
     engine = create_engine("sqlite://", poolclass=StaticPool)
     with engine.begin() as connection:
         connection.exec_driver_sql("ATTACH DATABASE ':memory:' AS nexent")

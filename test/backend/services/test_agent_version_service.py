@@ -1,5 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import asyncio
 import sys
 import types
@@ -30,9 +32,10 @@ consts_mock.const.PERMISSION_EDIT = "EDIT"
 consts_mock.const.PERMISSION_READ = "READ_ONLY"
 
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
-consts_exceptions_mod = types.ModuleType("consts.exceptions")
+consts_exceptions_mod = types.ModuleType("contracts.errors.exceptions")
 
 
 class ValidationError(Exception):
@@ -40,9 +43,9 @@ class ValidationError(Exception):
 
 
 consts_exceptions_mod.ValidationError = ValidationError
-sys.modules['consts.exceptions'] = consts_exceptions_mod
+install_shared_contract_stub(consts_exceptions_mod, 'exceptions')
 
-# Mock consts.agent_unavailable_reasons
+# Mock contracts.constants.constants
 agent_unavailable_reasons_mock = MagicMock()
 agent_unavailable_reasons_mock.AgentUnavailableReason = type('AgentUnavailableReason', (), {
     'DUPLICATE_NAME': 'duplicate_name',
@@ -61,7 +64,7 @@ agent_unavailable_reasons_mock.AgentUnavailableReason = type('AgentUnavailableRe
         'model_unavailable', 'tool_unavailable', 'all_tools_disabled', 'agent_not_found'
     ]),
 })()
-sys.modules['consts.agent_unavailable_reasons'] = agent_unavailable_reasons_mock
+install_shared_contract_stub(agent_unavailable_reasons_mock, 'agent_unavailable_reasons')
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -77,15 +80,15 @@ utils_mock.skill_params_utils.strip_params_comments_for_db = MagicMock(
 )
 
 sys.modules['utils'] = utils_mock
-sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
-sys.modules['management.db.serialization'] = utils_mock.str_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.utils.serialization'] = utils_mock.str_utils
 sys.modules['management.services.skill.params'] = utils_mock.skill_params_utils
 
 # Mock boto3
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
 
-# Mock database.client
+# Mock management.db.client
 client_mock = MagicMock()
 client_mock.MinioClient = MagicMock()
 client_mock.PostgresClient = MagicMock()
@@ -93,10 +96,16 @@ client_mock.db_client = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 
-sys.modules['database.client'] = client_mock
-sys.modules['backend.database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
-# Mock database.db_models
+# Mock management.db.models
 db_models_mock = MagicMock()
 db_models_mock.AgentInfo = MagicMock()
 db_models_mock.ToolInstance = MagicMock()
@@ -107,10 +116,10 @@ db_models_mock.SkillToolRelation = MagicMock()
 db_models_mock.SkillInstance = MagicMock()
 db_models_mock.ToolInfo = MagicMock()
 
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
-# Mock database.agent_version_db
+# Mock management.db.agent.version
 agent_version_db_mock = MagicMock()
 agent_version_db_mock.SOURCE_TYPE_NORMAL = "NORMAL"
 agent_version_db_mock.SOURCE_TYPE_ROLLBACK = "ROLLBACK"
@@ -118,37 +127,37 @@ agent_version_db_mock.STATUS_RELEASED = "RELEASED"
 agent_version_db_mock.STATUS_DISABLED = "DISABLED"
 agent_version_db_mock.STATUS_ARCHIVED = "ARCHIVED"
 
-sys.modules['database.agent_version_db'] = agent_version_db_mock
-sys.modules['backend.database.agent_version_db'] = agent_version_db_mock
+sys.modules['management.db.agent.version'] = agent_version_db_mock
+sys.modules['management.db.agent.version'] = agent_version_db_mock
 
-# Mock database.model_management_db
+# Mock management.db.model.repository
 model_management_db_mock = MagicMock()
 # Default pass-through behavior for get_valid_model_ids
 model_management_db_mock.get_valid_model_ids = MagicMock(
     side_effect=lambda model_ids, tenant_id: model_ids
 )
-sys.modules['database.model_management_db'] = model_management_db_mock
-sys.modules['backend.database.model_management_db'] = model_management_db_mock
+sys.modules['management.db.model.repository'] = model_management_db_mock
+sys.modules['management.db.model.repository'] = model_management_db_mock
 
-# Mock database.agent_db (for list_published_agents_impl)
+# Mock management.db.agent.repository (for list_published_agents_impl)
 agent_db_mock = MagicMock()
-sys.modules['database.agent_db'] = agent_db_mock
-sys.modules['backend.database.agent_db'] = agent_db_mock
+sys.modules['management.db.agent.repository'] = agent_db_mock
+sys.modules['management.db.agent.repository'] = agent_db_mock
 
-# Mock database.skill_db
+# Mock management.db.skill.repository
 skill_db_mock = MagicMock()
 skill_db_mock.query_skill_instances_by_agent_id = MagicMock(return_value=[])
 skill_db_mock.strip_params_comments_for_db = MagicMock(side_effect=lambda x: x)
-sys.modules['database.skill_db'] = skill_db_mock
-sys.modules['backend.database.skill_db'] = skill_db_mock
+sys.modules['management.db.skill.repository'] = skill_db_mock
+sys.modules['management.db.skill.repository'] = skill_db_mock
 
 # Mock published-agent dependencies at their canonical import sites.
 agent_read_mock = MagicMock()
 sys.modules["management.services.agent.read"] = agent_read_mock
 user_tenant_db_mock = MagicMock()
-sys.modules["database.user_tenant_db"] = user_tenant_db_mock
+sys.modules["management.db.identity.user_tenant"] = user_tenant_db_mock
 group_db_mock = MagicMock()
-sys.modules["database.group_db"] = group_db_mock
+sys.modules["management.db.identity.group"] = group_db_mock
 
 # Mock database module
 database_mock = MagicMock()
@@ -157,15 +166,15 @@ database_mock.agent_db = agent_db_mock
 sys.modules['database'] = database_mock
 sys.modules['backend.database'] = database_mock
 
-# Mock database.a2a_agent_db
+# Mock management.db.a2a.repository
 a2a_agent_db_mock = MagicMock()
 a2a_agent_db_mock.create_server_agent = MagicMock()
 a2a_agent_db_mock.get_server_agent_by_agent_id = MagicMock()
-sys.modules['database.a2a_agent_db'] = a2a_agent_db_mock
-sys.modules['backend.database.a2a_agent_db'] = a2a_agent_db_mock
+sys.modules['management.db.a2a.repository'] = a2a_agent_db_mock
+sys.modules['management.db.a2a.repository'] = a2a_agent_db_mock
 
 # Now import the service module
-import management.services.agent.versions as agent_version_service_module
+from management.services.agent import versions as agent_version_service_module
 from management.services.agent.versions import (
     publish_version_impl,
     get_version_list_impl,
@@ -282,7 +291,7 @@ def mock_agent_draft():
         "agent_id": 1,
         "tenant_id": "tenant1",
         "version_no": 0,
-        "name": "Test Agent",
+        "name": "Test_Agent",
         "description": "Test Description",
         "model_ids": [1],
         "business_logic_model_id": 2,
@@ -2063,7 +2072,7 @@ def test_list_published_agents_impl_exception_handling(monkeypatch):
 def test_publish_version_impl_with_a2a_new_agent(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test publishing version with publish_as_a2a=True for a new A2A agent"""
     mock_agent_draft["is_a2a"] = True
-    mock_agent_draft["name"] = "Test-Agent"
+    mock_agent_draft["name"] = "Test_Agent"
     mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
     mock_get_next = MagicMock(return_value=1)
@@ -2088,7 +2097,7 @@ def test_publish_version_impl_with_a2a_new_agent(monkeypatch, mock_agent_draft, 
     a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
         "agent_id": 1,
         "endpoint_id": "a2a_1_abc12345",
-        "name": "Test-Agent",
+        "name": "Test_Agent",
         "description": "Test Description",
         "version": "1",
         "streaming": False,
@@ -2118,7 +2127,7 @@ def test_publish_version_impl_with_a2a_new_agent(monkeypatch, mock_agent_draft, 
         agent_id=1,
         user_id="user1",
         tenant_id="tenant1",
-        name="Test-Agent",
+        name="Test_Agent",
         description="Test Description",
         version="1",
     )
@@ -2135,7 +2144,7 @@ def test_publish_version_impl_with_a2a_new_agent(monkeypatch, mock_agent_draft, 
 def test_publish_version_impl_with_a2a_existing_agent(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test publishing version with publish_as_a2a=True for an existing A2A agent"""
     mock_agent_draft["is_a2a"] = True
-    mock_agent_draft["name"] = "Test-Agent"
+    mock_agent_draft["name"] = "Test_Agent"
     mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
     mock_get_next = MagicMock(return_value=2)
@@ -2158,7 +2167,7 @@ def test_publish_version_impl_with_a2a_existing_agent(monkeypatch, mock_agent_dr
     existing_a2a = {
         "agent_id": 1,
         "endpoint_id": "a2a_1_existing",
-        "name": "Test-Agent",
+        "name": "Test_Agent",
         "description": "Test Description",
         "version": "0",
         "streaming": False,
@@ -2168,7 +2177,7 @@ def test_publish_version_impl_with_a2a_existing_agent(monkeypatch, mock_agent_dr
     a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
         "agent_id": 1,
         "endpoint_id": "a2a_1_existing",
-        "name": "Test-Agent",
+        "name": "Test_Agent",
         "description": "Test Description",
         "version": "2",
         "streaming": False,
@@ -2303,7 +2312,7 @@ def test_publish_version_impl_without_a2a(monkeypatch, mock_agent_draft, mock_to
 def test_publish_version_impl_with_a2a_streaming_agent(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test publishing A2A agent that supports streaming"""
     mock_agent_draft["is_a2a"] = True
-    mock_agent_draft["name"] = "Test-Agent"
+    mock_agent_draft["name"] = "Test_Agent"
     mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
     mock_get_next = MagicMock(return_value=1)
@@ -2326,7 +2335,7 @@ def test_publish_version_impl_with_a2a_streaming_agent(monkeypatch, mock_agent_d
     a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
         "agent_id": 1,
         "endpoint_id": "a2a_1_stream",
-        "name": "Test-Agent",
+        "name": "Test_Agent",
         "description": "Test Description",
         "version": "1",
         "streaming": True,
@@ -2502,7 +2511,7 @@ def test_publish_version_impl_with_a2a_empty_string_name(monkeypatch, mock_tools
 def test_publish_version_impl_with_a2a_missing_endpoint_id_in_response(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test A2A agent creation response without endpoint_id - card is still created with None endpoint_id"""
     mock_agent_draft["is_a2a"] = True
-    mock_agent_draft["name"] = "Test-Agent"
+    mock_agent_draft["name"] = "Test_Agent"
     mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
     mock_get_next = MagicMock(return_value=1)
@@ -2525,7 +2534,7 @@ def test_publish_version_impl_with_a2a_missing_endpoint_id_in_response(monkeypat
     # create_server_agent returns dict without endpoint_id (edge case)
     a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
         "agent_id": 1,
-        "name": "Test-Agent",
+        "name": "Test_Agent",
         "description": "Test Description",
         "version": "1",
         "streaming": False,
@@ -2551,7 +2560,7 @@ def test_publish_version_impl_with_a2a_missing_endpoint_id_in_response(monkeypat
 def test_publish_version_impl_with_a2a_existing_agent_keeps_endpoint_id(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test that existing A2A agent preserves its endpoint_id through create_server_agent"""
     mock_agent_draft["is_a2a"] = True
-    mock_agent_draft["name"] = "Test-Agent"
+    mock_agent_draft["name"] = "Test_Agent"
     mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
     mock_get_next = MagicMock(return_value=5)
@@ -2613,7 +2622,7 @@ def test_publish_version_impl_with_a2a_existing_agent_keeps_endpoint_id(monkeypa
 def test_publish_version_impl_with_a2a_result_contains_both_keys(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test that publish_version_impl returns both a2a_agent and a2a_agent_card keys when publish_as_a2a=True"""
     mock_agent_draft["is_a2a"] = True
-    mock_agent_draft["name"] = "Test-Agent"
+    mock_agent_draft["name"] = "Test_Agent"
     mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
     mock_get_next = MagicMock(return_value=1)
@@ -2636,7 +2645,7 @@ def test_publish_version_impl_with_a2a_result_contains_both_keys(monkeypatch, mo
     a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
         "agent_id": 1,
         "endpoint_id": "a2a_1_complete",
-        "name": "Test-Agent",
+        "name": "Test_Agent",
         "description": "Test Description",
         "version": "1",
         "streaming": False,
@@ -2672,7 +2681,7 @@ def test_publish_version_impl_with_a2a_description_none(monkeypatch, mock_agent_
     """Test A2A agent creation when agent draft has no description"""
     agent_draft_no_desc = mock_agent_draft.copy()
     agent_draft_no_desc["is_a2a"] = True
-    agent_draft_no_desc["name"] = "Test-Agent"
+    agent_draft_no_desc["name"] = "Test_Agent"
     agent_draft_no_desc["description"] = None
 
     mock_query_draft = MagicMock(return_value=(agent_draft_no_desc, mock_tools_draft, mock_relations_draft))
@@ -2697,7 +2706,7 @@ def test_publish_version_impl_with_a2a_description_none(monkeypatch, mock_agent_
     a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
         "agent_id": 1,
         "endpoint_id": "a2a_1_nodec",
-        "name": "Test-Agent",
+        "name": "Test_Agent",
         "description": None,  # create_server_agent returns None for description
         "version": "1",
         "streaming": False,
@@ -2727,7 +2736,7 @@ def test_publish_version_impl_with_a2a_description_none(monkeypatch, mock_agent_
 def test_publish_version_impl_with_a2a_existing_agent_description_update(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test that existing A2A agent updates its description from agent_draft"""
     mock_agent_draft["is_a2a"] = True
-    mock_agent_draft["name"] = "Test-Agent"
+    mock_agent_draft["name"] = "Test_Agent"
     mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
     mock_get_next = MagicMock(return_value=2)
@@ -2758,7 +2767,7 @@ def test_publish_version_impl_with_a2a_existing_agent_description_update(monkeyp
     a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
         "agent_id": 1,
         "endpoint_id": "a2a_1_old",
-        "name": "Test-Agent",  # Updated from agent_draft
+        "name": "Test_Agent",  # Updated from agent_draft
         "description": "Test Description",  # Updated from agent_draft
         "version": "2",
         "streaming": False,
@@ -2772,10 +2781,10 @@ def test_publish_version_impl_with_a2a_existing_agent_description_update(monkeyp
 
     # Verify create_server_agent called with updated name and description from draft
     call_kwargs = a2a_agent_db_mock.create_server_agent.call_args[1]
-    assert call_kwargs["name"] == "Test-Agent"
+    assert call_kwargs["name"] == "Test_Agent"
     assert call_kwargs["description"] == "Test Description"
     # Agent card should reflect updated values
-    assert result["a2a_agent_card"]["name"] == "Test-Agent"
+    assert result["a2a_agent_card"]["name"] == "Test_Agent"
     assert result["a2a_agent_card"]["description"] == "Test Description"
 
     # Verify updated_by is set on all snapshot types
@@ -2790,7 +2799,7 @@ def test_publish_version_impl_with_a2a_existing_agent_description_update(monkeyp
 def test_publish_version_impl_with_a2a_agent_card_all_fields(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft):
     """Test A2A agent card contains all expected fields"""
     mock_agent_draft["is_a2a"] = True
-    mock_agent_draft["name"] = "Test-Agent"
+    mock_agent_draft["name"] = "Test_Agent"
     mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
     mock_get_next = MagicMock(return_value=1)
@@ -2860,7 +2869,7 @@ def test_publish_version_impl_with_a2a_agent_card_all_fields(monkeypatch, mock_a
 def test_publish_version_impl_a2a_logging_on_create(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft, caplog):
     """Test that appropriate log messages are emitted for A2A agent creation"""
     mock_agent_draft["is_a2a"] = True
-    mock_agent_draft["name"] = "Test-Agent"
+    mock_agent_draft["name"] = "Test_Agent"
     mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
     mock_get_next = MagicMock(return_value=1)
@@ -2883,7 +2892,7 @@ def test_publish_version_impl_a2a_logging_on_create(monkeypatch, mock_agent_draf
     a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
         "agent_id": 1,
         "endpoint_id": "a2a_1_log",
-        "name": "Test-Agent",
+        "name": "Test_Agent",
         "description": "Test Description",
         "version": "1",
         "streaming": False,
@@ -2914,7 +2923,7 @@ def test_publish_version_impl_a2a_logging_on_create(monkeypatch, mock_agent_draf
 def test_publish_version_impl_a2a_logging_on_update(monkeypatch, mock_agent_draft, mock_tools_draft, mock_relations_draft, mock_skills_draft, caplog):
     """Test that appropriate log messages are emitted for A2A agent update"""
     mock_agent_draft["is_a2a"] = True
-    mock_agent_draft["name"] = "Test-Agent"
+    mock_agent_draft["name"] = "Test_Agent"
     mock_query_draft = MagicMock(return_value=(mock_agent_draft, mock_tools_draft, mock_relations_draft))
     monkeypatch.setattr(agent_version_service_module, "query_agent_draft", mock_query_draft)
     mock_get_next = MagicMock(return_value=2)
@@ -2945,7 +2954,7 @@ def test_publish_version_impl_a2a_logging_on_update(monkeypatch, mock_agent_draf
     a2a_agent_db_mock.create_server_agent = MagicMock(return_value={
         "agent_id": 1,
         "endpoint_id": "a2a_1_existing",
-        "name": "Test-Agent",
+        "name": "Test_Agent",
         "description": "Test Description",
         "version": "2",
         "streaming": False,

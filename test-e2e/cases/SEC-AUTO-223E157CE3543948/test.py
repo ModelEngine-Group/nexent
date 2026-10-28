@@ -8,7 +8,7 @@ import types
 
 import pytest
 
-import consts.const as const
+import contracts.constants.environment as const
 from management.services.agent.policy import build_sandbox_policy, get_sandbox_minio_client
 
 

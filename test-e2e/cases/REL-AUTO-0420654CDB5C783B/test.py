@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import uuid
@@ -6,8 +8,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from database.a2a_agent_db import _get_db_session, fail_active_tasks_on_startup
-from database.db_models import A2ATask
+from management.db.a2a.repository import _get_db_session, fail_active_tasks_on_startup
+from management.db.models import A2ATask
 
 CASE_ID = "REL-AUTO-0420654CDB5C783B"
 

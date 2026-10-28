@@ -1,4 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import os
 import sys
 import types
@@ -21,17 +23,17 @@ class MockModule(mock.MagicMock):
 
 _MOCKED_MODULE_NAMES = (
     "database",
-    "database.client",
-    "database.model_management_db",
+    "management.db.client",
+    "management.db.model.repository",
     "utils",
-    "management.services.permission.identity.authentication_helpers",
+    "gateway.authentication.auth",
     "management.services.configuration.tenant.settings",
     "utils.memory_utils",
     "management.services.model.names",
     "consts",
-    "consts.const",
-    "consts.model",
-    "consts.provider",
+    "contracts.constants.environment",
+    "contracts.agent",
+    "contracts.constants.constants",
     "nexent",
     "nexent.core",
     "nexent.core.agents",
@@ -53,10 +55,14 @@ _SAVED_MODULES = {
 
 # Mock required modules before any imports occur
 sys.modules['database'] = MockModule()
-sys.modules['database.client'] = MockModule()
-sys.modules['database.model_management_db'] = MockModule()
+sys.modules['management.db.client'] = MockModule()
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.model.repository'] = MockModule()
 sys.modules['utils'] = MockModule()
-sys.modules['management.services.permission.identity.authentication_helpers'] = MockModule()
+sys.modules['gateway.authentication.auth'] = MockModule()
 sys.modules['management.services.configuration.tenant.settings'] = MockModule()
 sys.modules['utils.memory_utils'] = MockModule()
 sys.modules['management.services.model.names'] = MockModule()
@@ -65,9 +71,10 @@ consts_const_module = MockModule()
 consts_const_module.LOCALHOST_IP = "127.0.0.1"
 consts_const_module.LOCALHOST_NAME = "localhost"
 consts_const_module.DOCKER_INTERNAL_HOST = "host.docker.internal"
-sys.modules['consts.const'] = consts_const_module
-sys.modules['consts.model'] = MockModule()
-sys.modules['consts.provider'] = MockModule()
+sys.modules['contracts.constants.environment'] = consts_const_module
+install_business_constant_stubs(consts_const_module)
+install_business_contract_stubs(MockModule())
+install_shared_contract_stub(MockModule(), 'provider')
 
 # Mock nexent packages and modules with proper hierarchy
 sys.modules['nexent'] = MockModule()

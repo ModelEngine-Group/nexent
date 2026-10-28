@@ -1,0 +1,26 @@
+schema_version: '1.0'
+change:
+  change_id: CHAT-DISCOVERY-PAGE-SIZE-20261026
+  change_type: requirement
+  requirement_id: CHAT-DISCOVERY-PAGE-SIZE-20261026
+  title: Default Agent discovery to 12 cards per page
+  description: Match Agent configuration with a 12-card default and 10/12/20/50 page-size options.
+  affected_features:
+    existing: []
+    added: [CHAT-AGENT-DISCOVERY]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Render 12 cards initially with 10/12/20/50 options.
+    - Render the final partial page and reset on size, search and tab changes without selecting an agent.
+    - Preserve empty and loading rendering.
+    reason: Frontend-only local display state; Python UT is irrelevant. Rendered frontend UT sufficiently proves the affected configuration and slicing; no duplicate D1 or new API/runtime/browser/risk obligation.
+    test_selectors: [frontend/tests/component/agentLandingPagination.test.tsx]
+  no_case_change_reason: Existing drawer and sidebar Cases exercise different contracts; this local default adjustment requires no additional formal proof boundary.

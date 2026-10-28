@@ -1,13 +1,16 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for MCP community request models and content validators."""
 
 import sys
 import types
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from pydantic import ValidationError
 
-# Stub optional SDK deps and agent model imports used by consts.model.
+# Stub optional SDK deps and agent model imports used by contracts.agent.
 sys.modules.setdefault("boto3", MagicMock())
 sys.modules.setdefault("botocore", MagicMock())
 sys.modules.setdefault("botocore.client", MagicMock())
@@ -17,17 +20,16 @@ _agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
 _agent_model_mod.AgentVerificationConfig = MagicMock()
 _agent_model_mod.ToolConfig = MagicMock()
 sys.modules.setdefault("nexent", MagicMock())
-sys.modules.setdefault("nexent.core", MagicMock())
+sys.modules.setdefault("nexent.core", types.ModuleType("nexent.core"))
+# Preserve real validation while isolating optional SDK integrations.
+sys.modules["nexent.core"].__path__ = [
+    str(Path(__file__).resolve().parents[3] / "sdk" / "nexent" / "core")
+]
 sys.modules.setdefault("nexent.core.agents", MagicMock())
 sys.modules["nexent.core.agents.agent_model"] = _agent_model_mod
 
-from backend.consts.model import (
-    CommunityPublishRequest,
-    CommunityReviewActionRequest,
-    CommunityStatusUpdateRequest,
-    CommunityUpdateRequest,
-    SkillRepositoryListingCreateRequest,
-)
+from contracts.tool import CommunityPublishRequest, CommunityReviewActionRequest, CommunityStatusUpdateRequest, CommunityUpdateRequest
+from contracts.skill import SkillRepositoryListingCreateRequest
 
 
 @pytest.mark.parametrize(

@@ -4,8 +4,8 @@
 
 import pytest
 
-from consts import model
-from database.db_models import AgentInfo, TableBase
+from contracts import agent as model
+from management.db.models import AgentInfo, TableBase
 from management.services.agent import naming, prompt
 
 
@@ -64,7 +64,7 @@ def test_agent_contracts_no_longer_expose_private_template_fields(request_type):
 def test_legacy_agent_payload_drops_retired_fields():
     request = model.AgentInfoRequest.model_validate({
         "agent_id": 1,
-        "name": "Existing Agent",
+        "name": "Existing_Agent",
         "prompt": "Preserve the saved prompt",
         "prompt_template_id": 42,
         "prompt_template_name": "Private template",

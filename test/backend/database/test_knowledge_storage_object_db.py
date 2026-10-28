@@ -1,5 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for the knowledge-base source-object storage ledger DAL."""
 
+from contracts.errors import exceptions as storage_db_knowledge_base_storage_object_exceptions
 from contextlib import nullcontext
 import sys
 import types
@@ -8,21 +11,26 @@ from unittest.mock import MagicMock
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from backend.database.db_models import KnowledgeStorageObject
+from management.db.models import KnowledgeStorageObject
 
 
-client_module = types.ModuleType("backend.database.client")
+client_module = types.ModuleType("management.db.client")
 client_module.as_dict = MagicMock(name="as_dict")
 client_module.get_db_session = MagicMock(name="get_db_session")
-previous_client_module = sys.modules.get("backend.database.client")
-sys.modules["backend.database.client"] = client_module
+previous_client_module = sys.modules.get("management.db.client")
+sys.modules["management.db.client"] = client_module
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
-from backend.database import knowledge_storage_object_db as storage_db
+from management.db.knowledge_base import storage_object as storage_db
+from contracts.constants import constants as storage_db_knowledge_base_storage_object
 
 if previous_client_module is None:
-    sys.modules.pop("backend.database.client", None)
+    sys.modules.pop("management.db.client", None)
 else:
-    sys.modules["backend.database.client"] = previous_client_module
+    sys.modules["management.db.client"] = previous_client_module
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
 
 
 def _row(**overrides):
@@ -34,7 +42,7 @@ def _row(**overrides):
         "bucket_name": "bucket",
         "object_name": "knowledge_base/source.pdf",
         "raw_bytes": 300,
-        "status": storage_db.COMMITTED_STATUS,
+        "status": storage_db_knowledge_base_storage_object.COMMITTED_STATUS,
         "delete_flag": "N",
         "created_by": "user-a",
         "updated_by": "user-a",
@@ -186,7 +194,7 @@ def test_commit_storage_object_rejects_different_ownership_or_size(
         **call_overrides,
     }
 
-    with pytest.raises(storage_db.StorageObjectConflictError):
+    with pytest.raises(storage_db_knowledge_base_storage_object_exceptions.StorageObjectConflictError):
         storage_db.commit_storage_object(**payload)
 
 
