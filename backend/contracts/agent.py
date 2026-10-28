@@ -13,7 +13,6 @@ from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
 from contracts.skill import SkillResolution, SkillZipEntry
 from contracts.tool import ToolParamsRequest
 from infrastructure.agent_prompt import normalize_imported_agent_bundle
-from nexent.core.agent_names import validate_agent_name
 from nexent.core.agents.agent_model import AgentVerificationConfig, ToolConfig
 from pydantic import (
     BaseModel,
@@ -544,7 +543,13 @@ class AgentInfoRequest(BaseModel):
     @field_validator("name")
     @classmethod
     def validate_name(cls, value: Optional[str]) -> Optional[str]:
-        return validate_agent_name(value) if value is not None else None
+        if value is None:
+            return None
+        # Imported lazily: contracts must not require the SDK package at import
+        # time, because several unit suites stub ``nexent.core`` wholesale.
+        from nexent.core.agent_names import validate_agent_name
+
+        return validate_agent_name(value)
 
     @field_validator("verification_config", mode="before")
     @classmethod
