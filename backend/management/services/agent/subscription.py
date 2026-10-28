@@ -544,8 +544,12 @@ async def run_agent_stream(
         agent_request.__dict__["_runtime_metadata_snapshot"] = metadata_snapshot
         agent_request.__dict__["_runtime_metadata_version"] = metadata_version
 
+    # Resume reconnects carry no enable_plan from the frontend, so re-applying
+    # the chat_mode update would overwrite a stored planning conversation with
+    # execution mode while its run is still in flight.
     if (
         not agent_request.is_debug
+        and not resume
         and not is_new_conversation
         and agent_request.conversation_id is not None
     ):
