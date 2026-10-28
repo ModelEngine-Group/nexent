@@ -443,8 +443,11 @@ sys.modules["management.services.model.invocation"] = _utils_llm_module
 _utils_pkg.llm_utils = _utils_llm_module
 
 # management.services.agent.profile is imported lazily inside _generate_test_queries.
-sys.modules["management.services.agent.profile"] = MagicMock()
-_utils_pkg.agent_profile_utils = sys.modules["management.services.agent.profile"]
+# Declare fetch_agent_profile so set_import_attribute can patch it later.
+_agent_profile_stub = MagicMock()
+_agent_profile_stub.fetch_agent_profile = MagicMock()
+sys.modules["management.services.agent.profile"] = _agent_profile_stub
+_utils_pkg.agent_profile_utils = _agent_profile_stub
 
 _utils_prompt_template_module = MagicMock()
 _utils_prompt_template_module.get_prompt_template = MagicMock()

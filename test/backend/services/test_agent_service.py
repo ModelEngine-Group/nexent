@@ -414,10 +414,23 @@ agent_run_manager_module.AgentRunAlreadyActiveError = _AgentRunAlreadyActiveErro
 agent_run_manager_module.AgentRunConcurrencyExceededError = (
     _AgentRunConcurrencyExceededError
 )
-agent_run_manager_module.agent_run_manager = MagicMock()
-agent_run_manager_module.agent_run_manager.reserve_agent_capacity.return_value = (
-    "agent-capacity-test"
-)
+# Materialise every method the suite patches or asserts on. A bare MagicMock
+# answers attribute access lazily but monkeypatch.setattr needs a real entry,
+# so newer pytest versions reject attributes that were never set.
+_agent_run_manager_mock = MagicMock()
+_agent_run_manager_mock.reserve_agent_capacity.return_value = "agent-capacity-test"
+_agent_run_manager_mock.reserve_agent_run.return_value = "agent-run-reservation"
+for _method in (
+    "register_agent_run",
+    "unregister_agent_run",
+    "release_agent_run_reservation",
+    "release_agent_capacity",
+    "stop_agent_run",
+    "get_agent_run_info",
+    "submit",
+):
+    setattr(_agent_run_manager_mock, _method, MagicMock())
+agent_run_manager_module.agent_run_manager = _agent_run_manager_mock
 sys.modules["management.services.agent.lifecycle"] = agent_run_manager_module
 sys.modules["management.services.agent.preprocessing"] = MagicMock()
 

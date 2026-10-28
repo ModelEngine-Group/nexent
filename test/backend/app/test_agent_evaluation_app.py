@@ -104,7 +104,11 @@ sys.modules["management.services.evaluation.runs"] = MagicMock(name="agent_eval_
 sys.modules["management.services.evaluation.reporting.report"] = MagicMock(name="report_svc")
 sys.modules["management.services.agent.runtime_client"] = MagicMock(name="runtime_proxy_svc")
 sys.modules["management.db.evaluation.runs"] = MagicMock(name="agent_eval_db")
-sys.modules["gateway.authentication.auth"] = MagicMock(name="auth_utils")
+# The module is stubbed wholesale, so name the helper ``_safe_extract_language``
+# imports lazily; an unset attribute would make monkeypatch.setattr fail.
+_auth_utils_mock = MagicMock(name="auth_utils")
+_auth_utils_mock.parse_language_from_request = MagicMock(return_value="zh")
+sys.modules["gateway.authentication.auth"] = _auth_utils_mock
 
 # Load the target module via spec so its ``from X import Y`` lookups hit the
 # stubs above.
