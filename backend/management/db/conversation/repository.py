@@ -253,7 +253,8 @@ def _touch_conversation_activity(session, conversation_id: int, user_id: Optiona
 
 def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None,
                                  status: str = 'completed', *,
-                                 message_source: MessageSource = MessageSource.CHAT) -> int:
+                                 message_source: MessageSource = MessageSource.CHAT,
+                                 db_session=None) -> int:
     """
     Create a conversation message record
 
@@ -271,7 +272,7 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         int: Newly created message ID (auto-increment ID)
     """
     message_source = MessageSource(message_source)
-    with get_db_session() as session:
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         # Ensure conversation_id is integer type
         conversation_id = int(message_data["conversation_id"])
         message_idx = int(message_data["message_idx"])
@@ -626,6 +627,8 @@ def create_message_unit(
     unit_status: str = "completed",
     tool_call_id: Optional[str] = None,
     invocation_id: Optional[str] = None,
+    *,
+    db_session=None,
 ) -> int:
     """
     Insert a single ConversationMessageUnit row.
@@ -648,7 +651,7 @@ def create_message_unit(
     Returns:
         int: Newly created unit ID (auto-increment ID)
     """
-    with get_db_session() as session:
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         message_id = int(message_id)
         conversation_id = int(conversation_id)
         unit_index = int(unit_index)
