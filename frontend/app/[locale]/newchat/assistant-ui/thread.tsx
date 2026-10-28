@@ -2,6 +2,8 @@
 
 "use client";
 
+import { useMessageSources } from "../ui/message-sources";
+
 import { useConversationModelControls } from "@/features/model-controls/useConversationModelControls";
 import { useConversationModelThreadKey } from "@/features/model-controls/ConversationModelControlsProvider";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
@@ -9,10 +11,6 @@ import type { ReasoningEffort } from "@/types/modelConfig";
 import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 
 import type { SourceAttributes } from "@/types/source";
-import {
-  buildCitationDisplayIndexMap,
-  withCitationDisplayIndices,
-} from "@/lib/citationDisplay";
 
 import {
   createElement,
@@ -66,7 +64,7 @@ import {
   useAuiState,
 } from "@assistant-ui/react";
 import { Sources } from "../ui/sources";
-import { SourcesPanel, type PanelSourceItem } from "../ui/sources-panel";
+import { SourcesPanel } from "../ui/sources-panel";
 import {
   SourcesPanelProvider,
   useSourcesPanel,
@@ -126,8 +124,6 @@ import {
   ToolGroupTrigger,
 } from "../ui/tool-group";
 import {
-  searchSourcesRegistry,
-  conversationSourcesRegistry,
   skillFileUploadsRegistry,
   type Nl2aMessage,
   type Nl2SkillFileCardData,
@@ -1046,6 +1042,7 @@ const ThreadView: FC<ThreadViewProps> = ({
       </div>
 
       <SourcesPanel
+        messageId={selection?.messageId}
         sources={selection?.sources ?? []}
         images={selection?.images ?? []}
         open={selection !== null}
@@ -1100,6 +1097,7 @@ export const ReadOnlyConversation: FC<{
           </ThreadPrimitive.Viewport>
         </main>
         <SourcesPanel
+          messageId={selection?.messageId}
           sources={selection?.sources ?? []}
           images={selection?.images ?? []}
           open={selection !== null}
@@ -2185,63 +2183,8 @@ const SubAgentGroupRenderer: FC<{
 
 const SourceGroupButton: FC<SourceGroupButtonProps> = ({ indices }) => {
   const { t } = useTranslation();
-  // Subscribe to the current message so we can split the indices into image
-  // vs. regular sources — `useAuiState` re-runs the selector on every change,
-  // which keeps the counts accurate while a streaming run appends parts.
-  const content = useAuiState((s) => s.message.content) as ReadonlyArray<{
-    type?: string;
-    [key: string]: unknown;
-  }>;
-  const messageId = useAuiState((s) => s.message.id as string | undefined);
-
-  const { sources, images, total } = useMemo(() => {
-    const srcs: PanelSourceItem[] = [];
-    const imgs: PanelSourceItem[] = [];
-    const groupedSources = indices.flatMap((index) => {
-      const raw = content[index] as SourcePartLike | undefined;
-      return raw?.type === "source" ? [raw] : [];
-    });
-    const registryMessageId =
-      groupedSources.find((source) => source.messageId)?.messageId ?? messageId;
-    const registeredSources = registryMessageId
-      ? (searchSourcesRegistry.get(registryMessageId) ??
-        conversationSourcesRegistry.get(registryMessageId))
-      : undefined;
-    const displaySources: PanelSourceItem[] = registeredSources?.length
-      ? registeredSources.map((source) => ({
-          sourceType:
-            source.sourceType === "file" || source.sourceType === "document"
-              ? "document"
-              : "url",
-          url: source.url,
-          title: source.title,
-          text: source.text,
-          publishedDate: source.publishedDate,
-          filename: source.filename,
-          downloadUrl: source.downloadUrl,
-          objectName: source.objectName,
-          isImage: source.isImage,
-          citeIndex: source.citeIndex,
-          toolSign: source.toolSign,
-          searchType: source.searchType,
-          sourceMetadata: source.sourceMetadata,
-          sourceReference: source.sourceReference,
-          retrievalHighlightTerms: source.retrievalHighlightTerms,
-        }))
-      : groupedSources;
-    const numberedSources = withCitationDisplayIndices(
-      displaySources,
-      buildCitationDisplayIndexMap(content, displaySources)
-    );
-    for (const item of numberedSources) {
-      if (item.isImage) {
-        imgs.push(item);
-      } else {
-        srcs.push(item);
-      }
-    }
-    return { sources: srcs, images: imgs, total: srcs.length + imgs.length };
-  }, [content, indices, messageId]);
+  const { messageId, sources, images } = useMessageSources();
+  const total = sources.length + images.length;
 
   const { toggle, selection, isOpen } = useSourcesPanel();
   const groupId = indices.length > 0 ? indices.join(",") : "default";

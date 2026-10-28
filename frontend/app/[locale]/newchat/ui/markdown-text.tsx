@@ -1,8 +1,7 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
 
-import type { SourceAttributes } from "@/types/source";
 import { getSourceLabel } from "@/lib/source";
 
 import "@assistant-ui/react-markdown/styles/dot.css";
@@ -34,40 +33,14 @@ import {
   getLocalFileDownloadUrl,
   isLocalStorageObjectUrl,
 } from "@/services/storageService";
-import { useSourcesPanel } from "./sources-panel-context";
+import { useSourcesPanelActions } from "./sources-panel-context";
 import {
-  buildCitationDisplayIndexMap,
-  withCitationDisplayIndices,
-} from "@/lib/citationDisplay";
-import { getCitationKey, getCitationLabel, type PanelSourceItem } from "./sources-panel";
-import {
-  searchSourcesRegistry,
-  searchImagesRegistry,
-  conversationSourcesRegistry,
-  type SearchSource,
-} from "../adapter/remote-chat-model-adapter";
-
-/**
- * Looks up a SearchSource from either registry by citekey (e.g. "b1" or "1").
- * Checks searchSourcesRegistry first (streaming messages), then
- * conversationSourcesRegistry (historical messages).
- */
-interface MessageSourcePart extends SourceAttributes {
-  type?: string;
-  sourceType?: string;
-  publishedDate?: string;
-  url?: string;
-  title?: string;
-  text?: string;
-  filename?: string;
-  downloadUrl?: string;
-  objectName?: string;
-  citeIndex?: number | string;
-  toolSign?: string;
-  isImage?: boolean;
-  imageKey?: string;
-  retrievalHighlightTerms?: string[];
-}
+  useMessageSources,
+  findMessageSource,
+  type MessageSourcePart,
+} from "./message-sources";
+import { getCitationKey, getCitationLabel } from "./sources-panel";
+import { searchImagesRegistry } from "../adapter/remote-chat-model-adapter";
 
 const markdownUrlTransform: UrlTransform = (url) => {
   // React Markdown rejects non-web protocols by default. s3:// is Nexent's
@@ -77,95 +50,6 @@ const markdownUrlTransform: UrlTransform = (url) => {
   }
   return defaultUrlTransform(url);
 };
-
-function normalizeCiteIndex(value: unknown): number | undefined {
-  const citeIndex = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(citeIndex) ? citeIndex : undefined;
-}
-
-function resolveCiteSources(
-  messageId: string | undefined,
-  content: readonly MessageSourcePart[]
-): SearchSource[] {
-  const contentSources = content.flatMap((part) => {
-    const citeIndex = normalizeCiteIndex(part.citeIndex);
-    if (part.type !== "source" || citeIndex === undefined) {
-      return [];
-    }
-
-    return [{
-      citeIndex,
-      url: part.url ?? "",
-      title: part.title || part.filename || part.url || `Source ${citeIndex}`,
-      text: part.text,
-      sourceType: part.sourceType,
-      publishedDate: part.publishedDate,
-      filename: part.filename,
-      downloadUrl: part.downloadUrl,
-      objectName: part.objectName,
-      toolSign: part.toolSign,
-      isImage: part.isImage,
-      imageKey: part.imageKey,
-      retrievalHighlightTerms: part.retrievalHighlightTerms,
-      searchType: part.searchType,
-      sourceMetadata: part.sourceMetadata,
-      sourceReference: part.sourceReference,
-    }];
-  });
-
-  if (contentSources.length > 0) return contentSources;
-  if (!messageId) return [];
-
-  return (
-    searchSourcesRegistry.get(messageId) ??
-    conversationSourcesRegistry.get(messageId) ??
-    []
-  );
-}
-
-function getCiteIndex(citekey: string): number | undefined {
-  const numericPart = citekey.replace(/^[a-z]+/i, "");
-  const citeIndex = Number.parseInt(numericPart, 10);
-  return Number.isNaN(citeIndex) ? undefined : citeIndex;
-}
-
-function findCiteSource(sources: SearchSource[], citekey: string): SearchSource | undefined {
-  const normalizedKey = citekey.trim().toLowerCase();
-  const exactMatch = sources.find((source) =>
-    getCitationKey({ citeIndex: source.citeIndex, toolSign: source.toolSign }) === normalizedKey,
-  );
-  if (exactMatch) return exactMatch;
-
-  // Older persisted messages can contain numeric-only markers without a
-  // tool sign. Keep those conversations readable without weakening new
-  // `a1` / `b1` matching.
-  return /^\d+$/.test(normalizedKey)
-    ? sources.find((source) => source.citeIndex === getCiteIndex(normalizedKey))
-    : undefined;
-}
-
-function toPanelSource(source: SearchSource): PanelSourceItem {
-  return {
-    sourceType:
-      source.sourceType === "file" || source.sourceType === "document"
-        ? "document"
-        : "url",
-    url: source.url,
-    title: source.title,
-    text: source.text,
-    publishedDate: source.publishedDate,
-    filename: source.filename,
-    downloadUrl: source.downloadUrl,
-    objectName: source.objectName,
-    citeIndex: source.citeIndex,
-    toolSign: source.toolSign,
-    isImage: source.isImage,
-    retrievalHighlightTerms: source.retrievalHighlightTerms,
-    searchType: source.searchType,
-    sourceMetadata: source.sourceMetadata,
-    sourceReference: source.sourceReference,
-  };
-}
 
 /**
  * A reference marker belongs to the one sentence immediately before it.
@@ -191,12 +75,10 @@ function getSentenceStartOffset(text: string, endOffset: number): number {
 function getCitationScopeText(
   content: readonly MessageSourcePart[],
   citekey: string,
-  citationElement: HTMLElement | null,
+  citationElement: HTMLElement | null
 ): string {
   const answerText = content
-    .filter(
-      (part) => part.type === "text" && typeof part.text === "string",
-    )
+    .filter((part) => part.type === "text" && typeof part.text === "string")
     .map((part) => part.text)
     .join("\n");
   if (!answerText) return "";
@@ -204,7 +86,7 @@ function getCitationScopeText(
   const normalizedKey = citekey.trim().toLowerCase();
   const markers = Array.from(answerText.matchAll(/\[\[([^\]]+)\]\]/g));
   const matchingMarkers = markers.filter(
-    (marker) => marker[1].trim().toLowerCase() === normalizedKey,
+    (marker) => marker[1].trim().toLowerCase() === normalizedKey
   );
   if (!matchingMarkers.length) return "";
 
@@ -212,7 +94,7 @@ function getCitationScopeText(
     ? Array.from(
         citationElement
           .closest(".aui-md")
-          ?.querySelectorAll<HTMLElement>("[data-citekey]") || [],
+          ?.querySelectorAll<HTMLElement>("[data-citekey]") || []
       ).filter((marker) => marker.dataset.citekey === normalizedKey)
     : [];
   const occurrence = Math.max(0, renderedMarkers.indexOf(citationElement!));
@@ -226,8 +108,9 @@ function getCitationScopeText(
     groupStart > 0 &&
     !answerText
       .slice(
-        (markers[groupStart - 1].index || 0) + markers[groupStart - 1][0].length,
-        markers[groupStart].index,
+        (markers[groupStart - 1].index || 0) +
+          markers[groupStart - 1][0].length,
+        markers[groupStart].index
       )
       .trim()
   ) {
@@ -239,7 +122,7 @@ function getCitationScopeText(
     !answerText
       .slice(
         (markers[groupEnd].index || 0) + markers[groupEnd][0].length,
-        markers[groupEnd + 1].index,
+        markers[groupEnd + 1].index
       )
       .trim()
   ) {
@@ -258,62 +141,54 @@ function getCitationScopeText(
  * Custom cite component rendered for [[citekey]] markers in markdown.
  * Looks up the source from the registry and renders a CiteMarker with hover.
  */
-const CiteComponent: FC<
-  React.ComponentProps<"cite"> & { citekey?: string }
-> = ({ citekey }) => {
-  const messageId = useAuiState((s) => s.message.id as string | undefined);
-  const content = useAuiState(
-    (s) => s.message.content as readonly MessageSourcePart[]
-  );
-  const { open } = useSourcesPanel();
+const CiteComponent = memo(function CiteComponent({
+  citekey,
+}: React.ComponentProps<"cite"> & { citekey?: string }) {
+  const model = useMessageSources();
+  const { messageId, content, sources, images, displayIndices } = model;
+  const { open } = useSourcesPanelActions();
   const { t } = useTranslation();
-
   if (!citekey) return null;
-
-  const messageSources = resolveCiteSources(messageId, content);
-  const source = findCiteSource(messageSources, citekey);
-  const citeIndex = getCiteIndex(citekey);
-  const sourceIndex = source?.citeIndex ?? citeIndex ?? 0;
+  const source = findMessageSource(model, citekey);
+  const sourceIndex =
+    source?.citeIndex ??
+    (Number.parseInt(citekey.replace(/^[a-z]+/i, ""), 10) || 0);
   const citationKey = source
-    ? getCitationKey({ citeIndex: source.citeIndex, toolSign: source.toolSign })
+    ? getCitationKey(source)
     : citekey.trim().toLowerCase();
-  const citationDisplayIndexMap = buildCitationDisplayIndexMap(
-    content,
-    messageSources
-  );
   const displayIndex =
-    citationDisplayIndexMap.get(citekey.trim().toLowerCase()) ?? sourceIndex;
-  const panelItems = withCitationDisplayIndices(
-    messageSources.map(toPanelSource),
-    citationDisplayIndexMap
-  );
-  const panelSource = source
-    ? panelItems.find((item) => getCitationKey(item) === citationKey)
-    : undefined;
-  const sources = panelItems.filter((item) => !item.isImage);
-  const images = panelItems.filter((item) => item.isImage);
+    displayIndices.get(citekey.trim().toLowerCase()) ?? sourceIndex;
+  const panelSource = source;
 
   return (
     <CiteMarker
       citekey={citekey}
       displayIndex={displayIndex}
       sourceIndex={sourceIndex}
-      label={panelSource ? getCitationLabel(panelSource, {
-        knowledgeBase: t("chat.sources.knowledgeBase"),
-        web: t("chat.sources.web"),
-        source: t("chat.sources.source"),
-      }) : `${t("chat.sources.source")} ${displayIndex}`}
+      label={
+        panelSource
+          ? getCitationLabel(panelSource, {
+              knowledgeBase: t("chat.sources.knowledgeBase"),
+              web: t("chat.sources.web"),
+              source: t("chat.sources.source"),
+            })
+          : `${t("chat.sources.source")} ${displayIndex}`
+      }
       title={source?.title ?? `Source ${displayIndex}`}
       text={panelSource?.text}
       filename={panelSource?.filename}
       url={panelSource?.url}
       sourceType={panelSource?.sourceType}
-      sourceLabel={panelSource ? getSourceLabel(panelSource, {
-        knowledgeBase: t("chat.sources.knowledgeBase"),
-        web: t("chat.sources.web"),
-        document: t("chat.sources.document"),
-        source: t("chat.sources.source"),
-      }) : undefined}
+      sourceLabel={
+        panelSource
+          ? getSourceLabel(panelSource, {
+              knowledgeBase: t("chat.sources.knowledgeBase"),
+              web: t("chat.sources.web"),
+              document: t("chat.sources.document"),
+              source: t("chat.sources.source"),
+            })
+          : undefined
+      }
       loading={!source}
       onClick={
         source && messageId
@@ -334,15 +209,13 @@ const CiteComponent: FC<
       }
     />
   );
-};
+});
 
 // Wrapper component that safely renders MarkdownTextPrimitive
 // Guards against rendering for non-text parts or when text is not a valid string
 const MarkdownTextImpl = () => {
-  const messageId = useAuiState((s) => s.message.id as string | undefined);
-  const content = useAuiState(
-    (s) => s.message.content as readonly MessageSourcePart[]
-  );
+  const { messageId, displayIndices: citationDisplayIndexMap } =
+    useMessageSources();
   // Check if we have a valid text part context using useAuiState
   const isValidTextPart = useAuiState((s) => {
     const part = s.part;
@@ -353,13 +226,6 @@ const MarkdownTextImpl = () => {
       part.text.length > 0
     );
   });
-  const citationDisplayIndexMap = useMemo(
-    () => buildCitationDisplayIndexMap(
-      content,
-      resolveCiteSources(messageId, content)
-    ),
-    [content, messageId]
-  );
   const citationIndexMapAttribute = useMemo(
     () => JSON.stringify(Object.fromEntries(citationDisplayIndexMap)),
     [citationDisplayIndexMap]
@@ -473,7 +339,9 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
           typeof part.url === "string"
       )
     : [];
-  const markerMatch = imageSrc?.match(/\/__aidp_image__\/([a-z]+\d+)(?:[?#].*)?$/i);
+  const markerMatch = imageSrc?.match(
+    /\/__aidp_image__\/([a-z]+\d+)(?:[?#].*)?$/i
+  );
   if (markerMatch) {
     const contentImage = trustedImages.find(
       (image) => image.imageKey === markerMatch[1]

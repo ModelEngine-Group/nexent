@@ -431,6 +431,7 @@
   "chat.modelSelector.effort.minimal": "最低",
   "chat.modelSelector.effort.xhigh": "极高",
   "chat.modelSelector.effort.max": "最高",
+  "chat.sources.pagination": "来源分页",
   "chat.sources.panel": "来源面板",
   "chat.sources.title": "来源",
   "chat.sources.close": "关闭来源面板",
