@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
@@ -274,6 +276,28 @@ class TestGenerateAccessKey:
         assert len(set(keys)) == 10
 
 
+class TestMaskAccessKey:
+    """Tests for mask_access_key, the value clients render for a stored key."""
+
+    def test_mask_access_key_keeps_prefix_and_tail(self):
+        """Pins the display format reported as "nexent****11bb"."""
+        assert token_db.mask_access_key(
+            "nexent-7593775c8d8798ae7565495b") == "nexent****495b"
+
+    def test_mask_access_key_without_separator(self):
+        """A key without a prefix separator falls back to its first 8 characters."""
+        assert token_db.mask_access_key("abcdefghij") == "abcdefgh****ghij"
+
+    def test_mask_access_key_short_key(self):
+        """A key too short to split hides everything after the first two chars."""
+        assert token_db.mask_access_key("nexent12") == "ne****"
+
+    def test_mask_access_key_missing_value(self):
+        """An absent key stays absent instead of turning into a mask."""
+        assert token_db.mask_access_key(None) is None
+        assert token_db.mask_access_key("") == ""
+
+
 class TestCreateToken:
     """Tests for create_token function."""
 
@@ -291,7 +315,7 @@ class TestListTokensByUser:
     """Tests for list_tokens_by_user function."""
 
     def test_list_tokens_by_user_success(self, mock_db_session):
-        """Test successful token listing."""
+        """Test successful token listing masks keys by default."""
         # Add some tokens
         token1 = MockUserTokenInfo(token_id=1, access_key="nexent-key1", user_id="user123")
         token2 = MockUserTokenInfo(token_id=2, access_key="nexent-key2", user_id="user123")
@@ -300,6 +324,25 @@ class TestListTokensByUser:
         result = token_db.list_tokens_by_user("user123")
 
         assert len(result) >= 1
+        # Default stays safe: a caller that does not opt out never sees the secret.
+        assert result[0]["access_key"] == "nexent****key1"
+
+    def test_list_tokens_by_user_unmasked_on_request(self, mock_db_session):
+        """mask=False returns the stored key so the permission layer can expose it.
+
+        Regression guard: role-based exposure is decided by the permission layer,
+        which therefore needs the stored value. The database mask used to be
+        applied unconditionally, which made administrators copy "nexent****11bb".
+        """
+        stored_key = "nexent-1234567890abcdef"
+        mock_db_session._tokens.append(
+            MockUserTokenInfo(token_id=1, access_key=stored_key, user_id="user123")
+        )
+
+        result = token_db.list_tokens_by_user("user123", mask=False)
+
+        assert result[0]["access_key"] == stored_key
+        assert "*" not in result[0]["access_key"]
 
     def test_list_tokens_by_user_empty(self, mock_db_session):
         """Test listing tokens when user has none."""
