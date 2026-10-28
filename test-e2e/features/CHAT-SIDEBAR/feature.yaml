@@ -40,6 +40,9 @@ feature:
       refresh preserve composer, runtime and pin semantics. Activity is stored as
       a UTC TIMESTAMP without time zone; database/session timezone changes cannot
       shift writes, cursor boundaries, pin metadata or public epoch timestamps.
+      Legacy message-source backfill uses only explicit automation run message IDs,
+      validates conversation ownership and leaves unlinked messages unchanged;
+      it never reads the message-unit table.
   - rule_id: CHAT-SIDEBAR-RULE-005
     description: Workbench sidebar selection updates the URL to the selected saved
       conversation without document navigation or runtime replacement. New and
@@ -65,6 +68,7 @@ feature:
   - D5
   source:
     requirement_ids:
+    - CHAT-AUTOMATION-RUN-BACKFILL-20261027
     - CHAT-AGENT-DETAIL-20261026
     - CHAT-SIDEBAR-COLLAPSE-20261020
     - CHAT-SIDEBAR-REQ-001

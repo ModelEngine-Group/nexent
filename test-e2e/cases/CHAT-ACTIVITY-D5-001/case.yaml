@@ -5,6 +5,7 @@ case:
   case_id: CHAT-ACTIVITY-D5-001
   feature_id: CHAT-SIDEBAR
   requirement_ids:
+  - CHAT-AUTOMATION-RUN-BACKFILL-20261027
   - CHAT-AUTOMATION-ACTIVITY-20261020
   - CHAT-ACTIVITY-TIMESTAMP-20261021
   business_rule_ids:
@@ -31,10 +32,10 @@ case:
     - newer
   steps:
   - order: 1
-    action: Apply migration to legacy tables containing mixed ordinary/automation/soft-deleted messages and run
-      references.
-    expected: Only explicit automation message identities are classified; last visible message time is backfilled,
-      not administrative update time.
+    action: Apply migration to legacy tables without a message-unit table, containing mixed ordinary/automation/soft-deleted messages,
+      duplicate and NULL run message IDs, missing messages, unlinked messages and references to another conversation.
+    expected: Only message IDs explicitly referenced by runs in the same conversation are classified;
+      unlinked and mismatched messages remain CHAT. Last visible message time is backfilled, not administrative update time.
   - order: 2
     action: Repeat migration and query defaults, activity, indexes and row preservation.
     expected: Second application is idempotent; normal defaults and existing rows are preserved; no new business
@@ -43,14 +44,15 @@ case:
     action: Apply and replay the migration under UTC, Asia/Shanghai and America/New_York to both develop-era fixtures without an activity column and an existing UTC TIMESTAMP activity column with its current index.
     expected: Activity has timestamp without time zone type; existing UTC values and microseconds, sources and unrelated audit values remain unchanged; the index uses the same naive fallback as list queries.
   expected_results:
-  - Only explicit automation message identities are classified; last visible message time is backfilled, not administrative
-    update time.
+  - Only same-conversation run message IDs are classified, without reading message units; duplicate, NULL and missing references
+    are safe, unlinked and mismatched messages remain CHAT, and last visible message time is backfilled instead of administrative update time.
   - Second application is idempotent; normal defaults and existing rows are preserved; no new business table is
     introduced.
   - First-time upgrades and existing TIMESTAMP schemas preserve UTC activity and subsecond precision across connection timezones, with matching indexes and repeatable execution.
   forbidden_side_effects:
   - No production data/schema mutation, quota bypass by ordinary requests, loss of composer/stream state or changes
     to unrelated histories.
+  - No migration access to the message-unit table and no changes to runtime failure status or message-ID association behavior.
   observations:
   - Persisted source/activity, API order and errors, visible browser state or migration output.
   cleanup:
@@ -61,14 +63,15 @@ case:
       required_services: []
   acceptance:
   - id: AC-01
-    description: Only explicit automation message identities are classified; last visible message time is backfilled,
-      not administrative update time.
+    description: Source backfill succeeds without a message-unit table, classifies only same-conversation run message IDs,
+      preserves unlinked and mismatched messages and safely handles duplicate, NULL and missing references while retaining visible activity backfill.
     steps:
     - 1
     expected_results:
     - 1
     forbidden_side_effects:
     - 1
+    - 2
   - id: AC-02
     description: Second application is idempotent; normal defaults and existing rows are preserved; no new business
       table is introduced.
