@@ -70,7 +70,7 @@ function render(ui: ReactElement) {
 const runtime = vi.hoisted(() => ({
   thread: { isRunning: false, messages: [] },
   threads: { mainThreadId: "fixture-thread" },
-  composer: { text: "question", dictation: false, attachments: [] },
+  composer: { text: "question", dictation: false, attachments: [] as unknown[] },
   cancel: vi.fn(),
 }));
 beforeEach(() => {
@@ -78,6 +78,7 @@ beforeEach(() => {
   deployment.isDeploymentReady = true;
   runtime.thread.isRunning = false;
   runtime.composer.text = "question";
+  runtime.composer.attachments = [];
   runtime.cancel.mockReset();
   resourceQueries.knowledge.mockClear();
   resourceQueries.skills.mockClear();
@@ -1013,6 +1014,24 @@ it("ordinary chat scopes shared parameters to the active thread and locks them w
   rerender(<Composer {...base} disabled />);
   expect(selectorProps.mock.lastCall?.[0].parameterSettingsDisabled).toBe(true);
   runtime.threads.mainThreadId = "fixture-thread";
+});
+
+it("keeps the send control enabled for attachment-only drafts", () => {
+  runtime.composer.text = "";
+  runtime.composer.attachments = [{}];
+  render(<Composer {...base} />);
+  expect(
+    screen.getByRole("button", { name: "chat.composer.send" })
+  ).toBeEnabled();
+});
+
+it("keeps the send control disabled when a draft has neither text nor attachments", () => {
+  runtime.composer.text = "";
+  runtime.composer.attachments = [];
+  render(<Composer {...base} />);
+  expect(
+    screen.getByRole("button", { name: "chat.composer.send" })
+  ).toBeDisabled();
 });
 
 beforeEachI18n(async () => {
