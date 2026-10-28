@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useState } from "react";
@@ -12,6 +14,7 @@ import styles from "./AidpPagination.module.css";
 interface AidpPaginationProps {
   currentPage: number;
   pageSize: number;
+  pageSizeOptions?: readonly number[];
   total: number;
   /** True when the backend reports a confirmed global total. */
   totalReliable: boolean;
@@ -24,6 +27,7 @@ interface AidpPaginationProps {
 const AidpPagination: React.FC<AidpPaginationProps> = ({
   currentPage,
   pageSize,
+  pageSizeOptions = [10, 20, 50, 100],
   total,
   totalReliable,
   hasMore,
@@ -60,7 +64,7 @@ const AidpPagination: React.FC<AidpPaginationProps> = ({
               aria-label={t("aidpKnowledge.pageSize")}
               value={pageSize}
               onChange={onPageSizeChange}
-              options={Array.from(new Set([10, 20, 50, 100, pageSize]))
+              options={Array.from(new Set([...pageSizeOptions, pageSize]))
                 .sort((a, b) => a - b)
                 .map((size) => ({
                   value: size,
