@@ -42,7 +42,9 @@ feature:
       shift writes, cursor boundaries, pin metadata or public epoch timestamps.
       Legacy message-source backfill uses only explicit automation run message IDs,
       validates conversation ownership and leaves unlinked messages unchanged;
-      it never reads the message-unit table.
+      it never reads the message-unit table. Upgrades leave missing activity NULL
+      without historical activity backfill; lists use creation time until the next
+      committed visible message initializes activity. Existing activity is preserved.
   - rule_id: CHAT-SIDEBAR-RULE-005
     description: Workbench sidebar selection updates the URL to the selected saved
       conversation without document navigation or runtime replacement. New and
