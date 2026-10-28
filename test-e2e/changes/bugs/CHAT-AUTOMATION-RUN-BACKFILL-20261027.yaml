@@ -4,9 +4,9 @@ change:
   change_type: bugfix
   bug_id: CHAT-AUTOMATION-RUN-BACKFILL-20261027
   title: Backfill automation message sources using run references only
-  description: Replace correlated source classification with deduplicated run message references, without accessing message units.
+  description: Replace correlated source classification with direct run message references, without accessing message units or explicit deduplication.
   observed_behavior: Source backfill scans the large message-unit table and repeatedly checks automation runs for ordinary messages.
-  expected_behavior: Extract both run message IDs once, deduplicate conversation/message pairs and update only matching CHAT messages; leave unlinked historical messages unchanged.
+  expected_behavior: Expand both run message IDs with LATERAL VALUES and directly update only matching CHAT messages; duplicate references preserve the constant AUTOMATION result and unlinked historical messages remain unchanged.
   escaped_stage: D5
   coverage_gap:
     type: missing_assertion

@@ -330,23 +330,17 @@ COMMENT ON COLUMN nexent.conversation_record_t.last_activity_time IS
     'Last committed visible message activity as a UTC timestamp; NULL falls back to conversation creation';
 
 -- Classify explicit run message identities, never an entire task conversation.
-WITH target_messages AS (
-    SELECT DISTINCT
-        r.conversation_id,
-        v.message_id
-    FROM nexent.agent_automation_run_t AS r
-    CROSS JOIN LATERAL (
-        VALUES
-            (r.user_message_id),
-            (r.assistant_message_id)
-    ) AS v(message_id)
-    WHERE v.message_id IS NOT NULL
-)
 UPDATE nexent.conversation_message_t AS m
 SET message_source = 'AUTOMATION'
-FROM target_messages AS target
-WHERE m.conversation_id = target.conversation_id
-  AND m.message_id = target.message_id
+FROM nexent.agent_automation_run_t AS r
+CROSS JOIN LATERAL (
+    VALUES
+        (r.user_message_id),
+        (r.assistant_message_id)
+) AS v(message_id)
+WHERE v.message_id IS NOT NULL
+  AND m.conversation_id = r.conversation_id
+  AND m.message_id = v.message_id
   AND m.message_source = 'CHAT';
 
 -- Legacy audit timestamps include title/config changes, so use message creation.
