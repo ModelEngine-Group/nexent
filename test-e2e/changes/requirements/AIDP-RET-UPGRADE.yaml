@@ -147,6 +147,10 @@ change:
     The prompt-service UT's SDK namespace mock retains the core package path so
     contracts can load the real shared name validator, and restores that imported
     module with its other patched modules; no validator stub replaces the rule.
+    Overlapping develop repairs keep the typed nullable name validator with a
+    module-level SDK import; package-aware test stubs provide import compatibility
+    without moving product imports into methods. Reuse the existing identity
+    fixtures and lifecycle path when resolving equivalent upstream test changes.
 
     Clarification UT retains real inserts, RETURNING, rollback and stored-answer
     assertions. Older Linux x86_64 test runners use the test-only bundled SQLite

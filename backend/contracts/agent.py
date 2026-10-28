@@ -544,7 +544,7 @@ class AgentInfoRequest(BaseModel):
 
     @field_validator("name")
     @classmethod
-    def validate_name(cls, value):
+    def validate_name(cls, value: Optional[str]) -> Optional[str]:
         return validate_agent_name(value) if value is not None else None
 
     @field_validator("verification_config", mode="before")
