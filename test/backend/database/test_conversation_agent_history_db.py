@@ -16,7 +16,7 @@ from contracts.conversation import (
     encode_agent_conversation_cursor,
     encode_agent_group_cursor,
 )
-from database import conversation_agent_history_db as db
+from management.db.identity import conversation_agent_history_db as db
 
 
 @pytest.fixture
@@ -163,7 +163,7 @@ def test_agent_conversation_ids_reject_invalid_identity_before_query(session):
 @pytest.mark.parametrize("workbench_config", [None, {}, {"mode": "agent_create"}])
 def test_detail_activity_is_added_only_to_agent_chat(monkeypatch, session, workbench_config):
     """Preserve the existing Workbench detail response while enriching Agent chat."""
-    from database import conversation_db as history_db
+    from management.db.conversation import repository as history_db
 
     @contextmanager
     def sessions():

@@ -8,12 +8,12 @@ import zipfile
 
 import pytest
 
+from contracts.authentication import AuthenticatedIdentity
 from management.services.agent import transfer
 
 
 @pytest.fixture
 def export_context(mocker):
-    mocker.patch.object(transfer, "get_current_user_info", return_value=("user", "tenant", "USER"))
     mocker.patch.object(transfer, "is_system_agent", return_value=False)
     mocker.patch.object(transfer, "search_agent_info_by_agent_id", return_value={
         "tenant_id": "tenant", "name": "agent", "display_name": "Agent",
@@ -61,7 +61,7 @@ async def test_export_download_excludes_removed_skill(export_context, keep_selec
     if keep_selected:
         query.return_value.append({"skill_id": 1, "enabled": True})
 
-    result = await transfer.export_agent_with_skills_impl(1, "Bearer test")
+    result = await transfer.export_agent_with_skills_impl(1, AuthenticatedIdentity("user", "tenant"))
 
     if keep_selected:
         assert result["_zip"] is True
@@ -130,5 +130,5 @@ async def test_system_export_rejected_before_skill_reads(export_context, mocker)
     query, _lookup, _service = export_context
     mocker.patch.object(transfer, "is_system_agent", return_value=True)
     with pytest.raises(transfer.ForbiddenError, match="cannot be exported"):
-        await transfer.export_agent_with_skills_impl(1, "Bearer test")
+        await transfer.export_agent_with_skills_impl(1, AuthenticatedIdentity("user", "tenant"))
     query.assert_not_called()

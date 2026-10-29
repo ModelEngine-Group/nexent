@@ -38,7 +38,7 @@ case:
   - order: 2
     action: Persist assistant visible output and compare activity, administrative edits, HTTP list order, cursor
       and bucket counts.
-    expected: Committed messages move an old owned history to the head; placeholder/admin writes do not; fresh clients
+    expected: The first visible message initializes NULL activity and moves that history to the head; committed messages move an old owned history to the head; placeholder/admin writes do not; fresh clients
       receive consistent pagination and buckets.
   - order: 3
     action: Run committed activity, empty-history fallback, tie-break pagination and pinned-history metadata under UTC, Asia/Shanghai and America/New_York database sessions.
@@ -46,7 +46,7 @@ case:
   expected_results:
   - Automation appends above the ordinary limit; the next ordinary row is rejected; client-supplied source cannot
     bypass quota.
-  - Committed messages move an old owned history to the head; placeholder/admin writes do not; fresh clients receive
+  - The first visible message initializes NULL activity and moves that history to the head; committed messages move an old owned history to the head; placeholder/admin writes do not; fresh clients receive
     consistent pagination and buckets.
   - UTC storage writes, fallback ordering, cursor boundaries, counts and pin metadata are invariant across database session timezones.
   forbidden_side_effects:
@@ -74,7 +74,7 @@ case:
     forbidden_side_effects:
     - 1
   - id: AC-02
-    description: Committed messages move an old owned history to the head; placeholder/admin writes do not; fresh
+    description: The first visible message initializes NULL activity and moves that history to the head; committed messages move an old owned history to the head; placeholder/admin writes do not; fresh
       clients receive consistent pagination and buckets.
     steps:
     - 2
