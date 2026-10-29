@@ -9,6 +9,7 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
+from nexent.core.concurrency import run_blocking
 from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, StreamingResponse
 

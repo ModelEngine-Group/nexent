@@ -562,51 +562,9 @@ async def get_agent_info_impl(
     return agent_info
 
 
-def _validate_requested_output_tokens_for_agent(
-    request: AgentInfoRequest,
-    tenant_id: str,
-) -> None:
-    requested_output_tokens = request.requested_output_tokens
-    if requested_output_tokens is None:
-        return
-
-    # Validate against every configured model — the user can switch models at
-    # chat time, so requested_output_tokens must not exceed any model's limit.
-    model_ids = list(request.model_ids or [])
-    if not model_ids and request.agent_id is not None:
-        try:
-            existing_agent = search_agent_info_by_agent_id(
-                agent_id=request.agent_id,
-                tenant_id=tenant_id,
-                version_no=request.version_no,
-            )
-            model_ids = list(existing_agent.get("model_ids") or [])
-        except Exception as exc:
-            logger.warning(
-                "Could not resolve existing agent models for requested_output_tokens validation: %s",
-                exc,
-            )
-
-    if not model_ids:
-        return
-
-    for model_id in model_ids:
-        model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
-        max_output_tokens = model_info.get("max_output_tokens") if model_info else None
-        if (
-            max_output_tokens is not None
-            and requested_output_tokens > max_output_tokens
-        ):
-            model_display = (
-                model_info.get("display_name") if model_info else f"model_id={model_id}"
-            )
-            raise AppException(
-                ErrorCode.COMMON_PARAMETER_INVALID,
-                (
-                    f"requested_output_tokens ({requested_output_tokens}) cannot exceed "
-                    f"max_output_tokens ({max_output_tokens}) of model '{model_display}'"
-                ),
-            )
+def _normalize_agent_output_reserve(request: AgentInfoRequest) -> None:
+    """Retire historical Agent reserves; output limits belong to saved outlets."""
+    request.requested_output_tokens = None
 
 
 def _validate_agent_relationships(request: AgentInfoRequest, tenant_id: str):
@@ -692,7 +650,7 @@ async def update_agent_info_impl(
             "example_questions cannot exceed 6 items",
         )
 
-    _validate_requested_output_tokens_for_agent(request, tenant_id)
+    _normalize_agent_output_reserve(request)
 
     existing_agent = None
     if request.agent_id is not None:
