@@ -10,10 +10,6 @@ concurrency:
 on:
   workflow_dispatch:
     inputs:
-      runner_label_json:
-        description: 'JSON runner labels; blank uses self-hosted, or use ["ubuntu-24.04"] for GitHub-hosted'
-        required: false
-        default: ''
       pytest_file_timeout:
         description: 'per-file timeout in seconds (0=disabled)'
         required: false
@@ -49,7 +45,7 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ fromJson(inputs.runner_label_json || '["self-hosted", "linux", "x64"]') }}
+    runs-on: ut
     env:
       UV_PYTHON: "3.11.15"
       CODECOV_CLI_VERSION: "11.3.2"
