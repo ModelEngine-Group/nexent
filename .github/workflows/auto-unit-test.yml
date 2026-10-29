@@ -80,7 +80,7 @@ jobs:
           cd ..
 
       - name: Run all tests and collect coverage
-        # Configure NEXENT_PYTEST_WORKERS in the runner environment; the default is serial.
+        # Configure NEXENT_PYTEST_WORKERS in the runner environment; the default is the CPU count.
         env:
           NEXENT_PYTEST_FILE_TIMEOUT: ${{ github.event.inputs.pytest_file_timeout || '300' }}
         run: |

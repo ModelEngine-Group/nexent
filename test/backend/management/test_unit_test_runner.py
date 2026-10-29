@@ -26,9 +26,6 @@ def runner():
 @pytest.mark.parametrize(
     ("budget", "file_count", "expected"),
     [
-        (None, 12, 1),
-        ("", 12, 1),
-        ("  ", 12, 1),
         ("4", 12, 4),
         ("20", 3, 3),
         ("0", 12, 1),
@@ -49,6 +46,21 @@ def test_environment_budget_without_cpu_detection(runner, monkeypatch, budget, f
 
     with monkeypatch.context() as context:
         context.setattr(runner.os, "cpu_count", unexpected_detection)
+        assert runner._worker_count(file_count) == expected
+
+
+@pytest.mark.parametrize(
+    ("budget", "cpu_count", "file_count", "expected"),
+    [(None, 8, 12, 8), ("", 8, 12, 8), ("  ", 8, 12, 8),
+     (None, 8, 3, 3), (None, None, 12, 1), (None, 0, 12, 1)],
+)
+def test_missing_budget_uses_cpu_count(runner, monkeypatch, budget, cpu_count, file_count, expected):
+    if budget is None:
+        monkeypatch.delenv("NEXENT_PYTEST_WORKERS", raising=False)
+    else:
+        monkeypatch.setenv("NEXENT_PYTEST_WORKERS", budget)
+    with monkeypatch.context() as context:
+        context.setattr(runner.os, "cpu_count", lambda: cpu_count)
         assert runner._worker_count(file_count) == expected
 
 
@@ -136,7 +148,8 @@ def test_real_process_isolation_reports_and_failure_exit(tmp_path, budget, inclu
     )
     output = result.stdout + result.stderr
     assert result.returncode == (1 if include_failure else 0), output
-    assert f"Running with {budget or '1'} file worker(s)" in output
+    expected_workers = int(budget) if budget else max(1, min(os.cpu_count() or 1, 3))
+    assert f"Running with {expected_workers} file worker(s)" in output
     assert "Passed: 2" in output
     assert f"Failed: {int(include_failure)}" in output
     assert "Skipped: 1" in output

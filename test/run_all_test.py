@@ -37,8 +37,10 @@ def check_required_packages() -> None:
 
 
 def _worker_count(total_files: int) -> int:
-    raw_workers = os.environ.get("NEXENT_PYTEST_WORKERS", "1").strip().lower()
-    if raw_workers in {"", "0", "false", "none", "off"}:
+    raw_workers = os.environ.get("NEXENT_PYTEST_WORKERS", "").strip().lower()
+    if not raw_workers:
+        return max(1, min(os.cpu_count() or 1, total_files))
+    if raw_workers in {"0", "false", "none", "off"}:
         return 1
     try:
         return max(1, min(int(raw_workers), total_files))
