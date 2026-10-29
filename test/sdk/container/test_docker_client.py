@@ -764,6 +764,10 @@ class TestStartContainer:
                     full_command=["npx", "-y", "test-mcp"],
                 )
 
+        # The container was created and then failed its readiness check, so
+        # the failure path must remove it rather than leaving it orphaned.
+        new_container.remove.assert_called_once_with(force=True)
+
     @pytest.mark.asyncio
     async def test_start_container_health_check_failure_container_not_found(self, docker_container_client):
         """Test starting container when health check fails and container not found"""
@@ -774,6 +778,10 @@ class TestStartContainer:
         new_container.id = "new-container-id"
         new_container.status = "running"
         new_container.reload.side_effect = NotFound("Container not found")
+        # The container is already gone by the time cleanup runs (matching
+        # reload()'s NotFound above), so remove() 404s the same way; that
+        # must not mask the original "not found after start" error.
+        new_container.remove.side_effect = NotFound("Container not found")
         docker_container_client.client.containers.run.return_value = new_container
 
         with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
@@ -788,6 +796,10 @@ class TestStartContainer:
                     user_id="user12345",
                     full_command=["npx", "-y", "test-mcp"],
                 )
+
+        # Cleanup was attempted (best-effort) even though the container was
+        # already gone; the resulting NotFound must be swallowed, not raised.
+        new_container.remove.assert_called_once_with(force=True)
 
     @pytest.mark.asyncio
     async def test_start_container_health_check_failure_but_running(self, docker_container_client):
@@ -815,6 +827,34 @@ class TestStartContainer:
             )
 
             assert result["status"] == "started"
+
+        # A container that ends up running must never be torn down.
+        new_container.remove.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_start_container_cleanup_on_unexpected_exception_after_create(self, docker_container_client):
+        """A failure raised after the container is created, outside the
+        health-check branch (e.g. resolving the service host), must still
+        remove the container rather than leaving it orphaned."""
+        docker_container_client.client.containers.get.side_effect = NotFound(
+            "Container not found")
+
+        new_container = MagicMock()
+        new_container.id = "new-container-id"
+        docker_container_client.client.containers.run.return_value = new_container
+
+        with patch.object(DockerContainerClient, "find_free_port", return_value=5020), \
+                patch.object(DockerContainerClient, "_get_service_host",
+                             side_effect=RuntimeError("host resolution failed")):
+            with pytest.raises(ContainerError, match="Container startup failed"):
+                await docker_container_client.start_container(
+                    service_name="test-service",
+                    tenant_id="tenant123",
+                    user_id="user12345",
+                    full_command=["npx", "-y", "test-mcp"],
+                )
+
+        new_container.remove.assert_called_once_with(force=True)
 
     @pytest.mark.asyncio
     async def test_start_container_existing_no_port_mapping(self, docker_container_client, mock_container):
