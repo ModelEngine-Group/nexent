@@ -6,6 +6,8 @@ import { useCallback, useContext, useSyncExternalStore } from "react";
 import { AuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import {
   guidePreferenceKey,
+  sharedGuideKey,
+  LEGACY_GUIDE_PREFIX,
   isGuideDismissed,
   setGuideDismissed,
   type GuideId,
@@ -23,17 +25,14 @@ function subscribe(notify: () => void) {
 export function useGuidePreference(id: GuideId, preferenceKey?: string) {
   const user = useContext(AuthorizationContext)?.user;
   const key =
-    preferenceKey?.replace(
-      "nexent.agent.creation-guide.v1/",
-      "nexent.guide-preferences.v1/"
-    ) ??
+    (preferenceKey ? sharedGuideKey(preferenceKey) : undefined) ??
     (user?.tenantId && user.id
       ? guidePreferenceKey(user.tenantId, user.id)
       : null);
   const legacyKey =
     preferenceKey ??
     (user?.tenantId && user.id
-      ? `nexent.agent.creation-guide.v1/${encodeURIComponent(user.tenantId)}/${encodeURIComponent(user.id)}`
+      ? `${LEGACY_GUIDE_PREFIX}${encodeURIComponent(user.tenantId)}/${encodeURIComponent(user.id)}`
       : undefined);
   const dismissed = useSyncExternalStore(
     subscribe,

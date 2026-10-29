@@ -1,10 +1,14 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { isGuideDismissed, setGuideDismissed } from "@/lib/guidePreferences";
-const GUIDE_VERSION = "v1";
+import {
+  isGuideDismissed,
+  setGuideDismissed,
+  sharedGuideKey,
+  LEGACY_GUIDE_PREFIX,
+} from "@/lib/guidePreferences";
 
 export function agentCreationGuideKey(tenantId: string, userId: string) {
-  return `nexent.agent.creation-guide.${GUIDE_VERSION}/${encodeURIComponent(tenantId)}/${encodeURIComponent(userId)}`;
+  return `${LEGACY_GUIDE_PREFIX}${encodeURIComponent(tenantId)}/${encodeURIComponent(userId)}`;
 }
 
 export function canStartAgentCreationGuide({
@@ -23,17 +27,10 @@ export function canStartAgentCreationGuide({
   return creationEntry && ready && !readOnly && Boolean(tenantId && userId);
 }
 
-function sharedKey(key: string) {
-  return key.replace(
-    "nexent.agent.creation-guide.v1/",
-    "nexent.guide-preferences.v1/"
-  );
-}
-
 export function hasCompletedAgentCreationGuide(key: string) {
-  return isGuideDismissed(sharedKey(key), "agent-creation", key);
+  return isGuideDismissed(sharedGuideKey(key), "agent-creation", key);
 }
 
 export function completeAgentCreationGuide(key: string) {
-  setGuideDismissed(sharedKey(key), "agent-creation", true);
+  setGuideDismissed(sharedGuideKey(key), "agent-creation", true);
 }

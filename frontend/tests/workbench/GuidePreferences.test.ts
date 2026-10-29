@@ -52,3 +52,42 @@ it("recovers from malformed storage and falls back when writes fail", () => {
   setGuideDismissed(key, "agent-configuration", true);
   expect(isGuideDismissed(key, "agent-configuration")).toBe(true);
 });
+
+it("invalidates failed-write memory when persistent storage changes", () => {
+  const key = guidePreferenceKey("recovery", "user");
+  localStorage.setItem(key, "{}");
+  const write = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new Error("quota");
+    });
+  setGuideDismissed(key, "agent-configuration", true);
+  expect(isGuideDismissed(key, "agent-configuration")).toBe(true);
+  setGuideDismissed(key, "agent-configuration", false);
+  expect(isGuideDismissed(key, "agent-configuration")).toBe(false);
+  setGuideDismissed(key, "agent-configuration", true);
+  write.mockRestore();
+  localStorage.removeItem(key);
+  expect(isGuideDismissed(key, "agent-configuration")).toBe(false);
+});
+it("removes legacy data only after a successful migration", () => {
+  const legacy = agentCreationGuideKey("migration", "user");
+  localStorage.setItem(legacy, "1");
+  const write = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new Error("quota");
+    });
+  expect(hasCompletedAgentCreationGuide(legacy)).toBe(true);
+  expect(localStorage.getItem(legacy)).toBe("1");
+  write.mockRestore();
+  const other = agentCreationGuideKey("migration", "other");
+  localStorage.setItem(other, "1");
+  expect(hasCompletedAgentCreationGuide(other)).toBe(true);
+  expect(localStorage.getItem(other)).toBeNull();
+});
+it("rejects unsupported legacy key versions", () => {
+  expect(() =>
+    hasCompletedAgentCreationGuide("nexent.agent.creation-guide.v2/t/u")
+  ).toThrow("Unsupported legacy");
+});
