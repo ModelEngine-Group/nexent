@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
+import hmac
 import logging
 import re
 from copy import deepcopy
@@ -14,7 +15,7 @@ from fastmcp import FastMCP
 from fastmcp.tools.tool import ToolResult
 
 from management.db.tool.outer_api import query_available_openapi_services
-from contracts.constants.environment import TOKEN
+from contracts.constants.environment import MCP_INTERNAL_TOKEN, TOKEN
 from mcp.types import Tool as MCPTool
 from nexent.core.concurrency import (
     ManagedThreadSpec,
@@ -103,6 +104,17 @@ _tenant_mcp_lock = RLock()
 _mcp_management_app = None
 
 
+def _require_management_authorization(authorization: Optional[str]) -> None:
+    """Require the backend-to-MCP service token for management APIs."""
+    if not MCP_INTERNAL_TOKEN:
+        raise HTTPException(status_code=503, detail="MCP internal authentication is not configured")
+    scheme, _, supplied_token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(
+        supplied_token, MCP_INTERNAL_TOKEN
+    ):
+        raise HTTPException(status_code=401, detail="Invalid MCP management authorization")
+
+
 def get_mcp_management_app():
     """Get or create FastAPI app for MCP management endpoints."""
     global _mcp_management_app
@@ -120,6 +132,7 @@ def get_mcp_management_app():
             This endpoint is called by other services (like nexent-config)
             to notify the MCP server to reload outer API tools.
             """
+            _require_management_authorization(authorization)
             try:
                 result = refresh_openapi_services_by_tenant(tenant_id)
                 return {
@@ -141,6 +154,7 @@ def get_mcp_management_app():
             This endpoint uses FastMCP.from_openapi() to batch-load all tools
             from each OpenAPI service, replacing individual tool registration.
             """
+            _require_management_authorization(authorization)
             try:
                 result = refresh_openapi_services_by_tenant(tenant_id)
                 return {
@@ -157,6 +171,7 @@ def get_mcp_management_app():
             authorization: Optional[str] = Header(None)
         ):
             """List all registered OpenAPI service names and their tool counts."""
+            _require_management_authorization(authorization)
             return {
                 "status": "success",
                 "data": get_registered_openapi_services(tenant_id)
@@ -173,6 +188,7 @@ def get_mcp_management_app():
 
             This allows dynamic updates without reloading all services.
             """
+            _require_management_authorization(authorization)
             try:
                 result = refresh_single_openapi_service(service_name, tenant_id)
                 return {
@@ -188,10 +204,62 @@ def get_mcp_management_app():
             authorization: Optional[str] = Header(None)
         ):
             """List all registered outer API tool names (legacy endpoint, now returns OpenAPI services)."""
+            _require_management_authorization(authorization)
             return {
                 "status": "success",
                 "data": get_registered_openapi_services()
             }
+
+        @_mcp_management_app.get("/internal/tools/openapi-service-map")
+        async def list_openapi_service_tool_map_endpoint(
+            tenant_id: str = Query(..., description="Tenant ID"),
+            authorization: Optional[str] = Header(None),
+        ):
+            """Return the internal tool-to-service map to the authenticated backend."""
+            _require_management_authorization(authorization)
+            server = _tenant_mcp_servers.get(tenant_id)
+            registry = getattr(server, "_nexent_openapi_services", {})
+            data = []
+            seen = set()
+            service_prefixes = []
+
+            async def iter_tools(server_instance):
+                get_tools = getattr(server_instance, "get_tools", None)
+                if get_tools is None:
+                    return []
+                tools = await get_tools()
+                return tools.values() if isinstance(tools, dict) else tools
+
+            for service_name, service_mcp in registry.items():
+                service_id = getattr(service_mcp, "_nexent_service_id", None)
+                if service_id is None:
+                    continue
+                service_prefixes.append(
+                    (_sanitize_function_name(service_name) + "_", service_id)
+                )
+                for tool in await iter_tools(service_mcp):
+                    tool_name = getattr(tool, "name", None)
+                    item = (tool_name, service_id)
+                    if tool_name and item not in seen:
+                        data.append({"name": tool_name, "service_id": service_id})
+                        seen.add(item)
+
+            # FastMCP mounts the tools on the tenant-level parent server. The
+            # child server returned by the registry may therefore expose an
+            # empty local tool list even though the tools are callable.
+            for tool in await iter_tools(server):
+                tool_name = getattr(tool, "name", None)
+                normalized_name = _sanitize_function_name(tool_name or "")
+                for prefix, service_id in sorted(
+                    service_prefixes, key=lambda item: len(item[0]), reverse=True
+                ):
+                    if normalized_name.startswith(prefix):
+                        item = (tool_name, service_id)
+                        if tool_name and item not in seen:
+                            data.append({"name": tool_name, "service_id": service_id})
+                            seen.add(item)
+                        break
+            return {"status": "success", "data": data}
 
     return _mcp_management_app
 
@@ -216,6 +284,9 @@ def register_openapi_service(
     headers_template: Dict[str, str],
     mcp_server: Optional[FastMCP] = None,
     tenant_id: Optional[str] = None,
+    ssl_verify: bool = True,
+    auth_enabled: bool = False,
+    client: Optional[httpx.AsyncClient] = None,
 ) -> bool:
     """
     Register an OpenAPI service using FastMCP.from_openapi().
@@ -251,8 +322,16 @@ def register_openapi_service(
         if server_url:
             openapi_spec["servers"] = [{"url": server_url}]
 
-        # Create HTTP client for the underlying REST API
-        client = httpx.AsyncClient(base_url=server_url, timeout=120.0, headers=headers_template)
+        # Create HTTP client for the underlying REST API.  A refresh reuses the
+        # previous client so tools belonging to an already-open MCP session and
+        # tools in the newly-built server observe the same TLS policy.
+        if client is None:
+            client = httpx.AsyncClient(
+                base_url=server_url,
+                timeout=120.0,
+                headers=headers_template if auth_enabled else None,
+                verify=ssl_verify,
+            )
 
         # Create FastMCP instance from OpenAPI spec
         service_mcp = FastMCP.from_openapi(
@@ -278,6 +357,28 @@ def register_openapi_service(
     except Exception as e:
         logger.error(f"Failed to register OpenAPI service '{service_name}': {e}", exc_info=True)
         return False
+
+
+def _update_openapi_service_client_ssl_verify(
+    service_mcp: FastMCP, ssl_verify: bool
+) -> None:
+    """Update an already-mounted OpenAPI client's TLS policy in place.
+
+    Tenant MCP applications can keep an SSE session alive while the service
+    configuration is edited.  Rebuilding the tenant registry alone does not
+    update tools that are still served by that existing session, because
+    their OpenAPI tools retain the original ``httpx.AsyncClient`` instance.
+    Replace that client's transport so both existing and new sessions use the
+    current service setting.
+    """
+    client = getattr(service_mcp, "_client", None)
+    if not isinstance(client, httpx.AsyncClient):
+        return
+
+    # FastMCP's OpenAPI tools keep a reference to the service-level client.
+    # Replacing the transport on that same client updates all existing tools
+    # without invalidating their MCP session or requiring a container restart.
+    client._transport = httpx.AsyncHTTPTransport(verify=ssl_verify)
 
 
 def unregister_openapi_service(service_name: str) -> bool:
@@ -339,6 +440,10 @@ def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
     # services have been registered. Existing clients keep using the old
     # instance until the replacement is ready.
     with _tenant_mcp_lock:
+        previous_server = _tenant_mcp_servers.get(tenant_id)
+        previous_registry = getattr(
+            previous_server, "_nexent_openapi_services", {}
+        )
         tenant_mcp = FastMCP(name=f"nexent_mcp_{tenant_id}")
         tenant_registry: Dict[str, FastMCP] = {}
         tenant_mcp._nexent_openapi_services = tenant_registry
@@ -357,20 +462,43 @@ def refresh_openapi_services_by_tenant(tenant_id: str) -> Dict[str, Any]:
             openapi_json = service.get("openapi_json")
             server_url = service.get("server_url")
             headers_template = service.get("headers_template")
+            auth_enabled = service.get("auth_enabled", bool(headers_template))
+            ssl_verify = service.get("ssl_verify", True)
+
+            previous_service = previous_registry.get(service_name)
+            previous_client = None
+            if previous_service is not None:
+                _update_openapi_service_client_ssl_verify(
+                    previous_service, ssl_verify
+                )
+                previous_client = getattr(previous_service, "_client", None)
+                if not isinstance(previous_client, httpx.AsyncClient):
+                    previous_client = None
 
             if not openapi_json:
                 logger.warning(f"Service '{service_name}' has no OpenAPI JSON, skipping")
                 skipped_count += 1
                 continue
 
+            register_kwargs = {
+                "ssl_verify": ssl_verify,
+                "auth_enabled": auth_enabled,
+                "mcp_server": tenant_mcp,
+                "tenant_id": tenant_id,
+            }
+            if previous_client is not None:
+                register_kwargs["client"] = previous_client
+
             if register_openapi_service(
                 service_name,
                 openapi_json,
                 server_url,
                 headers_template,
-                mcp_server=tenant_mcp,
-                tenant_id=tenant_id,
+                **register_kwargs,
             ):
+                registered_service = tenant_registry.get(service_name)
+                if registered_service is not None:
+                    setattr(registered_service, "_nexent_service_id", service.get("id"))
                 registered_count += 1
             else:
                 skipped_count += 1

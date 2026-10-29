@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import i18n from 'i18next';
 
 import { ErrorCode } from '@/const/errorCode';
@@ -65,6 +67,7 @@ export const getMcpServerList = async (tenantId?: string | null) => {
           container_status: server.container_status,
           authorization_token: server.authorization_token,
           custom_headers: server.custom_headers,
+          ssl_verify: server.ssl_verify,
           version: server.version,
           market_id: server.market_id,
           is_listed_in_repository: server.is_listed_in_repository,
@@ -1021,7 +1024,9 @@ export interface OpenApiServiceInput {
   service_name: string;
   server_url: string;
   openapi_json: Record<string, unknown>;
+  auth_enabled?: boolean;
   headers_template?: Record<string, unknown> | null;
+  ssl_verify?: boolean;
 }
 
 export const getOpenApiServices = async () => {

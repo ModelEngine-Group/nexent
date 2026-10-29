@@ -23,7 +23,9 @@ def create_openapi_service(
     tenant_id: str,
     user_id: str,
     description: str = None,
+    auth_enabled: bool = False,
     headers_template: Dict[str, Any] = None,
+    ssl_verify: bool = True,
 ) -> Dict[str, Any]:
     """
     Create a new OpenAPI service record.
@@ -48,11 +50,12 @@ def create_openapi_service(
         "created_by": user_id,
         "updated_by": user_id,
         "is_available": True,
+        "auth_enabled": auth_enabled,
+        "ssl_verify": ssl_verify,
     }
     if description:
         service_dict["description"] = description
-    if headers_template:
-        service_dict["headers_template"] = headers_template
+    service_dict["headers_template"] = headers_template
 
     with get_db_session() as session:
         new_service = OuterApiService(**filter_property(service_dict, OuterApiService))
@@ -68,7 +71,9 @@ def upsert_openapi_service(
     tenant_id: str,
     user_id: str,
     description: str = None,
+    auth_enabled: bool = False,
     headers_template: Dict[str, Any] = None,
+    ssl_verify: bool = True,
 ) -> Dict[str, Any]:
     """
     Create or update an OpenAPI service record.
@@ -92,11 +97,12 @@ def upsert_openapi_service(
         "tenant_id": tenant_id,
         "updated_by": user_id,
         "is_available": True,
+        "auth_enabled": auth_enabled,
+        "ssl_verify": ssl_verify,
     }
     if description:
         service_dict["description"] = description
-    if headers_template:
-        service_dict["headers_template"] = headers_template
+    service_dict["headers_template"] = headers_template
 
     with get_db_session() as session:
         existing = (
@@ -187,6 +193,22 @@ def query_service_by_name(service_name: str, tenant_id: str) -> Optional[Dict[st
             .first()
         )
         return as_dict(service) if service else None
+
+
+def update_openapi_service_ssl_verify(
+    service_name: str, tenant_id: str, user_id: str, ssl_verify: bool
+) -> bool:
+    """Update the TLS certificate verification setting for an API service."""
+    with get_db_session() as session:
+        updated = session.query(OuterApiService).filter(
+            OuterApiService.mcp_service_name == service_name,
+            OuterApiService.tenant_id == tenant_id,
+            OuterApiService.delete_flag != 'Y',
+        ).update({
+            OuterApiService.ssl_verify: ssl_verify,
+            OuterApiService.updated_by: user_id,
+        })
+        return bool(updated)
 
 
 def query_service_by_id(service_id: int, tenant_id: str) -> Optional[Dict[str, Any]]:

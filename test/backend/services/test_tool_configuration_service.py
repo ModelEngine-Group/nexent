@@ -5143,6 +5143,7 @@ class TestRefreshOpenapiServicesInMcp:
 
         assert result == {"refreshed": 5}
         mock_post.assert_called_once()
+        assert mock_post.call_args.kwargs["headers"]["Authorization"] == "Bearer token"
         mock_logger.info.assert_called_once()
 
     @patch('time.sleep')

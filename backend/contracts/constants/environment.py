@@ -292,6 +292,9 @@ WORKER_CONCURRENCY = int(os.getenv('WORKER_CONCURRENCY', str(DP_PART_PROCESSOR_C
 # Voice Service Configuration
 APPID = os.getenv('APPID', '')
 TOKEN = os.getenv('TOKEN', '')
+# Internal backend-to-MCP calls use a dedicated token when configured. Fall
+# back to the existing TOKEN so current deployments remain compatible.
+MCP_INTERNAL_TOKEN = os.getenv('MCP_INTERNAL_TOKEN') or TOKEN
 CLUSTER = os.getenv('CLUSTER', 'volcano_tts')
 VOICE_TYPE = os.getenv('VOICE_TYPE', 'zh_male_jieshuonansheng_mars_bigtts')
 SPEED_RATIO = float(os.getenv('SPEED_RATIO', '1.3'))

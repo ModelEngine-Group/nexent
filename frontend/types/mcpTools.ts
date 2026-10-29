@@ -182,6 +182,7 @@ export interface McpServiceItem {
   containerStatus?: McpContainerStatus;
   authorizationToken?: string;
   customHeaders?: Record<string, string>;
+  sslVerify?: boolean;
   isListedInRepository?: boolean;
   communityId?: number;
   marketId?: number;
@@ -208,6 +209,7 @@ export interface AddMcpServicePayload {
   tags?: string[];
   authorization_token?: string;
   custom_headers?: Record<string, string>;
+  ssl_verify?: boolean;
   container_config?: Record<string, unknown>;
   container_port?: number;
   config_json?: Record<string, unknown>;
@@ -229,6 +231,7 @@ export interface UpdateMcpServicePayload {
   tags?: string[];
   authorization_token?: string;
   custom_headers?: Record<string, string>;
+  ssl_verify?: boolean;
   config_json?: Record<string, unknown>;
   version?: string;
   community_id?: number;
@@ -273,6 +276,8 @@ export interface LocalAddMcpDraft {
   transportType: McpTransportType;
   serverUrl: string;
   authorizationToken?: string;
+  apiAuthEnabled?: boolean;
+  sslVerify?: boolean;
   customHeaders?: string;
   openApiJson?: string;
   containerConfigJson: string;

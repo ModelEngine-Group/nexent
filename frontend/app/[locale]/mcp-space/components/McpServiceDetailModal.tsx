@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -10,6 +12,7 @@ import {
   Modal,
   Select,
   Space,
+  Switch,
 } from "antd";
 import {
   ApiOutlined,
@@ -149,6 +152,7 @@ export default function McpServiceDetailModal({
         ? draft.groupIds.split(",").map(Number).filter(Boolean)
         : undefined,
       ingroup_permission: draft.ingroupPermission || "READ_ONLY",
+      sslVerify: draft.sslVerify !== false,
     });
   }, [draft, form]);
 
@@ -219,6 +223,7 @@ export default function McpServiceDetailModal({
       authorizationToken: values.authorizationToken ?? "",
       customHeaders: parsedCustomHeaders,
       configJson: parsedConfigJson,
+      sslVerify: values.sslVerify !== false,
     };
     detail.setDraft(nextDraft);
     const ok = await detail.save(nextDraft);
@@ -437,6 +442,36 @@ export default function McpServiceDetailModal({
             <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>
               {t("mcpConfig.openApiToMcp.form.apiJsonHint")}
             </span>
+            <div className="flex items-center gap-2 mt-3">
+              <Form.Item
+                name="sslVerify"
+                valuePropName="checked"
+                noStyle
+              >
+                <Switch disabled={isReadOnly} />
+              </Form.Item>
+              <span className="text-sm text-slate-700">
+                {t("mcpConfig.openapiService.form.sslVerifyLabel")}
+              </span>
+            </div>
+            <Form.Item noStyle shouldUpdate={(prev, current) =>
+              prev.sslVerify !== current.sslVerify
+            }>
+              {({ getFieldValue }) => {
+                const sslVerify = getFieldValue("sslVerify") !== false;
+                return (
+                  <Alert
+                    type={sslVerify ? "info" : "warning"}
+                    showIcon
+                    message={t(
+                      sslVerify
+                        ? "mcpConfig.openapiService.form.sslVerifyHint"
+                        : "mcpConfig.openapiService.form.sslVerifyWarning"
+                    )}
+                  />
+                );
+              }}
+            </Form.Item>
           </>
         ) : null}
         {isLocalImage ? (
