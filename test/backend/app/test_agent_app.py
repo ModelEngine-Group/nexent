@@ -1160,7 +1160,7 @@ def test_legacy_creating_sub_agent_endpoint_is_not_exposed():
 def test_update_agent_info_api_rejects_invalid_callable_names(mocker, mock_auth_header, name):
     """Reject invalid internal identifiers before invoking the update service."""
     update_agent = mocker.patch(
-        "apps.agent_app.update_agent_info_impl", new_callable=AsyncMock)
+        "management.api.agent.agent.update_agent_info_impl", new_callable=AsyncMock)
 
     response = config_client.post(
         "/agent/update",

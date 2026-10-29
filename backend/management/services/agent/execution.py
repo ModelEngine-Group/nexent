@@ -3,7 +3,6 @@
 """Agent execution, message persistence and process-local task ownership."""
 
 import asyncio
-from management.services.agent.persistence import finalize_assistant_projection
 import json
 import logging
 import os
@@ -13,6 +12,8 @@ from typing import (
     Optional,
 )
 
+from management.services.agent.background import BackgroundExecutionState, settle_background_projection
+from management.services.agent.persistence import finalize_assistant_projection
 from management.services.agent.lifecycle import (
     agent_run_manager,
 )
@@ -334,6 +335,7 @@ async def _stream_agent_chunks(
     channel: Optional[Any] = None,
     execution: Optional[ManagedExecution] = None,
     deferred_run: Optional[DeferredAgentRun] = None,
+    execution_state: Optional[BackgroundExecutionState] = None,
 ):
     """
     Yield SSE chunks from agent_run while buffering assistant persistence.
@@ -369,6 +371,13 @@ async def _stream_agent_chunks(
     # Determine if we're in resume mode
     is_resume_mode = resume_from_unit_index > 0
 
+    # Resolve the channel before committing the placeholder. Cancellation or a
+    # channel failure here must not leave an assistant outside finalization.
+    if channel is None:
+        channel = await streaming_channel_manager.get_or_create_channel(
+            conversation_id=agent_request.conversation_id, user_id=user_id
+        )
+
     # Persist the parent ConversationMessage row up front with status='streaming'
     # so history and recovery can observe the active assistant run.
     streaming_message_id: Optional[int] = resume_message_id
@@ -386,17 +395,25 @@ async def _stream_agent_chunks(
             minio_files=None,
         )
         try:
-            streaming_message_id = save_message(
-                assistant_message_req,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                status="streaming",
-                message_source=getattr(agent_request, "_message_source", "CHAT"),
-            )
+            if execution_state is not None and execution_state.create_assistant is not None:
+                streaming_message_id = execution_state.create_assistant(assistant_message_req)
+            else:
+                streaming_message_id = save_message(
+                    assistant_message_req,
+                    user_id=user_id,
+                    tenant_id=tenant_id,
+                    status="streaming",
+                    message_source=getattr(agent_request, "_message_source", "CHAT"),
+                )
+            if execution_state is not None:
+                execution_state.assistant_message_id = streaming_message_id
         except Exception as msg_exc:
             logger.error(
                 "Failed to create streaming message row: %r", msg_exc, exc_info=True
             )
+            if execution_state is not None:
+                execution_state.fail("AUTOMATION_MESSAGE_CREATE_FAILED", "Assistant message could not be created.")
+                raise
 
     # Tracks the unit currently being accumulated in memory. Assistant output
     # is written to PostgreSQL only once, after the stream reaches a terminal
@@ -407,12 +424,7 @@ async def _stream_agent_chunks(
     next_unit_index: int = resume_from_unit_index
     # Set when the agent run loop finishes successfully.
     stream_completed_normally: bool = False
-
-    # Get or create streaming channel for multi-subscriber support
-    if channel is None:
-        channel = await streaming_channel_manager.get_or_create_channel(
-            conversation_id=agent_request.conversation_id, user_id=user_id
-        )
+    stream_closing = False
 
     if agent_run_info.cancellation_scope is None:
         agent_run_info.cancellation_scope = RunCancellationScope(
@@ -460,6 +472,9 @@ async def _stream_agent_chunks(
                 data = json.loads(chunk)
                 chunk_type = data.get("type")
                 chunk_content = data.get("content", "") or ""
+                if execution_state is not None and chunk_type == "error":
+                    execution_state.error_code = data.get("error_code") or "AUTOMATION_EXECUTION_FAILED"
+                    execution_state.error_message = str(chunk_content) or "Agent execution failed."
                 if chunk_type == "final_answer":
                     has_body = resolve_answer_completion(buffered_units, data)
                     if data.get("answer_phase") == "complete":
@@ -767,13 +782,21 @@ async def _stream_agent_chunks(
             await channel.publish(f"data: {chunk}\n\n")
             yield f"data: {chunk}\n\n"
         stream_completed_normally = True
+    except (asyncio.CancelledError, GeneratorExit):
+        stream_closing = True
+        if execution_state is not None:
+            agent_run_info.stop_event.set()
+        raise
     except Exception as run_exc:
+        if execution_state is not None:
+            execution_state.fail("AUTOMATION_EXECUTION_FAILED", "Agent generation failed.")
         logger.error("Agent run error: %r", run_exc, exc_info=True)
         await channel.publish(_safe_agent_stream_error_chunk(run_exc))
         yield _safe_agent_stream_error_chunk(run_exc)
     finally:
         if not cancel_poll_task.done():
             cancel_poll_task.cancel()
+        await asyncio.gather(cancel_poll_task, return_exceptions=True)
 
         was_stopped = (
             getattr(agent_run_info, "stop_event", None)
@@ -792,87 +815,106 @@ async def _stream_agent_chunks(
             # ``error`` chunk, so the async iterator can finish normally while
             # the worker outcome still authoritatively marks the run failed.
             terminal_status = outcome
+        elif execution_state is not None and terminal_status == "completed" and outcome != "completed":
+            terminal_status = "failed"
+            execution_state.fail("AUTOMATION_OUTCOME_MISSING", "Agent ended without a confirmed terminal outcome.")
 
+        artifact_interruption = None
         try:
-            skill_file_payloads = list(captured_skill_files.values())
-            if skill_file_payloads:
-                skill_file_uploads = await _process_skill_file_uploads(
-                    payloads=skill_file_payloads,
-                    user_id=user_id,
-                    tenant_id=tenant_id,
-                )
-                skill_file_uploads = await runtime_thread_manager.run(
+            try:
+                skill_file_payloads = list(captured_skill_files.values())
+                if skill_file_payloads and not stream_closing:
+                    skill_file_uploads = await _process_skill_file_uploads(
+                        payloads=skill_file_payloads,
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                    )
+                    skill_file_uploads = await runtime_thread_manager.run(
+                        "control-io",
+                        ManagedTaskSpec(
+                            task_name="enrich-skill-file-urls",
+                            owner="management.services.agent.run",
+                        ),
+                        _enrich_file_uploads_with_presigned_urls,
+                        skill_file_uploads,
+                    )
+                    logger.info(
+                        "[skill-file] upload finished conversation=%s result_count=%s results=%s",
+                        agent_request.conversation_id,
+                        len(skill_file_uploads),
+                        skill_file_uploads,
+                    )
+                    if skill_file_uploads:
+                        files_payload = json.dumps(
+                            {"file_uploads": skill_file_uploads},
+                            ensure_ascii=False,
+                        )
+                        files_chunk = (
+                            "data: "
+                            + json.dumps(
+                                {"type": "files", "content": files_payload},
+                                ensure_ascii=False,
+                            )
+                            + "\n\n"
+                        )
+                        try:
+                            await channel.publish(files_chunk)
+                            yield files_chunk
+                        except RuntimeError:
+                            # Stream is closing (e.g., client disconnect). Avoid raising during generator teardown.
+                            pass
+                        frontend_skill_files.extend(
+                            _transform_skill_files_to_standard_format(skill_file_uploads)
+                        )
+            except Exception:
+                logger.exception("Failed to process skill file uploads")
+
+            if workspace_file_uploads and not stream_closing:
+                uploaded_files = await runtime_thread_manager.run(
                     "control-io",
                     ManagedTaskSpec(
-                        task_name="enrich-skill-file-urls",
+                        task_name="enrich-workspace-file-urls",
                         owner="management.services.agent.run",
                     ),
                     _enrich_file_uploads_with_presigned_urls,
-                    skill_file_uploads,
+                    list(workspace_file_uploads.values()),
                 )
-                logger.info(
-                    "[skill-file] upload finished conversation=%s result_count=%s results=%s",
-                    agent_request.conversation_id,
-                    len(skill_file_uploads),
-                    skill_file_uploads,
-                )
-                if skill_file_uploads:
-                    files_payload = json.dumps(
-                        {"file_uploads": skill_file_uploads},
-                        ensure_ascii=False,
-                    )
-                    files_chunk = (
-                        "data: "
-                        + json.dumps(
-                            {"type": "files", "content": files_payload},
-                            ensure_ascii=False,
-                        )
-                        + "\n\n"
-                    )
-                    try:
-                        await channel.publish(files_chunk)
-                        yield files_chunk
-                    except RuntimeError:
-                        # Stream is closing (e.g., client disconnect). Avoid raising during generator teardown.
-                        pass
-                    frontend_skill_files.extend(
-                        _transform_skill_files_to_standard_format(skill_file_uploads)
-                    )
-        except Exception:
-            logger.exception("Failed to process skill file uploads")
-
-        if workspace_file_uploads:
-            uploaded_files = await runtime_thread_manager.run(
-                "control-io",
-                ManagedTaskSpec(
-                    task_name="enrich-workspace-file-urls",
-                    owner="management.services.agent.run",
-                ),
-                _enrich_file_uploads_with_presigned_urls,
-                list(workspace_file_uploads.values()),
-            )
-            files_payload = json.dumps(
-                {"file_uploads": uploaded_files},
-                ensure_ascii=False,
-            )
-            files_chunk = (
-                "data: "
-                + json.dumps(
-                    {"type": "files", "content": files_payload},
+                files_payload = json.dumps(
+                    {"file_uploads": uploaded_files},
                     ensure_ascii=False,
                 )
-                + "\n\n"
-            )
-            try:
-                await channel.publish(files_chunk)
-                yield files_chunk
-            except RuntimeError:
-                pass
-            frontend_skill_files.extend(
-                _transform_skill_files_to_standard_format(uploaded_files)
-            )
+                files_chunk = (
+                    "data: "
+                    + json.dumps(
+                        {"type": "files", "content": files_payload},
+                        ensure_ascii=False,
+                    )
+                    + "\n\n"
+                )
+                try:
+                    await channel.publish(files_chunk)
+                    yield files_chunk
+                except RuntimeError:
+                    pass
+                frontend_skill_files.extend(
+                    _transform_skill_files_to_standard_format(uploaded_files)
+                )
 
-        terminal_status, persistence_failed, final_answer_content = await finalize_assistant_projection(
+        except (asyncio.CancelledError, GeneratorExit) as interrupted:
+            if execution_state is None:
+                raise
+            artifact_interruption = interrupted
+            stream_closing = True
+            agent_run_info.stop_event.set()
+            terminal_status = "stopped"
+        except Exception:
+            if execution_state is None:
+                raise
+            logger.exception("Failed to prepare assistant artifact metadata")
+            terminal_status = "failed"
+            execution_state.fail("AUTOMATION_ARTIFACT_FAILED", "Assistant artifact processing failed.")
+
+        projection = finalize_assistant_projection(
             thread_manager=runtime_thread_manager,
             message_id=streaming_message_id,
             conversation_id=agent_request.conversation_id,
@@ -890,7 +932,19 @@ async def _stream_agent_chunks(
             mark_failed=update_message_status,
             logger=logger,
         )
-        if persistence_failed and channel is not None:
+        if execution_state is not None:
+            terminal_status, persistence_failed, final_answer_content = await settle_background_projection(projection)
+        else:
+            terminal_status, persistence_failed, final_answer_content = await projection
+        if execution_state is not None:
+            execution_state.outcome = terminal_status
+            execution_state.persisted = streaming_message_id is not None and not persistence_failed
+            if persistence_failed:
+                execution_state.fail("AUTOMATION_PERSISTENCE_FAILED", "Assistant result could not be saved.")
+            elif terminal_status == "completed":
+                execution_state.error_code = None
+                execution_state.error_message = None
+        if persistence_failed and channel is not None and not stream_closing:
             persistence_error_chunk = _safe_agent_stream_error_chunk()
             await channel.publish(persistence_error_chunk)
             try:
@@ -920,6 +974,9 @@ async def _stream_agent_chunks(
             )
             _channel_cleanup_tasks.add(cleanup_task)
             cleanup_task.add_done_callback(_channel_cleanup_tasks.discard)
+        if artifact_interruption is not None:
+            raise artifact_interruption
+
         # Memory recording is now handled by the agent-side ``StoreMemoryTool``
         # (which delegates to the new ``MemoryService`` facade). The legacy
         # background ``add_memory_in_levels`` call has been removed because

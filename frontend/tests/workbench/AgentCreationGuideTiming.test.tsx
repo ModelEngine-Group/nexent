@@ -1,5 +1,6 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+import { agentCreationGuideKey } from "@/lib/agentCreationGuide";
 import { useRef } from "react";
 import { render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
@@ -34,18 +35,31 @@ function Workspace({
 
 it("opens as soon as targets mount without waiting for an animation frame", () => {
   vi.spyOn(window, "requestAnimationFrame").mockReturnValue(1);
-  render(<Workspace preferenceKey="guide-immediate" />);
+  render(
+    <Workspace
+      preferenceKey={agentCreationGuideKey("timing", "guide-immediate")}
+    />
+  );
   expect(screen.getByRole("dialog")).toHaveTextContent("Creation guide");
 });
 
 it("does not reopen a completed guide", () => {
-  localStorage.setItem("guide-completed", "1");
-  render(<Workspace preferenceKey="guide-completed" />);
+  localStorage.setItem(agentCreationGuideKey("timing", "guide-completed"), "1");
+  render(
+    <Workspace
+      preferenceKey={agentCreationGuideKey("timing", "guide-completed")}
+    />
+  );
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  localStorage.removeItem("guide-completed");
+  localStorage.removeItem(agentCreationGuideKey("timing", "guide-completed"));
 });
 
 it("does not open against missing targets", () => {
-  render(<Workspace preferenceKey="guide-missing-target" complete={false} />);
+  render(
+    <Workspace
+      preferenceKey={agentCreationGuideKey("timing", "guide-missing-target")}
+      complete={false}
+    />
+  );
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });

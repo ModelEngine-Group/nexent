@@ -31,7 +31,7 @@ We recommend **Python** because it offers beginner-friendly syntax, rich ecosyst
 Install FastMCP before you start coding:
 
 ```bash
-pip install fastmcp
+uv pip install fastmcp
 ```
 
 ### 📝 Basic Example

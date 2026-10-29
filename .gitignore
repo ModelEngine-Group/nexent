@@ -112,3 +112,6 @@ agent_repository_frontend
 .codex/skills/openspec-*
 # Added by Serena MCP
 .serena/
+
+# CI-managed Python stays inside the checkout.
+.ci-python/

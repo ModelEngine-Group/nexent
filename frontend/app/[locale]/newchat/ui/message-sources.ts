@@ -120,17 +120,23 @@ export function getMessageSources(
   });
   const displayIndices = buildCitationDisplayIndexMap(content, items);
   const all = withCitationDisplayIndices(items, displayIndices);
-  const sources: PanelSourceItem[] = [],
-    images: PanelSourceItem[] = [];
   const byKey = new Map<string, PanelSourceItem>();
   const byLegacyIndex = new Map<number, PanelSourceItem>();
+  // Resolve ambiguous legacy indices in retrieval order, before presentation sorting.
   for (const item of all) {
-    (item.isImage ? images : sources).push(item);
     const key = getCitationKey(item);
     if (key !== undefined && !byKey.has(key)) byKey.set(key, item);
     if (item.citeIndex !== undefined && !byLegacyIndex.has(item.citeIndex))
       byLegacyIndex.set(item.citeIndex, item);
   }
+  // Sort only the derived snapshot. Unnumbered items keep their relative order.
+  all.sort(
+    (left, right) =>
+      (left.displayIndex ?? Number.MAX_SAFE_INTEGER) -
+      (right.displayIndex ?? Number.MAX_SAFE_INTEGER)
+  );
+  const sources = all.filter((item) => !item.isImage);
+  const images = all.filter((item) => item.isImage);
   const model = {
     messageId,
     content,

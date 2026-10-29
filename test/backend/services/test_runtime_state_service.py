@@ -44,6 +44,9 @@ class FakeRedisClient:
             self.hashes.pop(key, None)
             self.values.pop(key, None)
 
+    def hdel(self, key, field):
+        self.hashes.get(key, {}).pop(field, None)
+
     def hgetall(self, key):
         self._maybe_fail("hgetall")
         return dict(self.hashes.get(key, {}))

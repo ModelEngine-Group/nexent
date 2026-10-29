@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: CPU-DEFAULT-UV-20261026
+  change_type: requirement
+  requirement_id: CPU-DEFAULT-UV-20261026
+  title: Default document processing to CPU and standardize uv installation
+  description: Use preset CPU/NVIDIA indexes with uv 0.13.6 and unchanged Python across development, UT CI and data-process builds; migrate direct build/development pip commands
+    to uv without changing sandbox dynamic installation. Preserve SDK dev/parse dependency ownership, avoid new direct Torch requirements, and preserve the original SDK distribution name nexent. User excludes deployment and application functional verification.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - F-173
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - DEP-UV-DEPENDENCY-VARIANTS
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/data_process/test_tasks.py
+    - test/sdk/data_process/test_core.py
+    - test/backend/test_data_process_service_entrypoint.py
+    - test/backend/deploy/test_k8s_env_injection.py
+    - test/backend/services/test_clarification_response.py
+    - test/sdk/container/test_docker_client.py
+    - test/sdk/monitor/test_monitoring.py
+    behaviors:
+    - Execute the existing CI unit-test suite under both CPU and NVIDIA dependency installations without weakening assertions.
+    - Missing Redis client returns failure without accessing cleanup services and provides uv installation guidance.
+    - A missing Flower launch command returns failure without registering a process or starting background logging/waiting.
+    - The full CI suite has Helm and a managed Python SQLite runtime supporting transaction RETURNING statements.
+    - The unavailable-host-port test explicitly selects the outside-Docker branch and does not depend on the runner platform.
+    reason: Dependency resolution and Docker installation are proved by real D5 installation/build observations; there is no new isolated Python
+      business logic requiring implementation-mirroring tests. Existing UT verifies imports and regressions in both dependency environments. Remote
+      Codecov identified these two dependency-failure branches as the only uncovered changed executable lines; strengthen their existing owning
+      UT rather than adding a CI dependency guard or duplicate formal Case.
+  notes: 'SPEC: ../nexent-doc/docs/Developing/management-cpu-default-uv-installation. Approved by user 2026-10-26; no new install script, recurring
+    CI dependency guard, deployment or application functional verification. The second self-hosted runner exposed missing Helm, old SQLite, and
+    an uncontrolled container-detection premise in one existing UT; provision CI prerequisites with uv/Helm actions and strengthen that test precondition
+    without changing runner selection or product behavior.'

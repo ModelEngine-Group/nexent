@@ -18,6 +18,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   height: 28px;
   flex-shrink: 0;
 }
@@ -29,10 +30,11 @@
   font-size: 20px;
   font-weight: 500;
   line-height: 28px;
-  cursor: pointer;
 }
 .agent-debug-header-actions {
   display: flex;
+  align-items: center;
+  flex-shrink: 0;
   gap: 16px;
 }
 .agent-debug-disclaimer {
