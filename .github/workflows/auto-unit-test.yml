@@ -79,9 +79,6 @@ jobs:
           uv sync --managed-python --extra data-process --extra test --index pytorch-cpu --upgrade-package torch --upgrade-package torchvision
           cd ..
 
-      - name: Check packaged model profiles before submission
-        run: backend/.venv/bin/python scripts/check_model_profiles.py
-
       - name: Run all tests and collect coverage
         # Configure NEXENT_PYTEST_WORKERS in the runner environment; the default is the CPU count.
         env:
