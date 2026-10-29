@@ -85,6 +85,7 @@ from management.services.conversation.service import (
 )
 from management.services.memory.extraction import (
     FaMemoryExtractor,
+    MemoryExtractionModelClient,
 )
 from management.services.memory.provider import (
     _build_ingestion_event_service,
@@ -999,23 +1000,6 @@ async def _stream_agent_chunks(
                         timeout_seconds=config.get("timeout_seconds"),
                     )
 
-                    class _ModelAdapter:
-                        def __init__(self, sync_model):
-                            self._model = sync_model
-
-                        async def chat(self, messages):
-                            result = await runtime_thread_manager.run(
-                                "model-tool-io",
-                                ManagedTaskSpec(
-                                    task_name="memory-extractor-model-generate",
-                                    owner="management.services.agent.run",
-                                ),
-                                self._model.generate,
-                                messages,
-                            )
-                            content = getattr(result, "content", result)
-                            return content if isinstance(content, str) else str(content)
-
                     extractor = FaMemoryExtractor(
                         tenant_id=tenant_id,
                         user_id=user_id,
@@ -1024,7 +1008,7 @@ async def _stream_agent_chunks(
                             getattr(agent_request, "conversation_id", "")
                         ),
                         memory_service=build_memory_service_for_fa_extraction(),
-                        model_client=_ModelAdapter(model),
+                        model_client=MemoryExtractionModelClient(model, runtime_thread_manager),
                     )
                     result = await extractor.extract_and_store(
                         final_answer_content,
