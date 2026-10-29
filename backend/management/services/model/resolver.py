@@ -36,6 +36,13 @@ def is_model_available(model: dict | None) -> bool:
     )
 
 
+def is_model_configured(model: dict | None) -> bool:
+    """Allow explicit LLM choices independently of a cached connectivity probe."""
+    return bool(model) and model.get("delete_flag") != "Y" and model.get(
+        "model_type", "llm"
+    ) in {"llm", "chat"}
+
+
 def get_model_descriptor(model_id: int | None, tenant_id: str) -> ModelDescriptor:
     """Resolve display name and capabilities in one best-effort catalog query."""
     if model_id is not None:

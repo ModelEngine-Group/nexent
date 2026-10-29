@@ -8,6 +8,8 @@ import logging
 from management.utils.health import install_health_contract
 from contracts.errors.exceptions import AppException, QuotaExceededError, TokenExpiredError
 from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.routing import APIRoute
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -216,3 +218,20 @@ def register_exception_handlers(app: FastAPI) -> None:
             status_code=500,
             content={"message": "Internal server error, please try again later."},
         )
+
+
+class ModelCredentialRoute(APIRoute):
+    """Keep input validation diagnostics from reflecting model credential values."""
+
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def credential_safe_handler(request):
+            try:
+                return await handler(request)
+            except RequestValidationError as error:
+                details = [{key: value for key, value in item.items() if key in {"loc", "msg", "type"}}
+                           for item in error.errors()]
+                return JSONResponse(status_code=422, content={"detail": details})
+
+        return credential_safe_handler

@@ -14,6 +14,11 @@ _request = base._request
 
 
 def _configure_early_workbench_run(monkeypatch, canonical, conversation):
+    from management.services.conversation import model_preferences
+    monkeypatch.setattr(
+        model_preferences, "read_model_preferences",
+        MagicMock(return_value={"selected_model_id": None, "model_parameter_preferences": {}}),
+    )
     plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99)))
     workbench_module = ModuleType("management.services.agent.workbench")
     workbench_module.assert_workbench_version = MagicMock()

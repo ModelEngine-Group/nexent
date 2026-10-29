@@ -12,6 +12,10 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 MANAGEMENT_SERVICES = BACKEND_ROOT / "management" / "services"
 
 MIGRATED_MODULES = {
+    'model/outlet_migration.py',
+    'model/outlet_legacy.py',
+    'conversation/model_preferences.py',
+    'agent/model_parameters.py',
     'model/profiles.py',
     'model/outlet_projection.py',
     'agent/creation.py',

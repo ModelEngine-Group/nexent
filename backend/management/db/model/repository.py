@@ -15,6 +15,24 @@ from management.utils.audit_fields import add_creation_tracking, add_update_trac
 logger = logging.getLogger("management.db.model.repository")
 
 
+def create_resolved_model_record(*args, **kwargs):
+    """Create a resolved outlet through the transactional storage implementation."""
+    from .outlets import create_resolved_model_record as create_resolved
+    return create_resolved(*args, **kwargs)
+
+
+def get_resolved_model_record(*args, **kwargs):
+    """Load a tenant-owned resolved outlet without applying legacy parameter filters."""
+    from .outlets import get_resolved_model_record as get_resolved
+    return get_resolved(*args, **kwargs)
+
+
+def update_resolved_model_record(*args, **kwargs):
+    """Update a resolved outlet with an expected configuration revision."""
+    from .outlets import update_resolved_model_record as update_resolved
+    return update_resolved(*args, **kwargs)
+
+
 def create_model_record(model_data: Dict[str, Any], user_id: str, tenant_id: str) -> bool:
     """
     Create a model record
@@ -106,7 +124,7 @@ def update_model_record(
 
 
 def fail_detecting_models_on_startup() -> int:
-    """Finish connectivity checks interrupted by a config-service restart."""
+    """Clear interrupted checks without claiming the model failed a completed probe."""
     with get_db_session() as session:
         result = session.execute(
             update(ModelRecord)
@@ -115,7 +133,7 @@ def fail_detecting_models_on_startup() -> int:
                 ModelRecord.delete_flag == "N",
             )
             .values(
-                connect_status="unavailable",
+                connect_status="not_detected",
                 update_time=func.current_timestamp(),
             )
         )

@@ -8633,21 +8633,21 @@ def test_check_agent_availability_tool_unavailable(
 @patch("management.services.agent.read.check_tool_is_available")
 @patch("management.services.agent.read.search_tools_for_sub_agent")
 @patch("management.services.agent.read.search_agent_info_by_agent_id")
-def test_check_agent_availability_model_unavailable(
+def test_check_agent_availability_missing_model(
     mock_search_agent_info,
     mock_search_tools,
     mock_check_tool,
     mock_resolve_model,
     mock_get_model_by_model_id_ignore_delete,
 ):
-    """Test check_agent_availability when model is unavailable."""
+    """Test check_agent_availability when the configured model no longer exists."""
     from management.services.agent.read import check_agent_availability
 
     mock_agent_info = {"agent_id": 123, "model_ids": [456]}
     mock_search_agent_info.return_value = mock_agent_info
     mock_search_tools.return_value = [{"tool_id": 1}]
     mock_check_tool.return_value = [True]
-    mock_resolve_model.return_value = {"connect_status": "unavailable"}
+    mock_resolve_model.return_value = None
 
     is_available, reasons = check_agent_availability(
         agent_id=123, tenant_id="test_tenant"
@@ -8861,7 +8861,7 @@ def test_check_agent_availability_both_unavailable(
     mock_search_agent_info.return_value = mock_agent_info
     mock_search_tools.return_value = [{"tool_id": 1}]
     mock_check_tool.return_value = [False]
-    mock_resolve_model.return_value = {"connect_status": "unavailable"}
+    mock_resolve_model.return_value = None
 
     is_available, reasons = check_agent_availability(
         agent_id=123, tenant_id="test_tenant"

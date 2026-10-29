@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Provider paging, malformed catalog and error regression tests."""
 
 from unittest.mock import AsyncMock
@@ -155,3 +157,14 @@ async def test_dashscope_authentication_failure_is_classified(provider_http):
     )
     assert result[0]["_error"] == "authentication_failed"
     assert result[0]["_http_code"] == 401
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key,header", [("", None), ("  ", None), (" fixture ", "Bearer fixture")])
+async def test_optional_key_model_discovery_does_not_send_empty_bearer(provider_http, key, header):
+    """UI-AUTH-11: discovery uses the same optional API key convention."""
+    requests = provider_http(openai_provider, lambda request: httpx.Response(200, json={"data": [{"id": "model"}]}))
+    result = await openai_provider.OpenAICompatibleProvider().get_models(
+        {"base_url": "https://fixture.test/v1", "api_key": key})
+    assert result == [{"id": "model", "model_tag": "chat"}]
+    assert requests[0].headers.get("Authorization") == header

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Generic OpenAI-compatible provider.
 
 Used as the fallback for any provider that is not covered by a dedicated
@@ -24,7 +26,7 @@ class OpenAICompatibleProvider(AbstractModelProvider):
 
     async def get_models(self, provider_config: Dict) -> List[Dict]:
         try:
-            model_api_key: str = provider_config["api_key"]
+            model_api_key: str = provider_config.get("api_key") or ""
             base_url: str = provider_config.get("base_url", "") or ""
             # TLS verification is on by default. Operators pointing at a
             # self-signed internal endpoint can opt out explicitly through
@@ -38,9 +40,13 @@ class OpenAICompatibleProvider(AbstractModelProvider):
             if not url.endswith("/models"):
                 url = f"{url}/models"
 
-            headers = {"Authorization": f"Bearer {model_api_key}"}
+            from nexent.core.model_service.connection_headers import connection_headers
 
-            async with httpx.AsyncClient(verify=ssl_verify, timeout=30) as client:
+            headers = connection_headers(provider_config.get("http_headers") or {}, api_key=model_api_key)
+            if model_api_key.strip():
+                headers["authorization"] = f"Bearer {model_api_key.strip()}"
+
+            async with httpx.AsyncClient(verify=ssl_verify, timeout=provider_config.get("timeout_seconds", 120)) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
                 payload = response.json()
