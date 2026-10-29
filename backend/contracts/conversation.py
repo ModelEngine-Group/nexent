@@ -177,6 +177,19 @@ class ConversationHistory(TypedDict):
     image_records: List[ImageRecord]
 
 
+class ConversationModelPreferencePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=0, lt=2**31 - 1, strict=True)
+    parameter_values: Dict[str, Any] = Field(default_factory=dict)
+    delete_parameters: List[str] = Field(default_factory=list, max_length=128)
+
+
+class ConversationModelSelectionPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=0, lt=2**31 - 1, strict=True)
+    selected_model_id: int = Field(gt=0, lt=2**31, strict=True)
+
+
 def _search_fingerprint(search: str) -> str:
     return hashlib.sha256(search.strip().casefold().encode("utf-8")).hexdigest()
 
