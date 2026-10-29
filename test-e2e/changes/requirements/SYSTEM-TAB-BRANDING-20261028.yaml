@@ -132,3 +132,20 @@ change:
     because NEXENT_TEST_HOME is absent. Browser DOM inspection confirms 2px image
     translation and Nexent homepage text when the sidebar is expanded. No live
     branding settings were saved and no container was changed during verification.
+    PR review 4411750924 wording follow-up, using user-selected option 3:
+    display application logo/name for browser branding and navigation logo/title for
+    top-left branding in Chinese/English. Retain the display-location annotations and
+    visible hints explaining the application name's wider use and navigation logo's
+    fallback. This delta changes only UI copy and its presentation; existing variable,
+    function and translation-key names, configuration, HTTP payloads and assets remain
+    unchanged. Reuse projectConfigBranding UT and adjust only accessible-name strings
+    in the existing D4 script. No new behavior, UT or formal acceptance obligation is
+    introduced; full D4 re-execution is exempt for this wording-only delta, without
+    closing the previously blocked formal runtime acceptance. Python is unaffected.
+    Verification after narrowing scope: 5 projectConfigBranding component UT PASS;
+    source-only TypeScript excluding generated .next files, bilingual copy/key checks,
+    Prettier, copyright and git diff --check PASS. ESLint has zero errors and two
+    existing native-image warnings. git diff confirms that branding helpers, upload
+    server logic, navigation rendering and browser-tab provider match the committed
+    baseline exactly. The previously observed formal validation/runtime blockers
+    remain recorded above; no full formal runtime PASS is claimed for this copy edit.

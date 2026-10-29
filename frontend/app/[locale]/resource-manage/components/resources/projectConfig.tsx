@@ -78,6 +78,7 @@ export default function ProjectConfigTab({
     {
       key: "productName",
       label: t("project.config.title"),
+      hint: t("project.config.title.hint"),
       max: 20,
       maxEn: 50,
       optional: true,
@@ -240,6 +241,7 @@ export default function ProjectConfigTab({
               <Form.Item
                 name={["configZh", item.key]}
                 label={item.label}
+                extra={item.hint}
                 rules={[
                   {
                     required: !item.optional,
@@ -267,6 +269,7 @@ export default function ProjectConfigTab({
               <Form.Item
                 name={["configEn", item.key]}
                 label={`${item.label}-English`}
+                extra={item.hint}
                 rules={[
                   {
                     required: !item.optional,
@@ -307,7 +310,7 @@ export default function ProjectConfigTab({
             ]}
           />
         </Form.Item>
-        <Form.Item>
+        <Form.Item extra={t("project.config.system.logo.hint")}>
           <div className="flex items-center gap-4 mt-2 mb-4">
             <span>{t("project.config.page.simple.log")}</span>
             <img
@@ -315,7 +318,7 @@ export default function ProjectConfigTab({
               src={
                 previewUrl2 ? previewUrl2 : publicAsset("/modelengine-logo.png")
               }
-              alt={"old logo2"}
+              alt={t("project.config.page.simple.log")}
             ></img>
           </div>
           <Upload

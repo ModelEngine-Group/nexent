@@ -60,15 +60,24 @@ beforeEach(() => {
 
 it("saves optional localized homepage titles and explicit empty system names", async () => {
   render(<ProjectConfigTab />);
-  fireEvent.change(screen.getByRole("textbox", { name: "系统名" }), {
-    target: { value: "" },
-  });
-  fireEvent.change(screen.getByRole("textbox", { name: "首页标题" }), {
-    target: { value: "独立首页" },
-  });
-  fireEvent.change(screen.getByRole("textbox", { name: "首页标题-English" }), {
-    target: { value: "Separate homepage" },
-  });
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "应用名称（网页标签页标题）" }),
+    {
+      target: { value: "" },
+    }
+  );
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "导航栏标题（页面左上角）" }),
+    {
+      target: { value: "独立首页" },
+    }
+  );
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "导航栏标题（页面左上角）-English" }),
+    {
+      target: { value: "Separate homepage" },
+    }
+  );
   fireEvent.click(screen.getByRole("button", { name: "保存" }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   const body = vi.mocked(fetch).mock.calls[0][1]!.body as FormData;
@@ -85,11 +94,10 @@ it("saves optional localized homepage titles and explicit empty system names", a
 
 it("explicitly resets an existing homepage logo without uploading the system logo", async () => {
   render(<ProjectConfigTab />);
-  fireEvent.click(screen.getByRole("button", { name: "恢复系统logo" }));
-  expect(screen.getByRole("img", { name: "首页logo" })).toHaveAttribute(
-    "src",
-    "/modelengine-logo.png"
-  );
+  fireEvent.click(screen.getByRole("button", { name: "使用应用 Logo" }));
+  expect(
+    screen.getByRole("img", { name: "导航栏 Logo（页面左上角）" })
+  ).toHaveAttribute("src", "/modelengine-logo.png");
   fireEvent.click(screen.getByRole("button", { name: "保存" }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   const body = vi.mocked(fetch).mock.calls[0][1]!.body as FormData;
@@ -100,8 +108,12 @@ it("explicitly resets an existing homepage logo without uploading the system log
 
 it("keeps an empty homepage title instead of substituting the system name", async () => {
   render(<ProjectConfigTab />);
-  expect(screen.getByRole("textbox", { name: "首页标题" })).toHaveValue("");
-  expect(screen.getByRole("textbox", { name: "系统名" })).toHaveValue("System");
+  expect(
+    screen.getByRole("textbox", { name: "导航栏标题（页面左上角）" })
+  ).toHaveValue("");
+  expect(
+    screen.getByRole("textbox", { name: "应用名称（网页标签页标题）" })
+  ).toHaveValue("System");
   fireEvent.click(screen.getByRole("button", { name: "保存" }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   const body = vi.mocked(fetch).mock.calls[0][1]!.body as FormData;
@@ -118,10 +130,9 @@ it("uploads a separate image and keeps errors recoverable", async () => {
     target: { files: [file] },
   });
   await waitFor(() =>
-    expect(screen.getByRole("img", { name: "首页logo" })).toHaveAttribute(
-      "src",
-      "blob:home-preview"
-    )
+    expect(
+      screen.getByRole("img", { name: "导航栏 Logo（页面左上角）" })
+    ).toHaveAttribute("src", "blob:home-preview")
   );
   vi.mocked(fetch).mockResolvedValueOnce({
     ok: false,

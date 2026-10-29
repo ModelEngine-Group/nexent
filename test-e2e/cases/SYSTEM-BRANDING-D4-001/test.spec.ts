@@ -82,7 +82,7 @@ journey("SYSTEM-BRANDING-D4-001", async (context) => {
   const open = async () => {
     await page.goto(appPath("/resource-manage"));
     await page.getByRole("button", { name: "系统配置", exact: true }).click();
-    await expect(title("zh", "首页标题")).toBeVisible();
+    await expect(title("zh", "导航栏标题（页面左上角）")).toBeVisible();
   };
   const save = async () => {
     const response = page.waitForResponse(
@@ -190,12 +190,12 @@ journey("SYSTEM-BRANDING-D4-001", async (context) => {
     steps: [
       async () => {
         await open();
-        await title("zh", "系统名").fill("Branding system");
-        await title("en", "系统名").fill("Branding system");
-        await title("zh", "首页标题").fill("");
-        await title("en", "首页标题").fill("");
+        await title("zh", "应用名称（网页标签页标题）").fill("Branding system");
+        await title("en", "应用名称（网页标签页标题）").fill("Branding system");
+        await title("zh", "导航栏标题（页面左上角）").fill("");
+        await title("en", "导航栏标题（页面左上角）").fill("");
         const reset = page.getByRole("button", {
-          name: "恢复系统logo",
+          name: "使用应用 Logo",
           exact: true,
         });
         if (await reset.isEnabled()) await reset.click();
@@ -278,8 +278,10 @@ journey("SYSTEM-BRANDING-D4-001", async (context) => {
       },
       async () => {
         await open();
-        await title("zh", "首页标题").fill("独立首页标题");
-        await title("en", "首页标题").fill("Independent homepage");
+        await title("zh", "导航栏标题（页面左上角）").fill("独立首页标题");
+        await title("en", "导航栏标题（页面左上角）").fill(
+          "Independent homepage",
+        );
         await page.locator('input[type="file"]').nth(1).setInputFiles({
           name: "home.png",
           mimeType: "image/png",
@@ -340,7 +342,7 @@ journey("SYSTEM-BRANDING-D4-001", async (context) => {
       },
       async () => {
         await open();
-        await title("zh", "首页标题").fill("");
+        await title("zh", "导航栏标题（页面左上角）").fill("");
         await save();
         await expectSystemTab();
         await rail().hover();
@@ -376,10 +378,10 @@ journey("SYSTEM-BRANDING-D4-001", async (context) => {
       },
       async () => {
         await open();
-        await title("zh", "首页标题").fill("");
-        await title("en", "首页标题").fill("");
+        await title("zh", "导航栏标题（页面左上角）").fill("");
+        await title("en", "导航栏标题（页面左上角）").fill("");
         await page
-          .getByRole("button", { name: "恢复系统logo", exact: true })
+          .getByRole("button", { name: "使用应用 Logo", exact: true })
           .click();
         await save();
         await expectSystemTab();
