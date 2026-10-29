@@ -58,7 +58,11 @@ vi.mock('@/stores/agentStore', () => ({
 
 // Keep the real Debug -> Chat -> Thread model derivation. Only replace
 // runtime/network adapters and the unrelated comparison panel.
-vi.mock('@/hooks/useConfig', () => ({ useConfig: () => ({ modelConfig: {} }) }));
+vi.mock('@/hooks/useConfig', () => ({ useConfig: () => ({
+  modelConfig: {},
+  defaultLlmModelConfig: h.agentStore.defaultLlmConfig,
+  isSuccess: true,
+}) }));
 vi.mock('@/app/[locale]/newchat/adapter/attachment-adapter', () => ({ compositeAttachmentAdapter: {} }));
 vi.mock('@/app/[locale]/newchat/adapter/server-dictation-adapter', () => ({ ServerDictationAdapter: class {} }));
 vi.mock('@/app/[locale]/newchat/assistant-ui/agent-landing', () => ({ AgentLandingPage: () => null }));
@@ -330,7 +334,9 @@ describe(' 模型可用性过滤与主模型回退', () => {
 
     render(React.createElement(Form, null, React.createElement(AgentPrompt)));
 
-    expect(h.agentStore.updateAgentConfig).not.toHaveBeenCalled();
+    expect(h.agentStore.updateAgentConfig).toHaveBeenCalledExactlyOnceWith({
+      model_ids: [1], model: 'Model A', model_names: ['Model A'],
+    });
   });
 
   it(' AgentPrompt defaultLlmConfig.id 不可用时 selectedModelIds 为空', async () => {

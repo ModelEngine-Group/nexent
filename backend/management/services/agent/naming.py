@@ -4,6 +4,8 @@
 
 import logging
 
+from nexent.core.agent_names import AGENT_NAME_MAX_LENGTH, validate_agent_name
+
 from contracts.constants.constants import LANGUAGE
 from management.db.agent.repository import query_all_agent_info_by_tenant_id
 from management.services.agent.prompt import (
@@ -49,7 +51,17 @@ def generate_unique_agent_value(
 ) -> str:
     """Find the first free numeric suffix using the existing tenant scope."""
     for counter in range(1, max_suffix_attempts + 1):
-        candidate = f"{base_value}_{counter}"
+        suffix = f"_{counter}"
+        if field_key == "name":
+            try:
+                validate_agent_name(base_value)
+                base = base_value
+            except ValueError:
+                base = "agent"
+            candidate = f"{base[:AGENT_NAME_MAX_LENGTH - len(suffix)]}{suffix}"
+            validate_agent_name(candidate)
+        else:
+            candidate = f"{base_value}{suffix}"
         if not check_agent_value_duplicate(
             field_key, candidate, tenant_id, exclude_agent_id, agents_cache
         ):
@@ -93,6 +105,8 @@ def regenerate_agent_value(
                 tenant_id=tenant_id,
             )
             candidate = (value or "").strip().splitlines()[0].strip()
+            if field_key == "name":
+                validate_agent_name(candidate)
             if candidate in values:
                 raise ValueError(f"Generated duplicate value '{candidate}'")
             return candidate

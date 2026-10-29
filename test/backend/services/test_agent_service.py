@@ -414,10 +414,23 @@ agent_run_manager_module.AgentRunAlreadyActiveError = _AgentRunAlreadyActiveErro
 agent_run_manager_module.AgentRunConcurrencyExceededError = (
     _AgentRunConcurrencyExceededError
 )
-agent_run_manager_module.agent_run_manager = MagicMock()
-agent_run_manager_module.agent_run_manager.reserve_agent_capacity.return_value = (
-    "agent-capacity-test"
-)
+# Materialise every method the suite patches or asserts on. A bare MagicMock
+# answers attribute access lazily but monkeypatch.setattr needs a real entry,
+# so newer pytest versions reject attributes that were never set.
+_agent_run_manager_mock = MagicMock()
+_agent_run_manager_mock.reserve_agent_capacity.return_value = "agent-capacity-test"
+_agent_run_manager_mock.reserve_agent_run.return_value = "agent-run-reservation"
+for _method in (
+    "register_agent_run",
+    "unregister_agent_run",
+    "release_agent_run_reservation",
+    "release_agent_capacity",
+    "stop_agent_run",
+    "get_agent_run_info",
+    "submit",
+):
+    setattr(_agent_run_manager_mock, _method, MagicMock())
+agent_run_manager_module.agent_run_manager = _agent_run_manager_mock
 sys.modules["management.services.agent.lifecycle"] = agent_run_manager_module
 sys.modules["management.services.agent.preprocessing"] = MagicMock()
 
@@ -10719,9 +10732,15 @@ async def test_import_agent_with_skills_impl_success():
     """Test import_agent_with_skills_impl successfully imports agent with skills."""
     from management.services.agent.service import import_agent_with_skills_impl
     from management.services.agent import transfer as ag_svc
-    existing_skills = [{'name': 'ExistingSkill'}]
-    new_skills = [MagicMock(skill_name='NewSkill', skill_zip_base64='SGVsbG8gV29ybGQ=')]
-    mock_agent_info = types.SimpleNamespace(agent_id=1, agent_info={'1': types.SimpleNamespace(agent_id=1, skill_names=['NewSkill'], tools=[])})
+    existing_skills = [{"name": "ExistingSkill"}]
+    new_skills = [MagicMock(skill_name="NewSkill", skill_zip_base64="SGVsbG8gV29ybGQ=")]
+
+    mock_agent_info = types.SimpleNamespace(
+        agent_id=1,
+        agent_info={
+            "1": types.SimpleNamespace(agent_id=1, name="agent_one", skill_names=["NewSkill"], tools=[]),
+        },
+    )
     mock_skill_service = MagicMock()
     mock_skill_service.create_skill_from_zip_bytes.return_value = {'skill_id': 200}
     with patch.object(agent_transfer.skill_db, 'list_skills', return_value=existing_skills):
@@ -10782,8 +10801,15 @@ async def test_import_agent_with_skills_impl_no_main_agent():
     from management.services.agent.service import import_agent_with_skills_impl
     from management.services.agent import transfer as ag_svc
     existing_skills = []
-    new_skills = [MagicMock(skill_name='NewSkill', skill_zip_base64='SGVsbG8gV29ybGQ=')]
-    mock_agent_info = types.SimpleNamespace(agent_id=1, agent_info={'1': types.SimpleNamespace(agent_id=1, skill_names=['NewSkill'], tools=[])})
+    # Use valid base64 encoded string "Hello World"
+    new_skills = [MagicMock(skill_name="NewSkill", skill_zip_base64="SGVsbG8gV29ybGQ=")]
+
+    mock_agent_info = types.SimpleNamespace(
+        agent_id=1,
+        agent_info={
+            "1": types.SimpleNamespace(agent_id=1, name="agent_one", skill_names=["NewSkill"], tools=[]),
+        },
+    )
     mock_skill_service = MagicMock()
     mock_skill_service.create_skill_from_zip_bytes.return_value = {'skill_id': 200}
     with patch.object(agent_transfer.skill_db, 'list_skills', return_value=existing_skills):
@@ -10802,10 +10828,33 @@ async def test_import_agent_with_skills_impl_resolves_existing_and_renamed_per_a
     from contracts.skill import SkillResolution
     from management.services.agent.service import import_agent_with_skills_impl
     from management.services.agent import transfer as ag_svc
-    agent_info = types.SimpleNamespace(agent_id=1, agent_info={'1': types.SimpleNamespace(agent_id=1, skill_names=['ExistingSkill'], tools=[]), '2': types.SimpleNamespace(agent_id=2, skill_names=['RenamedSkill', 'NewSkill', 'MissingSkill'], tools=[])})
-    skills = [types.SimpleNamespace(skill_name='ExistingSkill', skill_zip_base64='eA=='), types.SimpleNamespace(skill_name='RenamedSkill', skill_zip_base64='eA=='), types.SimpleNamespace(skill_name='NewSkill', skill_zip_base64='eA==')]
-    rename_target = 'RenamedSkill 副本'
-    resolutions = [SkillResolution(skill_name='ExistingSkill', action='use_existing'), SkillResolution(skill_name='RenamedSkill', action='rename', new_name=rename_target)]
+
+    agent_info = types.SimpleNamespace(
+        agent_id=1,
+        agent_info={
+            "1": types.SimpleNamespace(
+                agent_id=1, name="agent_one", skill_names=["ExistingSkill"], tools=[]
+            ),
+            "2": types.SimpleNamespace(
+                agent_id=2,
+                name="agent_two",
+                skill_names=["RenamedSkill", "NewSkill", "MissingSkill"],
+                tools=[],
+            ),
+        },
+    )
+    skills = [
+        types.SimpleNamespace(skill_name="ExistingSkill", skill_zip_base64="eA=="),
+        types.SimpleNamespace(skill_name="RenamedSkill", skill_zip_base64="eA=="),
+        types.SimpleNamespace(skill_name="NewSkill", skill_zip_base64="eA=="),
+    ]
+    rename_target = "RenamedSkill \u526f\u672c"
+    resolutions = [
+        SkillResolution(skill_name="ExistingSkill", action="use_existing"),
+        SkillResolution(
+            skill_name="RenamedSkill", action="rename", new_name=rename_target
+        ),
+    ]
     mock_skill_service = MagicMock()
     mock_skill_service.create_skill_from_zip_bytes.side_effect = [{'skill_id': 20}, {'skill_id': 30}]
     with patch.object(agent_transfer.skill_db, 'list_skills', return_value=[{'name': 'ExistingSkill', 'skill_id': 10}, {'name': 'RenamedSkill', 'skill_id': 11}]), patch.object(agent_transfer, 'generate_available_copy_skill_name', side_effect=lambda base_name, _: f'{base_name} 副本'), patch.object(agent_transfer, 'SkillService', return_value=mock_skill_service), patch.object(agent_transfer, 'import_agent_impl', new_callable=AsyncMock, return_value={1: 101, 2: 102}), patch.object(agent_transfer.skill_db, 'create_or_update_skill_by_skill_info') as mock_create_instance:
@@ -11346,7 +11395,7 @@ async def test_import_agent_by_agent_id_invalid_name():
     mock_agent_info.business_logic_model_id = None
     mock_agent_info.business_logic_model_name = None
 
-    with pytest.raises(ValueError, match="Invalid agent name"):
+    with pytest.raises(ValueError, match="Python identifier"):
         await import_agent_by_agent_id(
             import_agent_info=mock_agent_info, tenant_id="tenant_1", user_id="user_1"
         )
@@ -18641,7 +18690,9 @@ async def test_import_agent_with_skills_rejects_parameters_before_dependency_wri
     mocker.patch.object(agent_transfer, 'query_all_tools', return_value=[{'class_name': 'AidpSearchTool', 'source': 'local', 'params': [{'name': 'kds_list'}]}])
     skill_service = mocker.patch.object(agent_transfer, 'SkillService')
     import_agents = mocker.patch.object(agent_transfer, 'import_agent_impl', new_callable=AsyncMock)
-    snapshot = types.SimpleNamespace(agent_info={'1': types.SimpleNamespace(tools=[types.SimpleNamespace(class_name='AidpSearchTool', source='local', params={'unknown': 1})])})
+    snapshot = types.SimpleNamespace(agent_info={"1": types.SimpleNamespace(name="agent_one", tools=[
+        types.SimpleNamespace(class_name='AidpSearchTool', source='local', params={'unknown': 1}),
+    ])})
     with pytest.raises(AgentToolImportError, match='unknown'):
         await management.import_agent_with_skills_impl(snapshot, [], AuthenticatedIdentity('user', 'tenant'))
     skill_service.assert_not_called()

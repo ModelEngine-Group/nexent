@@ -1,8 +1,16 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { Popover, Tabs } from "antd";
 import { XIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -29,23 +37,41 @@ function entriesOf(value: JsonObject | JsonValue[]): [string, JsonValue][] {
         .map((key) => [key, value[key]]);
 }
 
+function MetadataGroup({
+  name,
+  value,
+}: {
+  name: string;
+  value: JsonObject | JsonValue[];
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <details
+      className={styles.group}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary>{name}</summary>
+      {expanded && (
+        <div className={styles.children}>
+          {Object.keys(value).length ? (
+            <MetadataProperties value={value} />
+          ) : Array.isArray(value) ? (
+            "[]"
+          ) : (
+            "{}"
+          )}
+        </div>
+      )}
+    </details>
+  );
+}
+
 function MetadataProperties({ value }: { value: JsonObject | JsonValue[] }) {
   return (
     <div className={styles.properties}>
       {entriesOf(value).map(([key, entry]) =>
         isStructured(entry) ? (
-          <details key={key} className={styles.group}>
-            <summary>{key}</summary>
-            <div className={styles.children}>
-              {Object.keys(entry).length ? (
-                <MetadataProperties value={entry} />
-              ) : Array.isArray(entry) ? (
-                "[]"
-              ) : (
-                "{}"
-              )}
-            </div>
-          </details>
+          <MetadataGroup key={key} name={key} value={entry} />
         ) : (
           <dl key={key} className={styles.property}>
             <dt>{key}</dt>
@@ -57,21 +83,79 @@ function MetadataProperties({ value }: { value: JsonObject | JsonValue[] }) {
   );
 }
 
+const MetadataJson = memo(function MetadataJson({
+  metadata,
+}: {
+  metadata: JsonObject;
+}) {
+  const text = useMemo(() => JSON.stringify(metadata, null, 2), [metadata]);
+  return <pre className={styles.json}>{text}</pre>;
+});
+
+function MetadataDetails({
+  metadata,
+  popoverRef,
+  onClose,
+}: {
+  metadata: JsonObject;
+  popoverRef: RefObject<HTMLDivElement | null>;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      className={styles.popover}
+      ref={popoverRef}
+      role="dialog"
+      aria-label={t("chat.sources.attributes")}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+    >
+      <div className={styles.heading}>
+        <span>{t("chat.sources.attributes")}</span>
+        <button
+          type="button"
+          aria-label={t("chat.sources.closeAttributes")}
+          onClick={onClose}
+        >
+          <XIcon className="size-4" />
+        </button>
+      </div>
+      <Tabs
+        size="small"
+        items={[
+          {
+            key: "properties",
+            label: t("chat.sources.properties"),
+            children: <MetadataProperties value={metadata} />,
+          },
+          {
+            key: "json",
+            label: t("chat.sources.rawJson"),
+            children: <MetadataJson metadata={metadata} />,
+          },
+        ]}
+      />
+    </div>
+  );
+}
+
 /** Per-hit raw-key chips; hover, focus and click reveal the complete snapshot. */
-export function SourceMetadata({ metadata }: SourceMetadataProps) {
+export const SourceMetadata = memo(function SourceMetadata({
+  metadata,
+}: SourceMetadataProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [pinned, setPinned] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(0);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const measureRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
-  const close = () => {
+  const close = useCallback(() => {
     if (popoverRef.current?.contains(document.activeElement))
       triggerRef.current?.focus();
     setPinned(false);
     setOpen(false);
-  };
+  }, []);
   useEffect(() => {
     if (!pinned) return;
     const dismiss = (event: PointerEvent) => {
@@ -109,52 +193,6 @@ export function SourceMetadata({ metadata }: SourceMetadataProps) {
     [entries, t]
   );
 
-  useLayoutEffect(() => {
-    const trigger = triggerRef.current;
-    const measure = measureRef.current;
-    if (!trigger || !measure) return;
-    const update = () => {
-      const width = trigger.clientWidth;
-      if (!width) return;
-      const children = Array.from(measure.children) as HTMLElement[];
-      const overflow = children[labels.length];
-      const widths = children
-        .slice(0, labels.length)
-        .map((child) => child.getBoundingClientRect().width);
-      const fits = (count: number) => {
-        const sizes = widths.slice(0, count);
-        if (count < labels.length) {
-          overflow.textContent = `+${labels.length - count}`;
-          sizes.push(overflow.getBoundingClientRect().width);
-        }
-        let rows = 1,
-          used = 0;
-        for (const size of sizes) {
-          if (used && used + 5 + size > width) {
-            rows++;
-            used = 0;
-          }
-          used += (used ? 5 : 0) + size;
-        }
-        return rows <= 2;
-      };
-      let count = labels.length;
-      while (count > 0 && !fits(count)) count--;
-      setVisibleCount(count);
-    };
-    update();
-    let active = true;
-    document.fonts?.ready.then(() => {
-      if (active) update();
-    });
-    const observer = new ResizeObserver(update);
-    observer.observe(trigger);
-    return () => {
-      active = false;
-      observer.disconnect();
-    };
-  }, [labels]);
-
   if (!metadata || entries.length === 0) return null;
 
   return (
@@ -172,46 +210,13 @@ export function SourceMetadata({ metadata }: SourceMetadataProps) {
         placement="bottomLeft"
         mouseEnterDelay={0.15}
         mouseLeaveDelay={0.2}
+        destroyOnHidden
         content={
-          <div
-            className={styles.popover}
-            ref={popoverRef}
-            role="dialog"
-            aria-label={t("chat.sources.attributes")}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") close();
-            }}
-          >
-            <div className={styles.heading}>
-              <span>{t("chat.sources.attributes")}</span>
-              <button
-                type="button"
-                aria-label={t("chat.sources.closeAttributes")}
-                onClick={close}
-              >
-                <XIcon className="size-4" />
-              </button>
-            </div>
-            <Tabs
-              size="small"
-              items={[
-                {
-                  key: "properties",
-                  label: t("chat.sources.properties"),
-                  children: <MetadataProperties value={metadata} />,
-                },
-                {
-                  key: "json",
-                  label: t("chat.sources.rawJson"),
-                  children: (
-                    <pre className={styles.json}>
-                      {JSON.stringify(metadata, null, 2)}
-                    </pre>
-                  ),
-                },
-              ]}
-            />
-          </div>
+          <MetadataDetails
+            metadata={metadata}
+            popoverRef={popoverRef}
+            onClose={close}
+          />
         }
       >
         <button
@@ -240,27 +245,14 @@ export function SourceMetadata({ metadata }: SourceMetadataProps) {
           }}
         >
           <span className={styles.chips}>
-            {labels.slice(0, visibleCount).map((label, index) => (
+            {labels.map((label, index) => (
               <span key={entries[index][0]} className={styles.chip}>
                 {label}
               </span>
             ))}
-            {visibleCount < labels.length && (
-              <span className={styles.chip}>
-                +{labels.length - visibleCount}
-              </span>
-            )}
           </span>
         </button>
       </Popover>
-      <div className={styles.measure} ref={measureRef} aria-hidden="true">
-        {labels.map((label, index) => (
-          <span key={entries[index][0]} className={styles.chip}>
-            {label}
-          </span>
-        ))}
-        <span className={styles.chip}>+{labels.length}</span>
-      </div>
     </div>
   );
-}
+});

@@ -49,7 +49,8 @@ data-process = [
 ]
 test = [
     "nexent[dev]",
-    "pytest",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
     "pytest-cov",
     "coverage",
     "jsonschema>=4.25.0",
@@ -57,7 +58,6 @@ test = [
     "langfuse==2.60.10",
     "unittest2",
     "mock",
-    "pytest-asyncio",
     "pytest-mock",
     "httpx>=0.28.1",
     "selenium",

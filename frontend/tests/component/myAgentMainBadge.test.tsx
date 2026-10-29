@@ -9,7 +9,9 @@ import type { MyEditableAgentItem } from "@/types/agentRepository";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string) => {
+    t: (key: string, options?: { version?: string }) => {
+      if (key === "agentRepository.mine.currentVersion")
+        return `版本 ${options?.version}`;
       const translations: Record<string, string> = {
         "agentRepository.card.mainAgent": "主智能体",
         "agentRepository.card.untitled": "未命名",
@@ -27,10 +29,22 @@ vi.mock("@/app/[locale]/agent-space/components/MyAgentIcon", () => ({
 }));
 
 vi.mock("@/components/resource/ResourceCard", () => ({
-  default: ({ title, badge }: { title?: unknown; badge?: unknown }) => (
+  default: ({
+    title,
+    badge,
+    subtitle,
+    statusRow,
+  }: {
+    title?: unknown;
+    badge?: unknown;
+    subtitle?: unknown;
+    statusRow?: unknown;
+  }) => (
     <div>
       <div data-testid="card-title">{title as never}</div>
       <div data-testid="card-badge">{badge as never}</div>
+      <div data-testid="card-subtitle">{subtitle as never}</div>
+      <div data-testid="card-status">{statusRow as never}</div>
     </div>
   ),
 }));
@@ -73,6 +87,37 @@ describe("MyAgentCard main-agent badge", () => {
   it("omits the badge for a non-main agent", () => {
     renderCard({ ...baseAgent, is_main_agent: false });
     expect(screen.queryByText("主智能体")).not.toBeInTheDocument();
+  });
+
+  it("puts the main badge and version in one subtitle row while preserving status", () => {
+    renderCard({ ...baseAgent, is_main_agent: true, version_label: "v1.0" });
+    const subtitle = screen.getByTestId("card-subtitle");
+    const badge = screen.getByText("主智能体");
+    const version = screen.getByText("版本 v1.0");
+    expect(subtitle).toContainElement(badge);
+    expect(subtitle).toContainElement(version);
+    expect(badge.parentElement).toHaveClass("flex", "items-center");
+    expect(badge).toHaveClass("shrink-0");
+    expect(version).toHaveClass("truncate");
+    expect(screen.getByTestId("card-badge")).toBeEmptyDOMElement();
+    expect(screen.getByTestId("card-status")).toHaveTextContent("已发布");
+  });
+
+  it("keeps the main badge in the subtitle even without a version", () => {
+    renderCard({ ...baseAgent, version_label: null });
+    expect(screen.getByTestId("card-subtitle")).toHaveTextContent("主智能体");
+    expect(screen.getByTestId("card-badge")).toBeEmptyDOMElement();
+  });
+
+  it("shows only the version for a non-main agent", () => {
+    renderCard({ ...baseAgent, is_main_agent: false, version_label: "v2" });
+    expect(screen.getByTestId("card-subtitle")).toHaveTextContent("版本 v2");
+    expect(screen.queryByText("主智能体")).not.toBeInTheDocument();
+  });
+
+  it("omits the subtitle when neither a main badge nor a version exists", () => {
+    renderCard({ ...baseAgent, is_main_agent: false, version_label: null });
+    expect(screen.getByTestId("card-subtitle")).toBeEmptyDOMElement();
   });
 });
 

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Deterministic formatting for structured context item groups.
 
 These pure functions are owned by the SDK because final model-message
@@ -122,8 +124,13 @@ def _format_external_agents_description(
     lines = [labels["heading"]]
     lines.append(labels["intro"])
     for agent in external_a2a_agents.values():
-        name = agent.name if hasattr(agent, "name") else agent.get("name", "")
+        original_name = agent.name if hasattr(agent, "name") else agent.get("name", "")
+        name = (getattr(agent, "invocation_name", None) if hasattr(agent, "name")
+                else agent.get("invocation_name")) or original_name
+        display_name = (getattr(agent, "display_name", None) if hasattr(agent, "name")
+                        else agent.get("display_name")) or original_name
         desc = agent.description if hasattr(agent, "description") else agent.get("description", "")
-        lines.append(f" - {name}: {desc}")
+        label = name if display_name == name else f"{name} ({display_name})"
+        lines.append(f" - {label}: {desc}")
     lines.extend(["", labels["guidance"]])
     return "\n".join(lines)

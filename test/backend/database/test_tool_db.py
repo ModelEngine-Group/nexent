@@ -120,6 +120,9 @@ sys.modules['management.db.models'] = db_models_mock
 # Mock agent_db module
 agent_db_mock = MagicMock()
 agent_db_mock.logger = MagicMock()
+# Declared up front so the autouse fixture can monkeypatch it: setattr on a bare
+# MagicMock cannot create a brand-new attribute on every pytest version.
+agent_db_mock.is_system_agent = MagicMock(return_value=False)
 
 # Add the mocked agent_db module to sys.modules
 sys.modules['management.db.agent.repository'] = agent_db_mock

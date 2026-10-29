@@ -921,20 +921,6 @@ async def run_agent_stream(
 
     async def stream_with_agent_context():
         try:
-            producer_task = None
-            if channel is not None:
-                producer_task = asyncio.create_task(
-                    _consume_agent_stream_producer(
-                        stream_gen=stream_gen,
-                        channel=channel,
-                        agent_metadata=agent_metadata,
-                        conversation_id=agent_request.conversation_id,
-                        user_id=resolved_user_id,
-                    )
-                )
-                _agent_stream_producer_tasks.add(producer_task)
-                producer_task.add_done_callback(_agent_stream_producer_tasks.discard)
-
             # Emit conversation_created event for new conversations
             if is_new_conversation:
                 yield (
@@ -1011,11 +997,12 @@ async def run_agent_stream(
                     wait_timeout=0,
                     mark_stuck_on_timeout=False,
                 )
-            agent_run_manager.release_agent_run_reservation(
-                _agent_run_identifier(agent_request),
-                resolved_user_id,
-                reservation_token,
-            )
+            if channel is None:
+                agent_run_manager.release_agent_run_reservation(
+                    _agent_run_identifier(agent_request),
+                    resolved_user_id,
+                    reservation_token,
+                )
 
     headers = {
         "Cache-Control": "no-cache",
@@ -1034,8 +1021,46 @@ async def run_agent_stream(
     if workbench_config_version is not None:
         headers["X-Workbench-Config-Version"] = str(workbench_config_version)
 
-    return StreamingResponse(
+    response = StreamingResponse(
         stream_with_agent_context(),
         media_type="text/event-stream",
         headers=headers,
     )
+
+    if channel is not None:
+        def release_producer_resources(task: asyncio.Task) -> None:
+            """Retain preparation ownership until the detached producer exits."""
+            _agent_stream_producer_tasks.discard(task)
+            reservation_released = agent_run_manager.release_agent_run_reservation(
+                run_identifier,
+                resolved_user_id,
+                reservation_token,
+            )
+            # A task cancelled before its first iteration cannot run the
+            # generator's finally block to release the deferred worker.
+            # A consumed/released reservation belongs to generate_stream;
+            # let its bound worker finish its own cleanup.
+            if reservation_released and not execution.future.done():
+                deferred_run.cancel()
+                runtime_thread_manager.cancel(
+                    execution.execution_id,
+                    reason="agent stream producer finished",
+                    wait_timeout=0,
+                    mark_stuck_on_timeout=False,
+                )
+
+        # Start independently of response-body iteration so clients may close
+        # the connection as soon as they receive the conversation ID header.
+        producer_task = asyncio.create_task(
+            _consume_agent_stream_producer(
+                stream_gen=stream_gen,
+                channel=channel,
+                agent_metadata=agent_metadata,
+                conversation_id=agent_request.conversation_id,
+                user_id=resolved_user_id,
+            )
+        )
+        _agent_stream_producer_tasks.add(producer_task)
+        producer_task.add_done_callback(release_producer_resources)
+
+    return response

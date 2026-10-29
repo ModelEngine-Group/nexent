@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Construction and fallback preserve the run's mapping and resource ownership."""
 
 from concurrent.futures import CancelledError
@@ -101,9 +103,14 @@ def test_allowed_local_fallback_clears_mappings_and_warns(construction, mocker):
     c.factory.sandbox_config.failure_policy = 'local'
     c.executor._nexent_backend = 'local'
     tool = Mock(name='file-tool')
+    tool.name = 'read'
     tool.workspace_mapping = c.factory.workspace_mapping
     plain_tool = Mock(name='plain-tool', workspace_mapping=None)
-    c.config.tools = [ToolConfig(name='read', class_name='ReadFileTool', source='local', params={})] * 2
+    plain_tool.name = 'plain_tool'
+    c.config.tools = [
+        ToolConfig(name='read', class_name='ReadFileTool', source='local', params={}),
+        ToolConfig(name='plain_tool', class_name='PlainTool', source='local', params={}),
+    ]
     mocker.patch.object(c.factory, 'create_tool', side_effect=[tool, plain_tool])
     mocker.patch.object(agent_module, '_wrap_tool_with_monitoring', side_effect=lambda tool, _: tool)
     result = c.factory.create_single_agent(c.config)
@@ -158,6 +165,7 @@ def test_deferred_local_fallback_clears_mapping_and_warns(construction, mocker):
     c.factory.sandbox_config.failure_policy = 'local'
     c.executor._nexent_backend = 'local'
     tool = Mock(name='file-tool', workspace_mapping=c.factory.workspace_mapping)
+    tool.name = 'read'
     c.config.tools = [ToolConfig(name='read', class_name='ReadFileTool', source='local', params={})]
     mocker.patch.object(c.factory, 'create_tool', return_value=tool)
     mocker.patch.object(agent_module, '_wrap_tool_with_monitoring', side_effect=lambda tool, _: tool)
