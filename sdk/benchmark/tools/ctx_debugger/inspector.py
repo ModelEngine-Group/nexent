@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """CLI inspector for ctx_debugger JSONL traces.
 
 Usage:
@@ -24,7 +26,7 @@ try:
     from rich.panel import Panel
     from rich.table import Table
 except ImportError:
-    sys.stderr.write("ERROR: rich is required.  pip install rich\n")
+    sys.stderr.write("ERROR: rich is required.  uv pip install rich\n")
     sys.exit(1)
 
 

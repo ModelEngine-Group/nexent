@@ -162,6 +162,9 @@ change:
     deleted between tests. The same model repository suite passes on 9.1.1
     and reproduces CI's missing attribute on 9.2. No tests or assertions are
     removed; rerun the complete failed-file selection and remote CI.
+    Retain develop's CPU-default uv indexes, local SDK source and pinned test
+    dependencies when merging installation changes; add only this PR's SQLite
+    test driver to the upstream test extra without duplicating framework pins.
 
     Clarification UT retains real inserts, RETURNING, rollback and stored-answer
     assertions. Older Linux x86_64 test runners use the test-only bundled SQLite

@@ -838,6 +838,7 @@
   "agent.debug.compareEmpty": "暂无输出",
   "agent.debug.defaultMode": "默认模式",
   "agent.debug.compareMode": "对比模式",
+  "agent.debug.toggleCompareMode": "切换对比模式",
   "agent.debug.promptCompare.title": "提示词对比",
   "agent.debug.promptCompare.close": "关闭",
   "agent.debug.promptCompare.apply": "一键替换",

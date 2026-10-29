@@ -208,7 +208,7 @@ export default function EvaluationDetailPage() {
   // { case_id: {schema_id: value} } in local state for O(1) lookups.
   const fetchAnnotations = useCallback(() => {
     if (!id) return;
-    fetch(`/api/evaluation-annotations/${id}/annotations`, {
+    fetch(API_ENDPOINTS.evaluationAnnotations.annotations(id), {
       headers: getAuthHeaders(),
     })
       .then((r) => r.json())
@@ -226,7 +226,9 @@ export default function EvaluationDetailPage() {
   }, [id]);
 
   const fetchSchemas = useCallback(() => {
-    fetch("/api/evaluation-annotations/schemas", { headers: getAuthHeaders() })
+    fetch(API_ENDPOINTS.evaluationAnnotations.schemas, {
+      headers: getAuthHeaders(),
+    })
       .then((r) => r.json())
       .then((d) => setSchemas(d.data || []));
   }, []);
@@ -237,7 +239,7 @@ export default function EvaluationDetailPage() {
   const fetchAnnoStats = useCallback(
     (schemaId: number) => {
       fetch(
-        `/api/evaluation-annotations/${id}/annotation-stats?schema_id=${schemaId}`,
+        `${API_ENDPOINTS.evaluationAnnotations.annotationStats(id)}?schema_id=${schemaId}`,
         { headers: getAuthHeaders() }
       )
         .then((r) => r.json())
@@ -295,7 +297,7 @@ export default function EvaluationDetailPage() {
         [caseId]: { ...(prev[caseId] || {}), [schemaId]: value },
       }));
       try {
-        await fetch(`/api/evaluation-annotations/${id}/annotations`, {
+        await fetch(API_ENDPOINTS.evaluationAnnotations.annotations(id), {
           method: "PUT",
           headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -319,7 +321,7 @@ export default function EvaluationDetailPage() {
 
   const persistSchemaIds = async (ids: number[]) => {
     try {
-      await fetch(`/api/agent-evaluations/${id}/annotation-schemas`, {
+      await fetch(API_ENDPOINTS.agentEvaluations.annotationSchemas(id), {
         method: "PUT",
         headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ schema_ids: ids }),
@@ -344,7 +346,7 @@ export default function EvaluationDetailPage() {
       try {
         // Fresh backend count — do not rely on possibly-stale local state.
         const r = await fetch(
-          `/api/evaluation-annotations/${id}/annotation-stats?schema_id=${schemaId}`,
+          `${API_ENDPOINTS.evaluationAnnotations.annotationStats(id)}?schema_id=${schemaId}`,
           { headers: getAuthHeaders() }
         );
         const d = await r.json();
@@ -370,7 +372,7 @@ export default function EvaluationDetailPage() {
         }
         // Cascade-delete all annotation rows for this schema within this run.
         await fetch(
-          `/api/evaluation-annotations/${id}/annotations?schema_id=${schemaId}`,
+          `${API_ENDPOINTS.evaluationAnnotations.annotations(id)}?schema_id=${schemaId}`,
           { method: "DELETE", headers: getAuthHeaders() }
         );
         // Drop this schema from local annotation + stats caches.
@@ -404,7 +406,9 @@ export default function EvaluationDetailPage() {
 
   const fetchStats = useCallback(() => {
     if (!id) return;
-    fetch(`/api/agent-evaluations/${id}/stats`, { headers: getAuthHeaders() })
+    fetch(API_ENDPOINTS.agentEvaluations.stats(id), {
+      headers: getAuthHeaders(),
+    })
       .then((r) => r.json())
       .then((d) => {
         if (d.data) setStats(d.data);
@@ -441,7 +445,7 @@ export default function EvaluationDetailPage() {
       setCaseLoading(true);
       const offset = (page - 1) * size;
       const queryKey = getCaseTotalQueryKey(tab, filters, sessionId);
-      let url = `/api/agent-evaluations/${id}/cases?limit=${size}&offset=${offset}`;
+      let url = `${API_ENDPOINTS.agentEvaluations.cases(id)}?limit=${size}&offset=${offset}`;
       if (sortBy)
         url += `&sort_by=${encodeURIComponent(sortBy)}&sort_order=${sortOrder}`;
       if (tab !== "all") url += `&pass_filter=${tab}`;
@@ -1164,7 +1168,7 @@ export default function EvaluationDetailPage() {
                     setAnalyzing(true);
                     try {
                       const r = await fetch(
-                        `/api/agent-evaluations/${run.agent_evaluation_id}/analyze?force=true`,
+                        `${API_ENDPOINTS.agentEvaluations.analyze(run.agent_evaluation_id)}?force=true`,
                         { method: "POST", headers: getAuthHeaders() }
                       );
                       const d = await r.json();

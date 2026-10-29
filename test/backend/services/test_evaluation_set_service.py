@@ -185,8 +185,14 @@ install_business_constant_stubs(_consts_const_module)
 _consts_pkg.const = _consts_const_module
 
 # Function-body imports used by the AIDP KB helpers.
-sys.modules["ext_components.aidp.services.aidp_access_service"] = MagicMock()
-sys.modules["ext_components.aidp.services.aidp_service"] = MagicMock()
+# Name the attributes the suite monkeypatches: setattr cannot introduce a new
+# attribute on a bare MagicMock under newer pytest versions.
+_aidp_access_stub = MagicMock()
+_aidp_access_stub.resolve_current_aidp_access = MagicMock()
+sys.modules["ext_components.aidp.services.aidp_access_service"] = _aidp_access_stub
+_aidp_service_stub = MagicMock()
+_aidp_service_stub.fusion_search_impl = MagicMock()
+sys.modules["ext_components.aidp.services.aidp_service"] = _aidp_service_stub
 
 _db_pkg = _register_package("database")
 _db_client_module = MagicMock()
@@ -231,7 +237,10 @@ _utils_pkg.prompt_template_utils = _utils_prompt_mock
 
 # Function-body imports used by the KB / LLM / export helpers.
 sys.modules["management.services.evaluation.spreadsheet"] = MagicMock()
-sys.modules["management.services.knowledge_base.service"] = MagicMock()
+_kb_service_stub = MagicMock()
+_kb_service_stub.get_vector_db_core = MagicMock()
+_kb_service_stub.get_embedding_model_by_index_name = MagicMock()
+sys.modules["management.services.knowledge_base.service"] = _kb_service_stub
 sys.modules["management.services.agent.profile"] = MagicMock()
 
 
