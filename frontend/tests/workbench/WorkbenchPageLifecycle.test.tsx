@@ -66,15 +66,7 @@ const runtime = {
 };
 const config = {
   ...initialWorkbenchState.config,
-  model_id: 11,
-  generation_config: {
-    deep_thinking: true,
-    thinking_effort: "xhigh" as const,
-    reasoning_budget_tokens: 4096,
-    requested_output_tokens: 1234,
-    temperature: 0.7,
-    top_p: 0.8,
-  },
+  requested_output_tokens: 1234,
 };
 const translate = (_key: string, fallback?: unknown) =>
   typeof fallback === "string" ? fallback : _key;
@@ -156,7 +148,7 @@ vi.mock("@/components/ui/sidebar", () => ({
   SidebarProvider: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("@/hooks/model/useModelList", () => ({
-  useModelList: () => ({ availableLlmModels: [], isLoading: false }),
+  useModelList: () => ({ llmModels: [], availableLlmModels: [], isLoading: false }),
 }));
 vi.mock("@/hooks/useConfig", () => ({
   useConfig: () => ({ modelConfig: undefined }),
@@ -445,13 +437,13 @@ it("ignores delayed loads and saves from an inactive conversation", async () => 
   );
   await act(async () => {
     saveB.resolve({
-      workbench_config: { ...config, model_id: 99 },
+      workbench_config: { ...config, requested_output_tokens: 999 },
       workbench_config_version: 999,
     });
     await saving;
   });
   expect(runConfig().threadId).toBe("101");
-  expect(runConfig().workbenchConfig.model_id).toBe(11);
+  expect(runConfig().workbenchConfig.requested_output_tokens).toBe(1234);
   expect(runConfig().workbenchConfigVersion).toBe(101);
 });
 
@@ -468,9 +460,7 @@ it("a version conflict bypasses shared history and preserves input and model par
   );
   expect(conversationService.getById).toHaveBeenCalledTimes(2);
   expect(runConfig().workbenchConfigVersion).toBe(999);
-  expect(runConfig().workbenchConfig.generation_config).toEqual(
-    config.generation_config
-  );
+  expect(runConfig().workbenchConfig.requested_output_tokens).toBe(config.requested_output_tokens);
   expect(runtime.thread.composer.setText).toHaveBeenCalledWith(
     "Keep this question"
   );
@@ -483,14 +473,12 @@ it("uses the server-issued ID first and preserves exact model config and version
   expect(runConfig().threadId).toBeUndefined();
   await act(async () => runConfig().onServerConversationId("303"));
   await waitFor(() => expect(runConfig().threadId).toBe("303"));
-  expect(runConfig().workbenchConfig.generation_config).toEqual(
-    config.generation_config
-  );
+  expect(runConfig().workbenchConfig.requested_output_tokens).toBe(1234);
   expect(runConfig().workbenchConfigVersion).toBe(7);
   act(() => runConfig().onWorkbenchConfigVersion(8));
   expect(runConfig().workbenchConfigVersion).toBe(8);
   expect(view.props?.conversationId).toBe(303);
-  expect(view.props?.thinkingEffort).toBe("xhigh");
+  expect(runConfig().workbenchConfig).not.toHaveProperty("generation_config");
 });
 
 it("restores a local chat snapshot after entering and leaving creation", async () => {
@@ -556,8 +544,11 @@ it("restores generated local Skill files after visiting another creation thread"
   expect(runConfig().draftSnapshot.files).toEqual([
     { path: "SKILL.md", content: "saved skill file" },
   ]);
-  expect(runConfig().creationWorkbenchConfig.generation_config).toEqual(
-    config.generation_config
+  expect(runConfig().creationWorkbenchConfig.requested_output_tokens).toBe(
+    1234
+  );
+  expect(runConfig().creationWorkbenchConfig).not.toHaveProperty(
+    "generation_config"
   );
 });
 

@@ -16,7 +16,6 @@ import { useTranslation } from "react-i18next";
 import { App } from "antd";
 import log from "@/lib/logger";
 import { SelectedResourceChips } from "@/features/workbench/components/SelectedResourceChips";
-import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
 import { SkillPicker } from "@/features/workbench/components/SkillPicker";
 import type { WorkbenchSkillMount } from "@/features/workbench/types";
 import { CreationExamples } from "@/features/workbench/components/CreationExamples";
@@ -136,19 +135,13 @@ const KnowledgeBookIcon: FC<{ className?: string }> = ({ className }) => (
 export type ChatMode = "planning" | "execution";
 
 export interface ComposerProps {
+  conversationId?: number;
   models: readonly ModelOption[];
   selectedModelId?: string;
   onModelChange?: (modelId: string) => void;
-  deepThinking?: boolean;
-  onDeepThinkingChange?: (enabled: boolean) => void;
-  thinkingEffort?: ReasoningEffort;
-  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
-  reasoningBudgetTokens?: number;
-  onReasoningBudgetTokensChange?: (budget: number) => void;
   chatMode: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
-  modelParameterSettings?: ModelParameterSettingsControl;
   children?: ReactNode;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
@@ -289,19 +282,13 @@ const SkillComposerDirectiveChip: FC<LexicalDirectiveChipProps> = ({
 );
 
 export const Composer: FC<ComposerProps> = ({
+  conversationId,
   models,
   selectedModelId,
   onModelChange,
-  deepThinking,
-  onDeepThinkingChange,
-  thinkingEffort,
-  onThinkingEffortChange,
-  reasoningBudgetTokens,
-  onReasoningBudgetTokensChange,
   chatMode,
   onChatModeChange,
   showModelSelector = true,
-  modelParameterSettings,
   children,
   knowledgeScope = null,
   knowledgePreview = null,
@@ -349,7 +336,11 @@ export const Composer: FC<ComposerProps> = ({
     });
     thread.composer.setRunConfig({
       ...config,
-      custom: { ...config.custom, ...feedback },
+      custom: {
+        ...config.custom,
+        ...feedback,
+        modelPreferenceScope: modelParameterScope,
+      },
     });
   };
   const [skillPickerOpen, setSkillPickerOpen] = useState(false);
@@ -819,23 +810,14 @@ export const Composer: FC<ComposerProps> = ({
               <div className="flex min-w-0 flex-[1_1_16rem] items-center justify-end gap-1">
                 {showModelSelector && (
                   <ModelSelector
+                    conversationId={conversationId}
                     models={models}
                     disabled={(modelSelectionDisabled ?? disabled) || isRunning}
-                    budgetTokens={reasoningBudgetTokens}
-                    onBudgetTokensChange={onReasoningBudgetTokensChange}
-                    parameterSettings={modelParameterSettings}
                     parameterSettingsScopeKey={modelParameterScope}
                     parameterSettingsDisabled={disabled || isRunning}
                     showEffort
                     value={selectedModelId}
                     onValueChange={onModelChange}
-                    deepThinking={deepThinking}
-                    onDeepThinkingChange={onDeepThinkingChange}
-                    effort={thinkingEffort}
-                    onEffortChange={(value) => {
-                      if (isReasoningEffort(value))
-                        onThinkingEffortChange?.(value);
-                    }}
                     variant="ghost"
                     size="sm"
                     className="min-w-0 max-w-[280px] text-sm font-normal leading-5 text-muted-foreground [&_[data-slot=model-selector-value]]:text-sm [&_[data-slot=model-selector-value]]:leading-5 [&_[data-slot=model-selector-value]]:text-muted-foreground [&_[data-slot=model-selector-value]_span]:font-normal"

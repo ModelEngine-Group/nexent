@@ -2,143 +2,115 @@
 
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { App } from "antd";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
+import {
+  getConversationModelSelection,
+  patchConversationModelSelection,
+} from "@/services/modelProfileService";
 import type { ModelOption } from "@/app/newchat/ui/model-selector";
-import type { ReasoningEffort } from "@/types/modelConfig";
-import { isReasoningEffort } from "@/lib/modelReasoning";
-import { snapshotTurnModelControls } from "./turnControls";
-import { DEFAULT_MODEL_PARAMETER_VALUES } from "@/const/modelParameterSettings";
-import type { ModelParameterValue } from "@/types/modelParameterSettings";
+import { automaticModelId } from "@/lib/modelSelection";
 import { subscribeRejectedSelection } from "./rejectedSelection";
 import {
-  useModelControlsState,
-  type ModelState,
-} from "./ConversationModelControlsProvider";
+  readModelSelectionDraft,
+  selectModelDraft,
+} from "@/lib/conversationModelDrafts";
 
 export function useConversationModelControls(
   models: readonly ModelOption[],
   sessionKey: string,
   defaultModelId?: string,
-  controlledModelId?: string
+  controlledModelId?: string,
+  conversationId?: number
 ) {
-  const {
-    sessions,
-    setSessions,
-    sampling,
-    setSampling,
-    rejected,
-    setRejected,
-  } = useModelControlsState();
-  const saved = sessions[sessionKey];
+  const client = useQueryClient();
+  const { message } = App.useApp();
+  const { t } = useTranslation();
+  const persisted = Boolean(conversationId && controlledModelId === undefined);
+  const queryKey = [
+    "conversation-model-preferences",
+    conversationId,
+    "selection",
+  ];
+  const selection = useQuery({
+    queryKey,
+    queryFn: ({ signal }) =>
+      getConversationModelSelection(conversationId!, signal),
+    enabled: persisted,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+  const save = useMutation({
+    mutationFn: (modelId: string) =>
+      patchConversationModelSelection(
+        conversationId!,
+        Number(modelId),
+        selection.data!.version
+      ),
+    onSuccess: async (result) => {
+      client.setQueryData(queryKey, result);
+      await client.invalidateQueries({
+        queryKey: ["conversation-model-preferences", conversationId],
+      });
+    },
+    onError: async () => {
+      message.error(t("modelProfile.preferencesFailed"));
+      await client.invalidateQueries({ queryKey });
+    },
+  });
+  const [, refreshDraft] = useState(0);
+  const [rejected, setRejected] = useState<Record<string, boolean>>({});
   const selectedId =
     controlledModelId ??
-    saved?.modelId ??
-    (models.some((m) => m.id === defaultModelId)
+    (persisted
+      ? selection.data?.selected_model_id?.toString()
+      : readModelSelectionDraft(sessionKey)) ??
+    (models.some((model) => model.id === defaultModelId)
       ? defaultModelId
-      : models[0]?.id);
-  const model = models.find((m) => m.id === selectedId);
-  const remembered = selectedId ? saved?.values[selectedId] : undefined;
-  const options = Array.isArray(model?.efforts) ? model.efforts : [];
-  const fallbackEffort = isReasoningEffort(model?.defaultEffort)
-    ? model.defaultEffort
-    : "auto";
-  const effort =
-    remembered?.effort === "auto" ||
-    options.some((e) => e.id === remembered?.effort)
-      ? (remembered?.effort ?? fallbackEffort)
-      : fallbackEffort;
-  const supported = Boolean(
-    model?.efforts ||
-    model?.budgetTokens ||
-    model?.reasoningCapability?.status === "supported"
-  );
-  const enabled =
-    supported && (remembered?.enabled ?? model?.defaultDeepThinking ?? false);
-  const range = model?.budgetTokens;
-  const rawBudget = remembered?.budget ?? model?.defaultBudgetTokens ?? 0;
-  const budget =
-    rawBudget > 0 && range
-      ? Math.min(range.max, Math.max(range.min, rawBudget))
-      : 0;
-  const activeModelId = model?.id;
-  const hasBudgetControl = Boolean(range);
-  const value: ModelState = { enabled, effort, budget };
-  const parameterScope = JSON.stringify([sessionKey, selectedId]);
-  const samplingValue =
-    sampling[parameterScope] ?? DEFAULT_MODEL_PARAMETER_VALUES;
+      : automaticModelId(models));
+  const model = models.find((item) => item.id === selectedId);
+  const scope = JSON.stringify([sessionKey, selectedId]);
   useEffect(
     () =>
       subscribeRejectedSelection((id) => {
         if (String(id) === selectedId)
-          setRejected((current) => ({ ...current, [parameterScope]: true }));
+          setRejected((current) => ({ ...current, [scope]: true }));
       }),
-    [selectedId, parameterScope, setRejected]
+    [selectedId, scope]
   );
   const snapshot = useMemo(
-    () =>
-      activeModelId
-        ? snapshotTurnModelControls(activeModelId, {
-            deep_thinking: enabled,
-            thinking_effort: hasBudgetControl ? "auto" : effort,
-            ...(hasBudgetControl ? { reasoning_budget_tokens: budget } : {}),
-            ...samplingValue,
-          })
-        : undefined,
-    [activeModelId, enabled, effort, hasBudgetControl, budget, samplingValue]
+    () => (model ? { model_id: Number(model.id) } : undefined),
+    [model?.id]
   );
-  const update = (patch: Partial<ModelState>) => {
-    if (!selectedId || !model) return;
-    setSessions((current) => ({
-      ...current,
-      [sessionKey]: {
-        modelId: selectedId,
-        values: {
-          ...current[sessionKey]?.values,
-          [selectedId]: { ...value, ...patch },
-        },
-      },
-    }));
-  };
   return {
     models,
+    error:
+      (selectedId && !model) || rejected[scope]
+        ? t("modelProfile.modelUnavailable")
+        : persisted && selection.isError
+          ? t("modelProfile.preferencesFailed")
+          : undefined,
     selectedModelId: selectedId,
     onModelChange: (modelId: string) => {
-      if (!models.some((m) => m.id === modelId)) return;
+      if (!models.some((item) => item.id === modelId)) return;
       setRejected((current) => ({
         ...current,
         [JSON.stringify([sessionKey, modelId])]: false,
       }));
-      setSessions((current) => ({
-        ...current,
-        [sessionKey]: {
-          modelId,
-          values: {
-            ...current[sessionKey]?.values,
-            ...(selectedId && model ? { [selectedId]: value } : {}),
-          },
-        },
-      }));
+      if (persisted) {
+        if (selection.data && !save.isPending) save.mutate(modelId);
+      } else {
+        selectModelDraft(sessionKey, modelId);
+        refreshDraft((version) => version + 1);
+      }
     },
-    deepThinking: enabled,
-    onDeepThinkingChange: (next: boolean) =>
-      update({
-        enabled: next,
-        ...(next && !enabled
-          ? { effort: fallbackEffort, budget: model?.defaultBudgetTokens ?? 0 }
-          : {}),
-      }),
-    thinkingEffort: range ? ("auto" as const) : effort,
-    onThinkingEffortChange: (next: ReasoningEffort) => update({ effort: next }),
-    reasoningBudgetTokens: budget,
-    onReasoningBudgetTokensChange: (next: number) => update({ budget: next }),
-    canSend: Boolean(model) && !rejected[parameterScope],
-    modelParameterSettings: {
-      scopeKey: parameterScope,
-      value: samplingValue,
-      defaultValue: DEFAULT_MODEL_PARAMETER_VALUES,
-      onChange: (next: ModelParameterValue) =>
-        setSampling((current) => ({ ...current, [parameterScope]: next })),
-    },
+    canSend:
+      Boolean(model) &&
+      !rejected[scope] &&
+      !save.isPending &&
+      (!persisted || (!selection.isError && !!selection.data)),
     snapshot,
   };
 }

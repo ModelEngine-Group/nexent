@@ -1,6 +1,9 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import type { ReactNode } from "react";
+import {useState, type ReactNode} from "react";
+import {App} from "antd";
+import {QueryClient, QueryClientProvider} from "@tanstack/react-query";
+import {patchModelDraft, readModelDraft} from "@/lib/conversationModelDrafts";
 import { act, renderHook } from "@testing-library/react";
 import { expect, it } from "vitest";
 import type { ModelOption } from "@/app/newchat/ui/model-selector";
@@ -22,11 +25,11 @@ const models: ModelOption[] = [
     efforts: [{ id: "high", name: "High" }],
   },
 ];
-const wrapper = ({ children }: { children: ReactNode }) => (
-  <ConversationModelControlsProvider>
-    {children}
-  </ConversationModelControlsProvider>
-);
+function BaseWrapper({children}: {children: ReactNode}) {
+  const [client] = useState(() => new QueryClient({defaultOptions:{queries:{retry:false}}}));
+  return <App><QueryClientProvider client={client}>{children}</QueryClientProvider></App>;
+}
+const wrapper = ({children}: {children: ReactNode}) => <BaseWrapper><ConversationModelControlsProvider>{children}</ConversationModelControlsProvider></BaseWrapper>;
 
 function useControls(
   local: string,
@@ -59,37 +62,22 @@ it("retains edits made after the first server response when reopening a new conv
   act(() => result.current.bind!("draft-a", "990"));
   expect(result.current.controls.snapshot).toBe(defaultSnapshot);
   act(() => result.current.controls.onModelChange("2"));
-  act(() => result.current.controls.onThinkingEffortChange("auto"));
+  act(() => patchModelDraft(`tenant:user:7:${result.current.key}`, 2, {reasoning_effort:"low"}, []));
   act(() =>
-    result.current.controls.modelParameterSettings.onChange({
-      temperature: 0,
-      top_p: 0.37,
-    })
+    patchModelDraft(`tenant:user:7:${result.current.key}`, 2, {temperature:0,top_p:0.37}, [])
   );
   const firstSelected = result.current.controls.snapshot;
-  expect(firstSelected).toEqual({
-    model_id: 2,
-    generation_config: {
-      deep_thinking: true,
-      thinking_effort: "auto",
-      temperature: 0,
-      top_p: 0.37,
-    },
-  });
+  expect(firstSelected).toEqual({model_id:2});
+  expect(readModelDraft(`tenant:user:7:${result.current.key}`, 2)).toMatchObject({temperature:0,top_p:0.37,reasoning_effort:"low"});
   rerender({ local: "historical-runtime-slot", remote: "990" });
   expect(result.current.controls.selectedModelId).toBe("2");
   expect(result.current.key).toBe("draft-a");
   expect(result.current.controls.snapshot).toBe(firstSelected);
-  act(() => result.current.controls.onDeepThinkingChange(false));
+  act(() => patchModelDraft(`tenant:user:7:${result.current.key}`, 2, {enable_thinking:false}, []));
   rerender({ local: "draft-a", remote: "" });
   expect(result.current.controls.selectedModelId).toBe("2");
-  expect(result.current.controls.deepThinking).toBe(false);
-  expect(result.current.controls.modelParameterSettings.value).toEqual({
-    temperature: 0,
-    top_p: 0.37,
-  });
-  expect(firstSelected?.generation_config.deep_thinking).toBe(true);
-  expect(defaultSnapshot?.model_id).toBe(1);
+  expect(readModelDraft(`tenant:user:7:${result.current.key}`, 2)).toMatchObject({temperature:0,top_p:0.37,enable_thinking:false,reasoning_effort:"low"});
+  expect(result.current.controls.snapshot).toEqual({model_id:2});
 });
 
 it("isolates drafts and Agent scopes through background and duplicate identity binding", () => {
@@ -146,6 +134,7 @@ it("keeps unbound histories stable and preserves local keys without the ordinary
   expect(history.result.current.key).toBe("990");
   const local = renderHook(({ remote }) => useControls("local", remote), {
     initialProps: { remote: "990" },
+    wrapper: BaseWrapper,
   });
   expect(local.result.current.bind).toBeUndefined();
   act(() => local.result.current.controls.onModelChange("2"));
