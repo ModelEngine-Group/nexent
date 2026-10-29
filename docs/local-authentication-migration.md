@@ -192,34 +192,12 @@ concurrent creator returning exists=true never disclose the supplied password.
 Rerunning deployment preserves the existing password and cannot recover plaintext
 from its hash. Backend bootstrap JSON and stdin password transport are unchanged.
 
-## Checking deployment tests after the migration
-
-Run the deployment manifest tests on Linux with Bash and Helm available in the
-same process environment as pytest. Check the selected interpreter and tools
-before running the affected selection from the repository root:
-
-```bash
-command -v python bash helm
-python -m pytest --version
-python -c 'import yaml; print(yaml.__version__)'
-helm version --short
-python -m pytest test/backend/management/test_service_directory_architecture.py test/backend/deploy/test_k8s_env_injection.py -q
-```
-
-`Helm is required for deployment manifest verification` means Helm is missing
-from the pytest process PATH. Use the backend test environment described in
-`AGENTS.md`, and make Helm available to the same runner. A login shell can select
-a different Python from the activated virtual environment; use that environment's
-interpreter explicitly when checking dependencies.
+## Checking Helm configuration after the migration
 
 `secrets.jwtSecret is required for local authentication` means Helm ran and the
-application values omitted the signing key. These tests provide a synthetic,
-test-only key in their fixture, including when invoking the deployment renderer
-directly. They do not need a real CI secret or an external authentication service.
-They also assert that an absent or empty key is rejected. Updating this test file
-is necessary when rerunning an older checkout whose fixtures predate local auth.
-The service-directory inventory must likewise omit the deleted Supabase identity
-`provider.py`; restoring that obsolete module would reintroduce a removed dependency.
+application values omitted the signing key. The pytest-based Bash/Helm rendering
+suite was removed at user request. Manual template checks still require an
+explicit signing key.
 
 For a manual template check, provide synthetic values explicitly:
 
