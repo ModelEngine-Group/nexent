@@ -17,6 +17,7 @@ HELPER = REPO / "deploy/k8s/env.sh"
 DEPLOY = REPO / "deploy/k8s/deploy.sh"
 CHART = REPO / "deploy/k8s/helm/nexent"
 BACKENDS = ("config", "runtime", "mcp", "northbound", "data-process")
+TEST_JWT_SECRET = "synthetic-test-only-jwt-signing-key-never-for-deployment"
 
 
 def render_data(path, extra_environment=None):
@@ -34,6 +35,7 @@ def decoded_data(output):
 
 def render_values(root, output, extra_environment=None):
     environment = os.environ.copy()
+    environment["JWT_SECRET"] = TEST_JWT_SECRET
     environment.update(extra_environment or {})
     script = r'''
 set -e
@@ -58,7 +60,7 @@ render_runtime_secret_values
     )
 
 
-def helm_documents(values=None, infrastructure=False):
+def helm_result(values=None, infrastructure=False, jwt_secret=TEST_JWT_SECRET):
     helm = shutil.which("helm")
     assert helm, "Helm is required for deployment manifest verification"
     chart = CHART.parent / "nexent-infrastructure" if infrastructure else CHART
@@ -66,7 +68,13 @@ def helm_documents(values=None, infrastructure=False):
     if values:
         for path in values if isinstance(values, (list, tuple)) else [values]:
             command += ["-f", str(path)]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if not infrastructure and jwt_secret is not None:
+        command += ["--set-string", "nexent-common.secrets.jwtSecret=" + jwt_secret]
+    return subprocess.run(command, capture_output=True, text=True, check=False)
+
+
+def helm_documents(values=None, infrastructure=False, jwt_secret=TEST_JWT_SECRET):
+    result = helm_result(values, infrastructure, jwt_secret)
     assert result.returncode == 0, result.stderr
     return [document for document in yaml.safe_load_all(result.stdout) if document]
 
@@ -194,6 +202,7 @@ def test_private_values_preserve_file_scope_and_final_credentials(tmp_path):
         "SHARED": "monitoring", "MONITOR_ONLY": "yes",
     }
     assert values["nexent-common"]["secrets"]["minio"]["accessKey"] == "final-access"
+    assert values["nexent-common"]["secrets"]["jwtSecret"] == TEST_JWT_SECRET
     assert list(tmp_path.glob("generated.yaml.*")) == []
 
 
@@ -239,6 +248,7 @@ def test_default_helm_has_empty_env_secrets_and_service_specific_references():
     secrets = {d["metadata"]["name"]: d for d in documents if d["kind"] == "Secret"}
     assert secrets["nexent-env"]["data"] == {}
     assert secrets["nexent-monitoring-env"]["data"] == {}
+    assert decoded_data(yaml.safe_dump(secrets["nexent-secrets"]["data"]))["JWT_SECRET"] == TEST_JWT_SECRET
     for deployment in [d for d in documents if d["kind"] == "Deployment"]:
         name = deployment["metadata"]["name"].removeprefix("nexent-")
         references = [v.get("secretRef", {}).get("name")
@@ -248,6 +258,7 @@ def test_default_helm_has_empty_env_secrets_and_service_specific_references():
             if name in ("config", "runtime"):
                 expected.append("nexent-monitoring-env")
             assert references == expected + ["nexent-secrets"]
+            assert container_environment(documents, deployment)[1]["JWT_SECRET"] == TEST_JWT_SECRET
         else:
             assert "nexent-env" not in references
             assert "nexent-monitoring-env" not in references
@@ -256,6 +267,30 @@ def test_default_helm_has_empty_env_secrets_and_service_specific_references():
             for container in document["spec"]["template"]["spec"]["containers"]:
                 assert all(source.get("secretRef", {}).get("name") not in
                            ("nexent-env", "nexent-monitoring-env") for source in container.get("envFrom", []))
+
+
+@pytest.mark.parametrize("jwt_secret", [None, ""])
+def test_application_helm_rejects_missing_or_empty_jwt_secret(jwt_secret):
+    result = helm_result(jwt_secret=jwt_secret)
+    assert result.returncode != 0
+    assert "secrets.jwtSecret is required for local authentication" in result.stderr
+    assert TEST_JWT_SECRET not in result.stdout + result.stderr
+
+
+def test_generated_signing_key_changes_auth_rollout_checksum(tmp_path):
+    root = tmp_path / ".env"
+    root.write_text("UNCHANGED=value\n")
+    output = tmp_path / "generated.yaml"
+    assert render_values(root, output).returncode == 0
+    first = yaml.safe_load(output.read_text())
+    changed_key = TEST_JWT_SECRET + "-rotated"
+    assert render_values(root, output, {"JWT_SECRET": changed_key}).returncode == 0
+    second = yaml.safe_load(output.read_text())
+    assert second["nexent-common"]["secrets"]["jwtSecret"] == changed_key
+    assert first["global"]["rolloutChecksums"]["authSecret"] != second["global"]["rolloutChecksums"]["authSecret"]
+    documents = helm_documents(output, jwt_secret=None)
+    deployment = next(d for d in documents if d["kind"] == "Deployment" and d["metadata"]["name"] == "nexent-config")
+    assert container_environment(documents, deployment)[1]["JWT_SECRET"] == changed_key
 
 
 def test_runtime_mapping_preserves_web_specific_configuration(tmp_path):
@@ -295,7 +330,7 @@ def test_backend_configuration_uses_secret_without_fixed_runtime_copies(tmp_path
         "timezone": "Asia/Shanghai", "services": {"northboundServer": "http://nexent-northbound:5013/api"},
         "redis": {"url": "redis://nexent-redis:6379/0"}, "dataProcess": {"partProcessorCount": "3"},
     }
-    documents = helm_documents([runtime, secrets])
+    documents = helm_documents([runtime, secrets], jwt_secret=None)
     configmap = next(d for d in documents if d["kind"] == "ConfigMap" and d["metadata"]["name"] == "nexent-config")
     assert configmap["data"]["CAS_DEFAULT_TENANT_ID"] == "tenant_id"
     assert configmap["data"]["GITHUB_OAUTH_CLIENT_SECRET"] == ""
@@ -310,7 +345,7 @@ def test_backend_configuration_uses_secret_without_fixed_runtime_copies(tmp_path
     root.write_text("UNKNOWN_NEW_FEATURE=enabled\n")
     assert render_runtime_values(root, runtime).returncode == 0
     assert render_values(root, secrets).returncode == 0
-    documents = helm_documents([runtime, secrets])
+    documents = helm_documents([runtime, secrets], jwt_secret=None)
     deployment = next(d for d in documents if d["kind"] == "Deployment" and d["metadata"]["name"] == "nexent-config")
     _, effective = container_environment(documents, deployment)
     assert effective["CAS_DEFAULT_TENANT_ID"] == "tenant_id"
@@ -326,7 +361,7 @@ def test_cleanup_retains_derived_defaults_and_empty_inputs(tmp_path, count, redi
     secrets = tmp_path / "secrets.yaml"
     assert render_runtime_values(root, runtime).returncode == 0
     assert render_values(root, secrets).returncode == 0
-    documents = helm_documents([runtime, secrets])
+    documents = helm_documents([runtime, secrets], jwt_secret=None)
     deployment = next(d for d in documents if d["kind"] == "Deployment" and d["metadata"]["name"] == "nexent-data-process")
     _, effective = container_environment(documents, deployment)
     assert effective["WORKER_CONCURRENCY"] == str(int(count) + 1)
@@ -373,7 +408,7 @@ NEXENT_SANDBOX_DEFAULT_LEVEL=wrong
     values = yaml.safe_load(output.read_text())
     values["global"].update(namespace="synthetic-namespace", deploymentVersion=deployment_version, sandboxMode=sandbox_mode)
     output.write_text(yaml.safe_dump(values))
-    documents = helm_documents(output)
+    documents = helm_documents(output, jwt_secret=None)
     deployments = [d for d in documents if d["kind"] == "Deployment" and
                    d["metadata"]["name"].removeprefix("nexent-") in BACKENDS]
     assert len(deployments) == 5
