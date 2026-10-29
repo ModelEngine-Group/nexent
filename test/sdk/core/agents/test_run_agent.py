@@ -1544,6 +1544,38 @@ def test_agent_run_error_message_exposes_leaf_for_unclassified_group(basic_agent
     assert message == "Run Agent Error: RuntimeError: disk on fire"
 
 
+def test_agent_run_error_message_ignores_hosts_without_usable_url(basic_agent_run_info):
+    """Host entries without a usable URL contribute nothing to the server label."""
+    basic_agent_run_info.observer.lang = "en"
+    group = BaseExceptionGroup(
+        "unhandled errors in a taskgroup (1 sub-exception)", [ConnectionRefusedError()]
+    )
+    hosts = [
+        {"transport": "sse"},  # dict without a url key
+        {"url": "", "transport": "sse"},  # empty-string url
+        {"url": None, "transport": "sse"},  # non-string url
+    ]
+
+    message = run_agent._agent_run_error_message(basic_agent_run_info, hosts, group)
+
+    assert message == (
+        "MCP tool service connection failed (the connection was refused). "
+        "Please verify the service is running, the address and port are correct, "
+        "and the firewall allows access."
+    )
+
+
+def test_agent_run_error_message_falls_back_for_unclassified_plain_error(basic_agent_run_info):
+    """A plain (non-group) unclassified error keeps the raw fallback text."""
+    basic_agent_run_info.observer.lang = "en"
+
+    message = run_agent._agent_run_error_message(
+        basic_agent_run_info, _mcp_host_single(), RuntimeError("boom")
+    )
+
+    assert message == "Run Agent Error: boom"
+
+
 def test_agent_run_error_message_fallback_without_mcp_host(basic_agent_run_info):
     group = BaseExceptionGroup(
         "unhandled errors in a taskgroup (1 sub-exception)", [RuntimeError("Boom")]
