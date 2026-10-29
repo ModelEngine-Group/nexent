@@ -28,9 +28,10 @@ from smolagents.models import OpenAIServerModel, ChatMessage, MessageRole
 
 from .capacity_budget import (
     CallerMaxTokensOverrideForbidden,
-    ContextBudgetCapacityMismatch,
+    ContextBudgetCapacityMismatch as ContextBudgetCapacityMismatch,
     ContextBudgetSnapshot,
     parse_context_budget_snapshot,
+    verify_context_budget_capacity,
 )
 from ..utils.observer import MessageObserver, ProcessType
 from .prompt_cache import (
@@ -49,7 +50,7 @@ from .context_overflow import (
     ProviderContextOverflowRetryUnsafe,
     is_provider_context_overflow,
 )
-from .model_concurrency import ModelConcurrencyExceeded, model_concurrency_limiter
+from nexent.core.model_service.concurrency import ModelConcurrencyExceeded, model_concurrency_limiter
 from .sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P, resolve_sampling
 from .retry import (
     DEFAULT_MODEL_RETRY,
@@ -1465,31 +1466,9 @@ class OpenAIModel(OpenAIServerModel):
         rows without capacity columns, where W2 already does not produce a
         snapshot.
         """
-        if not capacity_snapshot:
-            return
-        w1_fingerprint = capacity_snapshot.get("capacity_fingerprint")
-        provider = capacity_snapshot.get("provider")
-        model_name = capacity_snapshot.get("model_name")
-        if not w1_fingerprint and not provider and not model_name:
-            return
-        if w1_fingerprint and w1_fingerprint != budget_snapshot.w1_fingerprint:
-            raise ContextBudgetCapacityMismatch(
-                field="w1_fingerprint",
-                expected=w1_fingerprint,
-                actual=budget_snapshot.w1_fingerprint,
-            )
-        if provider and provider != budget_snapshot.provider:
-            raise ContextBudgetCapacityMismatch(
-                field="provider",
-                expected=provider,
-                actual=budget_snapshot.provider,
-            )
-        if model_name and model_name != budget_snapshot.model_name:
-            raise ContextBudgetCapacityMismatch(
-                field="model_name",
-                expected=model_name,
-                actual=budget_snapshot.model_name,
-            )
+        verify_context_budget_capacity(
+            budget_snapshot=budget_snapshot, capacity_snapshot=capacity_snapshot,
+        )
 
     @staticmethod
     def _coerce_context_budget_snapshot(

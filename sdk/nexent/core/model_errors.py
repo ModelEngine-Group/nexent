@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Typed terminal failures shared by model adapters and Agent boundaries.
 
 This module deliberately lives outside ``core.models`` so Agent modules can
@@ -77,10 +79,14 @@ class ModelInvocationTerminalError(RuntimeError):
         attempts: int,
         *,
         cause: BaseException | None = None,
+        public_detail: str | None = None,
+        public_messages: dict[str, str] | None = None,
     ) -> None:
-        # Keep provider detail internal for logs and tracing. UI boundaries
-        # must use ``safe_message`` instead of ``str``.
+        # Raw causes stay internal. UI boundaries use ``safe_message``; only
+        # the shared HTTP layer's sanitized diagnostic may be public_detail.
         super().__init__(str(cause) if cause is not None else error_code.value)
+        self.public_messages = public_messages
+        self.public_detail = public_detail
         self.error_code = error_code
         self.attempts = attempts
         self.retryable = False
@@ -88,5 +94,9 @@ class ModelInvocationTerminalError(RuntimeError):
             self.__cause__ = cause
 
     def safe_message(self, lang: str = "en") -> str:
+        if self.public_messages:
+            locale = lang.lower().split("-")[0].split("_")[0]
+            return self.public_messages.get(locale, self.public_messages["en"])
         messages = _SAFE_ERROR_MESSAGES[self.error_code]
-        return messages.get(lang, messages["en"])
+        message = messages.get(lang, messages["en"])
+        return f"{message} {self.public_detail}" if self.public_detail else message
