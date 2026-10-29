@@ -57,17 +57,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Resolve uv cache directory
-        id: uv-cache
-        run: |
-          # setup-uv otherwise overrides runner settings and ignores XDG_CACHE_HOME.
-          echo "path=${UV_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/uv}" >> "$GITHUB_OUTPUT"
-
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        # astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
         with:
-          version: "0.13.6"
-          cache-local-path: ${{ steps.uv-cache.outputs.path }}
+          version: "latest"
 
       - name: Set up managed Python
         run: |
@@ -126,8 +120,8 @@ jobs:
               ;;
             *) echo "Unsupported Codecov OS: $CODECOV_OS" >&2; exit 1 ;;
           esac
-          # The Codecov binary installer defaults to ./codecov.
-          cache_dir="${CODECOV_CACHE_DIR:-$PWD}"
+          # Prefer runner configuration, then the standard Unix cache location.
+          cache_dir="${CODECOV_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/codecov}"
           mkdir -p "$cache_dir"
           cache_dir="$(cd "$cache_dir" && pwd)"
           binary="$cache_dir/codecov"
