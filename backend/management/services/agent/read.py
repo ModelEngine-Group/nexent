@@ -9,7 +9,7 @@ from contracts.agent import AgentModelProjection
 from management.db.agent.repository import search_agent_info_by_agent_id
 from management.db.model.repository import get_model_by_model_id_ignore_delete, get_valid_model_ids
 from management.db.tool.repository import check_tool_is_available, search_tools_for_sub_agent
-from management.services.model.resolver import is_model_available, resolve_model_record
+from management.services.model.resolver import is_model_configured, resolve_model_record
 
 
 def project_agent_models(
@@ -27,7 +27,7 @@ def project_agent_models(
         for mid in model_ids
     ]
     available_records = [
-        (mid, record) for mid, record in records if is_model_available(record)
+        (mid, record) for mid, record in records if is_model_configured(record)
     ]
     available_model_ids = [mid for mid, _ in available_records]
     names = [
@@ -42,12 +42,19 @@ def project_agent_models(
             if available_records and available_records[0][1] is not None
             else None
         )
+    fields = {"model_ids": available_model_ids, "model_names": names, "model_name": legacy_name}
+    overrides = agent.get("model_params_override")
+    if isinstance(overrides, dict):
+        from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
+
+        current = dict(overrides)
+        for model_id, record in records:
+            if (record and record.get("model_type") in {"llm", "chat"}
+                    and record.get("profile_schema_version") is not None and str(model_id) in current):
+                current[str(model_id)] = read_agent_parameter_entry(current[str(model_id)])
+        fields["model_params_override"] = current
     return AgentModelProjection(
-        fields={
-            "model_ids": available_model_ids,
-            "model_names": names,
-            "model_name": legacy_name,
-        },
+        fields=fields,
         deleted_model_ids=frozenset(configured_model_ids) - frozenset(model_ids),
         availability_model_ids=model_ids,
     )
@@ -112,7 +119,7 @@ def check_agent_availability(
         model_records = [
             resolve_model_record(mid, tenant_id, cache) for mid in model_ids if mid
         ]
-        if not any(is_model_available(record) for record in model_records):
+        if not any(is_model_configured(record) for record in model_records):
             reasons.append(AgentUnavailableReason.MODEL_UNAVAILABLE)
     return not reasons, reasons
 
