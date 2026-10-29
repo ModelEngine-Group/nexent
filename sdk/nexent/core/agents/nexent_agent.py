@@ -324,6 +324,8 @@ class NexentAgent:
         )
         if model_config is None:
             raise ValueError(f"Model {model_cite_name} not found")
+        if model_config.resolved_profile is not None:
+            return self._create_resolved_model(model_config)
         model_kwargs = dict(
             observer=self.observer,
             model_id=model_config.model_name,
@@ -363,6 +365,24 @@ class NexentAgent:
         model = OpenAIModel(**model_kwargs)
         model.stop_event = self.stop_event
         return model
+
+    def _create_resolved_model(self, model_config):
+        """Use the supplied outlet snapshot and the run's existing cancellation owner."""
+        from ..concurrency.cancellation import RunCancellationScope
+        from ..model_service.compatibility.legacy_chat_model import LegacyChatModel
+
+        profile = model_config.resolved_profile
+        if (
+            profile.identity.tenant_id != self.tenant_id
+            or profile.identity.request_model_id != model_config.model_name
+            or profile.connection.base_url != model_config.url
+        ):
+            raise ValueError("Model configuration does not match its outlet snapshot")
+        scope = self.cancellation_scope if self.cancellation_scope is not None else RunCancellationScope(self.stop_event)
+        return LegacyChatModel.from_profile(
+            profile, model_config.api_key, http_headers=model_config.http_headers,
+            observer=self.observer, cancellation_scope=scope,
+        )
 
 
     def create_local_tool(self, tool_config: ToolConfig):

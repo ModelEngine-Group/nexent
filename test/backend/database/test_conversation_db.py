@@ -311,7 +311,7 @@ def test_ut_be_wb_027_unchanged_config_is_checked_without_increment(monkeypatch,
     from management.db.conversation.repository import replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, WorkbenchConfigVersionConflict
 
     session, ctx = mock_session_ctx
-    config = {"schema_version": 3, "mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7, "version_no": 3}]}
+    config = {"schema_version": 4, "mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7, "version_no": 3}]}
     record = SimpleNamespace(
         workbench_config=deepcopy(config), workbench_config_version=2,
         runtime_metadata={"department": "sales"}, runtime_metadata_version=9,
@@ -349,7 +349,7 @@ def test_workbench_topology_can_change_without_leaving_its_conversation(monkeypa
     from management.db.conversation.repository import replace_conversation_workbench_config, replace_conversation_workbench_and_metadata
     session, ctx = mock_session_ctx
     record = SimpleNamespace(
-        workbench_config={"schema_version": 3, "mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7, "version_no": 3}]},
+        workbench_config={"schema_version": 4, "mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7, "version_no": 3}]},
         workbench_config_version=2, runtime_metadata={"department": "sales"}, runtime_metadata_version=9,
         agent_id=7, knowledge_scope=None,
     )
@@ -385,7 +385,7 @@ def test_ordinary_chat_cannot_be_converted_into_workbench(monkeypatch, mock_sess
     before = deepcopy(vars(record))
     session.scalars.return_value.first.return_value = record
     monkeypatch.setattr("management.db.conversation.repository.get_db_session", lambda: ctx)
-    config = {"schema_version": 3, "mode": "generic_chat", "agent_mounts": []}
+    config = {"schema_version": 4, "mode": "generic_chat", "agent_mounts": []}
     with pytest.raises(WorkbenchError) as raised:
         if joint:
             replace_conversation_workbench_and_metadata(1, "user", config, 0, {}, 0)
@@ -402,7 +402,7 @@ def test_creation_workflow_cannot_switch_to_chat_in_place(monkeypatch, mock_sess
 
     session, ctx = mock_session_ctx
     record = SimpleNamespace(
-        workbench_config={"schema_version": 3, "mode": "skill_create", "agent_mounts": []},
+        workbench_config={"schema_version": 4, "mode": "skill_create", "agent_mounts": []},
         workbench_config_version=1, agent_id=None,
     )
     session.scalars.return_value.first.return_value = record
@@ -410,7 +410,7 @@ def test_creation_workflow_cannot_switch_to_chat_in_place(monkeypatch, mock_sess
 
     with pytest.raises(WorkbenchError) as raised:
         replace_conversation_workbench_config(
-            1, "user", {"schema_version": 3, "mode": "generic_chat", "agent_mounts": []}, 1
+            1, "user", {"schema_version": 4, "mode": "generic_chat", "agent_mounts": []}, 1
         )
     assert raised.value.code == "WORKBENCH_TOPOLOGY_LOCKED"
     session.flush.assert_not_called()
