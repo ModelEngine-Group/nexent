@@ -10,6 +10,8 @@ import pytest
 from test.backend.services import test_agent_service as legacy
 
 
+from test.backend.services.test_agent_service import isolate_conversation_model_preferences  # noqa: F401
+
 agent_run = legacy.agent_run_service
 agent_subscription = legacy.agent_subscription
 AgentRequest = legacy.AgentRequest
@@ -98,24 +100,21 @@ def test_apply_workbench_runtime_plan_attaches_all_runtime_overrides(monkeypatch
         "display_name": "Researcher",
         "origin": "USER",
     }
-    assert request.__dict__["_runtime_generation_config"] == {"temperature": 0.2}
+    assert "_runtime_generation_config" not in request.__dict__
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("stored_generation", [True, False])
+@pytest.mark.parametrize("preferences,is_debug", [({}, False), ({"12": {"temperature": 0}}, False), ({"12": {"temperature": 0}}, True)])
 async def test_prepare_agent_run_forwards_workbench_runtime_state(
-    monkeypatch, stored_generation
+    monkeypatch, preferences, is_debug
 ):
-    from contracts.agent import WorkbenchGenerationConfig
-
-    request = _request()
+    request = _request(is_debug=is_debug)
+    preference_reader = MagicMock(return_value={"model_parameter_preferences": preferences})
+    monkeypatch.setattr(agent_run, "_read_model_preferences", preference_reader)
     request.__dict__["_runtime_knowledge_context"] = {"policy": "strict"}
     request.__dict__["_runtime_knowledge_tools"] = [{"id": "knowledge"}]
     request.__dict__["_runtime_skill_snapshot"] = {"1": ["skill-a"]}
-    if stored_generation:
-        request.__dict__["_runtime_generation_config"] = {"temperature": 0.1}
-    else:
-        request.generation_config = WorkbenchGenerationConfig(temperature=0.1)
+    request.model_parameter_preferences = preferences
     child = SimpleNamespace(
         agent_id=2,
         version_no=4,
@@ -158,10 +157,19 @@ async def test_prepare_agent_run_forwards_workbench_runtime_state(
     )
 
     kwargs = create_run.await_args.kwargs
+    if not is_debug:
+        preference_reader.assert_called_once_with(123, "user-a")
+    else:
+        preference_reader.assert_not_called()
+    if preferences:
+        assert kwargs["model_parameter_preferences"] == preferences
+    else:
+        assert "model_parameter_preferences" not in kwargs
     assert kwargs["runtime_knowledge_context"] == {"policy": "strict"}
     assert kwargs["runtime_knowledge_tools"] == [{"id": "knowledge"}]
     assert kwargs["runtime_skill_snapshot"] == {"1": ["skill-a"]}
-    assert kwargs["runtime_generation_config"]["temperature"] == 0.1
+    assert "runtime_generation_config" not in kwargs
+    assert "reasoning_effort" not in kwargs
     assert kwargs["runtime_sub_agent_mounts"] == [
         {
             "agent_id": 2,

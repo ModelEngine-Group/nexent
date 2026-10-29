@@ -383,6 +383,8 @@ def create_new_conversation(
     knowledge_scope: Optional[Dict[str, Any]] = None,
     runtime_metadata: Optional[Dict[str, Any]] = None,
     workbench_config: Optional[Dict[str, Any]] = None,
+    model_parameter_preferences: Optional[Dict[str, Any]] = None,
+    selected_model_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation
@@ -407,6 +409,10 @@ def create_new_conversation(
             create_kwargs["runtime_metadata"] = runtime_metadata
         if workbench_config is not None:
             create_kwargs["workbench_config"] = workbench_config
+        if selected_model_id is not None:
+            create_kwargs["selected_model_id"] = selected_model_id
+        if model_parameter_preferences:
+            create_kwargs["model_parameter_preferences"] = model_parameter_preferences
         conversation_data = create_conversation(title, user_id, **create_kwargs)
         return conversation_data
     except AppException:

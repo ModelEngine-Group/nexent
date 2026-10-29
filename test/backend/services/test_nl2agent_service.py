@@ -1667,18 +1667,69 @@ async def test_build_run_info_is_ephemeral(mocker, query, clarification_required
     capacity_snapshot = {'capacity_fingerprint': 'capacity-fingerprint'}
     resolved_capacity_snapshot = MagicMock(context_window_tokens=32768)
     context_budget_snapshot = _context_budget_snapshot()
-    join_query = mocker.patch('services.nl2agent_service.join_minio_file_description_to_query', new_callable=AsyncMock, return_value='final query')
-    mocker.patch('services.nl2agent_service.create_model_config_list', new_callable=AsyncMock, return_value=[])
-    get_model_config = mocker.patch('services.nl2agent_service.tenant_config_manager.get_model_config', return_value=default_model)
-    resolve_input_budget = mocker.patch('services.nl2agent_service._resolve_input_budget', return_value=(32768, capacity_snapshot, resolved_capacity_snapshot))
-    resolve_context_budget = mocker.patch('services.nl2agent_service._resolve_context_budget', return_value=context_budget_snapshot)
-    mocker.patch('services.nl2agent_service.get_tenant_local_mcp_server', return_value='http://local-mcp:5011')
-    verified_context = ContextItemInput(id='system:nl2agent_bound_resources', type=ContextItemType.SYSTEM, content={'text': 'verified draft state'}, source=('database:agent_bindings',))
-    build_verified_context = mocker.patch('services.nl2agent_service._build_verified_bound_resources_context', new_callable=AsyncMock, return_value=verified_context)
-    request = NL2AgentRunRequest(query=query, agent_id=42, history=[HistoryItem(role='user', content='Build an agent that summarizes weather risks.'), HistoryItem(role='assistant', content='I found matching weather tools.')])
-    run_info = await build_nl2agent_run_info(request, 'tenant-a', 'en', 'Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
-    assert run_info.query == 'final query'
-    assert run_info.agent_config.name == '__nl2agent_runtime__'
+    join_query = mocker.patch(
+        "services.nl2agent_service.join_minio_file_description_to_query",
+        new_callable=AsyncMock,
+        return_value="final query",
+    )
+    mocker.patch(
+        "services.nl2agent_service.create_model_config_list",
+        new_callable=AsyncMock,
+        return_value=[],
+    )
+    get_model_config = mocker.patch(
+        "services.nl2agent_service.tenant_config_manager.get_model_config",
+        return_value=default_model,
+    )
+    resolve_input_budget = mocker.patch(
+        "services.nl2agent_service._resolve_input_budget",
+        return_value=(32768, capacity_snapshot, resolved_capacity_snapshot),
+    )
+    resolve_context_budget = mocker.patch(
+        "services.nl2agent_service._resolve_context_budget",
+        return_value=context_budget_snapshot,
+    )
+    mocker.patch(
+        "services.nl2agent_service.get_tenant_local_mcp_server",
+        return_value="http://local-mcp:5011",
+    )
+    verified_context = ContextItemInput(
+        id="system:nl2agent_bound_resources",
+        type=ContextItemType.SYSTEM,
+        content={"text": "verified draft state"},
+        source=("database:agent_bindings",),
+    )
+    build_verified_context = mocker.patch(
+        "services.nl2agent_service._build_verified_bound_resources_context",
+        new_callable=AsyncMock,
+        return_value=verified_context,
+    )
+    request = NL2AgentRunRequest(
+        query=query,
+        agent_id=42,
+        history=[
+            HistoryItem(
+                role="user",
+                content="Build an agent that summarizes weather risks.",
+            ),
+            HistoryItem(
+                role="assistant",
+                content="I found matching weather tools.",
+            ),
+        ],
+    )
+
+    run_info = await build_nl2agent_run_info(
+        request,
+        "tenant-a",
+        "en",
+        "Bearer tenant-token",
+        identity=AuthenticatedIdentity("user-a", "tenant-a"),
+    )
+
+    assert run_info.tenant_id == "tenant-a"
+    assert run_info.query == "final query"
+    assert run_info.agent_config.name == "__nl2agent_runtime__"
     assert run_info.agent_config.context_manager_config.token_threshold == 24000
     assert run_info.agent_config.context_manager_config.effective_input_limit_tokens == 30000
     assert run_info.agent_config.context_manager_config.compaction_target_tokens == 18000

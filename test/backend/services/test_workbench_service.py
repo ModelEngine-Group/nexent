@@ -497,17 +497,16 @@ def test_single_agent_uses_tenant_model_on_workbench_root(mocker):
     canonical, plan = workbench_service.resolve_workbench_config(
         WorkbenchSessionConfig(
             mode="single_agent_chat",
-            model_id=13,
             agent_mounts=[{"agent_id": 7, "version_no": 3}],
         ),
         tenant_id="tenant",
     )
 
-    assert canonical.model_id == 13
+    assert "model_id" not in canonical.model_dump()
     assert plan.root.identity.agent_id == 99
     assert [child.agent_id for child in plan.child_mounts] == [7]
-    assert plan.overlay.model_id == 13
-    get_model.assert_called_once_with(13, tenant_id="tenant")
+    assert plan.overlay.model_id is None
+    get_model.assert_not_called()
 
 
 @pytest.mark.parametrize("definitions", [[], [{"tool_id": 4, "author": "tenant", "is_available": False}], [{"tool_id": 4, "author": "other", "is_available": True}]])

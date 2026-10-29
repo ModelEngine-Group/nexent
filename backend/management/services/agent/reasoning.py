@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Helpers for keeping agent-owned reasoning settings independent from models."""
 
 from copy import deepcopy
@@ -26,6 +27,10 @@ def _resolve_model_reasoning_capability(model_info: Optional[dict]) -> Optional[
     """Resolve capability metadata for an agent snapshot when needed."""
     if not isinstance(model_info, dict):
         return None
+    if model_info.get("profile_schema_version") is not None and model_info.get("model_type") in {"llm", "chat"}:
+        from management.services.model.outlet_projection import project_saved_outlet
+
+        return (project_saved_outlet(model_info) or {}).get("reasoning_capability")
     capability = model_info.get("reasoning_capability")
     if isinstance(capability, dict):
         return capability
@@ -95,6 +100,8 @@ def snapshot_agent_reasoning_config(
     requested_overrides: Optional[dict],
     existing_overrides: Optional[dict],
     tenant_id: str,
+    *,
+    normalize_profiles: bool = True,
 ) -> Optional[dict]:
     """Snapshot reasoning settings while preserving explicit agent overrides.
 
@@ -124,6 +131,25 @@ def snapshot_agent_reasoning_config(
         )
 
         model_info = get_model_by_model_id(model_id, tenant_id=tenant_id)
+        if ((model_info or {}).get("profile_schema_version") is not None
+                and (model_info or {}).get("model_type") in {"llm", "chat"}):
+            # Runtime reads convert in memory; only explicit saves write the current format.
+            if not normalize_profiles:
+                continue
+            # Validate only explicit overrides; omitted values keep inheriting the outlet.
+            from nexent.core.model_service.profiles.outlet_storage import decode_resolved_model_profile
+            from nexent.core.model_service.registry import model_service_references
+            from management.services.agent.model_parameters import merge_agent_model_parameters
+
+            if not entry:
+                continue
+            from nexent.core.model_service.compatibility.agent_parameters import read_agent_parameter_entry
+            entry = read_agent_parameter_entry(entry)
+            if entry["parameter_values"] or entry.get("context_window_tokens") is not None or entry.get("custom_overrides") is not None:
+                profile = decode_resolved_model_profile(model_info, registered_references=model_service_references())
+                merge_agent_model_parameters(profile, entry)
+            override_map[model_key] = entry
+            continue
         capability = _resolve_model_reasoning_capability(model_info)
         has_reasoning_override = (
             "enable_thinking" in extra_params
