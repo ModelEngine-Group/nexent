@@ -40,6 +40,7 @@ vi.mock("@/stores/agentStore", () => ({
 }));
 vi.mock("@/hooks/model/useModelList", () => ({
   useModelList: () => ({
+    llmModels: mocks.models,
     availableLlmModels: mocks.models,
     isSuccess: mocks.modelListLoaded,
   }),
@@ -49,6 +50,7 @@ vi.mock("@/hooks/useConfig", () => ({
     defaultLlmModelConfig: { id: mocks.defaultModelId },
     isSuccess: mocks.configLoaded,
   }),
+
 }));
 vi.mock("@/hooks/model/useInferenceFieldSpecs", () => ({
   useInferenceFieldSpecs: () => ({ specs: mocks.specs }),

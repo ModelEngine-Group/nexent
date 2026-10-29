@@ -30,7 +30,6 @@ vi.mock("@/components/providers/AuthorizationProvider", () => ({
 }));
 
 const options = [
-  ["agentConfig.layout.outputReserve", "agent.requestedOutputTokens.tooltip"],
   ["agent.highFidelity.chatMetadata", "agent.allowChatMetadata.tooltip"],
   ["agent.highFidelity.selfValidate", "agent.runPolicy.selfValidateHint"],
   [
@@ -107,3 +106,17 @@ describe("Advanced configuration help buttons", () => {
     expect(mocks.update).not.toHaveBeenCalled();
   });
 });
+
+it.each([false, true])(
+  "never offers Agent token length overrides (high fidelity: %s)",
+  (highFidelity) => {
+    render(<AgentRunPolicy highFidelity={highFidelity} />);
+    expect(
+      screen.queryByText(mocks.translations["agentConfig.layout.outputReserve"])
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(mocks.translations["agent.requestedOutputTokens"])
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByRole("spinbutton")).toHaveLength(1);
+  }
+);
