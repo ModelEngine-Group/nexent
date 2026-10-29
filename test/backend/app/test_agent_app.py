@@ -1156,6 +1156,23 @@ def test_legacy_creating_sub_agent_endpoint_is_not_exposed():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("name", ["Updated Agent", "agent-one", "class", "9agent", ""])
+def test_update_agent_info_api_rejects_invalid_callable_names(mocker, mock_auth_header, name):
+    """Reject invalid internal identifiers before invoking the update service."""
+    update_agent = mocker.patch(
+        "management.api.agent.agent.update_agent_info_impl", new_callable=AsyncMock)
+
+    response = config_client.post(
+        "/agent/update",
+        json={"agent_id": 123, "name": name},
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "name"]
+    update_agent.assert_not_called()
+
+
 def test_update_agent_info_api_success(mocker, mock_auth_header):
     """Test update_agent_info_api success case."""
     mock_update_agent = mocker.patch(
@@ -1164,13 +1181,16 @@ def test_update_agent_info_api_success(mocker, mock_auth_header):
 
     response = config_client.post(
         "/agent/update",
-        json={"agent_id": 123, "name": "Updated Agent",
+        json={"agent_id": 123, "name": "updated_agent",
               "display_name": "Updated Display Name"},
         headers=mock_auth_header
     )
 
     assert response.status_code == 200
     mock_update_agent.assert_called_once()
+    request = mock_update_agent.call_args.args[0]
+    assert request.name == "updated_agent"
+    assert request.display_name == "Updated Display Name"
     assert response.json() == {}
 
 
@@ -1182,7 +1202,7 @@ def test_update_agent_info_api_with_result(mocker, mock_auth_header):
 
     response = config_client.post(
         "/agent/update",
-        json={"agent_id": 123, "name": "Updated Agent"},
+        json={"agent_id": 123, "name": "updated_agent"},
         headers=mock_auth_header
     )
 
@@ -1198,7 +1218,7 @@ def test_update_agent_info_api_exception(mocker, mock_auth_header):
 
     response = config_client.post(
         "/agent/update",
-        json={"agent_id": 123, "name": "Updated Agent"},
+        json={"agent_id": 123, "name": "updated_agent"},
         headers=mock_auth_header
     )
 

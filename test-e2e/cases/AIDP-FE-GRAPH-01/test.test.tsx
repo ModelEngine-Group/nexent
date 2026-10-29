@@ -134,7 +134,7 @@ describe("AIDP-FE-GRAPH-01", () => {
 
     // LLM model.
     await editSetting(t("aidpKnowledge.detailEditGraphModel"));
-    await select("value", "llm-a");
+    await select("value", "Language A");
     fireEvent.click(confirmButton());
     await screen.findByText(t("aidpKnowledge.detailSettingSaved"));
     expect(lastPutBody()).toEqual({
@@ -143,7 +143,7 @@ describe("AIDP-FE-GRAPH-01", () => {
     await waitFor(() =>
       expect(
         fieldValue(t("aidpKnowledge.detailGraphModel")),
-      ).toHaveTextContent("llm-a"),
+      ).toHaveTextContent("Language A"),
     );
     expect(screen.queryByRole("dialog")).toBeNull();
 

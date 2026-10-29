@@ -1,4 +1,4 @@
-// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 "use client";
 
@@ -10,7 +10,7 @@ import {
 } from "@/lib/citationDisplay";
 
 import { memo } from "react";
-import { useSourcesPanel } from "./sources-panel-context";
+import { useSourcesPanelActions } from "./sources-panel-context";
 import type { PanelSourceItem } from "./sources-panel";
 import {
   AlertCircleIcon,
@@ -213,7 +213,7 @@ function ToolFallbackSearchContent({
 }: React.ComponentProps<"div"> & {
   searchContent?: ToolSearchSource[];
 }) {
-  const { open } = useSourcesPanel();
+  const { open } = useSourcesPanelActions();
   const content = useAuiState((s) => s.message.content) as readonly {
     type?: string;
     text?: unknown;

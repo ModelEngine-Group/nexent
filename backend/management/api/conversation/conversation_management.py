@@ -7,7 +7,7 @@ import logging
 from http import HTTPStatus
 from typing import Annotated, Any, Dict, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Path, Query, Request
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 
 from contracts.conversation import BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
@@ -28,9 +28,106 @@ from management.services.conversation.service import (
     update_message_opinion_service,
     get_message_id_by_index_impl,
 )
+from management.services.conversation.agent_history import (
+    list_agent_group_conversation_ids,
+    list_agent_group_conversations,
+    list_agent_groups,
+)
 from gateway.authentication.auth import get_current_user_id, get_current_user_info
 
 router = APIRouter(prefix="/conversation")
+
+
+@router.get("/agent_groups", response_model=ConversationResponse)
+async def list_agent_groups_endpoint(
+    authorization: Optional[str] = Header(None),
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
+    cursor: Annotated[Optional[str], Query(max_length=512)] = None,
+    search: Annotated[str, Query(max_length=200)] = "",
+    include_agent_id: list[int] = Query(default=[]),
+    include_other: bool = False,
+):
+    """Return paginated Agent-chat groups and pinned groups outside the page."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        if len(include_agent_id) > 100 or any(agent_id <= 0 for agent_id in include_agent_id):
+            raise ValueError("Invalid included Agent groups")
+        data = list_agent_groups(
+            user_id,
+            tenant_id,
+            limit,
+            cursor,
+            search,
+            include_agent_id,
+            include_other,
+        )
+        return ConversationResponse(code=0, message="success", data=data)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except TokenExpiredError as exc:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.exception("Failed to list Agent conversation groups")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to list Agent conversation groups",
+        ) from exc
+
+
+@router.get("/agent_groups/{group_key}/conversations", response_model=ConversationResponse)
+async def list_agent_group_conversations_endpoint(
+    group_key: str,
+    authorization: Optional[str] = Header(None),
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
+    cursor: Annotated[Optional[str], Query(max_length=512)] = None,
+    search: Annotated[str, Query(max_length=200)] = "",
+):
+    """Return a paginated Agent-chat history group without message bodies."""
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        data = list_agent_group_conversations(user_id, group_key, limit, cursor, search)
+        return ConversationResponse(code=0, message="success", data=data)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except TokenExpiredError as exc:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.exception("Failed to list Agent group conversations")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to list Agent group conversations",
+        ) from exc
+
+
+@router.get("/agent_groups/{agent_id}/conversation_ids", response_model=ConversationResponse)
+async def list_agent_group_conversation_ids_endpoint(
+    agent_id: Annotated[int, Path(gt=0, le=2147483647)],
+    authorization: Optional[str] = Header(None),
+):
+    """Return all active conversation IDs for one Agent, scoped to its owner."""
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        data = list_agent_group_conversation_ids(user_id, agent_id)
+        return ConversationResponse(code=0, message="success", data=data)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except TokenExpiredError as exc:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.exception("Failed to list Agent conversation IDs")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to list Agent conversation IDs",
+        ) from exc
 
 
 @router.put("/create", response_model=ConversationResponse)

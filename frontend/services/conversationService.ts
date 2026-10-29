@@ -10,6 +10,8 @@ import type {
   ConversationListResponse,
   ConversationListPage,
   ConversationListParams,
+  AgentConversationGroupPage,
+  AgentGroupConversationPage,
   ApiConversationDetail,
   ApiConversationResponse,
   WorkbenchPins,
@@ -38,6 +40,73 @@ const getWebSocketUrl = (endpoint: string): string => {
 };
 
 export const conversationService = {
+  async getAgentGroups(
+    params: {
+      limit?: number;
+      cursor?: string | null;
+      search?: string;
+      includeAgentIds?: readonly number[];
+      includeOther?: boolean;
+    } = {}
+  ): Promise<AgentConversationGroupPage> {
+    const query = new URLSearchParams({ limit: String(params.limit ?? 10) });
+    if (params.cursor) query.set("cursor", params.cursor);
+    if (params.search?.trim()) query.set("search", params.search.trim());
+    for (const agentId of params.includeAgentIds ?? []) {
+      query.append("include_agent_id", String(agentId));
+    }
+    if (params.includeOther) query.set("include_other", "true");
+    const response = await fetch(
+      `${API_ENDPOINTS.conversation.agentGroups}?${query.toString()}`
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data as AgentConversationGroupPage;
+  },
+
+  async getAgentGroupConversations(params: {
+    groupKey: string;
+    limit?: number;
+    cursor?: string | null;
+    search?: string;
+  }): Promise<AgentGroupConversationPage> {
+    const query = new URLSearchParams({ limit: String(params.limit ?? 10) });
+    if (params.cursor) query.set("cursor", params.cursor);
+    if (params.search?.trim()) query.set("search", params.search.trim());
+    const response = await fetch(
+      `${API_ENDPOINTS.conversation.agentGroupConversations(params.groupKey)}?${query.toString()}`
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data as AgentGroupConversationPage;
+  },
+
+  async getAgentConversationIds(agentId: number): Promise<string[]> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.agentGroupConversationIds(agentId)
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return Array.isArray(data.data?.items)
+      ? data.data.items.map((id: number | string) => String(id))
+      : [];
+  },
+
   async getWorkbenchPins(): Promise<WorkbenchPins> {
     const response = await fetch(API_ENDPOINTS.conversation.workbenchPins);
     const data = await response.json();

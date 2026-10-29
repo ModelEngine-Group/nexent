@@ -1,0 +1,59 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
+.scrollArea {
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+.scrollArea::-webkit-scrollbar {
+  width: 4px;
+  background-color: transparent;
+}
+
+.scrollArea::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+.scrollArea::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border: 0;
+  border-radius: 9999px;
+  background-clip: content-box;
+}
+
+.scrollArea[data-agent-history-scrolling],
+.scrollArea[data-scrollbar-scrolling] {
+  scrollbar-color: var(--scrollbar-thumb) transparent !important;
+}
+
+.scrollArea[data-agent-history-scrolling]::-webkit-scrollbar-thumb,
+.scrollArea[data-scrollbar-scrolling]::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb) !important;
+  background-clip: content-box !important;
+}
+
+.scrollArea:hover {
+  scrollbar-color: var(--scrollbar-thumb-hover) transparent !important;
+}
+
+.scrollArea:hover::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb-hover) !important;
+  background-clip: content-box !important;
+}
+
+.groupViewport:has(.scrollArea:hover) {
+  scrollbar-color: transparent transparent !important;
+}
+
+.groupViewport:has(.scrollArea:hover)::-webkit-scrollbar-thumb {
+  background: transparent !important;
+}
+
+@supports selector(::-webkit-scrollbar) {
+  .scrollArea.scrollArea,
+  .groupViewport:has(.scrollArea:hover) {
+    scrollbar-width: auto;
+    scrollbar-color: auto !important;
+  }
+}

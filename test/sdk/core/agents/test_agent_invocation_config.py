@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Configuration cloning preserves services but isolates invocation data."""
 
 from dataclasses import dataclass
@@ -80,7 +82,9 @@ def test_invocation_factory_passes_isolated_config_and_original_client_to_tools(
 
     def create_tool(_owner, config):
         captured.append(config)
-        return Mock()
+        tool = Mock()
+        tool.name = config.name
+        return tool
 
     monkeypatch.setattr(NexentAgent, "create_tool", create_tool)
     client = InjectedClient()

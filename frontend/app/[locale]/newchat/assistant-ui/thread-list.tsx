@@ -33,6 +33,7 @@ import {
   CircleAlertIcon,
   LoaderCircle,
   ListChecks,
+  Share2Icon,
 } from "lucide-react";
 import {
   Fragment,
@@ -51,6 +52,7 @@ import { removeDeletedWorkbenchPins } from "@/lib/workbenchPins";
 import { cn } from "@/lib/utils";
 import log from "@/lib/logger";
 import { conversationService } from "@/services/conversationService";
+import { useConversationShareRequest } from "@/stores/conversationShare";
 import { getConversationDateBoundaries } from "@/lib/conversationViewport";
 import {
   fetchAgentConversationIds,
@@ -69,6 +71,7 @@ import { setPendingThreadOperationId } from "../adapter/conversation-thread-list
 import { getVisibleThreadIds } from "./visible-thread-ids";
 import { getVisibleAgentThreads } from "./thread-list-visibility";
 import { hoistPinnedThreads, usePinnedThreads } from "./thread-pins";
+import { AgentHistoryList, AgentHistoryViewport } from "./agent-history-list";
 export { PinnedThreadsProvider } from "./thread-pins";
 
 // Conversation status indicator component
@@ -100,6 +103,7 @@ const ConversationStatusIndicator: FC<{
 };
 
 interface BatchSelectionValue {
+  resolveRemoteId: (id: string) => string | undefined;
   batchMode: boolean;
   selectedIds: Set<string>;
   allVisibleSelected: boolean;
@@ -107,6 +111,7 @@ interface BatchSelectionValue {
   toggle: (id: string) => void;
   isSelected: (id: string) => boolean;
   selectAllVisible: () => void;
+  setVisibleConversationIds: (ids?: readonly string[]) => void;
   toggleAgentGroup: (
     agentId: number,
     visibleThreadIds: readonly string[]
@@ -158,6 +163,8 @@ export const BatchSelectionProvider: FC<{
   const threadAgentOverrides = useThreadAgentOverrides();
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [externalVisibleConversationIds, setExternalVisibleConversationIds] =
+    useState<readonly string[] | undefined>(undefined);
   const [agentConversationIds, setAgentConversationIds] = useState<
     ReadonlyMap<number, readonly string[]>
   >(() => new Map());
@@ -181,13 +188,15 @@ export const BatchSelectionProvider: FC<{
   const resolveRemoteId = useCallback(
     (id: string): string | undefined => {
       const rawId =
-        serverConversationIds?.get(id) || itemsById.get(id)?.remoteId;
+        serverConversationIds?.get(id) ||
+        itemsById.get(id)?.remoteId ||
+        (conversationType === "agent_chat" ? id : undefined);
       const numericId = Number(rawId);
       return Number.isSafeInteger(numericId) && numericId > 0
         ? String(numericId)
         : undefined;
     },
-    [itemsById, serverConversationIds]
+    [conversationType, itemsById, serverConversationIds]
   );
   const scopedVisibleThreadIds = useMemo(() => {
     const ids = getVisibleThreadIds(
@@ -211,13 +220,22 @@ export const BatchSelectionProvider: FC<{
     threadIds,
     threadItems,
   ]);
-  const visibleConversationIds = useMemo(
-    () =>
-      scopedVisibleThreadIds
-        .map(resolveRemoteId)
-        .filter((id): id is string => Boolean(id)),
-    [scopedVisibleThreadIds, resolveRemoteId]
-  );
+  const visibleConversationIds = useMemo(() => {
+    if (
+      conversationType === "agent_chat" &&
+      externalVisibleConversationIds !== undefined
+    ) {
+      return [...new Set(externalVisibleConversationIds)];
+    }
+    return scopedVisibleThreadIds
+      .map(resolveRemoteId)
+      .filter((id): id is string => Boolean(id));
+  }, [
+    conversationType,
+    externalVisibleConversationIds,
+    scopedVisibleThreadIds,
+    resolveRemoteId,
+  ]);
 
   const toggle = useCallback(
     (id: string) => {
@@ -250,6 +268,12 @@ export const BatchSelectionProvider: FC<{
     });
   }, [setSelectedIds, visibleConversationIds]);
 
+  const setVisibleConversationIds = useCallback(
+    (ids?: readonly string[]) =>
+      setExternalVisibleConversationIds(ids ? [...ids] : undefined),
+    []
+  );
+
   const getAgentGroupSelection = useCallback(
     (agentId: number, visibleIds: readonly string[]) => {
       const completeIds = agentConversationIds.get(agentId);
@@ -281,33 +305,47 @@ export const BatchSelectionProvider: FC<{
       const visibleConversationIds = visibleThreadIds
         .map(resolveRemoteId)
         .filter((id): id is string => Boolean(id));
-      const shouldSelect =
+      const shouldSelectVisible =
         visibleConversationIds.length === 0 ||
         !visibleConversationIds.every((id) => selectedIds.has(id));
 
       loadingAgentIdsRef.current.add(agentId);
       setLoadingAgentIds((previous) => new Set(previous).add(agentId));
       try {
-        const boundaries = getConversationDateBoundaries();
-        const conversationIds = await fetchAgentConversationIds(
-          agentId,
-          (offset, limit) =>
-            conversationService.getList({
-              offset,
-              limit,
-              ...boundaries,
-              conversationType,
-            }),
-          100
-        );
+        let conversationIds: string[];
+        if (conversationType === "agent_chat") {
+          conversationIds =
+            await conversationService.getAgentConversationIds(agentId);
+        } else {
+          const boundaries = getConversationDateBoundaries();
+          conversationIds = await fetchAgentConversationIds(
+            agentId,
+            (offset, limit) =>
+              conversationService.getList({
+                offset,
+                limit,
+                ...boundaries,
+                conversationType,
+              }),
+            100
+          );
+        }
         setAgentConversationIds((previous) => {
           const next = new Map(previous);
           next.set(agentId, conversationIds);
           return next;
         });
-        setSelectedIds((previous) =>
-          setAgentConversationSelection(previous, conversationIds, shouldSelect)
-        );
+        setSelectedIds((previous) => {
+          const shouldSelect =
+            conversationType === "agent_chat"
+              ? !conversationIds.every((id) => previous.has(id))
+              : shouldSelectVisible;
+          return setAgentConversationSelection(
+            previous,
+            conversationIds,
+            shouldSelect
+          );
+        });
       } catch (error) {
         log.error(
           `[ThreadList] Failed to load conversations for agent ${agentId}:`,
@@ -382,6 +420,17 @@ export const BatchSelectionProvider: FC<{
             );
           }
           await aui.threads.reload();
+          if (conversationType === "agent_chat") {
+            void queryClient.invalidateQueries({
+              queryKey: ["agentConversationGroups"],
+            });
+            void queryClient.invalidateQueries({
+              queryKey: ["agentConversationGroupConversations"],
+            });
+            void queryClient.invalidateQueries({
+              queryKey: ["workbench-pins"],
+            });
+          }
           setAgentConversationIds(new Map());
           if (result?.failed_ids?.length) {
             message.warning(
@@ -418,6 +467,7 @@ export const BatchSelectionProvider: FC<{
 
   const value = useMemo<BatchSelectionValue>(
     () => ({
+      resolveRemoteId,
       batchMode,
       selectedIds,
       allVisibleSelected:
@@ -429,6 +479,7 @@ export const BatchSelectionProvider: FC<{
       toggle,
       isSelected,
       selectAllVisible,
+      setVisibleConversationIds,
       toggleAgentGroup,
       getAgentGroupSelection,
       clear,
@@ -437,12 +488,14 @@ export const BatchSelectionProvider: FC<{
       deleteSelected,
     }),
     [
+      resolveRemoteId,
       batchMode,
       selectedIds,
       visibleConversationIds,
       toggle,
       isSelected,
       selectAllVisible,
+      setVisibleConversationIds,
       toggleAgentGroup,
       getAgentGroupSelection,
       clear,
@@ -561,19 +614,22 @@ interface ThreadListProps {
   searchQuery?: string;
   newChatDesign?: boolean;
   selectedAgentId?: number;
+  onNewConversation?: () => void | Promise<void>;
 }
 
 export const ThreadList: FC<ThreadListProps> = ({
-  activeThreadId,
   generatedTitles,
   serverConversationIds,
   onHistoryAgentSelected,
+  activeThreadId,
   onRenameSuccess,
   searchQuery = "",
   newChatDesign = false,
   selectedAgentId,
+  onNewConversation,
 }) => {
   const { t } = useTranslation();
+  const batchSelection = useBatchSelection();
   const [completedConversations, setCompletedConversations] = useState(
     () => new Set<string>()
   );
@@ -620,10 +676,11 @@ export const ThreadList: FC<ThreadListProps> = ({
   }, []);
 
   return (
-    <div className="flex flex-col p-2">
+    <div className={cn("flex flex-col p-2", newChatDesign && "min-h-0 flex-1")}>
       <div
         className={cn(
           "mb-1 flex h-8 items-center justify-between py-1",
+          newChatDesign && "shrink-0",
           newChatDesign ? "px-1" : "px-3"
         )}
       >
@@ -641,43 +698,63 @@ export const ThreadList: FC<ThreadListProps> = ({
         </p>
         <BatchManageButton newChatDesign={newChatDesign} />
       </div>
-      <AuiIf condition={(s) => s.threads.isLoading}>
-        <ThreadListSkeleton />
-      </AuiIf>
-      <AuiIf
-        condition={(s) => !s.threads.isLoading && visibleThreadIds.length === 0}
-      >
-        <ThreadListEmpty />
-      </AuiIf>
-      <AuiIf
-        condition={(s) => !s.threads.isLoading && visibleThreadIds.length > 0}
-      >
-        <ThreadListItems
-          activeThreadId={activeThreadId}
-          visibleThreadIds={visibleThreadIds}
-          completedConversations={completedConversations}
-          generatedTitles={generatedTitles}
-          onHistoryAgentSelected={onHistoryAgentSelected}
-          onRenameSuccess={onRenameSuccess}
-          searchQuery={searchQuery}
-          newChatDesign={newChatDesign}
-          selectedAgentId={selectedAgentId}
-          expandedAgentKeys={expandedAgentKeys}
-          onToggleAgentExpanded={toggleAgentExpanded}
-        />
-      </AuiIf>
-      {hasMore && !isLoading && (
-        <ThreadListPrimitive.LoadMore
-          disabled={isLoadingMore}
-          className="mt-1 flex h-8 w-full items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted-foreground hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {isLoadingMore ? <ArrowDownIcon className="size-3.5" /> : null}
-          <span>
-            {isLoadingMore
-              ? t("chat.threadList.loadingMore")
-              : t("chat.threadList.loadMore")}
-          </span>
-        </ThreadListPrimitive.LoadMore>
+      {newChatDesign ? (
+        <AgentHistoryViewport enabled={selectedAgentId === undefined}>
+          <AgentHistoryList
+            searchQuery={searchQuery}
+            selectedAgentId={selectedAgentId}
+            generatedTitles={generatedTitles}
+            onHistoryAgentSelected={onHistoryAgentSelected}
+            onRenameSuccess={onRenameSuccess}
+            onNewConversation={onNewConversation}
+            batch={batchSelection}
+          />
+        </AgentHistoryViewport>
+      ) : (
+        <>
+          <AuiIf condition={(s) => s.threads.isLoading}>
+            <ThreadListSkeleton />
+          </AuiIf>
+          <AuiIf
+            condition={(s) =>
+              !s.threads.isLoading && visibleThreadIds.length === 0
+            }
+          >
+            <ThreadListEmpty />
+          </AuiIf>
+          <AuiIf
+            condition={(s) =>
+              !s.threads.isLoading && visibleThreadIds.length > 0
+            }
+          >
+            <ThreadListItems
+              activeThreadId={activeThreadId}
+              visibleThreadIds={visibleThreadIds}
+              completedConversations={completedConversations}
+              generatedTitles={generatedTitles}
+              onHistoryAgentSelected={onHistoryAgentSelected}
+              onRenameSuccess={onRenameSuccess}
+              searchQuery={searchQuery}
+              newChatDesign={newChatDesign}
+              selectedAgentId={selectedAgentId}
+              expandedAgentKeys={expandedAgentKeys}
+              onToggleAgentExpanded={toggleAgentExpanded}
+            />
+          </AuiIf>
+          {hasMore && !isLoading && (
+            <ThreadListPrimitive.LoadMore
+              disabled={isLoadingMore}
+              className="mt-1 flex h-8 w-full items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted-foreground hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isLoadingMore ? <ArrowDownIcon className="size-3.5" /> : null}
+              <span>
+                {isLoadingMore
+                  ? t("chat.threadList.loadingMore")
+                  : t("chat.threadList.loadMore")}
+              </span>
+            </ThreadListPrimitive.LoadMore>
+          )}
+        </>
       )}
     </div>
   );
@@ -1524,7 +1601,42 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
     });
   };
 
+  const shareAgentOverrides = useThreadAgentOverrides();
   const togglePinned = () => pinned?.togglePin(thread);
+  const shareConversationId = Number(
+    batch?.resolveRemoteId(thread.id) || thread.remoteId
+  );
+
+  const handleShare = async () => {
+    const conversationId = shareConversationId;
+    if (
+      !Number.isSafeInteger(conversationId) ||
+      conversationId <= 0 ||
+      isRunning
+    )
+      return;
+    const agentId = resolveThreadAgentId(
+      thread.custom?.agentId,
+      shareAgentOverrides[thread.id]
+    );
+    if (agentId !== null) onHistoryAgentSelected?.(agentId);
+    try {
+      await aui.threads.switchToThread(thread.id);
+      if (aui.threads.getState().mainThreadId === thread.id) {
+        useConversationShareRequest
+          .getState()
+          .setRequest({ threadId: thread.id, conversationId });
+      }
+    } catch (error) {
+      if (
+        useConversationShareRequest.getState().request?.threadId === thread.id
+      ) {
+        useConversationShareRequest.getState().setRequest(null);
+      }
+      log.error("[ThreadList] Failed to open conversation for sharing:", error);
+      message.error(t("chatInterface.shareCreateFailed"));
+    }
+  };
 
   const renderMainContent = () => {
     if (isEditing) {
@@ -1652,6 +1764,18 @@ const ThreadListItemContent: FC<ThreadListItemContentProps> = ({
             <MoreHorizontalIcon className="size-4" />
           </ThreadListItemMorePrimitive.Trigger>
           <ThreadListItemMorePrimitive.Content className="z-50 rounded-md border bg-popover p-1 shadow-md">
+            <ThreadListItemMorePrimitive.Item
+              onSelect={() => void handleShare()}
+              disabled={
+                isRunning ||
+                !Number.isSafeInteger(shareConversationId) ||
+                shareConversationId <= 0
+              }
+              className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent data-[disabled]:opacity-50"
+            >
+              <Share2Icon className="size-4" />
+              {t("chatInterface.shareConversation")}
+            </ThreadListItemMorePrimitive.Item>
             <ThreadListItemMorePrimitive.Item
               onSelect={togglePinned}
               disabled={!pinned?.canPin(thread)}

@@ -271,11 +271,19 @@ class TestCreateToken(unittest.IsolatedAsyncioTestCase):
             "user_id": "user-123"
         }
 
-        result = ums.create_token("user-123")
+        # This module replaces database.token_db with a MagicMock, so the mask
+        # helper is stubbed to assert the display value is derived, not guessed.
+        with patch(
+            'management.services.permission.identity.authentication.mask_access_key',
+            side_effect=lambda key: f"masked:{key}",
+        ):
+            result = ums.create_token("user-123")
 
         assert result["token_id"] == 1
         assert result["access_key"] == "nexent-abc123"
         assert result["user_id"] == "user-123"
+        # The masked value is what a client renders, so it ships next to the key.
+        assert result["masked_access_key"] == "masked:nexent-abc123"
         assert result["can_copy"] is True
         mock_generate_access_key.assert_called_once()
         session = mock_get_db_session.return_value.__enter__.return_value
@@ -288,8 +296,10 @@ class TestCreateToken(unittest.IsolatedAsyncioTestCase):
 class TestListTokensByUser(unittest.IsolatedAsyncioTestCase):
     """Tests for list_tokens_by_user function in user_management_service."""
 
+    @patch('management.services.permission.identity.authentication.mask_access_key',
+            side_effect=lambda key: f"masked:{key}")
     @patch('management.services.permission.identity.authentication.list_tokens_by_user_record')
-    def test_list_tokens_by_user_success(self, mock_list_tokens):
+    def test_list_tokens_by_user_success(self, mock_list_tokens, mock_mask_access_key):
         """Test successful token listing."""
         from management.services.permission.identity import authentication as ums
 
@@ -301,25 +311,45 @@ class TestListTokensByUser(unittest.IsolatedAsyncioTestCase):
         result = ums.list_tokens_by_user("user-123", "USER")
 
         assert len(result) == 2
-        assert result[0]["access_key"] == "nexent*key1"
+        # A role that may not copy sees the masked value in both fields, so a
+        # client renders and (had it been allowed) copies the same safe value.
+        assert result[0]["access_key"] == "masked:nexent-key1"
+        assert [t["masked_access_key"] for t in result] == [
+            "masked:nexent-key1",
+            "masked:nexent-key2",
+        ]
         assert result[0]["can_copy"] is False
-        mock_list_tokens.assert_called_once_with("user-123")
+        assert mock_mask_access_key.call_count == 2
+        # The record layer masks by default, so the opt-out is part of the contract.
+        mock_list_tokens.assert_called_once_with("user-123", mask=False)
 
+    @patch('management.services.permission.identity.authentication.mask_access_key',
+            side_effect=lambda key: f"masked:{key}")
     @patch('management.services.permission.identity.authentication.list_tokens_by_user_record')
-    def test_list_tokens_by_user_admin_receives_complete_key(self, mock_list_tokens):
+    def test_list_tokens_by_user_admin_receives_complete_key(self, mock_list_tokens, mock_mask_access_key):
         from management.services.permission.identity import authentication as ums
 
+        stored_key = "nexent-7593775c8d8798ae7565495b"
         mock_list_tokens.return_value = [
-            {"token_id": 1, "access_key": "nexent-1234567890abcdef", "user_id": "user-123"}
+            {"token_id": 1, "access_key": stored_key, "user_id": "user-123"}
         ]
 
         result = ums.list_tokens_by_user("user-123", "ADMIN")
 
-        assert result[0]["access_key"] == "nexent-1234567890abcdef"
+        assert result[0]["access_key"] == stored_key
+        # Only the display value stays masked for a copy-capable role.
+        assert result[0]["masked_access_key"] == f"masked:{stored_key}"
         assert result[0]["can_copy"] is True
+        mock_mask_access_key.assert_called_once_with(stored_key)
+        # Regression guard for the reported defect: administrators could copy a
+        # masked key ("nexent****11bb") because the record layer was never asked
+        # for the stored value.
+        mock_list_tokens.assert_called_once_with("user-123", mask=False)
 
+    @patch('management.services.permission.identity.authentication.mask_access_key',
+            side_effect=lambda key: f"masked:{key}")
     @patch('management.services.permission.identity.authentication.list_tokens_by_user_record')
-    def test_list_tokens_by_user_dev_masks_middle(self, mock_list_tokens):
+    def test_list_tokens_by_user_dev_masks_middle(self, mock_list_tokens, mock_mask_access_key):
         from management.services.permission.identity import authentication as ums
 
         mock_list_tokens.return_value = [
@@ -328,8 +358,10 @@ class TestListTokensByUser(unittest.IsolatedAsyncioTestCase):
 
         result = ums.list_tokens_by_user("user-123", "DEV")
 
-        assert result[0]["access_key"] == "nexent-123*********cdef"
+        assert result[0]["access_key"] == "masked:nexent-1234567890abcdef"
+        assert result[0]["masked_access_key"] == "masked:nexent-1234567890abcdef"
         assert result[0]["can_copy"] is False
+        mock_mask_access_key.assert_called_once_with("nexent-1234567890abcdef")
 
     @patch('management.services.permission.identity.authentication.list_tokens_by_user_record')
     def test_list_tokens_by_user_empty(self, mock_list_tokens):

@@ -213,6 +213,7 @@ nexent_core_utils_observer.MessageObserver = MagicMock()
 sys.modules['nexent.core.utils.observer'] = nexent_core_utils_observer
 
 sys.modules['nexent.core'] = _create_package_mock('nexent.core')
+sys.modules['nexent.core'].__path__ = [str(SDK_ROOT / 'nexent' / 'core')]
 sys.modules['nexent.core.agents'] = _create_package_mock('nexent.core.agents')
 if memory_pkg is not None:
     sys.modules["nexent.memory"] = memory_pkg

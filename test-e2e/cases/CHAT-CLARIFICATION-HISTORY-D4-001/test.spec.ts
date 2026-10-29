@@ -4,7 +4,7 @@ import { expect, test } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { prepareWorkbench } from "../../infra/automation/d4/fixtures/workbench-controls";
 
-test.use({ channel: "chrome", viewport: {width:1440,height:1100} });
+test.use({ viewport: {width:1440,height:1100} });
 
 const form = {schema_version:1, questions:[
   {id:"goal",type:"text",title:"Goal?",required:true},

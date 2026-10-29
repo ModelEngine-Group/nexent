@@ -28,32 +28,63 @@ it("uses message activity instead of an administrative audit timestamp", async (
   expect(result.nextCursor).toBeUndefined();
 });
 
-it("uses keyset cursors and reloads the entire loaded window, preserving cursor semantics", async () => {
+it("leaves Agent-chat history loading to the grouped history API", async () => {
+  const get = vi.spyOn(conversationService, "getList");
+  const result = await createConversationThreadListAdapter("agent_chat").list(
+    {}
+  );
+
+  expect(result).toEqual({ threads: [] });
+  expect(get).not.toHaveBeenCalled();
+});
+
+it.each(["agent_chat", "workbench"] as const)(
+  "limits detail activity metadata changes to Agent chat (%s)",
+  async (conversationType) => {
+    vi.spyOn(conversationService, "getById").mockResolvedValue({
+      conversation_id: 7,
+      create_time: 1000,
+      last_activity_time: 9000,
+      message: [],
+    });
+    const adapter = createConversationThreadListAdapter(conversationType);
+    const result = await adapter.fetch("7");
+    expect(result.custom?.lastMessageAt).toBe(
+      new Date(conversationType === "agent_chat" ? 9000 : 1000).toISOString()
+    );
+  }
+);
+
+it("preserves Workbench keyset pagination and its loaded refresh window", async () => {
   const get = vi
     .spyOn(conversationService, "getList")
     .mockResolvedValueOnce({
-      items: Array.from({ length: 30 }, (_, i) => row(140 - i)),
+      items: Array.from({ length: 30 }, (_, index) => row(140 - index)),
       metadata,
       next_cursor: "first",
     })
     .mockResolvedValueOnce({
-      items: Array.from({ length: 20 }, (_, i) => row(110 - i)),
+      items: Array.from({ length: 20 }, (_, index) => row(110 - index)),
       metadata,
       next_cursor: "tail",
     })
     .mockResolvedValueOnce({
       items: [
         row(1, 200),
-        ...Array.from({ length: 49 }, (_, i) => row(140 - i)),
+        ...Array.from({ length: 49 }, (_, index) => row(140 - index)),
       ],
       metadata,
       next_cursor: "rebased",
     });
-  const adapter = createConversationThreadListAdapter("agent_chat");
+  const adapter = createConversationThreadListAdapter("workbench");
   const initial = await adapter.list({});
   expect(initial.nextCursor).toBe("activity:first");
   const more = await adapter.list({ after: initial.nextCursor });
-  expect(get.mock.calls[1][0]).toMatchObject({ offset: 0, cursor: "first" });
+  expect(get.mock.calls[1][0]).toMatchObject({
+    offset: 0,
+    cursor: "first",
+    conversationType: "workbench",
+  });
   expect(more.nextCursor).toBe("activity:tail");
   const refreshed = await adapter.list({});
   expect(get.mock.calls[2][0]).toMatchObject({ offset: 0, limit: 50 });

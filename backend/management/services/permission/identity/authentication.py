@@ -5,7 +5,13 @@ from types import SimpleNamespace
 from sqlalchemy import select
 from typing import Optional, Any, Tuple, Dict, List
 
-from management.db.identity.token import create_token as create_token_record, generate_access_key, list_tokens_by_user as list_tokens_by_user_record, delete_token as delete_token_record
+from management.db.identity.token import (
+    create_token as create_token_record,
+    generate_access_key,
+    list_tokens_by_user as list_tokens_by_user_record,
+    mask_access_key,
+    delete_token as delete_token_record,
+)
 
 from pydantic import EmailStr
 
@@ -362,15 +368,13 @@ def create_token(user_id: str) -> Dict[str, Any]:
     with get_db_session() as session:
         soft_delete_tokens_by_user(user_id, user_id, session)
         token = create_token_record(access_key, user_id, created_by=user_id, db_session=session)
-    return {**token, "can_copy": True}
-
-
-def _mask_access_key(access_key: str) -> str:
-    """Keep the key prefix and suffix visible while hiding its secret middle."""
-    if len(access_key) <= 8:
-        return "*" * len(access_key)
-    prefix_length = min(10, len(access_key) - 5)
-    return f"{access_key[:prefix_length]}{'*' * (len(access_key) - prefix_length - 4)}{access_key[-4:]}"
+    return {
+        **token,
+        # The list endpoint returns the same pair, so a client renders the mask
+        # and copies the complete key consistently right after a refresh.
+        "masked_access_key": mask_access_key(token["access_key"]),
+        "can_copy": True,
+    }
 
 
 def list_tokens_by_user(user_id: str, actor_role: str) -> List[Dict[str, Any]]:
@@ -381,19 +385,32 @@ def list_tokens_by_user(user_id: str, actor_role: str) -> List[Dict[str, Any]]:
         actor_role: Role of the authenticated user requesting the list.
 
     Returns:
-        List of token information. Administrators can view and copy complete
-        keys; other roles receive masked, non-copyable values.
+        List of token information. Display and copy are separate fields:
+        ``masked_access_key`` is the masked value every client renders, and
+        ``access_key`` holds the stored key only for roles whose
+        ``can_copy`` is True. Copying therefore yields the complete key while
+        other roles keep seeing a masked, non-copyable value.
     """
     can_copy = (actor_role or "").upper() in {"ADMIN", "SU"}
-    tokens = list_tokens_by_user_record(user_id)
-    return [
-        {
+    # The persistence layer masks access keys by default, so the stored value is
+    # requested here and role-based exposure below stays the single decision
+    # point. Requesting the mask instead made can_copy True while the value was
+    # already masked, so copying produced "nexent****11bb".
+    tokens = list_tokens_by_user_record(user_id, mask=False)
+
+    result: List[Dict[str, Any]] = []
+    for token in tokens:
+        masked_access_key = mask_access_key(token["access_key"])
+        result.append({
             **token,
-            "access_key": token["access_key"] if can_copy else _mask_access_key(token["access_key"]),
+            # A copy-capable role receives the stored key, every other role
+            # receives the masked value, and masked_access_key is what clients
+            # display either way.
+            "access_key": token["access_key"] if can_copy else masked_access_key,
+            "masked_access_key": masked_access_key,
             "can_copy": can_copy,
-        }
-        for token in tokens
-    ]
+        })
+    return result
 
 
 def delete_token(token_id: int, user_id: str) -> bool:
