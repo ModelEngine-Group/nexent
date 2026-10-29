@@ -44,7 +44,7 @@ def test_create_conversation_persists_initial_workbench_version(monkeypatch):
         knowledge_scope=None,
         runtime_metadata={},
         runtime_metadata_version=0,
-        workbench_config={"schema_version": 3, "mode": "single_agent_chat"},
+        workbench_config={"schema_version": 4, "mode": "single_agent_chat"},
         workbench_config_version=1,
         create_time=1000,
         update_time=1000,
@@ -55,14 +55,14 @@ def test_create_conversation_persists_initial_workbench_version(monkeypatch):
         "Workbench",
         "user-a",
         agent_id=7,
-        workbench_config={"schema_version": 3, "mode": "single_agent_chat"},
+        workbench_config={"schema_version": 4, "mode": "single_agent_chat"},
     )
 
     assert result["workbench_config_version"] == 1
     assert result["workbench_config"]["mode"] == "single_agent_chat"
     assert insert_values["workbench_config_version"] == 1
     assert insert_values["workbench_config"] == {
-        "schema_version": 3,
+        "schema_version": 4,
         "mode": "single_agent_chat",
     }
 
@@ -80,7 +80,7 @@ def test_workbench_replacement_requires_owned_conversation(
     common = {
         "conversation_id": 42,
         "user_id": "user-a",
-        "config": {"schema_version": 3, "mode": "generic_chat"},
+        "config": {"schema_version": 4, "mode": "generic_chat"},
     }
 
     with pytest.raises(conversation_db.ConversationNotFoundError):
@@ -97,11 +97,11 @@ def test_workbench_replacement_requires_owned_conversation(
 
 def test_creation_topology_accepts_same_creation_mode():
     record = SimpleNamespace(
-        workbench_config={"schema_version": 3, "mode": "skill_create"}
+        workbench_config={"schema_version": 4, "mode": "skill_create"}
     )
 
     conversation_db._assert_workbench_topology(
-        record, {"schema_version": 3, "mode": "skill_create"}
+        record, {"schema_version": 4, "mode": "skill_create"}
     )
 
 
