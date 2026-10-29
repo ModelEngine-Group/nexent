@@ -13,7 +13,9 @@ from typing import Optional
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking
-from starlette.responses import JSONResponse, Response
+from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
+from starlette.responses import JSONResponse, Response, StreamingResponse
+
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 from contracts.agent import AgentInfoRequest, AgentIDRequest, AgentImportRequest, SkillConflictCheckRequest, AgentNameBatchCheckRequest, AgentNameBatchRegenerateRequest, VersionPublishRequest, VersionListResponse, VersionDetailResponse, VersionStatusRequest, CurrentVersionResponse, VersionCompareRequest, VersionUpdateRequest, WorkbenchCapabilityPreviewRequest
@@ -267,6 +269,9 @@ async def update_agent_info_api(
             "agent_update", request=http_request, user_id=user_id, tenant_id=tenant_id, details=audit_details
         )
         return result or {}
+    except ParameterValidationError as exc:
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+                            detail={"code": exc.category, "field": exc.path}) from None
     except AgentRelationValidationError as exc:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
     except AgentNotFoundError as exc:

@@ -1475,10 +1475,10 @@ async def build_nl2agent_run_info(
         key=MODEL_CONFIG_MAPPING["llm"],
         tenant_id=tenant_id,
     )
-    if request.model_id is not None or request.generation_config is not None:
+    if request.model_id is not None or request.model_parameter_preferences or getattr(request, "_runtime_model_parameter_preferences", {}):
         default_model = resolve_creator_model(
             model_config_list, agent_config, tenant_id, request.model_id,
-            request.generation_config.model_dump(exclude_unset=True) if request.generation_config else None,
+            getattr(request, "_runtime_model_parameter_preferences", request.model_parameter_preferences),
             default_model,
         )
     input_budget, capacity_snapshot, resolved_capacity_snapshot = (
@@ -1538,6 +1538,7 @@ async def build_nl2agent_run_info(
 
     stop_event = threading.Event()
     run_info = AgentRunInfo(
+        tenant_id=tenant_id,
         query=final_query,
         model_config_list=model_config_list,
         observer=_Nl2AgentBoundaryObserver(

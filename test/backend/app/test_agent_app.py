@@ -1210,6 +1210,16 @@ def test_update_agent_info_api_with_result(mocker, mock_auth_header):
     assert response.json()["updated"] is True
 
 
+def test_update_agent_info_api_rejects_invalid_model_parameters(mocker, mock_auth_header):
+    from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
+
+    mocker.patch("management.api.agent.agent.update_agent_info_impl", new_callable=AsyncMock,
+                 side_effect=ParameterValidationError("PARAMETER_VALUE_INVALID", "/temperature"))
+    response = config_client.post("/agent/update", json={"agent_id": 1}, headers=mock_auth_header)
+    assert response.status_code == 422
+    assert response.json()["detail"] == {"code": "PARAMETER_VALUE_INVALID", "field": "/temperature"}
+
+
 def test_update_agent_info_api_exception(mocker, mock_auth_header):
     """Test update_agent_info_api exception handling."""
     mock_update_agent = mocker.patch(

@@ -12,7 +12,7 @@ from management.services.conversation import service as service
 def test_legacy_scope_endpoint_updates_canonical_config_only(mocker):
     """UT-BE-WB-026: legacy PATCH delegates to versioned canonical replacement."""
     canonical = {
-        "schema_version": 3,
+        "schema_version": 4,
         "mode": "single_agent_chat",
         "agent_mounts": [{"agent_id": 7, "version_no": 2}],
         "skill_mounts": [],
@@ -42,7 +42,7 @@ def test_legacy_scope_endpoint_updates_canonical_config_only(mocker):
 def test_legacy_scope_endpoint_rejects_unversioned_or_stale_update(mocker, version):
     """UT-BE-WB-026: stale compatibility clients cannot overwrite v3 scope."""
     mocker.patch.object(service, "get_conversation", return_value={
-        "workbench_config": {"schema_version": 3}, "workbench_config_version": 4,
+        "workbench_config": {"schema_version": 4}, "workbench_config_version": 4,
     })
     replace = mocker.patch.object(service, "update_conversation_workbench_config_service")
     with pytest.raises(WorkbenchConfigVersionConflict):

@@ -181,6 +181,7 @@ async def test_build_nl2skill_run_info_uses_template_and_request_history(mocker)
         language="en",
     )
 
+    assert result.tenant_id == "tenant"
     assert result.query == "rendered query"
     prompt_loader.assert_called_once()
     assert "complexity" not in prompt_loader.call_args.kwargs
