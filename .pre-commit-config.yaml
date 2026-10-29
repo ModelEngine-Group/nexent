@@ -1,0 +1,9 @@
+repos:
+  - repo: local
+    hooks:
+      - id: model-profile-check
+        name: Check packaged model profiles
+        entry: python scripts/check_model_profiles.py
+        language: system
+        pass_filenames: false
+        files: ^(sdk/nexent/core/model_service/|scripts/check_model_profiles\.py)
