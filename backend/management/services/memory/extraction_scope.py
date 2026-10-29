@@ -31,7 +31,12 @@ _SUGGESTION = re.compile(
 _CLAUSE_BOUNDARY = re.compile(r"[。！？!?；;\n]|\.(?=\s|$)")
 _REFERENCE_REQUEST = re.compile(
     r"^(?:请按(?:照)?|按照我|沿用|根据你|按我(?:的|长期|既有|一贯))|[?？]|"
-    r"^(?:please )?(?:follow|use) my (?:existing|usual|long[- ]term)\b",
+    r"(?:沿用|仍用|按(?:照)?|遵循|依照|继续使用|保持).{0,30}"
+    r"(?:既有|已有|之前|原有|一贯|常态|我(?:的)?|长期|你记(?:得|住)).{0,16}"
+    r"(?:偏好|习惯|结构|格式|风格|要求|约定|规范)|"
+    r"\b(?:follow|use|using|keep|stick with).{0,40}"
+    r"(?:my|existing|previous|usual|long[- ]term).{0,25}"
+    r"(?:preferences?|formats?|styles?|structures?|habits?)\b",
     re.IGNORECASE,
 )
 _CATEGORIES = {"user_preference", "user_fact", "task_outcome", "lesson"}

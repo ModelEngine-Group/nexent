@@ -152,6 +152,10 @@ def test_ac004_bare_answer_instruction_does_not_establish_lasting_intent(query):
     '沿用我长期的汇报习惯给出建议。',
     'Please follow my long-term reporting preference.',
     'What is my usual reporting format?',
+    '交付提醒仍用我的长期结构',
+    '后续按我之前的格式整理。',
+    'Please continue using my usual style.',
+    'For release reports, follow my existing preferences.',
 ])
 @pytest.mark.parametrize('category', ['user_preference', 'user_fact'])
 def test_ac004_reference_to_existing_preference_is_not_a_new_fact(query, category):
