@@ -61,6 +61,7 @@ import {
   useAui,
   useAuiState,
 } from "@assistant-ui/react";
+import { useActionBarCopy } from "@assistant-ui/core/react";
 import { Sources } from "../ui/sources";
 import { SourcesPanel } from "../ui/sources-panel";
 import {
@@ -1622,6 +1623,31 @@ const AssistantMessage: FC<{
   );
 };
 
+
+const AssistantMessageCopyButton: FC = () => {
+  const { t } = useTranslation();
+  const { copy, disabled, isCopied } = useActionBarCopy({
+    copiedDuration: 3000,
+    copyToClipboard,
+  });
+
+  return (
+    <TooltipIconButton
+      tooltip={t("chat.thread.copy")}
+      disabled={disabled}
+      onClick={() => {
+        copy();
+      }}
+    >
+      {isCopied ? (
+        <CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />
+      ) : (
+        <CopyIcon className="animate-in zoom-in-75 fade-in duration-150" />
+      )}
+    </TooltipIconButton>
+  );
+};
+
 const AssistantActionBar: FC = () => {
   const { t } = useTranslation();
   const aui = useAui();
@@ -1668,16 +1694,7 @@ const AssistantActionBar: FC = () => {
       className="aui-assistant-action-bar-root text-muted-foreground animate-in fade-in col-start-3 row-start-2 -ml-1 flex w-full items-center gap-1 duration-200"
     >
       <div className="flex items-center gap-1">
-        <ActionBarPrimitive.Copy asChild>
-          <TooltipIconButton tooltip={t("chat.thread.copy")}>
-            <AuiIf condition={(s) => s.message.isCopied}>
-              <CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />
-            </AuiIf>
-            <AuiIf condition={(s) => !s.message.isCopied}>
-              <CopyIcon className="animate-in zoom-in-75 fade-in duration-150" />
-            </AuiIf>
-          </TooltipIconButton>
-        </ActionBarPrimitive.Copy>
+        <AssistantMessageCopyButton />
         {creationMode ? (
           <TooltipIconButton
             tooltip={t("chat.thread.refresh")}
