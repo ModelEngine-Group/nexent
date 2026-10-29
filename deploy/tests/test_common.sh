@@ -1229,13 +1229,19 @@ if deployment_https_validate_cert_pair >/dev/null 2>&1; then
   echo "FAIL: wrong passphrase should fail validation"
   exit 1
 fi
+assert_contains "$(deployment_https_validate_cert_pair 2>&1 >/dev/null || true)" \
+  "Wrong private key passphrase" "wrong passphrase should be reported as such"
 
-# Cert validation: encrypted key without passphrase should demand one
+# Cert validation: encrypted key without passphrase must demand one without
+# prompting OpenSSL on the controlling terminal (a TTY-attached run used to
+# block on "Enter pass phrase for ...").
 DEPLOYMENT_HTTPS_KEY_PASSPHRASE=""
 if deployment_https_validate_cert_pair >/dev/null 2>&1; then
   echo "FAIL: encrypted key without passphrase should fail validation"
   exit 1
 fi
+assert_contains "$(deployment_https_validate_cert_pair 2>&1 >/dev/null || true)" \
+  "passphrase-protected" "encrypted key without passphrase should ask for the passphrase"
 
 # Custom mode: missing cert file must fail with a clear error
 if deployment_prepare_config --components infrastructure --https-mode custom \
@@ -1316,7 +1322,7 @@ deployment_https_prepare || {
 }
 assert_contains "$DEPLOYMENT_HTTPS_KEY_PATH" "$HTTPS_TEST_DIR/custom-root/nginx/ssl/server.key" \
   "custom key path should point at the materialized copy"
-if ! openssl pkey -in "$DEPLOYMENT_HTTPS_KEY_PATH" -noout >/dev/null 2>&1; then
+if ! openssl pkey -in "$DEPLOYMENT_HTTPS_KEY_PATH" -noout -passin pass: </dev/null >/dev/null 2>&1; then
   echo "FAIL: materialized key should load without a passphrase"
   exit 1
 fi
