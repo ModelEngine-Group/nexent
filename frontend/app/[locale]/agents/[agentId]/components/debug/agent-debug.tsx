@@ -71,18 +71,21 @@ interface AgentDebugChatProps {
   agent: Agent;
   agentId: number;
   chatMode: ChatMode;
+  onChatModeChange: (mode: ChatMode) => void;
   clearEpoch: number;
 }
 
 function DebugConversation({
   agent,
   chatMode,
+  onChatModeChange,
   selectedModelId,
   onModelChange,
   dictationConfigured,
 }: {
   agent: Agent;
   chatMode: ChatMode;
+  onChatModeChange: (mode: ChatMode) => void;
   selectedModelId?: string;
   onModelChange: (id: string) => void;
   dictationConfigured: boolean;
@@ -94,7 +97,7 @@ function DebugConversation({
     <Thread
       agent={agent}
       chatMode={chatMode}
-      onChatModeChange={() => undefined}
+      onChatModeChange={onChatModeChange}
       selectedModelId={selectedModelId}
       onModelChange={onModelChange}
       showModelSelector
@@ -124,6 +127,7 @@ const AgentDebugChat: FC<AgentDebugChatProps> = ({
   agent,
   agentId,
   chatMode,
+  onChatModeChange,
   clearEpoch,
 }) => {
   const { modelConfig } = useConfig();
@@ -165,6 +169,7 @@ const AgentDebugChat: FC<AgentDebugChatProps> = ({
           <DebugConversation
             agent={agent}
             chatMode={chatMode}
+            onChatModeChange={onChatModeChange}
             selectedModelId={effectiveModelId}
             onModelChange={setSelectedModelId}
             dictationConfigured={isDictationConfigured(modelConfig?.stt)}
@@ -279,6 +284,7 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
             agent={debugAgent}
             agentId={agentId}
             chatMode={chatMode}
+            onChatModeChange={setChatMode}
             clearEpoch={clearEpoch}
           />
         </div>
