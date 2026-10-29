@@ -50,6 +50,7 @@ import {
 import { getEffectiveRoutePath } from "@/lib/auth";
 import { authEvents } from "@/lib/authEvents";
 import { publicAsset } from "@/lib/publicAsset";
+import { getHomeLogo, getHomeTitle } from "@/lib/projectBranding";
 
 interface RouteConfig {
   path: string;
@@ -217,6 +218,8 @@ export function SideNavigation({
   const locale = params.locale === "en" ? "en" : "zh";
   const { config } = useGlobalConfigStore();
   const [expanded, setExpanded] = useState(false);
+  const brandTitle = getHomeTitle(config);
+  const logoOnly = !brandTitle;
   const [pinned, setPinned] = useState(false);
   const suppressExpansion = useRef(false);
   const hovered = useRef(false);
@@ -448,20 +451,37 @@ export function SideNavigation({
         <Link
           href="/"
           aria-label={t("sidebar.homePage")}
-          className="flex h-12 min-w-0 flex-1 items-center overflow-hidden rounded-[4px] pr-2"
+          className={`flex h-12 min-w-0 flex-1 items-center overflow-hidden rounded-[4px] ${expanded ? "pr-2" : ""}`}
         >
-          <span className="flex h-12 w-12 shrink-0 items-center justify-center">
+          <span
+            className={
+              logoOnly
+                ? "flex h-12 w-40 shrink-0 items-center justify-start"
+                : "flex h-12 w-12 shrink-0 items-center justify-center"
+            }
+          >
             <img
-              src={publicAsset("/modelengine-logo.png")}
+              src={getHomeLogo(config)}
               alt="logo"
-              className="h-10 w-10 object-contain"
+              onError={(event) => {
+                const fallback = publicAsset("/modelengine-logo.png");
+                if (event.currentTarget.getAttribute("src") !== fallback)
+                  event.currentTarget.src = fallback;
+              }}
+              className={
+                logoOnly
+                  ? "h-10 w-full translate-x-1 object-contain object-left"
+                  : "h-10 w-10 translate-x-1 object-contain"
+              }
             />
           </span>
-          <NavigationRailLabel
-            expanded={expanded}
-            label={config.productName || "Nexent"}
-            variant="title"
-          />
+          {brandTitle && (
+            <NavigationRailLabel
+              expanded={expanded}
+              label={brandTitle}
+              variant="title"
+            />
+          )}
         </Link>
         {expanded && (
           <Tooltip title={t(pinned ? "sidebar.unpin" : "sidebar.pin")}>
