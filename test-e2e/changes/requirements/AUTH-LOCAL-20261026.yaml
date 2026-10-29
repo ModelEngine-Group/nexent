@@ -25,6 +25,10 @@ change:
   traditional_ut:
     decision: strengthen
     test_selectors:
+    - test/backend/database/test_local_account_persistence.py
+    - test/backend/services/test_local_account_cli.py
+    - test/backend/services/test_local_provider_provisioning.py
+    - test/backend/services/test_native_authentication_flows.py
     - test/backend/management/test_service_directory_architecture.py
     - test/backend/deploy/test_k8s_env_injection.py
     - test/backend/management/test_gateway_authentication.py
