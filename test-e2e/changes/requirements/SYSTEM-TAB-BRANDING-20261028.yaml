@@ -32,8 +32,9 @@ change:
     - Browser title uses system name and favicon uses the system logo after loading,
       regardless of homepage overrides; unavailable names remain blank and pending
       or failed image loads remain transparent without competing metadata.
-    - Homepage titles remain blank when absent, empty or whitespace; no system-name
-      fallback.
+    - Startup initializes an unconfigured homepage title to Nexent in both locales,
+      preserves legacy titles, and never replaces explicit empty or whitespace titles.
+      Navigation does not substitute the system name for a cleared title.
     - Homepage logo uses its own persisted asset or falls back to system logo; legacy
       tab fields/assets remain readable.
     - Persist canonical homepage fields, accept legacy upload aliases, preserve system
@@ -110,3 +111,24 @@ change:
     required. Reuse sidebarHover regression UT and adjust the existing D4 measured
     left inset from zero to 4px; formal runtime re-execution is exempt for this purely
     cosmetic delta, without claiming closure of earlier blocked acceptance checks.
+    Follow-up 2026-10-29: reduce the homepage image right offset from 4px to 2px.
+    Startup sets a missing homeTitle to the legacy tabTitle or Nexent, using nullish
+    fallback so saved empty/whitespace titles and independent localized values survive
+    subsequent starts. Existing local custom.json edits are preserved. Add startup UT
+    for absent, localized, legacy and explicitly cleared values, reusing configuration
+    save and sidebar UT for editing to empty and blank-title layout. No Python code is
+    affected. No additional D1 is needed for an isolated initialization default. Reuse
+    SYSTEM-BRANDING-D4-001 for saved-empty persistence; its cosmetic inset becomes 2px.
+    The new initialization rule is proved by startup UT, separate from D4 execution.
+    Verification for this follow-up: 33 component UT and 28 Node UT PASS. The six new
+    startup variants exercise real locale file reads/writes with isolated storage,
+    including clearing values before a second startup. Before implementation, the
+    unconfigured and legacy initialization variants fail as expected. Prettier,
+    JavaScript syntax and copyright checks PASS; ESLint has zero errors and the
+    existing native-image warning. Design validation with --generate and current
+    Change selection PASS; unrelated generated navigation changes were restored.
+    Implementation validation remains BLOCKED by the existing missing
+    ConversationResumeBranch.test.tsx; formal runtime execution remains BLOCKED
+    because NEXENT_TEST_HOME is absent. Browser DOM inspection confirms 2px image
+    translation and Nexent homepage text when the sidebar is expanded. No live
+    branding settings were saved and no container was changed during verification.

@@ -470,8 +470,8 @@ export function SideNavigation({
               }}
               className={
                 logoOnly
-                  ? "h-10 w-full translate-x-1 object-contain object-left"
-                  : "h-10 w-10 translate-x-1 object-contain"
+                  ? "h-10 w-full translate-x-0.5 object-contain object-left"
+                  : "h-10 w-10 translate-x-0.5 object-contain"
               }
             />
           </span>

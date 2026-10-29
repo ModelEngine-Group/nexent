@@ -362,7 +362,7 @@ journey("SYSTEM-BRANDING-D4-001", async (context) => {
         expect(Math.abs(collapsedLogo.width - width)).toBeLessThanOrEqual(1);
         expect(collapsedBrand.width).toBeLessThanOrEqual(48);
         expect(
-          Math.abs(collapsedLogo.x - collapsedBrand.x - 4),
+          Math.abs(collapsedLogo.x - collapsedBrand.x - 2),
         ).toBeLessThanOrEqual(1);
         expect(collapsedLogo.x + collapsedLogo.width).toBeGreaterThan(
           collapsedBrand.x + collapsedBrand.width,

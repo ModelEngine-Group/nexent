@@ -18,6 +18,61 @@ function declaration(name) {
   assert.ok(start >= 0, name);
   return source.slice(start, source.indexOf("\n}", start) + 2);
 }
+
+const initializationSource = fs
+  .readFileSync(new URL("../build-config.js", import.meta.url), "utf8")
+  .split("export function ensureDir")[1];
+
+for (const [name, initial, expected] of [
+  ["unconfigured", {}, "Nexent"],
+  ["configured", { homeTitle: "Custom home" }, "Custom home"],
+  ["cleared", { homeTitle: "", tabTitle: "Old home" }, ""],
+  ["whitespace", { homeTitle: "   " }, "   "],
+  ["legacy", { tabTitle: "Old home" }, "Old home"],
+  ["cleared legacy", { tabTitle: "" }, ""],
+]) {
+  test(`startup preserves ${name} homepage title across both locales and restarts`, (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "nexent-home-default-"));
+    t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+    const builtIn = path.join(root, "built-in");
+    const persistent = path.join(root, "persistent");
+    for (const locale of ["zh", "en"]) {
+      fs.mkdirSync(path.join(builtIn, locale), { recursive: true });
+      fs.writeFileSync(
+        path.join(builtIn, locale, "custom.json"),
+        JSON.stringify({ ...initial, productName: `${locale} system` })
+      );
+    }
+    const start = () =>
+      vm.runInNewContext(
+        `function ensureDir${initializationSource.replaceAll("export function", "function")}`,
+        {
+          fs,
+          path,
+          console,
+          LOCALES_CONFIG_DIR: persistent,
+          BUILT_IN_LOCALES_CONFIG_DIR: builtIn,
+          fileUploadSizeLimit: 10,
+        }
+      );
+    start();
+    for (const locale of ["zh", "en"]) {
+      const file = path.join(persistent, locale, "custom.json");
+      const config = JSON.parse(fs.readFileSync(file, "utf8"));
+      assert.equal(config.homeTitle, expected);
+      assert.equal(config.productName, `${locale} system`);
+      fs.writeFileSync(file, JSON.stringify({ ...config, homeTitle: "" }));
+    }
+    start();
+    for (const locale of ["zh", "en"]) {
+      const config = JSON.parse(
+        fs.readFileSync(path.join(persistent, locale, "custom.json"), "utf8")
+      );
+      assert.equal(config.homeTitle, "");
+      assert.equal(config.productName, `${locale} system`);
+    }
+  });
+}
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
   "base64"
