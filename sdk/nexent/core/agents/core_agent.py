@@ -1371,24 +1371,8 @@ Additional Args:
         except ModelInvocationTerminalError as terminal_error:
             if self.stop_event.is_set():
                 raise RunTerminated() from terminal_error
-            finish_reason = getattr(self.model, "last_finish_reason", None)
-            if finish_reason is None:
-                diagnostics = getattr(self.model, "last_response_diagnostics", None) or {}
-                finish_reason = diagnostics.get("finish_reason")
-            if (
-                terminal_error.error_code == ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED
-                and legacy_code_action
-                and finish_reason != "length"
-            ):
-                raise RuntimeFinalAnswer(
-                    self._empty_model_response_hint(), "empty_model_output"
-                ) from terminal_error
-            if terminal_error.error_code == ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED and not legacy_code_action:
-                raise ModelOutputProtocolError(
-                    reason=ProtocolErrorReason.EMPTY_VISIBLE_CONTENT,
-                    protocol=getattr(self, "output_protocol", "code_action"),
-                    logger=self.logger,
-                ) from terminal_error
+            # Empty-response recovery is exhausted in the model layer. Never
+            # restart it through the protocol repair or Agent step loop.
             raise
         except Exception as e:
             if self.stop_event.is_set():
