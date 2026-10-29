@@ -65,6 +65,12 @@ change:
       - test/backend/management/test_agent_runtime_boundaries.py
       - test/backend/services/test_agent_name_contract.py
       - test/backend/services/test_prompt_service.py
+      - test/backend/app/test_agent_evaluation_app.py
+      - test/backend/database/test_model_managment_db.py
+      - test/backend/services/test_agent_evaluation_service.py
+      - test/backend/services/test_evaluation_set_service.py
+      - test/backend/services/test_memory_retrieval_service.py
+      - test/sdk/core/agents/test_context_item.py
       - test/backend/services/test_agent_export_skills.py
       - test/backend/services/test_clarification_response.py
       - test/backend/agents/test_create_agent_info.py::TestMergeToolParams
@@ -151,6 +157,11 @@ change:
     module-level SDK import; package-aware test stubs provide import compatibility
     without moving product imports into methods. Reuse the existing identity
     fixtures and lifecycle path when resolving equivalent upstream test changes.
+    Keep the test runner reproducible at pytest 9.1.1: pytest 9.2 changes
+    monkeypatch attribute restoration and leaves shared dynamic Mock children
+    deleted between tests. The same model repository suite passes on 9.1.1
+    and reproduces CI's missing attribute on 9.2. No tests or assertions are
+    removed; rerun the complete failed-file selection and remote CI.
 
     Clarification UT retains real inserts, RETURNING, rollback and stored-answer
     assertions. Older Linux x86_64 test runners use the test-only bundled SQLite

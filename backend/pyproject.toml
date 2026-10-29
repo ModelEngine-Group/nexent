@@ -48,7 +48,8 @@ data-process = [
 ]
 test = [
     "pysqlite3-binary>=0.5.4; sys_platform == 'linux' and platform_machine == 'x86_64'",
-    "pytest",
+    # pytest 9.2 changes monkeypatch restoration for dynamic Mock attributes.
+    "pytest==9.1.1",
     "pytest-cov",
     "coverage",
     "jsonschema>=4.25.0",
