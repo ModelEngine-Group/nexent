@@ -39,8 +39,7 @@ def download_gsm8k(split: str = "test", cache_dir: str = None) -> list[dict]:
         from datasets import load_dataset
     except ImportError:
         print("ERROR: 'datasets' package not installed.")
-        print("  Install with: pip install datasets")
-        print("  Or: uv pip install datasets")
+        print("  Install with: uv pip install datasets")
         sys.exit(1)
 
     print(f"Downloading GSM8K ({split} split)...")

@@ -558,7 +558,8 @@ class TestStartContainer:
         docker_container_client.client.containers.get.side_effect = NotFound(
             "Container not found")
 
-        with patch.object(DockerContainerClient, "find_free_port", side_effect=ContainerError("No ports available")):
+        with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False), \
+                patch.object(DockerContainerClient, "find_free_port", side_effect=ContainerError("No ports available")):
             with pytest.raises(ContainerError, match="No ports available"):
                 await docker_container_client.start_container(
                     service_name="test-service",

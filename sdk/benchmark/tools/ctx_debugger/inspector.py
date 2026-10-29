@@ -24,7 +24,7 @@ try:
     from rich.panel import Panel
     from rich.table import Table
 except ImportError:
-    sys.stderr.write("ERROR: rich is required.  pip install rich\n")
+    sys.stderr.write("ERROR: rich is required.  uv pip install rich\n")
     sys.exit(1)
 
 

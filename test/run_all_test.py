@@ -29,7 +29,7 @@ def check_required_packages() -> None:
     missing_packages = [package for module, package in required.items() if not _has_module(module)]
     if missing_packages:
         logger.error("Missing required packages: %s", ", ".join(missing_packages))
-        logger.error("Please install them using: pip install %s", " ".join(missing_packages))
+        logger.error("Please install them using: uv pip install %s", " ".join(missing_packages))
         sys.exit(1)
     logger.info("All required packages are available")
 

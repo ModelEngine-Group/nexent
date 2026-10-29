@@ -7,7 +7,7 @@ import argparse
 try:
     import faiss
 except:
-    print("faiss not found, try to install it via `pip install faiss-cpu` or `pip install faiss-gpu`")
+    print("faiss not found, try to install it via `uv pip install faiss-cpu` or `uv pip install faiss-gpu`")
 import torch
 import numpy as np
 from transformers import AutoConfig, AutoTokenizer, AutoModel
