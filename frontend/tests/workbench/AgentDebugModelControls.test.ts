@@ -115,6 +115,23 @@ it("keeps omitted debug intent and existing sampling exclusion unchanged", async
   expect(body.generation_config).toBeUndefined();
 });
 
+it.each([true, false, undefined])(
+  "serializes the debug planning flag %j without changing run identity",
+  async (enablePlan) => {
+    const base = debugOptions({});
+    const input = {
+      ...base,
+      runConfig: {
+        ...base.runConfig,
+        custom: { ...base.runConfig?.custom, enablePlan },
+      },
+    };
+    const body = await consume(input);
+    expect(body.enable_plan).toBe(enablePlan === true);
+    expect(body).toMatchObject({ agent_id: 7, model_id: 12, is_debug: true });
+  }
+);
+
 it("does not add sampling or stale effort to the disabled generation config", async () => {
   const body = await consume(
     debugOptions({

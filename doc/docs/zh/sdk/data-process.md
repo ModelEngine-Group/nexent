@@ -211,7 +211,7 @@ print(f"支持的处理器类型: {processors}")
 | `ImportError` | 缺少必需的处理依赖（如 unstructured） | 安装 `nexent[data_process]` extra |
 | `RuntimeError` | `file_split()` 拆分失败 | 查看日志定位拆分错误 |
 
-> 💡 **libmagic 依赖提示**：`file_process()` 仅支持内存字节数据输入，unstructured 从内存字节检测文件类型依赖系统 libmagic。Linux/macOS 一般默认可用；Windows 默认无 libmagic，需要先安装（如 `pip install python-magic-bin`），否则处理 `.txt` 等格式会抛出 `UnsupportedFileFormatError`。
+> 💡 **libmagic 依赖提示**：`file_process()` 仅支持内存字节数据输入，unstructured 从内存字节检测文件类型依赖系统 libmagic。Linux/macOS 一般默认可用；Windows 默认无 libmagic，需要先安装（如 `uv pip install python-magic-bin`），否则处理 `.txt` 等格式会抛出 `UnsupportedFileFormatError`。
 
 ### 错误处理示例
 ```python

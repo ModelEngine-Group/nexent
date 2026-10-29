@@ -414,10 +414,23 @@ agent_run_manager_module.AgentRunAlreadyActiveError = _AgentRunAlreadyActiveErro
 agent_run_manager_module.AgentRunConcurrencyExceededError = (
     _AgentRunConcurrencyExceededError
 )
-agent_run_manager_module.agent_run_manager = MagicMock()
-agent_run_manager_module.agent_run_manager.reserve_agent_capacity.return_value = (
-    "agent-capacity-test"
-)
+# Materialise every method the suite patches or asserts on. A bare MagicMock
+# answers attribute access lazily but monkeypatch.setattr needs a real entry,
+# so newer pytest versions reject attributes that were never set.
+_agent_run_manager_mock = MagicMock()
+_agent_run_manager_mock.reserve_agent_capacity.return_value = "agent-capacity-test"
+_agent_run_manager_mock.reserve_agent_run.return_value = "agent-run-reservation"
+for _method in (
+    "register_agent_run",
+    "unregister_agent_run",
+    "release_agent_run_reservation",
+    "release_agent_capacity",
+    "stop_agent_run",
+    "get_agent_run_info",
+    "submit",
+):
+    setattr(_agent_run_manager_mock, _method, MagicMock())
+agent_run_manager_module.agent_run_manager = _agent_run_manager_mock
 sys.modules["management.services.agent.lifecycle"] = agent_run_manager_module
 sys.modules["management.services.agent.preprocessing"] = MagicMock()
 
@@ -10569,22 +10582,22 @@ async def test_run_agent_background_consumes_stream_and_returns_assistant_messag
     request.history = []
     request.minio_files = []
 
-    async def fake_stream():
+    async def fake_stream(*args, execution_state, **kwargs):
+        execution_state.assistant_message_id = 123
+        execution_state.outcome = "completed"
+        execution_state.persisted = True
         yield "chunk-1"
         yield "chunk-2"
 
     memory_context = MagicMock(user_config=MagicMock(memory_switch=False))
     with (
+        patch("management.services.agent.run.agent_run_manager") as run_manager,
         patch(
             "management.services.configuration.user.memory.build_memory_context",
             return_value=memory_context,
         ),
         patch(
-            "management.services.agent.run.generate_stream", return_value=fake_stream()
-        ),
-        patch(
-            "management.services.agent.run.get_latest_assistant_message",
-            return_value={"message_id": 123},
+            "management.services.agent.run.generate_stream", side_effect=fake_stream
         ),
         patch("management.services.agent.run.save_messages") as mock_save_messages,
     ):
@@ -10598,10 +10611,18 @@ async def test_run_agent_background_consumes_stream_and_returns_assistant_messag
     assert result == {
         "conversation_id": 99,
         "assistant_message_id": 123,
+        "status": "completed",
+        "persisted": True,
+        "error_code": None,
+        "error_message": None,
         "chunks": 2,
     }
     assert request._message_source == "AUTOMATION"
     mock_save_messages.assert_not_called()
+    run_manager.reserve_agent_run.assert_called_once_with(99, "user")
+    run_manager.release_agent_run_reservation.assert_called_once_with(
+        99, "user", run_manager.reserve_agent_run.return_value,
+    )
 
 
 # =============================================================================
