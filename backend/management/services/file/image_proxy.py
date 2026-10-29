@@ -9,9 +9,9 @@ from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 
-from consts.const import AIDP_API_KEY, AIDP_SERVER_URL, DATA_PROCESS_SERVICE
-from consts.const import MODEL_CONFIG_MAPPING
-from database.model_management_db import get_model_by_model_id
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, DATA_PROCESS_SERVICE
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
+from management.db.model.repository import get_model_by_model_id
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.model.names import get_model_name_from_config
 

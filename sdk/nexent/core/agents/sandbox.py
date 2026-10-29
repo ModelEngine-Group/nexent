@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Sandbox executor factory and lifecycle management.
 
@@ -44,6 +46,7 @@ from typing import Any, Optional
 from urllib.parse import urlsplit
 
 from nexent.core.agents.sandbox_workspace import SandboxWorkspace, validate_container_root
+from nexent.core.agent_names import validate_callable_names
 from nexent.core.agents.sandbox_tls import (
     TLS_BOOTSTRAP, TLS_CERTIFICATE, TLS_DIRECTORY, TLS_LABEL, TLS_VERSION,
     SandboxTLSClient, SandboxTLSMigrationRequired, SandboxTLSRecoveryError,
@@ -1096,6 +1099,7 @@ class _ToolBridge:
         self._thread = self._execution.thread_ref()
 
     def register(self, tools: dict[str, Any]) -> None:
+        validate_callable_names(tools)
         self._tools = dict(tools)
 
     @contextmanager
@@ -1151,6 +1155,7 @@ class _ToolBridge:
         return "nexent-runtime" if _is_containerized_runtime() else "host.docker.internal"
 
     def proxy_code(self, tools: dict[str, Any], bridge_host: Optional[str] = None) -> str:
+        validate_callable_names(tools)
         definitions = []
         for name in tools:
             definitions.append(
@@ -3171,7 +3176,7 @@ class SandboxPoolManager:
                 raise RuntimeError("Docker sandbox FAILED phase=dependency; local fallback is disabled")
             logger_.error(
                 "DockerExecutor requires smolagents[docker]. "
-                "Install it with: pip install 'smolagents[docker]'. "
+                "Install it with: uv pip install 'smolagents[docker]'. "
                 "Falling back to LocalPythonExecutor."
             )
             return _wrap_executor(
@@ -3321,7 +3326,7 @@ class SandboxPoolManager:
         except ImportError as exc:
             logger_.error(
                 "WasmExecutor requires smolagents[wasm]. "
-                "Install it with: pip install 'smolagents[wasm]'. "
+                "Install it with: uv pip install 'smolagents[wasm]'. "
                 "Falling back to LocalPythonExecutor."
             )
             return _wrap_executor(

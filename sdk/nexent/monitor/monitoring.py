@@ -12,8 +12,8 @@ When OpenTelemetry dependencies are not available, the module gracefully degrade
 and disables monitoring functionality without breaking the application.
 
 Installation:
-- Basic: pip install nexent
-- With monitoring: pip install nexent[performance]
+- Basic: uv pip install nexent
+- With monitoring: uv pip install nexent[performance]
 """
 
 # Optional OpenTelemetry imports - gracefully handle missing dependencies
@@ -481,7 +481,7 @@ class MonitoringConfig:
         if self.enable_telemetry and not OPENTELEMETRY_AVAILABLE:
             logger.warning(
                 "OpenTelemetry dependencies not available. Disabling telemetry. "
-                "Install with: pip install nexent[performance]"
+                "Install with: uv pip install nexent[performance]"
             )
             self.enable_telemetry = False
 
@@ -575,7 +575,7 @@ class MonitoringManager:
         if not OPENTELEMETRY_AVAILABLE:
             logger.warning(
                 "OpenTelemetry dependencies not available. Telemetry initialization skipped. "
-                "Install with: pip install nexent[performance]"
+                "Install with: uv pip install nexent[performance]"
             )
             return
 
@@ -755,7 +755,7 @@ class MonitoringManager:
             elif not OPENTELEMETRY_AVAILABLE:
                 logger.warning(
                     "OpenTelemetry not available. FastAPI monitoring skipped. "
-                    "Install with: pip install nexent[performance]"
+                    "Install with: uv pip install nexent[performance]"
                 )
             return False
         except Exception as e:
@@ -2765,8 +2765,8 @@ class MonitoringRecordBuffer:
             if os.path.exists(backend_path) and backend_path not in sys.path:
                 sys.path.insert(0, backend_path)
 
-            from database.client import get_monitoring_db_session
-            from database.db_models import ModelMonitoringRecord
+            from management.db.client import get_monitoring_db_session
+            from management.db.models import ModelMonitoringRecord
         except ImportError as e:
             logger.debug(
                 f"Monitoring buffer: backend database not available: {e}")

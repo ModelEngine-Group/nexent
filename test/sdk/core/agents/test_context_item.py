@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import pytest
 from pydantic import ValidationError
 
@@ -75,7 +77,9 @@ def test_compact_failure_is_not_cached(monkeypatch):
         nonlocal calls
         calls += 1
         raise RuntimeError("failed")
-    monkeypatch.setattr(item, "_build_compact_result", fail)
+    # Patch the class, not the instance: ContextItem is a frozen model, so
+    # monkeypatch cannot set (or restore) an attribute on the instance itself.
+    monkeypatch.setattr(type(item), "_build_compact_result", lambda self: fail())
     for _ in range(2):
         with pytest.raises(RuntimeError):
             item.compact()

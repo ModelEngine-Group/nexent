@@ -31,7 +31,7 @@ def service_module(monkeypatch):
     logging_utils = types.ModuleType("infrastructure.logging")
     logging_utils.configure_logging = MagicMock()
     logging_utils.get_uvicorn_logging_config = MagicMock(return_value={})
-    constants = types.ModuleType("consts.const")
+    constants = types.ModuleType("contracts.constants.environment")
     constants.REDIS_URL = "redis://test:6379/0"
     constants.REDIS_BACKEND_URL = "redis://test:6379/1"
     constants.REDIS_PORT = 6379
@@ -50,7 +50,7 @@ def service_module(monkeypatch):
         "dotenv": dotenv,
         "fastapi": fastapi,
         "infrastructure.logging": logging_utils,
-        "consts.const": constants,
+        "contracts.constants.environment": constants,
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
 
@@ -101,9 +101,9 @@ def test_parse_arguments_exposes_supported_service_flags(service_module, monkeyp
 
 
 def test_create_app_registers_data_process_router(service_module, monkeypatch):
-    app_module = types.ModuleType("apps.data_process_app")
+    app_module = types.ModuleType("data_process.api.tasks.routes")
     app_module.router = object()
-    monkeypatch.setitem(sys.modules, "apps.data_process_app", app_module)
+    monkeypatch.setitem(sys.modules, "data_process.api.tasks.routes", app_module)
 
     app = service_module.create_app()
 
@@ -242,3 +242,40 @@ def test_main_exits_when_service_dependencies_fail(service_module, monkeypatch):
     with pytest.raises(SystemExit):
         service_module.main()
     assert stopped == [True]
+
+
+def test_missing_redis_client_returns_failure_without_cleanup(service_module, monkeypatch):
+    monkeypatch.setitem(sys.modules, "redis", None)
+    cleanup_service = MagicMock()
+    task_state = types.ModuleType("management.services.knowledge_base.task_state")
+    task_state.get_redis_service = cleanup_service
+    monkeypatch.setitem(sys.modules, task_state.__name__, task_state)
+    logger = MagicMock()
+    monkeypatch.setattr(service_module, "logger", logger)
+
+    manager = service_module.ServiceManager({})
+
+    assert manager.start_redis() is False
+    cleanup_service.assert_not_called()
+    logger.error.assert_called_once()
+    assert "uv pip install redis" in logger.error.call_args.args[0]
+
+
+def test_missing_flower_command_does_not_register_or_monitor_a_process(service_module, monkeypatch):
+    popen = MagicMock(side_effect=FileNotFoundError("launch command unavailable"))
+    thread = MagicMock()
+    sleep = MagicMock()
+    logger = MagicMock()
+    monkeypatch.setattr(service_module.subprocess, "Popen", popen)
+    monkeypatch.setattr(service_module.threading, "Thread", thread)
+    monkeypatch.setattr(service_module.time, "sleep", sleep)
+    monkeypatch.setattr(service_module, "logger", logger)
+    manager = service_module.ServiceManager({})
+
+    assert manager.start_flower() is False
+    popen.assert_called_once()
+    assert popen.call_args.args[0][:3] == [sys.executable, "-m", "celery"]
+    assert service_module.service_processes["flower"] is None
+    thread.assert_not_called()
+    sleep.assert_not_called()
+    assert any("uv pip install flower" in call.args[0] for call in logger.error.call_args_list)

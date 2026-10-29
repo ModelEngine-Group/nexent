@@ -7,7 +7,7 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 
-from consts.model import AgentImportRequest, ExportAndImportAgentInfo
+from contracts.agent import AgentImportRequest, ExportAndImportAgentInfo
 from infrastructure.agent_prompt import normalize_imported_agent_bundle, normalize_imported_agent_prompt
 
 

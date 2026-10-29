@@ -12,14 +12,7 @@ try:
 except ImportError:
     redis = None
 
-from consts.const import (
-    RUNTIME_CANCEL_TTL_SECONDS,
-    RUNTIME_COMPLETED_TTL_SECONDS,
-    RUNTIME_RUN_TTL_SECONDS,
-    RUNTIME_STATE_REDIS_URL,
-    RUNTIME_STREAM_MAX_LEN,
-    RUNTIME_STREAM_TTL_SECONDS,
-)
+from contracts.constants.environment import RUNTIME_CANCEL_TTL_SECONDS, RUNTIME_COMPLETED_TTL_SECONDS, RUNTIME_RUN_TTL_SECONDS, RUNTIME_STATE_REDIS_URL, RUNTIME_STREAM_MAX_LEN, RUNTIME_STREAM_TTL_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -98,11 +91,23 @@ class RuntimeStateService:
         ):
             self.client.expire(key, ttl)
 
-    def reset_stream(self, user_id: str, conversation_id: int) -> None:
+    def reset_stream(self, user_id: str, conversation_id: int, generation: Optional[str] = None) -> None:
         """Initialize an admitted new turn before its cancellation polls start."""
         if not self.enabled:
             return
         try:
+            if generation is not None:
+                self.client.eval("""
+                    redis.call('DEL', KEYS[1], KEYS[2], KEYS[3])
+                    redis.call('HSET', KEYS[4], 'generation', ARGV[1])
+                    redis.call('EXPIRE', KEYS[4], ARGV[2])
+                    return 1
+                """, 4, self._stream_key(user_id, conversation_id),
+                    self._stream_done_key(user_id, conversation_id),
+                    self._cancel_key(user_id, conversation_id), self._run_key(user_id, conversation_id),
+                    generation, RUNTIME_RUN_TTL_SECONDS)
+                return
+            self.client.hdel(self._run_key(user_id, conversation_id), "generation")
             self.client.delete(
                 self._stream_key(user_id, conversation_id),
                 self._stream_done_key(user_id, conversation_id),
@@ -111,8 +116,11 @@ class RuntimeStateService:
         except Exception as exc:
             logger.warning("Failed to reset runtime stream state: %s", exc)
 
-    async def reset_stream_async(self, user_id: str, conversation_id: int) -> None:
-        await self._run_managed("runtime-state-reset-stream", self.reset_stream, user_id, conversation_id)
+    async def reset_stream_async(self, user_id: str, conversation_id: int, generation: Optional[str] = None) -> None:
+        if generation is None:
+            await self._run_managed("runtime-state-reset-stream", self.reset_stream, user_id, conversation_id)
+        else:
+            await self._run_managed("runtime-state-reset-stream", self.reset_stream, user_id, conversation_id, generation)
 
     def register_run(self, user_id: str, conversation_id: int, message_id: Optional[int] = None) -> None:
         if not self.enabled:
@@ -135,11 +143,21 @@ class RuntimeStateService:
         except Exception as exc:
             logger.warning("Failed to register runtime run state: %s", exc)
 
-    def mark_run_finished(self, user_id: str, conversation_id: int, status: str) -> None:
+    def mark_run_finished(self, user_id: str, conversation_id: int, status: str, generation: Optional[str] = None) -> None:
         if not self.enabled:
             return
         try:
             key = self._run_key(user_id, conversation_id)
+            if generation is not None:
+                self.client.eval("""
+                    if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return 0 end
+                    redis.call('HSET', KEYS[1], 'status', ARGV[2], 'updated_at', ARGV[3])
+                    for _, key in ipairs(KEYS) do redis.call('EXPIRE', key, ARGV[4]) end
+                    return 1
+                """, 4, key, self._cancel_key(user_id, conversation_id),
+                    self._stream_key(user_id, conversation_id), self._stream_done_key(user_id, conversation_id),
+                    generation, status, str(int(time.time())), max(1, RUNTIME_COMPLETED_TTL_SECONDS))
+                return
             self.client.hset(key, mapping={
                 "status": status,
                 "updated_at": str(int(time.time())),
@@ -160,10 +178,17 @@ class RuntimeStateService:
     async def get_run_state_async(self, user_id: str, conversation_id: int) -> Dict[str, str]:
         return await self._run_managed("runtime-state-get-run", self.get_run_state, user_id, conversation_id)
 
-    def set_cancel_signal(self, user_id: str, conversation_id: int) -> bool:
+    def set_cancel_signal(self, user_id: str, conversation_id: int, expected_generation: Optional[str] = None) -> bool:
         if not self.enabled:
             return False
         try:
+            if expected_generation is not None:
+                return bool(self.client.eval("""
+                    if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[1] then return 0 end
+                    redis.call('SETEX', KEYS[2], ARGV[2], ARGV[1])
+                    return 1
+                """, 2, self._run_key(user_id, conversation_id), self._cancel_key(user_id, conversation_id),
+                    expected_generation, RUNTIME_CANCEL_TTL_SECONDS))
             self.client.setex(self._cancel_key(user_id, conversation_id), RUNTIME_CANCEL_TTL_SECONDS, self._pod_name)
             return True
         except Exception as exc:

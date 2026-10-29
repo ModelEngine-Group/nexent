@@ -46,7 +46,7 @@ def copy_invocation_config(config: "AgentConfig") -> "AgentConfig":
     return deepcopy(config, memo)
 
 
-# Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
+# Protocol type constants (must match backend/management/db/a2a/repository.py definitions)
 PROTOCOL_JSONRPC = "JSONRPC"
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_GRPC = "GRPC"
@@ -588,6 +588,7 @@ class ExternalA2AAgentConfig(BaseModel):
 
     agent_id: str = Field(description="External agent ID")
     name: str = Field(description="Agent display name")
+    invocation_name: Optional[str] = Field(default=None, description="Resolved runtime callable; original name is preserved")
     description: str = Field(description="Agent description for prompt", default="")
     url: str = Field(description="A2A endpoint URL")
     api_key: Optional[str] = Field(description="API key for authentication", default=None)
@@ -649,6 +650,7 @@ class ExternalA2AAgentConfig(BaseModel):
         return A2AAgentInfo(
             agent_id=self.agent_id,
             name=self.name,
+            invocation_name=self.invocation_name,
             url=self.url,
             api_key=self.api_key,
             transport_type=self.transport_type,

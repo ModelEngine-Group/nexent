@@ -55,6 +55,11 @@ export const API_ENDPOINTS = {
   },
   conversation: {
     list: `${API_BASE_URL}/conversation/list`,
+    agentGroups: `${API_BASE_URL}/conversation/agent_groups`,
+    agentGroupConversations: (groupKey: string) =>
+      `${API_BASE_URL}/conversation/agent_groups/${encodeURIComponent(groupKey)}/conversations`,
+    agentGroupConversationIds: (agentId: number) =>
+      `${API_BASE_URL}/conversation/agent_groups/${agentId}/conversation_ids`,
     workbenchPins: `${API_BASE_URL}/conversation/workbench_pins`,
     workbenchPin: (id: number) =>
       `${API_BASE_URL}/conversation/${id}/workbench_pin`,
@@ -187,6 +192,11 @@ export const API_ENDPOINTS = {
     config: `${API_BASE_URL}/evaluation-sets/config`,
     detail: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}`,
     cases: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/cases`,
+    case: (id: number, caseId: number) =>
+      `${API_BASE_URL}/evaluation-sets/${id}/cases/${caseId}`,
+    casesBatchDelete: (id: number) =>
+      `${API_BASE_URL}/evaluation-sets/${id}/cases/batch-delete`,
+    generateCases: `${API_BASE_URL}/evaluation-sets/generate-cases-async`,
     upload: `${API_BASE_URL}/evaluation-sets/upload`,
     template: `${API_BASE_URL}/evaluation-sets/template`,
     export: (id: number) => `${API_BASE_URL}/evaluation-sets/${id}/export`,
@@ -201,14 +211,36 @@ export const API_ENDPOINTS = {
     export: `${API_BASE_URL}/evaluators/export`,
     import: `${API_BASE_URL}/evaluators/import`,
     generate: `${API_BASE_URL}/evaluators/generate`,
+    versions: (id: number) => `${API_BASE_URL}/evaluators/${id}/versions`,
+    version: (id: number, versionId: number) =>
+      `${API_BASE_URL}/evaluators/${id}/versions/${versionId}`,
+    restoreVersion: (id: number, versionId: number) =>
+      `${API_BASE_URL}/evaluators/${id}/versions/${versionId}/restore`,
   },
   agentEvaluations: {
     create: `${API_BASE_URL}/agent-evaluations`,
     list: `${API_BASE_URL}/agent-evaluations`,
+    trialRun: `${API_BASE_URL}/agent-evaluations/trial-run`,
     detail: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
-    cases: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/cases`,
+    cases: (id: string | number) =>
+      `${API_BASE_URL}/agent-evaluations/${id}/cases`,
+    stats: (id: string | number) =>
+      `${API_BASE_URL}/agent-evaluations/${id}/stats`,
+    analyze: (id: string | number) =>
+      `${API_BASE_URL}/agent-evaluations/${id}/analyze`,
+    annotationSchemas: (id: string | number) =>
+      `${API_BASE_URL}/agent-evaluations/${id}/annotation-schemas`,
     report: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}/report`,
     delete: (id: number) => `${API_BASE_URL}/agent-evaluations/${id}`,
+  },
+  evaluationAnnotations: {
+    schemas: `${API_BASE_URL}/evaluation-annotations/schemas`,
+    schema: (schemaId: number) =>
+      `${API_BASE_URL}/evaluation-annotations/schemas/${schemaId}`,
+    annotations: (id: string | number) =>
+      `${API_BASE_URL}/evaluation-annotations/${id}/annotations`,
+    annotationStats: (id: string | number) =>
+      `${API_BASE_URL}/evaluation-annotations/${id}/annotation-stats`,
   },
   stt: {
     ws: `${API_BASE_URL}/voice/stt/ws`,

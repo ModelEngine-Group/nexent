@@ -1,0 +1,49 @@
+schema_version: '1.0'
+change:
+  change_id: AUTOMATION-PATCH-COVERAGE-20261029
+  change_type: test-fix
+  title: Cover automation execution and terminal persistence boundaries
+  description: >-
+    Backfill PR 4242 unit proof for assistant creation, terminal errors,
+    cancellation finalization, generation fencing and task/run transactions.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-126]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    This is isolated unit-branch backfill. Existing AUTO-RUN-D3-001 and
+    AUTO-RUN-D5-001 retain runtime and PostgreSQL race contracts unchanged;
+    no product behavior or formal execution binding changes.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Background assistant creation and persistence report only the current execution identity and outcome.
+    - Preparation, artifact and persistence errors cannot report successful execution.
+    - Cancellation joins the owned finalizer and generation-specific stops preserve replacement runs.
+    - Task/run locking, terminal guards and adapter message arguments retain ownership and status.
+    reason: >-
+      CI passes UT but patch coverage is 68.80 percent. Existing outcome tests
+      replace generate_stream and therefore miss execution.py collaboration;
+      existing Redis fixtures do not exercise generation-specific calls, and
+      runner transaction stubs bypass repository locking. Add assertion-based
+      unit variants at these boundaries without changing coverage policy.
+    test_selectors:
+    - test/backend/services/test_agent_background_stream.py
+    - test/backend/services/test_agent_background_generation.py
+    - test/backend/services/test_agent_background_finalization.py
+    - test/backend/services/test_automation_terminal_boundaries.py
+    - test/backend/services/test_automation_generation_storage.py
+    - test/backend/database/test_automation_task_run_locking.py
+  notes: >-
+    Baseline bff7585bd on djb/bugfix-aotumation-sql-check; Codecov patch requires
+    90 percent. Only PR-related traditional tests and this record change.
+    Proof-gap analysis and evidence: nexent-doc/nexent/chat-automation-activity-and-quota/design.md
+    and local outputs/codecov-4242-20261029. No production, dependency, workflow,
+    formal Case or coverage-threshold changes; no commit or push requested.

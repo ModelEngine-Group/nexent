@@ -4,7 +4,7 @@
 from copy import deepcopy
 from typing import Optional
 
-from database.model_management_db import get_model_by_model_id
+from management.db.model.repository import get_model_by_model_id
 from management.services.model.names import add_repo_to_name
 from management.services.model.reasoning import normalize_reasoning_params
 

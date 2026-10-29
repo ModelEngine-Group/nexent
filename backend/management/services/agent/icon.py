@@ -23,7 +23,7 @@ def validate_icon_image(content: bytes) -> str:
 
 
 def upload_icon_image(content: bytes, object_name: str) -> str:
-    from database.attachment_db import upload_file_bytes
+    from management.db.file.attachment import upload_file_bytes
 
     content_type = validate_icon_image(content)
     success, error = upload_file_bytes(content, object_name)
@@ -33,7 +33,7 @@ def upload_icon_image(content: bytes, object_name: str) -> str:
 
 
 def read_icon_image(object_name: str) -> tuple[bytes, str]:
-    from database.attachment_db import get_file_stream
+    from management.db.file.attachment import get_file_stream
 
     stream = get_file_stream(object_name)
     if stream is None:

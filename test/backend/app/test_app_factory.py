@@ -17,10 +17,10 @@ backend_path = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '../../../backend'))
 sys.path.insert(0, backend_path)
 
-# Import AppException from consts.exceptions where it is defined
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
-from backend.apps.app_factory import create_app, register_exception_handlers
+# Import AppException from contracts.errors.exceptions where it is defined
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
+from management.utils.app_factory import create_app, register_exception_handlers
 
 class TestCreateApp:
     """Test class for create_app function."""
@@ -516,7 +516,7 @@ class TestMonitoringImportFailure:
 
         # Mock the monitoring module to raise ImportError
         with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': None}):
-            with patch('backend.apps.app_factory.logger') as mock_logger:
+            with patch('management.utils.app_factory.logger') as mock_logger:
                 # Create app with monitoring enabled - import will fail
                 app = create_app(enable_monitoring=True)
 
@@ -532,7 +532,7 @@ class TestMonitoringImportFailure:
         """Test that no warning is logged when monitoring is disabled."""
         from unittest.mock import patch
 
-        with patch('backend.apps.app_factory.logger') as mock_logger:
+        with patch('management.utils.app_factory.logger') as mock_logger:
             app = create_app(enable_monitoring=False)
 
             # Warning should not be called when monitoring is disabled
@@ -552,7 +552,7 @@ class TestMonitoringImportFailure:
         )
 
         with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': mock_module}):
-            with patch('backend.apps.app_factory.logger') as mock_logger:
+            with patch('management.utils.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
 
                 # Should log warning about monitoring utilities not available
@@ -695,7 +695,7 @@ class TestGenericExceptionHandlerAppExceptionCheck:
                 ErrorCode.COMMON_VALIDATION_ERROR, "Validation error")
 
         # Use capture to check logging
-        with patch('backend.apps.app_factory.logger') as mock_logger:
+        with patch('management.utils.app_factory.logger') as mock_logger:
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/test-app-exc")
 
@@ -717,7 +717,7 @@ class TestQuotaExceededErrorHandler:
 
     def test_quota_exceeded_error_returns_413(self):
         """Test QuotaExceededError returns 413 with correct body."""
-        from consts.exceptions import QuotaExceededError
+        from contracts.errors.exceptions import QuotaExceededError
 
         app = FastAPI()
         register_exception_handlers(app)
@@ -923,7 +923,7 @@ class TestGenericHandlerAppExceptionDelegation:
 
     def test_token_expired_exception_handler(self):
         """Test TokenExpiredError handler returns 401 with TOKEN_EXPIRED code."""
-        from consts.exceptions import TokenExpiredError
+        from contracts.errors.exceptions import TokenExpiredError
 
         app = FastAPI()
         register_exception_handlers(app)

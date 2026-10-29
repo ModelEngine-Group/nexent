@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Resolve the current AIDP catalog and Nexent user permissions consistently."""
 
 from __future__ import annotations
@@ -11,8 +13,8 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from typing import Any, Callable, TypeVar
 
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from ext_components.aidp.services import aidp_permission_service
 from ext_components.aidp.services.aidp_service import fetch_all_aidp_knowledge_bases_impl
 
@@ -79,7 +81,7 @@ def _cache_key(server_url: str, aidp_tenant_id: str) -> tuple[str, str]:
     """Build the in-process cache key for one AIDP deployment.
 
     ``api_key`` is intentionally excluded: credentials are process-constant
-    (read once from ``consts.const`` at startup and never rewritten at
+    (read once from ``contracts.constants.environment`` at startup and never rewritten at
     runtime), so the same ``(server_url, aidp_tenant_id)`` always maps to the
     same remote catalog. Including the key would only force a hashing step
     over sensitive data for zero distinguishing power.

@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Unit tests for ``backend.apps.agent_evaluation_app``."""
+"""Unit tests for ``management.api.evaluation.agent_evaluation``."""
 
 import sys
 import types
@@ -95,24 +95,28 @@ for _name in (
     "management.services.evaluation.reporting.report",
     "management.services.agent.runtime_client",
     "database",
-    "database.agent_evaluation_db",
+    "management.db.evaluation.runs",
     "utils",
-    "management.services.permission.identity.authentication_helpers",
+    "gateway.authentication.auth",
 ):
     _register_package(_name)
 sys.modules["management.services.evaluation.runs"] = MagicMock(name="agent_eval_svc")
 sys.modules["management.services.evaluation.reporting.report"] = MagicMock(name="report_svc")
 sys.modules["management.services.agent.runtime_client"] = MagicMock(name="runtime_proxy_svc")
-sys.modules["database.agent_evaluation_db"] = MagicMock(name="agent_eval_db")
-sys.modules["management.services.permission.identity.authentication_helpers"] = MagicMock(name="auth_utils")
+sys.modules["management.db.evaluation.runs"] = MagicMock(name="agent_eval_db")
+# The module is stubbed wholesale, so name the helper ``_safe_extract_language``
+# imports lazily; an unset attribute would make monkeypatch.setattr fail.
+_auth_utils_mock = MagicMock(name="auth_utils")
+_auth_utils_mock.parse_language_from_request = MagicMock(return_value="zh")
+sys.modules["gateway.authentication.auth"] = _auth_utils_mock
 
 # Load the target module via spec so its ``from X import Y`` lookups hit the
 # stubs above.
 import importlib.util
 
 _spec = importlib.util.spec_from_file_location(
-    "backend.apps.agent_evaluation_app",
-    str(_BACKEND_DIR / "apps" / "agent_evaluation_app.py"),
+    "management.api.evaluation.agent_evaluation",
+    str(_BACKEND_DIR / 'management' / 'api' / 'evaluation' / 'agent_evaluation.py'),
 )
 agent_evaluation_app = importlib.util.module_from_spec(_spec)
 sys.modules[_spec.name] = agent_evaluation_app
@@ -137,13 +141,13 @@ def _app_module_state():
 
 
 def _exc(error_code, message):
-    from consts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
 
     return AppException(error_code, message)
 
 
 def _code(name):
-    from consts.error_code import ErrorCode
+    from contracts.errors.codes import ErrorCode
 
     return getattr(ErrorCode, name)
 
@@ -224,7 +228,7 @@ class TestCreateEvaluation:
         assert app.create_agent_evaluation_run_impl.call_args.kwargs["query_count"] == 5
 
     def test_401_on_unauthorized(self, client):
-        from consts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_info=MagicMock(side_effect=UnauthorizedError()))
         response = client.post(
@@ -304,7 +308,7 @@ class TestListEvaluations:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from consts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.get("/agent-evaluations?agent_ids=%5B1%5D")
@@ -351,7 +355,7 @@ class TestGetEvaluation:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from consts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.get("/agent-evaluations/1")
@@ -384,7 +388,7 @@ class TestListCases:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from consts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.get("/agent-evaluations/1/cases")
@@ -418,7 +422,7 @@ class TestStats:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from consts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.get("/agent-evaluations/1/stats")
@@ -458,7 +462,7 @@ class TestDownloadReport:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from consts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(
             get_current_user_info=MagicMock(side_effect=UnauthorizedError())
@@ -507,7 +511,7 @@ class TestAnalyze:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from consts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.post("/agent-evaluations/1/analyze")
@@ -539,7 +543,7 @@ class TestUpdateAnnotationSchemas:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from consts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.put(
@@ -585,7 +589,7 @@ class TestDeleteEvaluation:
         assert response.status_code == 500
 
     def test_401_on_unauthorized(self, client):
-        from consts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.delete("/agent-evaluations/1")
@@ -623,7 +627,7 @@ class TestTrialRun:
         assert app.forward_agent_evaluation_trial_run.call_args.kwargs["query"] == "hello"
 
     def test_401_on_unauthorized(self, client):
-        from consts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         _mock_impls(get_current_user_id=MagicMock(side_effect=UnauthorizedError()))
         response = client.post(
@@ -691,7 +695,7 @@ class TestSafeExtractors:
     def test_language_from_request(self, monkeypatch):
         request = MagicMock()
         monkeypatch.setattr(
-            sys.modules["management.services.permission.identity.authentication_helpers"],
+            sys.modules["gateway.authentication.auth"],
             "parse_language_from_request",
             MagicMock(return_value="en"),
         )
@@ -700,7 +704,7 @@ class TestSafeExtractors:
     def test_language_fallback_on_error(self, monkeypatch):
         request = MagicMock()
         monkeypatch.setattr(
-            sys.modules["management.services.permission.identity.authentication_helpers"],
+            sys.modules["gateway.authentication.auth"],
             "parse_language_from_request",
             MagicMock(side_effect=RuntimeError("boom")),
         )

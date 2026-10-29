@@ -3,58 +3,38 @@
 import logging
 from typing import Optional, Any, Tuple, Dict, List
 
-from database.token_db import (
+from management.db.identity.token import (
     create_token as create_token_record,
     generate_access_key,
     list_tokens_by_user as list_tokens_by_user_record,
+    mask_access_key,
     delete_token as delete_token_record,
 )
 
 import aiohttp
-from fastapi import Header
 from supabase import Client
 from pydantic import EmailStr
 
-from management.services.permission.identity.authentication_helpers import (
-    get_supabase_client,
-    get_supabase_admin_client,
-    delete_supabase_user,
-    calculate_expires_at,
-    get_jwt_expiry_seconds,
-    ensure_cas_session_active_from_authorization,
-    resolve_tenant_id_from_user_tenant_record,
-)
-from consts.const import (
-    INVITE_CODE,
-    SUPABASE_URL,
-    SUPABASE_KEY,
-    ASSET_OWNER_TENANT_ID,
-    ASSET_OWNER_INVITE_CODE_TYPE,
-    ASSET_OWNER_ROLE,
-    ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL,
-)
+from management.services.permission.identity.provider import get_supabase_client, get_supabase_admin_client, delete_supabase_user
+from gateway.authentication.auth import calculate_expires_at, get_jwt_expiry_seconds, ensure_cas_session_active_from_authorization, resolve_tenant_id_from_user_tenant_record
+from contracts.constants.environment import INVITE_CODE, SUPABASE_URL, SUPABASE_KEY
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL
 
 from management.services.permission.asset_owner import (
     filter_accessible_routes_for_asset_owner_feature,
     require_asset_owner_enabled,
 )
-from consts.exceptions import (
-    NoInviteCodeException,
-    IncorrectInviteCodeException,
-    UserRegistrationException,
-    UnauthorizedError,
-    TenantResourceLimitError,
-    ValidationError,
-)
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
+from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, TenantResourceLimitError, ValidationError
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 
-from database.model_management_db import create_model_record
-from database.user_tenant_db import insert_user_tenant, get_user_tenant_by_user_id
-from database.oauth_account_db import list_oauth_accounts_by_user_id
-from database.group_db import query_group_ids_by_user
-from database.client import as_dict, get_db_session
-from database.db_models import RolePermission
+from management.db.model.repository import create_model_record
+from management.db.identity.user_tenant import insert_user_tenant, get_user_tenant_by_user_id
+from management.db.identity.oauth_account import list_oauth_accounts_by_user_id
+from management.db.identity.group import query_group_ids_by_user
+from management.utils.orm import as_dict
+from management.db.client import get_db_session
+from management.db.models import RolePermission
 from management.services.permission.identity.invitations import use_invitation_code, check_invitation_available, get_invitation_by_code
 from management.services.permission.identity.groups import add_user_to_groups
 from management.services.tool.configuration import init_tool_list_for_tenant
@@ -83,60 +63,12 @@ def get_provider_username(user_id: str, provider: str) -> Optional[str]:
     return None
 
 
-def set_auth_token_to_client(client: Client, token: str) -> None:
-    """Set token to client"""
-    jwt_token = token.replace(
-        "Bearer ", "") if token.startswith("Bearer ") else token
-
-    try:
-        # Only set access_token
-        client.auth.access_token = jwt_token
-    except Exception as e:
-        logging.error(f"Set access token failed: {str(e)}")
 
 
-def get_authorized_client(authorization: Optional[str] = Header(None)) -> Client:
-    """Get token from authorization header and create authorized supabase client"""
-    client = get_supabase_client()
-    if authorization:
-        token = authorization.replace("Bearer ", "") if authorization.startswith(
-            "Bearer ") else authorization
-        set_auth_token_to_client(client, token)
-    return client
 
 
-def get_current_user_from_client(client: Client, token: Optional[str] = None) -> Optional[Any]:
-    """Get current user from client using provided JWT, return user object or None"""
-    try:
-        # Prefer explicitly passing the JWT to avoid relying on client-side session state
-        if token:
-            jwt_token = token.replace(
-                "Bearer ", "") if token.startswith("Bearer ") else token
-            user_response = client.auth.get_user(jwt_token)
-        else:
-            user_response = client.auth.get_user()
-
-        if user_response and getattr(user_response, "user", None):
-            return user_response.user
-        return None
-    except Exception as e:
-        logging.error(f"Get current user failed: {str(e)}")
-        return None
 
 
-def validate_token(token: str) -> Tuple[bool, Optional[Any]]:
-    """Validate token function, return (is valid, user object)"""
-    client = get_supabase_client()
-    set_auth_token_to_client(client, token)
-    try:
-        user = get_current_user_from_client(client, token)
-        if user:
-            ensure_cas_session_active_from_authorization(token)
-            return True, user
-        return False, None
-    except Exception as e:
-        logging.error(f"Token validation failed: {str(e)}")
-        return False, None
 
 
 def extend_session(client: Client, refresh_token: str) -> Optional[dict]:
@@ -275,7 +207,7 @@ async def signup_user_with_invitation(email: EmailStr,
                     try:
                         # Convert group_ids from string to list if needed
                         if isinstance(group_ids, str):
-                            from management.db.serialization import convert_string_to_list
+                            from management.utils.serialization import convert_string_to_list
                             group_ids = convert_string_to_list(group_ids)
 
                         if group_ids:
@@ -338,7 +270,7 @@ async def parse_supabase_response(is_admin, response, user_role, auto_login: boo
 async def verify_invite_code(invite_code):
     logging.info(
         "detect admin registration request, start verifying invite code")
-    logging.info(f"The INVITE_CODE obtained from consts.const: {INVITE_CODE}")
+    logging.info(f"The INVITE_CODE obtained from contracts.constants.environment: {INVITE_CODE}")
     if not INVITE_CODE:
         logging.error("please check the INVITE_CODE environment variable")
         raise NoInviteCodeException(
@@ -406,7 +338,9 @@ async def signin_user(email: EmailStr,
 
 
 async def refresh_user_token(authorization, refresh_token: str):
-    client = get_authorized_client(authorization)
+    client = get_supabase_client()
+    if authorization:
+        client.auth.access_token = authorization
     session_info = extend_session(client, refresh_token)
     if not session_info:
         logging.error("Refresh token failed, the token may have expired")
@@ -417,27 +351,6 @@ async def refresh_user_token(authorization, refresh_token: str):
     return session_info
 
 
-async def get_session_by_authorization(authorization):
-    # Extract clean token from authorization header
-    clean_token = authorization.replace(
-        "Bearer ", "") if authorization.startswith("Bearer ") else authorization
-
-    # Use the unified token validation function
-    is_valid, user = validate_token(clean_token)
-    if is_valid and user:
-        user_role = "user"  # Default role
-        if user.user_metadata and 'role' in user.user_metadata:
-            user_role = user.user_metadata['role']
-        return {
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "role": user_role
-            }
-        }
-    else:
-        # Use domain-specific exception for invalid/expired token
-        raise UnauthorizedError("Session is invalid or expired")
 
 
 async def get_user_info(user_id: str) -> Optional[Dict[str, Any]]:
@@ -564,22 +477,20 @@ def create_token(user_id: str) -> Dict[str, Any]:
     Returns:
         Dictionary containing the API token information including token_id.
     """
-    from database.client import get_db_session
-    from database.token_db import soft_delete_tokens_by_user
+    from management.db.client import get_db_session
+    from management.db.identity.token import soft_delete_tokens_by_user
 
     access_key = generate_access_key()
     with get_db_session() as session:
         soft_delete_tokens_by_user(user_id, user_id, session)
         token = create_token_record(access_key, user_id, created_by=user_id, db_session=session)
-    return {**token, "can_copy": True}
-
-
-def _mask_access_key(access_key: str) -> str:
-    """Keep the key prefix and suffix visible while hiding its secret middle."""
-    if len(access_key) <= 8:
-        return "*" * len(access_key)
-    prefix_length = min(10, len(access_key) - 5)
-    return f"{access_key[:prefix_length]}{'*' * (len(access_key) - prefix_length - 4)}{access_key[-4:]}"
+    return {
+        **token,
+        # The list endpoint returns the same pair, so a client renders the mask
+        # and copies the complete key consistently right after a refresh.
+        "masked_access_key": mask_access_key(token["access_key"]),
+        "can_copy": True,
+    }
 
 
 def list_tokens_by_user(user_id: str, actor_role: str) -> List[Dict[str, Any]]:
@@ -590,19 +501,32 @@ def list_tokens_by_user(user_id: str, actor_role: str) -> List[Dict[str, Any]]:
         actor_role: Role of the authenticated user requesting the list.
 
     Returns:
-        List of token information. Administrators can view and copy complete
-        keys; other roles receive masked, non-copyable values.
+        List of token information. Display and copy are separate fields:
+        ``masked_access_key`` is the masked value every client renders, and
+        ``access_key`` holds the stored key only for roles whose
+        ``can_copy`` is True. Copying therefore yields the complete key while
+        other roles keep seeing a masked, non-copyable value.
     """
     can_copy = (actor_role or "").upper() in {"ADMIN", "SU"}
-    tokens = list_tokens_by_user_record(user_id)
-    return [
-        {
+    # The persistence layer masks access keys by default, so the stored value is
+    # requested here and role-based exposure below stays the single decision
+    # point. Requesting the mask instead made can_copy True while the value was
+    # already masked, so copying produced "nexent****11bb".
+    tokens = list_tokens_by_user_record(user_id, mask=False)
+
+    result: List[Dict[str, Any]] = []
+    for token in tokens:
+        masked_access_key = mask_access_key(token["access_key"])
+        result.append({
             **token,
-            "access_key": token["access_key"] if can_copy else _mask_access_key(token["access_key"]),
+            # A copy-capable role receives the stored key, every other role
+            # receives the masked value, and masked_access_key is what clients
+            # display either way.
+            "access_key": token["access_key"] if can_copy else masked_access_key,
+            "masked_access_key": masked_access_key,
             "can_copy": can_copy,
-        }
-        for token in tokens
-    ]
+        })
+    return result
 
 
 def delete_token(token_id: int, user_id: str) -> bool:

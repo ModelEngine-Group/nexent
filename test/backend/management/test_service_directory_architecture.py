@@ -12,6 +12,22 @@ BACKEND_ROOT = PROJECT_ROOT / "backend"
 MANAGEMENT_SERVICES = BACKEND_ROOT / "management" / "services"
 
 MIGRATED_MODULES = {
+    'agent/creation.py',
+    'agent/lifecycle.py',
+    'agent/background.py',
+    'agent/persistence.py',
+    'agent/preparation/compiler.py',
+    'agent/preparation/inputs.py',
+    'agent/preparation/resources.py',
+    'agent/preparation/run.py',
+    'agent/preparation/tools.py',
+    'agent/preprocessing.py',
+    'agent/resource_resolver.py',
+    'agent/tool_identity.py',
+    'model/run_bindings.py',
+    'model/run_budget.py',
+    'skill/creation.py',
+
     'agent/a2a/adapter.py',
     'agent/a2a/catalog.py',
     'agent/a2a/service.py',
@@ -55,6 +71,7 @@ MIGRATED_MODULES = {
     'configuration/tenant/settings.py',
     'configuration/user/memory.py',
     'configuration/user/quotas.py',
+    'conversation/agent_history.py',
     'conversation/creation_history.py',
     'conversation/pins.py',
     'conversation/service.py',
@@ -129,6 +146,7 @@ MIGRATED_MODULES = {
     'memory/retrieval.py',
     'model/adapter.py',
     'model/capacity.py',
+    'model/catalog.py',
     'model/health.py',
     'model/invocation.py',
     'model/management.py',
@@ -153,7 +171,7 @@ MIGRATED_MODULES = {
     'permission/api_keys.py',
     'permission/asset_owner.py',
     'permission/identity/authentication.py',
-    'permission/identity/authentication_helpers.py',
+    'permission/identity/provider.py',
     'permission/identity/cas.py',
     'permission/identity/display.py',
     'permission/identity/groups.py',
@@ -336,10 +354,10 @@ def test_agent_shared_types_and_utilities_have_canonical_locations():
     shared_types = {
         "AgentModelProjection", "AgentRunContext", "SystemAgentRef", "WorkbenchReleaseManifest",
         "OptimizeRequest", "OptimizeResult",
-        "OptimizeRequest", "OptimizeResult",
     }
     contract = ast.parse((BACKEND_ROOT / "contracts/agent.py").read_text(encoding="utf-8"))
-    assert {node.name for node in contract.body if isinstance(node, ast.ClassDef)} == shared_types
+    # The business file also owns the API request models after their migration.
+    assert shared_types <= {node.name for node in contract.body if isinstance(node, ast.ClassDef)}
     for source in (MANAGEMENT_SERVICES / "agent").glob("*.py"):
         tree = ast.parse(source.read_text(encoding="utf-8"))
         assert not {node.name for node in tree.body if isinstance(node, ast.ClassDef)} & shared_types

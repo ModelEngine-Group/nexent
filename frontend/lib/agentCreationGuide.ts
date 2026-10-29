@@ -1,8 +1,14 @@
-const completedInMemory = new Set<string>();
-const GUIDE_VERSION = "v1";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import {
+  isGuideDismissed,
+  setGuideDismissed,
+  sharedGuideKey,
+  LEGACY_GUIDE_PREFIX,
+} from "@/lib/guidePreferences";
 
 export function agentCreationGuideKey(tenantId: string, userId: string) {
-  return `nexent.agent.creation-guide.${GUIDE_VERSION}/${encodeURIComponent(tenantId)}/${encodeURIComponent(userId)}`;
+  return `${LEGACY_GUIDE_PREFIX}${encodeURIComponent(tenantId)}/${encodeURIComponent(userId)}`;
 }
 
 export function canStartAgentCreationGuide({
@@ -22,20 +28,9 @@ export function canStartAgentCreationGuide({
 }
 
 export function hasCompletedAgentCreationGuide(key: string) {
-  try {
-    return (
-      completedInMemory.has(key) || window.localStorage.getItem(key) === "1"
-    );
-  } catch {
-    return completedInMemory.has(key);
-  }
+  return isGuideDismissed(sharedGuideKey(key), "agent-creation", key);
 }
 
 export function completeAgentCreationGuide(key: string) {
-  completedInMemory.add(key);
-  try {
-    window.localStorage.setItem(key, "1");
-  } catch {
-    // A denied browser preference must not prevent editing the draft.
-  }
+  setGuideDismissed(sharedGuideKey(key), "agent-creation", true);
 }

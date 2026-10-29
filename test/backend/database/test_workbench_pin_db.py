@@ -12,8 +12,8 @@ import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.dml import Update
 
-from consts.exceptions import ConversationNotFoundError
-from database import workbench_pin_db as pins
+from contracts.errors.exceptions import ConversationNotFoundError
+from management.db.conversation import pins as pins
 
 STAMP = datetime(2026, 10, 1, tzinfo=timezone.utc)
 NEW_STAMP = datetime(2026, 10, 2, tzinfo=timezone.utc)

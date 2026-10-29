@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Regression coverage for transient catalog failures and recovery."""
 
 from types import SimpleNamespace
@@ -6,8 +8,8 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
 from ext_components.aidp.services import aidp_access_service as service
 from ext_components.aidp.services import aidp_service
 

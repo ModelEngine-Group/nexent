@@ -15,47 +15,15 @@ from typing import Any, Dict, Optional
 import defusedxml.ElementTree as ET
 from defusedxml.common import DefusedXmlException
 
-from consts.const import (
-    CAS_CA_BUNDLE,
-    CAS_CALLBACK_BASE_URL,
-    CAS_DEFAULT_ROLE,
-    CAS_DEFAULT_TENANT_ID,
-    CAS_EMAIL_ATTRIBUTE,
-    CAS_ENABLED,
-    CAS_HEARTBEAT_COOKIE_NAME,
-    CAS_HEARTBEAT_INTERVAL_SECONDS,
-    CAS_HEARTBEAT_URL,
-    CAS_INTERNAL_SERVER_URL,
-    CAS_LOGIN_MODE,
-    CAS_LOGOUT_URL,
-    CAS_RENEW_BEFORE_SECONDS,
-    CAS_RENEW_TIMEOUT_SECONDS,
-    CAS_ROLE_ATTRIBUTE,
-    CAS_ROLE_MAP_JSON,
-    CAS_SERVER_URL,
-    CAS_SESSION_MAX_AGE_SECONDS,
-    CAS_SSL_VERIFY,
-    CAS_SYNTHETIC_EMAIL_DOMAIN,
-    CAS_TENANT_ATTRIBUTE,
-    CAS_USER_ATTRIBUTE,
-    CAS_VALIDATE_PATH,
-    DEFAULT_TENANT_ID,
-    LOCAL_SESSION_MAX_AGE_SECONDS,
-)
-from database.cas_session_db import (
-    create_cas_session,
-    revoke_cas_session_by_index,
-    revoke_cas_sessions_by_user_id,
-)
-from database.oauth_account_db import get_oauth_account_by_provider
-from database.user_tenant_db import get_user_tenant_by_user_id, upsert_user_tenant
-from management.services.permission.identity.oauth import (
-    create_or_update_oauth_account,
-    find_supabase_user_id_by_email,
-)
+from contracts.constants.environment import CAS_CA_BUNDLE, CAS_CALLBACK_BASE_URL, CAS_DEFAULT_ROLE, CAS_DEFAULT_TENANT_ID, CAS_EMAIL_ATTRIBUTE, CAS_ENABLED, CAS_HEARTBEAT_COOKIE_NAME, CAS_HEARTBEAT_INTERVAL_SECONDS, CAS_HEARTBEAT_URL, CAS_INTERNAL_SERVER_URL, CAS_LOGIN_MODE, CAS_LOGOUT_URL, CAS_RENEW_BEFORE_SECONDS, CAS_RENEW_TIMEOUT_SECONDS, CAS_ROLE_ATTRIBUTE, CAS_ROLE_MAP_JSON, CAS_SERVER_URL, CAS_SESSION_MAX_AGE_SECONDS, CAS_SSL_VERIFY, CAS_SYNTHETIC_EMAIL_DOMAIN, CAS_TENANT_ATTRIBUTE, CAS_USER_ATTRIBUTE, CAS_VALIDATE_PATH, LOCAL_SESSION_MAX_AGE_SECONDS
+from contracts.constants.constants import DEFAULT_TENANT_ID
+from management.db.identity.cas_session import create_cas_session, revoke_cas_session_by_index, revoke_cas_sessions_by_user_id
+from management.db.identity.oauth_account import get_oauth_account_by_provider
+from management.db.identity.user_tenant import get_user_tenant_by_user_id, upsert_user_tenant
+from management.services.permission.identity.oauth import create_or_update_oauth_account, find_supabase_user_id_by_email
 from management.services.skill.transfer import init_skill_list_for_tenant
 from management.services.tool.configuration import init_tool_list_for_tenant
-from management.services.permission.identity.authentication_helpers import calculate_expires_at, generate_session_jwt, get_supabase_admin_client
+from gateway.authentication.auth import calculate_expires_at, generate_session_jwt, get_supabase_admin_client
 
 logger = logging.getLogger(__name__)
 

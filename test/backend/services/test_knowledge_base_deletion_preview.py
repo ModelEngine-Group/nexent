@@ -5,7 +5,7 @@
 from unittest.mock import MagicMock
 
 import ext_components.aidp.services.aidp_service as aidp_service
-import management.services.knowledge_base.management as local_service
+from management.services.knowledge_base import management as local_service
 import pytest
 
 

@@ -17,7 +17,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-014")
 def test_repository_transition_enforces_owner_and_reviewer_roles() -> None:
-    from consts.exceptions import UnauthorizedError
+    from contracts.errors.exceptions import UnauthorizedError
     from management.services.repository.agent.listing import _validate_repository_status_transition
 
     record = {"publisher_tenant_id": "t1", "publisher_user_id": "dev-1"}

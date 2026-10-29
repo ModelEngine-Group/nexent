@@ -317,9 +317,16 @@ class AgentPromptComposer:
 
         if is_manager and include_external_agents and external_a2a_agents:
             for agent_id, agent in external_a2a_agents.items():
+                original_name = getattr(agent, "name", "") if not isinstance(agent, dict) else agent.get("name", "")
+                invocation_name = (
+                    getattr(agent, "invocation_name", None) if not isinstance(agent, dict)
+                    else agent.get("invocation_name")
+                ) or original_name
                 payload = {
                     "agent_id": str(getattr(agent, "agent_id", agent_id) if not isinstance(agent, dict) else agent.get("agent_id", agent_id)),
-                    "name": getattr(agent, "name", "") if not isinstance(agent, dict) else agent.get("name", ""),
+                    "name": invocation_name,
+                    "display_name": original_name,
+                    "invocation_name": invocation_name,
                     "description": getattr(agent, "description", "") if not isinstance(agent, dict) else agent.get("description", ""),
                     "url": getattr(agent, "url", "") if not isinstance(agent, dict) else agent.get("url", ""),
                 }

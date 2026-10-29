@@ -1,4 +1,6 @@
-"""Unit tests for ``backend.database.memory_provider_config_param_db``."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Unit tests for ``management.db.memory.provider_config_param``."""
 
 from unittest.mock import MagicMock
 
@@ -20,11 +22,7 @@ class MemoryProviderConfigParam:
 
 install_database_stubs("MemoryProviderConfigParam", MemoryProviderConfigParam)
 
-from backend.database.memory_provider_config_param_db import (
-    delete_params,
-    get_params,
-    upsert_params,
-)
+from management.db.memory.provider_config_param import delete_params, get_params, upsert_params
 
 
 @pytest.fixture
@@ -51,7 +49,7 @@ def test_get_params_empty(monkeypatch, mock_session_ctx):
     mock_filter.all.return_value = []
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_param_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config_param.get_db_session", lambda: ctx)
 
     assert get_params(1) == {}
 
@@ -67,7 +65,7 @@ def test_get_params_with_results(monkeypatch, mock_session_ctx):
     mock_filter.all.return_value = rows
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
-    monkeypatch.setattr("backend.database.memory_provider_config_param_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config_param.get_db_session", lambda: ctx)
 
     result = get_params(1)
     assert result == {"plugin.name": "mem0", "plugin.api_key": "sk-123"}
@@ -76,7 +74,7 @@ def test_get_params_with_results(monkeypatch, mock_session_ctx):
 def test_upsert_params_insert_new(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     _configure_update_result(session, 0)
-    monkeypatch.setattr("backend.database.memory_provider_config_param_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config_param.get_db_session", lambda: ctx)
 
     assert upsert_params(1, {"plugin.name": "mem0"}) is True
     session.add.assert_called_once()
@@ -86,7 +84,7 @@ def test_upsert_params_insert_new(monkeypatch, mock_session_ctx):
 def test_upsert_params_replace_existing(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     _configure_update_result(session, 2)
-    monkeypatch.setattr("backend.database.memory_provider_config_param_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config_param.get_db_session", lambda: ctx)
 
     assert upsert_params(1, {"plugin.name": "new", "plugin.api_key": "new-key"}) is True
     assert session.add.call_count == 2
@@ -96,7 +94,7 @@ def test_upsert_params_replace_existing(monkeypatch, mock_session_ctx):
 def test_upsert_params_failure(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.query.side_effect = Exception("db error")
-    monkeypatch.setattr("backend.database.memory_provider_config_param_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config_param.get_db_session", lambda: ctx)
 
     assert upsert_params(1, {"plugin.name": "x"}) is False
     session.rollback.assert_called_once()
@@ -105,7 +103,7 @@ def test_upsert_params_failure(monkeypatch, mock_session_ctx):
 def test_delete_params_success(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     _configure_update_result(session, 3)
-    monkeypatch.setattr("backend.database.memory_provider_config_param_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config_param.get_db_session", lambda: ctx)
 
     assert delete_params(1) is True
     session.commit.assert_called_once()
@@ -114,7 +112,7 @@ def test_delete_params_success(monkeypatch, mock_session_ctx):
 def test_delete_params_no_params_to_delete(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     _configure_update_result(session, 0)
-    monkeypatch.setattr("backend.database.memory_provider_config_param_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config_param.get_db_session", lambda: ctx)
 
     assert delete_params(1) is True
 
@@ -122,7 +120,7 @@ def test_delete_params_no_params_to_delete(monkeypatch, mock_session_ctx):
 def test_delete_params_failure(monkeypatch, mock_session_ctx):
     session, ctx = mock_session_ctx
     session.query.side_effect = Exception("db error")
-    monkeypatch.setattr("backend.database.memory_provider_config_param_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.provider_config_param.get_db_session", lambda: ctx)
 
     assert delete_params(1) is False
     session.rollback.assert_called_once()
