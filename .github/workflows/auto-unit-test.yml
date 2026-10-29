@@ -57,16 +57,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Resolve uv cache directory
+        id: uv-cache
+        run: |
+          # setup-uv otherwise overrides runner settings and ignores XDG_CACHE_HOME.
+          echo "path=${UV_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/uv}" >> "$GITHUB_OUTPUT"
+
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
           version: "0.13.6"
+          cache-local-path: ${{ steps.uv-cache.outputs.path }}
 
       - name: Set up managed Python
-        env:
-          UV_PYTHON_INSTALL_DIR: ${{ runner.tool_cache }}/nexent-ut/python
         run: |
-          echo "UV_PYTHON_INSTALL_DIR=$UV_PYTHON_INSTALL_DIR" >> "$GITHUB_ENV"
           uv python install 3.11.15 --no-bin
           managed_python_bin="$(dirname "$(uv python find --managed-python 3.11.15)")"
           echo "$managed_python_bin" >> "$GITHUB_PATH"
@@ -122,7 +126,10 @@ jobs:
               ;;
             *) echo "Unsupported Codecov OS: $CODECOV_OS" >&2; exit 1 ;;
           esac
-          cache_dir="$RUNNER_TOOL_CACHE/nexent-ut/codecov/$CODECOV_CLI_VERSION/$CODECOV_OS"
+          # The Codecov binary installer defaults to ./codecov.
+          cache_dir="${CODECOV_CACHE_DIR:-$PWD}"
+          mkdir -p "$cache_dir"
+          cache_dir="$(cd "$cache_dir" && pwd)"
           binary="$cache_dir/codecov"
           verify_binary() {
             printf '%s  %s\n' "$checksum" "$1" | sha256sum --check --status
@@ -130,7 +137,6 @@ jobs:
           if [ -f "$binary" ] && verify_binary "$binary"; then
             echo "Using cached Codecov CLI $CODECOV_CLI_VERSION ($CODECOV_OS)"
           else
-            mkdir -p "$cache_dir"
             temporary_binary="$(mktemp "$cache_dir/codecov.XXXXXX")"
             trap 'rm -f "$temporary_binary"' EXIT
             curl --fail --silent --show-error --location --retry 3 \
@@ -144,7 +150,7 @@ jobs:
             chmod +x "$temporary_binary"
             mv -f "$temporary_binary" "$binary"
           fi
-          chmod +x "$binary"
+          if [ ! -x "$binary" ]; then chmod +x "$binary"; fi
           echo "binary=$binary" >> "$GITHUB_OUTPUT"
 
       - name: Upload coverage to Codecov
