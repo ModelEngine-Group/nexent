@@ -47,3 +47,57 @@ async def test_projection_success_and_failure_are_observed():
     assert await settle_background_projection(success()) == "committed"
     with pytest.raises(RuntimeError, match="controlled"):
         await settle_background_projection(failure())
+
+
+@pytest.mark.asyncio
+async def test_repeated_cancellation_still_joins_one_finalizer():
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    settled = []
+
+    async def projection():
+        entered.set()
+        try:
+            await release.wait()
+        finally:
+            settled.append("settled")
+
+    worker = asyncio.create_task(settle_background_projection(projection()))
+    await entered.wait()
+    worker.cancel()
+    await asyncio.sleep(0)
+    worker.cancel()
+    await asyncio.sleep(0)
+    assert not worker.done() and settled == []
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await worker
+    assert settled == ["settled"]
+
+
+@pytest.mark.asyncio
+async def test_finalizer_deadline_cancels_and_joins_owned_task(monkeypatch):
+    entered = asyncio.Event()
+    settled = asyncio.Event()
+    deadlines = []
+
+    async def projection():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            settled.set()
+
+    async def expired(shielded, timeout):
+        deadlines.append(timeout)
+        shielded.cancel()
+        raise asyncio.TimeoutError()
+
+    monkeypatch.setattr(asyncio, "wait_for", expired)
+    worker = asyncio.create_task(settle_background_projection(projection()))
+    await entered.wait()
+    worker.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await worker
+    assert settled.is_set()
+    assert len(deadlines) == 1 and 0 < deadlines[0] <= 5
