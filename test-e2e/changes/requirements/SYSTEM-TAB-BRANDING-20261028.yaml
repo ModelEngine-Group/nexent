@@ -149,3 +149,20 @@ change:
     server logic, navigation rendering and browser-tab provider match the committed
     baseline exactly. The previously observed formal validation/runtime blockers
     remain recorded above; no full formal runtime PASS is claimed for this copy edit.
+    Tooltip follow-up: move the four labels' parenthesized display locations into
+    small circular-exclamation help buttons, following model configuration hint
+    styling. Both localized name inputs retain their own labels; hints appear on
+    hover or keyboard focus and clicking help never submits the form. Preserve
+    existing persistent usage/fallback text, internal identifiers and HTTP behavior.
+    Strengthen projectConfigBranding UT with Chinese/English hover and focus checks;
+    update only the existing D4 label selectors. Reuse its save/reset/empty-title
+    journey rather than adding a new formal Case for presentation. The current
+    isolated D4 runtime prerequisite remains unavailable; do not claim a formal PASS.
+    Verification: 8 projectConfigBranding UT PASS, including all six help controls in
+    Chinese/English, hover dismissal, focus accessibility and no-submit behavior.
+    Source-only TypeScript excluding generated .next files, localized JSON checks,
+    Prettier, copyright and git diff --check PASS; ESLint has zero errors and two
+    existing native-image warnings. Manual Chrome inspection confirms short labels,
+    visible circular-exclamation buttons and correct application/navigation hints;
+    real title and navigation-logo screenshots are stored outside Git. No branding
+    settings were saved. Formal runtime acceptance remains blocked as recorded above.

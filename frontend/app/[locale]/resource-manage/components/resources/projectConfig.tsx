@@ -13,7 +13,9 @@ import {
   Row,
   Col,
   Tabs,
+  Tooltip,
 } from "antd";
+import { CircleAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   useGlobalConfigStore,
@@ -79,6 +81,7 @@ export default function ProjectConfigTab({
       key: "productName",
       label: t("project.config.title"),
       hint: t("project.config.title.hint"),
+      tooltip: t("project.config.title.placement"),
       max: 20,
       maxEn: 50,
       optional: true,
@@ -86,6 +89,7 @@ export default function ProjectConfigTab({
     {
       key: "homeTitle",
       label: t("project.config.home.title"),
+      tooltip: t("project.config.home.title.placement"),
       max: 50,
       maxEn: 100,
       optional: true,
@@ -227,6 +231,24 @@ export default function ProjectConfigTab({
     }
   };
 
+  const renderLabel = (label: string, tooltip?: string) =>
+    tooltip ? (
+      <span className="inline-flex items-center gap-1.5">
+        <span>{label}</span>
+        <Tooltip title={tooltip} trigger={["hover", "focus"]}>
+          <button
+            type="button"
+            aria-label={t("project.config.field.hint", { label })}
+            className="cursor-help rounded-sm text-muted-foreground/60 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          >
+            <CircleAlert className="size-3.5" aria-hidden="true" />
+          </button>
+        </Tooltip>
+      </span>
+    ) : (
+      label
+    );
+
   const projectConfigContent = (
     <Card>
       <Form
@@ -240,7 +262,7 @@ export default function ProjectConfigTab({
             <Col span={12}>
               <Form.Item
                 name={["configZh", item.key]}
-                label={item.label}
+                label={renderLabel(item.label, item.tooltip)}
                 extra={item.hint}
                 rules={[
                   {
@@ -256,6 +278,7 @@ export default function ProjectConfigTab({
                 ]}
               >
                 <Input
+                  aria-label={item.label}
                   allowClear
                   placeholder={
                     item.key === "homeTitle"
@@ -268,7 +291,7 @@ export default function ProjectConfigTab({
             <Col span={12}>
               <Form.Item
                 name={["configEn", item.key]}
-                label={`${item.label}-English`}
+                label={renderLabel(`${item.label}-English`, item.tooltip)}
                 extra={item.hint}
                 rules={[
                   {
@@ -284,6 +307,7 @@ export default function ProjectConfigTab({
                 ]}
               >
                 <Input
+                  aria-label={`${item.label}-English`}
                   allowClear
                   placeholder={
                     item.key === "homeTitle"
@@ -312,7 +336,10 @@ export default function ProjectConfigTab({
         </Form.Item>
         <Form.Item extra={t("project.config.system.logo.hint")}>
           <div className="flex items-center gap-4 mt-2 mb-4">
-            <span>{t("project.config.page.simple.log")}</span>
+            {renderLabel(
+              t("project.config.page.simple.log"),
+              t("project.config.page.simple.log.placement")
+            )}
             <img
               className="h-7"
               src={
@@ -329,7 +356,12 @@ export default function ProjectConfigTab({
             <Button size="small">{t("project.config.logo.upload.new")}</Button>
           </Upload>
         </Form.Item>
-        <Form.Item label={t("project.config.home.logo")}>
+        <Form.Item
+          label={renderLabel(
+            t("project.config.home.logo"),
+            t("project.config.home.logo.placement")
+          )}
+        >
           <div className="mb-4 mt-2 flex items-center gap-4">
             <img
               className="h-7 max-w-40 object-contain"

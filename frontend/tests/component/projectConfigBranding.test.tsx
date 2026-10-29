@@ -9,10 +9,21 @@ import {
   useGlobalConfigStoreAllLanguage,
 } from "@/stores/global";
 import zh from "@/public/locales/zh/common.json";
+import en from "@/public/locales/en/common.json";
+
+const translations = vi.hoisted(() => ({ locale: "zh" }));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string) => (zh as unknown as Record<string, string>)[key] || key,
+    t: (key: string, options?: Record<string, unknown>) => {
+      const messages = translations.locale === "en" ? en : zh;
+      const value = (messages as unknown as Record<string, string>)[key] || key;
+      return Object.entries(options || {}).reduce(
+        (text, [name, replacement]) =>
+          text.replaceAll(`{{${name}}}`, String(replacement)),
+        value
+      );
+    },
   }),
 }));
 vi.mock(
@@ -33,6 +44,7 @@ vi.mock("@/services/api", () => ({
 vi.mock("@/lib/logger", () => ({ default: { error: vi.fn() } }));
 
 beforeEach(() => {
+  translations.locale = "zh";
   useGlobalConfigStore.getState().setConfig({
     productName: "System",
     homeLogo: "home-logo.png?v=abc",
@@ -58,22 +70,88 @@ beforeEach(() => {
   );
 });
 
+it.each([
+  ["zh", zh],
+  ["en", en],
+])("shows each display location on hover in %s", async (locale, messages) => {
+  translations.locale = locale;
+  render(<ProjectConfigTab />);
+  expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("textbox", {
+      name: messages["project.config.title"],
+    })
+  ).toBeVisible();
+  const placements = [
+    [
+      messages["project.config.title"],
+      messages["project.config.title.placement"],
+    ],
+    [
+      `${messages["project.config.title"]}-English`,
+      messages["project.config.title.placement"],
+    ],
+    [
+      messages["project.config.home.title"],
+      messages["project.config.home.title.placement"],
+    ],
+    [
+      `${messages["project.config.home.title"]}-English`,
+      messages["project.config.home.title.placement"],
+    ],
+    [
+      messages["project.config.page.simple.log"],
+      messages["project.config.page.simple.log.placement"],
+    ],
+    [
+      messages["project.config.home.logo"],
+      messages["project.config.home.logo.placement"],
+    ],
+  ];
+  for (const [label, location] of placements) {
+    const button = screen.getByRole("button", {
+      name: messages["project.config.field.hint"].replace("{{label}}", label),
+    });
+    fireEvent.mouseEnter(button);
+    await waitFor(() =>
+      expect(screen.getByRole("tooltip")).toHaveTextContent(location)
+    );
+    fireEvent.mouseLeave(button);
+    await waitFor(() =>
+      expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+    );
+  }
+  expect(fetch).not.toHaveBeenCalled();
+});
+
+it("supports keyboard help without submitting or changing configuration", async () => {
+  render(<ProjectConfigTab />);
+  const button = screen.getByRole("button", { name: "导航栏 Logo说明" });
+  fireEvent.focus(button);
+  await waitFor(() =>
+    expect(screen.getByRole("tooltip")).toHaveTextContent(
+      zh["project.config.home.logo.placement"]
+    )
+  );
+  fireEvent.click(button);
+  expect(fetch).not.toHaveBeenCalled();
+  expect(screen.getByRole("textbox", { name: "导航栏标题" })).toHaveValue("");
+  fireEvent.blur(button);
+  await waitFor(() =>
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+  );
+});
+
 it("saves optional localized homepage titles and explicit empty system names", async () => {
   render(<ProjectConfigTab />);
+  fireEvent.change(screen.getByRole("textbox", { name: "应用名称" }), {
+    target: { value: "" },
+  });
+  fireEvent.change(screen.getByRole("textbox", { name: "导航栏标题" }), {
+    target: { value: "独立首页" },
+  });
   fireEvent.change(
-    screen.getByRole("textbox", { name: "应用名称（网页标签页标题）" }),
-    {
-      target: { value: "" },
-    }
-  );
-  fireEvent.change(
-    screen.getByRole("textbox", { name: "导航栏标题（页面左上角）" }),
-    {
-      target: { value: "独立首页" },
-    }
-  );
-  fireEvent.change(
-    screen.getByRole("textbox", { name: "导航栏标题（页面左上角）-English" }),
+    screen.getByRole("textbox", { name: "导航栏标题-English" }),
     {
       target: { value: "Separate homepage" },
     }
@@ -95,9 +173,10 @@ it("saves optional localized homepage titles and explicit empty system names", a
 it("explicitly resets an existing homepage logo without uploading the system logo", async () => {
   render(<ProjectConfigTab />);
   fireEvent.click(screen.getByRole("button", { name: "使用应用 Logo" }));
-  expect(
-    screen.getByRole("img", { name: "导航栏 Logo（页面左上角）" })
-  ).toHaveAttribute("src", "/modelengine-logo.png");
+  expect(screen.getByRole("img", { name: "导航栏 Logo" })).toHaveAttribute(
+    "src",
+    "/modelengine-logo.png"
+  );
   fireEvent.click(screen.getByRole("button", { name: "保存" }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   const body = vi.mocked(fetch).mock.calls[0][1]!.body as FormData;
@@ -108,12 +187,10 @@ it("explicitly resets an existing homepage logo without uploading the system log
 
 it("keeps an empty homepage title instead of substituting the system name", async () => {
   render(<ProjectConfigTab />);
-  expect(
-    screen.getByRole("textbox", { name: "导航栏标题（页面左上角）" })
-  ).toHaveValue("");
-  expect(
-    screen.getByRole("textbox", { name: "应用名称（网页标签页标题）" })
-  ).toHaveValue("System");
+  expect(screen.getByRole("textbox", { name: "导航栏标题" })).toHaveValue("");
+  expect(screen.getByRole("textbox", { name: "应用名称" })).toHaveValue(
+    "System"
+  );
   fireEvent.click(screen.getByRole("button", { name: "保存" }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   const body = vi.mocked(fetch).mock.calls[0][1]!.body as FormData;
@@ -130,9 +207,10 @@ it("uploads a separate image and keeps errors recoverable", async () => {
     target: { files: [file] },
   });
   await waitFor(() =>
-    expect(
-      screen.getByRole("img", { name: "导航栏 Logo（页面左上角）" })
-    ).toHaveAttribute("src", "blob:home-preview")
+    expect(screen.getByRole("img", { name: "导航栏 Logo" })).toHaveAttribute(
+      "src",
+      "blob:home-preview"
+    )
   );
   vi.mocked(fetch).mockResolvedValueOnce({
     ok: false,
