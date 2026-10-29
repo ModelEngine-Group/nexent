@@ -1,0 +1,77 @@
+schema_version: '1.0'
+change:
+  change_id: AUTO-RUN-OUTCOME-20261027
+  change_type: bugfix
+  bug_id: AUTO-RUN-OUTCOME-20261027
+  title: Persist automation run message identities and actual execution outcomes
+  description: Atomically associate created messages and propagate final execution/persistence
+    outcomes with cancellation-safe terminal transitions. Live follow-up fixes cross-turn
+    cancellation, atomic scheduled cancellation, manual HTTP cancellation and latest-result
+    ordering/refresh.
+  observed_behavior: Exceptions/timeouts leave committed messages without run IDs;
+    error streams may be reported as SUCCEEDED and attach a previous assistant message.
+  expected_behavior: Each run retains only its own committed messages and reports
+    success only after completed execution and successful persistence; cancellation
+    wins only through a conditional transition.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Runner UT stubs background returns; background UT stubs latest-message
+      lookup. Existing quota integration omits run linkage and failed-stream outcome
+      propagation. Live browser testing found that mocked Redis pollers hid stale
+      cancellation and that cancellation did not consume scheduled occurrences; history
+      used planned time.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - F-126
+    retired: []
+  affected_cases:
+    existing:
+    - AUTO-QUOTA-D3-001
+    added:
+    - AUTO-RUN-D3-001
+    - AUTO-RUN-D5-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Background outcomes use the current execution and final persistence, including
+      failed preparation, memory fallback, failed message creation, typed model errors
+      and cancellation.
+    - Runner finalization preserves committed IDs and fences terminal updates, failures,
+      manual schedules and cancellation races.
+    - Shared-session message writes and atomic run binding preserve ownership and
+      rollback.
+    - Generation-fenced cancellation, exactly-once atomic schedule finalization, HTTP
+      business versus caller cancellation, actual-time history order and stale UI
+      responses.
+    reason: UT proves local outcomes/branches, D3 proves real service/stream/persistence
+      collaboration, and D5 proves transaction faults and races. No duplicate D1.
+    test_selectors:
+    - test/backend/services/test_agent_automation_runner.py
+    - test/backend/services/test_agent_automation_run_outcomes.py
+    - test/backend/services/test_agent_background_outcomes.py
+    - test/backend/services/test_agent_background_finalization.py
+    - test/backend/services/test_agent_automation_conversation_adapter.py
+    - test/backend/services/test_agent_automation_lifecycle.py
+    - test/backend/database/test_conversation_activity.py
+    - test/backend/database/test_agent_automation_message_binding.py
+    - test/backend/services/test_agent_automation_cancel_race.py
+    - test/backend/services/test_agent_service.py
+    - test/backend/services/test_agent_model_attempt_persistence.py
+    - test/backend/services/test_agent_automation_facade.py
+    - test/backend/services/test_automation_runtime_admission.py
+    - test/backend/services/test_runtime_state_service.py
+    - test/backend/database/test_agent_automation_db.py
+    - test/backend/agents/test_agent_run_manager.py
+  notes: Baseline 342b8b07a on djb/bugfix-aotumation-sql-check. Maintain the existing
+    automation/activity design in the separate nexent-doc repository. SQL-only PR
+    4234 remains unchanged. No new tables/fields/indexes or unit-table scanning; historical
+    missing run links are not guessed. Preserve existing public chat contracts, managed-thread
+    ownership and quota rules. Only isolated fixtures are mutated; do not commit,
+    push or deploy. Full baseline asset validation already has unrelated missing UT/navigation
+    references; do not repair those as part of this change.

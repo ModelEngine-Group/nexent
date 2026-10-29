@@ -35,7 +35,7 @@ case:
     action: Apply migration to legacy tables without a message-unit table, containing mixed ordinary/automation/soft-deleted messages,
       duplicate and NULL run message IDs, missing messages, unlinked messages and references to another conversation.
     expected: Only message IDs explicitly referenced by runs in the same conversation are classified;
-      unlinked and mismatched messages remain CHAT. Last visible message time is backfilled, not administrative update time.
+      unlinked and mismatched messages remain CHAT. Missing activity remains NULL without rewriting conversation rows; effective order falls back to creation time, not historical messages or administrative edits.
   - order: 2
     action: Repeat migration and query defaults, activity, indexes and row preservation.
     expected: Second application is idempotent; normal defaults and existing rows are preserved; no new business
@@ -45,7 +45,7 @@ case:
     expected: Activity has timestamp without time zone type; existing UTC values and microseconds, sources and unrelated audit values remain unchanged; the index uses the same naive fallback as list queries.
   expected_results:
   - Only same-conversation run message IDs are classified, without reading message units; duplicate, NULL and missing references
-    are safe, unlinked and mismatched messages remain CHAT, and last visible message time is backfilled instead of administrative update time.
+    are safe, unlinked and mismatched messages remain CHAT, and missing activity remains NULL with creation-time fallback and unchanged conversation row versions.
   - Second application is idempotent; normal defaults and existing rows are preserved; no new business table is
     introduced.
   - First-time upgrades and existing TIMESTAMP schemas preserve UTC activity and subsecond precision across connection timezones, with matching indexes and repeatable execution.
@@ -64,7 +64,7 @@ case:
   acceptance:
   - id: AC-01
     description: Source backfill succeeds without a message-unit table, classifies only same-conversation run message IDs,
-      preserves unlinked and mismatched messages and safely handles duplicate, NULL and missing references while retaining visible activity backfill.
+      preserves unlinked and mismatched messages and safely handles incomplete references while missing activity remains NULL, effective order uses creation time and conversation row versions stay unchanged.
     steps:
     - 1
     expected_results:

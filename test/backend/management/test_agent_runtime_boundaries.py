@@ -164,4 +164,24 @@ def test_assistant_projection_is_a_separate_responsibility():
     execution = (ROOT / "backend/management/services/agent/execution.py").read_text(
         encoding="utf-8"
     )
-    assert "await finalize_assistant_projection(" in execution
+    execution_tree = ast.parse(execution)
+    assignments = [node for node in ast.walk(execution_tree) if isinstance(node, ast.Assign)]
+    assert any(
+        isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Name)
+        and node.value.func.id == "finalize_assistant_projection"
+        and any(
+            isinstance(target, ast.Name) and target.id == "projection"
+            for target in node.targets
+        )
+        for node in assignments
+    )
+    awaits = [node.value for node in ast.walk(execution_tree) if isinstance(node, ast.Await)]
+    assert any(isinstance(node, ast.Name) and node.id == "projection" for node in awaits)
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "settle_background_projection"
+        and any(isinstance(arg, ast.Name) and arg.id == "projection" for arg in node.args)
+        for node in awaits
+    )
