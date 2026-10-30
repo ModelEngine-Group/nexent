@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """OpenAI LLM adapters: standard + long-context."""
 
 from __future__ import annotations
@@ -5,9 +7,10 @@ from __future__ import annotations
 import asyncio
 from typing import Any, AsyncIterator
 
+from nexent.core.concurrency import run_blocking
+from nexent.core.models.openai_long_context_model import LongTextPreparation
 from nexent.core.models import OpenAILongContextModel, OpenAIModel
 from nexent.core.models.retry import DEFAULT_MODEL_RETRY
-from nexent.core.concurrency import run_blocking
 
 from ...model_context import LLMContext
 from ...multimodal_adapter import ModelInfo
@@ -40,6 +43,21 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
     def _build_model(self) -> None:
         """Construct the wrapped :class:`OpenAIModel` on first use."""
         ctx = self._context
+        if ctx.resolved_profile is not None:
+            from nexent.core.model_service.compatibility.legacy_chat_model import LegacyChatModel
+
+            profile = ctx.resolved_profile
+            if (
+                profile.identity.tenant_id != ctx.tenant_id
+                or profile.identity.request_model_id != ctx.model_name
+                or profile.connection.base_url != ctx.base_url
+            ):
+                raise ValueError("Model context does not match its outlet snapshot")
+            self._model = LegacyChatModel.from_profile(
+                profile, ctx.api_key, http_headers=ctx.http_headers,
+                observer=ctx.observer, cancellation_scope=ctx.cancellation_scope,
+            )
+            return
         kwargs = dict(
             observer=ctx.observer,
             model_id=ctx.model_name,
@@ -74,6 +92,8 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
         """Create a streaming completion using the wrapped OpenAI client."""
         if self._model is None:
             self._build_model()
+        if self._context.resolved_profile is not None:
+            return self._model.agenerate_stream(request.messages, **request.kwargs)
         completion_kwargs = {
             "model": self._model.model_id,
             "messages": request.messages,
@@ -97,6 +117,18 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
 
     def get_model_info(self) -> ModelInfo:
         """Return ``ModelInfo`` advertising text + tool_calling capabilities."""
+        if self._context.resolved_profile is not None:
+            profile = self._context.resolved_profile
+            return ModelInfo(
+                model_id=profile.identity.request_model_id,
+                display_name=profile.identity.display_name,
+                provider=profile.identity.provider_id,
+                capabilities={
+                    "text": "text" in profile.capabilities.modalities.output,
+                    "tool_calling": profile.capabilities.tools.status == "supported",
+                    "long_context": False,
+                },
+            )
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
@@ -110,7 +142,7 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
 
 
 @register_adapter("openai", "llm_long_context")
-class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
+class OpenAILongContextLLMAdapter(LongTextPreparation, OpenAILLMAdapter):
     """Adapter for OpenAILongContextModel with long-context support.
 
     Reuses the standard OpenAI LLM adapter behavior and overrides only
@@ -126,6 +158,10 @@ class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
     def _build_model(self) -> None:
         """Construct the wrapped :class:`OpenAILongContextModel` on first use."""
         ctx = self._context
+        if ctx.resolved_profile is not None:
+            limits = ctx.resolved_profile.capabilities.context
+            self.initialize_long_text(limits.input_limit or limits.combined_window, ctx.truncation_strategy or "start")
+            return super()._build_model()
         self._model = OpenAILongContextModel(
             observer=ctx.observer,
             model_id=ctx.model_name,
@@ -159,6 +195,8 @@ class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
         """
         if self._model is None:
             self._build_model()
+        if self._context.resolved_profile is not None:
+            return LongTextPreparation.analyze_long_text(self, text_content, system_prompt, user_prompt)
         return self._model.analyze_long_text(
             text_content=text_content,
             system_prompt=system_prompt,
@@ -167,6 +205,10 @@ class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
 
     def get_model_info(self) -> ModelInfo:
         """Return ``ModelInfo`` advertising ``long_context=True``."""
+        if self._context.resolved_profile is not None:
+            info = super().get_model_info()
+            info.capabilities["long_context"] = True
+            return info
         return ModelInfo(
             model_id=self._context.model_name,
             display_name=self._context.display_name or "",
