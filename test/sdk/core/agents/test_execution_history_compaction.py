@@ -283,6 +283,19 @@ def test_ac008_registered_reader_is_listed_with_actual_schema_in_model_resources
     assert observer.execution_history is agent._execution_history
 
 
+def test_ac003_runtime_result_contract_requires_actual_execution_before_final_answer():
+    _, _, runtime, _ = runtime_agent()
+    contracts = [item for item in runtime.items if item.id == 'system:execution_result_contract']
+    assert len(contracts) == 1 and contracts[0].type == 'system'
+    rendered = ContextItemRenderer().render([ContextItem.from_input(contracts[0])])
+    assert len(rendered) == 1 and rendered[0]['role'] == 'system'
+    contract = text(rendered)
+    assert 'Only the runtime emits CODE_EXEC_RESULT, SUMMARIED_RESULT and OUTPUT_REF tags' in contract
+    assert 'do not generate these records yourself' in contract
+    assert 'wait for the actual execution result' in contract
+    assert 'final answer in a separate response' in contract
+
+
 def test_ac003_ac015_finalize_registers_partial_error_once_and_not_final_answers():
     from smolagents.memory import ToolCall
     from smolagents.utils import AgentExecutionError
