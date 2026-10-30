@@ -3,7 +3,7 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -24,14 +24,6 @@ def release(mocker):
     next_version = mocker.patch.object(service, "next_workbench_version", return_value=4)
     write = mocker.patch.object(service, "write_system_agent_release")
     return SimpleNamespace(session=session, provider=provider, latest=latest, next=next_version, write=write)
-
-
-def test_publish_requires_initialized_identity(release):
-    with pytest.raises(WorkbenchAgentError) as caught:
-        service._publish_workbench(release.session, release.provider, None)
-    assert caught.value.code == "system_agent_not_ready"
-    release.next.assert_not_called()
-    release.write.assert_not_called()
 
 
 def test_same_revision_reuses_published_snapshot_without_new_version(release):
@@ -80,28 +72,6 @@ def test_publish_allocates_next_version_and_passes_manifest_fields(release, prev
     )
     if previous is None:
         release.provider._is_newer_release.assert_not_called()
-
-
-def test_release_locks_loads_and_publishes_inside_one_transaction(mocker):
-    session = MagicMock()
-    context = mocker.patch.object(service, "get_db_session").return_value
-    context.__enter__.return_value = session
-    provider = mocker.patch.object(service, "SystemAgentProvider")
-    calls = MagicMock()
-    calls.attach_mock(mocker.patch.object(service, "lock_system_agent_release"), "lock")
-    load = mocker.patch.object(service, "load_system_agent", return_value={"agent_id": 77})
-    calls.attach_mock(load, "load")
-    publish = mocker.patch.object(service, "_publish_workbench", return_value=SystemAgentRef(
-        ASSET_OWNER_TENANT_ID, "workbench_main", 77, 4,
-    ))
-    calls.attach_mock(publish, "publish")
-    assert service.release_system_agents(app_version="2.8.2") == {"workbench_main": 77, "workbench_version": 4}
-    provider.assert_called_once_with(app_version="2.8.2")
-    assert calls.mock_calls == [
-        call.lock(session, "workbench_main"), call.load(session, "workbench_main"),
-        call.publish(session, provider.return_value, {"agent_id": 77}),
-    ]
-    context.__exit__.assert_called_once_with(None, None, None)
 
 
 def test_release_failure_reaches_transaction_context_and_caller(mocker):

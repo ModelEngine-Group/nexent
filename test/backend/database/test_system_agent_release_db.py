@@ -4,8 +4,10 @@
 from unittest.mock import MagicMock
 
 import pytest
+from sqlalchemy import and_
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql.dml import Insert, Update
+from sqlalchemy.sql.selectable import Select
 
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.db.agent import system as db
@@ -66,8 +68,24 @@ def test_release_writes_draft_snapshot_metadata_and_copies_each_active_binding()
         revision="2.8.2", fields={"name": "Workbench", "enabled": True, "model_ids": [999]}, version_no=3,
     )
     statements = [call.args[0] for call in session.execute.call_args_list]
-    draft, snapshot, metadata = statements[:3]
-    assert isinstance(draft, Update) and isinstance(snapshot, Insert)
+    drafts = [statement for statement in statements if isinstance(statement, Update)
+              and statement.table.fullname == db.AgentInfo.__table__.fullname]
+    assert len(drafts) == 1
+    draft = drafts[0]
+    inserts = {}
+    queries = {}
+    for statement in statements:
+        if isinstance(statement, Insert):
+            inserts.setdefault(statement.table.fullname, []).append(statement)
+        elif isinstance(statement, Select):
+            table = statement.get_final_froms()[0]
+            queries.setdefault(table.fullname, []).append(statement)
+    assert set(inserts) == {table.fullname for table in bindings} | {
+        db.AgentInfo.__table__.fullname, db.AgentVersion.__table__.fullname,
+    }
+    assert all(len(group) == 1 for group in inserts.values())
+    snapshot = inserts[db.AgentInfo.__table__.fullname][0]
+    metadata = inserts[db.AgentVersion.__table__.fullname][0]
     assert compiled(draft).params["current_version_no"] == 3
     assert "version_no = 0" in sql(draft.whereclause)
     assert f"tenant_id = '{ASSET_OWNER_TENANT_ID}'" in sql(draft.whereclause)
@@ -82,13 +100,19 @@ def test_release_writes_draft_snapshot_metadata_and_copies_each_active_binding()
     assert compiled(snapshot).params["version_no"] == 3
     assert compiled(metadata).params["status"] == "RELEASED"
     assert compiled(metadata).params["version_name"] == "2.8.2"
-    assert len(statements) == 9
-    for query, insert in zip(statements[3::2], statements[4::2]):
-        assert "version_no = 0" in sql(query)
-        assert "delete_flag = 'N'" in sql(query)
-        assert f"tenant_id = '{ASSET_OWNER_TENANT_ID}'" in sql(query)
+    assert set(queries) == {table.fullname for table in bindings}
+    for model in (db.ToolInstance, db.SkillInstance, db.AgentRelation):
+        table = model.__table__
+        assert len(queries[table.fullname]) == 1
+        query = queries[table.fullname][0]
+        agent_column = model.parent_agent_id if model is db.AgentRelation else model.agent_id
+        assert query.whereclause.compare(and_(
+            agent_column == 77, model.tenant_id == ASSET_OWNER_TENANT_ID,
+            model.version_no == 0, model.delete_flag == "N",
+        )), f"Binding copy must select only active draft rows for Agent 77: {sql(query)}"
+        insert = inserts[table.fullname][0]
         assert compiled(insert).params["version_no"] == 3
-        expected = bindings[query.get_final_froms()[0]]
+        expected = bindings[table]
         for key, value in expected.items():
             assert compiled(insert).params[key] == value
     assert result["agent_id"] == 77 and result["version_no"] == 3

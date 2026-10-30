@@ -38,13 +38,23 @@ def deployment(mocker):
 
 def test_publisher_only_reads_and_publishes_workbench(deployment, mocker):
     events, session = deployment
-    load = mocker.patch.object(release, "load_system_agent", return_value={"agent_id": 77})
-    publish = mocker.patch.object(release, "_publish_workbench", return_value=SystemAgentRef(ASSET_OWNER_TENANT_ID, "workbench_main", 77, 1))
+    provider = mocker.patch.object(release, "SystemAgentProvider")
+    load = mocker.patch.object(
+        release, "load_system_agent",
+        side_effect=lambda *_: events.append("load") or {"agent_id": 77},
+    )
+    publish = mocker.patch.object(
+        release, "_publish_workbench",
+        side_effect=lambda *_: events.append("publish") or SystemAgentRef(
+            ASSET_OWNER_TENANT_ID, "workbench_main", 77, 1,
+        ),
+    )
     init = mocker.patch.object(initialize, "initialize_system_agents")
-    assert release.release_system_agents() == {"workbench_main": 77, "workbench_version": 1}
-    assert events == ["begin", "workbench_main", "commit"]
+    assert release.release_system_agents(app_version="2.8.2") == {"workbench_main": 77, "workbench_version": 1}
+    provider.assert_called_once_with(app_version="2.8.2")
+    assert events == ["begin", "workbench_main", "load", "publish", "commit"]
     load.assert_called_once_with(session, "workbench_main")
-    publish.assert_called_once()
+    publish.assert_called_once_with(session, provider.return_value, {"agent_id": 77})
     init.assert_not_called()
     assert not hasattr(release, "consolidate_system_agent")
     assert not hasattr(release, "initialize_nl2agent_identity")
@@ -54,8 +64,11 @@ def test_publisher_rejects_missing_shared_draft(deployment, mocker):
     events, session = deployment
     mocker.patch.object(release, "load_system_agent", return_value=None)
     write = mocker.patch.object(release, "write_system_agent_release")
-    with pytest.raises(WorkbenchAgentError, match="system_agent_not_ready"):
+    next_version = mocker.patch.object(release, "next_workbench_version")
+    with pytest.raises(WorkbenchAgentError, match="system_agent_not_ready") as caught:
         release.release_system_agents()
+    assert caught.value.code == "system_agent_not_ready"
+    next_version.assert_not_called()
     write.assert_not_called()
     assert events[-1] == "rollback"
 
