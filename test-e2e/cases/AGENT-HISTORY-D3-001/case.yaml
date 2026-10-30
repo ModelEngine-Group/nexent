@@ -1,0 +1,62 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: AGENT-HISTORY-D3-001
+  feature_id: F-171
+  business_rule_ids:
+  - F-171-RULE-01
+  title: Real Agent execution history summary and authorized result recall
+  type: AGENT-IT
+  priority: P0
+  status: active
+  automation: manual
+  objective: Verify actual Agent/model/result-store collaboration with Phoenix evidence.
+  preconditions:
+  - Run the tested source revision in Nexent-Test with real model and Phoenix configured.
+  - Use isolated test conversation and model resources; retain evidence below task
+    worktree.
+  test_data:
+    legacy_asset_declaration: Deterministic long tool result with a middle sentinel
+      and an error-after-output scenario; no secrets.
+  steps:
+  - order: 1
+    action: Run short and multi-code-block tasks and inspect subsequent real model
+      input.
+    expected: Code appears once, one CODE_EXEC_RESULT follows, false values and partial
+      errors remain.
+  - order: 2
+    action: Run a long result across the configured context threshold; inspect summary
+      call and repeated assembly.
+    expected: Only selected finished result is summarized once; SUMMARIED_RESULT and
+      real message/unit reference replace full output.
+  - order: 3
+    action: Ask Agent to recall a middle sentinel using the reference; attempt an
+      unauthorized reference.
+    expected: Read real original text without rerunning original tool; deny unauthorized
+      reference; loaded text reaches next model request.
+  - order: 4
+    action: Finish run and inspect stored unit JSON and browser history.
+    expected: Original content and summary preserved; page still shows original code
+      and results.
+  - order: 5
+    action: Inspect Phoenix prompts, tool spans, summary output, latency and final
+      output for all scenarios.
+    expected: No masked raw data returns; record actual source/model/trace IDs and
+      separate missing performance evidence.
+  expected_results:
+  - Real Agent completes with correct final answer and no repeated side effects.
+  - Summary and recall match tested source and persisted execution record.
+  forbidden_side_effects:
+  - Cross-conversation result access
+  - Replacing or deleting original tool results
+  - Changing guardrail rules
+  source:
+    notes: Approved chat-action-history-offload design; current change AGENT-HISTORY-20261030.
+  integration_boundary:
+  - Actual CoreAgent/provider and result unit storage; real model and Phoenix.
+  observations:
+  - Final messages, tool execution count, summary count, recalled sentinel and actual
+    latency.
+  cleanup:
+  - Remove only task test resources after retaining sanitized evidence.

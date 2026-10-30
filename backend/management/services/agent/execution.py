@@ -364,6 +364,9 @@ async def _stream_agent_chunks(
     skill_file_uploads: list[dict] = []
     workspace_file_uploads: dict[str, dict] = {}
     frontend_skill_files: list[dict] = []
+    from nexent.core.agents.context.execution_history import ExecutionHistory
+    from management.services.agent.stream import bind_execution_result_unit, finalize_execution_result_units
+    execution_history = ExecutionHistory()
     buffered_units: list[dict[str, Any]] = []
     buffered_search_records: list[dict[str, Any]] = []
     buffered_image_urls: list[str] = []
@@ -441,6 +444,9 @@ async def _stream_agent_chunks(
         yield STREAM_STATUS_EVENT
         yield f'data: {{"status": "resumed", "last_unit_index": {resume_from_unit_index - 1}}}\n\n'
 
+    if streaming_message_id is not None:
+        agent_run_info.observer.execution_history = execution_history
+
     async def _iter_run_chunks():
         for event in getattr(
             agent_run_info.agent_config,
@@ -495,6 +501,18 @@ async def _stream_agent_chunks(
                 # Malformed chunk: emit as-is and skip persistence bookkeeping.
                 await channel.publish(f"data: {chunk}\n\n")
                 yield f"data: {chunk}\n\n"
+                continue
+
+            if chunk_type == "execution_result":
+                payload = json.loads(chunk_content) if isinstance(chunk_content, str) else chunk_content
+                key = payload.get("execution_key") if isinstance(payload, dict) else None
+                record = execution_history.get(key) if key else None
+                if record is not None and streaming_message_id is not None:
+                    buffered_units.append(bind_execution_result_unit(
+                        execution_history, key, streaming_message_id, next_unit_index, data,
+                    ))
+                    next_unit_index += 1
+                    current_unit = None
                 continue
 
             if chunk_type == "model_attempt_control":
@@ -880,6 +898,7 @@ async def _stream_agent_chunks(
         persistence_failed = False
         if streaming_message_id is not None:
             try:
+                finalize_execution_result_units(execution_history, buffered_units)
                 remove_answer_only_steps(buffered_units)
                 persistence_bytes = _finalize_buffered_unit_fragments(buffered_units)
                 final_answer_content = next(
