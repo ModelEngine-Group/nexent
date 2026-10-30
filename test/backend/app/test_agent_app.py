@@ -326,6 +326,16 @@ async def test_workbench_bootstrap_is_unavailable_when_disabled(mocker):
     assert exc_info.value.detail == {"code": "WORKBENCH_DISABLED"}
 
 
+@pytest.fixture(autouse=True)
+def creator_history_boundary(mocker):
+    from contracts.agent import SystemAgentRef
+    from management.services.conversation import creator_execution
+    mocker.patch.object(creator_execution.system_agent_provider, "get_creator_ref", return_value=SystemAgentRef("shared", "nl2agent_main", 77, 0))
+    mocker.patch.object(creator_execution, "authorize_target", side_effect=lambda target, *_: target)
+    mocker.patch.object(creator_execution, "prepare_creation_history", return_value=(42, 1))
+    mocker.patch.object(creator_execution, "persist_creation_stream", side_effect=lambda stream, **_: stream)
+
+
 @pytest.mark.asyncio
 async def test_nl2agent_run_api_streams_for_existing_draft(
     mocker, mock_auth_header
@@ -368,7 +378,7 @@ async def test_nl2agent_run_api_streams_for_existing_draft(
         == mock_auth_header["Authorization"]
     )
     assert request.conversation_id is None
-    assert request.persist_history is False
+    assert request.persist_history is True
     assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
     assert create_stream.call_args.kwargs["language"] == "en"
 
@@ -396,10 +406,10 @@ async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
         return_value=mock_stream(),
     )
     prepare = mocker.patch(
-        "runtime.api.agent.execution.prepare_creation_history", return_value=(42, 1)
+        "management.services.conversation.creator_execution.prepare_creation_history", return_value=(42, 1)
     )
     persist = mocker.patch(
-        "runtime.api.agent.execution.persist_creation_stream",
+        "management.services.conversation.creator_execution.persist_creation_stream",
         side_effect=lambda stream, **kwargs: stream,
     )
     response = await nl2agent_run_api(
@@ -417,7 +427,10 @@ async def test_nl2agent_workbench_creation_returns_persistent_conversation_id(
         authorization=mock_auth_header["Authorization"],
     )
     assert response.headers["conversation_id"] == "42"
-    assert prepare.call_args.kwargs["agent_id"] == 17
+    assert prepare.call_args.kwargs["agent_id"] == 77
+    assert prepare.call_args.kwargs["target"] == {"type": "agent", "id": 17}
+    chunks = [chunk async for chunk in response.body_iterator]
+    assert chunks
     assert persist.call_args.kwargs["assistant_index"] == 1
 
 
@@ -558,7 +571,7 @@ def test_northbound_agent_stop_api_rejects_invalid_token(mocker):
 
 
 @pytest.mark.asyncio
-async def test_nl2agent_run_api_streams_without_persistent_ids(
+async def test_nl2agent_editor_run_uses_persistent_history(
     mocker, mock_auth_header
 ):
     mocker.patch(
@@ -599,7 +612,7 @@ async def test_nl2agent_run_api_streams_without_persistent_ids(
         == mock_auth_header["Authorization"]
     )
     assert request.conversation_id is None
-    assert request.persist_history is False
+    assert request.persist_history is True
     assert create_stream.call_args.kwargs["tenant_id"] == "tenant-a"
     assert create_stream.call_args.kwargs["language"] == "en"
 
@@ -703,7 +716,8 @@ async def test_nl2agent_run_api_maps_draft_identity_errors(
 
 
 @pytest.mark.asyncio
-async def test_nl2agent_run_api_requires_agent_id():
+async def test_nl2agent_run_api_requires_target_for_new_conversation(mocker):
+    mocker.patch("runtime.api.agent.execution.get_current_user_info", return_value=("user", "tenant", "en"))
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=runtime_app),
         base_url="http://test",
@@ -713,8 +727,8 @@ async def test_nl2agent_run_api_requires_agent_id():
             json={"query": "Build an assistant"},
         )
 
-    assert response.status_code == 422
-    assert response.json()["detail"][0]["loc"][-1] == "agent_id"
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid Workbench creation session."
 
 
 async def test_agent_run_api_error_debug_mode(mocker, mock_auth_header):

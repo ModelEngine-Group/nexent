@@ -1,6 +1,8 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import { t as translate } from "i18next";
+import { getCreatorMode } from "@/lib/creatorConversation";
+import { initialWorkbenchState } from "./state";
 import { previewWorkbenchAgent } from "./api";
 import { fetchSkillsList } from "@/services/skillService";
 import type { WorkbenchSessionConfig } from "./types";
@@ -11,9 +13,16 @@ export async function resolveRestoredWorkbench(conversation: {
   workbench_config?: WorkbenchSessionConfig | null;
   workbench_config_version?: number;
   agent_id?: number | string | null;
+  agent_system_key?: string | null;
   knowledge_scope?: ConversationKnowledgeScope | null;
 }) {
-  const config = conversation.workbench_config;
+  const mode = getCreatorMode(conversation);
+  // A standalone creator gets transient display state; never persist it as Workbench configuration.
+  const config =
+    conversation.workbench_config ??
+    (mode
+      ? { ...structuredClone(initialWorkbenchState.config), mode }
+      : undefined);
   if (!config)
     throw new Error("This conversation does not belong to Workbench");
   const version = conversation.workbench_config_version ?? 0;

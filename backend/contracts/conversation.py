@@ -7,9 +7,9 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Literal, Optional, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from contracts.clarification import ClarificationResponse
 
@@ -74,6 +74,14 @@ class MessageRequest(BaseModel):
     clarification_response: Optional[ClarificationResponse] = None
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
+
+
+class ConversationTarget(BaseModel):
+    """Resource edited by a creator conversation, distinct from its executor."""
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["agent", "skill"]
+    id: StrictInt = Field(gt=0)
 
 
 class ConversationRequest(BaseModel):
@@ -156,6 +164,8 @@ class ConversationHistory(TypedDict):
     conversation_id: int
     conversation_title: str
     agent_id: Optional[int]
+    target: Optional[Dict[str, Any]]
+    agent_system_key: Optional[str]
     knowledge_scope: Optional[Dict[str, Any]]
     runtime_metadata: Dict[str, Any]
     runtime_metadata_version: int

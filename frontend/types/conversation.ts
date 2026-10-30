@@ -1,9 +1,21 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+export interface ConversationTarget {
+  type: "agent" | "skill";
+  id: number;
+}
+
+export interface CreatorHistoryPage {
+  items: ConversationListItem[];
+  total: number;
+}
+
 export interface ConversationListItem {
   conversation_id: number;
   conversation_title: string;
   agent_id?: number | null;
+  target?: ConversationTarget | null;
+  agent_system_key?: string | null;
   create_time: number;
   update_time: number;
   last_activity_time?: number;
@@ -143,6 +155,8 @@ export interface ApiConversationDetail {
   conversation_id: number | string;
   conversation_title?: string;
   agent_id?: number | null;
+  target?: ConversationTarget | null;
+  agent_system_key?: string | null;
   chat_mode?: "planning" | "execution";
   knowledge_scope?:
     import("./knowledgeScope").ConversationKnowledgeScope | null;

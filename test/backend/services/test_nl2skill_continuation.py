@@ -11,6 +11,12 @@ from nexent.core.agents.context import ContextManager, ContextManagerConfig
 from nexent.core.agents.run_agent import _get_authorized_history
 
 
+@pytest.fixture(autouse=True)
+def creator_identity(mocker):
+    from contracts.agent import SystemAgentRef
+    mocker.patch.object(service.system_agent_provider, "get_nl2skill_main_ref", return_value=SystemAgentRef("shared", "nl2skill_main", 78, 0))
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("history", [
     [],

@@ -1,0 +1,48 @@
+schema_version: '1.0'
+change:
+  change_id: SHARED-AGENT-QUERY-SCOPE-20261030
+  change_type: bugfix
+  bug_id: SHARED-AGENT-QUERY-SCOPE-20261030
+  title: Keep child Agent queries scoped to their explicit tenant
+  description: Remove implicit platform fallback from child relation queries and use the required system identity tenant for shared Workbench resources.
+  observed_behavior: Business-tenant child queries also return platform-owned relations; incomplete Workbench identity objects silently fall back to the requesting tenant.
+  expected_behavior: Child queries use exactly the supplied tenant while platform system identities remain protected; shared Workbench resources use SystemAgentRef.tenant_id explicitly.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing relation UT returns mocked rows without testing tenant predicates, and Workbench fixtures omit the required identity tenant.
+  feature_contract_changed: false
+  affected_features:
+    existing: [SYS-AGENT-LIFECYCLE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/database/test_agent_relation_scope.py
+      - test/backend/database/test_agent_db.py
+      - test/backend/services/test_workbench_service.py
+      - test/backend/services/test_workbench_service_coverage.py
+      - test/backend/services/test_workbench_monitoring_labels.py
+      - test/backend/services/test_shared_workbench_runtime.py
+    behaviors:
+      - Business-tenant child queries exclude platform and foreign-tenant rows while retaining parent, version, soft-delete and pinned-child-version semantics.
+      - Explicit platform-tenant queries remain possible; missing business tenants receive no platform fallback.
+      - Platform SYSTEM identities remain detected and reject ordinary relationship mutation.
+      - Shared Workbench Skill profile and runtime bindings use the identity owner without a requesting-tenant fallback.
+    reason: Query predicate regressions use real local SQL evaluation in isolated UT; existing Workbench UT verifies shared resource ownership and dynamic mount behavior.
+  notes: >-
+    Related SPEC ../nexent-doc/docs/Developing/chat-shared-system-agents/proposal.md.
+    The user clarified that ordinary Agents cannot bind platform system Agents;
+    Workbench-selected child Agents are request-scoped mounts, not persisted AgentRelation rows.
+    Four scope regressions fail before reverting the two expanded predicates; shared identity protection already passes.
+    Keep actual shared Tool/Skill binding reads, resource-owner resolution and legacy creator request compatibility.
+    SYS-AGENT-D5-001 is unaffected: its publication/SQL migration assertions use explicit platform sessions and persisted rows,
+    not business-tenant child-query fallback. No migration or formal Case contract/script change is needed.
+    No new D1 duplicates the local predicate and service orchestration proof; no live database/deployment acceptance is claimed.

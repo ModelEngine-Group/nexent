@@ -54,6 +54,7 @@ export const API_ENDPOINTS = {
     renew: `${API_BASE_URL}/user/cas/renew`,
   },
   conversation: {
+    creatorHistories: `${API_BASE_URL}/conversation/creator_histories`,
     list: `${API_BASE_URL}/conversation/list`,
     agentGroups: `${API_BASE_URL}/conversation/agent_groups`,
     agentGroupConversations: (groupKey: string) =>
@@ -67,6 +68,7 @@ export const API_ENDPOINTS = {
     save: `${API_BASE_URL}/conversation/save`,
     rename: `${API_BASE_URL}/conversation/rename`,
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
+    target: (id: number) => `${API_BASE_URL}/conversation/${id}/target`,
     knowledgeScope: (id: number) =>
       `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
     workbenchConfig: (id: number) =>

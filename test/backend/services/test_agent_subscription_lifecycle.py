@@ -21,14 +21,15 @@ async def lifecycle(monkeypatch):
     service = service_tests.agent_subscription
     producer = service_tests.agent_execution
     # Load a fresh real manager without changing the legacy suite's SDK/DB stubs.
-    path = Path(__file__).resolve().parents[3] / "backend/management/services/agent/lifecycle.py"
+    path = Path(__file__).resolve().parents[3] / "backend/runtime/executions.py"
     spec = importlib.util.spec_from_file_location("subscription_lifecycle_manager", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    manager = module.AgentRunManager()
+    manager = module.LocalExecutionRegistry()
     monkeypatch.setattr(service, "agent_run_manager", manager)
     monkeypatch.setattr(producer, "agent_run_manager", manager)
     monkeypatch.setattr(service, "AgentRunAlreadyActiveError", module.AgentRunAlreadyActiveError)
+    monkeypatch.setattr(service, "AgentRunConcurrencyExceededError", module.AgentRunConcurrencyExceededError)
     monkeypatch.setattr(service, "_resolve_user_tenant_language", MagicMock(return_value=("u", "t", "en")))
     monkeypatch.setattr(service, "get_conversation_service", MagicMock(return_value={"conversation_id": 123}))
     monkeypatch.setattr(service, "create_new_conversation", MagicMock(return_value={"conversation_id": 123}))
@@ -40,11 +41,17 @@ async def lifecycle(monkeypatch):
     execution = SimpleNamespace(future=future, execution_id="lifecycle-worker")
     deferred = MagicMock()
     monkeypatch.setattr(service, "DeferredAgentRun", MagicMock(return_value=deferred))
+    thread_manager = MagicMock()
+    monkeypatch.setattr(service, "runtime_thread_manager", thread_manager)
+    monkeypatch.setattr(producer, "runtime_thread_manager", thread_manager)
     monkeypatch.setattr(service.runtime_thread_manager, "submit", MagicMock(return_value=execution))
     monkeypatch.setattr(service.runtime_thread_manager, "wait_until_started", AsyncMock())
     cancel = MagicMock(side_effect=lambda *_args, **_kwargs: future.cancel())
     monkeypatch.setattr(service.runtime_thread_manager, "cancel", cancel)
     channel = service_tests.AsyncChannelMock()
+    channels = MagicMock()
+    monkeypatch.setattr(service, "streaming_channel_manager", channels)
+    monkeypatch.setattr(producer, "streaming_channel_manager", channels)
     monkeypatch.setattr(service.streaming_channel_manager, "get_or_create_channel", AsyncMock(return_value=channel))
 
     async def complete_channel(**kwargs):

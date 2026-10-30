@@ -1,7 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Build the ephemeral NL2Agent configuration."""
+"""Build a fresh NL2Agent runtime configuration from its shared identity and product files."""
 
 import json
 
@@ -20,7 +19,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     create_nl2agent_mcp_tool_configs,
 )
 
-NL2AGENT_NAME = "__nl2agent_runtime__"
+NL2AGENT_NAME = "nl2agent_main"
 
 
 def build_nl2agent_system_prompt(
@@ -48,7 +47,7 @@ def build_nl2agent_system_prompt(
     )
 
 
-def create_nl2agent_agent_config(language: str) -> AgentConfig:
+def create_nl2agent_agent_config(language: str, snapshot: dict | None = None) -> AgentConfig:
     """Create the in-memory AgentConfig for one NL2Agent request."""
 
     system_prompt = build_nl2agent_system_prompt(language)
@@ -66,15 +65,22 @@ def create_nl2agent_agent_config(language: str) -> AgentConfig:
         )
     )
     return AgentConfig(
+        agent_id=snapshot["agent_id"] if snapshot is not None else None,
+        version_no=snapshot["version_no"] if snapshot is not None else None,
+        runtime_ref=(f"agent:{snapshot['agent_id']}:v{snapshot['version_no']}" if snapshot is not None else None),
+        origin="SYSTEM",
         name=NL2AGENT_NAME,
         display_name="创建智能体",
-        description="Ephemeral natural-language agent builder",
+        description=(
+            snapshot["description"] if snapshot is not None and snapshot.get("description")
+            else "Natural-language agent builder"
+        ),
         prompt_templates=None,
         tools=tools,
-        max_steps=8,
+        max_steps=int(snapshot["max_steps"]) if snapshot is not None else 8,
         model_name="main_model",
         provide_run_summary=False,
-        enable_protocol_repair_retry=True,
+        enable_protocol_repair_retry=snapshot.get("enable_protocol_repair_retry", True) if snapshot is not None else True,
         context_items=[
             ContextItemInput(
                 id="system:nl2agent_prompt",

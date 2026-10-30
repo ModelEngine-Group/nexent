@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { message } from "antd";
 import log from "@/lib/logger";
 import { fetchWithAuth } from "@/lib/auth";
@@ -251,7 +253,11 @@ export const submitSkillForm = async (
   onSuccess: () => void | Promise<void>,
   onCancel: () => void,
   t: (key: string) => string,
-  options: { mode?: "create" | "edit"; skillId?: number } = { mode: "create" }
+  options: {
+    mode?: "create" | "edit";
+    skillId?: number;
+    onSaved?: (id: number) => Promise<void>;
+  } = { mode: "create" }
 ): Promise<boolean> => {
   try {
     let result;
@@ -280,6 +286,8 @@ export const submitSkillForm = async (
     }
 
     if (result.success) {
+      const savedId = Number(result.data?.skill_id ?? options.skillId);
+      if (options.onSaved && savedId > 0) await options.onSaved(savedId);
       message.success(
         options.mode === "edit"
           ? t("skillManagement.message.updateSuccess")
@@ -289,8 +297,9 @@ export const submitSkillForm = async (
       onCancel();
       return true;
     } else {
-      throw (result as { error?: unknown }).error || new Error(
-        result.message || t("skillManagement.message.submitFailed")
+      throw (
+        (result as { error?: unknown }).error ||
+        new Error(result.message || t("skillManagement.message.submitFailed"))
       );
     }
   } catch (error) {
@@ -320,15 +329,19 @@ export const submitSkillFromFile = async (
       return true;
     } else {
       const limitMessage = getTenantResourceLimitMessage(result.error, t);
-      const errorCode = result.error && typeof result.error === "object"
-        ? String((result.error as { code?: string | number }).code || "")
-        : "";
+      const errorCode =
+        result.error && typeof result.error === "object"
+          ? String((result.error as { code?: string | number }).code || "")
+          : "";
       message.error(
         limitMessage ||
           (errorCode === "000403"
             ? t("skillManagement.message.fileTooLarge", {
-                limit: (result.error as { details?: { limit_mb?: number } } | undefined)
-                  ?.details?.limit_mb ?? "",
+                limit:
+                  (
+                    result.error as
+                      { details?: { limit_mb?: number } } | undefined
+                  )?.details?.limit_mb ?? "",
               })
             : result.message || t("skillManagement.message.submitFailed"))
       );
@@ -337,15 +350,17 @@ export const submitSkillFromFile = async (
   } catch (error) {
     log.error("Skill file upload error:", error);
     const limitMessage = getTenantResourceLimitMessage(error, t);
-    const errorCode = error && typeof error === "object"
-      ? String((error as { code?: string | number }).code || "")
-      : "";
+    const errorCode =
+      error && typeof error === "object"
+        ? String((error as { code?: string | number }).code || "")
+        : "";
     message.error(
       limitMessage ||
         (errorCode === "000403"
           ? t("skillManagement.message.fileTooLarge", {
-              limit: (error as { details?: { limit_mb?: number } } | undefined)
-                ?.details?.limit_mb ?? "",
+              limit:
+                (error as { details?: { limit_mb?: number } } | undefined)
+                  ?.details?.limit_mb ?? "",
             })
           : t("skillManagement.message.submitFailed"))
     );

@@ -1,5 +1,8 @@
 # Default values for nexent helm chart.
 global:
+  # Deployment scripts keep business Pods stopped until the bootstrap Job succeeds.
+  businessPaused: false
+  systemBootstrapTimeoutSeconds: 1800
   namespace: nexent
   dataDir: "/var/lib/nexent-data"
   sharedStorage:

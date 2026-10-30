@@ -156,7 +156,7 @@ def is_system_agent(agent_id: int, tenant_id: str) -> bool:
             session.query(AgentInfo.agent_id)
             .filter(
                 AgentInfo.agent_id == agent_id,
-                AgentInfo.tenant_id == tenant_id,
+                or_(AgentInfo.tenant_id == tenant_id, AgentInfo.tenant_id == ASSET_OWNER_TENANT_ID),
                 AgentInfo.agent_origin == "SYSTEM",
                 AgentInfo.delete_flag != "Y",
             )

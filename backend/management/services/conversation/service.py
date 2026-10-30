@@ -383,6 +383,7 @@ def create_new_conversation(
     knowledge_scope: Optional[Dict[str, Any]] = None,
     runtime_metadata: Optional[Dict[str, Any]] = None,
     workbench_config: Optional[Dict[str, Any]] = None,
+    target: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation
@@ -401,6 +402,8 @@ def create_new_conversation(
             "agent_id": agent_id,
             "chat_mode": chat_mode,
         }
+        if target is not None:
+            create_kwargs["target"] = target
         if knowledge_scope is not None:
             create_kwargs["knowledge_scope"] = knowledge_scope
         if runtime_metadata is not None:
@@ -992,6 +995,8 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
             'conversation_id': str(history_data['conversation_id']),
             'conversation_title': history_data.get('conversation_title'),
             'agent_id': history_data.get('agent_id'),
+            'target': history_data.get('target'),
+            'agent_system_key': history_data.get('agent_system_key'),
             'chat_mode': history_data.get('chat_mode') or 'execution',
             'knowledge_scope': history_data.get('knowledge_scope'),
             'runtime_metadata': history_data.get('runtime_metadata') or {},

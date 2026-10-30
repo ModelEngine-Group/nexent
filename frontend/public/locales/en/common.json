@@ -6403,5 +6403,16 @@
   "nl2agent.resourceBinding.recommendedKnowledge": "Recommended knowledge bases:",
   "nl2agent.resourceBinding.knowledgeNone": "None",
   "nl2agent.resourceBinding.knowledgeDescription": "Search selected knowledge bases for relevant information and supporting references.",
-  "nl2agent.resourceBinding.selectedKnowledge": "Selected knowledge bases:"
+  "nl2agent.resourceBinding.selectedKnowledge": "Selected knowledge bases:",
+  "nl2agent.history.label": "History",
+  "nl2agent.history.new": "New conversation",
+  "nl2agent.history.title": "Generation history for this agent",
+  "nl2skill.history.title": "Generation history for this skill",
+  "nl2agent.history.empty": "No conversations yet",
+  "nl2agent.history.loadFailed": "Could not load history",
+  "nl2agent.history.retry": "Retry",
+  "nl2agent.history.more": "Load more",
+  "nl2agent.history.untitled": "New conversation",
+  "nl2agent.history.restoreFailed": "Could not restore this conversation. Please retry.",
+  "nl2agent.history.newFailed": "Could not start a new conversation. Please retry."
 }
