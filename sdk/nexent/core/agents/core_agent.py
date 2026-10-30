@@ -767,6 +767,18 @@ class CoreAgent(CodeAgent):
             tools.extend(list(iterable or ()))
         return tools
 
+    def _screen_execution_output(self, text: str, code_action: str):
+        """Apply the same output policy to successful and failed executions."""
+        controller = getattr(self, "verification_controller", None)
+        engine = getattr(controller, "guardrail_engine", None) if controller else None
+        if engine is None:
+            return text, None
+        decision = engine.check_output(observation=text, code_action=code_action)
+        controller.emit(decision.verification_result, message=decision.message)
+        if decision.effective_action == "mask" and decision.cleaned_content is not None:
+            return decision.cleaned_content, decision.verification_result
+        return text, None
+
     def _guardrail_wrap_tools(self) -> None:
         """Wrap each tool's forward() to screen resolved args before execution (checkpoint ③).
 
@@ -1692,23 +1704,19 @@ Additional Args:
                 memory_step.model_output = refusal
                 raise RuntimeFinalAnswer(refusal, "guardrail_tool_input")
             exec_duration_ms = (time.time() - exec_start) * 1000
-            if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
-                execution_logs = str(
-                    self.python_executor.state["_print_outputs"])
-                if len(execution_logs) > 0:
-                    # Record execution results
-                    self.observer.add_message(
-                        self.agent_name, ProcessType.EXECUTION_LOGS, f"{execution_logs}\n")
-
-                    execution_outputs_console = [
-                        Text("Execution logs:", style="bold"), Text(execution_logs), ]
-                    memory_step.observations = "Execution logs:\n" + execution_logs
-                    self.logger.log(
-                        Group(*execution_outputs_console), level=LogLevel.INFO)
             partial_logs = getattr(e, "execution_logs", None)
-            if isinstance(partial_logs, str):
+            if not isinstance(partial_logs, str):
+                partial_logs = ""
+                if hasattr(self.python_executor, "state") and "_print_outputs" in self.python_executor.state:
+                    partial_logs = str(self.python_executor.state["_print_outputs"])
+            if partial_logs:
+                partial_logs, _ = self._screen_execution_output(partial_logs, code_action)
                 memory_step.observations = partial_logs
-            error_msg = str(e)
+                self.observer.add_message(self.agent_name, ProcessType.EXECUTION_LOGS, partial_logs)
+                self.logger.log(
+                    Group(Text("Execution logs:", style="bold"), Text(partial_logs)), level=LogLevel.INFO,
+                )
+            error_msg, _ = self._screen_execution_output(str(e), code_action)
             self.logger.log(
                 f"[Code Execution] step={memory_step.step_number} failed after {exec_duration_ms:.1f}ms: {error_msg}",
                 level=LogLevel.ERROR,
@@ -1752,18 +1760,9 @@ Additional Args:
 
         # Guardrail checkpoint ②: screen tool output; block downgrades to mask
         # because the tool already ran, then redact before memory.
-        guardrail_engine = getattr(verification_controller, "guardrail_engine", None) if verification_controller else None
-        if guardrail_engine:
-            decision = guardrail_engine.check_output(
-                observation=memory_step.observations,
-                code_action=code_action,
-            )
-            verification_controller.emit(
-                decision.verification_result, message=decision.message
-            )
-            if decision.effective_action == "mask" and decision.cleaned_content is not None:
-                memory_step.observations = decision.cleaned_content
-                self._append_verification_feedback(memory_step, decision.verification_result)
+        memory_step.observations, masking_result = self._screen_execution_output(memory_step.observations, code_action)
+        if masking_result is not None:
+            self._append_verification_feedback(memory_step, masking_result)
 
         if truncated_output is not None:
             execution_outputs_console += [

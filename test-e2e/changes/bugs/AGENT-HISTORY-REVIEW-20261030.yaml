@@ -1,0 +1,50 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-HISTORY-REVIEW-20261030
+  change_type: bugfix
+  bug_id: AGENT-HISTORY-REVIEW-20261030
+  title: Preserve host reader registration, failed-output masking and standalone compaction
+  description: Repair three regressions in PR4264 without changing history persistence or guardrail policy.
+  observed_behavior: Stateful reader is serialized remotely, partial failure bypasses output screening, and actions without a history store cannot compact.
+  expected_behavior: Host bridge keeps live reader state; failure output is screened before publication and storage; unreferenced actions have bounded previews at the existing threshold.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_boundary
+    description: Existing UT tests successful masking and bound-record compaction, but not actual reader bridge registration, failure-after-output masking or no-store compaction.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-171, F-183]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [AGENT-HISTORY-D3-001, UT-SDK-AUTO-FD74C47E39BAE2FC]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Register the real reader through the host bridge and retain history ownership and callbacks.
+    - Screen local and sandbox partial output and error text before history, persistence, recall and summary input.
+    - Compact unreferenced actions only at the existing adaptive threshold without mutating original steps or inventing references.
+    test_selectors:
+    - test/sdk/core/agents/test_execution_history_review_regressions.py
+    - test/sdk/core/agents/test_execution_history_compaction.py
+    - test/sdk/core/agents/test_guardrail_checkpoints.py
+    - test/sdk/core/agents/test_history_context_runtime.py
+    - test/sdk/core/agents/test_sandbox.py
+    - test/sdk/core/agents/test_nexent_agent_sandbox_construction.py
+    - test/sdk/core/agents/test_nexent_agent.py
+    - test/sdk/core/agents/test_nexent_agent_tool_fastpath.py
+    - test/sdk/core/agents/test_nexent_agent_tool_fastpath_policy.py
+    reason: Add focused isolated regression assertions and reuse adjacent UT; no duplicate formal D1.
+  notes: >-
+    SPEC nexent-doc/docs/Developing/chat-action-history-offload/changes/pr4264-review-fixes/design.md.
+    Original offload SPEC is referenced by the PR but absent from this synced documentation tree;
+    the lightweight repair design preserves the contracts defined by the PR and existing formal case.
+    Reuse manual AGENT-HISTORY-D3-001 for provider, result-store, partial-error and Phoenix proof,
+    and UT-SDK-AUTO-FD74C47E39BAE2FC for existing threshold/checkpoint compatibility.
+    Eager/deferred factory construction must enable the bridge for the injected reader even without business tools.
+    Actual runtime evidence and traditional UT results are recorded separately in the SPEC evidence.
+    No new formal stage or unrelated historical coverage expansion.

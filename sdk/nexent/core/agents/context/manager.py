@@ -448,7 +448,28 @@ class ContextManager:
         key = item.content.get("execution_key")
         record = history.get(key) if history is not None and key else None
         if record is None:
-            return None
+            if "execution_fields" not in item.content:
+                return item.compact()
+            # Debug and standalone SDK runs have no persisted result reference.
+            # Keep their original steps intact, but retain the legacy bounded
+            # view once adaptive compaction is triggered. Never invent a ref.
+            from .execution_history import result_text
+
+            content = deepcopy(item.content)
+            text = result_text(content.get("execution_fields", {}))
+            if len(text) <= 4000:
+                return None
+            content.pop("summary", None)
+            content.pop("output_ref", None)
+            content["preview"] = (
+                text[:2000] + "\n[Execution output truncated; no original-output reference available]\n" + text[-2000:]
+            )
+            data = item.model_dump(exclude={"content", "token_estimate", "metadata"})
+            return item.__class__(
+                **data, content=content,
+                metadata={**item.metadata, "representation": "compact"},
+                token_estimate=max(1, len(content["preview"]) // 2),
+            )
         # Backend consumes observer events independently of the model worker.
         # An unbound record must never publish a guessed unit reference.
         if not record.ready.wait(timeout=0.5):

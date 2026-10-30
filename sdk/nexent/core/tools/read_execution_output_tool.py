@@ -4,6 +4,7 @@ from smolagents.tools import Tool
 
 
 class ReadExecutionOutputTool(Tool):
+    _nexent_execute_on_host = True
     name = "read_execution_output"
     description = "Read original execution output using OUTPUT_REF, with Unicode character offset and a bounded length."
     inputs = {
