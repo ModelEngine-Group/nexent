@@ -19,6 +19,7 @@ change:
     decision: add
     test_selectors:
     - test/backend/ops/test_bootstrap.py
+    - test/backend/management/test_contracts_directory_architecture.py
     - test/backend/deploy/test_ops_chart.py
     behaviors:
     - Verify readiness before startup, during operation and after shutdown, including exceptional shutdown.
@@ -38,3 +39,4 @@ change:
     This adds component collaboration beyond isolated shell assertions; it is not a running API or inter-service integration test.
     Shell regression assertions are maintained in deploy/tests/test_common.sh, outside the traditional Python UT selector registry.
     Kubernetes follow-up expands the same component contract: real shared values and Helm templates plus the actual readiness selector run with controlled wait results; no live cluster is contacted.
+    CI regression: move the ops port upper-bound check into contracts.configuration so environment.py retains the imports-and-single-line-assignments contract. Reuse existing architecture regression and ops port success/boundary/error tests; formal startup contract is unchanged.

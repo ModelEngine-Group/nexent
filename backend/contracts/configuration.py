@@ -17,6 +17,14 @@ def parse_positive_int(raw_value: object, name: str, default: int) -> int:
     return parsed
 
 
+def parse_port(raw_value: object, name: str, default: int) -> int:
+    """Parse a TCP port while keeping environment declarations assignment-only."""
+    port = parse_positive_int(raw_value, name, default)
+    if port > 65535:
+        raise ValueError(f"{name} must be between 1 and 65535")
+    return port
+
+
 def parse_positive_float(raw_value: object, name: str, default: float) -> float:
     """Parse a finite positive float, falling back to ``default`` when unset."""
     value = default if raw_value is None else raw_value
