@@ -106,3 +106,17 @@ def test_switching_degree_does_not_silently_discard_fixed_budget(openai_profile)
     with pytest.raises(ParameterValidationError, match="FIXED_PARAMETER"):
         configure_thinking_degree(fixed, "effort")
     assert fixed.parameter_values["reasoning_budget_tokens"] == 4096
+
+
+@pytest.mark.parametrize("preset", ["enable_thinking", "thinking_type", "chat_template"])
+@pytest.mark.parametrize("mode", ["effort", "budget_tokens"])
+def test_aeu_coupled_reset_removes_dependencies_in_order_and_is_idempotent(openai_profile, preset, mode):
+    from nexent.core.model_service.profiles.thinking_configuration import configure_outlet_policy
+
+    original = configure_outlet_policy(without_reasoning(openai_profile))
+    configured = configure_outlet_policy(original, thinking_control=preset, thinking_mode=mode)
+    restored = configure_outlet_policy(configured, thinking_control="profile_default", thinking_mode="default")
+    assert restored.parameter_rules == original.parameter_rules
+    assert restored.parameter_values == original.parameter_values
+    assert restored.capabilities == original.capabilities
+    assert configure_outlet_policy(restored, thinking_control="profile_default", thinking_mode="default").model_dump() == restored.model_dump()

@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: MPN-D1-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_complete_catalog_capabilities_origins_and_immutable_snapshots
+  profiles:
+  - mock
+acceptance_bindings:
+  AC-01:
+  - test_runtime_does_not_execute_submission_checks_and_reference_metadata_is_unrestricted
+  - test_complete_catalog_capabilities_origins_and_immutable_snapshots
+  AC-02:
+  - test_source_and_rule_changes_affect_revision_and_preserve_original
+  AC-03:
+  - test_invalid_catalog_never_publishes_partial_results

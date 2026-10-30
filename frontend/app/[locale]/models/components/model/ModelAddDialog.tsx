@@ -2,8 +2,10 @@
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ModelHttpConnectionSettings } from "@/components/model/ModelHttpConnectionSettings";
+import { ModelOutletForm } from "@/components/model/ModelOutletForm";
 import { App } from "antd";
 import {
   Plus,
@@ -37,6 +39,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { MODEL_TYPES } from "@/const/modelConfig";
+import { ApiError } from "@/services/api";
 import { modelService, ModelError } from "@/services/modelService";
 import { ModelType, ReasoningCapability } from "@/types/modelConfig";
 import log from "@/lib/logger";
@@ -47,6 +50,22 @@ import {
   buildVoiceCredentialParams,
 } from "./ModelAdvancedSettings";
 import { ModelAdvancedConfig } from "./ModelAdvancedConfig";
+import { ModelOutletAddForm } from "./ModelOutletAddForm";
+import {
+  createModelOutlet,
+  previewModelProfile,
+  validateModelOutlet,
+  listModelProfiles,
+} from "@/services/modelProfileService";
+import { useQuery } from "@tanstack/react-query";
+import { suggestModelProfile } from "./profileSuggestion";
+import { outletSamplingValues } from "@/lib/modelSamplingParameters";
+import {
+  modelCheckFailure,
+  type ModelCheckIssue,
+} from "@/lib/modelCheckIssues";
+import { ModelCheckSummary } from "@/components/model/ModelCheckSummary";
+import type { ModelProfileDraftRequest } from "@/types/modelProfile";
 import {
   DEFAULT_CHUNKING_BATCH_SIZE,
   DEFAULT_EXPECTED_CHUNK_SIZE,
@@ -59,19 +78,7 @@ import {
   useTypeOptions,
 } from "./modelTypeUi";
 
-/**
- * v2.6.1 redesign (v0 design): the add-model dialog.
- *
- * Two tabs styled after the v0 ModelManagerDialog: 单个添加 (manual form:
- * provider / type / name / display name / base url / key) and 批量添加
- * (fetch the provider's model list and pick what to import). Built on the
- * project's shadcn/ui primitives.
- *
- * Deliberately simple: no per-row capacity or inference-param editing and
- * no pre-submit connectivity gate (the v0 logic) — models land in
- * not_detected state and are checked/edited from the library afterwards.
- * Both tabs reuse the existing single-model create endpoint per row.
- */
+/** LLM outlets use profile-driven forms; other model types retain their existing setup. */
 
 const CUSTOM_PROVIDER_KEY = "__custom__";
 
@@ -91,6 +98,7 @@ export const ModelAddDialog = ({
   initialTab = "single",
 }: ModelAddDialogProps) => {
   const { t } = useTranslation();
+  const [wide, setWide] = useState(true);
   const [tab, setTab] = useState<"single" | "batch">(initialTab);
 
   // Reset the tab whenever the dialog reopens (the sync-ModelEngine button
@@ -101,48 +109,47 @@ export const ModelAddDialog = ({
 
   return (
     <Dialog open={isOpen} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl">
-        <DialogHeader className="border-b px-6 py-4">
-          <DialogTitle className="text-base">
-            {t("modelConfig.addDialog.title", { defaultValue: "添加模型" })}
-          </DialogTitle>
-          <DialogDescription>
-            {t("modelConfig.addDialog.description", {
-              defaultValue:
-                "手动添加单个模型，或从服务商一键批量导入可用模型。",
-            })}
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="px-6 pt-5">
-          <div className="grid grid-cols-2 gap-1 rounded-xl bg-muted p-1">
+      <DialogContent
+        className={cn(
+          "flex max-h-[90vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0",
+          wide || tab === "batch" ? "sm:max-w-5xl" : "sm:max-w-xl"
+        )}
+      >
+        <DialogHeader className="shrink-0 flex-row flex-wrap items-center justify-between gap-4 border-b px-6 py-4 pr-14">
+          <div className="space-y-1 text-left">
+            <DialogTitle className="text-base">
+              {t("modelConfig.addDialog.title", { defaultValue: "添加模型" })}
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              {t("modelConfig.addDialog.description", {
+                defaultValue:
+                  "手动添加单个模型，或从服务商一键批量导入可用模型。",
+              })}
+            </DialogDescription>
+          </div>
+          <div
+            className="flex shrink-0 gap-1 rounded-md bg-muted p-1"
+            role="group"
+            aria-label={t("modelConfig.addDialog.title")}
+          >
             <TabButton
               active={tab === "single"}
               onClick={() => setTab("single")}
               icon={<Plus className="size-4" />}
-              title={t("modelConfig.addDialog.singleTab", {
-                defaultValue: "单个添加",
-              })}
-              desc={t("modelConfig.addDialog.singleTabDesc", {
-                defaultValue: "手动填写模型信息",
-              })}
+              title={t("modelConfig.addDialog.singleTab")}
             />
             <TabButton
               active={tab === "batch"}
               onClick={() => setTab("batch")}
               icon={<Layers className="size-4" />}
-              title={t("modelConfig.addDialog.batchTab", {
-                defaultValue: "批量添加",
-              })}
-              desc={t("modelConfig.addDialog.batchTabDesc", {
-                defaultValue: "从服务商导入",
-              })}
+              title={t("modelConfig.addDialog.batchTab")}
             />
           </div>
-        </div>
+        </DialogHeader>
 
         {tab === "single" ? (
           <SingleAddForm
+            onLayoutChange={setWide}
             onDone={onClose}
             onSuccess={onSuccess}
             tenantId={tenantId}
@@ -164,39 +171,26 @@ function TabButton({
   onClick,
   icon,
   title,
-  desc,
 }: {
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   title: string;
-  desc: string;
 }) {
   return (
     <button
       type="button"
+      aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "flex items-center gap-3 rounded-lg px-4 py-2.5 text-left transition-all",
+        "flex items-center gap-2 rounded px-3 py-1.5 text-xs transition-colors",
         active
-          ? "bg-card text-foreground shadow-sm"
+          ? "bg-background text-primary shadow-sm"
           : "text-muted-foreground hover:text-foreground"
       )}
     >
-      <span
-        className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-lg",
-          active ? "bg-primary text-primary-foreground" : "bg-background"
-        )}
-      >
-        {icon}
-      </span>
-      <span className="min-w-0">
-        <span className="block text-sm font-medium leading-tight">{title}</span>
-        <span className="block truncate text-xs text-muted-foreground">
-          {desc}
-        </span>
-      </span>
+      {icon}
+      {title}
     </button>
   );
 }
@@ -245,7 +239,7 @@ function ProviderSelect({
   const { t } = useTranslation();
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="w-full">
+      <SelectTrigger className="w-full data-[size=default]:h-10">
         <SelectValue
           placeholder={t("modelConfig.addDialog.providerPlaceholder", {
             defaultValue: "选择服务商",
@@ -283,13 +277,12 @@ async function createModel(
   return modelService.addCustomModel(params as any);
 }
 
-// Backend rejects a create whose display_name collides with an existing
-// record with HTTP 409 and the detail "Name <display_name> is already in
-// use, please choose another display name" (both /model/create and
-// /model/manage/create). Other ValueErrors also map to 409 (e.g. embedding
-// dimension probing), so match the stable message, not the status alone.
+// Resolved outlets use a stable duplicate-name business code. Legacy create
+// endpoints retain their name-conflict text. A bare 409 may be a stale revision
+// or another conflict, so never classify it as a duplicate by status alone.
 const isDisplayNameConflictError = (error: unknown): boolean =>
-  error instanceof ModelError && /is already in use/i.test(error.message);
+  (error instanceof ApiError && error.code === "MODEL_DISPLAY_NAME_CONFLICT") ||
+  (error instanceof ModelError && /is already in use/i.test(error.message));
 
 /**
  * Always send chunk params for embedding-family rows (old-dialog parity):
@@ -385,6 +378,7 @@ function capacitySuggestionToSettings(
 }
 
 function SingleAddForm({
+  onLayoutChange,
   onDone,
   onSuccess,
   tenantId,
@@ -392,14 +386,20 @@ function SingleAddForm({
   onDone: () => void;
   onSuccess: (newModel?: { name: string; type: ModelType }) => void;
   tenantId?: string;
+  onLayoutChange: (wide: boolean) => void;
 }) {
   const { t } = useTranslation();
   const { message } = App.useApp();
-  const presets = useProviderPresets(true);
   const typeOptions = useTypeOptions();
 
   const [provider, setProvider] = useState<string>(CUSTOM_PROVIDER_KEY);
   const [type, setType] = useState<ModelType>(MODEL_TYPES.LLM as ModelType);
+  const useOutletForm = type === MODEL_TYPES.LLM && !tenantId;
+  useEffect(
+    () => onLayoutChange(useOutletForm),
+    [useOutletForm, onLayoutChange]
+  );
+  const presets = useProviderPresets(!useOutletForm);
   const [name, setName] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -415,8 +415,7 @@ function SingleAddForm({
   const [capability, setCapability] = useState<ReasoningCapability | undefined>(
     undefined
   );
-  // Connectivity probe; the submit is gated on a passing result, matching
-  // the batch tab. Any form change resets it.
+  // Optional connectivity probe; valid configurations can be saved unchecked.
   const [probe, setProbe] = useState<
     "idle" | "checking" | "available" | "unavailable"
   >("idle");
@@ -424,7 +423,7 @@ function SingleAddForm({
   // Auto-detect capacity + reasoning capability whenever name and URL are
   // filled (debounced); user-saved overrides (the gear) win over suggestions.
   useEffect(() => {
-    if (!name.trim() || !baseUrl.trim()) {
+    if (useOutletForm || !name.trim() || !baseUrl.trim()) {
       setSuggestion(undefined);
       setCapability(undefined);
       return;
@@ -453,7 +452,7 @@ function SingleAddForm({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [name, baseUrl, provider, type]);
+  }, [name, baseUrl, provider, type, useOutletForm]);
 
   function changeProvider(next: string) {
     setProvider(next);
@@ -515,15 +514,6 @@ function SingleAddForm({
 
   async function submit() {
     if (!canSubmit || submitting) return;
-    // Same gate as the batch tab: the model must pass the probe first.
-    if (probe !== "available") {
-      message.warning(
-        t("modelConfig.addDialog.singleUntestedWarning", {
-          defaultValue: "请先通过连通性检测再添加模型",
-        })
-      );
-      return;
-    }
     setSubmitting(true);
     try {
       const params: Record<string, any> = {
@@ -536,8 +526,12 @@ function SingleAddForm({
         // placeholder (V2 parity); other types keep the generic default.
         maxTokens: isEmbeddingModelType(type) ? 1024 : 4096,
         modelFactory: isCustom ? "OpenAI-API-Compatible" : provider,
-        // The gate above guarantees a passing probe with these exact values.
-        connectStatus: "available",
+        connectStatus:
+          probe === "available"
+            ? "available"
+            : probe === "unavailable"
+              ? "unavailable"
+              : "not_detected",
       };
       if (effective?.settings) {
         applyAdvancedSettingsToParams(params, effective.settings, capability);
@@ -560,6 +554,37 @@ function SingleAddForm({
       setSubmitting(false);
     }
   }
+
+  if (useOutletForm)
+    return (
+      <ModelOutletAddForm
+        typeControl={
+          <Select
+            value={type}
+            disabled={submitting}
+            onValueChange={(value) => setType(value as ModelType)}
+          >
+            <SelectTrigger
+              id="outlet-model-type"
+              size="sm"
+              className="!h-7 w-full rounded-[4px] gap-4"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {typeOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+        onDone={onDone}
+        onSuccess={onSuccess}
+        onPendingChange={setSubmitting}
+      />
+    );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -588,7 +613,7 @@ function SingleAddForm({
                 setProbe("idle");
               }}
             >
-              <SelectTrigger className="w-full">
+              <SelectTrigger className="w-full data-[size=default]:h-10">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -825,6 +850,7 @@ interface FetchedRow {
  *  includes both capacity and inference params (the component renders them
  *  all in override mode), plus an optional custom display name. */
 interface RowOverride {
+  outletDraft?: ModelProfileDraftRequest;
   displayName?: string;
   settings?: ModelAdvancedSettingsValue;
 }
@@ -842,10 +868,46 @@ function BatchAddForm({
   const { message } = App.useApp();
   const presets = useProviderPresets(true);
   const typeOptions = useTypeOptions();
+  const models = useQuery({
+    queryKey: ["atomic-model-profiles"],
+    queryFn: () => listModelProfiles({ page_size: 100 }),
+  });
+  const [issues, setIssues] = useState<Record<string, ModelCheckIssue>>({});
+  const generations = useRef<Record<string, number>>({});
+  const checkReceipts = useRef<Record<string, string>>({});
+  const discoveryGeneration = useRef(0);
+  const [profileMatches, setProfileMatches] = useState<Record<string, boolean>>(
+    {}
+  );
+  function invalidateChecks(id?: string) {
+    if (!id) {
+      discoveryGeneration.current++;
+      setFetching(false);
+    }
+    const ids = id ? [id] : fetched.map((row) => row.id);
+    ids.forEach((key) => {
+      generations.current[key] = (generations.current[key] ?? 0) + 1;
+      delete checkReceipts.current[key];
+    });
+    setRowCheck((previous) => {
+      const next = { ...previous };
+      ids.forEach((key) => delete next[key]);
+      return next;
+    });
+    setIssues((previous) => {
+      const next = { ...previous };
+      ids.forEach((key) => delete next[key]);
+      return next;
+    });
+  }
 
   const [provider, setProvider] = useState<string>(CUSTOM_PROVIDER_KEY);
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+  const [sslVerify, setSslVerify] = useState(true);
+  const [timeoutSeconds, setTimeoutSeconds] = useState(120);
+  const [headers, setHeaders] = useState<Record<string, string>>({});
+  const [headersValid, setHeadersValid] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [fetched, setFetched] = useState<FetchedRow[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -875,6 +937,7 @@ function BatchAddForm({
   const [batchChecking, setBatchChecking] = useState(false);
 
   function changeProvider(next: string) {
+    invalidateChecks();
     setProvider(next);
     const preset = presets.find((p) => p.key === next);
     setBaseUrl(preset?.baseUrl || "");
@@ -911,6 +974,7 @@ function BatchAddForm({
   // correct it per row before importing. The stored probe result was measured
   // under the previous type, so reset it to force a re-probe before submit.
   function updateRowType(rowId: string, next: ModelType) {
+    invalidateChecks(rowId);
     setFetched((prev) =>
       prev.map((r) => (r.id === rowId ? { ...r, model_type: next } : r))
     );
@@ -922,14 +986,6 @@ function BatchAddForm({
   }
 
   async function fetchModels() {
-    if (!apiKey.trim()) {
-      message.warning(
-        t("model.dialog.v2.warn.apiKeyRequired", {
-          defaultValue: "请先输入 API Key",
-        })
-      );
-      return;
-    }
     if (provider === CUSTOM_PROVIDER_KEY && !baseUrl.trim()) {
       message.warning(
         t("modelConfig.addDialog.baseUrlRequired", {
@@ -938,6 +994,7 @@ function BatchAddForm({
       );
       return;
     }
+    const generation = ++discoveryGeneration.current;
     setFetching(true);
     setFetched([]);
     setSelected({});
@@ -947,13 +1004,20 @@ function BatchAddForm({
             tenantId,
             provider,
             apiKey,
+            sslVerify,
+            timeoutSeconds,
+            httpHeaders: headers,
             ...(baseUrl ? { baseUrl } : {}),
           })
         : await modelService.addProviderModel({
             provider,
             apiKey,
+            sslVerify,
+            timeoutSeconds,
+            httpHeaders: headers,
             ...(baseUrl ? { baseUrl } : {}),
           });
+      if (discoveryGeneration.current !== generation) return;
       // Drop nameless entries (gateway internals / soft-deleted endpoints).
       const rows: FetchedRow[] = (result || [])
         .filter((m: any) => !!(m.id || m.model_name))
@@ -969,13 +1033,38 @@ function BatchAddForm({
       setRowSuggestions({});
       setRowCapabilities({});
       setRowCheck({});
+      setIssues({});
       // Auto-fill capacity from the catalog (same as the old dialog):
       // suggestCapacity is a local lookup, fast enough to batch.
       const suggestions: Record<string, RowOverride> = {};
       const capabilities: Record<string, ReasoningCapability | undefined> = {};
+      const matched: Record<string, boolean> = {};
       await Promise.all(
         rows.map(async (row) => {
           try {
+            if (!tenantId && row.model_type === MODEL_TYPES.LLM) {
+              const profile = suggestModelProfile(
+                row.model_name,
+                models.data?.items ?? []
+              );
+              const preview = await previewModelProfile({
+                request_model_id: row.model_name,
+                provider_info: {
+                  base_url: baseUrl.trim(),
+                  provider_id:
+                    provider === CUSTOM_PROVIDER_KEY ? null : provider,
+                  ssl_verify: sslVerify,
+                  timeout_seconds: timeoutSeconds,
+                },
+                model_profile: profile
+                  ? { key: profile.key, revision: profile.revision }
+                  : null,
+              });
+              matched[row.id] = !!(
+                preview.matched_profile || preview.selected.model
+              );
+              return;
+            }
             const s = await modelService.suggestCapacity({
               modelName: row.model_name,
               baseUrl,
@@ -994,9 +1083,13 @@ function BatchAddForm({
           }
         })
       );
+      if (discoveryGeneration.current !== generation) return;
+      setProfileMatches(matched);
       setRowSuggestions(suggestions);
       setRowCapabilities(capabilities);
     } catch (error: any) {
+      if (discoveryGeneration.current !== generation) return;
+      setIssues({ __connection: modelCheckFailure(error) });
       log.error("fetch provider models failed", error);
       message.error(
         error?.message ||
@@ -1005,13 +1098,93 @@ function BatchAddForm({
           })
       );
     } finally {
-      setFetching(false);
+      if (discoveryGeneration.current === generation) setFetching(false);
     }
   }
 
+  function outletDraft(row: FetchedRow): ModelProfileDraftRequest {
+    const configured = rowOverrides[row.id]?.outletDraft;
+    const matched = suggestModelProfile(
+      row.model_name,
+      models.data?.items ?? []
+    );
+    return {
+      model_profile: matched
+        ? { key: matched.key, revision: matched.revision }
+        : null,
+      selection_mode: "auto",
+      ...configured,
+      authentication_scheme: apiKey.trim() ? "bearer_token_v1" : "no_auth_v1",
+      request_model_id: row.model_name,
+      http_headers: headers,
+      provider_info: {
+        ...configured?.provider_info,
+        ssl_verify: sslVerify,
+        timeout_seconds: timeoutSeconds,
+        base_url: baseUrl.trim(),
+        provider_id: provider === CUSTOM_PROVIDER_KEY ? null : provider,
+      },
+    };
+  }
+
+  async function resolveOutletDraft(row: FetchedRow) {
+    const draft = outletDraft(row);
+    const preview = await previewModelProfile(draft);
+    if (
+      draft.catalog_revision &&
+      draft.catalog_revision !== preview.catalog_revision
+    )
+      throw new Error(t("modelProfile.previewRequired"));
+    return {
+      ...draft,
+      catalog_revision: preview.catalog_revision,
+      parameter_values: outletSamplingValues(
+        draft.parameter_values ?? {},
+        preview.parameter_values
+      ),
+    };
+  }
+
   async function checkRow(row: FetchedRow) {
+    if (submitting) return;
+    const generation = (generations.current[row.id] ?? 0) + 1;
+    generations.current[row.id] = generation;
+    const apply = (ok: boolean, issue?: ModelCheckIssue | null) => {
+      if (generations.current[row.id] !== generation) return;
+      setRowCheck((previous) => ({
+        ...previous,
+        [row.id]: ok ? "available" : "unavailable",
+      }));
+      setIssues((previous) => {
+        const next = { ...previous };
+        if (!ok)
+          next[row.id] = issue ?? {
+            category: "MODEL_NETWORK_ERROR",
+            scope: "connection",
+          };
+        else delete next[row.id];
+        return next;
+      });
+    };
+    delete checkReceipts.current[row.id];
     setRowCheck((s) => ({ ...s, [row.id]: "checking" }));
     try {
+      if (!tenantId && row.model_type === MODEL_TYPES.LLM) {
+        const draft = await resolveOutletDraft(row);
+        const result = await validateModelOutlet({
+          draft: {
+            ...draft,
+            api_key:
+              draft.authentication_scheme === "no_auth_v1"
+                ? null
+                : apiKey.trim() || null,
+          },
+        });
+        if (generations.current[row.id] === generation && result.check_receipt)
+          checkReceipts.current[row.id] = result.check_receipt;
+        apply(result.ok, result.error);
+        return;
+      }
       // voice 凭证随探测透传，按当前类型门控防止类型切换后过期值泄漏
       // （只取手动 override——目录建议不携带语音凭证）
       const result = await modelService.verifyModelConfigConnectivity({
@@ -1024,18 +1197,18 @@ function BatchAddForm({
           rowOverrides[row.id]?.settings
         ),
       });
-      setRowCheck((s) => ({
-        ...s,
-        [row.id]: result.connectivity ? "available" : "unavailable",
-      }));
-    } catch {
-      setRowCheck((s) => ({ ...s, [row.id]: "unavailable" }));
+      apply(result.connectivity, {
+        category: "MODEL_HTTP_ERROR",
+        scope: "connection",
+      });
+    } catch (error) {
+      apply(false, modelCheckFailure(error));
     }
   }
 
   async function checkAllSelected() {
     const rows = fetched.filter((row) => selected[row.id]);
-    if (rows.length === 0 || batchChecking) return;
+    if (rows.length === 0 || batchChecking || submitting) return;
     setBatchChecking(true);
     await Promise.all(rows.map((row) => checkRow(row)));
     setBatchChecking(false);
@@ -1044,18 +1217,6 @@ function BatchAddForm({
   async function submit() {
     const rows = fetched.filter((row) => selected[row.id]);
     if (rows.length === 0 || submitting) return;
-    // Require all selected models to have passed the connectivity probe —
-    // same gate as the old dialog. Prevents adding models that can't connect.
-    const untested = rows.filter((row) => rowCheck[row.id] !== "available");
-    if (untested.length > 0) {
-      message.warning(
-        t("modelConfig.addDialog.untestedWarning", {
-          defaultValue: `有 ${untested.length} 个模型未通过连通性检测，请先批量检测`,
-          count: untested.length,
-        })
-      );
-      return;
-    }
     setSubmitting(true);
     let created = 0;
     const failed: string[] = [];
@@ -1072,6 +1233,22 @@ function BatchAddForm({
       // reported as a per-row failure instead of silently suffixed.
       const displayName = override?.displayName?.trim() || row.model_name;
       try {
+        if (!tenantId && row.model_type === MODEL_TYPES.LLM) {
+          const draft = await resolveOutletDraft(row);
+          await createModelOutlet({
+            ...draft,
+            check_receipt: checkReceipts.current[row.id],
+            api_key:
+              draft.authentication_scheme === "no_auth_v1"
+                ? null
+                : apiKey.trim() || null,
+          });
+          createdDisplayNames.push(
+            draft.display_name?.trim() || row.model_name
+          );
+          created++;
+          continue;
+        }
         const params: Record<string, any> = {
           name: row.model_name,
           type: row.model_type,
@@ -1083,11 +1260,12 @@ function BatchAddForm({
             provider === CUSTOM_PROVIDER_KEY
               ? "OpenAI-API-Compatible"
               : provider,
-          // The batch gate requires every selected model to have passed the
-          // connectivity probe (rowCheck === "available") before submit, so
-          // carry the verified result into the created record instead of
-          // resetting to not_detected.
-          connectStatus: "available",
+          connectStatus:
+            rowCheck[row.id] === "available"
+              ? "available"
+              : rowCheck[row.id] === "unavailable"
+                ? "unavailable"
+                : "not_detected",
           // Batch rows leave default-slot auto-configuration to the single
           // finalize call after the loop, so the whole batch competes for
           // empty slots at once (and occupied slots stay untouched) instead
@@ -1121,7 +1299,14 @@ function BatchAddForm({
       // Only the user-facing flow (no tenantId override) — the manage-tenant
       // path targets another tenant and keeps its own behavior.
       // Best-effort — a failure here does not fail the import.
-      if (!tenantId) {
+      if (
+        !tenantId &&
+        rows.some(
+          (row) =>
+            row.model_type !== MODEL_TYPES.LLM &&
+            rowCheck[row.id] === "available"
+        )
+      ) {
         try {
           await modelService.backfillDefaults(createdDisplayNames);
         } catch (error) {
@@ -1138,6 +1323,7 @@ function BatchAddForm({
           t("modelConfig.addDialog.batchSuccess", {
             defaultValue: `已添加 ${created} 个模型`,
             count: created,
+            created,
           })
         );
       } else if (duplicateNames.length > 0) {
@@ -1157,12 +1343,33 @@ function BatchAddForm({
           t("modelConfig.addDialog.batchPartial", {
             defaultValue: `已添加 ${created} 个模型，${failed.length} 个失败`,
             count: created,
+            created,
             failed: failed.length,
           })
         );
       }
       onSuccess();
-      onDone();
+      if (
+        failed.length > 0 &&
+        !tenantId &&
+        rows.every((row) => row.model_type === MODEL_TYPES.LLM)
+      ) {
+        const remaining = new Set(failed);
+        setFetched((previous) =>
+          previous.filter(
+            (row) => remaining.has(row.model_name) || !selected[row.id]
+          )
+        );
+        setSelected(
+          Object.fromEntries(
+            rows
+              .filter((row) => remaining.has(row.model_name))
+              .map((row) => [row.id, true])
+          )
+        );
+      } else {
+        onDone();
+      }
       return;
     }
     // All creates failed: keep the dialog open so the operator can fix the
@@ -1199,9 +1406,12 @@ function BatchAddForm({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-        <div className="grid grid-cols-2 gap-x-4 gap-y-5">
-          <div className="space-y-2">
+      <fieldset
+        disabled={submitting}
+        className="min-h-0 min-w-0 flex-1 overflow-y-auto px-6 py-5"
+      >
+        <div className="grid grid-cols-1 gap-x-5 gap-y-5 md:grid-cols-[minmax(0,0.7fr)_minmax(0,1.8fr)_minmax(0,1fr)]">
+          <div className="min-w-0 space-y-2">
             <Label>
               {t("modelConfig.addDialog.provider", { defaultValue: "服务商" })}
             </Label>
@@ -1211,7 +1421,25 @@ function BatchAddForm({
               onChange={changeProvider}
             />
           </div>
-          <div className="space-y-2">
+          <div className="min-w-0 space-y-2">
+            <Label>
+              {t("modelConfig.addDialog.baseUrl", { defaultValue: "Base URL" })}
+            </Label>
+            <Input
+              className="min-w-0"
+              value={baseUrl}
+              onChange={(e) => {
+                invalidateChecks();
+                setBaseUrl(e.target.value);
+                // Stored probe results were measured against the previous
+                // endpoint.
+                setRowCheck({});
+              }}
+              placeholder="https://api.example.com/v1"
+              autoComplete="off"
+            />
+          </div>
+          <div className="min-w-0 space-y-2">
             <Label>
               {t("modelConfig.addDialog.apiKey", { defaultValue: "API Key" })}
             </Label>
@@ -1219,6 +1447,7 @@ function BatchAddForm({
               type="password"
               value={apiKey}
               onChange={(e) => {
+                invalidateChecks();
                 setApiKey(e.target.value);
                 // Stored probe results were measured with the previous key.
                 setRowCheck({});
@@ -1227,41 +1456,34 @@ function BatchAddForm({
               autoComplete="new-password"
             />
           </div>
-          <div className="col-span-2 space-y-2">
-            <Label>
-              {t("modelConfig.addDialog.baseUrl", { defaultValue: "Base URL" })}
-            </Label>
-            <div className="flex gap-2">
-              <Input
-                value={baseUrl}
-                onChange={(e) => {
-                  setBaseUrl(e.target.value);
-                  // Stored probe results were measured against the previous
-                  // endpoint.
-                  setRowCheck({});
-                }}
-                placeholder="https://api.example.com/v1"
-                autoComplete="off"
-              />
-              <Button
-                variant="outline"
-                className="shrink-0"
-                disabled={fetching || !provider}
-                onClick={fetchModels}
-              >
-                {fetching ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="size-4" />
-                )}
-                {t("modelConfig.addDialog.fetchModels", {
-                  defaultValue: "获取模型列表",
-                })}
-              </Button>
-            </div>
-          </div>
         </div>
 
+        <details className="mt-4 border-t pt-3">
+          <summary className="cursor-pointer text-xs">
+            {t("modelProfile.connectionSettings")}
+          </summary>
+          <ModelOutletForm layout="vertical" className="!pt-4">
+            <ModelHttpConnectionSettings
+              sslVerify={sslVerify}
+              onSslVerifyChange={(value) => {
+                invalidateChecks();
+                setSslVerify(value);
+              }}
+              timeout={timeoutSeconds}
+              onTimeoutChange={(value) => {
+                invalidateChecks();
+                setTimeoutSeconds(value);
+              }}
+              headers={headers}
+              onHeadersChange={(value) => {
+                invalidateChecks();
+                setHeaders(value as Record<string, string>);
+              }}
+              onValidityChange={setHeadersValid}
+              pending={submitting || batchChecking}
+            />
+          </ModelOutletForm>
+        </details>
         {/* Fetched list */}
         {fetched.length > 0 && (
           <div className="mt-5 overflow-hidden rounded-xl border">
@@ -1328,10 +1550,12 @@ function BatchAddForm({
                     <div
                       role="button"
                       tabIndex={0}
-                      onClick={() =>
-                        setSelected((s) => ({ ...s, [row.id]: !s[row.id] }))
-                      }
+                      onClick={() => {
+                        if (!submitting)
+                          setSelected((s) => ({ ...s, [row.id]: !s[row.id] }));
+                      }}
                       onKeyDown={(e) => {
+                        if (submitting) return;
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           setSelected((s) => ({ ...s, [row.id]: !s[row.id] }));
@@ -1365,7 +1589,9 @@ function BatchAddForm({
                           <span className="size-2 rounded-full bg-emerald-500" />
                         )}
                         {rowCheck[row.id] === "unavailable" && (
-                          <span className="size-2 rounded-full bg-red-500" />
+                          <span className="text-xs text-red-500">
+                            {t("modelProfile.checkFailed")}
+                          </span>
                         )}
                         {/* Per-row type editor — styled like the old badge.
                             stopPropagation keeps opening the dropdown from
@@ -1404,13 +1630,21 @@ function BatchAddForm({
                             </SelectContent>
                           </Select>
                         </span>
-                        {rowOverrides[row.id] && (
-                          <span className="size-1.5 rounded-full bg-primary" />
+                        {row.model_type === MODEL_TYPES.LLM && (
+                          <span className="text-xs text-muted-foreground">
+                            {t(
+                              outletDraft(row).model_profile ||
+                                profileMatches[row.id]
+                                ? "modelProfile.profileMatched"
+                                : "modelProfile.chooseProfile"
+                            )}
+                          </span>
                         )}
                         <Button
                           size="icon"
                           variant="ghost"
                           className="size-7"
+                          aria-label={`${t("modelProfile.checkModel")} ${row.model_name}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             checkRow(row);
@@ -1423,6 +1657,7 @@ function BatchAddForm({
                           size="icon"
                           variant="ghost"
                           className="size-7"
+                          aria-label={`${t("modelProfile.configureModel")} ${row.model_name}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             setSettingsRowId(row.id);
@@ -1444,15 +1679,30 @@ function BatchAddForm({
             <PackageOpen className="size-7 text-muted-foreground/40" />
             <p className="text-xs text-muted-foreground">
               {t("modelConfig.addDialog.fetchHint", {
-                defaultValue: "填写 API Key 后获取模型列表",
+                defaultValue: "填写服务连接信息后获取模型列表",
               })}
             </p>
           </div>
         )}
-      </div>
+      </fieldset>
 
       <div className="flex items-center justify-between border-t px-6 py-4">
         <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            className="shrink-0"
+            disabled={submitting || fetching || !provider || !headersValid}
+            onClick={fetchModels}
+          >
+            {fetching ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <RefreshCw className="size-4" />
+            )}
+            {t("modelConfig.addDialog.fetchModels", {
+              defaultValue: "获取模型列表",
+            })}
+          </Button>
           <span className="text-sm text-muted-foreground">
             {selectedCount > 0
               ? t("modelConfig.addDialog.selectedCount", {
@@ -1478,12 +1728,35 @@ function BatchAddForm({
               })}
             </Button>
           )}
+          <ModelCheckSummary
+            issues={issues}
+            onRetryShared={() => {
+              if (batchChecking || submitting) return;
+              setBatchChecking(true);
+              void Promise.all(
+                fetched.filter((row) => !!issues[row.id]).map(checkRow)
+              ).finally(() => setBatchChecking(false));
+            }}
+            modelNames={Object.fromEntries(
+              fetched.map((row) => [row.id, row.model_name])
+            )}
+            onConfigure={(id) => {
+              if (!submitting) setSettingsRowId(id);
+            }}
+            onRetry={(id) => {
+              const row = fetched.find((item) => item.id === id);
+              if (row) void checkRow(row);
+            }}
+          />
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={onDone}>
             {t("common.cancel", { defaultValue: "取消" })}
           </Button>
-          <Button disabled={selectedCount === 0 || submitting} onClick={submit}>
+          <Button
+            disabled={selectedCount === 0 || submitting || !headersValid}
+            onClick={submit}
+          >
             {submitting && <Loader2 className="size-4 animate-spin" />}
             <Plus className="size-4" />
             {selectedCount > 0
@@ -1499,24 +1772,66 @@ function BatchAddForm({
           suggestions. key forces remount per row so useState picks up the
           correct initial values (otherwise the first open's empty state
           sticks for all subsequent rows). */}
-      {settingsRowId && (
-        <RowSettingsDialog
-          key={settingsRowId}
-          row={fetched.find((r) => r.id === settingsRowId) ?? null}
-          override={
-            rowOverrides[settingsRowId] ?? rowSuggestions[settingsRowId]
-          }
-          reasoningCapability={rowCapabilities[settingsRowId]}
-          onModelTypeChange={(next) => updateRowType(settingsRowId, next)}
-          onSave={(next) => {
-            setRowOverrides((prev) => ({
-              ...prev,
-              [settingsRowId]: next,
-            }));
-            setSettingsRowId(null);
-          }}
-          onClose={() => setSettingsRowId(null)}
-        />
+      {settingsRowId &&
+      !tenantId &&
+      fetched.find((row) => row.id === settingsRowId)?.model_type ===
+        MODEL_TYPES.LLM ? (
+        <Dialog open onOpenChange={(open) => !open && setSettingsRowId(null)}>
+          <DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-5xl">
+            <DialogHeader className="border-b px-6 py-4">
+              <DialogTitle>
+                {fetched.find((row) => row.id === settingsRowId)?.model_name}
+              </DialogTitle>
+              <DialogDescription>
+                {t("modelProfile.batchConfigurationHint")}
+              </DialogDescription>
+            </DialogHeader>
+            <ModelOutletAddForm
+              key={settingsRowId}
+              configuration={{
+                draft: outletDraft(
+                  fetched.find((row) => row.id === settingsRowId)!
+                ),
+                onApply: (draft) => {
+                  invalidateChecks(settingsRowId);
+                  setRowOverrides((previous) => ({
+                    ...previous,
+                    [settingsRowId]: { outletDraft: draft },
+                  }));
+                  setRowCheck((previous) => {
+                    const next = { ...previous };
+                    delete next[settingsRowId];
+                    return next;
+                  });
+                  setSettingsRowId(null);
+                },
+              }}
+              onPendingChange={() => {}}
+              onSuccess={() => {}}
+              onDone={() => setSettingsRowId(null)}
+            />
+          </DialogContent>
+        </Dialog>
+      ) : (
+        settingsRowId && (
+          <RowSettingsDialog
+            key={settingsRowId}
+            row={fetched.find((r) => r.id === settingsRowId) ?? null}
+            override={
+              rowOverrides[settingsRowId] ?? rowSuggestions[settingsRowId]
+            }
+            reasoningCapability={rowCapabilities[settingsRowId]}
+            onModelTypeChange={(next) => updateRowType(settingsRowId, next)}
+            onSave={(next) => {
+              setRowOverrides((prev) => ({
+                ...prev,
+                [settingsRowId]: next,
+              }));
+              setSettingsRowId(null);
+            }}
+            onClose={() => setSettingsRowId(null)}
+          />
+        )
       )}
     </div>
   );

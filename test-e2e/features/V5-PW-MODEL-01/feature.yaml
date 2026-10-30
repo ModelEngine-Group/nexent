@@ -10,6 +10,16 @@ feature:
   business_rules:
   - rule_id: V5-PW-MODEL-01-RULE-01
     description: 模型 V2 从 Provider 导入/自定义接入→真实连通性→保存→Agent 使用
+  - rule_id: V5-PW-MODEL-01-RULE-02
+    description: 有效配置保存成功即完成，不自动推理检测；检测只由用户显式触发，不阻塞单个或批量保存；批量共用 HTTP 设置与逐模型 Body 分离；未命中使用 fallback 并提示选择档案，连接错误去重、模型参数错误按模型展示。
+  - rule_id: V5-PW-MODEL-01-RULE-03
+    description: 同一页面的批量、逐行和其他显式检测共用最多 3 个在途任务，先进先出补位；失败释放名额，排队取消不发送请求，保存不入队。
+  - rule_id: V5-PW-MODEL-01-RULE-04
+    description: 后端仅在显式检测完成时记录结果；有效请求配置改变重置未检测而不自动检测；同值、展示信息及不发送参数保留结果；取消、管理权限错误和旧 revision 不覆盖检测结果；默认模型选择与页面刷新不触发检测。
+  - rule_id: V5-PW-MODEL-01-RULE-05
+    description: 单个添加手选具体档案后立即展示参数；后填名称保持人工档案与参数修改；无名称或服务地址不可保存，不伪造模型 ID 或提前发送预览/检测请求。
+  - rule_id: V5-PW-MODEL-01-RULE-06
+    description: 单个添加底部提供主动草稿检测与共用问题汇总；检测与保存独立，修改清除旧结果并取消旧检测；字段顺序为 Base URL、API Key、模型 ID、模型档案。
   required_test_stages:
   - D4
   source:

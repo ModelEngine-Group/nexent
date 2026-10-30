@@ -5,6 +5,7 @@ implementations:
     file: test_runtime.py
     selector: test_
 acceptance_bindings:
+  AC-03: [test_empty_stop_recovery_never_restarts_as_protocol_repair]
   AC-01: [test_unavailable_and_stream_failure_never_fall_back]
   AC-02: [test_cancel_retry_rejects_delayed_old_provider_output]
 timeout_seconds: 240

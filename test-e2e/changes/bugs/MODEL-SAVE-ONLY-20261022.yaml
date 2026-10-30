@@ -1,0 +1,36 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-SAVE-ONLY-20261022
+  change_type: bugfix
+  bug_id: MODEL-SAVE-ONLY-20261022
+  title: Save model configuration without automatic inference checks
+  description: User approved removal of automatic post-save connectivity checks for single and batch onboarding.
+  observed_behavior: Serial post-save probes block the add button even after a prior batch check.
+  expected_behavior: Saving ends after persistence; only explicit connectivity actions send inference requests; partial save failures remain retryable without duplicates.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_contract
+    description: Previous tests required automatic probes; the newly approved save-only contract needs explicit zero-probe and stalled-probe regressions.
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Existing frontend units own single and batch save/check separation; no Python code changes or duplicate D1 is needed.
+    behaviors:
+    - Single and batch saves finish without invoking a pending or failed validation endpoint.
+    - Explicit checks still display shared and model-specific errors.
+    - Partial save retries do not recreate saved rows; pending saves freeze identity fields.
+    test_selectors:
+    - frontend/tests/component/modelOutletAddForm.test.tsx
+    - frontend/tests/component/modelOutletBatch.test.tsx
+    - frontend/tests/component/modelLibraryChecks.test.tsx
+  affected_features:
+    existing: []
+    modified: [V5-PW-MODEL-01]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [PW-MODEL-01]
+    modified: []
+    added: []
+    retired: []
+  notes: SPEC SAVE-ONLY-20261022 and PROBE-COMPATIBILITY-20261022 record explicit user approval. PW-MODEL-01 already separates save and check at the business level; its shared page helper must invoke the existing row check explicitly. Focused real dev browser proof is recorded separately from whole-journey formal execution. No image build or remote update.

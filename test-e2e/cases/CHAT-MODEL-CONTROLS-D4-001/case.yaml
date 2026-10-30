@@ -5,6 +5,7 @@ case:
   case_id: CHAT-MODEL-CONTROLS-D4-001
   feature_id: CHAT-MODEL-CONTROLS
   requirement_ids:
+  - SESSION-MODEL-UNIFY-20261020
   - CHAT-MODEL-CONTROLS-20261014
   - CHAT-WORKBENCH-REFINEMENTS-20261015
   business_rule_ids:
@@ -35,7 +36,6 @@ case:
     - budget-B
     - plain-model
     supported_efforts:
-    - auto
     - none
     - minimal
     - low
@@ -59,18 +59,17 @@ case:
     action: Send a fixed creation request, inspect the actual frontend POST, consume deterministic clarification/structured
       file events, then send a follow-up from the subsequent composer.
     expected: Both turns use B and true/xhigh through the original route; custom defaults do not replace B. Existing agent_id,
-      history, attachments, language, draft_snapshot, persistence and retry fields retain their route meanings; Workbench
-      snapshots agree with the effective controls. NL2Agent draft updates and NL2Skill file views remain usable.
+      history, attachments, language, draft_snapshot, persistence and retry fields retain their route meanings; canonical conversation preference snapshots agree with the effective controls; Workbench config contains resources only. NL2Agent draft updates and NL2Skill file views remain usable.
   - order: 3
-    action: Switch enabled effort to automatic and explicitly send; disable thinking and send; switch to budget-B and choose
+    action: Reset the effort override to its inherited outlet value and explicitly send; disable thinking and send; switch to budget-B and choose
       a valid concrete budget; then inspect plain-model controls.
-    expected: Requests preserve automatic versus disabled versus budget intent with no concrete effort/budget conflict; plain
+    expected: Requests preserve inherited versus disabled versus budget intent with no concrete effort/budget conflict; plain
       model has no fabricated levels. The menu's enabled state does not change capability values and original messages/drafts
       remain visible. Thinking off collapses the effort or budget row, and enabling restores applicable configured reasoning
       defaults without changing candidate capability.
   expected_results:
   - Four creators share the same capability-derived selection UI, including the initial and subsequent NL2Agent composer.
-  - Captured real frontend requests and Workbench snapshots match visible effective selections, while original creation events
+  - Captured real frontend requests and shared conversation preference snapshots match visible effective selections, while original creation events
     and draft interfaces remain functional.
   forbidden_side_effects:
   - No real provider calls, global model mutations or unrelated real database writes from browser mock fixtures.
@@ -84,7 +83,7 @@ case:
   - Send first request
   - Consume original creation events
   - Send follow-up
-  - Exercise automatic/off/budget/plain model
+  - Exercise inherited/off/budget/plain model
   final_business_result:
   - Creator selection is visible and reaches real frontend serialization consistently without disturbing creation flows
   failure_evidence:

@@ -321,7 +321,15 @@ def build_outlet_draft(request, tenant_id, *, require_revision=False):
 
 
 def preview_model_profile(request, tenant_id):
-    profile, candidates = build_outlet_draft(request, tenant_id)
+    from contracts.model import ModelProfilePreviewRequest
+
+    data = request.model_dump(exclude_unset=True)
+    data["display_name"] = data.get("display_name") or None
+    connection = data.setdefault("provider_info", {})
+    connection["base_url"] = connection.get("base_url") or "https://profile-preview.invalid"
+    data["request_model_id"] = data.get("request_model_id") or (
+        request.model_profile.key.rsplit("/", 1)[-1] if request.model_profile else "profile-preview")
+    profile, candidates = build_outlet_draft(ModelProfilePreviewRequest.model_validate(data), tenant_id)
     return {"catalog_revision": get_model_profile_catalog().revision, "candidates": candidates,
             "matched_profile": bool(profile.model_profile_key or
                 f"{profile.provider_key}/{profile.identity.request_model_id}" in get_model_profile_catalog().provider_models),
@@ -381,9 +389,79 @@ def get_model_outlet(model_id, tenant_id):
             "has_credential": has_model_outlet_credential(model_id, tenant_id)}
 
 
+def reselect_outlet_profile(profile, request):
+    """Recompose only explicitly selected catalog references, retaining outlet identity."""
+    if request.profile_selection is None and request.request_model_id is None:
+        return profile
+    if request.profile_selection is None:
+        raise ModelOutletValidationError("PROFILE_SELECTION_REQUIRED", "/profile_selection")
+    from contracts.model import ModelProfilePreviewRequest
+    from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+
+    selection = request.profile_selection
+    connection = profile.connection.model_dump(mode="json", exclude={"credential_ref"})
+    connection.update(request.connection.model_dump(exclude_unset=True) if request.connection else {})
+    values = {} if request.reset_parameters else {key: value for key, value in profile.parameter_values.items() if key not in request.delete_parameters}
+    values.update(request.parameter_values)
+    draft = ModelProfilePreviewRequest(
+        selection_mode="manual", catalog_revision=selection.catalog_revision,
+        model_profile=selection.model_profile, provider_profile=selection.provider_profile,
+        request_model_id=request.request_model_id or profile.identity.request_model_id,
+        display_name=request.display_name or profile.identity.display_name,
+        provider_info={**connection, "provider_id": selection.provider_profile.key if selection.provider_profile else "custom"},
+        authentication_scheme=profile.bindings.auth.ref, parameter_values=values,
+        thinking_control=request.thinking_control, thinking_mode=request.thinking_mode,
+        extra_api_parameters=request.extra_api_parameters if request.extra_api_parameters is not None else profile.extra_api_parameters,
+    )
+    # A custom provider can retain registered manual controls from the saved outlet.
+    # Inspect the new trusted declarations before validating inherited user values.
+    native, _ = build_outlet_draft(draft.model_copy(update={"parameter_values": {},
+        "thinking_control": None, "thinking_mode": None}), profile.identity.tenant_id, require_revision=True)
+    native_keys = {rule["key"] for rule in native.parameter_rules}
+    if "enable_thinking" in values and "enable_thinking" not in native_keys and draft.thinking_control in (None, "profile_default"):
+        from nexent.core.model_service.profiles.thinking_configuration import THINKING_FORMATS
+
+        binding = next((rule.get("api_binding") for rule in profile.parameter_rules if rule["key"] == "enable_thinking"), None)
+        preset = next((key for key, (path, transform) in THINKING_FORMATS.items()
+            if binding and binding.get("path") == path and binding.get("transform_ref") == transform), None)
+        if preset:
+            draft = draft.model_copy(update={"thinking_control": preset})
+    degrees = {"reasoning_effort": "effort", "reasoning_budget_tokens": "budget_tokens"}
+    if not native_keys.intersection(degrees) and draft.thinking_mode in (None, "default"):
+        paths = {"reasoning_effort": "/reasoning_effort", "reasoning_budget_tokens": "/thinking_budget"}
+        mode = next((mode for key, mode in degrees.items() if key in values and any(
+            rule["key"] == key and rule.get("api_binding", {}).get("path") == paths[key]
+            and rule.get("api_binding", {}).get("transform_ref") == "identity_v1"
+            for rule in profile.parameter_rules)), None)
+        if mode:
+            draft = draft.model_copy(update={"thinking_mode": mode})
+    rebuilt, _ = build_outlet_draft(draft, profile.identity.tenant_id, require_revision=True)
+    data = rebuilt.model_dump(mode="json")
+    data.update(outlet_id=profile.outlet_id, config_revision=profile.config_revision)
+    data["connection"]["credential_ref"] = profile.connection.credential_ref.model_dump(mode="json")
+    data["capabilities"]["context"] = profile.capabilities.context.model_dump(mode="json")
+    data["context_configuration"] = profile.context_configuration.model_dump(mode="json")
+    return ResolvedModelProfile.model_validate(data)
+
+
+def preview_outlet_patch(model_id, request, tenant_id):
+    """Preview exactly the same saved-snapshot update used by checks and persistence."""
+    current, _, _ = _load_validation_outlet(model_id, tenant_id)
+    if current.config_revision != request.expected_revision:
+        raise ModelOutletConflictError()
+    profile = apply_outlet_patch(current, request)
+    reference = profile.provenance.atomic_refs.model or profile.provenance.atomic_refs.provider
+    return {"catalog_revision": request.profile_selection.catalog_revision if request.profile_selection else
+                (reference.catalog_revision if reference else "saved"),
+            "selected": {"model": profile.model_profile_key, "provider": profile.provider_key},
+            "candidates": {"models": [], "providers": []}, "field_specs": profile.parameter_rules,
+            "parameter_values": profile.parameter_values, "capabilities": profile.capabilities.model_dump(mode="json"),
+            "instruction_mapping": profile.instruction_mapping.model_dump(mode="json"), "conflicts": []}
+
+
 def apply_outlet_patch(profile, request):
     """Validate partial updates against the saved rules without applying new defaults."""
-    from nexent.core.model_service.profiles.parameter_rules import compile_parameter_rules, validate_saved_parameter_values
+    from nexent.core.model_service.profiles.parameter_rules import apply_parameter_values, compile_parameter_rules, validate_saved_parameter_values
     from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, json_values_equal
     from nexent.core.model_service.profiles.request_parameters import apply_extra_api_parameters
     from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
@@ -391,22 +469,34 @@ def apply_outlet_patch(profile, request):
     from urllib.parse import urlsplit
 
     _validate_credential_input(request.api_key)
+    previous_rules = {rule["key"]: rule for rule in profile.parameter_rules}
+    profile = reselect_outlet_profile(profile, request)
     try:
         from nexent.core.model_service.profiles.thinking_configuration import configure_outlet_policy
 
         from nexent.core.model_service.profiles.protocol_parameters import ensure_outlet_sampling_rules
 
         profile = ensure_outlet_sampling_rules(profile)
-        previous_rules = {rule["key"]: rule for rule in profile.parameter_rules}
-        profile = configure_outlet_policy(profile, thinking_control=request.thinking_control,
-            thinking_mode=request.thinking_mode,
+        metadata = profile.provenance.provider_metadata if request.profile_selection is not None else {}
+        control = request.thinking_control
+        mode = request.thinking_mode
+        if control in (None, "profile_default"):
+            control = metadata.get("operator_thinking", {}).get("preset", control)
+        if mode in (None, "default"):
+            mode = metadata.get("operator_thinking_degree", {}).get("mode", mode)
+        inherited_values = dict(profile.parameter_values)
+        profile = configure_outlet_policy(profile, thinking_control=control,
+            thinking_mode=mode,
             has_credential=bool(request.api_key and request.api_key.strip()) if "api_key" in request.model_fields_set else None)
         removed = request.delete_parameters
-        if len(set(removed)) != len(removed) or set(removed) & request.parameter_values.keys():
+        if (request.reset_parameters and removed) or len(set(removed)) != len(removed) or set(removed) & request.parameter_values.keys():
             raise ParameterValidationError("PARAMETER_UPDATE_CONFLICT")
         compiled = compile_parameter_rules(profile.parameter_rules)
         rules = {rule["key"]: rule for rule in compiled.declarations}
         values = dict(profile.parameter_values)
+        selected_degree = {"effort": "reasoning_effort", "budget_tokens": "reasoning_budget_tokens"}.get(mode)
+        if selected_degree in inherited_values and selected_degree in rules:
+            values.setdefault(selected_degree, inherited_values[selected_degree])
         for key in set(removed) | request.parameter_values.keys():
             if key not in rules:
                 old = previous_rules.get(key)
@@ -419,6 +509,10 @@ def apply_outlet_patch(profile, request):
         for key in removed:
             values.pop(key, None)
         values.update(request.parameter_values)
+        if request.reset_parameters:
+            values = apply_parameter_values(compiled, request.parameter_values, scope="outlet", saved_values={})
+            values.setdefault("temperature", 0.7)
+            values.setdefault("top_p", 1.0)
         data = profile.model_dump(mode="json")
         data["parameter_values"] = validate_saved_parameter_values(compiled, values)
         if request.context_limits is not None:
@@ -473,7 +567,8 @@ def update_model_outlet(model_id, request, user_id, tenant_id):
     if status is not None:
         credentials["connect_status"] = status
     revision = update_resolved_model_record(proposed, request.expected_revision, user_id, tenant_id,
-                                           registered_references=refs, **credentials)
+                                           registered_references=refs, replacement_base=reselect_outlet_profile(current, request)
+                                           if request.profile_selection is not None else None, **credentials)
     data = proposed.model_dump(mode="json")
     data["config_revision"] = revision
     return {"model_id": model_id, "config_revision": revision, "profile": data,

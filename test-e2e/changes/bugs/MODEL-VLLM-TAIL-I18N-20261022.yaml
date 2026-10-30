@@ -1,0 +1,46 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-VLLM-TAIL-I18N-20261022
+  change_type: bugfix
+  bug_id: MODEL-VLLM-TAIL-I18N-20261022
+  title: Accept vLLM empty-delta usage tails and localize shared diagnostics
+  description: Provided sample and one SDK formatter for probes and Agent terminals.
+  observed_behavior: Empty delta trailers rejected and known English bypasses localization.
+  expected_behavior: Empty trailers succeed; late content and finish conflicts fail
+    precisely; bilingual known errors and labeled unknown provider text.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing HTTP peer only returned one usage and DONE, and privacy
+      assertions hid all text rather than checking credential redaction.
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Strengthen owning units and the existing actual HTTP boundary without
+      adding duplicate D1.
+    behaviors:
+    - Provided vLLM sample succeeds once.
+    - Late content and finish conflicts remain errors.
+    - Known diagnostics bilingual; unknown provider text redacted and labeled.
+    - Probes and Agent share normalized diagnostics.
+    test_selectors:
+    - test/sdk/core/model_service/test_openai_stream.py
+    - test/sdk/core/model_service/test_errors_registry.py
+    - test/sdk/core/model_service/test_legacy_chat_model.py
+    - test/backend/services/test_model_outlet_validation_service.py
+    - frontend/tests/component/modelCheckSummary.test.tsx
+  affected_features:
+    existing: []
+    modified:
+    - SDK-MODEL-TRANSPORT
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified:
+    - MST-D3-001
+    added: []
+    retired: []
+  notes: SPEC VLLM-TAIL-I18N-20261022 AC-VT-01 through 04. Strengthen MST-D3-001,
+    no new D1; local/dev only. Original intranet service inaccessible; report replay
+    versus original-service verification.

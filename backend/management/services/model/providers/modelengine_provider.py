@@ -1,8 +1,10 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import logging
 from typing import Dict, List
 
 import aiohttp
+from nexent.core.model_service.connection_headers import connection_headers
 from contracts.constants.constants import DEFAULT_LLM_MAX_TOKENS
 from management.services.model.providers.base import (
     AbstractModelProvider,
@@ -59,15 +61,17 @@ class ModelEngineProvider(AbstractModelProvider):
             host = provider_config.get("base_url")
             api_key = provider_config.get("api_key")
             model_engine_url = get_model_engine_raw_url(host)
-            if not host or not api_key:
+            if not host or (not api_key and not provider_config.get("http_headers")):
                 logger.warning("ModelEngine host or api key not configured")
                 return []
 
-            headers = {"Authorization": f"Bearer {api_key}"}
+            headers = connection_headers(provider_config.get("http_headers") or {}, api_key=api_key)
+            if api_key:
+                headers["authorization"] = f"Bearer {api_key}"
 
             async with aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=30),
-                connector=aiohttp.TCPConnector(ssl=False),
+                timeout=aiohttp.ClientTimeout(total=provider_config.get("timeout_seconds", 120)),
+                connector=aiohttp.TCPConnector(ssl=provider_config.get("ssl_verify", True)),
             ) as session:
                 async with session.get(
                     f"{model_engine_url.rstrip('/')}/{MODEL_ENGINE_NORTH_PREFIX}/models",

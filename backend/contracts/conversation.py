@@ -267,3 +267,4 @@ def decode_agent_conversation_cursor(
         return activity.astimezone(timezone.utc), value[1]
     except (ValueError, TypeError, UnicodeError, OverflowError) as exc:
         raise ValueError("Invalid agent conversation cursor") from exc
+

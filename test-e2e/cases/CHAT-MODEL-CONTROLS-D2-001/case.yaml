@@ -4,14 +4,14 @@ module: CHAT-MESSAGE
 case:
   case_id: CHAT-MODEL-CONTROLS-D2-001
   feature_id: CHAT-MODEL-CONTROLS
-  requirement_ids: [CHAT-MODEL-CONTROLS-20261014, CHAT-SAMPLING-20261016]
+  requirement_ids: [SESSION-MODEL-UNIFY-20261020, CHAT-MODEL-CONTROLS-20261014, CHAT-SAMPLING-20261016]
   business_rule_ids: [CHAT-MODEL-CONTROLS-RULE-002, CHAT-MODEL-CONTROLS-RULE-003, CHAT-MODEL-CONTROLS-RULE-006]
-  title: 三运行端点的选模、思考部分覆盖与旧请求兼容契约
+  title: 三运行端点共享选模、档案参数与旧临时请求拒绝契约
   type: API-IT
   priority: P0
   status: active
   automation: automated
-  objective: Verify actual HTTP DTOs and route adapters preserve absent overrides, explicit intent, valid raw reasoning controls and legacy payloads.
+  objective: Verify actual HTTP DTOs and route adapters preserve absent overrides, explicit intent, canonical profile preferences and rejection of removed temporary payloads.
   preconditions:
     - use actual FastAPI routes and existing authentication/tenant dependencies after implementation.
     - Isolated tenant creator has valid Agent and Skill drafts, effort/budget/plain LLM fixtures and distinctive existing model parameters.
@@ -22,16 +22,16 @@ case:
     variants: [legacy-absent, empty-overlay, partial-overlay, disabled-with-remembered-effort, auto, none, minimal, low, medium, high, xhigh, max, budget-zero-auto, budget-min, budget-max, invalid-enum, field-null, wrong-type, budget-outside-range, conflicting-concrete-controls, conflicting-snapshot]
   steps:
     - order: 1
-      action: Submit each route's existing minimal valid payload without new fields; repeat with empty NL2 generation_config and legacy model_id null; compare inherited model and parameters with the baseline.
+      action: Submit each route's existing minimal valid payload without new fields; repeat with empty canonical preferences; compare inherited model and parameters with the baseline.
       expected: Valid streams retain their existing schema and defaults; absent fields never materialize false/low overrides and no new sampling input is required.
     - order: 2
-      action: Select the effort model and submit partial enablement, explicit false with remembered effort, true plus auto and each of seven concrete supported effort values; repeat on ordinary and creator route forms including persisted Workbench creation snapshots.
+      action: Select the effort model and submit partial enablement, explicit false with inactive effort removed, true plus inherited defaults and each declared effort value; repeat on ordinary and creator route forms including persisted Workbench creation snapshots.
       expected: Requests preserve exact enum and presence intent; false disables active reasoning, auto inherits the selected model effective default, partial effort does not implicitly enable thinking, and matching snapshot fields are accepted.
     - order: 3
-      action: Select the budget model; submit zero auto, minimum and maximum budget; exercise existing ordinary top-level budget fields and compatible Workbench budget snapshots.
-      expected: Valid budgets use budget controls without a conflicting concrete effort; zero means automatic rather than a zero provider limit and old budget requests are not overwritten by defaulted generation fields.
+      action: Select the budget model; submit minimum and maximum declared budgets; send the same canonical preference map on all routes.
+      expected: Valid budgets use the declared profile domain and a single canonical preference field; resource declarations do not contain model parameters.
     - order: 4
-      action: Submit invalid enum/type/null reasoning fields, out-of-capability effort, out-of-range budget, enabled concrete effort plus budget, contradictory legacy fields/snapshots, and invalid sampling types/ranges or conflicting sampling snapshots.
+      action: Submit invalid enum/type/null reasoning fields, out-of-capability effort, out-of-range budget, enabled concrete effort plus budget, removed temporary fields, and invalid sampling types/ranges or conflicting sampling snapshots.
       expected: Each invalid input returns 422 before SSE headers/provider execution, with field validation or model_controls_invalid detail; valid numeric sampling overrides including zero are accepted; bool/string/nonfinite/out-of-range sampling and conflicting snapshots are rejected.
   expected_results:
     - All three actual endpoints distinguish absence, disabled, automatic and concrete controls while preserving original successful stream contracts and model parameters.
@@ -43,13 +43,13 @@ case:
     protocol: HTTP JSON request with existing SSE success and preflight JSON errors
     method: POST
     endpoint: /api/agent/run; /api/agent/nl2agent/run; /api/skills/nl2skill/run
-    request_expectations: [Preserve existing payload fields and route-specific schemas, Optional NL2 overrides have no implicit false or low values, Workbench snapshots and explicit runtime controls agree, Sampling overrides preserve optionality and explicit zero]
+    request_expectations: [Preserve existing payload fields and route-specific schemas, Optional NL2 overrides have no implicit false or low values, Resource snapshots never duplicate model preferences, Sampling overrides preserve optionality and explicit zero]
     response_expectations: [Valid requests retain existing 200 stream format, Invalid reasoning fields or conflicting controls return 422 before streaming]
   execution:
     profiles: [{name: mock, required_services: [http-fixture]}]
   acceptance:
     - id: AC-01
-      description: Legacy and partial requests preserve presence-aware semantics across all three routes.
+      description: Canonical and partial requests preserve presence-aware semantics across all three routes.
       steps: [1, 2, 3]
       expected_results: [1]
       forbidden_side_effects: [1]

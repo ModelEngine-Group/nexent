@@ -1,0 +1,32 @@
+schema_version: '1.0'
+module:
+  id: SDK-MODEL-SERVICE
+  name: SDK model service
+feature:
+  feature_id: SDK-MODEL-TRANSPORT
+  name: Unified model HTTP transport and response adaptation
+  status: planned
+  description: Prepare and send model requests through common HTTP transport and decode
+    provider responses.
+  business_rules:
+  - rule_id: SDK-MODEL-TRANSPORT-RULE-01
+    description: Exact prepared URL, headers and body reach the HTTP peer without
+      duplicate protocol roots or extra retries.
+  - rule_id: SDK-MODEL-TRANSPORT-RULE-02
+    description: Sync and async streams preserve event order and separate reasoning,
+      content and complete tool calls. Identical usage tails are deduplicated and a
+      complete finish permits normal EOF without DONE. Empty deltas in nonempty
+      choices with usage after finish are valid, including the vLLM 0.23.0 sample.
+  - rule_id: SDK-MODEL-TRANSPORT-RULE-03
+    description: Errors and incomplete streams are explicit, sanitized and release
+      owned resources without replay. The HTTP boundary extracts bounded provider
+      diagnostics with request credentials redacted; display text never controls retries.
+      Known errors retain specific reason codes and bilingual messages shared by probes
+      and Agent Runtime; unrecognized provider text is explicitly source-labeled.
+  required_test_stages:
+  - D3
+  source:
+    requirement_ids:
+    - MODEL-TRANSPORT-20261013
+    notes: SPEC model-service boundary; controlled HTTP protocol evidence does not
+      qualify hosted models.

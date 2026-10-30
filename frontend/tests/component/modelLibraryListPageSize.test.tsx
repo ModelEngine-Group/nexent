@@ -18,10 +18,11 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+const permission = vi.hoisted(() => ({ edit: true }));
 vi.mock("@/hooks/permission/usePermission", () => ({
   usePermission: () => ({
     isReady: true,
-    can: () => true,
+    can: (key: string) => key !== "model:update" || permission.edit,
     canAny: () => true,
   }),
 }));
@@ -109,6 +110,7 @@ const originalResizeObserver = (globalThis as { ResizeObserver?: unknown })
   .ResizeObserver;
 
 beforeEach(() => {
+  permission.edit = true;
   MockResizeObserver.instances = [];
   (globalThis as { ResizeObserver: unknown }).ResizeObserver =
     MockResizeObserver;
@@ -197,4 +199,63 @@ describe("ModelLibraryList adaptive pagination", () => {
     expect(rowCount()).toBe(8);
     expect(screen.getByText("共 25 个模型，第 1/4 页")).toBeInTheDocument();
   });
+});
+
+it.each([
+  ["migrated" as const, true, "modelMigration.pending"],
+  ["failed" as const, undefined, "modelMigration.failed"],
+])(
+  "ME-01 %s review uses the single marked edit action",
+  async (migrationStatus, migrationReviewRequired, hint) => {
+    const edit = vi.fn();
+    const model = {
+      ...makeModels(1)[0],
+      migrationStatus,
+      migrationReviewRequired,
+    };
+    const { container } = render(
+      <TooltipProvider>
+        <ModelLibraryList
+          models={[model]}
+          defaultSlotMap={{}}
+          onCheck={vi.fn()}
+          onEdit={edit}
+          onDelete={vi.fn()}
+        />
+      </TooltipProvider>
+    );
+    const action = screen.getByRole("button", {
+      name: `common.edit · ${hint}`,
+    });
+    expect(action.querySelector("svg.lucide-circle-alert")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "modelMigration.review" })
+    ).not.toBeInTheDocument();
+    expect(
+      container.querySelector("[data-model-row]")?.querySelectorAll("button")
+    ).toHaveLength(3);
+    await userEvent.click(action);
+    expect(edit).toHaveBeenCalledExactlyOnceWith(model);
+  }
+);
+it("ME-01 reviewed outlets have an ordinary pencil with no warning", () => {
+  const { container } = renderList([
+    {
+      ...makeModels(1)[0],
+      migrationStatus: "migrated",
+      migrationReviewRequired: false,
+    },
+  ]);
+  const edit = screen.getByRole("button", { name: "编辑" });
+  expect(edit.querySelector("svg.lucide-circle-alert")).not.toBeInTheDocument();
+  expect(
+    container.querySelector("[data-model-row]")?.querySelectorAll("button")
+  ).toHaveLength(3);
+});
+
+it("ME-01 review warnings do not bypass edit permission", () => {
+  permission.edit = false;
+  renderList([{ ...makeModels(1)[0], migrationStatus: "migrated", migrationReviewRequired: true }]);
+  expect(screen.queryByRole("button", { name: /common.edit/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "modelMigration.review" })).not.toBeInTheDocument();
 });

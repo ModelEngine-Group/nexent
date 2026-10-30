@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-SINGLE-DRAFT-CHECK-20261022
+  change_type: bugfix
+  bug_id: MODEL-SINGLE-DRAFT-CHECK-20261022
+  title: Restore explicit single-model draft checks and reorder onboarding fields
+  description: Show an independent draft connectivity button without coupling validation to persistence.
+  observed_behavior: Single onboarding has no explicit check button and places identity fields before connection fields.
+  expected_behavior: Explicit check uses existing draft services, preserves save-only semantics, and orders Base URL, API Key, Model ID, profile.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing save-only tests prove no automatic probe but do not require an explicit single-draft check entry point.
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Owning component tests cover button lifecycle and payload; existing queue/summary tests cover shared boundaries. No duplicate D1.
+    behaviors:
+    - Required fields gate only explicit checks, with the requested DOM order.
+    - Draft success and structured failure reuse shared diagnostics without saving.
+    - Failed or pending checks do not block saving or add automatic checks.
+    - Editing aborts stale checks, old results are ignored, and embedded batch configuration has no duplicate check button.
+    test_selectors:
+    - frontend/tests/component/modelOutletAddForm.test.tsx
+    - frontend/tests/component/modelOutletBatch.test.tsx
+    - frontend/tests/component/modelCheckSummary.test.tsx
+    - frontend/tests/component/modelCheckConcurrency.test.tsx
+    - frontend/tests/component/modelCheckQueue.test.tsx
+  affected_features:
+    existing: []
+    modified: [V5-PW-MODEL-01]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [PW-MODEL-01]
+    modified: []
+    added: []
+    retired: []
+  notes: SPEC SINGLE-DRAFT-CHECK-20261022 AC-SC-01 through AC-SC-03. Preserve PW-MODEL-01 full journey and use targeted dev browser/controlled peer acceptance for this wiring change. No backend request parsing module, image build or remote update.

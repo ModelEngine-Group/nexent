@@ -1,5 +1,10 @@
 schema_version: '1.0'
 case_id: PW-MODEL-01
+acceptance_bindings:
+  AC-SOURCE: [PW-MODEL-01]
+  AC-PERSIST: [PW-MODEL-01]
+  AC-CREDENTIAL: [PW-MODEL-01]
+  AC-AGENT: [PW-MODEL-01]
 implementations:
 - framework: playwright
   file: test.spec.ts
