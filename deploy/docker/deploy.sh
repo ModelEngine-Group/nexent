@@ -1214,7 +1214,7 @@ deploy_core_services() {
   local service
   for service in $DEPLOYMENT_SELECTED_DOCKER_SERVICES; do
     case "$service" in
-      nexent-config|nexent-runtime|nexent-mcp|nexent-northbound|nexent-web|nexent-data-process)
+      nexent-config|nexent-runtime|nexent-mcp|nexent-northbound|nexent-web|nexent-data-process|nexent-ops)
         core_services+=("$service")
         ;;
     esac

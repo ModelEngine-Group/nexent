@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 # Shared deployment configuration helpers for Docker and Kubernetes deploy scripts.
 # This file is intentionally dependency-light so it can be sourced from Bash-only
@@ -2055,8 +2056,8 @@ deployment_compute_selection() {
     helm_charts+=(nexent-elasticsearch nexent-postgresql nexent-redis nexent-minio)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-    docker_services+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web)
-    helm_charts+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web)
+    docker_services+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-ops)
+    helm_charts+=(nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-ops)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
     docker_services+=(nexent-data-process)
@@ -2084,7 +2085,7 @@ deployment_compute_docker_ports() {
   local ports=()
 
   if [ "$DEPLOYMENT_PORT_POLICY" = "production" ]; then
-    deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && ports+=(3000 5013)
+    deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application" && ports+=(3000 5013 "${OPS_PORT:-5016}")
     deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal" && ports+=(2222)
     printf '%s\n' "${ports[*]}"
     return 0
@@ -2094,7 +2095,7 @@ deployment_compute_docker_ports() {
     ports+=(9210 9310 5434 6379 9010 9011)
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-    ports+=(5010 5014 5011 5015 5013 3000)
+    ports+=(5010 5014 5011 5015 5013 3000 "${OPS_PORT:-5016}")
   fi
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
     ports+=(5012 5555)
@@ -2361,6 +2362,8 @@ deployment_render_image_values() {
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf 'nexent-northbound:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf 'nexent-ops:\n'
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf 'nexent-web:\n'
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"
   printf 'nexent-data-process:\n'
@@ -2411,6 +2414,8 @@ deployment_render_k8s_port_values() {
   fi
   printf 'nexent-northbound:\n'
   printf '  services:\n    northbound:\n      type: "%s"\n      nodePort: 30013\n' "$northbound_type"
+  printf 'nexent-ops:\n'
+  printf '  service:\n    type: "NodePort"\n    port: %s\n    nodePort: 30016\n' "${OPS_PORT:-5016}"
   printf 'nexent-config:\n'
   printf '  service:\n    type: "%s"\n    nodePort: 30010\n' "$internal_type"
   printf 'nexent-runtime:\n'
@@ -2470,6 +2475,11 @@ deployment_render_helm_chart_values() {
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf '  services:\n    northbound:\n      type: "%s"\n      nodePort: 30013\n' "$northbound_type"
+  printf 'nexent-ops:\n'
+  printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf '  service:\n    type: "NodePort"\n    port: %s\n    nodePort: 30016\n' "${OPS_PORT:-5016}"
+  printf '  config:\n    logLevel: %s\n' "$(deployment_yaml_quote "$(printf '%s' "${LOG_LEVEL:-INFO}" | tr '[:upper:]' '[:lower:]')")"
   printf 'nexent-web:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"

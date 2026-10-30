@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: OPS-BOOTSTRAP-20261026
+  change_type: requirement
+  requirement_id: OPS-BOOTSTRAP-20261026
+  title: Minimal independent nexent-ops backend
+  description: Add a launcher, operations API and service package boundary, local health lifecycle, centralized settings and standalone Compose using the existing backend image.
+  affected_features:
+    existing: []
+    added: [OPS-BOOTSTRAP]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [OPS-BOOTSTRAP-D5-001, OPS-BOOTSTRAP-D1-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - test/backend/ops/test_bootstrap.py
+    - test/backend/deploy/test_ops_chart.py
+    behaviors:
+    - Verify readiness before startup, during operation and after shutdown, including exceptional shutdown.
+    - Verify centralized defaults, explicit values and invalid port rejection; ops reuses shared LOG_LEVEL rather than defining a separate environment setting.
+    - The launcher binds to 0.0.0.0 without an OPS_HOST setting; a client destination URL is not introduced.
+    - Verify launcher arguments and absence of business routes.
+    - Shell deployment UT verifies Docker application selection and default or overridden ops port; Helm value UT verifies application gating, shared image, service settings and log level.
+    reason: Existing health UT covers management helpers, not the new independent ops lifecycle. No duplicate D1 is needed; D5 proves an actual isolated subprocess start and restart.
+  notes: >-
+    The sibling nexent-doc repository and its module registry are unavailable, blocking the canonical SPEC set.
+    Existing management health UT and API-162 were inspected; their business-stack prerequisites do not prove ops independence.
+    D3 is irrelevant without external integration; no UI requires D4. D5 verifies real HTTP and restart in an isolated process. Kubernetes cluster execution is separate from local Helm rendering.
+    Docker image execution remains separate deployment evidence and must not be inferred from subprocess results.
+    Compose joins the existing external nexent_network and publishes port 5016 by default; the network must exist before container startup.
+    D1 admission: existing test_common.sh checks selection and source contracts but does not execute deploy_core_services with the real selection output.
+    The new D1 executes real configuration selection plus core deployment argument construction and failure handling, substituting only the external Compose command.
+    This adds component collaboration beyond isolated shell assertions; it is not a running API or inter-service integration test.
+    Shell regression assertions are maintained in deploy/tests/test_common.sh, outside the traditional Python UT selector registry.
+    Kubernetes follow-up expands the same component contract: real shared values and Helm templates plus the actual readiness selector run with controlled wait results; no live cluster is contacted.

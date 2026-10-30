@@ -13,6 +13,11 @@ from ..configuration import parse_positive_float, parse_positive_int, _require_p
 _ENVIRONMENT_LOADED = load_dotenv(override=False)
 _CONFIG_DIRECTORY = Path(__file__).resolve().parents[2] / 'configs'
 
+# Operations service configuration
+OPS_PORT = parse_positive_int(os.getenv('OPS_PORT'), 'OPS_PORT', 5016)
+if OPS_PORT > 65535:
+    raise ValueError('OPS_PORT must be between 1 and 65535')
+
 # Elasticsearch Configuration
 ES_HOST = os.getenv('ELASTICSEARCH_HOST')
 ES_API_KEY = os.getenv('ELASTICSEARCH_API_KEY')

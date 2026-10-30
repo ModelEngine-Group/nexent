@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "replicaCount": {"type": "integer", "minimum": 1},
+    "service": {
+      "type": "object",
+      "properties": {
+        "type": {"enum": ["ClusterIP", "NodePort"]},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "nodePort": {"type": "integer", "minimum": 30000, "maximum": 32767}
+      },
+      "required": ["type", "port", "nodePort"]
+    },
+    "config": {
+      "type": "object",
+      "properties": {
+        "logLevel": {"enum": ["critical", "error", "warning", "info", "debug", "trace"]}
+      },
+      "required": ["logLevel"]
+    }
+  }
+}

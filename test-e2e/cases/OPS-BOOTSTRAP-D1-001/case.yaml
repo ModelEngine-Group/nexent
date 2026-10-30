@@ -1,0 +1,52 @@
+schema_version: '1.0'
+stage: D1
+module: OPS-PLATFORM
+case:
+  case_id: OPS-BOOTSTRAP-D1-001
+  feature_id: OPS-BOOTSTRAP
+  requirement_ids: [OPS-BOOTSTRAP-20261026]
+  business_rule_ids: [OPS-BOOTSTRAP-RULE-04, OPS-BOOTSTRAP-RULE-05]
+  title: Docker and Kubernetes deployment compose the independent ops service
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Execute real selection, Docker startup orchestration, Helm composition and Kubernetes readiness selection with controlled external boundaries.
+  preconditions: [Bash, Helm 3 and Python test dependencies are installed.]
+  test_data:
+    modes: [development, production]
+  unit_boundary: Real shared selection and values feed Docker startup or Helm rendering. The real Kubernetes readiness selector calls a controlled wait boundary. No daemon or cluster is used.
+  inputs: [Application selection, infrastructure-only selection, successful and failed Compose command]
+  assertions:
+  - Application selection starts ops through the correct development or production Compose file.
+  - Infrastructure-only selection issues no core startup and disables the ops Helm dependency.
+  - Compose failure is propagated to the caller.
+  - The root chart renders ops with the shared image, consistent ports and probes, no business envFrom or mounts, and configuration rollout checksums.
+  - Kubernetes readiness includes ops and propagates an ops readiness failure.
+  steps:
+  - order: 1
+    action: Select application services for development and production and pass the result to deploy_core_services with captured Compose execution.
+    expected: Each command uses project nexent, the corresponding Compose file, up -d and nexent-ops.
+  - order: 2
+    action: Select infrastructure only, then inject a Compose failure for application deployment.
+    expected: Infrastructure triggers no core command and application command failure returns nonzero.
+  - order: 3
+    action: Render the parent Helm chart with real generated values for application and infrastructure-only selections, then exercise the real Kubernetes readiness selector with controlled success and failure results.
+    expected: Only application renders ops with minimal dependencies and the configured service; readiness waits for ops and returns failure if ops is not ready.
+  expected_results:
+  - Both application modes select and start ops with the existing backend services.
+  - Infrastructure-only emits no core command and disables ops in Helm selection.
+  - A failed Compose invocation makes core deployment fail.
+  - Helm renders consistent ops image, ports, probes and config checksums without business credentials or storage; Kubernetes readiness failure propagates.
+  forbidden_side_effects: [Calling real Docker or contacting a Kubernetes cluster.]
+  acceptance:
+  - id: AC-01
+    description: Component collaboration selects correct startup arguments and propagates failures without real Docker execution.
+    steps: [1, 2]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Helm composition and Kubernetes readiness selection implement ops without business dependencies or cluster access.
+    steps: [3]
+    expected_results: [2, 4]
+    forbidden_side_effects: [1]

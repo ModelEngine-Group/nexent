@@ -1,0 +1,69 @@
+{{- $global := default dict .Values.global -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-ops
+  namespace: {{ default .Release.Namespace $global.namespace }}
+  labels:
+    app: nexent-ops
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: nexent-ops
+  template:
+    metadata:
+      labels:
+        app: nexent-ops
+      annotations:
+        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" $global | quote }}
+        checksum/ops-config: {{ dict "port" .Values.service.port "logLevel" .Values.config.logLevel | toJson | sha256sum | quote }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: nexent-ops
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          command:
+            - /opt/nexent/scripts/start-backend.sh
+            - python
+            - backend/ops_service.py
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+          env:
+            - name: OPS_PORT
+              value: {{ .Values.service.port | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+            - name: NEXENT_SQL_STARTUP_MODE
+              value: "off"
+            - name: PYTHON_DOTENV_DISABLED
+              value: "1"
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
