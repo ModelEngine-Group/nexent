@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Snapshot Git test-asset provenance and explicit functional routing contacts."""
 from __future__ import annotations
 
@@ -14,6 +15,9 @@ def load_rules(repo):
     rules = yaml.safe_load((directory / "report-ownership.yaml").read_text(encoding="utf-8"))
     schema = json.loads((directory / "report-ownership.schema.json").read_text(encoding="utf-8"))
     Draft202012Validator(schema).validate(rules)
+    for domain in rules['domains'].values():
+        if domain['owner'].strip().lstrip('@').strip().casefold() in {'', 'unassigned', 'unknown', 'todo', '未分配', '待确认'}:
+            raise ValueError('Responsibility contact must not be a placeholder')
     for section in ("feature_overrides", "case_overrides"):
         if any(value not in rules["domains"] for value in rules[section].values()):
             raise ValueError("Ownership override references an unknown domain")

@@ -142,6 +142,7 @@ def test_strict_validation_still_fails_and_daily_checks_derived_views_without_wr
             patch.object(validate_test_assets.validate_cases, "validate", return_value=[]), \
             patch.object(validate_test_assets.validate_changes, "validate", return_value=[]), \
             patch.object(validate_test_assets.validate_traceability, "validate", return_value=[]), \
+            patch.object(validate_test_assets.ownership_catalog, "validate", return_value=[]), \
             patch.object(validate_test_assets, "discover_documents", return_value=[]), \
             patch.object(validate_test_assets.validate_execution, "inspect", return_value=([], {"cases": records()})), \
             patch.object(validate_test_assets.generate_feature_links, "expected_pages", return_value={stale: "new"}), \
@@ -206,6 +207,7 @@ def test_real_ut_reference_is_warning_only_in_daily_validator(tmp_path):
             patch.object(validate_test_assets.validate_cases, "validate", return_value=[]), \
             patch.object(validate_test_assets.validate_changes, "validate", return_value=[]), \
             patch.object(validate_test_assets.validate_traceability, "validate", return_value=[]), \
+            patch.object(validate_test_assets.ownership_catalog, "validate", return_value=[]), \
             patch.object(validate_test_assets, "discover_documents", return_value=[]), \
             patch.object(validate_test_assets, "change_index", return_value=({"CHANGE": change}, [])), \
             patch.object(validate_test_assets.validate_execution, "inspect", return_value=([], {"cases": records()})), \

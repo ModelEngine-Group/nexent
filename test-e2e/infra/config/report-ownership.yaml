@@ -73,6 +73,27 @@ domains:
     feature_id_patterns: ['^V5-DEP-']
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
+  AGENT-EDITOR-WORKFLOWS: agent_config
+  AGENT-LIST-VIEWS: agent_repository
+  AGENT-PUBLICATION: agent_config
+  AGENT-REPO-SORT-MAIN-TAG: agent_repository
+  CAS-USER-DISPLAY: system
+  CHAT-AGENT-DISCOVERY: runtime
+  CHAT-CLARIFICATION-HISTORY: runtime
+  CHAT-MODEL-CONTROLS: model
+  CHAT-SIDEBAR: runtime
+  FAF-001: runtime
+  MSRF-001: model
+  NAV-MENU-VISIBILITY: system
+  NL2AGENT-PROTOCOL: agent_config
+  PR-QUALITY-FRONTEND: model
+  RESOURCE-TAG-MANAGEMENT: system
+  SAI-001: runtime
+  SDK-SQL-ROWS: runtime
+  SEARCH-DEEPSEEK: runtime
+  TFP-001: sandbox
+  TPC-001: runtime
+  WB-CONTROLS: runtime
   F-046: context
   F-047: context
   F-048: context
@@ -95,13 +116,18 @@ feature_overrides:
   F-170: model
   F-171: runtime
   F-172: deployment
+  F-173: deployment
+  F-174: deployment
+  F-175: deployment
   F-176: deployment
   F-183: context
   F-186: task
   V5-PERF-01: runtime
   V5-PERF-02: runtime
   V5-PERF-03: knowledge
+  V5-PERF-04: knowledge
   V5-PERF-05: task
+  V5-PERF-06: evaluation
   V5-PERF-07: context
   V5-PERF-08: mcp
   V5-PERF-09: runtime
@@ -133,18 +159,38 @@ feature_overrides:
   V5-REL-AUTO-DD1A9CB3B544F39F: evaluation
   V5-REL-AUTO-ECAC7A02C22B21FF: runtime
   V5-SEC-02: knowledge
+  V5-SEC-01: system
   V5-SEC-03: runtime
   V5-SEC-04: system
+  V5-SEC-05: system
+  V5-SEC-06: system
+  V5-SEC-07: skill
+  V5-SEC-08: system
   V5-SEC-09: context
   V5-SEC-10: system
   V5-SEC-11: runtime
   V5-SEC-AUTO-223E157CE3543948: sandbox
   V5-SEC-AUTO-54F2ABC236F8E944: memory
   V5-SEC-AUTO-926FF16475B223A7: context
+  V5-SEC-AUTO-A4AD5354E1E6A58E: system
+  V5-SEC-AUTO-F4D28F8271C36B99: memory
   V5-UT-BE-022: model
   V5-UT-BE-023: system
   V5-UT-FE-039: runtime
 case_overrides:
+  CHAT-MODEL-CONTROLS-D2-001: runtime
+  CHAT-MODEL-CONTROLS-D3-001: runtime
+  CHAT-MODEL-CONTROLS-D3-002: runtime
+  CHAT-MODEL-CONTROLS-D4-001: agent_config
+  CHAT-MODEL-CONTROLS-D4-002: runtime
+  CHAT-MODEL-CONTROLS-D4-003: agent_config
+  SAI-D3-001: sandbox
+  SAI-D5-001: sandbox
+  SEC-06: mcp
+  WB-CONTROLS-D4-001: agent_config
+  WB-CONTROLS-D4-002: agent_config
+  WB-CONTROLS-D4-004: knowledge
+  WB-CONTROLS-D4-005: agent_config
   UT-SDK-018: sandbox
   UT-SDK-019: sandbox
   UT-SDK-AUTO-AA4383E2E3B57AD8: sandbox

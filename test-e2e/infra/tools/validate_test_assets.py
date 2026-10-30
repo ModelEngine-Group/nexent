@@ -16,6 +16,7 @@ import validate_changes
 import validate_execution
 import validate_features
 import validate_traceability
+import ownership_catalog
 from test_asset_lib import ValidationIssue, case_index, change_index, discover_documents, render_issues, repository_root
 
 
@@ -30,6 +31,7 @@ def validate(root: Path, phase: str, regenerate: bool,
     issues.extend(validate_cases.validate(root))
     issues.extend(validate_changes.validate(root))
     issues.extend(validate_traceability.validate(root))
+    issues.extend(ownership_catalog.validate(root))
     changes, _ = change_index(discover_documents(root, "changes"))
     for change_id in require_ut_changes or []:
         if change_id not in changes:

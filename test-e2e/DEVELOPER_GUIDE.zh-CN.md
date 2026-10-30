@@ -118,6 +118,22 @@ uv pip check --python $TestPython
 
 用例验收标准正确时，纯脚本修复不必改 `case.yaml`；文件名、选择器和准备声明没变时，也不必改 `execution.yaml`。保留原 Case ID。新增用例使用新 ID，历史契约需要退出时标记 `retired`。
 
+### 设计时确定责任田
+
+在设计 Feature 和用例时确认一个主要责任模块，在 `infra/config/report-ownership.yaml` 的 `feature_overrides` 中登记，关联用例自动继承。人名只在 `domains` 中统一维护，不逐条写入 `case.yaml`。例如 `AGENT-EDITOR-WORKFLOWS: agent_config` 表示智能体开发配置，当前联系人由该模块配置解析。
+
+只有实际证明边界不同的用例才用 `case_overrides`，并在变更记录中说明依据。不要按 Git 作者、报错关键词或厂商名称分配责任。所有 active/planned Feature（包括尚未生成用例的 Feature）和非 retired 用例必须唯一匹配；设计和实现校验都检查这一点。可先运行 `python test-e2e/infra/tools/ownership_catalog.py --root .`。
+
+人员调整只更新中心配置并走正常 PR，不直接改 Ubuntu 或历史结果。看板统一显示一个“负责人”，按版本化责任田映射更新；历史批次原件保留，不等于缺陷归因。未提交的本地配置导出必须明确标为未提交，不能宣称已经在 develop/Daily 生效。
+
+### 新增用例的命名规则
+
+新增 Case ID 统一使用 `<模块>-<场景>-<阶段>-<三位序号>`，例如 `AGENT-LIST-D1-003`、`MODEL-PERMISSION-D2-001`。模块和场景使用大写英文字母、数字及连字符，可由多个词组成；不要把负责人、日期、哈希或测试工具名称当作业务命名。序号为 `001`～`999`，在相同模块、场景和阶段前缀内选用未占用编号，历史和非活跃用例也不能重复占号。
+
+ID 中的阶段必须与 `case.yaml` 的 `stage` 一致，目录名、用例定义和执行绑定里的 ID 也必须一致。保留存量 `API-001`、`PW-SKILL-02`、`UT-…-AUTO-…` 等历史 ID，不因格式统一改名。仓库的 `case-naming-legacy.json` 是冻结的历史兼容清单，不是新用例登记表，不能追加豁免或按当前目录重新生成；固定内容摘要在无 Git 历史时也会检查清单未被修改，两种校验阶段都会拒绝不合规的新 ID。
+
+用例标题写清“场景／条件＋预期行为”，例如“模型不可用时禁止选择且不触发切换回调”，中英文均可。标题是否准确需结合断言审查，不能仅靠格式校验。主脚本仍使用对应框架的文件名，如 `test.py`、`test.spec.ts`，通过 `execution.yaml` 绑定，不必把完整 ID 重复放进文件名。
+
 Bugfix 有相关 SPEC 时，沿用其中 Feature、业务规则和 Case 的关联，并结合实际调用路径确认影响。没有可用 SPEC 时，在文档仓库创建轻量 `design.md`，按 [Bugfix design 模板](../.agents/skills/nexent-spec-coding/references/bugfix-design-template.md) 描述完整、内聚的功能边界与最终预期，保留与新需求相同的 `D1-D5 Test Design` 矩阵。它列出功能范围内的已知覆盖，Notes 标注复用、补强、新增、仅回归或不受影响；本次修复与验证范围单独写明。无需强制补齐 proposal/task 或整模块需求文档。
 
 优先复用能复现的用例，缺一个边界时补强原用例，只有缺少必要证明才新增。允许新增 0 条，也不要求每层一条。区分“没有 SPEC”“当前分支没有迁入基线”和“已确认覆盖缺口”：找不到基线时记录未知及检索范围，不自动补全整个功能。矩阵中的 N/A 表示不适用，GAP 表示已知缺口，UNKNOWN 表示覆盖不可确认；这些标注不是 Case ID，也不代表通过。

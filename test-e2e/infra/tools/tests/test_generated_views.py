@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Generated registry and Excel are optional local views, not checkout prerequisites."""
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ class GeneratedViewTests(unittest.TestCase):
                 patch.object(validate_test_assets.validate_cases, "validate", return_value=[]), \
                 patch.object(validate_test_assets.validate_changes, "validate", return_value=[]), \
                 patch.object(validate_test_assets.validate_traceability, "validate", return_value=[]), \
+                patch.object(validate_test_assets.ownership_catalog, "validate", return_value=[]), \
                 patch.object(validate_test_assets.validate_execution, "inspect", return_value=([], {"cases": []})), \
                 patch.object(validate_test_assets.generate_feature_links, "expected_pages", return_value={}), \
                 patch.object(validate_test_assets.generate_excel, "write_workbook", side_effect=write_workbook), \
