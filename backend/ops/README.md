@@ -57,8 +57,10 @@ The default published port is `5016:5016`. Containers on the shared network can
 resolve `nexent-ops` and reach `http://nexent-ops:5016`; host access uses
 `http://localhost:5016`. If `OPS_PORT` is changed, both ports change together.
 
-The service has no business-service `depends_on` entries. The environment file
-supplies Compose substitutions; it is not injected wholesale into the container.
+The service has no business-service `depends_on` entries. Like the other backend
+services, it loads `deploy/env/.env` through `env_file`. Logging parameters come
+from that file rather than repeated Compose defaults. Merely passing component
+addresses does not initialize their clients.
 Only the existing logs directory is mounted; no business data volumes are required. Set
 `ROOT_DIR` in the deployment environment for this mount. SQL startup is explicitly disabled. The container listens on
 `0.0.0.0`. There is no operations destination URL configured in business services.
@@ -86,7 +88,8 @@ The existing `bash deploy/deploy.sh --defaults k8s` entry point enables the
 `nexent-ops` subchart whenever `application` is selected and waits for its
 Deployment to become ready. It reuses the selected backend image and does not
 mount business configuration, credentials, SQL or business storage. Only explicit
-ops settings and SQL-startup-off are passed to its container; the Kubernetes API
+ops settings, selected logging keys from the existing `nexent-env` Secret and
+SQL-startup-off are passed to its container; the Kubernetes API
 service-account token is not mounted.
 
 The only storage mount is the logs PVC, using `global.sharedStorage.logs.existingClaim`
@@ -98,7 +101,7 @@ The default external address is `<node-ip>:30016`; in the same namespace,
 use `http://nexent-ops:5016`. For direct Helm use, configure
 `nexent-ops.service.type=ClusterIP` to keep it internal, or change
 `nexent-ops.service.nodePort` when the default NodePort conflicts. Log level
-uses `LOG_LEVEL`, default `info`.
+uses the shared `LOG_LEVEL` from `.env`, default `INFO`.
 
 Health probes use `/health/live` and `/health/ready`. Image and ops configuration
 checksums participate in rollouts. Resource requests and limits are configurable
@@ -108,7 +111,8 @@ manifest composition; it does not prove an actual cluster deployment.
 ## Persistent logs
 
 Console output remains available. Application, Uvicorn server and HTTP access
-records also use the existing rotating file handler:
+records also use `get_uvicorn_logging_config(categories=['ops'])`, the same
+logging factory used by the existing backend entrypoints:
 
 - Local: `LOG_DIR/ops/nexent_ops.log`, default `logs/ops/nexent_ops.log`.
 - Docker host: `${ROOT_DIR}/logs/ops/nexent_ops.log`.

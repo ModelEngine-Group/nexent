@@ -133,11 +133,14 @@ deployment_render_helm_chart_values
         assert container['volumeMounts'] == [{'name': 'ops-logs', 'mountPath': '/mnt/nexent-data/logs'}]
         assert next(env for env in container['env'] if env['name'] == 'POD_NAME')['valueFrom']['fieldRef']['fieldPath'] == 'metadata.name'
         assert {env['name']: env['value'] for env in container['env'] if 'value' in env} == {
-            'OPS_PORT': '15016', 'LOG_LEVEL': 'debug',
-            'LOG_DIR': '/mnt/nexent-data/logs/$(POD_NAME)', 'IS_DEBUG': 'false',
-            'LOG_MAX_BYTES': '52428800', 'LOG_ROTATION_INTERVAL': '1', 'LOG_BACKUP_COUNT': '30',
+            'OPS_PORT': '15016',
+            'LOG_DIR': '/mnt/nexent-data/logs/$(POD_NAME)',
             'NEXENT_SQL_STARTUP_MODE': 'off', 'PYTHON_DOTENV_DISABLED': '1',
         }
+        for name in ('LOG_LEVEL', 'IS_DEBUG', 'LOG_MAX_BYTES', 'LOG_ROTATION_INTERVAL', 'LOG_BACKUP_COUNT'):
+            assert next(env for env in container['env'] if env['name'] == name)['valueFrom']['secretKeyRef'] == {
+                'name': 'nexent-env', 'key': name, 'optional': True,
+            }
         assert container['ports'] == [{'name': 'http', 'containerPort': 15016}]
         assert container['startupProbe']['httpGet'] == {'path': '/health/live', 'port': 'http'}
         assert container['livenessProbe']['httpGet'] == {'path': '/health/live', 'port': 'http'}
@@ -159,7 +162,7 @@ deployment_render_helm_chart_values
     assert internal_service['spec']['type'] == 'ClusterIP'
     assert 'nodePort' not in internal_service['spec']['ports'][0]
     assert internal_deployment['spec']['template']['metadata']['annotations']['checksum/ops-config'] != application_checksum
-    for setting in ('service.port=0', 'service.port=65536', 'service.nodePort=29999', 'config.logLevel=verbose'):
+    for setting in ('service.port=0', 'service.port=65536', 'service.nodePort=29999', 'replicaCount=0'):
         invalid = subprocess.run(
             [helm, 'template', 'ops-proof', str(ops_chart), '--set', setting],
             capture_output=True, text=True, encoding='utf-8', timeout=30,

@@ -4,13 +4,13 @@
 import uvicorn
 
 from contracts.constants.environment import OPS_PORT
+from infrastructure.logging import get_uvicorn_logging_config
 from ops.api.application import app
-from ops.logging import build_logging_config
 
 
 def main() -> None:
     """Run operations with shared console and rotating file logging."""
-    uvicorn.run(app, host='0.0.0.0', port=OPS_PORT, log_config=build_logging_config())
+    uvicorn.run(app, host='0.0.0.0', port=OPS_PORT, log_config=get_uvicorn_logging_config(categories=['ops']))
 
 
 if __name__ == '__main__':

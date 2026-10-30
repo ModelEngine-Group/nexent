@@ -23,7 +23,8 @@ spec:
         app: nexent-ops
       annotations:
         checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" $global | quote }}
-        checksum/ops-config: {{ dict "port" .Values.service.port "config" .Values.config | toJson | sha256sum | quote }}
+        checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" $global | quote }}
+        checksum/ops-config: {{ dict "port" .Values.service.port | toJson | sha256sum | quote }}
     spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
@@ -47,16 +48,14 @@ spec:
               value: "/mnt/nexent-data/logs/$(POD_NAME)"
             - name: OPS_PORT
               value: {{ .Values.service.port | quote }}
-            - name: LOG_LEVEL
-              value: {{ .Values.config.logLevel | quote }}
-            - name: IS_DEBUG
-              value: {{ .Values.config.isDebug | quote }}
-            - name: LOG_MAX_BYTES
-              value: {{ .Values.config.logMaxBytes | quote }}
-            - name: LOG_ROTATION_INTERVAL
-              value: {{ .Values.config.logRotationInterval | quote }}
-            - name: LOG_BACKUP_COUNT
-              value: {{ .Values.config.logBackupCount | quote }}
+            {{- range list "LOG_LEVEL" "IS_DEBUG" "LOG_MAX_BYTES" "LOG_ROTATION_INTERVAL" "LOG_BACKUP_COUNT" }}
+            - name: {{ . }}
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-env
+                  key: {{ . }}
+                  optional: true
+            {{- end }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "off"
             - name: PYTHON_DOTENV_DISABLED

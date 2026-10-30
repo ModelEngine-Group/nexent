@@ -6,13 +6,6 @@ images:
     tag: latest
     pullPolicy: IfNotPresent
 
-config:
-  logLevel: info
-  isDebug: "false"
-  logMaxBytes: 52428800
-  logRotationInterval: 1
-  logBackupCount: 30
-
 logs:
   existingClaim: nexent-logs
 

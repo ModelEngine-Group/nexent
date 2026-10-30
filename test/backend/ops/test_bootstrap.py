@@ -57,9 +57,9 @@ def test_launcher_uses_operations_settings(mocker):
     run = mocker.patch('ops_service.uvicorn.run')
     mocker.patch('ops_service.OPS_PORT', 12345)
     config = {'version': 1}
-    build_config = mocker.patch('ops_service.build_logging_config', return_value=config)
+    build_config = mocker.patch('ops_service.get_uvicorn_logging_config', return_value=config)
     ops_service.main()
-    build_config.assert_called_once_with()
+    build_config.assert_called_once_with(categories=['ops'])
     run.assert_called_once_with(ops_service.app, host='0.0.0.0', port=12345, log_config=config)
 
 

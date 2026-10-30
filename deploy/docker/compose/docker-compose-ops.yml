@@ -9,14 +9,11 @@ services:
       - nexent
     volumes:
       - ${ROOT_DIR:?Set ROOT_DIR for persistent ops logs}/logs:/mnt/nexent-data/logs
+    env_file:
+      - ../../env/.env
     environment:
       OPS_PORT: "${OPS_PORT:-5016}"
-      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
       LOG_DIR: "/mnt/nexent-data/logs"
-      IS_DEBUG: "${IS_DEBUG:-false}"
-      LOG_MAX_BYTES: "${LOG_MAX_BYTES:-52428800}"
-      LOG_ROTATION_INTERVAL: "${LOG_ROTATION_INTERVAL:-1}"
-      LOG_BACKUP_COUNT: "${LOG_BACKUP_COUNT:-30}"
       NEXENT_SQL_STARTUP_MODE: "off"
       PYTHON_DOTENV_DISABLED: "1"
     entrypoint:

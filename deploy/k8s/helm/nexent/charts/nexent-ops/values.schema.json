@@ -11,13 +11,6 @@
         "nodePort": {"type": "integer", "minimum": 30000, "maximum": 32767}
       },
       "required": ["type", "port", "nodePort"]
-    },
-    "config": {
-      "type": "object",
-      "properties": {
-        "logLevel": {"enum": ["critical", "error", "warning", "info", "debug", "trace"]}
-      },
-      "required": ["logLevel"]
     }
   }
 }
