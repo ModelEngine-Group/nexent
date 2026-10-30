@@ -16,6 +16,7 @@ from sqlalchemy.sql.dml import Insert, Update
 from contracts.errors.exceptions import AppException
 from contracts.agent import AgentRequest
 from contracts.conversation import MessageSource, decode_activity_cursor, encode_activity_cursor
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.db.conversation import repository as db
 
 
@@ -175,8 +176,18 @@ def test_activity_page_uses_time_and_id_boundary_and_last_visible_cursor(session
     limit_parameter = re.search(r"LIMIT %\((\w+)\)s", sql).group(1)
     assert compiled.params[limit_parameter] == 3
     if conversation_type:
-        predicate = "IS NOT NULL" if conversation_type == "workbench" else "IS NULL"
-        assert f"workbench_config {predicate}" in sql
+        assert "workbench_config IS NOT NULL" in sql
+        assert "EXISTS (SELECT 1" in sql
+        assert re.search(r"ag_tenant_agent_t.agent_id = [\w.]*conversation_record_t.agent_id", sql)
+        literal_sql = str(session.execute.call_args.args[0].compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True},
+        ))
+        assert "system_key IN ('nl2agent_main', 'nl2skill_main')" in literal_sql
+        assert f"tenant_id = '{ASSET_OWNER_TENANT_ID}'" in literal_sql
+        assert "agent_origin = 'SYSTEM'" in literal_sql
+        assert "version_no = 0" in literal_sql
+        if conversation_type == "agent_chat":
+            assert re.search(r"NOT \([\w.]*workbench_config IS NOT NULL OR \(EXISTS", sql)
 
 
 def test_exhausted_activity_cursor_retains_scope_counts_without_another_cursor(session):
