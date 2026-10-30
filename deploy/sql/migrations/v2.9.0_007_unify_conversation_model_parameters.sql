@@ -1,9 +1,5 @@
 -- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-ALTER TABLE nexent.conversation_record_t ADD COLUMN IF NOT EXISTS selected_model_id INTEGER;
-COMMENT ON COLUMN nexent.conversation_record_t.selected_model_id IS
-    'Root model selected for this Agent conversation; NULL inherits the Agent default.';
-
 -- Upgrade only historical Workbench declarations. New preferences win per field.
 -- Never assign historical choices to an arbitrary model when its identity is missing.
 DO $$
