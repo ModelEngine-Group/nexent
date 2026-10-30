@@ -1,95 +1,22 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Low-dependency tests for the ContextManager runtime."""
+
 from __future__ import annotations
 
-import importlib.util
-import sys
 import types
-from pathlib import Path
 
 import pytest
 
 
-ROOT = Path(__file__).resolve().parents[4] / "sdk" / "nexent"
-_BOOTSTRAP_MODULES = (
-    "nexent",
-    "nexent.core",
-    "nexent.core.agents",
-    "nexent.core.agents.context",
-    "nexent.core.agents.context.manager",
-    "nexent.core.agents.context.models",
-    "nexent.core.agents.context.run_context",
-    "nexent.core.agents.cores.smolagents.context",
-    "nexent.core.agents.cores.smolagents.context_contracts",
-    "nexent.core.agents.cores.smolagents.context_contracts",
-    "smolagents.memory",
-    "smolagents.models",
-    "smolagents.tools",
-)
-
-
-def _load(name: str, relative: str):
-    spec = importlib.util.spec_from_file_location(name, ROOT / relative)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
-
-
 def _bootstrap():
-    snapshot = {name: sys.modules.get(name) for name in _BOOTSTRAP_MODULES}
-    for name, path in (
-        ("nexent", ROOT),
-        ("nexent.core", ROOT / "core"),
-        ("nexent.core.agents", ROOT / "core" / "agents"),
-        ("nexent.core.agents.context", ROOT / "core" / "agents" / "context"),
-        ("nexent.core.agents.cores.smolagents.context_contracts", ROOT / "core" / "context_runtime"),
-    ):
-        package = types.ModuleType(name)
-        package.__path__ = [str(path)]
-        sys.modules[name] = package
+    from nexent.core.agents.cores.smolagents import context
 
-    memory_module = types.ModuleType("smolagents.memory")
-
-    class SystemPromptStep:
-        def __init__(self, system_prompt):
-            self.system_prompt = system_prompt
-
-        def to_messages(self):
-            return [{"role": "system", "content": self.system_prompt}]
-
-    memory_module.SystemPromptStep = SystemPromptStep
-    memory_module.AgentMemory = type("AgentMemory", (), {})
-    memory_module.MemoryStep = type("MemoryStep", (), {})
-    sys.modules["smolagents.memory"] = memory_module
-
-    models_module = types.ModuleType("smolagents.models")
-    models_module.ChatMessage = type("ChatMessage", (), {})
-    models_module.Model = type("Model", (), {})
-    sys.modules["smolagents.models"] = models_module
-    tools_module = types.ModuleType("smolagents.tools")
-    tools_module.Tool = type("Tool", (), {})
-    sys.modules["smolagents.tools"] = tools_module
-
-    manager_module = types.ModuleType("nexent.core.agents.context.manager")
-    manager_module.ContextManager = type("ContextManager", (), {})
-    sys.modules[manager_module.__name__] = manager_module
-    models_module = types.ModuleType("nexent.core.agents.context.models")
-    models_module.ContextItem = type("ContextItem", (), {})
-    models_module.ContextItemInput = type("ContextItemInput", (), {})
-    sys.modules[models_module.__name__] = models_module
-    _load("nexent.core.agents.cores.smolagents.context_contracts", "core/context_runtime/contracts.py")
-    managed = _load("nexent.core.agents.cores.smolagents.context", "core/agents/context/runtime.py")
-    return managed, snapshot
+    return context, {}
 
 
 def _restore(snapshot):
-    for name in _BOOTSTRAP_MODULES:
-        previous = snapshot.get(name)
-        if previous is None:
-            sys.modules.pop(name, None)
-        else:
-            sys.modules[name] = previous
+    """No global module replacements are needed for the canonical bridge."""
 
 
 class _Memory:
@@ -112,20 +39,28 @@ class _ContextManager:
     def __init__(self):
         self.calls = []
         self.force_compactions = []
+        self._current_item_cache = {}
+        self._to_json_value = lambda value: value
+        self.build_context_messages = lambda items: []
 
-    def prepare_run_context(self, *, memory, fallback_system_prompt, items=None):
-        self.calls.append(("prepare_run_context", fallback_system_prompt, items))
+    def prepare_items_context(self, *, fallback_system_prompt, items=None):
+        self.calls.append(("prepare_items_context", fallback_system_prompt, items))
         return types.SimpleNamespace(
             stable_messages=({"role": "system", "content": "managed stable"},),
             dynamic_messages=(),
-            selected_item_types=tuple(str(getattr(item, "type", "unknown")) for item in items or ()),
+            selected_item_types=tuple(
+                str(getattr(item, "type", "unknown")) for item in items or ()
+            ),
             items=tuple(items or ()),
         )
 
-    def assemble_final_context(self, **kwargs):
-        self.calls.append(("assemble_final_context", kwargs["purpose"], kwargs.get("tools")))
+    def assemble_context_items(self, **kwargs):
+        self.calls.append(
+            ("assemble_context_items", kwargs["purpose"], kwargs.get("tools"))
+        )
         self.force_compactions.append(kwargs.get("force_compaction", False))
-        contracts = sys.modules["nexent.core.agents.cores.smolagents.context_contracts"]
+        from nexent.core.agents.contracts import context as contracts
+
         return contracts.FinalContext(
             messages=[{"role": "system", "content": kwargs["purpose"]}],
             tools=list(kwargs.get("tools") or ()),
@@ -133,7 +68,13 @@ class _ContextManager:
         )
 
     def get_step_compression_stats(self):
-        return {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cache_hits": 0, "cache_types": []}
+        return {
+            "calls": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_hits": 0,
+            "cache_types": [],
+        }
 
     def get_all_compression_stats(self):
         return {"calls": 1, "records": ["record"]}
@@ -175,9 +116,9 @@ def test_managed_runtime_is_thin_context_manager_adapter():
         )
 
         assert manager.calls == [
-            ("prepare_run_context", "fallback", [item]),
-            ("assemble_final_context", "step", [{"name": "z"}]),
-            ("assemble_final_context", "final_answer", None),
+            ("prepare_items_context", "fallback", [item]),
+            ("assemble_context_items", "step", [{"name": "z"}]),
+            ("assemble_context_items", "final_answer", None),
         ]
         assert final.messages == [{"role": "system", "content": "step"}]
         assert final_answer.messages == [{"role": "system", "content": "final_answer"}]
@@ -194,6 +135,7 @@ def test_managed_runtime_is_thin_context_manager_adapter():
     finally:
         _restore(snapshot)
 
+
 def test_managed_runtime_replaces_items_without_mutating_context_manager():
     managed_module, snapshot = _bootstrap()
     try:
@@ -204,7 +146,7 @@ def test_managed_runtime_replaces_items_without_mutating_context_manager():
         runtime.replace_items([item])
         runtime.prepare_run(memory=_Memory(), fallback_system_prompt="fallback")
 
-        assert manager.calls[0] == ("prepare_run_context", "fallback", [item])
+        assert manager.calls[0] == ("prepare_items_context", "fallback", [item])
     finally:
         _restore(snapshot)
 
@@ -218,7 +160,7 @@ def test_managed_runtime_uses_item_snapshot_without_explicit_prepare_run():
 
         runtime.prepare_step(model=None, memory=_Memory(), current_run_start_idx=0)
 
-        assert manager.calls[0] == ("prepare_run_context", "", [item])
+        assert manager.calls[0] == ("prepare_items_context", "", [item])
     finally:
         _restore(snapshot)
 
@@ -231,7 +173,10 @@ def test_managed_runtime_forces_compaction_for_both_overflow_recovery_paths():
         memory = _Memory()
 
         step = runtime.recover_step(
-            model=None, memory=memory, current_run_start_idx=0, tools=[{"name": "search"}],
+            model=None,
+            memory=memory,
+            current_run_start_idx=0,
+            tools=[{"name": "search"}],
         )
         final_answer = runtime.recover_final_answer(
             model=None,

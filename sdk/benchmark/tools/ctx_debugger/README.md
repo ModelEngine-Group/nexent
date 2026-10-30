@@ -160,7 +160,7 @@ Attach debugger to an agent or `ContextManager`.
 
 ```python
 from ctx_debugger import attach_debugger
-from nexent.core.agents.context import ContextManager
+from nexent.core.agents.context.manager import ContextManager
 
 cm = ContextManager(config=...)
 attach_debugger(cm, trace_path="/tmp/run.jsonl")          # Only attach compression layer

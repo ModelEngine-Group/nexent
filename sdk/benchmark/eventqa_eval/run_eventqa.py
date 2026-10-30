@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Run the EventQA benchmark with the nexent agent.
 
 EventQA (MemoryAgentBench) gives a full novel plus 100 six-choice

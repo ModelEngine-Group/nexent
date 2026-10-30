@@ -303,19 +303,24 @@ for check in summary_checks:
 Run compression on pure text pairs without agent, using the same prompt and schema:
 
 ```python
-from nexent.core.agents.context import compress_history_offline
+from nexent.core.agents.context.config import ContextManagerConfig
+from nexent.core.agents.context.history_compression import HistorySummaryInput
+from nexent.core.agents.context.llm_summary import LLMSummary
+from nexent.core.agents.context.step_renderer import StepRenderer
+from nexent.core.agents.cores.smolagents.context import adapt_context_model
 
-result = compress_history_offline(
-    pairs=[("What user said", "What assistant did"), ...],
-    model=llm_model,
-    config=ContextManagerConfig(),
+summary_input = HistorySummaryInput(
+    previous_summary_markdown=None,
+    new_turns=(("What user said", "What assistant did"),),
+    covered_through_message_id=0,
+).render()
+result = LLMSummary(ContextManagerConfig(), StepRenderer()).generate_summary(
+    summary_input, adapt_context_model(llm_model), call_type="history_summary", prompt_type="initial",
 )
-# result["summary"]: compressed summary
-# result["is_incremental"]: whether incremental compression was used
-# result["is_fallback"]: whether LLM failed and used fallback
-# result["input_text"]: raw text fed to LLM (for debugging)
+# result.summary_text: compressed summary, or None when generation failed
+# result.records: compression call records
 
-eval_text(result["summary"], {"must_contain": ["key_filename"]})
+eval_text(result.summary_text or "", {"must_contain": ["key_filename"]})
 ```
 
 Offline approach advantages:

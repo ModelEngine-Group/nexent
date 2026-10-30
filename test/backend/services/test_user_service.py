@@ -23,7 +23,7 @@ sys.modules['psycopg2'] = MagicMock()
 sys.modules['nexent'] = MagicMock()
 sys.modules['nexent.core'] = MagicMock()
 sys.modules['nexent.core.agents'] = MagicMock()
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
+sys.modules['nexent.core.agents.contracts.config'] = MagicMock()
 sys.modules['nexent.storage'] = MagicMock()
 sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
 sys.modules['nexent.storage.minio_config'] = MagicMock()
@@ -40,7 +40,7 @@ class MockToolConfig(BaseModel):
     description: str = ""
     parameters: dict = {}
 
-sys.modules['nexent.core.agents.agent_model'].ToolConfig = MockToolConfig
+sys.modules['nexent.core.agents.contracts.config'].ToolConfig = MockToolConfig
 
 # Patch storage client factory before imports
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=MagicMock()).start()

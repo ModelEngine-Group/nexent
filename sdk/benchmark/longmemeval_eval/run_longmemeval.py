@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Run the LongMemEval (S*) benchmark with the nexent agent.
 
 LongMemEval (S*) from MemoryAgentBench gives 5 long multi-session dialogues

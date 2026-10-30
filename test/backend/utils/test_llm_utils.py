@@ -109,14 +109,14 @@ sys.modules["nexent.core.models"] = models_mod
 nexent_core_pkg = types.ModuleType("nexent.core")
 nexent_core_pkg.__path__ = [os.path.join(_sdk_nexent_path, "core")]
 sys.modules["nexent.core"] = nexent_core_pkg
-# Stub nexent.core.agents.agent_model: backend/contracts/agent.py (reached via
+# Stub nexent.core.agents.contracts.config: backend/contracts/agent.py (reached via
 # management.db.model.repository) imports AgentVerificationConfig/ToolConfig from
 # it at module level, and the empty __path__ above blocks the real SDK package.
 agents_pkg = types.ModuleType("nexent.core.agents")
 agents_pkg.__path__ = []
 sys.modules["nexent.core.agents"] = agents_pkg
 nexent_core_pkg.agents = agents_pkg
-agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+agent_model_mod = types.ModuleType("nexent.core.agents.contracts.config")
 
 
 class _StubAgentVerificationConfig:  # pylint: disable=too-few-public-methods
@@ -131,7 +131,7 @@ class _StubToolConfig:  # pylint: disable=too-few-public-methods
 
 agent_model_mod.AgentVerificationConfig = _StubAgentVerificationConfig
 agent_model_mod.ToolConfig = _StubToolConfig
-sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+sys.modules["nexent.core.agents.contracts.config"] = agent_model_mod
 agents_pkg.agent_model = agent_model_mod
 gateway_mod = types.ModuleType("nexent.core.gateway")
 for _name in ("EmbeddingContext", "LLMContext", "LongContextLLMContext", "ModelContext", "VLMContext", "get_gateway"):

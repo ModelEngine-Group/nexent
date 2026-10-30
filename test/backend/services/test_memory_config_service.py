@@ -35,8 +35,8 @@ consts_const.DEFAULT_EXTERNAL_PROVIDER_TOP_K = 5
 sys.modules["contracts.constants.environment"] = consts_const
 install_business_constant_stubs(consts_const)
 
-# Stub nexent.core.agents.agent_model for MemoryContext and MemoryUserConfig
-agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+# Stub nexent.core.agents.contracts.config for MemoryContext and MemoryUserConfig
+agent_model_mod = types.ModuleType("nexent.core.agents.contracts.config")
 class MemoryUserConfig:
     def __init__(
         self,
@@ -60,7 +60,7 @@ class MemoryContext:
         self.agent_id = agent_id
 agent_model_mod.MemoryUserConfig = MemoryUserConfig
 agent_model_mod.MemoryContext = MemoryContext
-sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+sys.modules["nexent.core.agents.contracts.config"] = agent_model_mod
 
 # Fake out management.db.client to prevent boto3/MinIO side effects and provide needed APIs
 fake_client = types.ModuleType("management.db.client")

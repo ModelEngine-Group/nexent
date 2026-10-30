@@ -30,8 +30,8 @@ class MockToolConfig(BaseModel):
     parameters: dict = {}
 
 
-sys.modules['nexent.core.agents.agent_model'] = MagicMock()
-sys.modules['nexent.core.agents.agent_model'].ToolConfig = MockToolConfig
+sys.modules['nexent.core.agents.contracts.config'] = MagicMock()
+sys.modules['nexent.core.agents.contracts.config'].ToolConfig = MockToolConfig
 sys.modules['nexent.storage'] = MagicMock()
 sys.modules['nexent.storage.storage_client_factory'] = MagicMock()
 sys.modules['nexent.storage.minio_config'] = MagicMock()

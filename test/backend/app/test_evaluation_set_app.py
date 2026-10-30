@@ -82,7 +82,7 @@ for _name in (
     "nexent",
     "nexent.core",
     "nexent.core.agents",
-    "nexent.core.agents.agent_model",
+    "nexent.core.agents.contracts.config",
     "nexent.core.utils",
     "nexent.memory",
     "nexent.monitor",

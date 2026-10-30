@@ -1,0 +1,46 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-MCP-TERMINAL-GUARD-20261028
+  change_type: bugfix
+  bug_id: JIUWEN-MCP-TERMINAL-GUARD-20261028
+  title: Stop model preparation after a terminal MCP resource failure
+  description: Resource D5 exposed a race where the native loop sent additional model requests
+    before the outer stream consumer observed an already recorded MCP timeout. Check the same
+    terminal error before and after CM preparation without changing cancellation or CM policy.
+  observed_behavior: A native timeout variant recorded one MCP invocation but four model requests
+    because the outer stream consumer observed the terminal resource error after native retries.
+  expected_behavior: A known terminal MCP error blocks every later main-model preparation,
+    preserves the original failure and drains owners before independent recovery.
+  escaped_stage: D3
+  coverage_gap:
+    type: no_gap
+    description: Existing resource D5 already detected excess requests under the failing schedule.
+      Add isolated guard branch assertions and retain the exact runtime call-count requirement.
+  feature_contract_changed: false
+  no_case_change_reason: Existing resource D5 already requires exactly one model request and
+    one blocked MCP invocation, zero side effects, drained owners and successful independent recovery.
+  affected_features:
+    existing:
+    - JIUWEN-RESOURCES
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-RESOURCES-D5-001
+    - JIUWEN-RESOURCES-D3-001
+    modified: []
+    added: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - A recorded terminal MCP error blocks CM preparation and model sending.
+    - A terminal error recorded during CM preparation blocks the prepared model request.
+    - Healthy resources preserve the prepared message result and exception identity.
+    reason: Existing D5 caught excess model requests; isolated guards need branch and
+      exact error-identity assertions without duplicating the runtime Case as a new D1.
+    test_selectors:
+    - test/sdk/core/agents/test_jiuwen_context_terminal_guard.py
+  notes: Observed during SDK R3 verification. Keep the existing strict formal assertions,
+    ModelService transport ownership, saved CM policy and failed-versus-stopped outcome.
