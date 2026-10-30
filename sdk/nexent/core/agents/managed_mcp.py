@@ -67,6 +67,9 @@ class ManagedMCPToolCollection:
         self._startup_error: BaseException | None = None
         self._public_collection = None
         self.tools: list[Any] = []
+        # Servers whose session setup failed; their tools are absent from
+        # self.tools. Populated by _run_async_session before _ready is set.
+        self.connection_failures: tuple[MCPConnectionFailure, ...] = ()
 
     def _session_factory(self):
         if self._session_context_factory is not None:
@@ -118,6 +121,8 @@ class ManagedMCPToolCollection:
         adapter = self._adapter_factory()()
         async with AsyncExitStack() as stack:
             connections = []
+            attribution_failures: list[MCPConnectionFailure] = []
+            terminal_errors: list[BaseException] = []
             for parameters in self.server_parameters:
                 try:
                     connection = await asyncio.wait_for(
@@ -132,17 +137,47 @@ class ManagedMCPToolCollection:
                 except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
                     raise
                 except asyncio.TimeoutError as exc:
-                    raise MCPConnectionTimeoutError(
+                    error = MCPConnectionTimeoutError(
                         f"MCP connection timed out after {self.connect_timeout_seconds:g} seconds"
-                    ) from exc
+                    )
+                    error.__cause__ = exc
                 except Exception as exc:
                     # Attribute the failure to this server so terminal messages
                     # can name it; the original error stays on __cause__.
-                    raise MCPConnectionFailure(
+                    error = MCPConnectionFailure(
                         url=str(parameters.get("url", "unknown")),
                         transport=str(parameters.get("transport", "unknown")),
-                    ) from exc
-                connections.append(connection)
+                    )
+                    error.__cause__ = exc
+                else:
+                    connections.append(connection)
+                    continue
+                attribution = (
+                    error
+                    if isinstance(error, MCPConnectionFailure)
+                    else MCPConnectionFailure(
+                        url=str(parameters.get("url", "unknown")),
+                        transport=str(parameters.get("transport", "unknown")),
+                    )
+                )
+                attribution_failures.append(attribution)
+                terminal_errors.append(error)
+                logger.warning(
+                    "event=mcp_server_connect_failed url=%s transport=%s timeout_seconds=%.3f error_type=%s",
+                    attribution.url,
+                    attribution.transport,
+                    self.connect_timeout_seconds,
+                    type(error.__cause__).__name__,
+                )
+
+            with self._lock:
+                self.connection_failures = tuple(attribution_failures)
+
+            if self.server_parameters and not connections:
+                # Every configured server failed: keep the historical terminal
+                # behavior (first failure in configuration order) so downstream
+                # classifiers in consts/mcp_errors.py still recognize MCP failures.
+                raise terminal_errors[0]
 
             tools = []
             for session, mcp_tools in connections:

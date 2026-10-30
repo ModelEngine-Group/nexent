@@ -336,3 +336,137 @@ def test_connection_cancellation_is_not_wrapped():
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(run_session())
     asyncio.run(manager.shutdown(timeout=1))
+
+
+def _mixed_context_factory(healthy_context, failing_url_marker: str):
+    """Return a session factory that fails only for servers whose url contains the marker."""
+
+    def factory(server_parameters, **_kwargs):
+        if failing_url_marker in str(server_parameters.get("url", "")):
+            return _FailingConnectContext()
+        return healthy_context
+
+    return factory
+
+
+def test_partial_connection_failure_keeps_healthy_servers():
+    """One unreachable server must not drop the tools of the healthy ones."""
+    manager = _manager()
+    scope = RunCancellationScope()
+    exited = threading.Event()
+    healthy = _AsyncMCPContext(_BlockingAsyncSession(threading.Event(), threading.Event()), exited)
+
+    collection = ManagedMCPToolCollection(
+        manager=manager,
+        server_parameters=[
+            {"url": "http://healthy.invalid/mcp", "transport": "streamable-http"},
+            {"url": "http://unreachable.invalid/mcp", "transport": "streamable-http"},
+        ],
+        cancellation_scope=scope,
+        tool_timeout_seconds=1,
+        close_timeout_seconds=0.5,
+        connect_timeout_seconds=1,
+        session_context_factory=_mixed_context_factory(healthy, "unreachable"),
+    )
+    with collection as public_collection:
+        assert len(public_collection.tools) == 1
+        assert len(collection.connection_failures) == 1
+        failure = collection.connection_failures[0]
+        assert failure.url == "http://unreachable.invalid/mcp"
+        assert failure.transport == "streamable-http"
+        assert isinstance(failure.__cause__, ConnectionRefusedError)
+
+    assert exited.wait(1)
+    assert manager.snapshot().active_count == 0
+    asyncio.run(manager.shutdown(timeout=1))
+
+
+def test_all_servers_failing_raises_first_failure_in_order():
+    """When every server fails, the first failure in configuration order stays terminal."""
+    manager = _manager()
+    scope = RunCancellationScope()
+
+    class _OtherFailureContext:
+        async def __aenter__(self):
+            raise OSError("boom")
+
+        async def __aexit__(self, exc_type, exc_value, traceback):
+            return False
+
+    def factory(server_parameters, **_kwargs):
+        if "other" in str(server_parameters.get("url", "")):
+            return _OtherFailureContext()
+        return _FailingConnectContext()
+
+    with pytest.raises(MCPConnectionFailure) as exc_info:
+        with ManagedMCPToolCollection(
+            manager=manager,
+            server_parameters=[
+                {"url": "http://first.invalid/mcp", "transport": "streamable-http"},
+                {"url": "http://other.invalid/mcp", "transport": "streamable-http"},
+            ],
+            cancellation_scope=scope,
+            tool_timeout_seconds=1,
+            close_timeout_seconds=0.5,
+            connect_timeout_seconds=1,
+            session_context_factory=factory,
+        ):
+            pass
+
+    assert exc_info.value.url == "http://first.invalid/mcp"
+    assert isinstance(exc_info.value.__cause__, ConnectionRefusedError)
+    assert manager.snapshot().active_count == 0
+    asyncio.run(manager.shutdown(timeout=1))
+
+
+def test_all_servers_timing_out_still_raises_connection_timeout():
+    """All-fail via timeouts keeps the MCPConnectionTimeoutError terminal class."""
+    manager = _manager()
+    scope = RunCancellationScope()
+
+    class SlowConnectContext:
+        async def __aenter__(self):
+            await asyncio.sleep(1)
+            return _BlockingAsyncSession(threading.Event(), threading.Event()), []
+
+        async def __aexit__(self, exc_type, exc_value, traceback):
+            return False
+
+    with pytest.raises(MCPConnectionTimeoutError, match="0.05 seconds"):
+        with ManagedMCPToolCollection(
+            manager=manager,
+            server_parameters=[
+                {"url": "http://slow-1.invalid/mcp", "transport": "streamable-http"},
+                {"url": "http://slow-2.invalid/mcp", "transport": "streamable-http"},
+            ],
+            cancellation_scope=scope,
+            tool_timeout_seconds=1,
+            close_timeout_seconds=0.5,
+            connect_timeout_seconds=0.05,
+            session_context_factory=lambda *_args, **_kwargs: SlowConnectContext(),
+        ):
+            pass
+
+    asyncio.run(manager.shutdown(timeout=1))
+
+
+def test_empty_server_list_still_enters_with_no_tools():
+    """An empty server list keeps today's behavior: enter, no tools, no failures."""
+    manager = _manager()
+    scope = RunCancellationScope()
+
+    collection = ManagedMCPToolCollection(
+        manager=manager,
+        server_parameters=[],
+        cancellation_scope=scope,
+        tool_timeout_seconds=1,
+        close_timeout_seconds=0.5,
+        connect_timeout_seconds=1,
+        session_context_factory=lambda *_args, **_kwargs: _FailingConnectContext(),
+    )
+    with collection as public_collection:
+        assert public_collection.tools == []
+        assert collection.connection_failures == ()
+
+    assert manager.snapshot().active_count == 0
+    asyncio.run(manager.shutdown(timeout=1))
