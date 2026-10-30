@@ -3,12 +3,16 @@
 
 import json
 import logging
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from smolagents.agents import EMPTY_PROMPT_TEMPLATES
 from smolagents.memory import ActionStep, TaskStep, ToolCall
+from smolagents.models import ChatMessage, Model
 from smolagents.monitoring import Timing
+from smolagents.tools import Tool
 from smolagents.utils import AgentExecutionError
 from test_guardrail_checkpoints import KEYWORD, _make_step_agent, _msg
 
@@ -17,9 +21,66 @@ from nexent.core.agents.context import ContextManager, ContextManagerConfig
 from nexent.core.agents.context.execution_history import ExecutionHistory, summarize_record
 from nexent.core.agents.context.models import ContextItem, ContextItemInput
 from nexent.core.agents.context.rendering import ContextItemRenderer
+from nexent.core.agents.context.runtime import ManagedContextRuntime
 from nexent.core.agents.core_agent import CoreAgent
 from nexent.core.agents.sandbox import _install_host_tool_bridge
 from nexent.core.tools.read_execution_output_tool import ReadExecutionOutputTool
+from nexent.core.utils.observer import MessageObserver
+
+
+@pytest.mark.parametrize("history_enabled", [False, True])
+@pytest.mark.parametrize("explicit_system", [False, True])
+@pytest.mark.parametrize("tool_item", [False, True])
+def test_ac_r4_execution_contract_preserves_configured_prompt_in_model_requests(
+    history_enabled, explicit_system, tool_item,
+):
+    requests = []
+
+    class CaptureModel(Model):
+        def generate(self, messages, **kwargs):
+            requests.append(json.dumps(messages, default=str))
+            return ChatMessage(role="assistant", content="<final_answer>done</final_answer>")
+
+    class OrdinaryTool(Tool):
+        name = "ordinary_tool"
+        description = "ORDINARY_TOOL_DOCUMENTATION_SENTINEL"
+        inputs = {}
+        output_type = "string"
+
+        def forward(self):
+            raise AssertionError("This prompt test must not execute a tool")
+
+    observer = MessageObserver(lang="en")
+    if history_enabled:
+        observer.execution_history = ExecutionHistory()
+    tool = OrdinaryTool()
+    items = [ContextItemInput(id="system:caller", type="system", content={"text": "CALLER_SYSTEM_SENTINEL"})]
+    if not explicit_system:
+        items = []
+    if tool_item:
+        items.append(ContextItemInput(id="tool:ordinary", type="tool", content={
+            "name": tool.name, "description": tool.description, "inputs": tool.inputs, "output_type": tool.output_type,
+        }, metadata={"render_group": "tools", "language": "en"}))
+    runtime = ManagedContextRuntime(ContextManager(), items)
+    templates = deepcopy(EMPTY_PROMPT_TEMPLATES)
+    templates["system_prompt"] = (
+        "CONFIGURED_INSTRUCTION_SENTINEL\n"
+        "{% for tool in tools.values() %}{{ tool.name }}: {{ tool.description }}\n{% endfor %}"
+    )
+    agent = CoreAgent(observer=observer, model=CaptureModel(model_id="unit"), tools=[tool],
+                      prompt_templates=templates, context_runtime=runtime, max_steps=1, verbosity_level=0)
+    for _ in range(2):
+        assert agent.run("Finish now") == "done"
+    assert len(requests) == 2
+    for request in requests:
+        assert ("CALLER_SYSTEM_SENTINEL" in request) == explicit_system
+        assert request.count("CONFIGURED_INSTRUCTION_SENTINEL") == int(not explicit_system)
+        assert ("ORDINARY_TOOL_DOCUMENTATION_SENTINEL" in request) == (not explicit_system or tool_item)
+        assert request.count("Only the runtime emits CODE_EXEC_RESULT") == int(history_enabled)
+        if history_enabled:
+            assert "read_execution_output" in request
+        if history_enabled and not explicit_system:
+            assert request.index("CONFIGURED_INSTRUCTION_SENTINEL") < request.index("Only the runtime emits")
 
 
 def test_reader_bridge_keeps_live_history_and_callback_on_host():

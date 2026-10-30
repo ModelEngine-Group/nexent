@@ -2,6 +2,7 @@
 """Regression contracts for finalized execution summary/recall and exact messages."""
 import json
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -246,7 +247,7 @@ def test_ac014_structured_summary_content_and_no_savings_are_handled():
     assert summarize_record(record, model, 20000) is None
 
 
-def runtime_agent():
+def runtime_agent(prompt_templates=None):
     from smolagents.models import Model
     from nexent.core.agents.core_agent import CoreAgent
     from nexent.core.agents.context.runtime import ManagedContextRuntime
@@ -265,7 +266,8 @@ def runtime_agent():
     }, metadata=metadata)
     runtime = ManagedContextRuntime(ContextManager(), [existing])
     agent = CoreAgent(observer=observer, model=UnitModel(model_id='unit'), tools=[],
-                      name='history_lifecycle', context_runtime=runtime, max_steps=2)
+                      name='history_lifecycle', context_runtime=runtime, max_steps=2,
+                      prompt_templates=prompt_templates)
     return agent, observer, runtime, metadata
 
 
@@ -345,12 +347,17 @@ def test_ac003_legacy_observation_fallback_keeps_masking_and_empty_success(obser
 
 
 def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs():
+    from smolagents.agents import EMPTY_PROMPT_TEMPLATES
     from smolagents.models import ChatMessage, MessageRole, TokenUsage
     from nexent.core.utils.observer import ProcessType
 
-    agent, observer, runtime, _ = runtime_agent()
+    # Keep prompt cost controlled so the small budget tests reader clipping,
+    # independently of the SDK's full default instruction/tool template.
+    templates = deepcopy(EMPTY_PROMPT_TEMPLATES)
+    templates['system_prompt'] = 'Execute the requested code and return the final answer.'
+    agent, observer, runtime, _ = runtime_agent(prompt_templates=templates)
     store = observer.execution_history
-    runtime.context_manager.config.effective_input_limit_tokens = 5000
+    runtime.context_manager.config.effective_input_limit_tokens = 6000
     runtime.context_manager.config.policy_layers = {'request': {'processing_mode': 'passthrough'}}
     old_owner = agent._execution_owner
     publish = observer.add_message
@@ -381,7 +388,7 @@ def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs
         '<final_answer>done</final_answer>',
     ]
     agent.model.generate = Mock(side_effect=[ChatMessage(role=MessageRole.ASSISTANT, content=body,
-        token_usage=TokenUsage(input_tokens=4000, output_tokens=100)) for body in responses])
+        token_usage=TokenUsage(input_tokens=5000, output_tokens=100)) for body in responses])
     assert str(agent.run('Print a report once, read its original range, then finish.', max_steps=3)) == 'done'
     assert agent._execution_owner != old_owner
     assert agent.tools['read_execution_output'].owner == agent._execution_owner

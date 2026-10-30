@@ -3,14 +3,14 @@ change:
   change_id: AGENT-HISTORY-REVIEW-20261030
   change_type: bugfix
   bug_id: AGENT-HISTORY-REVIEW-20261030
-  title: Preserve host reader registration, failed-output masking and standalone compaction
-  description: Repair three regressions in PR4264 without changing history persistence or guardrail policy.
-  observed_behavior: Stateful reader is serialized remotely, partial failure bypasses output screening, and actions without a history store cannot compact.
-  expected_behavior: Host bridge keeps live reader state; failure output is screened before publication and storage; unreferenced actions have bounded previews at the existing threshold.
+  title: Preserve history reader, output masking, standalone compaction and fallback prompts
+  description: Repair four regressions in PR4264 without changing history persistence or guardrail policy.
+  observed_behavior: Stateful reader is serialized remotely, partial failure bypasses output screening, actions without a history store cannot compact, and the execution contract suppresses fallback instructions.
+  expected_behavior: Host bridge keeps live reader state; failure output is screened before publication and storage; unreferenced actions have bounded previews at the existing threshold; fallback instructions and ordinary tool documentation precede the additive execution contract.
   escaped_stage: unknown
   coverage_gap:
     type: missing_boundary
-    description: Existing UT tests successful masking and bound-record compaction, but not actual reader bridge registration, failure-after-output masking or no-store compaction.
+    description: Existing UT tests successful masking and bound-record compaction, but not actual reader bridge registration, failure-after-output masking no-store compaction or fallback prompt preservation when the contract is the first system item.
   feature_contract_changed: false
   affected_features:
     existing: [F-171, F-183]
@@ -28,6 +28,7 @@ change:
     - Register the real reader through the host bridge and retain history ownership and callbacks.
     - Screen local and sandbox partial output and error text before history, persistence, recall and summary input.
     - Compact unreferenced actions only at the existing adaptive threshold without mutating original steps or inventing references.
+    - Preserve configured fallback instructions and ordinary tool documentation alongside the execution contract in actual model requests; retain explicit-system precedence and history-disabled behavior across repeated runs.
     test_selectors:
     - test/sdk/core/agents/test_execution_history_review_regressions.py
     - test/sdk/core/agents/test_execution_history_compaction.py
@@ -47,4 +48,5 @@ change:
     and UT-SDK-AUTO-FD74C47E39BAE2FC for existing threshold/checkpoint compatibility.
     Eager/deferred factory construction must enable the bridge for the injected reader even without business tools.
     Actual runtime evidence and traditional UT results are recorded separately in the SPEC evidence.
+    AC-R4 adds actual model-request assertions for empty and tool-only context inputs; prior runtime evidence used explicit system context and did not cover this boundary.
     No new formal stage or unrelated historical coverage expansion.

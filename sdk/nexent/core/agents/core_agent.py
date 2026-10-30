@@ -617,6 +617,13 @@ class CoreAgent(CodeAgent):
             context_manager.config.execution_history = self._execution_history
             if "read_execution_output" in self.tools:
                 raise ValueError("read_execution_output is reserved for execution history")
+            # The additive contract must not suppress the caller's fallback
+            # instructions and ordinary tool documentation during preparation.
+            if not any(item.type == "system" for item in self.context_runtime.items):
+                self.context_runtime.items.append(ContextItemInput(
+                    id="system:fallback", type="system", content={"text": self.system_prompt},
+                    metadata={"layout_order": -1, "runtime_fallback": True},
+                ))
             self.tools["read_execution_output"] = ReadExecutionOutputTool(
                 self._execution_history, self._execution_owner,
                 lambda: setattr(self, "_execution_loaded", True),
