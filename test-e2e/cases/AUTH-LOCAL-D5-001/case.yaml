@@ -16,6 +16,7 @@ case:
   preconditions:
   - Isolated test process and dependency runtime available.
   - Disposable PostgreSQL source and target databases available.
+  - Docker available for an isolated source-stack cleanup proof using owned containers only.
   test_data:
     profile: local isolated synthetic users, no external credentials
   steps:
@@ -36,6 +37,12 @@ case:
       conflicting metadata.
     expected: Role/email move to account, original associations and credentials survive,
       replay preserves local edits, and conflicts roll back all schema/data changes.
+  - order: 5
+    action: Upgrade legacy API-only memberships and keys, then replay against old disabled placeholders and explicitly disabled/deleted identities.
+    expected: Empty-email USER/DEV identities with historical keys and active membership become passwordless active accounts; original keys and IDs survive, replay preserves subsequent disablement, and normal/deleted identities remain unavailable.
+  - order: 6
+    action: Apply an import using an isolated stopped Supabase source DB and owned Auth/Kong containers; exercise failure and preview before a successful apply.
+    expected: Preview/failure preserve the stack; successful committed apply removes its DB/Auth/Kong containers without deleting data volumes, backups or unrelated containers.
   expected_results:
   - Successful identity behavior matches the preserved HTTP/data contract.
   - Negative paths reject access or writes deterministically.
@@ -43,6 +50,8 @@ case:
     account counters.
   - Canonical user_email/user_role exist only on accounts; old membership columns
     are removed atomically and credential-pending rows are hydrated safely.
+  - API-only account upgrades preserve existing keys, keep password login disabled and never reactivate explicitly disabled or deleted accounts on replay.
+  - Source containers are reclaimed only after a successful local apply and all persistent data is retained.
   forbidden_side_effects:
   - No plaintext password/hash/token/DSN in returned errors or logs; no writes to
     unrelated users.
@@ -54,11 +63,15 @@ case:
     - 2
     - 3
     - 4
+    - 5
+    - 6
     expected_results:
     - 1
     - 2
     - 3
     - 4
+    - 5
+    - 6
     forbidden_side_effects:
     - 1
   risk_type: DEPLOYMENT

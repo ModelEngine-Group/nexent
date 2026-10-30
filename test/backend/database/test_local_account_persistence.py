@@ -98,6 +98,30 @@ def test_create_account_keeps_explicit_identity(session):
     assert account.create_account("user@example.com", user_id="original", db_session=session)["user_id"] == "original"
 
 
+def test_explicit_api_only_account_has_no_email_or_password(session):
+    result = account.create_account(None, user_id="api-user", api_only=True, created_by="admin", db_session=session)
+    stored = session.add.call_args.args[0]
+    assert result["user_id"] == "api-user"
+    assert stored.user_email is stored.password_hash is stored.password_hash_scheme is stored.email_confirmed_at is None
+    assert stored.account_status == "active" and stored.password_login_enabled is False
+    assert stored.source_metadata == {"api_only": True}
+    assert stored.created_by == stored.updated_by == "admin"
+    assert all("account-email:None" not in str(call) for call in session.execute.call_args_list)
+
+
+@pytest.mark.parametrize("email,encoded", [("api@example.com", None), (None, "hash")])
+def test_api_only_mode_cannot_smuggle_password_credentials(session, email, encoded):
+    with pytest.raises(ValueError, match="API-only"):
+        account.create_account(email, encoded, api_only=True, db_session=session)
+    session.add.assert_not_called()
+
+
+def test_normal_account_creation_still_requires_email(session):
+    with pytest.raises(ValueError, match="Invalid account email"):
+        account.create_account(None, db_session=session)
+    session.add.assert_not_called()
+
+
 def test_delete_account_disables_login_and_invalidates_existing_tokens(session):
     account.delete_account("identity", session)
     query = compiled(session.execute.call_args.args[0])

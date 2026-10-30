@@ -12,12 +12,15 @@ from management.db.client import get_db_session
 from management.db.models import UserAccount
 
 
-def lock_account_keys(session, user_id: str, email: str) -> None:
+def lock_account_keys(session, user_id: str, email: str | None) -> None:
     # Migration holds the exclusive form, avoiding one advisory lock per source
     # row while keeping online creation serialized against the full import.
     session.execute(text("SELECT pg_advisory_xact_lock_shared(hashtext('account-writers'))"))
     # Stable ordering prevents cross-key deadlocks between online writers.
-    for key in sorted({f"account-id:{user_id}", f"account-email:{email}"}):
+    keys = {f"account-id:{user_id}"}
+    if email is not None:
+        keys.add(f"account-email:{email}")
+    for key in sorted(keys):
         session.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": key}
         )
@@ -50,10 +53,14 @@ def get_account_by_email(email: str, db_session=None):
     )
 
 
-def create_account(email: str, password_hash=None, *, user_id=None, db_session=None):
+def create_account(email: str | None, password_hash=None, *, user_id=None, db_session=None,
+                   api_only=False, created_by=None):
+    """Create a login identity or an explicitly passwordless, email-free API identity."""
     user_id = user_id or str(uuid4())
-    email = str(email).strip().lower()
-    if (
+    if api_only and (email is not None or password_hash is not None):
+        raise ValueError("API-only accounts cannot have an email or password")
+    email = None if api_only else str(email or "").strip().lower()
+    if not api_only and (
         not email
         or len(email) > 255
         or email.count("@") != 1
@@ -62,7 +69,7 @@ def create_account(email: str, password_hash=None, *, user_id=None, db_session=N
         raise ValueError("Invalid account email")
     with get_db_session(db_session) as session:
         lock_account_keys(session, user_id, email)
-        if get_account(user_id, session) or get_account_by_email(email, session):
+        if get_account(user_id, session) or (email is not None and get_account_by_email(email, session)):
             raise AccountConflictError("Email already exists")
         from infrastructure.security.passwords import password_scheme
 
@@ -76,11 +83,11 @@ def create_account(email: str, password_hash=None, *, user_id=None, db_session=N
             password_login_enabled=bool(password_hash),
             account_status="active",
             token_version=0,
-            email_confirmed_at=datetime.utcnow(),
-            created_by=user_id,
-            updated_by=user_id,
+            email_confirmed_at=None if api_only else datetime.utcnow(),
+            created_by=created_by or user_id,
+            updated_by=created_by or user_id,
             delete_flag="N",
-            source_metadata={},
+            source_metadata={"api_only": True} if api_only else {},
         )
         session.add(account)
         session.flush()

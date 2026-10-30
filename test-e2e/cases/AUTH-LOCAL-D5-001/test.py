@@ -27,6 +27,74 @@ from deploy.sql.tools.supabase_to_postgres.migration import (
 from infrastructure.security.passwords import verify_password
 
 
+def test_legacy_api_only_keys_survive_upgrade_and_replay(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.engine import URL
+    from sqlalchemy.orm import sessionmaker
+    from management.db.client import db_client
+    from management.db import models
+    from gateway.authentication import northbound_auth
+
+    sql = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    with disposable_database() as dsn:
+        params = parse_dsn(dsn)
+        engine = create_engine(URL.create("postgresql+psycopg2", username=params["user"], password=params["password"], host=params["host"], port=int(params["port"]), database=params["dbname"]))
+        try:
+            with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+                cursor.execute("CREATE SCHEMA nexent")
+                cursor.execute("CREATE TABLE nexent.user_tenant_t (user_id varchar(100), tenant_id varchar(100), user_role varchar(30), user_email varchar(255), delete_flag varchar(1) DEFAULT 'N')")
+            models.UserTokenInfo.__table__.create(engine)
+            with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+                cursor.executemany("INSERT INTO nexent.user_tenant_t VALUES (%s,'tenant',%s,%s,%s)", [
+                    ("api", "USER", None, "N"), ("revoked", "DEV", "", "N"),
+                    ("normal", "USER", "normal@example.com", "N"), ("unknown", "USER", None, "N"),
+                    ("deleted", "USER", None, "Y"), ("admin", "SU", None, "N"),
+                ])
+                for token_id, uid in enumerate(["api", "revoked", "normal", "deleted", "admin"], 1):
+                    cursor.execute("INSERT INTO nexent.user_token_info_t (token_id,access_key,user_id,delete_flag) VALUES (%s,%s,%s,%s)",
+                                   (token_id, "nexent-original-" + uid, uid, "Y" if uid == "revoked" else "N"))
+                cursor.execute(sql)
+                cursor.execute("SELECT user_id,account_status,password_login_enabled,password_hash,user_email,source_metadata,delete_flag FROM nexent.user_account_t")
+                rows = {r[0]: r[1:] for r in cursor.fetchall()}
+                assert rows["api"][:4] == rows["revoked"][:4] == ("active", False, None, None)
+                assert rows["api"][4] == {"api_only": True}
+                assert all(rows[uid][0] == "disabled" for uid in ["normal", "unknown", "deleted", "admin"])
+                assert rows["deleted"][-1] == "Y"
+                # Repair a placeholder produced by the previous draft migration.
+                cursor.execute("UPDATE nexent.user_account_t SET account_status='disabled',source_metadata='{" + '"credential_migration_pending":true' + "}',updated_by='account-schema-migration' WHERE user_id='api'")
+                cursor.execute(sql)
+                cursor.execute("SELECT account_status FROM nexent.user_account_t WHERE user_id='api'")
+                assert cursor.fetchone()[0] == "active"
+                cursor.execute("UPDATE nexent.user_account_t SET account_status='disabled',source_metadata=%s,updated_by='operator' WHERE user_id='revoked'",
+                               (Json({"credential_migration_pending": True}),))
+                cursor.execute(sql)
+                cursor.execute("SELECT account_status FROM nexent.user_account_t WHERE user_id='revoked'")
+                assert cursor.fetchone()[0] == "disabled"
+            with monkeypatch.context() as patch:
+                patch.setattr(db_client, "session_maker", sessionmaker(bind=engine))
+                assert northbound_auth.validate_bearer_token("nexent-original-api")[0]
+                assert not northbound_auth.validate_bearer_token("nexent-original-revoked")[0]
+                assert not northbound_auth.validate_bearer_token("nexent-original-deleted")[0]
+                with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+                    cursor.execute("UPDATE nexent.user_account_t SET account_status='disabled',updated_by='operator' WHERE user_id='api'")
+                    cursor.execute(sql)
+                assert not northbound_auth.validate_bearer_token("nexent-original-api")[0]
+            with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+                cursor.execute("SELECT access_key,user_id FROM nexent.user_token_info_t ORDER BY user_id")
+                assert cursor.fetchall() == [("nexent-original-" + uid, uid) for uid in sorted(["api", "revoked", "normal", "deleted", "admin"])]
+        finally:
+            engine.dispose()
+
+
+def test_successful_apply_reclaims_source_stack_and_retains_data(target):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("auth_source_cleanup", Path(__file__).with_name("source_cleanup.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.assert_source_cleanup(ROOT, target)
+
+
 @pytest.fixture
 def target():
     with disposable_database() as dsn:
@@ -235,7 +303,7 @@ def test_account_migration_serializes_online_creation_with_one_writer_lock(targe
 
 
 def test_account_profile_single_sql_upgrade_and_replay():
-    sql = (ROOT / "deploy/sql/migrations/v2.8.1_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    sql = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
     original = historical_user()
     pending = historical_user()
     pending["email"] = "pending@example.com"
@@ -278,7 +346,7 @@ def test_account_profile_single_sql_upgrade_and_replay():
 
 @pytest.mark.parametrize("role,email", [("SU","same@example.com"),("USER","different@example.com")])
 def test_account_profile_conflict_rolls_back_single_sql(role, email):
-    sql = (ROOT / "deploy/sql/migrations/v2.8.1_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    sql = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
     with disposable_database() as dsn:
         with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
             cursor.execute("CREATE SCHEMA nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),user_role varchar(30),user_email varchar(255),delete_flag varchar(1) DEFAULT 'N')")

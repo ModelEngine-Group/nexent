@@ -77,6 +77,24 @@ CREATE TABLE IF NOT EXISTS nexent.user_account_t (
         ALTER TABLE nexent.user_tenant_t DROP COLUMN IF EXISTS user_role;
         ALTER TABLE nexent.user_tenant_t DROP COLUMN IF EXISTS user_email;
     END IF;
+    -- Historical API-only users have no auth.users row. Token evidence and an
+    -- active USER/DEV membership distinguish them from incomplete login users.
+    -- Only untouched migration placeholders may be activated; replay must not
+    -- undo explicit account disablement, deletion or credential changes.
+    IF to_regclass('nexent.user_token_info_t') IS NOT NULL AND to_regclass('nexent.user_tenant_t') IS NOT NULL THEN
+        UPDATE nexent.user_account_t a SET
+            account_status='active',
+            user_email=NULL,
+            source_metadata=(a.source_metadata - 'credential_migration_pending') || '{"api_only":true}'::jsonb,
+            updated_by='account-schema-migration', update_time=CURRENT_TIMESTAMP
+        WHERE a.delete_flag='N' AND a.account_status='disabled'
+          AND nullif(trim(a.user_email),'') IS NULL AND upper(a.user_role) IN ('USER','DEV')
+          AND a.password_hash IS NULL AND a.token_version=0 AND NOT a.password_login_enabled
+          AND a.source_metadata->>'credential_migration_pending'='true'
+          AND a.updated_by='account-schema-migration'
+          AND EXISTS (SELECT 1 FROM nexent.user_tenant_t u WHERE u.user_id=a.user_id AND u.delete_flag='N')
+          AND EXISTS (SELECT 1 FROM nexent.user_token_info_t t WHERE t.user_id=a.user_id);
+    END IF;
     IF EXISTS (SELECT lower(trim(user_email)) FROM nexent.user_account_t WHERE delete_flag='N' AND user_email IS NOT NULL GROUP BY lower(trim(user_email)) HAVING count(*)>1) THEN
         RAISE EXCEPTION 'Duplicate account emails; resolve before migration';
     END IF;
@@ -84,14 +102,14 @@ CREATE INDEX IF NOT EXISTS ix_user_account_user_id ON nexent.user_account_t (use
 CREATE INDEX IF NOT EXISTS ix_user_account_email ON nexent.user_account_t (user_email);
 COMMENT ON COLUMN nexent.user_account_t.account_id IS 'Technical account record identifier';
 COMMENT ON COLUMN nexent.user_account_t.user_id IS 'Stable user UUID; account service serializes identity uniqueness';
-COMMENT ON COLUMN nexent.user_account_t.user_email IS 'Normalized lowercase login email; service serializes uniqueness';
+COMMENT ON COLUMN nexent.user_account_t.user_email IS 'Normalized lowercase login email; null for API-only users or pending legacy profiles';
 COMMENT ON COLUMN nexent.user_account_t.password_hash IS 'Encoded password hash; never exposed by user APIs';
 COMMENT ON COLUMN nexent.user_account_t.password_hash_scheme IS 'Hash scheme: scrypt or imported bcrypt';
 COMMENT ON COLUMN nexent.user_account_t.password_login_enabled IS 'Whether password authentication is permitted';
 COMMENT ON COLUMN nexent.user_account_t.account_status IS 'Authentication state: active or disabled';
 COMMENT ON COLUMN nexent.user_account_t.token_version IS 'Credential revision invalidating earlier JWTs';
 COMMENT ON COLUMN nexent.user_account_t.email_confirmed_at IS 'UTC email confirmation time; null if unconfirmed';
-COMMENT ON COLUMN nexent.user_account_t.source_metadata IS 'Migration provider/user metadata snapshot; never grants permissions';
+COMMENT ON COLUMN nexent.user_account_t.source_metadata IS 'Migration/provider provenance and API-only identity marker; never grants permissions';
 COMMENT ON COLUMN nexent.user_account_t.created_by IS 'Creating user or migration actor';
 COMMENT ON COLUMN nexent.user_account_t.create_time IS 'UTC creation time';
 COMMENT ON COLUMN nexent.user_account_t.updated_by IS 'Last updating user or migration actor';

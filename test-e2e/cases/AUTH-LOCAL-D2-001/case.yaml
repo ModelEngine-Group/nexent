@@ -24,9 +24,13 @@ case:
   - order: 2
     action: Exercise invalid/expired/disabled credentials and legacy refresh.
     expected: Invalid authentication is rejected and refresh does not extend credentials.
+  - order: 3
+    action: Batch-create API-only identities through the real northbound HTTP route, authenticate their keys and reject password login; force a later batch write to fail.
+    expected: Accounts have no email/password and remain active; account/membership/group/key writes commit together or all roll back, and deleted or disabled identities are denied.
   expected_results:
   - Successful identity behavior matches the preserved HTTP/data contract.
   - Negative paths reject access or writes deterministically.
+  - API-only users retain valid keys with no password login and atomic batch persistence.
   forbidden_side_effects:
   - No plaintext password/hash/token/DSN in returned errors or logs; no writes to
     unrelated users.
@@ -36,9 +40,11 @@ case:
     steps:
     - 1
     - 2
+    - 3
     expected_results:
     - 1
     - 2
+    - 3
     forbidden_side_effects:
     - 1
   contract:

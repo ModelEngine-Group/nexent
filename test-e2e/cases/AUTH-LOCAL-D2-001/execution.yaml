@@ -6,6 +6,7 @@ implementations:
   selector: AUTH-LOCAL-D2-001
 acceptance_bindings:
   AC-01:
+  - test_api_only_batch_http_and_atomic_rollback
   - test_native_http_identity_password_and_api_keys
   - test_native_http_invalid_duplicate_disabled_and_refresh
   - test_native_http_cas_sid_revocation_remains_effective

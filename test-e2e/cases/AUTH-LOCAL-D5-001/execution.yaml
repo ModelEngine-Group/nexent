@@ -6,6 +6,8 @@ implementations:
   selector: AUTH-LOCAL-D5-001
 acceptance_bindings:
   AC-01:
+  - test_legacy_api_only_keys_survive_upgrade_and_replay
+  - test_successful_apply_reclaims_source_stack_and_retains_data
   - test_account_migration_retains_original_password_and_repeat_safety
   - test_account_migration_conflict_rolls_back_all_users
   - test_account_migration_keeps_orphans_disabled

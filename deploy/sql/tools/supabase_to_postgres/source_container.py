@@ -62,3 +62,18 @@ def prepare_source(params, container=None, *, allow_start=True):
     host = binding.get("HostIp") or "127.0.0.1"
     params["host"] = "127.0.0.1" if host == "0.0.0.0" else "::1" if host == "::" else host
     params["port"] = int(binding["HostPort"])
+    return container
+
+
+def source_stack_configuration(values, container):
+    """Resolve only the selected local source and configured legacy peers."""
+    from deploy.sql.tools.supabase_to_postgres.legacy_stack import configuration
+
+    return configuration({**values, "SUPABASE_MIGRATION_DB_CONTAINER": container})[0]
+
+
+def cleanup_source_stack(values):
+    """Remove source DB/Auth/Kong containers without deleting persistent volumes."""
+    from deploy.sql.tools.supabase_to_postgres.legacy_stack import execute
+
+    execute("down", values)

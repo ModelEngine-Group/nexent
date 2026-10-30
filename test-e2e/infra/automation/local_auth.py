@@ -49,6 +49,6 @@ def initialize_target(dsn):
         )
         cursor.execute(
             (
-                ROOT / "deploy/sql/migrations/v2.8.1_001_local_user_accounts.sql"
+                ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql"
             ).read_text(encoding="utf-8")
         )

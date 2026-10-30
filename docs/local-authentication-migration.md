@@ -36,7 +36,7 @@ metadata are never returned by identity APIs.
 1. Back up both the original Supabase database and business PostgreSQL. Retain
    those backups until account, provider-binding and ownership checks finish.
    Freeze registration, password changes and provider binding during cutover.
-2. Apply `deploy/sql/migrations/v2.8.1_001_local_user_accounts.sql` using the normal
+2. Apply `deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql` using the normal
    migration runner, or apply this additive migration to the target manually.
    Do not alter the historical initialization/merged SQL files.
 3. Run the migration on the deployment host with Python 3.11 and the backend
@@ -162,14 +162,14 @@ and standard record/audit fields. Existing HTTP payloads keep their `email` keys
 association query results project role/email from the account for compatibility.
 
 All schema upgrade steps are integrated into
-`deploy/sql/migrations/v2.8.1_001_local_user_accounts.sql` as one atomic DO block.
+`deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql` as one atomic DO block.
 It upgrades an older account `email` column, adds missing profile columns, checks
 conflicting IDs/emails/roles, transfers old association metadata, and only then
 drops the old association role/email columns. Original active association values
 are preferred; deleted-only identities stay deleted. Ambiguous old identities
 cause rollback instead of arbitrary role selection.
 
-If a legacy association has no account, the SQL creates a disabled account with
+Except for recognized API-only users, if a legacy association has no account, the SQL creates a disabled account with
 the original UUID, role/email and a credential-pending marker. The host importer
 then fills its original credentials. Its `updated` counter reports these hydrated
 accounts; `inserted` counts genuinely new records, and `skipped` counts accounts
@@ -182,6 +182,22 @@ password. Keep the original data/backup until both SQL and account import finish
 Deleting account rows after the old columns have been removed also deletes that
 identity's canonical role/email; SQL replay cannot recover intentionally removed
 metadata from an association-only table.
+
+## API-only identities and source cleanup
+
+API-only users do not need Supabase credentials. The 2.9.0 migration recognizes
+active empty-email USER/DEV memberships with historical token evidence and keeps
+their original keys usable through active, passwordless local accounts. Untouched
+pending placeholders from the earlier draft are repaired on replay; explicit
+disablement/deletion and revoked keys remain effective. New API-only batches
+create accounts, memberships, group links and keys in one transaction.
+
+For local sources, a successful host-side `migrate.py --apply` also stops and
+removes the selected DB and configured Supabase Auth/Kong containers, retaining
+data volumes and backups. Preview or import failure preserves the stack. Configure
+custom legacy container names as described in the migration-tool README. Cleanup
+failure after a committed import is reported separately and does not undo the
+migrated accounts. Remote-source connections do not remove local containers.
 
 ## Initial administrator credential output
 

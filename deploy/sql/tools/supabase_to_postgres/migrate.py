@@ -11,7 +11,9 @@ ROOT = Path(__file__).resolve().parents[4]
 sys.path[:0] = [str(ROOT), str(ROOT / "backend")]
 
 from deploy.sql.tools.supabase_to_postgres.settings import MigrationSetupError, connections, load_settings
-from deploy.sql.tools.supabase_to_postgres.source_container import prepare_source
+from deploy.sql.tools.supabase_to_postgres.source_container import (
+    cleanup_source_stack, prepare_source, source_stack_configuration,
+)
 
 
 def main():
@@ -29,10 +31,15 @@ def main():
         MigrationConflict, read_source_users, import_users,
     )
 
+    cleanup_started = False
     try:
-        source_params, target_params, managed = connections(load_settings(args.env_file))
+        values = load_settings(args.env_file)
+        source_params, target_params, managed = connections(values)
+        cleanup_values = None
         if managed or args.source_container:
-            prepare_source(source_params, args.source_container, allow_start=not args.no_start_source)
+            selected = prepare_source(source_params, args.source_container, allow_start=not args.no_start_source)
+            if args.apply:
+                cleanup_values = source_stack_configuration(values, selected)
         deadline = time.monotonic() + args.wait_timeout
         while True:
             try:
@@ -56,13 +63,18 @@ def main():
                 result = import_users(target, rows, dry_run=not args.apply)
         finally:
             target.close()
+        if cleanup_values is not None:
+            cleanup_started = True
+            cleanup_source_stack(cleanup_values)
+            print("Removed source Supabase DB/Auth/Kong containers; data volumes and backups were retained.", file=sys.stderr)
         print(json.dumps(result))
         return 0
     except (MigrationConflict, MigrationSetupError) as exc:
-        print("Account migration preflight rejected: " + str(exc), file=sys.stderr)
+        prefix = "Account migration committed; source cleanup failed: " if cleanup_started else "Account migration preflight rejected: "
+        print(prefix + str(exc), file=sys.stderr)
         return 1
     except Exception as exc:
-        print("Account migration failed (" + type(exc).__name__
+        print(("Account migration committed; source cleanup failed (" if cleanup_started else "Account migration failed (") + type(exc).__name__
               + "); inspect prerequisites and run preflight again.", file=sys.stderr)
         return 1
 

@@ -16,6 +16,70 @@ sys.path.insert(0, str(ROOT / "test-e2e/infra/automation"))
 from local_auth_http import native_runtime, runtime, register, bearer  # noqa: F401
 
 
+def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
+    from sqlalchemy import select, func
+    from management.db.client import get_db_session
+    from management.db.identity.token import create_token
+    from management.db.identity.user_tenant import update_user_tenant_role
+    from management.services.permission import api_keys
+    from gateway.api import northbound as routes
+    from gateway.authentication import northbound_auth
+
+    client, auth, helpers, models = runtime
+    client.app.include_router(routes.router)
+    monkeypatch.setattr(routes, "record_security_event", lambda *a, **kw: None)
+    admin = register(client)["user"]["id"]
+    assert update_user_tenant_role(admin, "ADMIN", admin)
+    admin_key = create_token("nexent-local-admin-key", admin)["access_key"]
+    with get_db_session() as session:
+        group = models.TenantGroupInfo(tenant_id="tenant-native", group_name="API-only regression", created_by=admin, updated_by=admin)
+        session.add(group)
+        session.flush()
+        group_id = group.group_id
+    response = client.post("/nb/v1/api-users/batch", headers=bearer(admin_key), json={"role": "DEV", "group_id": group_id, "count": 2})
+    assert response.status_code == 201, response.text
+    users = response.json()["data"]
+    assert len(users) == 2 and len({u["user_id"] for u in users}) == 2
+    for user in users:
+        assert northbound_auth.validate_bearer_token(user["api_key"])[0]
+        with get_db_session() as session:
+            account = session.execute(select(models.UserAccount).where(models.UserAccount.user_id == user["user_id"])).scalar_one()
+            assert account.account_status == "active" and account.user_role == "DEV"
+            assert account.user_email is account.password_hash is account.email_confirmed_at is None
+            assert not account.password_login_enabled
+            assert session.query(models.TenantGroupUser).filter_by(user_id=user["user_id"], group_id=group_id).count() == 1
+    assert client.post("/api/user/signin", json={"email": "", "password": "Password123"}).status_code in {401, 422}
+
+    measured = [models.UserAccount, models.UserTenant, models.UserTokenInfo, models.TenantGroupUser]
+    def counts():
+        with get_db_session() as session:
+            return [session.execute(select(func.count()).select_from(model)).scalar_one() for model in measured]
+    before = counts()
+    real_create = api_keys.create_token
+    writes = []
+    def fail_second(*args, **kwargs):
+        writes.append(args)
+        if len(writes) == 2:
+            raise RuntimeError("synthetic second-key failure")
+        return real_create(*args, **kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(api_keys, "create_token", fail_second)
+        with pytest.raises(RuntimeError, match="second-key failure"):
+            client.post("/nb/v1/api-users/batch", headers=bearer(admin_key), json={"role": "USER", "group_id": group_id, "count": 2})
+    assert counts() == before
+    refreshed = client.post("/nb/v1/api-keys/refresh", headers=bearer(admin_key), json={"user_id": users[0]["user_id"]})
+    assert refreshed.status_code == 200, refreshed.text
+    current_key = refreshed.json()["data"]["api_key"]
+    assert northbound_auth.validate_bearer_token(current_key)[0]
+    assert not northbound_auth.validate_bearer_token(users[0]["api_key"])[0]
+    for state in ["disabled", "deleted"]:
+        with get_db_session() as session:
+            account = session.execute(select(models.UserAccount).where(models.UserAccount.user_id == users[0]["user_id"])).scalar_one()
+            account.account_status = "disabled" if state == "disabled" else "active"
+            account.delete_flag = "Y" if state == "deleted" else "N"
+        assert not northbound_auth.validate_bearer_token(current_key)[0]
+
+
 def test_native_http_identity_password_and_api_keys(runtime):
     client, auth, helpers, models = runtime
     from gateway.authentication import northbound_auth as northbound
@@ -81,7 +145,6 @@ def test_native_http_identity_password_and_api_keys(runtime):
 
 def test_native_http_invalid_duplicate_disabled_and_refresh(runtime):
     client, auth, helpers, models = runtime
-    from gateway.authentication import northbound_auth as northbound
     data = register(client)
     token = data["session"]["access_token"]
     duplicate = client.post(
@@ -142,7 +205,6 @@ def test_native_http_invalid_duplicate_disabled_and_refresh(runtime):
 
 def test_native_http_cas_sid_revocation_remains_effective(runtime):
     client, auth, helpers, models = runtime
-    from gateway.authentication import northbound_auth as northbound
     data = register(client)
     user_id = data["user"]["id"]
     from management.db.client import get_db_session
@@ -178,7 +240,6 @@ def test_native_http_cas_sid_revocation_remains_effective(runtime):
 
 def test_native_account_bootstrap_and_cas_provisioning(runtime):
     client, auth, helpers, models = runtime
-    from gateway.authentication import northbound_auth as northbound
     from infrastructure.security.account_cli import bootstrap_super_admin
     from contracts.errors.exceptions import AccountConflictError
     from management.db.identity.account import get_account_by_email
@@ -201,7 +262,7 @@ def test_native_account_bootstrap_and_cas_provisioning(runtime):
         bootstrap_super_admin("another-su@example.com", "", check_only=True)
     account = get_account_by_email("suadmin@nexent.com")
     assert verify_password("BootstrapPass123", account["password_hash"])
-    data = register(client)
+    register(client)
     with pytest.raises(AccountConflictError):
         bootstrap_super_admin("native@example.com", "Password123")
     principal = CasPrincipal(

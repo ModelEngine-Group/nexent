@@ -14,7 +14,7 @@ file is rewritten. Normal backend/SDK environment configuration is unaffected.
 ## Default flow
 
 1. Back up both databases and freeze account/password/provider-binding writes.
-2. Apply `deploy/sql/migrations/v2.8.1_001_local_user_accounts.sql` to the existing
+2. Apply `deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql` to the existing
    application PostgreSQL if the deployment SQL runner has not done so.
 3. Run the host-side preview. It never writes account rows.
 
@@ -32,9 +32,11 @@ For a default local source the tool discovers the existing Supabase database
 container, including names such as `supabase_db` and `supabase-db-mini`. If it is
 stopped, the tool starts that existing container and waits up to 30 seconds for
 PostgreSQL. It uses the published host port reported by Docker. It never creates
-an empty source, recreates containers, changes volumes or stops the source after
-migration. A dry-run may start the existing source container but never imports
-rows. If multiple candidates exist, select one explicitly:
+an empty source or changes data volumes. After a successful local `--apply`
+commits, it stops and removes the selected source DB plus the configured legacy
+Auth/Kong containers. A preview or failed import retains the stack for inspection
+and retry. A dry-run may start the existing source container but never imports
+rows or removes containers. If multiple candidates exist, select one explicitly:
 
 ```sh
 python deploy/sql/tools/supabase_to_postgres/migrate.py --source-container supabase_db
@@ -44,6 +46,32 @@ Use `--no-start-source` to reject a stopped container and `--wait-timeout 60` to
 allow a longer startup. A missing source container requires recovery of the old
 container/data or reachable SUPABASE_POSTGRES_HOST/PORT settings; the tool cannot reconstruct
 passwords from tenant membership alone.
+
+The selected DB name is used for cleanup. Auth/Kong default to
+`supabase-auth-mini` and `supabase-kong-mini`; set
+`SUPABASE_MIGRATION_AUTH_CONTAINER` / `SUPABASE_MIGRATION_KONG_CONTAINER` in the
+existing deployment environment if the source stack uses different names. Cleanup
+uses exact names, never application-wide Compose down, and does not delete data
+volumes or backups. A remote source selected only by HOST/PORT does not cause
+local container removal. If cleanup fails after commit, the command reports
+`Account migration committed; source cleanup failed`; the accounts remain
+migrated. Correct Docker access/configuration and use `legacy_stack.py down` with
+the original source names to finish cleanup; repeating the importer is safe.
+
+## Historical API-only identities
+
+API-only users created by the batch endpoint have no Supabase `auth.users` row.
+The 2.9.0 SQL recognizes an active USER/DEV membership with an empty email and
+historical token evidence, retains the original UUID and API Key, and makes the
+account active with password login disabled. A revoked key stays revoked. A
+normal login identity, deleted membership, or identity without this evidence stays
+disabled until its normal credential migration completes.
+
+The same SQL repairs untouched pending placeholders created by the earlier draft
+migration, even when the old membership columns have already been removed. It
+does not reactivate an account subsequently disabled/deleted or modified by an
+operator. Batch creation now writes the passwordless account, membership, group
+link and key in one transaction, so a later failure rolls back the entire batch.
 
 ## Restore a stopped or removed legacy stack manually
 
@@ -168,7 +196,7 @@ are read.
 
 ## Canonical account profile upgrade
 
-Apply the single `v2.8.1_001_local_user_accounts.sql` before importing. It moves
+Apply the single `v2.9.0_001_local_user_accounts.sql` before importing. It moves
 legacy role/email into `user_account_t.user_role/user_email`, removes their old
 association columns and preserves the original user UUID. Disabled placeholders
 created by SQL are filled by `--apply`; this appears in the `updated` counter.

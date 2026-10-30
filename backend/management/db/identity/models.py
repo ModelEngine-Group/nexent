@@ -250,7 +250,7 @@ class UserAccount(TableBase):
     account_id = Column(Integer, Sequence("user_account_t_account_id_seq", schema=SCHEMA),
                         primary_key=True, comment="Technical account record identifier")
     user_id = Column(String(100), nullable=False, comment="Stable UUID; service-serialized identity uniqueness")
-    user_email = Column(String(255), comment="Normalized login email; null only for disabled legacy identities pending credential migration")
+    user_email = Column(String(255), comment="Normalized login email; null for API-only identities or legacy profiles pending migration")
     user_role = Column(String(30), comment="Canonical account role transferred from membership and maintained by identity services")
     password_hash = Column(String(512), comment="Encoded local or imported password hash; never returned to API callers")
     password_hash_scheme = Column(String(30), comment="Password encoding scheme: scrypt or imported bcrypt")
@@ -262,7 +262,7 @@ class UserAccount(TableBase):
                            comment="Credential revision; password changes invalidate earlier JWTs")
     email_confirmed_at = Column(TIMESTAMP(timezone=False), comment="UTC email confirmation time, null if unconfirmed")
     source_metadata = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"),
-                             comment="Migration-only provider/user metadata snapshot; never grants permissions")
+                             comment="Migration/provider provenance and API-only identity marker; never grants permissions")
 
 # Read projections preserve established association query/response contracts.
 # These expressions create no role/email columns on the association table.

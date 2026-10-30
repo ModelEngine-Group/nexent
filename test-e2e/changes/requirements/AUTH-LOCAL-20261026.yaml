@@ -25,6 +25,9 @@ change:
   traditional_ut:
     decision: strengthen
     test_selectors:
+    - test/backend/services/test_api_key_service.py
+    - test/backend/services/test_auth_migration_cleanup.py
+    - test/backend/database/test_group_shared_session.py
     - test/backend/database/test_local_account_persistence.py
     - test/backend/services/test_local_account_cli.py
     - test/backend/services/test_local_provider_provisioning.py
@@ -50,6 +53,8 @@ change:
     - test/backend/app/test_oauth_app.py
     - test/backend/app/test_cas_app.py
     behaviors:
+    - API-only null-email accounts remain passwordless; account/membership/group/key writes share a transaction.
+    - Only committed local applies reclaim source DB/Auth/Kong; preview, failure and remote sources retain containers/data.
     - Password success/invalid/boundary and legacy hash compatibility.
     - JWT expiry/tamper/disabled/deleted account rejection and provider provisioning.
     - Migration dry-run/idempotence/conflict and no secret disclosure.
