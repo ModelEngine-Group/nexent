@@ -46,6 +46,7 @@ class ExecutionHistory:
         self._records: dict[str, ExecutionRecord] = {}
         self._references: dict[str, str] = {}
         self._read_chars: dict[str, int] = {}
+        self._rendered_budget: dict[str, int | None] = {}
 
     def register(self, owner: str, fields: dict[str, str]) -> str:
         key = uuid4().hex
@@ -73,9 +74,11 @@ class ExecutionHistory:
             self._references[reference] = key
             record.ready.set()
 
-    def reset_read_budget(self, owner: str) -> None:
+    def reset_read_budget(self, owner: str, max_rendered_chars: int | None = None) -> None:
+        """Set the current action allowance after accounting for existing context."""
         with self._lock:
             self._read_chars[owner] = 0
+            self._rendered_budget[owner] = None if max_rendered_chars is None else max(0, max_rendered_chars)
 
     def read(self, owner: str, reference: str, offset: int = 0, max_chars: int = 4000) -> str:
         if not re.fullmatch(r"message:[1-9]\d*/unit-index:\d+", reference):
@@ -95,8 +98,31 @@ class ExecutionHistory:
             if available <= 0:
                 raise ValueError("Execution read budget exhausted for this action")
             end = min(len(text), offset + min(max_chars, available))
+            budget = self._rendered_budget.get(owner)
+
+            def payload_at(stop):
+                return json.dumps({"text": text[offset:stop], "next_offset": stop, "eof": stop == len(text)}, ensure_ascii=False)
+
+            # JSON quoting and result XML escaping also consume the next request.
+            if budget is not None:
+                low, high = offset, end
+                while low < high:
+                    middle = (low + high + 1) // 2
+                    if len(escape(payload_at(middle))) + 80 <= budget:
+                        low = middle
+                    else:
+                        high = middle - 1
+                end = low
+                if end == offset and offset < len(text):
+                    raise ValueError("Insufficient context budget for execution output; request a smaller range later")
+                if len(escape(payload_at(end))) + 80 > budget:
+                    raise ValueError("Insufficient context budget for execution output metadata")
+            payload = payload_at(end)
             self._read_chars[owner] = self._read_chars.get(owner, 0) + end - offset
-        return json.dumps({"text": text[offset:end], "next_offset": end, "eof": end == len(text)}, ensure_ascii=False)
+            if budget is not None:
+                self._rendered_budget[owner] = budget - len(escape(payload)) - 80
+        return payload
+
 
 
 def summarize_record(record: ExecutionRecord, model: Any, input_limit: int) -> str | None:

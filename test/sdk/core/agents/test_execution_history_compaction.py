@@ -164,3 +164,24 @@ def test_read_tool_marks_success_only_after_authorized_read():
     on_read.assert_called_once()
     with pytest.raises(PermissionError):tool.forward('message:6/unit-index:2')
     on_read.assert_called_once()
+
+
+def test_ac009_remaining_context_budget_counts_json_and_xml_escaping():
+    from html import escape
+    store, key = bound_history({'OUTPUT': '"<&\\' * 5000})
+    store.reset_read_budget('owner', max_rendered_chars=500)
+    payload = store.read('owner', 'message:5/unit-index:2', 0, 4000)
+    value = json.loads(payload)
+    assert 0 < value['next_offset'] < 4000
+    assert len(escape(payload)) + 80 <= 500
+    with pytest.raises(ValueError, match='context budget'):
+        store.read('owner', 'message:5/unit-index:2', value['next_offset'], 4000)
+
+
+def test_ac009_zero_remaining_budget_is_explicit_and_does_not_consume_data():
+    store, _ = bound_history()
+    store.reset_read_budget('owner', max_rendered_chars=0)
+    with pytest.raises(ValueError, match='context budget'):
+        store.read('owner', 'message:5/unit-index:2')
+    store.reset_read_budget('owner', max_rendered_chars=1000)
+    assert json.loads(store.read('owner', 'message:5/unit-index:2', 0, 10))['next_offset'] == 10
