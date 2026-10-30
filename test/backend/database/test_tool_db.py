@@ -110,6 +110,7 @@ sys.modules['backend.database.db_models'] = db_models_mock
 
 # Mock agent_db module
 agent_db_mock = MagicMock()
+agent_db_mock.is_system_agent = MagicMock(return_value=False)
 agent_db_mock.logger = MagicMock()
 
 # Add the mocked agent_db module to sys.modules

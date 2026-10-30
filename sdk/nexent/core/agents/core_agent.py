@@ -621,6 +621,14 @@ class CoreAgent(CodeAgent):
                 self._execution_history, self._execution_owner,
                 lambda: setattr(self, "_execution_loaded", True),
             )
+            tool_metadata = next(
+                (item.metadata for item in self.context_runtime.items
+                 if item.type == "tool" and item.metadata.get("render_group")),
+                {"render_group": "tools", "language": self.lang},
+            )
+            self.context_runtime.items.append(
+                self.tools["read_execution_output"].context_item(tool_metadata)
+            )
             self.context_runtime.items.append(ContextItemInput(
                 id="system:execution_result_contract", type="system", content={"text": (
                     "CODE_EXEC_RESULT records are runtime evidence of code already executed. "

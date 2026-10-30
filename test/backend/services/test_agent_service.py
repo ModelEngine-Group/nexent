@@ -177,10 +177,10 @@ _thread_lifecycle_module.runtime_thread_manager = MagicMock()
 _thread_lifecycle_module.runtime_thread_manager.run = AsyncMock(
     side_effect=_run_managed
 )
-_thread_lifecycle_module.runtime_thread_manager.submit.return_value = MagicMock(
+_thread_lifecycle_module.runtime_thread_manager.submit = MagicMock(return_value=MagicMock(
     execution_id="execution-test",
     future=MagicMock(done=MagicMock(return_value=True)),
-)
+))
 _thread_lifecycle_module.runtime_thread_manager.wait_until_started = AsyncMock()
 _thread_lifecycle_module.config_thread_manager = MagicMock()
 sys.modules["infrastructure.concurrency"] = _thread_lifecycle_module
@@ -201,6 +201,7 @@ context_input_mock.ContextInput = MockContextInput
 sys.modules["nexent.core.agents.context_input"] = context_input_mock
 context_items_mock = types.ModuleType("nexent.core.agents.context")
 context_items_mock.ContextItemInput = MagicMock()
+context_items_mock.__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents/context")]
 sys.modules["nexent.core.agents.context"] = context_items_mock
 
 # Mock other nexent submodules
@@ -418,9 +419,14 @@ agent_run_manager_module.AgentRunConcurrencyExceededError = (
     _AgentRunConcurrencyExceededError
 )
 agent_run_manager_module.agent_run_manager = MagicMock()
-agent_run_manager_module.agent_run_manager.reserve_agent_capacity.return_value = (
-    "agent-capacity-test"
+agent_run_manager_module.agent_run_manager.reserve_agent_capacity = MagicMock(
+    return_value="agent-capacity-test"
 )
+# Give monkeypatch concrete attributes rather than dynamically synthesized children.
+for _method in ("reserve_agent_run", "release_agent_run_reservation",
+                "unregister_agent_run", "get_agent_run_info", "stop_agent_run"):
+    setattr(agent_run_manager_module.agent_run_manager, _method,
+            getattr(agent_run_manager_module.agent_run_manager, _method))
 sys.modules["agents.agent_run_manager"] = agent_run_manager_module
 sys.modules["agents.preprocess_manager"] = MagicMock()
 
@@ -566,7 +572,10 @@ sys.modules["management.db.serialization"].convert_string_to_list = lambda s: (
     s.split(",") if s else []
 )
 
-sys.modules["management.services.configuration.tenant.settings"] = MagicMock()
+tenant_settings_mock = MagicMock()
+tenant_settings_mock.tenant_config_manager = MagicMock()
+tenant_settings_mock.tenant_config_manager.get_model_config = MagicMock()
+sys.modules["management.services.configuration.tenant.settings"] = tenant_settings_mock
 sys.modules["management.services.agent.prompt"] = MagicMock()
 sys.modules["management.services.model.invocation"] = MagicMock()
 sys.modules["infrastructure.observability.bootstrap"] = MagicMock()

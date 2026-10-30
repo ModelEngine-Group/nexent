@@ -23,3 +23,14 @@ class ReadExecutionOutputTool(Tool):
         result = self.history.read(self.owner, output_ref, offset, max_chars)
         self.on_read()
         return result
+
+    def context_item(self, metadata):
+        """Describe the executable reader in the same resource list as other tools."""
+        from ..agents.context.models import ContextItemInput
+
+        return ContextItemInput(
+            id=f"tool:{self.name}", type="tool",
+            content={"name": self.name, "description": self.description,
+                     "inputs": self.inputs, "output_type": self.output_type},
+            source=(f"tool:{self.name}",), priority=50, metadata=dict(metadata),
+        )

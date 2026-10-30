@@ -60,3 +60,47 @@ case:
     latency.
   cleanup:
   - Remove only task test resources after retaining sanitized evidence.
+  acceptance:
+  - id: AC-01
+    description: Accepted code appears once followed by actual execution evidence,
+      including false values and partial errors.
+    steps:
+    - 1
+    expected_results:
+    - 1
+  - id: AC-02
+    description: Only selected finished results are summarized once, replacing the
+      full result with a stable reference.
+    steps:
+    - 2
+    expected_results:
+    - 2
+  - id: AC-03
+    description: Recall authorized original ranges without rerunning business tools;
+      deny unauthorized references and preserve loaded text for the next request.
+    steps:
+    - 3
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-04
+    description: Persist original content and summary with the real message and unit
+      index; preserve browser history.
+    steps:
+    - 4
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 2
+  - id: AC-05
+    description: Inspect Phoenix prompts and results for masking compatibility, observed
+      latency, and the final answer.
+    steps:
+    - 5
+    expected_results:
+    - 1
+    - 2
+    forbidden_side_effects:
+    - 3

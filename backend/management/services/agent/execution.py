@@ -366,7 +366,12 @@ async def _stream_agent_chunks(
     frontend_skill_files: list[dict] = []
     from nexent.core.agents.context.execution_history import ExecutionHistory
     from management.services.agent.stream import bind_execution_result_unit, finalize_execution_result_units
-    execution_history = ExecutionHistory()
+    from database.conversation_db import load_execution_result_content
+    execution_history = ExecutionHistory(
+        read_persisted=lambda message_id, unit_index: load_execution_result_content(
+            user_id, tenant_id, agent_request.conversation_id, message_id, unit_index,
+        ),
+    )
     buffered_units: list[dict[str, Any]] = []
     buffered_search_records: list[dict[str, Any]] = []
     buffered_image_urls: list[str] = []
@@ -934,6 +939,10 @@ async def _stream_agent_chunks(
                     automation_proposals=buffered_automation_proposals,
                     user_id=user_id,
                     tenant_id=tenant_id,
+                )
+                execution_history.mark_persisted(
+                    streaming_message_id,
+                    (unit["unit_index"] for unit in buffered_units if unit["type"] == "execution_result"),
                 )
             except Exception:
                 persistence_failed = True

@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass, field
 from html import escape
 from threading import Event, Lock, RLock
-from typing import Any
+from typing import Any, Callable, Iterable
 from uuid import uuid4
 
 
@@ -24,6 +24,7 @@ class ExecutionRecord:
     reference: str | None = None
     attempted: bool = False
     called: bool = False
+    persisted: bool = False
     ready: Event = field(default_factory=Event)
     summary_lock: Lock = field(default_factory=Lock)
 
@@ -41,8 +42,9 @@ class ExecutionRecord:
 class ExecutionHistory:
     """One trusted run scope; ownership cannot be supplied by model arguments."""
 
-    def __init__(self):
+    def __init__(self, read_persisted: Callable[[int, int], str] | None = None):
         self._lock = RLock()
+        self._read_persisted = read_persisted
         self._records: dict[str, ExecutionRecord] = {}
         self._references: dict[str, str] = {}
         self._read_chars: dict[str, int] = {}
@@ -74,6 +76,14 @@ class ExecutionHistory:
             self._references[reference] = key
             record.ready.set()
 
+    def mark_persisted(self, message_id: int, unit_indices: Iterable[int]) -> None:
+        """Switch only committed units to the trusted Backend read callback."""
+        with self._lock:
+            for index in unit_indices:
+                key = self._references.get(f"message:{message_id}/unit-index:{index}")
+                if key is not None:
+                    self._records[key].persisted = True
+
     def reset_read_budget(self, owner: str, max_rendered_chars: int | None = None) -> None:
         """Set the current action allowance after accounting for existing context."""
         with self._lock:
@@ -91,7 +101,13 @@ class ExecutionHistory:
             record = self._records.get(self._references.get(reference, ""))
             if record is None or record.owner != owner:
                 raise PermissionError("Execution result is unavailable or not authorized")
-            text = record.text
+            if record.persisted and self._read_persisted is not None:
+                message, index = reference.split("/unit-index:")
+                text = self._read_persisted(int(message.removeprefix("message:")), int(index))
+                if not isinstance(text, str):
+                    raise ValueError("Invalid persisted execution content")
+            else:
+                text = record.text
             if offset > len(text):
                 raise ValueError("Offset exceeds execution result")
             available = 16000 - self._read_chars.get(owner, 0)
