@@ -54,13 +54,18 @@ class TestA2AHttpClientInit:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("preference", [{}, {"ssl_verify": True}, {"ssl_verify": False}])
     async def test_certificate_verification_connector(self, mocker, preference):
+        """Regression (v2.8.3 hotfix): verification is hardcoded off.
+
+        The ssl_verify preference must no longer influence the connector, so
+        self-signed A2A endpoints work regardless of the stored preference.
+        """
         from infrastructure.http import a2a
 
         connector = mocker.patch.object(a2a.aiohttp, "TCPConnector")
         session = mocker.patch.object(a2a.aiohttp, "ClientSession")
         session.return_value.close = AsyncMock()
         async with a2a.A2AHttpClient(**preference):
-            assert connector.call_args.kwargs["ssl"] is preference.get("ssl_verify", True)
+            assert connector.call_args.kwargs["ssl"] is False
 
     def test_default_initialization(self):
         """Test default initialization values."""

@@ -46,8 +46,13 @@ class A2AHttpClient:
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def __aenter__(self):
+        # Hotfix (v2.8.3): TLS verification is hardcoded off so self-signed
+        # A2A endpoints work (discovery and catalog operations); the ssl_verify
+        # preference is kept for signature compatibility but no longer affects
+        # the transport. This intentionally diverges from develop; keep or
+        # re-land when merging.
         connector = aiohttp.TCPConnector(
-            ssl=self.ssl_verify,
+            ssl=False,
             limit=100,
             limit_per_host=20,
             ttl_dns_cache=300,

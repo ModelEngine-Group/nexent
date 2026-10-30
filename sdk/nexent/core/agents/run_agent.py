@@ -293,13 +293,19 @@ def _create_mcp_http_client_without_proxy(
     timeout: httpx.Timeout | None = None,
     auth: httpx.Auth | None = None,
 ) -> httpx.AsyncClient:
-    """Create an MCP HTTP client that ignores proxy environment variables."""
+    """Create an MCP HTTP client that ignores proxy environment variables.
+
+    Hotfix (v2.8.3): also disables TLS certificate verification so that
+    self-signed external MCP endpoints work at runtime. This intentionally
+    diverges from develop; keep or re-land when merging develop.
+    """
     return httpx.AsyncClient(
         headers=headers,
         timeout=timeout,
         auth=auth,
         follow_redirects=True,
         trust_env=False,
+        verify=False,
     )
 
 

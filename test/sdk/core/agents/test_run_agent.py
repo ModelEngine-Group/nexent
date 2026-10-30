@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import asyncio
 import types
 import json
@@ -910,7 +912,11 @@ def test_mcp_timeout_message_uses_english_and_effective_timeout(basic_agent_run_
 
 
 def test_normalize_mcp_config_bypasses_proxy_only_when_requested():
-    """Test that proxy bypass is represented as a transport-local factory."""
+    """Test that proxy bypass is represented as a transport-local factory.
+
+    Hotfix (v2.8.3): the factory must also disable TLS certificate
+    verification so self-signed external MCP endpoints work at runtime.
+    """
     result = run_agent._normalize_mcp_config(
         {
             "url": "http://localhost:5011/sse",
@@ -926,9 +932,10 @@ def test_normalize_mcp_config_bypasses_proxy_only_when_requested():
         is run_agent._create_mcp_http_client_without_proxy
     )
 
-    client = result["httpx_client_factory"]()
-    assert client._trust_env is False
-    asyncio.run(client.aclose())
+    with patch.object(run_agent.httpx, "AsyncClient") as constructor:
+        result["httpx_client_factory"]()
+        assert constructor.call_args.kwargs["trust_env"] is False
+        assert constructor.call_args.kwargs["verify"] is False
 
 
 def test_normalize_mcp_config_keeps_proxy_by_default():
