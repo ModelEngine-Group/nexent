@@ -3,12 +3,135 @@
 """Immutable model descriptors and capacity suggestion contracts."""
 
 import math
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from enum import Enum
+
+
+class ModelProfileSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    key: str = Field(min_length=1, max_length=200)
+    revision: str = Field(min_length=1, max_length=100)
+
+
+class ModelProfileProviderInfo(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    base_url: str = Field(min_length=1, max_length=500)
+    provider_id: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    ssl_verify: bool = True
+    timeout_seconds: int = Field(default=120, gt=0, lt=2**31)
+    concurrency_limit: Optional[int] = Field(default=None, gt=0, lt=2**31)
+
+
+class ModelOutletContextPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    combined_window: Optional[int] = Field(default=None, gt=0, lt=2**31, strict=True)
+    input_limit: Optional[int] = Field(default=None, gt=0, lt=2**31, strict=True)
+    output_limit: Optional[int] = Field(default=None, gt=0, lt=2**31, strict=True)
+
+
+class ModelOutletContextConfigurationPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    output_reserve_tokens: Optional[int] = Field(default=None, gt=0, lt=2**31, strict=True)
+    tokenizer_family: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    capacity_source: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    capability_profile_version: Optional[str] = Field(default=None, min_length=1, max_length=100)
+
+
+ThinkingControlFormat = Literal["profile_default", "enable_thinking", "thinking_type", "chat_template"]
+
+
+class ModelProfilePreviewRequest(BaseModel):
+    """Selection inputs only; clients cannot author effective capabilities or bindings."""
+    model_config = ConfigDict(extra="forbid")
+    selection_mode: Literal["auto", "manual"] = "auto"
+    model_profile: Optional[ModelProfileSelection] = None
+    provider_profile: Optional[ModelProfileSelection] = None
+    catalog_revision: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    provider_info: ModelProfileProviderInfo
+    request_model_id: str = Field(min_length=1, max_length=100)
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    protocol_id: Literal["openai_chat_completions"] = "openai_chat_completions"
+    authentication_scheme: Literal["bearer_token_v1", "no_auth_v1"] = "bearer_token_v1"
+    parameter_values: Dict[str, Any] = Field(default_factory=dict)
+    extra_api_parameters: List[Dict[str, Any]] = Field(default_factory=list)
+    http_headers: Dict[str, str] = Field(default_factory=dict, repr=False)
+    context_limits: Optional[ModelOutletContextPatch] = None
+    context_configuration: Optional[ModelOutletContextConfigurationPatch] = None
+    thinking_control: Optional[ThinkingControlFormat] = None
+    thinking_mode: Optional[Literal["default", "effort", "budget_tokens"]] = None
+
+
+class ModelOutletCreateRequest(ModelProfilePreviewRequest):
+    check_receipt: Optional[str] = Field(default=None, max_length=1024, repr=False)
+    api_key: Optional[str] = Field(default=None, max_length=500, repr=False)
+
+
+class ModelOutletConnectionPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    base_url: Optional[str] = Field(default=None, min_length=1, max_length=500)
+    ssl_verify: Optional[bool] = None
+    timeout_seconds: Optional[int] = Field(default=None, gt=0, lt=2**31, strict=True)
+    concurrency_limit: Optional[int] = Field(default=None, gt=0, lt=2**31, strict=True)
+
+
+class ModelOutletPatchRequest(BaseModel):
+    check_receipt: Optional[str] = Field(default=None, max_length=1024, repr=False)
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(gt=0, lt=2**31, strict=True)
+    parameter_values: Dict[str, Any] = Field(default_factory=dict)
+    delete_parameters: List[str] = Field(default_factory=list, max_length=128)
+    connection: Optional[ModelOutletConnectionPatch] = None
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    api_key: Optional[str] = Field(default=None, max_length=500, repr=False)
+    http_headers: Optional[Dict[str, Optional[str]]] = Field(default=None, repr=False)
+    extra_api_parameters: Optional[List[Dict[str, Any]]] = None
+    context_limits: Optional[ModelOutletContextPatch] = None
+    context_configuration: Optional[ModelOutletContextConfigurationPatch] = None
+    thinking_control: Optional[ThinkingControlFormat] = None
+    thinking_mode: Optional[Literal["default", "effort", "budget_tokens"]] = None
+
+
+class ConversationModelPreferencePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=0, lt=2**31 - 1, strict=True)
+    parameter_values: Dict[str, Any] = Field(default_factory=dict)
+    delete_parameters: List[str] = Field(default_factory=list, max_length=128)
+
+
+class ConversationModelSelectionPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=0, lt=2**31 - 1, strict=True)
+    selected_model_id: int = Field(gt=0, lt=2**31, strict=True)
+
+
+class ModelOutletMigrationReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_revision: int = Field(gt=0, lt=2**31, strict=True)
+
+
+class ModelOutletValidationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    outlet_id: Optional[int] = Field(default=None, gt=0, lt=2**31, strict=True)
+    expected_revision: Optional[int] = Field(default=None, gt=0, lt=2**31, strict=True)
+    draft: Optional[ModelOutletCreateRequest] = None
+    patch: Optional[ModelOutletPatchRequest] = None
+
+    @model_validator(mode="after")
+    def require_single_source(self):
+        if (self.outlet_id is None) == (self.draft is None):
+            raise ValueError("Select exactly one draft or saved outlet")
+        if self.outlet_id is None and self.expected_revision is not None:
+            raise ValueError("A draft has no saved revision")
+        if self.patch is not None and self.outlet_id is None:
+            raise ValueError("A patch requires a saved outlet")
+        if self.patch is not None and self.expected_revision not in (None, self.patch.expected_revision):
+            raise ValueError("Conflicting saved revisions")
+        return self
 
 
 ProfileKey = tuple[str, str]
@@ -201,6 +324,9 @@ class ProviderModelRequest(BaseModel):
     # safe value; operators pointing at self-signed internal endpoints must
     # opt out explicitly instead of verification being silently disabled.
     ssl_verify: bool = True
+
+    timeout_seconds: int = Field(default=120, gt=0, lt=2**31)
+    http_headers: Dict[str, str] = Field(default_factory=dict, repr=False)
 
 
 class BatchCreateModelsRequest(BaseModel):
@@ -484,12 +610,12 @@ class ManageProviderModelCreateRequest(BaseModel):
     )
     # v2.6.0: model_type is now optional. When omitted, returns all models and
     # infers type from model name. When provided, behavior is unchanged.
-    model_type: Optional[str] = Field(
-        None,
-        description="Model type (e.g., 'llm', 'embedding'). Optional since v2.6.0.",
-    )
-    api_key: Optional[str] = Field("", description="API key for the provider")
-    base_url: Optional[str] = Field("", description="Base URL for the provider API")
+    model_type: Optional[str] = Field(None, description="Model type (e.g., 'llm', 'embedding'). Optional since v2.6.0.")
+    api_key: Optional[str] = Field('', description="API key for the provider")
+    base_url: Optional[str] = Field('', description="Base URL for the provider API")
+    ssl_verify: bool = True
+    timeout_seconds: int = Field(default=120, gt=0, lt=2**31)
+    http_headers: Dict[str, str] = Field(default_factory=dict, repr=False)
 
 
 # =============================================================================
@@ -1036,16 +1162,8 @@ def _infer_visual_model_type(name: str, final_segment: str) -> Optional[str]:
     ):
         return "vlm2"
     if (
-        _name_matches(
-            name,
-            final_segment,
-            "qwen-vl-",
-            "glm-v",
-            "internvl-",
-            "llava-",
-            "gpt-4o-",
-            "gpt-4-vision-",
-        )
+        _name_matches(name, final_segment, "qwen-vl-", "internvl-", "llava-", "gpt-4o-", "gpt-4-vision-")
+        or re.match(r"^glm[-_]\d+(?:[._-]\d+)?v(?:$|[-_])", final_segment)
         or "vl" in final_segment.split("-")
         or _name_contains_any(name, final_segment, "vision", "visual", "ocr")
     ):

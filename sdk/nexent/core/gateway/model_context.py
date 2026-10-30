@@ -1,9 +1,14 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Modality-specific construction contexts for the gateway."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
+
+from nexent.core.concurrency.cancellation import RunCancellationScope
+from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
 
 
 @dataclass
@@ -30,6 +35,9 @@ class ModelContext:
 
 @dataclass
 class LLMContext(ModelContext):
+    resolved_profile: Optional[ResolvedModelProfile] = field(default=None, repr=False)
+    http_headers: Dict[str, str] = field(default_factory=dict, repr=False)
+    cancellation_scope: Optional[RunCancellationScope] = field(default=None, repr=False)
     temperature: Optional[float] = None
     top_p: Optional[float] = None
     stream: Optional[bool] = None

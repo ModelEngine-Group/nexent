@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-SCHEMA-CLOSURE-20261030
+  change_type: bugfix
+  bug_id: MODEL-SCHEMA-CLOSURE-20261030
+  title: Close first model schema PR over its ORM columns
+  description: Move pending HTTP-header DDL and selected-model column creation to the first schema PR; retain later historical data conversion and Header features.
+  observed_behavior: The first PR ORM selects http_headers and selected_model_id before the corresponding SQL appears in later stacked PRs.
+  expected_behavior: Applying only the first schema PR provides all ORM-selected columns; later migrations preserve the same final schema and historical values.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: Prior upgrade checks tested one migration or the complete stack, without first-PR SQL followed by full ORM selections of both tables.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [BE-MODEL-OUTLET-SCHEMA]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [MOS-D5-001]
+    retired: []
+  traditional_ut:
+    decision: reuse
+    behaviors:
+    - Existing ORM field types, defaults, comments and single-storage contracts remain unchanged.
+    - Outlet database writers preserve field ownership and stored values.
+    reason: Only pending SQL ownership changes. Reuse ORM and storage UT; real missing-column detection requires the strengthened existing PostgreSQL D5 rather than a duplicate SQL-text unit test.
+    test_selectors:
+    - test/backend/database/test_model_outlet_schema.py
+    - test/backend/services/test_model_saved_contracts.py
+  notes: >-
+    User explicitly authorized urgent repair of the stacked PR schema gap. Preserve all existing D1 Cases and the nine PR identities.
+    Move this schema Feature/Case and its existing UT to the first owning PR.
+    Later Workbench data-conversion fixture assumes the first schema migration already created selected_model_id.
+    Design and evidence remain in the existing model-access-native-agent TECHNICAL-DESIGN.md and schema-closure acceptance records.
+    Sparse-table redesign and retry behavior are outside this fix.
+    CHAT-MODEL-CONTROLS-D5-001 is a later-layer regression asset, unavailable at this first-layer baseline; execute it after stack propagation.

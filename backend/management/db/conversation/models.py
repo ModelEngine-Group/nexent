@@ -64,7 +64,7 @@ class ConversationRecord(TableBase):
     workbench_config = Column(
         JSONB,
         nullable=True,
-        doc="Canonical schema-v3 Workbench conversation declaration",
+        doc="Canonical schema-v4 Workbench resource declaration",
     )
     workbench_pinned_at = Column(
         TIMESTAMP(timezone=False), nullable=True,
@@ -76,6 +76,12 @@ class ConversationRecord(TableBase):
         server_default=text("0"),
         doc="Monotonic version of the canonical Workbench declaration",
     )
+
+    selected_model_id = Column(Integer, nullable=True, comment="Root model selected for this Agent conversation; NULL inherits the Agent default.")
+    model_parameter_preferences = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"),
+        comment="Explicit parameter preferences keyed by outlet ID; no credentials or default-value copies.")
+    model_parameter_preferences_version = Column(Integer, nullable=False, server_default=text("0"),
+        comment="Optimistic revision of model preferences, independent of metadata and Workbench configuration.")
 
 
 class ConversationMessage(TableBase):
