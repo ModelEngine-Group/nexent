@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 class Provider:
     def __init__(self):
         self.wire = []
+        self.auxiliary_wire = []
         self.failure = False
         self.delay = False
         self.release = threading.Event()
@@ -23,7 +24,11 @@ class Provider:
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                owner.wire.append({"path": self.path, **body})
+                # Agent execution streams; background title generation does not.
+                # Keep both, but do not let its completion order change which
+                # Agent invocation the runtime assertions inspect.
+                wire = owner.wire if body.get("stream") else owner.auxiliary_wire
+                wire.append({"path": self.path, **body})
                 if owner.failure:
                     self.send_response(400)
                     self.send_header("Content-Type", "application/json")

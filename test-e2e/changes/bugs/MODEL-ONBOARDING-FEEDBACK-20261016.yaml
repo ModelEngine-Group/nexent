@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-ONBOARDING-FEEDBACK-20261016
+  change_type: bugfix
+  bug_id: MODEL-ONBOARDING-FEEDBACK-20261016
+  title: Recover stale profile previews and improve matching and inherited output limits
+  description: Fix catalog suggestions and distinguish inherited output caps from explicit request defaults; recover stale catalog revisions explicitly without discarding batch configuration.
+  observed_behavior: Short prefixed GLM IDs fail matching and output limit inputs omit known catalog values. Batch thinking previews returned HTTP 409 after catalog revision changes; generic errors provided no recovery action. Model matching without an endpoint left basic capabilities blank because complete preview was disabled; the conflict banner was oversized.
+  expected_behavior: Prefix/suffix text does not hide a known exact model/version; known capability caps display independently of request defaults and edits update only capability limits; thinking toggles retain a valid request definition; model-only configuration is shown before connection details, and version conflicts use a compact recoverable notice.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing suggestion tests cover long Qwen IDs but not short prefixed GLM IDs; form tests do not assert inherited output cap display separately from the sent parameter, model-only display without connection details, or compact version-conflict recovery.
+  feature_contract_changed: false
+  affected_features:
+    existing: [V5-PW-MODEL-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [PW-MODEL-01]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    reason: Add isolated matching and inherited-limit regressions in the existing frontend suites; cover explicit revision refresh and retry without changing user configuration.
+    behaviors:
+    - Prefixed short model names match the same exact version without crossing minor versions or ambiguous identities.
+    - Output limit display and editing use context.output_limit; existing max_output_tokens request defaults stay separate and are not rewritten by capability edits.
+    - Batch form uses the same preview and configuration rules as single add.
+    - Known model-only configuration appears before endpoint entry; stale composed data never follows a changed model or endpoint.
+    - Version conflict recovery remains explicit and preserves user values using a compact inline notice.
+    test_selectors:
+    - frontend/tests/component/modelProfileSuggestion.test.tsx
+    - frontend/tests/component/modelOutletAddForm.test.tsx
+    - frontend/tests/component/modelOutletEditing.test.tsx
+    - frontend/tests/component/modelProfileLimits.test.tsx
+    - test/backend/services/test_model_profile_service.py
+  notes: User clarified that the model access field edits capability rather than request defaults; dynamic request budgeting remains pending separate verification. Existing SPEC and technical design updated directly. Existing PW-MODEL-01 is regression coverage; new assertions and manual dev checks remain distinct from formal D4 execution. No VLM changes. Dev preview recovery is tested separately from final container verification, which remains pending.

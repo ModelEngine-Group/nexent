@@ -1,0 +1,57 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-ONBOARDING-CONNECTION-20261021
+  change_type: bugfix
+  bug_id: MODEL-ONBOARDING-CONNECTION-20261021
+  title: Separate shared HTTP connections from model request configuration
+  description: Repair GLM version matching and type inference, allow save before probing, and present scoped connection/model diagnostics with explicit Header and Body editors.
+  observed_behavior: GLM-V5.2 misses its model profile and is classified as visual; failed probes lose their reason and block batch import; per-model dialogs expose shared HTTP settings and unexplained dots.
+  expected_behavior: Preserve request IDs, apply fallback while asking for a profile, save valid outlets independently of probe success, deduplicate common HTTP failures and retain per-model parameter issues, and inject credential headers separately from model Body parameters.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Prior cases prove successful onboarding and wire/storage contracts but omit GLM-V versions, failed unchecked batch saves, shared failure deduplication and credential-bearing custom headers.
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Extend owning matcher/form/service/storage tests and add focused header and issue-grouping units. Formal HTTP and PostgreSQL boundaries supply distinct cross-component proof; browser acceptance remains separately recorded.
+    behaviors:
+    - GLM version prefixes match the same minor version without changing the request identity or confusing visual suffixes.
+    - Explicit failed or unchecked models stay selectable across Agent and session paths without becoming automatic defaults or changing probe status.
+    - Effective fallback sampling exists before profile selection and failed probes do not prevent valid saves.
+    - Shared HTTP settings are outside row dialogs; Header and Body values have separate wire/storage ownership.
+    - Common HTTP errors deduplicate while model-specific parameter failures remain attributable.
+    - Issue popovers escape clipped modal containers; retry updates saved outlets without sending immutable provider identity or creating duplicates.
+    - Credential headers do not appear in snapshots or public values; retain, replace and delete use tenant-scoped CAS updates.
+    test_selectors:
+    - test/backend/services/test_run_model_controls.py
+    - frontend/tests/workbench/ConversationModelControls.test.tsx
+    - frontend/tests/component/agentSinglePrompt.test.tsx
+    - test/backend/services/test_agent_version_service.py
+    - frontend/tests/workbench/AgentModels.test.ts
+    - frontend/tests/component/modelSelection.test.tsx
+    - frontend/tests/component/modelProfileSuggestion.test.tsx
+    - frontend/tests/component/modelCheckSummary.test.tsx
+    - frontend/tests/component/modelProfileServiceContract.test.tsx
+    - frontend/tests/component/modelCheckIssues.test.tsx
+    - frontend/tests/component/httpHeadersEditor.test.tsx
+    - frontend/tests/component/modelOutletBatch.test.tsx
+    - frontend/tests/component/modelOutletAddForm.test.tsx
+    - frontend/tests/component/modelOutletEditing.test.tsx
+    - test/backend/services/test_model_profile_service.py
+    - test/backend/services/test_model_management_service.py
+    - test/backend/services/providers/test_modelengine_provider.py
+    - test/backend/database/test_model_outlet_db.py
+    - test/sdk/core/model_service/test_connection_headers.py
+    - test/sdk/core/model_service/test_errors_registry.py
+  affected_features:
+    existing: [SDK-MODEL-TRANSPORT, BE-MODEL-OUTLET-PERSISTENCE]
+    modified: [V5-PW-MODEL-01]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [PW-MODEL-01]
+    modified: [MST-D3-001, MOP-D3-001]
+    added: []
+    retired: []
+  notes: SPEC and TECHNICAL-DESIGN ONBOARDING-FIX-20261021 plus ONBOARDING-FIX-PROPOSAL define AC-FIX-01 through 10. Existing UT covers isolated matching/validation and frontend state; no duplicate D1 is added. Strengthen actual wire and real PostgreSQL credential/snapshot contracts. Execute real browser failure/layout scenarios separately under the approved AC matrix; do not describe unchanged PW-MODEL-01 as proving those new scenarios. Existing PW-MODEL-01 is successful onboarding/Agent regression. PW-MODEL-02 is embedding/KB indexing and is not evidence for LLM onboarding. Final container acceptance and dev restoration completed on 2026-10-22; evidence and layer limits are recorded in ONBOARDING-FIX-ACCEPTANCE-20261021.md. No remote PR updates authorized.

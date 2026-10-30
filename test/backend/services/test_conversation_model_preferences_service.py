@@ -185,3 +185,18 @@ def test_su_ac_05_draft_rejects_dependency_conflicts(persistence, monkeypatch):
     monkeypatch.setattr(run_controls, "validate_selected_model", Mock())
     with pytest.raises(ModelOutletValidationError):
         service.validate_model_preferences({"42": {"enable_thinking": False, "reasoning_budget_tokens": 64}}, "tenant")
+
+
+@pytest.mark.parametrize("status", ["supported", "unsupported", "unknown"])
+def test_td03_read_exposes_outlet_reasoning_status_without_writing(persistence, profile, status):
+    store, outlet = persistence
+    data = profile.model_dump()
+    data["capabilities"]["reasoning"]["status"] = status
+    data["capabilities"]["reasoning"]["controls"] = []
+    outlet.return_value = profile.__class__.model_validate(data)
+    original = deepcopy(store.return_value)
+    result = service.read_model_preference_view(1, 42, "owner", "tenant")
+    assert result["reasoning_status"] == status
+    assert result["parameter_values"] == {"temperature": 0.2}
+    assert store.return_value == original
+    assert all("resolve_values" not in call.kwargs for call in store.call_args_list)

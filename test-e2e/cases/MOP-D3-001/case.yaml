@@ -1,0 +1,84 @@
+schema_version: '1.0'
+stage: D3
+module: MODEL-SERVICE
+case:
+  case_id: MOP-D3-001
+  feature_id: BE-MODEL-OUTLET-PERSISTENCE
+  business_rule_ids: [BE-MODEL-OUTLET-PERSISTENCE-RULE-01, BE-MODEL-OUTLET-PERSISTENCE-RULE-02, BE-MODEL-OUTLET-PERSISTENCE-RULE-03, BE-MODEL-OUTLET-PERSISTENCE-RULE-04]
+  title: Persist isolated outlets with transactional optimistic updates
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Exercise actual PostgreSQL storage, snapshot codecs and shared transaction behavior.
+  integration_boundary:
+  - Actual PostgreSQL plus backend CRUD, shared session ownership and SDK snapshot codecs; implementation availability is a controlled test registry, no provider request occurs.
+  observations: [Persisted rows and revision values across separate sessions, SQL exception category and sanitized public diagnostics]
+  cleanup: [Drop only the isolated run-owned database and close test-owned sessions]
+  preconditions: [Isolated run-owned PostgreSQL database with current schema, Product database modules and SDK available at locked revision]
+  test_data:
+    configuration: Two synthetic tenants and outlets with zero/false/null parameter values and non-secret dummy credentials.
+  steps:
+  - order: 1
+    action: Create and read a resolved outlet in one caller-owned transaction, commit it, then restore it through a new session.
+    expected: Dedicated/JSON values match, the hard output cap and request default occupy distinct columns, and audit/id/revision fields are correct; only the API key column stores the dummy credential.
+  - order: 2
+    action: Load the same revision for two writers, commit the first update and submit the second stale update; read through another tenant and after soft deletion.
+    expected: One update increments revision, stale update fails without overwriting; wrong tenant and deleted rows are unavailable.
+  - order: 3
+    action: Create/update inside a transaction that fails later, roll it back and read through another session; provoke an actual SQL error with a dummy private value.
+    expected: No partially committed row/configuration survives and public error/log text excludes the dummy credential.
+  - order: 4
+    action: Persist zero/false/null preferences for two outlets in an owned conversation; reject stale and other-user writes, clear one outlet, then soft-delete the conversation.
+    expected: Exact values and other outlets survive; preference revisions advance independently without changing outlet defaults or model-visible metadata.
+  - order: 5
+    action: Check a draft and an unsaved edit, then save through product services with the server receipt; alter the effective request afterward.
+    expected: Success/failure state commits with the matching configuration, unsaved checks do not mutate rows, stale proof cannot mark changed requests checked, and saves never invoke the provider.
+  - order: 6
+    action: Preview and explicitly reselect provider/model profiles through the product edit service, then commit and retry a stale writer; restore the saved parameter defaults.
+    expected: The same outlet ID and credentials survive, create/edit render the same request, request changes invalidate prior status, stale saves do not overwrite, and parameter reset retains the saved profile references.
+  expected_results:
+  - Full profile survives actual PostgreSQL commit/load with single-location values and safe credential references.
+  - Tenant, active-row and revision constraints prevent unauthorized or stale writes, preserving the winner configuration.
+  - Transaction rollback restores prior state and query failures have sanitized diagnostics.
+  - Conversation preferences enforce ownership and active state, preserve exact values and other outlets, and never rewrite outlet defaults.
+  - Signed check results survive actual create/update commits and request changes invalidate old proof without additional provider calls.
+  - Explicit profile changes preserve identity and credentials with identical create/edit wire configuration.
+  forbidden_side_effects:
+  - No production connections, provider calls, source-file updates or real credentials in artifacts.
+  - No commits or session closure by CRUD when the caller owns the transaction.
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Actual committed row reconstructs the correct profile and credential ownership.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: Concurrency, tenant and deletion checks preserve valid state.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [1, 2]
+  - id: AC-03
+    description: Rollback and sanitized failure hold at the actual database boundary.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1, 2]
+  - id: AC-04
+    description: Real conversation preference storage preserves explicit values, ownership, revision and outlet independence.
+    steps: [4]
+    expected_results: [4]
+    forbidden_side_effects: [1, 2]
+  - id: AC-05
+    description: Matching signed detection results commit with create/edit and stale proof cannot survive an effective request change.
+    steps: [5]
+    expected_results: [5]
+    forbidden_side_effects: [1, 2]
+  - id: AC-06
+    description: Explicit profile reselection is an atomic identity-preserving configuration change.
+    steps: [6]
+    expected_results: [6]
+    forbidden_side_effects: [1, 2]

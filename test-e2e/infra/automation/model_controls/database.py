@@ -45,14 +45,18 @@ def database_fixture(monkeypatch, provider):
         raise
 
     @contextmanager
-    def sessions():
+    def sessions(existing=None):
+        if existing is not None:
+            yield existing
+            return
         with Session(engine) as session, session.begin():
             yield session
 
     original_session = client.get_db_session
     # Conversation DAC resolves this table lazily; load it before session routing.
     import importlib
-    importlib.import_module("management.db.identity.user_tenant")
+    for module_name in ("management.db.identity.user_tenant", "management.db.model.outlets", "management.db.conversation.model_preferences"):
+        importlib.import_module(module_name)
     for name, module in list(sys.modules.items()):
         if name.startswith("management.db.") and getattr(module, "get_db_session", None) is original_session:
             monkeypatch.setattr(module, "get_db_session", sessions)
@@ -80,6 +84,13 @@ def database_fixture(monkeypatch, provider):
                 )
                 session.add(record)
                 session.flush()
+                from model_controls.profiles import frozen_fixture_profile
+                from nexent.core.model_service.profiles.outlet_storage import encode_resolved_model_profile
+                from nexent.core.model_service.registry import model_service_references
+                row = {column.name: getattr(record, column.name) for column in record.__table__.columns}
+                profile = frozen_fixture_profile(row, BUDGET if "budget" in label else CAPABILITY)
+                for key, value in encode_resolved_model_profile(profile, registered_references=model_service_references()).items():
+                    setattr(record, key, value)
                 models[label] = record.model_id
             session.add(db_models.TenantConfig(
                 tenant_id=tenant, user_id=owner, config_key=MODEL_CONFIG_MAPPING["llm"],
@@ -90,9 +101,9 @@ def database_fixture(monkeypatch, provider):
                 description="Original fixture draft", model_ids=list(models.values())[:3], max_steps=3,
                 tenant_id=tenant, enabled=True, provide_run_summary=False, is_main_agent=True,
                 group_ids="[]", ingroup_permission="PRIVATE", created_by=owner, updated_by=owner,
-                prompt="Complete the fixture task.", allow_chat_metadata=False,
+                prompt="Complete the fixture task.", allow_chat_metadata=False, requested_output_tokens=99,
                 example_questions=[], greeting_message="",
-                model_params_override={str(value): {"extra_params": {}, **({"temperature": 0.56} if key == "selected-B" else {})}
+                model_params_override={str(value): {"context_window_tokens": 256, "parameter_values": {"max_output_tokens": 99, **({"temperature": 0.56} if key == "selected-B" else {})}}
                                        for key, value in list(models.items())[:3]},
             )
             session.add(actor)

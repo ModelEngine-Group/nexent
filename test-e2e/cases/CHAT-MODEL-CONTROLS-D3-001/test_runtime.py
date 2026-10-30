@@ -32,6 +32,7 @@ def test_selected_creator_runtime_wire(runtime, path, workbench):
     assert wire["path"].endswith("/selected-B/chat/completions")
     assert wire["temperature"] == (0.56 if path == "/api/agent/run" and not workbench else 0.43)
     assert wire["top_p"] == 0.78
+    assert wire["max_tokens"] == 1000
     assert wire["reasoning_effort"] == "xhigh"
     assert "fixture_custom" in str(wire)
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
@@ -50,11 +51,41 @@ def test_selected_creator_runtime_wire(runtime, path, workbench):
         with runtime.storage["sessions"]() as session:
             stored = session.scalar(select(ConversationRecord.workbench_config).where(
                 ConversationRecord.conversation_id == int(response.headers["conversation_id"])))
-            assert stored["model_id"] == runtime.models["selected-B"]
-            assert stored["generation_config"]["thinking_effort"] == "xhigh"
+            assert "model_id" not in stored
+            assert session.scalar(select(ConversationRecord.selected_model_id).where(
+                ConversationRecord.conversation_id == int(response.headers["conversation_id"]))) == runtime.models["selected-B"]
+            assert "generation_config" not in stored
+            preferences = session.scalar(select(ConversationRecord.model_parameter_preferences).where(
+                ConversationRecord.conversation_id == int(response.headers["conversation_id"])))
+            assert preferences[str(runtime.models["selected-B"])]["reasoning_effort"] == "xhigh"
     if path == "/api/agent/run" and not workbench:
         children = runtime.runs[-1].agent_config.worker_agents
         assert children and children[0].model_name == "business-C"
+    if path == "/api/agent/run" and not workbench:
+        from sqlalchemy import select, update
+        from management.db.conversation.models import ConversationRecord
+        conversation_id = int(response.headers["conversation_id"])
+        model_key = str(runtime.models["selected-B"])
+        legacy = {model_key: {"max_output_tokens": 7, "context_window_tokens": 256, "temperature": 0}}
+        with runtime.storage["sessions"]() as session:
+            session.execute(update(ConversationRecord).where(ConversationRecord.conversation_id == conversation_id)
+                            .values(model_parameter_preferences=legacy))
+        endpoint = f"/api/conversation/{conversation_id}/model_preferences/{model_key}"
+        headers = {"Authorization": "Bearer fixture-creator"}
+        view = runtime.client.get(endpoint, headers=headers)
+        assert view.status_code == 200, view.text
+        state = view.json()["data"]
+        assert state["parameter_values"] == {"temperature": 0}
+        assert next(rule for rule in state["field_specs"] if rule["key"] == "max_output_tokens")["allowed_scopes"] == ["outlet"]
+        rejected = runtime.client.patch(endpoint, headers=headers, json={"expected_version": state["version"], "parameter_values": {"max_output_tokens": 7}})
+        assert rejected.status_code == 422 and rejected.json()["detail"]["code"] == "FIXED_PARAMETER"
+        resumed = runtime.post(path, conversation_id=conversation_id, version_no=0)
+        assert resumed.status_code == 200, resumed.text
+        assert runtime.provider.wire[-1]["max_tokens"] == 1000
+        assert runtime.provider.wire[-1]["temperature"] == 0
+        with runtime.storage["sessions"]() as session:
+            assert session.scalar(select(ConversationRecord.model_parameter_preferences).where(
+                ConversationRecord.conversation_id == conversation_id)) == legacy
     if "nl2agent" in path:
         assert runtime.draft()["description"] == "Model controls fixture draft updated", response.text
     elif "nl2skill" in path:
@@ -86,8 +117,8 @@ def test_reasoning_variants_preserve_independent_configuration(runtime):
             assert wire, response.text
             assert all(row["model"] == "fixture-" + label for row in wire)
             root = next(m for m in runtime.runs[-1].model_config_list if m.cite_name == runtime.runs[-1].agent_config.model_name)
-            assert root.reasoning_effort == effort
-            assert root.reasoning_budget_tokens == budget
+            assert root.resolved_profile.parameter_values.get("reasoning_effort") == effort
+            assert root.resolved_profile.parameter_values.get("reasoning_budget_tokens") == budget
             assert root.top_p == 0.78
             assert all(row.get("reasoning_effort") == effort for row in wire)
             if budget is not None:
@@ -100,11 +131,8 @@ def test_reasoning_variants_preserve_independent_configuration(runtime):
     assert runtime.draft()["model_ids"] == original["model_ids"]
     assert runtime.draft()["model_params_override"] == original["model_params_override"]
     assert runtime.model_records() == original_models
-    from sqlalchemy import update
-    from management.db.models import ModelRecord
-    with runtime.storage["sessions"]() as session:
-        session.execute(update(ModelRecord).where(ModelRecord.model_id == runtime.models["selected-B"]).values(
-            extra_params={"enable_thinking": True, "reasoning_effort": "auto", "__custom__": {"fixture_custom": "retained"}}))
+    # Inheritance omits the parameter when the frozen outlet has no default.
+    runtime.set_outlet_defaults("selected-B", lambda values: {key: value for key, value in values.items() if key != "reasoning_effort"})
     for path, workbench in paths:
         before_wire = len(runtime.provider.wire)
         response = runtime.post(path, generation={"deep_thinking": True, "thinking_effort": "auto"}, workbench=workbench, version_no=0)
@@ -130,7 +158,7 @@ def test_sampling_runtime_wire_and_persisted_intent(runtime, path, workbench):
     assert not any('"type": "error"' in line for line in response.text.splitlines())
     run = runtime.runs[-1]
     root = next(m for m in run.model_config_list if m.cite_name == run.agent_config.model_name)
-    assert set(root.explicit_sampling) == {"temperature", "top_p"}
+    assert {key: root.resolved_profile.parameter_values[key] for key in ("temperature", "top_p")} == {"temperature": 0, "top_p": 0.6}
     independent = next(m for m in run.model_config_list if m.cite_name == "business-C")
     assert (independent.temperature, independent.top_p) == (0.43, 0.78)
     assert independent.explicit_sampling == []
@@ -142,8 +170,11 @@ def test_sampling_runtime_wire_and_persisted_intent(runtime, path, workbench):
         with runtime.storage["sessions"]() as session:
             saved = session.scalar(select(ConversationRecord.workbench_config).where(
                 ConversationRecord.conversation_id == int(response.headers["conversation_id"])))
-            assert saved["generation_config"]["temperature"] == 0
-            assert saved["generation_config"]["top_p"] == 0.6
+            assert "generation_config" not in saved
+            preferences = session.scalar(select(ConversationRecord.model_parameter_preferences).where(
+                ConversationRecord.conversation_id == int(response.headers["conversation_id"])))
+            assert preferences[str(runtime.models["selected-B"])]["temperature"] == 0
+            assert preferences[str(runtime.models["selected-B"])]["top_p"] == 0.6
 
 
 @pytest.mark.parametrize("path,workbench", [
@@ -154,19 +185,14 @@ def test_sampling_runtime_wire_and_persisted_intent(runtime, path, workbench):
 def test_null_sampling_inherits_shared_defaults_and_matches_display_metadata(runtime, path, workbench):
     import asyncio
 
-    from sqlalchemy import update
-
-    from management.db.models import ModelRecord
     from management.services.model.management import list_models_for_tenant
 
-    with runtime.storage["sessions"]() as session:
-        session.execute(update(ModelRecord).where(ModelRecord.model_id == runtime.models["selected-B"]).values(
-            temperature=None, top_p=None))
+    runtime.set_outlet_defaults("selected-B", lambda values: {**values, "temperature": 1.0, "top_p": 1.0})
     records_before, draft_before = runtime.model_records(), runtime.draft()
     models = asyncio.run(list_models_for_tenant(runtime.storage["tenant"]))
     metadata = next(row for row in models if row["model_id"] == runtime.models["selected-B"])
     assert metadata["effective_sampling"] == {"temperature": 1.0, "top_p": 1.0}
-    assert metadata["temperature"] is None and metadata["top_p"] is None
+    assert metadata["temperature"] == 1.0 and metadata["top_p"] == 1.0
     expected_temperature = 0.56 if path == "/api/agent/run" and not workbench else 1.0
     for sampling, expected in (
         ({}, (expected_temperature, 1.0)),
@@ -186,3 +212,24 @@ def test_null_sampling_inherits_shared_defaults_and_matches_display_metadata(run
         assert (independent.temperature, independent.top_p) == (0.43, 0.78)
         assert runtime.model_records() == records_before
         assert runtime.draft()["model_params_override"] == draft_before["model_params_override"]
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_debug_uses_canonical_preferences_without_changing_definitions(runtime, enabled):
+    before, models = runtime.draft(), runtime.model_records()
+    response = runtime.post("/api/agent/run", generation={
+        "deep_thinking": enabled, "thinking_effort": "xhigh", "temperature": 0.2, "top_p": 0.7,
+    }, is_debug=True, version_no=0)
+    assert response.status_code == 200, response.text
+    assert runtime.provider.wire, response.text
+    wire = runtime.provider.wire[-1]
+    assert wire["model"] == "fixture-selected-B"
+    assert wire["temperature"] == 0.2 and wire["top_p"] == 0.7
+    assert wire["enable_thinking"] is enabled
+    if enabled:
+        assert wire["reasoning_effort"] == "xhigh"
+    else:
+        assert "reasoning_effort" not in wire
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    assert not any(event.get("type") == "error" for event in events), response.text
+    assert runtime.draft() == before and runtime.model_records() == models

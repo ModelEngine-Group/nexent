@@ -26,7 +26,7 @@ import asyncio
 import logging
 import re
 
-from contracts.model import BatchCreateModelsRequest, BackfillDefaultsRequest, CapacitySuggestionRequestFields as CapacitySuggestionFields, ModelRequest, ModelProfilePreviewRequest, ModelOutletCreateRequest, ModelOutletPatchRequest, ModelOutletValidationRequest, ModelOutletMigrationReviewRequest, ModelProbeRequest, ModelCapacitySuggestionRequest, ModelCapacitySuggestionResponse, ProviderModelRequest, ManageTenantModelListRequest, ManageTenantModelListResponse, ManageTenantModelCreateRequest, ManageTenantModelUpdateRequest, ManageTenantModelDeleteRequest, ManageTenantModelHealthcheckRequest, ManageBatchCreateModelsRequest, ManageProviderModelListRequest, ManageProviderModelCreateRequest, FIXED_INFERENCE_FIELDS_BY_TYPE
+from contracts.model import BatchCreateModelsRequest, BackfillDefaultsRequest, CapacitySuggestionRequestFields as CapacitySuggestionFields, ModelRequest, ModelProfilePreviewRequest, ModelProfilePreviewInput, ModelOutletCreateRequest, ModelOutletPatchRequest, ModelOutletValidationRequest, ModelOutletMigrationReviewRequest, ModelProbeRequest, ModelCapacitySuggestionRequest, ModelCapacitySuggestionResponse, ProviderModelRequest, ManageTenantModelListRequest, ManageTenantModelListResponse, ManageTenantModelCreateRequest, ManageTenantModelUpdateRequest, ManageTenantModelDeleteRequest, ManageTenantModelHealthcheckRequest, ManageBatchCreateModelsRequest, ManageProviderModelListRequest, ManageProviderModelCreateRequest, FIXED_INFERENCE_FIELDS_BY_TYPE
 from contracts.constants.environment import CAPACITY_SUGGESTION_ENABLED
 
 from fastapi import APIRouter, Depends, Header, Query, HTTPException, Request, Path
@@ -1470,7 +1470,7 @@ async def get_profile_protocols(current_user: CurrentUser = Depends(require(MODE
 
 @router.post("/profile_previews")
 async def create_profile_preview(
-    request: ModelProfilePreviewRequest,
+    request: ModelProfilePreviewInput,
     current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
 ):
     """Compose a draft from trusted catalog selections without saving an outlet."""
@@ -1528,6 +1528,27 @@ async def get_model_outlet_endpoint(
     if data is None:
         raise HTTPException(HTTPStatus.NOT_FOUND, detail="MODEL_OUTLET_NOT_FOUND")
     return JSONResponse(status_code=HTTPStatus.OK, content={"data": data})
+
+
+@router.post("/outlets/{model_id}/profile_previews")
+async def preview_model_outlet_patch_endpoint(
+    request: ModelOutletPatchRequest,
+    model_id: int = Path(..., gt=0, lt=2**31),
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+):
+    """Preview a tenant-owned edit without writing or exposing its credentials."""
+    from management.services.model.profiles import preview_outlet_patch
+
+    try:
+        data = await run_blocking("model-outlet-preview", preview_outlet_patch, model_id, request, current_user.tenant_id)
+        return JSONResponse(status_code=HTTPStatus.OK, content={"data": data})
+    except LookupError:
+        raise HTTPException(HTTPStatus.NOT_FOUND, detail="MODEL_OUTLET_NOT_FOUND") from None
+    except ModelOutletConflictError:
+        raise HTTPException(HTTPStatus.CONFLICT, detail="MODEL_OUTLET_VERSION_CONFLICT") from None
+    except ModelOutletValidationError as error:
+        raise HTTPException(HTTPStatus.BAD_REQUEST, detail={"code": "MODEL_OUTLET_INVALID",
+            "details": {"category": error.category, "field": error.path}}) from None
 
 
 @router.patch("/outlets/{model_id}")

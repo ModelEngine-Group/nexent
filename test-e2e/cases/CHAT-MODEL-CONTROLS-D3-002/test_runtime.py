@@ -33,14 +33,19 @@ def counts(runtime):
 def test_unavailable_and_stream_failure_never_fall_back(runtime):
     before, histories = runtime.draft(), counts(runtime)
     with runtime.storage["sessions"]() as session:
-        session.execute(update(ModelRecord).where(ModelRecord.model_id == runtime.models["selected-B"]).values(connect_status="unavailable"))
+        session.execute(update(ModelRecord).where(ModelRecord.model_id == runtime.models["selected-B"]).values(connect_status="unavailable", delete_flag="Y"))
     for path, workbench in PATHS:
         response = runtime.post(path, workbench=workbench, generation={"deep_thinking": True, "thinking_effort": "xhigh"}, version_no=0)
-        assert response.status_code == 409 and "model_unavailable" in response.text
+        assert response.status_code == 404 and "model_not_available" in response.text
     assert not runtime.provider.wire and not runtime.runs
     assert runtime.draft() == before and counts(runtime) == histories
     with runtime.storage["sessions"]() as session:
-        session.execute(update(ModelRecord).where(ModelRecord.model_id == runtime.models["selected-B"]).values(connect_status="available"))
+        session.execute(update(ModelRecord).where(ModelRecord.model_id == runtime.models["selected-B"]).values(delete_flag="N"))
+    # An old failed check is historical evidence, not a live availability gate.
+    stale = runtime.post("/api/agent/run", version_no=0)
+    assert stale.status_code == 200, stale.text
+    assert runtime.provider.wire[-1]["model"] == "fixture-selected-B"
+    before = runtime.draft()
     runtime.provider.failure = True
     for path, workbench in PATHS:
         response = runtime.post(path, workbench=workbench, generation={"deep_thinking": True, "thinking_effort": "xhigh"}, version_no=0)
@@ -135,7 +140,7 @@ def test_cancel_retry_rejects_delayed_old_provider_output(runtime, path, workben
         assert runtime.draft()["model_ids"] == before["model_ids"]
         assert runtime.draft()["model_params_override"] == before["model_params_override"]
         root = next(m for m in runtime.runs[-1].model_config_list if m.cite_name == runtime.runs[-1].agent_config.model_name)
-        assert root.model_name == "fixture-default-A" and root.reasoning_effort == "minimal"
+        assert root.model_name == "fixture-default-A" and root.resolved_profile.parameter_values.get("reasoning_effort") == "minimal"
         if conversation_id is not None:
             with runtime.storage["sessions"]() as session:
                 user_rows = session.scalars(select(ConversationMessage).where(
@@ -144,3 +149,27 @@ def test_cancel_retry_rejects_delayed_old_provider_output(runtime, path, workben
                 # position; creator retries reuse the existing saved user row.
                 assert len(user_rows) == (2 if path == "/api/agent/run" else 1)
                 assert {row.message_index for row in user_rows} == {0}
+
+
+@pytest.mark.parametrize("strict", [False, True])
+@pytest.mark.parametrize("recover", [False, True])
+def test_empty_stop_recovery_never_restarts_as_protocol_repair(runtime, strict, recover):
+    from management.db.agent.models import AgentInfo
+    with runtime.storage["sessions"]() as session:
+        session.execute(update(AgentInfo).where(AgentInfo.agent_id == runtime.agent_id).values(
+            enable_protocol_repair_retry=strict))
+    def respond(body):
+        requests = [wire for wire in runtime.provider.wire if wire.get("stream")]
+        return "<final_answer>Recovered</final_answer>" if recover and len(requests) >= 2 else ""
+    runtime.provider.responder = respond
+    before, models = runtime.draft(), runtime.model_records()
+    response = runtime.post("/api/agent/run", generation={"deep_thinking": False}, version_no=0)
+    assert response.status_code == 200, response.text
+    requests = [wire for wire in runtime.provider.wire if wire.get("stream")]
+    assert len(requests) == 2, response.text
+    assert requests[0] == requests[1]
+    events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    assert any(event.get("type") == "error" for event in events) is (not recover), response.text
+    if recover:
+        assert "Recovered" in response.text
+    assert runtime.draft() == before and runtime.model_records() == models

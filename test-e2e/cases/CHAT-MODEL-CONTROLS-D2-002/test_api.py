@@ -36,7 +36,7 @@ def test_model_permission_and_tenant_preflight(api):
     api.configured = [api.records["effort"]["model_id"]]
     assert api.post("/api/agent/run", api.payload("/api/agent/run", model_id=plain_id)).status_code == 403
     response = api.post("/api/skills/nl2skill/run", api.payload("/api/skills/nl2skill/run", model_id=plain_id,
-                                                            generation_config={"deep_thinking": True, "thinking_effort": "xhigh"}))
+                                                            model_parameter_preferences={str(plain_id): {"enable_thinking": True, "reasoning_effort": "xhigh"}}))
     assert response.status_code == 422 and api.calls == []
     valid = api.records["effort"]["model_id"]
     assert api.post("/api/skills/nl2skill/run", api.payload("/api/skills/nl2skill/run", model_id=valid)).status_code == 200

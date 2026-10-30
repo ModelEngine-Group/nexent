@@ -1,0 +1,25 @@
+schema_version: '1.0'
+module:
+  id: SDK-MODEL-SERVICE
+  name: SDK model service
+feature:
+  feature_id: SDK-MODEL-OUTLET-RESOLUTION
+  name: Resolved outlet construction
+  status: planned
+  description: Connect real composition to the complete saved outlet contract.
+  business_rules:
+  - rule_id: SDK-MODEL-OUTLET-RESOLUTION-RULE-01
+    description: Complete new snapshots preserve exact request identity, composed values, traditional mapping and atomic source
+      provenance.
+  - rule_id: SDK-MODEL-OUTLET-RESOLUTION-RULE-02
+    description: Construction checks connection, implementation versions and protected extra fields without reapplying defaults
+      or retaining raw credentials.
+  - rule_id: SDK-MODEL-OUTLET-RESOLUTION-RULE-03
+    description: Saved snapshots load without source access; mismatched catalog revisions and inconsistent selections fail
+      before persistence.
+  required_test_stages:
+  - D1
+  source:
+    requirement_ids:
+    - MODEL-OUTLET-RESOLUTION-20261013
+    notes: Save-time component boundary of SPEC AC-01/03; real inference is not claimed.
