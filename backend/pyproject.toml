@@ -78,3 +78,4 @@ nexent = { path = "../sdk", editable = true }
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
+explicit = true

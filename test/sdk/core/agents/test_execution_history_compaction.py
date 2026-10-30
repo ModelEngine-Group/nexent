@@ -313,3 +313,92 @@ def test_ac003_ac015_finalize_registers_partial_error_once_and_not_final_answers
     answer = ActionStep(step_number=2, timing=Timing(start_time=0), is_final_answer=True)
     agent._finalize_step(answer)
     assert len(observer.execution_history._records) == 1
+
+
+def test_ac010_eof_still_requires_budget_for_result_metadata():
+    store, key = bound_history({'STDOUT': ''})
+    end = len(store.get(key).text)
+    store.reset_read_budget('owner', max_rendered_chars=1)
+    with pytest.raises(ValueError, match='metadata'):
+        store.read('owner', 'message:5/unit-index:2', end)
+    store.reset_read_budget('owner', max_rendered_chars=1000)
+    assert json.loads(store.read('owner', 'message:5/unit-index:2', end)) == {
+        'text': '', 'next_offset': end, 'eof': True,
+    }
+
+
+@pytest.mark.parametrize('observation, expected', [('***', {'OUTPUT': '***'}),
+                                               (None, {'STDOUT': ''}), ('', {'OUTPUT': ''})])
+def test_ac003_legacy_observation_fallback_keeps_masking_and_empty_success(observation, expected):
+    from smolagents.memory import ToolCall
+
+    agent, observer, _, _ = runtime_agent()
+    step = ActionStep(step_number=1, timing=Timing(start_time=0), observations=observation,
+                      tool_calls=[ToolCall(name='python_interpreter', arguments='pass', id='call')])
+    step.action_output = 'PRIVATE_RAW_VALUE'
+    agent._finalize_step(step)
+    assert observer.execution_history.get(step.execution_key).fields == expected
+    assert 'PRIVATE_RAW_VALUE' not in observer.execution_history.get(step.execution_key).text
+    no_execution = ActionStep(step_number=2, timing=Timing(start_time=0))
+    agent._finalize_step(no_execution)
+    assert len(observer.execution_history._records) == 1
+
+
+def test_ac009_real_agent_read_uses_provider_usage_and_resets_owner_between_runs():
+    from smolagents.models import ChatMessage, MessageRole, TokenUsage
+    from nexent.core.utils.observer import ProcessType
+
+    agent, observer, runtime, _ = runtime_agent()
+    store = observer.execution_history
+    runtime.context_manager.config.effective_input_limit_tokens = 5000
+    runtime.context_manager.config.policy_layers = {'request': {'processing_mode': 'passthrough'}}
+    old_owner = agent._execution_owner
+    publish = observer.add_message
+    references = []
+
+    def bind_result(name, kind, content, **kwargs):
+        publish(name, kind, content, **kwargs)
+        if kind == ProcessType.EXECUTION_RESULT:
+            key = json.loads(content)['execution_key']
+            store.bind(key, 10, len(references))
+            references.append(key)
+
+    observer.add_message = bind_result
+    store.reset_read_budget = Mock(wraps=store.reset_read_budget)
+    reader = agent.tools['read_execution_output']
+    forward = reader.forward
+    read_payloads = []
+
+    def capture_read(*args, **kwargs):
+        value = forward(*args, **kwargs)
+        read_payloads.append(json.loads(value))
+        return value
+
+    reader.forward = capture_read
+    responses = [
+        '<code>print("A" * 5000)</code>',
+        '<code>print(read_execution_output(output_ref="message:10/unit-index:0", max_chars=4000))</code>',
+        '<final_answer>done</final_answer>',
+    ]
+    agent.model.generate = Mock(side_effect=[ChatMessage(role=MessageRole.ASSISTANT, content=body,
+        token_usage=TokenUsage(input_tokens=4000, output_tokens=100)) for body in responses])
+    assert str(agent.run('Print a report once, read its original range, then finish.', max_steps=3)) == 'done'
+    assert agent._execution_owner != old_owner
+    assert agent.tools['read_execution_output'].owner == agent._execution_owner
+    assert len(references) == 2
+    original, loaded = [store.get(key) for key in references]
+    assert len(read_payloads) == 1 and 'next_offset' in loaded.text
+    payload = read_payloads[0]
+    assert 0 < payload['next_offset'] < 4000
+    assert payload['text'] == original.text[:payload['next_offset']] and not payload['eof']
+    assert loaded.owner == original.owner == agent._execution_owner
+    bounded = [call.kwargs['max_rendered_chars'] for call in store.reset_read_budget.call_args_list
+               if 'max_rendered_chars' in call.kwargs]
+    assert len(bounded) == 2 and all(0 < value < 4000 for value in bounded)
+    previous_owner = agent._execution_owner
+    agent.model.generate = Mock(return_value=ChatMessage(role=MessageRole.ASSISTANT,
+                                                        content='<final_answer>fresh run</final_answer>'))
+    assert str(agent.run('Begin a separate run.', max_steps=1)) == 'fresh run'
+    assert agent._execution_owner != previous_owner
+    with pytest.raises(PermissionError):
+        reader.forward(output_ref='message:10/unit-index:0', max_chars=10)
