@@ -884,7 +884,7 @@ wait_for_nexent_ready() {
     local deployment
 
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-        deployments="nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web"
+        deployments="nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-ops"
     fi
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
         deployments="$deployments nexent-data-process"

@@ -2,6 +2,31 @@
 
 Use the Case structure in `test-e2e/cases/<Case-ID>/case.yaml`. The validator checks its stage-specific contract against `test-e2e/infra/schemas/legacy/test-case.schema.json` after normalizing the single-Case wrapper; directory name and `case_id` must match.
 
+## Case IDs and titles
+
+New Cases use `<MODULE>-<SCENARIO>-<STAGE>-<NNN>`, for example
+`AGENT-LIST-D1-003` or `MODEL-PERMISSION-D2-001`.
+
+- Use uppercase ASCII letters/digits and hyphens. Include at least one module token and one scenario token before the stage; either label may contain more tokens. Reuse the owning capability's vocabulary rather than inventing a new prefix for each author or PR. The prefix need not literally equal the wrapper's `module` or the Feature ID.
+- Use `D1` through `D5` immediately before a three-digit sequence `001` through `999`. The embedded stage must equal the Case's `stage`; select the stage by the proof boundary below, not by the existing prefix.
+- Allocate an unused number within the same module/scenario/stage prefix after checking all existing Cases, including inactive history. Do not renumber to close gaps, reuse an ID for a different behavior, or put owners, dates, hash suffixes or tool-only prefixes in new IDs.
+- Keep the ID globally unique and identical in the directory, `case.yaml` and `execution.yaml`. Keep IDs and existing selectors stable when repairing a Case. Do not bulk rename historical Cases to this format; a real change of proof boundary needs an explicit migration/traceability decision, not a silent rename or stage edit.
+- Write a concise title as scenario/condition plus expected behavior, for example `模型不可用时禁止选择且不触发切换回调` or `Reject unavailable models without invoking the change callback`. Chinese or English is allowed; the validator rejects blank new titles but semantic clarity is a review obligation, not something a regex certifies.
+
+`test-e2e/infra/config/case-naming-legacy.json` freezes only the historical IDs
+that did not fit this format when the rule was introduced, anchored to its recorded
+Git commit. A pinned content digest rejects changes even without Git history.
+They retain their original IDs when edited. This is a compatibility
+list, not another Case registry or an authoring output: never regenerate it from
+current Cases or add new IDs to avoid the rule. Removed historical IDs may remain
+reserved there. Both design and implementation validation enforce the policy,
+including in a checkout without Git history or local generated views. The general
+identifier Schema stays backward-compatible for Feature IDs and historical assets.
+
+Primary script names remain framework-appropriate (`test.py`, `test.spec.ts`,
+`test.test.tsx`, etc.); they do not need to repeat the Case ID. Bind the real file
+and stable selector in `execution.yaml` and expose the Case ID in test metadata/title.
+
 | Stage | Primary proof | Required boundary |
 | --- | --- | --- |
 | D1 (new Cases) | Component behavior and internal collaboration | Real internal policy/state/error paths; controlled external dependencies |
@@ -41,3 +66,13 @@ Compare behavior/rule, input conditions, expected assertions and execution bound
 Missing existing test access is UNKNOWN, not proof of a gap. For already-developed code, use test-backfill.md. Apply admission to new D1 only; retain existing D1 contracts/scripts and repair genuine gaps within the authorized scope rather than bulk deduplicating the baseline.
 
 A2A coverage can include discovery, registration or publishing, binding, invocation, and failure recovery at their necessary proving stages. A bug affecting one A2A behavior does not require generating Cases for all capabilities or all five stages. OAuth and CAS journeys remain policy-skipped.
+
+## Responsibility routing
+
+Confirm the primary business domain when designing a Feature, before execution. Reuse the central `domains` and `feature_overrides` in `test-e2e/infra/config/report-ownership.yaml`; do not add owner names to each `case.yaml` or infer ownership from Git authors, stage, incidental keywords or a provider name.
+
+For example, an editor workflow Feature can declare `AGENT-EDITOR-WORKFLOWS: agent_config` under `feature_overrides`; every associated Case inherits the domain's maintained contact. Use `case_overrides` when a specific Case proves another boundary (for example an AIDP retrieval journey or a real Gateway kernel isolation test). State the rationale in the test-fix/change record. Keep one primary contact; collaboration does not make ambiguous routing acceptable.
+
+Active/planned Features and non-retired Cases must resolve uniquely during both validation phases. An unmapped new Feature fails even before it has Cases. Unknown domains, ambiguous rules and placeholder contacts are errors. Update central contacts for staff changes; do not rewrite historical `report-ownership.json` or journal/checkpoint results. The dashboard shows one contact from the versioned map while retaining original execution evidence internally.
+
+Design checklist: identify the Feature; confirm its domain and primary proving boundary; reuse or add the central mapping; document any Case exception; run `python test-e2e/infra/tools/ownership_catalog.py --root .` and the normal design validator. The validator checks coverage, not the correctness of a human business-domain decision.

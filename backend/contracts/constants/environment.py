@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 from dotenv import load_dotenv
-from ..configuration import parse_positive_float, parse_positive_int, _require_positive, _build_otlp_headers, _resolve_app_version
+from ..configuration import parse_positive_float, parse_positive_int, parse_port, _require_positive, _build_otlp_headers, _resolve_app_version
 
 # Environment initialization
 # Repository-root callers import this module through the backend namespace.
@@ -12,6 +12,9 @@ from ..configuration import parse_positive_float, parse_positive_int, _require_p
 # avoids silently replacing operator-provided service addresses.
 _ENVIRONMENT_LOADED = load_dotenv(override=False)
 _CONFIG_DIRECTORY = Path(__file__).resolve().parents[2] / 'configs'
+
+# Operations service configuration
+OPS_PORT = parse_port(os.getenv('OPS_PORT'), 'OPS_PORT', 5016)
 
 # Elasticsearch Configuration
 ES_HOST = os.getenv('ELASTICSEARCH_HOST')

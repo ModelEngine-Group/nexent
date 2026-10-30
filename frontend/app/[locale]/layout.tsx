@@ -7,7 +7,6 @@ import { DeploymentProvider } from "@/components/providers/deploymentProvider";
 import { ThemeProvider as NextThemesProvider } from "next-themes";
 import { ClientLayout } from "./layout.client";
 import I18nProviderWrapper from "@/components/providers/I18nProviderWrapper";
-import { publicAsset } from "@/lib/publicAsset";
 
 import "@/styles/globals.css";
 import "@/styles/react-markdown.css";
@@ -23,17 +22,10 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { locale } = await params;
   const isZh = locale === "zh";
-  const icon = publicAsset("/modelengine-logo.png");
   return {
-    title: "Nexent",
     description: isZh
       ? "一个强大的 AI 智能体平台，支持智能对话与流程自动化"
       : "A powerful AI agent platform for intelligent conversations and automation",
-    icons: {
-      icon,
-      shortcut: icon,
-      apple: icon,
-    },
   };
 }
 
