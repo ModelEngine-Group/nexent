@@ -1,0 +1,105 @@
+schema_version: '1.0'
+stage: D1
+module: SDK-MODEL-SERVICE
+case:
+  case_id: MPC-D1-001
+  feature_id: SDK-MODEL-PROFILE-COMPOSITION
+  business_rule_ids:
+  - SDK-MODEL-PROFILE-COMPOSITION-RULE-01
+  - SDK-MODEL-PROFILE-COMPOSITION-RULE-02
+  - SDK-MODEL-PROFILE-COMPOSITION-RULE-03
+  title: Compose pinned sources and explicit Nexent supplements atomically
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Execute real source loading, supplement interpretation, registered instruction/parameter
+    policy and provider-model composition as one read-only component.
+  preconditions:
+  - The SDK contains pinned source TOML and explicit versioned Nexent supplement rules.
+  - Temporary copies may alter supplement bytes and digests without modifying repository
+    files.
+  test_data:
+    provider: alibaba-cn
+    request_model_id: qwen3.5-plus
+  steps:
+  - order: 1
+    action: Load the complete supplemented catalog and compose the selected exact
+      provider-model draft, then validate default and explicit parameter values.
+      In temporary rules, layer model/provider/combination experience defaults and capability changes.
+    expected: Capabilities retain source evidence; instruction and API references
+      are explicit; upstream facts are combined before model, provider and exact-combination
+      supplements, and users see the effective defaults. Values obey permissions and conditions
+      without transport or persistence.
+  - order: 2
+    action: Change one declared supplement in a temporary copy and reload; compare
+      repeated loads and previously returned snapshots.
+    expected: Affected catalog/profile revisions and effective policy change deterministically;
+      original source facts and prior snapshots remain unchanged.
+  - order: 3
+    action: Load invalid supplement versions/references, contradictory equal-priority
+      overrides and invalid conditional values through the same component.
+    expected: Each failure has a structured value-free diagnostic, no partial publication
+      or mutation, and no silently selected conflicting behavior.
+  expected_results:
+  - The full source/supplement/policy component produces a complete exact provider-model
+    draft with traceable facts and overrides.
+  - Supplement contents and interpretation versions participate in deterministic revision
+    identity.
+  - Invalid rules, conflicts and values fail explicitly without hidden fallback or
+    partial catalogs.
+  forbidden_side_effects:
+  - No provider HTTP request, credential environment read, tenant database write or
+    tool execution occurs.
+  - Repository TOML and previously returned snapshots remain unchanged.
+  unit_boundary: Real collaboration across the existing source catalog, versioned
+    supplement reader, instruction registry, parameter policy and draft composition.
+    Existing MPN-D1-001 proves source-only publication; existing parameter UT proves
+    isolated values and permissions. Neither proves supplement/source conflicts, complete
+    bound draft generation and supplement revision propagation. Local temporary files
+    control only the filesystem boundary.
+  inputs:
+  - Pinned China-region source catalog and explicit Nexent supplement files
+  - Exact profile selection, controlled supplement changes and invalid rules/values
+  assertions:
+  - Composition preserves identity, source facts, explicit override evidence and registered
+    policy references
+  - User values are checked against the effective composed parameter rules
+  - Changed supplement semantics change relevant revisions without mutating prior
+    results
+  - Invalid references and conflicts prevent complete catalog publication
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Complete supplemented draft is traceable and enforces effective parameter/instruction
+      contracts without external execution.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: Supplement changes produce deterministic relevant revision changes
+      while preserving source facts and prior snapshots.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: Invalid supplements, references, conflicts and explicit values fail
+      atomically with sanitized diagnostics.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2

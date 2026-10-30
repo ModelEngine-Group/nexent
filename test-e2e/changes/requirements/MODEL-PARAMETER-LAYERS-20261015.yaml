@@ -1,0 +1,51 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-PARAMETER-LAYERS-20261015
+  change_type: requirement
+  requirement_id: MODEL-PARAMETER-LAYERS-20261015
+  title: Layer explicit conversation and Agent model settings above outlet defaults
+  description: Reuse Agent model_params_override and conversation preferences. Apply conversation values above the corresponding Agent model values above frozen outlet defaults; scope each editor to permitted settings and retain VLM behavior.
+  affected_features:
+    existing: [BE-MODEL-OUTLET-PERSISTENCE, V5-PW-MODEL-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [MOP-D3-001]
+    added: []
+    modified: [PW-MODEL-01]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    reason: Existing preference tests prove only the outlet/session merge. Add Agent-layer parameter and editor assertions; keep isolated merge validation in UT rather than duplicate D1. Existing database CAS and model onboarding journeys remain regression proof only.
+    behaviors:
+    - Explicit session values override per-model Agent values and outlet defaults without mutating either lower layer.
+    - False and zero are retained; clearing an override restores inheritance without copying defaults.
+    - Agent top_k reaches the resolved request and invalid fields/context values are rejected.
+    - Agent UI exposes declared common parameters and context; session UI displays inherited Agent values and saves explicit values only.
+    - Version-qualified short IDs suggest matching profiles and show approximate status; keyword search covers names and IDs.
+    - Explicit registered thinking switch formats survive storage and render the correct request body; restoration uses frozen originals.
+    - Compact capacity settings expose only window and maximum output; hidden inherited limits remain consistent.
+    - Typed request-parameter rows preserve nested values, block empty/duplicate keys and retain editable invalid drafts.
+    - Failed profile loading cannot apply a draft; legacy custom values and non-LLM paths are preserved.
+    - Uniform 28px text/password/select/numeric inputs; thinking toggle hides degree mode/value when off and prefills declared settings.
+    - Registered effort and budget degree presets freeze their request mapping and preserve existing provider constraints; values survive codec and switch/reset correctly.
+    - Unsent thread preferences remain isolated by local thread and outlet; persist before the first run using the same backend conversation, and block execution on save failure.
+    - Reuse upstream provider-scale sampling sliders, commit on blur/change-complete, reset by explicit deletion, and keep profile values out of the legacy generation context.
+    test_selectors:
+    - frontend/tests/component/modelSelectorPreferences.test.tsx
+    - frontend/tests/component/modelSelectorProfileContext.test.tsx
+    - frontend/tests/workbench/ConversationModelDrafts.test.ts
+    - frontend/tests/workbench/ModelParameterSettings.test.tsx
+    - frontend/tests/component/modelThinkingSettings.test.tsx
+    - test/backend/services/test_agent_model_parameters.py
+    - test/backend/services/test_agent_reasoning_service.py
+    - test/backend/services/test_conversation_model_preferences_service.py
+    - frontend/tests/component/modelParameterLayers.test.tsx
+    - frontend/tests/component/modelOutletEditing.test.tsx
+    - frontend/tests/component/requestParametersEditor.test.tsx
+    - frontend/tests/component/modelProfileSuggestion.test.tsx
+    - test/backend/services/test_model_thinking_configuration.py
+    - test/backend/database/test_model_outlet_db.py
+  no_case_change_reason: Reuse database persistence/CAS; adapt the existing onboarding UI selector and capacity expectation to the two-field form. Additional three-layer UI/API/runtime acceptance is recorded against AC-PARAM-LAYERS in the SPEC with separate evidence; unchanged formal scripts do not prove new hierarchy assertions. Browser and real runtime acceptance remain pending until executed.
+  notes: User authorized these new Agent overrides and precedence. No new schema or VLM changes. Final container verification remains mandatory before remote updates.

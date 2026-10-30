@@ -1,4 +1,7 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { expect, Locator, Page } from "playwright/test";
+import type { Request } from "playwright/test";
 import type { ModelAsset } from "../runner/runtime-config";
 import { appPath } from "../runner/runtime-config";
 
@@ -12,6 +15,9 @@ const TYPE_LABEL: Record<string, string> = {
 
 export class ModelPage {
   constructor(readonly page: Page) {}
+  private resolvedLlmDraft = false;
+  private persistedDraftStatus: number | undefined;
+  createdOutletId: number | undefined;
 
   private modelCard(capability: "llm" | "embedding"): Locator {
     const fieldKey = capability === "llm" ? "llm.main" : "embedding.embedding";
@@ -35,6 +41,9 @@ export class ModelPage {
   }
 
   async openAddDialog(): Promise<Locator> {
+    this.resolvedLlmDraft = false;
+    this.persistedDraftStatus = undefined;
+    this.createdOutletId = undefined;
     await this.page.getByRole("button", { name: "添加模型", exact: true }).click();
     const modal = this.page.getByRole("dialog", { name: "添加模型" });
     await expect(modal).toBeVisible();
@@ -42,6 +51,19 @@ export class ModelPage {
   }
 
   async fillConfiguredModel(modal: Locator, asset: ModelAsset, displayName: string): Promise<void> {
+    if (asset.capability === "llm") {
+      this.resolvedLlmDraft = true;
+      await modal.getByRole("textbox", { name: "服务地址", exact: true }).fill(asset.baseUrl);
+      await modal.getByRole("textbox", { name: "实际请求模型名称", exact: true }).fill(asset.model);
+      await modal.getByRole("textbox", { name: "显示名称", exact: true }).fill(displayName);
+      await modal.getByLabel("API Key", { exact: true }).fill(asset.secret);
+      const capacity = (label: string) => modal.locator(".ant-form-item")
+        .filter({ has: this.page.getByText(label, { exact: true }) }).getByRole("spinbutton");
+      await capacity("上下文窗口长度（Token）").fill("200000");
+      await modal.getByRole("spinbutton", { name: "最大输出长度（Token）", exact: true }).fill("4096");
+      await expect(modal.getByRole("button", { name: "添加模型", exact: true })).toBeEnabled();
+      return;
+    }
     const customTab = modal.getByRole("tab", { name: "自定义接入", exact: true });
     await expect(customTab).toBeVisible();
     await customTab.click();
@@ -67,6 +89,39 @@ export class ModelPage {
   }
 
   async verifyDraft(modal: Locator): Promise<number> {
+    if (this.resolvedLlmDraft) {
+      const automaticProbes: string[] = [];
+      const trackProbe = (request: Request) => {
+        if (new URL(request.url()).pathname === "/api/model/outlet_validations")
+          automaticProbes.push(request.url());
+      };
+      this.page.on("request", trackProbe);
+      const createdPromise = this.page.waitForResponse((response) =>
+        new URL(response.url()).pathname === "/api/model/outlets" && response.request().method() === "POST");
+      await modal.getByRole("button", { name: "添加模型", exact: true }).click();
+      const created = await createdPromise;
+      if (!created.ok()) throw new Error(`resolved model create returned ${created.status()}`);
+      const saved = (await created.json()).data;
+      expect(Number.isInteger(saved.model_id) && saved.model_id > 0).toBe(true);
+      this.createdOutletId = saved.model_id;
+      this.persistedDraftStatus = created.status();
+      expect(saved.profile.capabilities.context.combined_window).toBe(200000);
+      const outputLimit = saved.profile.capabilities.context.output_limit;
+      expect(outputLimit).toBe(4096);
+      // Saving only persists configuration; the user explicitly checks the row.
+      await expect(modal).toBeHidden();
+      this.page.off("request", trackProbe);
+      expect(automaticProbes).toEqual([]);
+      const validationPromise = this.page.waitForResponse((response) =>
+        new URL(response.url()).pathname === "/api/model/outlet_validations" && response.request().method() === "POST",
+        { timeout: 300000 });
+      await this.libraryRow(saved.profile.identity.display_name)
+        .getByRole("button", { name: "检测连通性", exact: true }).click();
+      const validation = await validationPromise;
+      if (!validation.ok()) throw new Error(`resolved connectivity returned ${validation.status()}`);
+      expect((await validation.json()).data.ok).toBe(true);
+      return validation.status();
+    }
     const connectivityPromise = this.page.waitForResponse((r) => r.url().includes("/api/model/temporary_healthcheck") && r.request().method() === "POST", { timeout: 300000 });
     await modal.getByRole("button", { name: "校验连通性", exact: true }).click();
     const connectivity = await connectivityPromise;
@@ -76,6 +131,11 @@ export class ModelPage {
   }
 
   async submitDraft(modal: Locator, displayName: string): Promise<number> {
+    if (this.resolvedLlmDraft) {
+      if (this.persistedDraftStatus === undefined) throw new Error("resolved draft has not been saved and checked");
+      await expect(modal).toBeHidden();
+      return this.persistedDraftStatus;
+    }
     // The deployed Ant button exposes the accessible name as `添 加` because
     // of its two-character spacing style.
     const addButton = modal.getByRole("button", { name: "保存", exact: true });
@@ -194,6 +254,9 @@ export class ModelPage {
     if (!model) throw new Error(`configured real model ${displayName} is missing`);
 
     const currentName = model.name ?? model.model_name;
+    if (capability === "llm" && currentName !== asset.model) {
+      throw new Error("configured LLM outlet identity differs from the fixed model asset; create a separate outlet");
+    }
     const currentUrl = model.apiUrl ?? model.api_url ?? model.base_url;
     const currentFactory = model.source ?? model.model_factory;
     const expectedFactory = asset.provider === "openai-compatible" ? "OpenAI-API-Compatible" : asset.provider;
@@ -204,7 +267,7 @@ export class ModelPage {
     // Official embedding providers may retain their product factory while the
     // test asset describes the common OpenAI-compatible protocol.
     const factoryMatches = capability === "embedding" || currentFactory === expectedFactory;
-    if (currentName === asset.model && urlMatches && factoryMatches) return "reused";
+    if (currentName === asset.model && urlMatches && (capability === "llm" || factoryMatches)) return "reused";
 
     const body: Record<string, unknown> = {
       model_name: asset.model,
@@ -212,6 +275,7 @@ export class ModelPage {
       api_key: asset.secret,
       model_factory: expectedFactory,
     };
+    if (capability === "llm") delete body.model_factory;
     if (capability === "embedding" && asset.dimension) body.max_tokens = asset.dimension;
     const updated = await this.page.request.post(`/api/model/update?display_name=${encodeURIComponent(displayName)}`, { data: body });
     if (!updated.ok()) throw new Error(`configured real model alignment returned ${updated.status()}`);
@@ -255,7 +319,7 @@ export class ModelPage {
     await expect(row).toBeVisible();
     await expect(row.getByRole("button", { name: "编辑", exact: true })).toHaveCount(1);
     await row.getByRole("button", { name: "编辑", exact: true }).click();
-    const editor = this.page.getByRole("dialog", { name: "编辑模型" });
+    const editor = this.page.getByRole("dialog", { name: /^(编辑模型|编辑模型出口)$/ });
     await expect(editor).toBeVisible();
     return editor;
   }
@@ -267,9 +331,12 @@ export class ModelPage {
     const editor = await this.openEditDialog(displayName, capability === "llm" ? "大语言模型" : "嵌入模型");
     const secret = editor.locator("input[type='password']");
     await expect(secret).toHaveValue("");
-    await expect(secret).toHaveAttribute("placeholder", /留空|保持|existing/i);
+    if (capability === "llm") await expect(editor.getByText(/留空保留原有密钥/)).toBeVisible();
+    else await expect(secret).toHaveAttribute("placeholder", /留空|保持|existing/i);
     const saved = this.page.waitForResponse(
-      (response) => response.request().method() === "POST" && response.url().includes("/api/model/update"),
+      (response) => capability === "llm"
+        ? response.request().method() === "PATCH" && /\/api\/model\/outlets\/\d+$/.test(new URL(response.url()).pathname)
+        : response.request().method() === "POST" && response.url().includes("/api/model/update"),
     );
     await editor.getByRole("button", { name: "保存", exact: true }).click();
     const response = await saved;
@@ -282,6 +349,20 @@ export class ModelPage {
     await expect(editor).toBeHidden();
     await this.verifyPersistedModel(displayName, capability);
     return body;
+  }
+
+  async savedLlmConfiguration(displayName: string): Promise<Record<string, unknown>> {
+    const listing = await this.page.request.get("/api/model/list");
+    expect(listing.ok()).toBe(true);
+    const model = (await listing.json()).data.find((item: any) =>
+      (item.display_name ?? item.displayName) === displayName && (item.model_type ?? item.type) === "llm");
+    expect(model).toBeTruthy();
+    const response = await this.page.request.get(`/api/model/outlets/${model.model_id ?? model.id}`);
+    expect(response.ok()).toBe(true);
+    const saved = (await response.json()).data;
+    expect(saved.has_credential).toBe(true);
+    return { context: saved.profile.capabilities.context, parameters: saved.profile.parameter_values,
+      model: saved.profile.identity.request_model_id, baseUrl: saved.profile.connection.base_url };
   }
 
   async deleteModel(displayName: string): Promise<void> {

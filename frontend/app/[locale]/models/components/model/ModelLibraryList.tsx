@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Pencil,
+  CircleAlert,
   Trash2,
   ShieldCheck,
   Search,
@@ -35,6 +36,7 @@ import { cn } from "@/lib/utils";
 import { MODEL_SOURCES } from "@/const/modelConfig";
 import { ModelOption, ModelType, ModelSource } from "@/types/modelConfig";
 import { Can } from "@/components/permission/Can";
+import { ModelMigrationBadge } from "./ModelMigrationBadge";
 import {
   STATUS_DOT_CLASS,
   TYPE_BADGE_CLASS,
@@ -81,8 +83,8 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
 };
 
 const STATUS_FALLBACK_LABELS: Record<string, string> = {
-  available: "可用",
-  unavailable: "不可用",
+  available: "已连通",
+  unavailable: "连接失败",
   detecting: "检测中",
   not_detected: "未检测",
 };
@@ -391,6 +393,7 @@ function ModelRow({
             <span className="truncate font-medium text-foreground">
               {model.displayName || model.name}
             </span>
+            <ModelMigrationBadge model={model} />
             {isDefault && (
               <Badge
                 variant="secondary"
@@ -436,10 +439,18 @@ function ModelRow({
             {statusLabel}
           </span>
         ) : (
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span className={`size-2 rounded-full ${dotCls}`} />
-            {statusLabel}
-          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                tabIndex={0}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground"
+              >
+                <span className={`size-2 rounded-full ${dotCls}`} />
+                {statusLabel}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{t("model.status.lastCheckHint")}</TooltipContent>
+          </Tooltip>
         )}
       </div>
 
@@ -457,10 +468,24 @@ function ModelRow({
         </RowAction>
         <Can permission="model:update">
           <RowAction
-            label={t("common.edit", { defaultValue: "编辑" })}
+            label={
+              model.migrationStatus === "failed" ||
+              model.migrationReviewRequired
+                ? `${t("common.edit")} · ${t(model.migrationStatus === "failed" ? "modelMigration.failed" : "modelMigration.pending")}`
+                : t("common.edit", { defaultValue: "编辑" })
+            }
             onClick={onEdit}
           >
-            <Pencil className="size-4" />
+            <span className="relative inline-flex">
+              <Pencil className="size-4" />
+              {(model.migrationStatus === "failed" ||
+                model.migrationReviewRequired) && (
+                <CircleAlert
+                  aria-hidden="true"
+                  className="absolute -right-1 -top-1 !size-2.5 fill-background text-destructive"
+                />
+              )}
+            </span>
           </RowAction>
         </Can>
         <Can permission="model:delete">

@@ -251,6 +251,7 @@ def update_resolved_model_record(
     tenant_id: str,
     *,
     registered_references: Mapping[str, Sequence[VersionedReference]],
+    replacement_base: ResolvedModelProfile | None = None,
     api_key=_UNSET,
     http_headers=_UNSET,
     connect_status=None,
@@ -293,7 +294,13 @@ def update_resolved_model_record(
             protected_paths=protected_paths)
         if current.config_revision != expected_revision:
             raise ModelOutletConflictError()
-        _validate_update(current, profile, api_key=api_key)
+        if replacement_base is not None:
+            if (replacement_base.outlet_id != current.outlet_id
+                    or replacement_base.identity.tenant_id != current.identity.tenant_id
+                    or replacement_base.identity.model_type != current.identity.model_type
+                    or replacement_base.config_revision != current.config_revision):
+                raise ModelOutletValidationError()
+        _validate_update(replacement_base or current, profile, api_key=api_key)
         for key in (
             "model_id",
             "tenant_id",
@@ -303,7 +310,8 @@ def update_resolved_model_record(
             "protocol_id",
             "profile_schema_version",
         ):
-            values.pop(key)
+            if replacement_base is None or key not in {"model_factory", "model_name"}:
+                values.pop(key)
         values.update(
             config_revision=expected_revision + 1,
             updated_by=user_id,

@@ -1,0 +1,56 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-PROFILE-NORMALIZATION-20261013
+  change_type: requirement
+  requirement_id: MODEL-PROFILE-NORMALIZATION-20261013
+  title: Normalize pinned model profile sources without invented capability defaults
+  description: Incremental source inheritance and normalization layer; first contract
+    step preserves absent budget bounds.
+  affected_features:
+    existing:
+    - SDK-MODEL-PROFILE-CONTRACTS
+    added:
+    - SDK-MODEL-PROFILE-NORMALIZATION
+    modified:
+    - SDK-MODEL-PROFILE-CONTRACTS
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - MPN-D1-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Absent reasoning budget minimum or maximum remains unknown; explicit zero and
+      declared special values remain distinct.
+    - Only known bounds participate in range validation; strict type errors and JSON
+      round trips preserve the declared domain.
+    - Inheritance keeps scalar/array replacements and recursive object merging distinct,
+      applies omit semantics, excludes identity/license/weights/links/benchmarks from
+      provider inheritance, and does not mutate source documents.
+    - Unknown/missing base references, duplicate source identities and invalid omission
+      declarations fail explicitly; surviving fields retain exact source file and
+      path.
+    - Selected authored source schemas reject unknown nested fields, incorrect scalar
+      types, invalid dates, modalities, reasoning variants and cost tiers with exact
+      sanitized source paths. Raw base-model overrides allow partial objects; effective
+      provider-model validation requires the inherited mandatory fields and reasoning
+      cross-field constraints.
+    - Explicit effort null sentinels remain declared values; catalog tree materialization
+      preserves array/object/null distinctions and immutable normalized snapshots.
+    - Versioned mapping rules reject duplicate source identities, unknown transforms
+      and incompatible versions; source capabilities preserve unknown, false and zero
+      separately from request bindings. Each handled leaf retains mapping and source
+      provenance; reference metadata never becomes an API setting.
+    reason: Existing profile contract UT owns isolated budget validation; no component
+      or runtime normalization is connected in this first step.
+    test_selectors:
+    - test/sdk/core/model_service/test_profile_contracts.py
+    - test/sdk/core/model_service/test_source_inheritance.py
+    - test/sdk/core/model_service/test_source_validation.py
+    - test/sdk/core/model_service/test_source_mapping.py
+    - test/sdk/core/model_service/test_catalog_normalization.py
+  notes: AC-01/02 subset remains pending as a whole. This change does not infer provider
+    API behavior or modify a saved outlet.

@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-OUTLET-PERSISTENCE-20261013
+  change_type: requirement
+  requirement_id: MODEL-OUTLET-PERSISTENCE-20261013
+  title: Persist resolved model outlets transactionally
+  description: Shared-session creation/read/update with stable identity, tenant and revision checks.
+  affected_features:
+    existing: []
+    added: [BE-MODEL-OUTLET-PERSISTENCE]
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: [MOP-D3-001]
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Validate new-record identity, credentials and shared-session lifecycle.
+    - Compile SQL with tenant, active state and expected revision predicates, preserving declaration immutability and parameter permissions.
+    - Sanitize SQL failures and reject stale or invalid updates without value disclosure.
+    - Recover integer sampling semantics from existing FLOAT columns and reject lossy integer storage.
+    reason: Existing CRUD tests do not exercise resolved snapshots. UT proves query/validation logic; D3 must prove actual transaction/CAS/database behavior.
+    test_selectors:
+    - test/backend/database/test_model_outlet_db.py
+    - test/sdk/core/model_service/test_outlet_storage.py
+    - test/sdk/core/model_service/test_outlet_parameters.py
+  notes: D3 designed before database implementation. Unit tests now exist; actual database script/execution remain pending. A FLOAT schema regression was reproduced before repair. No database transaction pass is claimed.

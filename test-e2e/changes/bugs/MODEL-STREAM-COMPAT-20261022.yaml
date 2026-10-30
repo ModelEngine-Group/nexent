@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-STREAM-COMPAT-20261022
+  change_type: bugfix
+  bug_id: MODEL-STREAM-COMPAT-20261022
+  title: Compatible stream tails and common HTTP error details
+  description: Deduplicate identical usage, accept finished EOF, prefer Kimi Top P 0.95 and share HTTP diagnostics between probes and Agent terminals.
+  observed_behavior: Actual gateways return repeated usage or normal EOF without DONE, which are rejected; provider reasons are hidden.
+  expected_behavior: Complete streams succeed; truncation and conflicts fail; bounded credential-redacted reasons are displayed without changing retry classification.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Existing HTTP peer only returned one usage and DONE, and privacy assertions hid all text rather than checking credential redaction.
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Strengthen owning units and the existing actual HTTP boundary without adding duplicate D1.
+    behaviors:
+    - Identical usage is emitted once and a declared finish permits normal EOF.
+    - HTTP JSON and raw diagnostics redact current request credentials in sync and async paths.
+    - Display text cannot change retry classification or introduce another retry.
+    - Kimi Top P defaults to 0.95 while provider or user overrides remain effective.
+    - Agent and onboarding receive the same normalized HTTP diagnostic.
+    test_selectors:
+    - test/sdk/core/model_service/test_openai_stream.py
+    - test/sdk/core/model_service/test_http_sender.py
+    - test/sdk/core/model_service/test_errors_registry.py
+    - test/sdk/core/model_service/test_composition.py
+    - test/sdk/core/model_service/test_legacy_chat_model.py
+    - test/sdk/core/model_service/test_model_service.py
+    - frontend/tests/component/modelCheckSummary.test.tsx
+    - frontend/tests/component/modelLibraryChecks.test.tsx
+  affected_features:
+    existing: []
+    modified: [SDK-MODEL-TRANSPORT]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [MST-D3-001]
+    added: []
+    retired: []
+  notes: SPEC RC-01 through RC-05 and PROBE-COMPATIBILITY-20261022 record approval. User requests dev-only acceptance, no image build or remote update. Real gateway and Langfuse proof is recorded separately from controlled D3. Reuse the HTTP module and no new functional module or D1.

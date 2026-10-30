@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: MPC-D1-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_complete_supplemented_policy_and_source_trace
+  profiles:
+  - mock
+acceptance_bindings:
+  AC-01:
+  - test_complete_supplemented_policy_and_source_trace
+  - test_experience_layers_follow_source_baseline
+  AC-02:
+  - test_supplement_revision_changes_without_mutating_prior_snapshots
+  AC-03:
+  - test_invalid_rules_references_conflicts_and_values_are_atomic

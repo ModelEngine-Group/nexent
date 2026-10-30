@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-PROFILE-COMPOSITION-20261013
+  change_type: requirement
+  requirement_id: MODEL-PROFILE-COMPOSITION-20261013
+  title: Compose model profiles with explicit Nexent supplements
+  description: Keep copied source data separate from Nexent roles, parameter permissions
+    and provider bindings; compose exact drafts with conflict diagnostics.
+  affected_features:
+    existing: []
+    added:
+    - SDK-MODEL-PROFILE-COMPOSITION
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - MPN-D1-001
+    added:
+    - MPC-D1-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Strict profile contracts and registered traditional instruction mapping reject
+      unknown fields/versions/unsupported roles.
+    - Supplement parsing, explicit conflict handling and revision inputs are deterministic
+      and preserve caller-owned data.
+    - Body extras use exact JSON Pointer semantics, reject owned/overlapping paths
+      and invalid arrays, preserve inputs, and enforce UTF-8 size/depth/leaf limits.
+    - Supplement declarations validate controlled paths, hashes, exact source ownership,
+      versions and atom links without exposing file contents. Cross-atom condition
+      validation remains a composition obligation.
+    reason: Existing contracts and parameter tests do not validate complete profile
+      definitions, supplements or selection composition. Keep isolated assertions
+      in UT and verify actual connected component behavior separately.
+    test_selectors:
+    - test/sdk/core/model_service/test_instruction_mapping.py
+    - test/sdk/core/model_service/test_request_parameters.py
+    - test/sdk/core/model_service/test_supplements.py
+    - test/sdk/core/model_service/test_profile_capabilities.py
+    - test/sdk/core/model_service/test_composition.py
+    - test/sdk/core/model_service/test_parameter_bindings.py
+  notes: Design before component wiring. D2/D3/D4 and deployed outlet acceptance remain
+    later service/runtime slices.

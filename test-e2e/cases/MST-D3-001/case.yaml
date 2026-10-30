@@ -1,0 +1,96 @@
+schema_version: '1.0'
+stage: D3
+module: MODEL-SERVICE
+case:
+  case_id: MST-D3-001
+  feature_id: SDK-MODEL-TRANSPORT
+  business_rule_ids:
+  - SDK-MODEL-TRANSPORT-RULE-01
+  - SDK-MODEL-TRANSPORT-RULE-02
+  - SDK-MODEL-TRANSPORT-RULE-03
+  title: Send model requests through actual HTTP and decode complete streams
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: Execute common sender and adapter through an isolated real local HTTP
+    peer.
+  integration_boundary:
+  - Actual local HTTP server, HTTPX sync/async transport, SSE decoder and OpenAI-compatible
+    adapter; controlled response fixtures, no hosted inference.
+  observations:
+  - Peer request captures, ordered decoded messages/events, request counts and response
+    closure.
+  cleanup:
+  - Close clients, stop the run-owned HTTP server and remove run-owned temporary artifacts.
+  preconditions:
+  - Product transport and adapter installed at locked revision
+  - Loopback HTTP server available to this run
+  test_data:
+    configuration: Non-secret dummy authentication and controlled JSON/SSE/error responses.
+  steps:
+  - order: 1
+    action: Construct a model through the actual NexentAgent factory with a supplied
+      resolved outlet, then send normal and streaming requests through sync and async APIs; capture
+      requests at the HTTP peer, including the resolved gateway asynchronous stream
+      and authorized resource conversion after restoring a saved row snapshot.
+    expected: Exact root/path/body/auth and one physical request; custom gateway headers stay separate from model-specific Body parameters and credential values stay outside snapshots; content, reasoning,
+      tool arguments and usage are preserved.
+  - order: 2
+    action: Serve multiline and fragmented SSE frames, including final tool calls
+      and usage; repeat identical usage and omit DONE after a valid finish.
+    expected: Ordered events and complete final message agree; partial tool-call fragments
+      never become completed calls. Identical usage is emitted once; normal EOF after
+      a complete finish is accepted while conflicts and truncation remain failures.
+  - order: 3
+    action: Serve transient errors before visible output, context overflow followed by
+      rebuilt messages, authentication errors, malformed/truncated streams and stop a stream early.
+    expected: Only ModelService may retry a transient pre-output failure within its
+      declared attempt budget; authentication, visible partial output and cancellation
+      never replay. Errors are sanitized and owned HTTP resources and shared permits
+      are released. Context recovery retains frozen credentials and changes only messages
+      within the same physical attempt budget.
+  expected_results:
+  - Actual HTTP request matches the prepared outlet configuration in sync and async
+    paths.
+  - Complete SSE output preserves message kinds, calls and usage with stable ordering.
+  - Retry counts obey the explicit ModelService budget before visible output; failure,
+    partial output and cancellation release resources and never hide a replay or private
+    provider message.
+  forbidden_side_effects:
+  - No hosted provider, production connections, tool execution or real credentials.
+  - No retry outside the declared pre-output budget, AgentMode change or secret content
+    in diagnostics.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Exact request reaches the real HTTP peer.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-02
+    description: Ordered complete stream reconstructs response kinds without premature
+      execution.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: Failure and cancellation are explicit, sanitized and do not replay.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2

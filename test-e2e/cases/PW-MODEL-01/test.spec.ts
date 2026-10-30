@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import type { Locator } from "playwright/test";
 import { journey } from "../../infra/automation/d4/runner/journey";
 import { executeFixedScenario } from "../../infra/automation/d4/runner/scenario";
@@ -24,6 +26,19 @@ journey("PW-MODEL-01", async (context) => {
   let responseText = "";
   let credentialPreservingEdit: Record<string, unknown> = {};
   let modelAlreadyExists = false;
+  let savedConfiguration: Record<string, unknown>;
+
+  contract.deferCleanup(async () => {
+    if (agentId) await agents.delete(agentId);
+    if (models.createdOutletId) {
+      const response = await page.request.get(`/api/model/outlets/${models.createdOutletId}`);
+      if (response.ok()) {
+        const outlet = (await response.json()).data;
+        expect(outlet.model_id).toBe(models.createdOutletId);
+        await models.deleteModel(outlet.profile.identity.display_name);
+      } else expect(response.status()).toBe(404);
+    }
+  });
 
   await executeFixedScenario(context, {
     preconditions: [
@@ -63,6 +78,9 @@ journey("PW-MODEL-01", async (context) => {
         const alignment = modelAlreadyExists ? await models.alignPersistedModel(asset, modelName, "llm") : "new";
         const status = modelAlreadyExists ? await models.verifyPersistedModel(modelName, "llm") : await models.verifyDraft(modal);
         expect(status).toBe(200);
+        savedConfiguration = await models.savedLlmConfiguration(modelName);
+        expect(savedConfiguration.model).toBe(asset.model);
+        expect(savedConfiguration.baseUrl).toBe(asset.baseUrl);
         return `${modelAlreadyExists ? alignment : "temporary"} configured real model connectivity made a provider call and returned available`;
       },
       async () => {
@@ -72,11 +90,13 @@ journey("PW-MODEL-01", async (context) => {
         registerReadyAsset("models", "d4_llm_display_name", modelName, "PW-MODEL-01");
         await page.reload({ waitUntil: "domcontentloaded" });
         await models.expectModel(modelName, "llm");
+        expect(await models.savedLlmConfiguration(modelName)).toEqual(savedConfiguration);
         await models.configureModel(modelName, "llm");
         return `${modelAlreadyExists ? "reused" : "added"} the verified real model, selected it and recovered the persisted display name`;
       },
       async () => {
         credentialPreservingEdit = await models.saveEditWithoutReplacingCredential(modelName, "llm");
+        expect(await models.savedLlmConfiguration(modelName)).toEqual(savedConfiguration);
         return "opened the real Edit Model UI, left API Key blank, saved, and rechecked real connectivity";
       },
       async () => {
@@ -108,7 +128,11 @@ journey("PW-MODEL-01", async (context) => {
         return "the UI model name, URL and llm type came from the config/models.yaml snapshot";
       },
       async () => "captured 200 from the real provider-connectivity request without treating an empty reasoning-model content field as failure",
-      async () => "capacity and supported reasoning parameters survived the model refresh and selection path",
+      async () => {
+        expect(savedConfiguration.context).toBeTruthy();
+        expect(savedConfiguration.parameters).toBeTruthy();
+        return "read-back capacity and declared request parameters matched after refresh and credential-preserving edit";
+      },
       async () => {
         expect("api_key" in credentialPreservingEdit || "apiKey" in credentialPreservingEdit).toBeFalsy();
         return "blank edit did not send a sentinel or overwrite the stored credential";

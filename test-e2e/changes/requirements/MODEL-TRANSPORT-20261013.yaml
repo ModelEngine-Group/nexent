@@ -1,0 +1,108 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-TRANSPORT-20261013
+  change_type: requirement
+  requirement_id: MODEL-TRANSPORT-20261013
+  title: Implement unified model transport and adapter
+  description: Common SSE and HTTP handling with first OpenAI-compatible response
+    adapter.
+  affected_features:
+    existing:
+    - F-171
+    added:
+    - SDK-MODEL-TRANSPORT
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - UT-SDK-AUTO-74430BEE8438F486
+    - UT-SDK-AUTO-9B9B36B05DA14338
+    added:
+    - MST-D3-001
+    modified:
+    - UT-SDK-AUTO-9A76928E3A7B1ADF
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - SSE fragmentation, fields, bounded buffers and incomplete events.
+    - Prepared request, adapter reconstruction and safe transport failure branches.
+    - Logical sync/async calls, bounded pre-output retries, credential snapshots,
+      run budgets and shared admission cleanup.
+    - Versioned protocol and authentication registration, tenant/outlet credential
+      ownership, and native-tool capability checks for historical messages.
+    - The legacy model and unified service import the same limiter implementation
+      and global instance after its internal relocation.
+    - Smolagents-compatible message/stream output, Code history role projection,
+      separate observer content and reasoning, and actual physical attempt numbers.
+    - Deferred response acceptance by the existing CoreAgent resolver, suppressed
+      repair output, and rollback of failed or prematurely closed visible attempts.
+    - Explicit legacy stop/structured-output aliases use declared parameter rules
+      and bindings without mutating persisted outlet defaults or inventing capabilities.
+    - Reuse existing W1/W2 fingerprint and identity checks; bind trusted output
+      caps through declarations and reject stale or cross-model budgets before send.
+    - Preserve the run-agent test package stub path when resolving the relocated
+      shared limiter; no product change or weakened runtime assertions.
+    - Legacy empty-response control is consumed before parameter validation; empty and
+      transport failures share one physical retry budget without replaying visible output.
+    - Common monitoring trace lifetime spans sync/async calls, retries and cleanup;
+      reported usage stays distinct from missing counts and legacy inferred totals.
+    - Code response diagnostics and cache DTOs reset across attempts; cache arithmetic
+      requires declared usage semantics and provider counts, with no inferred capability.
+    - Context rebuilds replace messages only after releasing the failed response and
+      permit, use at most two recoveries within the original physical attempt budget,
+      and retain frozen credentials, run deadline, cancellation and outer attempt identity.
+    - Legacy connection-only probes use saved outlet parameters through ModelService
+      without inventing output caps; cancellation propagates instead of reporting unavailable.
+    - Actual NexentAgent construction validates the supplied outlet's tenant/model/URL,
+      preserves frozen profile defaults and credentials, and reuses the run cancellation owner.
+    - Injected outlet selection validates tenant and record identity, detaches snapshots,
+      performs no credential or HTTP access, and keeps concurrent selections independent.
+    - The authored Alibaba CN Qwen3.5-plus profile declares Code/planning string stop
+      sequences; actual construction and HTTP preserve them without changing saved defaults.
+      Undeclared JSON Schema output remains rejected for this exact combination.
+    - The actual Alibaba CN Qwen3.5-plus output rule binds the unchanged W2 answer
+      budget to max_tokens; no inferred total-thinking cap or persisted default is added.
+    - Saved-outlet auxiliary prompt generation consumes normalized text and configured
+      defaults, closes streams, propagates cancellation and never adds an outer retry.
+    - Long-text entry points reuse the unchanged truncation preparation with the saved
+      outlet sender; missing capacity fails explicitly. VLM is excluded by user scope.
+    - Sync cancellation shuts down owned sockets but defers client close to the request
+      owner after blocked reads unwind; preserve late-connect cleanup and idempotence.
+    reason: New transport behavior is absent from profile tests; D3 adds actual protocol
+      collaboration.
+    test_selectors:
+    - test/sdk/core/model_service/test_sse.py
+    - test/sdk/core/model_service/test_http_contracts.py
+    - test/sdk/core/model_service/test_http_sender.py
+    - test/sdk/core/model_service/test_openai_chat_adapter.py
+    - test/sdk/core/model_service/test_openai_stream.py
+    - test/sdk/core/model_service/test_errors_registry.py
+    - test/sdk/core/model_service/test_authentication_registry.py
+    - test/sdk/core/model_service/test_model_service.py
+    - test/sdk/core/model_service/test_model_service_observation.py
+    - test/sdk/core/model_service/test_legacy_response_observation.py
+    - test/sdk/monitor/test_reported_token_usage.py
+    - test/sdk/core/model_service/test_legacy_chat_model.py
+    - test/sdk/core/model_service/test_legacy_invocation_options.py
+    - test/sdk/core/model_service/test_legacy_context_budget.py
+    - test/sdk/core/model_service/test_context_recovery.py
+    - test/sdk/core/model_service/test_legacy_context_recovery.py
+    - test/sdk/core/model_service/test_legacy_connectivity.py
+    - test/sdk/core/model_service/test_resource_conversion.py
+    - test/sdk/core/model_service/test_outlet_binding.py
+    - test/sdk/core/model_service/test_gateway_long_text_outlet.py
+    - test/sdk/core/models/test_openai_long_context_model.py
+    - test/sdk/core/model_service/test_prompt_generation_outlet.py
+    - test/backend/utils/test_llm_utils.py
+    - test/sdk/core/model_service/test_backend_snapshot_hydration.py
+    - test/backend/services/test_model_gateway_service.py
+    - test/backend/agents/test_create_agent_info.py
+    - test/sdk/core/model_service/test_gateway_resolved_model.py
+    - test/sdk/core/gateway/modality/test_llm_adapter.py
+    - test/sdk/core/model_service/test_agent_model_construction.py
+    - test/sdk/core/agents/test_nexent_agent.py
+    - test/sdk/core/models/test_model_concurrency.py
+    - test/sdk/core/models/test_model_concurrency_async.py
+    - test/sdk/core/agents/test_run_agent.py
+  notes: D3 planned before implementation; no duplicate D1 or real-model support claim.

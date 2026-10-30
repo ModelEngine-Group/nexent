@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-CHECK-STATE-20261022
+  change_type: requirement
+  requirement_id: MODEL-CHECK-STATE-20261022
+  title: Update connectivity state only on explicit checks or effective request changes
+  description: Preserve completed checks across equivalent saves and metadata edits; reset only effective request changes; cancellation and interrupted checks do not fabricate failures.
+  traditional_ut:
+    decision: strengthen
+    reason: Existing DB and probe tests cover CAS but not effective request equality or default selection without automatic probes. Reuse owning UT and dev API; no duplicate D1.
+    behaviors:
+    - Effective body, connection and credential changes reset; same values and unsupported parameters retain state.
+    - Completed explicit checks write with tenant and revision predicates; cancellation never writes.
+    - Restart clears only interrupted detecting states; page load and default selection never probe.
+    test_selectors:
+    - test/backend/database/test_model_connectivity_changes.py
+    - test/backend/database/test_model_outlet_connectivity_db.py
+    - test/backend/database/test_model_managment_db.py
+    - test/backend/services/test_model_outlet_validation_service.py
+    - test/backend/app/test_model_profile_app.py
+    - frontend/tests/component/modelLibraryChecks.test.tsx
+  affected_features:
+    existing: []
+    modified: [V5-PW-MODEL-01]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [MOP-D3-001]
+    modified: []
+    added: []
+    retired: []
+  notes: Approved CONNECTIVITY-STATE-PROPOSAL-20261022 CS-01 through CS-04. Existing MOP-D3-001 and PW-MODEL-01 retained; MOP-D3-001 persistence regression is rerun using executable adapter references; PW-MODEL-01 full Agent journey is not rerun. Targeted real dev API verifies persistence without changing Agent runtime. No container/image build or remote update per user scope. No new state table, digest layer or runtime periodic probing.

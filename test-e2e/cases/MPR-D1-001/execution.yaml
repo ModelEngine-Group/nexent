@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: MPR-D1-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: MPR-D1-001
+  profiles: [mock]
+acceptance_bindings:
+  AC-01: [test_shipped_policy_constructs_and_restores_complete_outlet]
+  AC-02: [test_custom_selection_survives_source_changes_without_reloading]
+  AC-03: [test_invalid_collaborating_inputs_do_not_publish_a_snapshot]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

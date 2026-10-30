@@ -1,0 +1,19 @@
+schema_version: '1.0'
+case_id: MOP-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: MOP-D3-001
+  profiles: [real_smoke]
+acceptance_bindings:
+  AC-01: [test_committed_snapshot_and_transaction_ownership]
+  AC-02: [test_stale_writer_tenant_and_deleted_row]
+  AC-03: [test_rollback_and_sanitized_actual_database_failure]
+  AC-04: [test_conversation_preferences_commit_cas_ownership_and_outlet_independence]
+  AC-05: [test_check_receipt_survives_actual_create_edit_and_request_change]
+  AC-06: [test_explicit_profile_reselection_commits_one_identity_and_preserves_credentials]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

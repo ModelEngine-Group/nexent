@@ -1,0 +1,18 @@
+schema_version: '1.0'
+case_id: MST-D3-001
+timeout_seconds: 120
+implementations:
+- framework: pytest
+  file: test.py
+  selector: MST-D3-001
+  profiles: [mock]
+acceptance_bindings:
+  # Auxiliary backend text flow preserves output and does not add an outer retry.
+  AC-01: [test_exact_request_reaches_real_peer, test_legacy_model_interface_uses_real_transport_and_retains_usage, test_legacy_connectivity_uses_real_service_defaults, test_actual_agent_factory_uses_resolved_outlet, test_resource_conversion_and_saved_snapshot_reach_real_peer, test_auxiliary_prompt_uses_saved_outlet_http_without_outer_retry, test_long_text_preparation_uses_saved_outlet_real_http]
+  AC-02: [test_agent_bridge_uses_vllm_tail_and_shared_localized_errors, test_compatible_stream_tails_complete_once_through_actual_http, test_fragmented_stream_retains_kinds_calls_and_usage, test_resolved_gateway_stream_uses_real_async_transport]
+  AC-03: [test_agent_bridge_uses_vllm_tail_and_shared_localized_errors, test_http_detail_reaches_agent_bridge_without_credentials_or_extra_retry, test_retry_error_and_partial_output_boundaries, test_cancellation_closes_blocked_real_response, test_sync_cancellation_reclaims_blocked_managed_worker, test_legacy_empty_policy, test_legacy_context_recovery_shares_real_http_budget, test_auxiliary_prompt_uses_saved_outlet_http_without_outer_retry]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

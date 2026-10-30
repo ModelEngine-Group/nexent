@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-EXPERIENCE-OVERLAY-20261016
+  change_type: requirement
+  requirement_id: MODEL-EXPERIENCE-OVERLAY-20261016
+  title: Apply Nexent experience rules after upstream profile composition
+  description: Compose source facts first, then model/provider/exact-combination supplements and permitted user values; preview and save share the same policy, retaining save-before-connection-check.
+  affected_features:
+    existing: [SDK-MODEL-PROFILE-COMPOSITION, V5-PW-MODEL-01]
+    added: []
+    modified: [SDK-MODEL-PROFILE-COMPOSITION]
+    retired: []
+  affected_cases:
+    existing: [MPC-D1-001, PW-MODEL-01]
+    added: []
+    modified: [MPC-D1-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    reason: Existing composition tests enforce the previous priority; add explicit multi-layer defaults/capabilities and preview assertions while retaining invalid-rule validation.
+    behaviors:
+    - All upstream capability facts precede model, provider and exact-combination experience overrides.
+    - Later-layer declarations override the same key and preserve unrelated keys; permitted user values override defaults but never fixed constraints.
+    - Previews return the effective defaults and capabilities without writes; saved snapshots are not recomposed.
+    test_selectors:
+    - test/sdk/core/model_service/test_composition.py
+    - test/sdk/core/model_service/test_experience_overlay.py
+    - test/backend/services/test_model_profile_service.py
+    - frontend/tests/component/modelOutletAddForm.test.tsx
+  notes: Strengthen the existing full-file composition component Case, no duplicate D1. Dev API/browser evidence is separate from formal D4 execution. No new inference defaults, VLM changes or tool execution changes. Final container verification remains required before remote updates.

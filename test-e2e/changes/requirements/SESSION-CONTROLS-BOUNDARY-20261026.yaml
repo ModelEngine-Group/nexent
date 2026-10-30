@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: SESSION-CONTROLS-BOUNDARY-20261026
+  change_type: requirement
+  requirement_id: SESSION-CONTROLS-BOUNDARY-20261026
+  title: Keep token length limits at the outlet and adopt upstream reasoning presentation
+  description: Merge accepted upstream UI while retaining one preference/runtime chain and outlet-only length configuration.
+  traditional_ut:
+    decision: strengthen
+    reason: Reuse existing parameter-layer, preference, Agent and lifecycle tests; no duplicate D1.
+    behaviors:
+    - Trigger degree summary and compact controls observe the same preference view.
+    - Agent/session editors omit length limits while outlet editing retains them.
+    - New length patches are rejected; historical overrides inherit the outlet without mutating it; reasoning budget remains supported.
+    - Retired global Agent output reserves no longer gate saves and are normalized to outlet inheritance.
+    - Draft-to-saved thread identity, existing-conversation restoration and runtime parameters share the approved canonical chain.
+    test_selectors:
+    - frontend/tests/component/modelParameterLayers.test.tsx
+    - frontend/tests/component/modelOutletEditing.test.tsx
+    - frontend/tests/workbench/ConversationModelThreadIdentity.test.tsx
+    - frontend/tests/workbench/ConversationModelControls.test.tsx
+    - frontend/tests/workbench/ModelSelectorThinking.test.tsx
+    - frontend/tests/workbench/WorkbenchPageLifecycle.test.tsx
+    - frontend/tests/component/agentAdvancedHints.test.tsx
+    - test/backend/agents/test_create_agent_info.py
+    - test/backend/services/test_agent_service.py
+    - test/backend/services/test_agent_model_parameters.py
+    - test/backend/services/test_conversation_model_preferences_service.py
+  affected_features:
+    existing: []
+    modified: [CHAT-MODEL-CONTROLS]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [MOP-D3-001, CHAT-MODEL-CONTROLS-D4-002]
+    modified: [CHAT-MODEL-CONTROLS-D3-001, CHAT-MODEL-CONTROLS-D3-002]
+    added: []
+    retired: []
+  notes: Approved SESSION-CONTROLS-BOUNDARY-20261026 SCB-01 through SCB-05. Existing formal ownership retained with scoped dev browser/API and existing runtime regression execution. No remote push or container build.

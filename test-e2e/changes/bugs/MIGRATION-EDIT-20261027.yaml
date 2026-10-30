@@ -1,0 +1,45 @@
+schema_version: '1.0'
+change:
+  change_id: MIGRATION-EDIT-20261027
+  change_type: bugfix
+  bug_id: MIGRATION-EDIT-20261027
+  title: Review migrated models through the existing edit flow
+  description: Replace the separate read-only review modal with a marked edit action and confirmation of the saved revision.
+  observed_behavior: A text review button interrupts row actions and opens a separate read-only modal rather than the editor.
+  expected_behavior: A marked pencil opens the existing editor; administrators confirm an untouched snapshot directly or save changed values then confirm the returned revision; cancel and failed saves never confirm.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing review UT only covered the separate modal and did not prove the shared edit entry or save-then-confirm sequence.
+  feature_contract_changed: false
+  affected_features:
+    existing: [BE-MODEL-OUTLET-PERSISTENCE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [MOP-D3-001]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - The existing edit action carries a review marker without an extra button or modal
+    - Only administrators reviewing a pending migrated outlet confirm its freshly saved revision
+    - Cancellation and save failure never confirm and confirmation failure never repeats a successful save
+    - Normal and already reviewed outlets retain the regular edit behavior
+    - Untouched legacy values including null sampling can be confirmed without a PATCH or normalization while edited invalid drafts remain blocked
+    test_selectors:
+    - frontend/tests/component/modelMigrationReview.test.tsx
+    - frontend/tests/component/modelOutletEditing.test.tsx
+    - frontend/tests/component/modelLibraryListPageSize.test.tsx
+    - frontend/tests/component/modelEditDialog.test.tsx
+    reason: Strengthen existing component boundaries and reuse the existing backend revision and permission tests; no duplicate D1 is needed.
+  notes: >-
+    Existing sibling model-access-native-agent SPEC and MIGRATION-EDIT-20261027.md
+    contain ME-01 through ME-04 and the approved UX. MOP-D3-001 retains its
+    persistence contract; browser and API evidence proves the actual edit journey.
+    Backend migration-review authorization and revision contracts are unchanged.
+
+    ME-05 follow-up separates untouched snapshot review from edited-draft validation.

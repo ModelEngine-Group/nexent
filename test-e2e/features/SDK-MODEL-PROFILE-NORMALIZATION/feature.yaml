@@ -1,0 +1,31 @@
+schema_version: '1.0'
+module:
+  id: SDK-MODEL-SERVICE
+  name: SDK model service
+feature:
+  feature_id: SDK-MODEL-PROFILE-NORMALIZATION
+  name: Model profile source inheritance and normalization
+  status: planned
+  description: Versioned conversion from pinned source definitions to provider-neutral
+    capabilities with explicit field origins.
+  business_rules:
+  - rule_id: SDK-MODEL-PROFILE-NORMALIZATION-RULE-01
+    description: Pinned authored inheritance overlays objects recursively, replaces
+      arrays/scalars, honors omissions, excludes reference-only metadata, and leaves
+      original documents unchanged.
+  - rule_id: SDK-MODEL-PROFILE-NORMALIZATION-RULE-02
+    description: Missing capabilities and bounds stay unknown; boolean abilities and
+      configurable values remain separate.
+  - rule_id: SDK-MODEL-PROFILE-NORMALIZATION-RULE-03
+    description: Before submission, validate the consumed source fields and inherited constraints
+      with source diagnostics. Reference metadata has no detailed business validation;
+      runtime catalog loading converts the already checked sources without rerunning
+      the submission validator.
+  required_test_stages:
+  - D1
+  source:
+    requirement_ids:
+    - MODEL-PROFILE-NORMALIZATION-20261013
+    notes: Isolated UT does not complete component acceptance. MPN-D1-001 was
+      designed before connecting the catalog pipeline to prove complete publication,
+      provenance and revision behavior. No provider/API/database/Agent acceptance claimed.
