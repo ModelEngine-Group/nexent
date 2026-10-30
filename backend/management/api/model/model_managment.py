@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """FastAPI App layer for model management endpoints.
 
 This module exposes HTTP endpoints under the prefix "/model". It follows the App
@@ -20,14 +21,15 @@ from contracts.constants.constants import MODEL_CREATE_PERMISSION, MODEL_DELETE_
 from contracts.model import BatchCreateModelsRequest, BackfillDefaultsRequest, CapacitySuggestionRequestFields as CapacitySuggestionFields, ModelRequest, ModelProbeRequest, ModelCapacitySuggestionRequest, ModelCapacitySuggestionResponse, ProviderModelRequest, ManageTenantModelListRequest, ManageTenantModelListResponse, ManageTenantModelCreateRequest, ManageTenantModelUpdateRequest, ManageTenantModelDeleteRequest, ManageTenantModelHealthcheckRequest, ManageBatchCreateModelsRequest, ManageProviderModelListRequest, ManageProviderModelCreateRequest, FIXED_INFERENCE_FIELDS_BY_TYPE
 from contracts.errors.exceptions import TokenExpiredError, ModelProviderError
 from contracts.constants.constants import MODEL_CREATE_PERMISSION, MODEL_DELETE_PERMISSION, MODEL_READ_PERMISSION, MODEL_UPDATE_PERMISSION, _AUDIT_SAFE_MODEL_KEYS, _CATALOG_UNAVAILABLE_MESSAGE, _MANAGE_ALLOWED_ROLES
+from management.utils.app_factory import ModelCredentialRoute
 import asyncio
 import logging
 import re
 
-from contracts.model import BatchCreateModelsRequest, BackfillDefaultsRequest, CapacitySuggestionRequestFields as CapacitySuggestionFields, ModelRequest, ModelProbeRequest, ModelCapacitySuggestionRequest, ModelCapacitySuggestionResponse, ProviderModelRequest, ManageTenantModelListRequest, ManageTenantModelListResponse, ManageTenantModelCreateRequest, ManageTenantModelUpdateRequest, ManageTenantModelDeleteRequest, ManageTenantModelHealthcheckRequest, ManageBatchCreateModelsRequest, ManageProviderModelListRequest, ManageProviderModelCreateRequest, FIXED_INFERENCE_FIELDS_BY_TYPE
+from contracts.model import BatchCreateModelsRequest, BackfillDefaultsRequest, CapacitySuggestionRequestFields as CapacitySuggestionFields, ModelRequest, ModelProfilePreviewRequest, ModelOutletCreateRequest, ModelOutletPatchRequest, ModelOutletValidationRequest, ModelOutletMigrationReviewRequest, ModelProbeRequest, ModelCapacitySuggestionRequest, ModelCapacitySuggestionResponse, ProviderModelRequest, ManageTenantModelListRequest, ManageTenantModelListResponse, ManageTenantModelCreateRequest, ManageTenantModelUpdateRequest, ManageTenantModelDeleteRequest, ManageTenantModelHealthcheckRequest, ManageBatchCreateModelsRequest, ManageProviderModelListRequest, ManageProviderModelCreateRequest, FIXED_INFERENCE_FIELDS_BY_TYPE
 from contracts.constants.environment import CAPACITY_SUGGESTION_ENABLED
 
-from fastapi import APIRouter, Depends, Header, Query, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, Query, HTTPException, Request, Path
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from http import HTTPStatus
@@ -64,7 +66,7 @@ from gateway.authentication.auth import authenticate
 from permissions.depends import require
 from permissions.models import CurrentUser
 from gateway.authentication.auth import get_current_user_id
-from contracts.errors.exceptions import TokenExpiredError, ModelProviderError
+from contracts.errors.exceptions import DuplicateError, TokenExpiredError, ModelProviderError, ModelOutletValidationError, ModelOutletConflictError
 from nexent.core.concurrency import run_blocking
 from management.db.model.repository import get_model_by_model_id
 
@@ -101,7 +103,9 @@ except Exception as _exc:  # noqa: BLE001
         return {"version": "0.0.0", "metadata": {}, "providers": []}
 
 
-router = APIRouter(prefix="/model")
+
+
+router = APIRouter(prefix="/model", route_class=ModelCredentialRoute)
 logger = logging.getLogger("model_management_app")
 
 # Allowlisted payload keys that are safe to copy into audit entries; anything
@@ -133,7 +137,11 @@ def _sanitize_model_credentials(payload: Any) -> Any:
         return [_sanitize_model_credentials(item) for item in payload]
 
     if isinstance(payload, dict):
-        return {key: _sanitize_model_credentials(value) for key, value in payload.items() if key != "api_key"}
+        return {
+            key: _sanitize_model_credentials(value)
+            for key, value in payload.items()
+            if key not in {"api_key", "http_headers"}
+        }
 
     return payload
 
@@ -1187,6 +1195,9 @@ async def manage_create_provider_models(
             "model_type": request.model_type,
             "api_key": request.api_key,
             "base_url": request.base_url,
+            "ssl_verify": request.ssl_verify,
+            "timeout_seconds": request.timeout_seconds,
+            "http_headers": request.http_headers,
         }
         model_list = await create_provider_models_for_tenant(request.tenant_id, provider_request)
         return JSONResponse(
@@ -1416,3 +1427,178 @@ async def get_model_catalog_profile(
             model_name=model_name,
             data=None,
         )
+
+
+@router.get("/model_profiles")
+async def get_model_profiles(
+    query: str = Query("", max_length=200),
+    family: Optional[str] = Query(None, max_length=100),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+):
+    """List local model references without claiming provider/model qualification."""
+    from management.services.model.profiles import list_atomic_profiles
+
+    data = await run_blocking("model-profile-list", list_atomic_profiles, "model",
+                              query=query, family=family, page=page, page_size=page_size)
+    return JSONResponse(status_code=HTTPStatus.OK, content={"data": data})
+
+
+@router.get("/provider_profiles")
+async def get_provider_profiles(
+    query: str = Query("", max_length=200),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+):
+    """List provider references; endpoint hints are suggestions only."""
+    from management.services.model.profiles import list_atomic_profiles
+
+    data = await run_blocking("provider-profile-list", list_atomic_profiles, "provider",
+                              query=query, page=page, page_size=page_size)
+    return JSONResponse(status_code=HTTPStatus.OK, content={"data": data})
+
+
+@router.get("/profile_protocols")
+async def get_profile_protocols(current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION))):
+    """List the SDK's registered protocol and authentication choices."""
+    from management.services.model.profiles import list_profile_protocols
+
+    return JSONResponse(status_code=HTTPStatus.OK, content={"data": list_profile_protocols()})
+
+
+@router.post("/profile_previews")
+async def create_profile_preview(
+    request: ModelProfilePreviewRequest,
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+):
+    """Compose a draft from trusted catalog selections without saving an outlet."""
+    from management.services.model.profiles import preview_model_profile
+
+    try:
+        data = await run_blocking("model-profile-preview", preview_model_profile, request, current_user.tenant_id)
+        return JSONResponse(status_code=HTTPStatus.OK, content={"data": data})
+    except ModelOutletConflictError:
+        raise HTTPException(HTTPStatus.CONFLICT, detail="MODEL_OUTLET_VERSION_CONFLICT") from None
+    except ModelOutletValidationError as error:
+        raise HTTPException(HTTPStatus.BAD_REQUEST, detail={"code": "MODEL_OUTLET_INVALID",
+            "details": {"category": error.category, "field": error.path}}) from None
+
+
+@router.post("/outlets")
+async def create_model_outlet_endpoint(
+    request: ModelOutletCreateRequest,
+    http_request: Request,
+    current_user: CurrentUser = Depends(require(MODEL_CREATE_PERMISSION)),
+):
+    """Save a fully composed LLM outlet under the authenticated tenant."""
+    from management.services.model.profiles import create_model_outlet
+
+    try:
+        data = await run_blocking("model-outlet-create", create_model_outlet, request,
+                                  current_user.user_id, current_user.tenant_id)
+        record_security_event("model_create", request=http_request,
+            user_id=current_user.user_id, tenant_id=current_user.tenant_id,
+            details={"model_id": data["model_id"], "model_name": request.request_model_id,
+                     "display_name": request.display_name or request.request_model_id})
+        return JSONResponse(status_code=HTTPStatus.OK, content={"data": data})
+    except DuplicateError:
+        raise HTTPException(HTTPStatus.CONFLICT, detail={
+            "code": "MODEL_DISPLAY_NAME_CONFLICT",
+            "message": "The display name is already in use.",
+            "details": {"field": "display_name"},
+        }) from None
+    except ModelOutletConflictError:
+        raise HTTPException(HTTPStatus.CONFLICT, detail="MODEL_OUTLET_VERSION_CONFLICT") from None
+    except ModelOutletValidationError as error:
+        raise HTTPException(HTTPStatus.BAD_REQUEST, detail={"code": "MODEL_OUTLET_INVALID",
+            "details": {"category": error.category, "field": error.path}}) from None
+
+
+@router.get("/outlets/{model_id}")
+async def get_model_outlet_endpoint(
+    model_id: int = Path(..., gt=0, lt=2**31),
+    current_user: CurrentUser = Depends(require(MODEL_READ_PERMISSION)),
+):
+    """Return the tenant-owned saved outlet, not a newly composed catalog view."""
+    from management.services.model.profiles import get_model_outlet
+
+    data = await run_blocking("model-outlet-get", get_model_outlet, model_id, current_user.tenant_id)
+    if data is None:
+        raise HTTPException(HTTPStatus.NOT_FOUND, detail="MODEL_OUTLET_NOT_FOUND")
+    return JSONResponse(status_code=HTTPStatus.OK, content={"data": data})
+
+
+@router.patch("/outlets/{model_id}")
+async def patch_model_outlet_endpoint(
+    request: ModelOutletPatchRequest,
+    http_request: Request,
+    model_id: int = Path(..., gt=0, lt=2**31),
+    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
+):
+    """Apply revision-checked changes using the saved outlet's own rules."""
+    from management.services.model.profiles import update_model_outlet
+
+    try:
+        data = await run_blocking("model-outlet-update", update_model_outlet, model_id, request,
+                                 current_user.user_id, current_user.tenant_id)
+        record_security_event("model_update", request=http_request,
+            user_id=current_user.user_id, tenant_id=current_user.tenant_id,
+            details={"model_id": model_id, "config_revision": data["config_revision"]})
+        return JSONResponse(status_code=HTTPStatus.OK, content={"data": data})
+    except LookupError:
+        raise HTTPException(HTTPStatus.NOT_FOUND, detail="MODEL_OUTLET_NOT_FOUND") from None
+    except ModelOutletConflictError:
+        raise HTTPException(HTTPStatus.CONFLICT, detail="MODEL_OUTLET_VERSION_CONFLICT") from None
+    except ModelOutletValidationError as error:
+        raise HTTPException(HTTPStatus.UNPROCESSABLE_ENTITY, detail={"code": "MODEL_OUTLET_INVALID",
+            "details": {"category": error.category, "field": error.path}}) from None
+
+
+@router.post("/outlet_validations")
+async def validate_model_outlet_endpoint(
+    request: ModelOutletValidationRequest,
+    http_request: Request,
+    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
+):
+    """Check only endpoint/model availability through the common model service."""
+    from management.services.model.profiles import validate_model_outlet
+
+    try:
+        data = await validate_model_outlet(request, current_user.tenant_id,
+            is_disconnected=http_request.is_disconnected)
+        return JSONResponse(status_code=HTTPStatus.OK, content={"data": data})
+    except LookupError:
+        raise HTTPException(HTTPStatus.NOT_FOUND, detail="MODEL_OUTLET_NOT_FOUND") from None
+    except ModelOutletConflictError:
+        raise HTTPException(HTTPStatus.CONFLICT, detail="MODEL_OUTLET_VERSION_CONFLICT") from None
+    except ModelOutletValidationError as error:
+        raise HTTPException(HTTPStatus.UNPROCESSABLE_ENTITY, detail={"code": "MODEL_OUTLET_INVALID",
+            "details": {"category": error.category, "field": error.path}}) from None
+
+
+@router.post("/outlets/{model_id}/migration_reviews")
+async def confirm_model_outlet_migration_endpoint(
+    request: ModelOutletMigrationReviewRequest,
+    http_request: Request,
+    model_id: int = Path(..., gt=0, lt=2**31),
+    current_user: CurrentUser = Depends(require(MODEL_UPDATE_PERMISSION)),
+):
+    """Allow tenant administrators to confirm the displayed outlet revision."""
+    from management.services.model.profiles import confirm_outlet_migration
+
+    _require_manage_scope(current_user, current_user.tenant_id)
+    try:
+        result = await run_blocking("model-migration-review", confirm_outlet_migration,
+            model_id, request, current_user.user_id, current_user.tenant_id)
+        if result is None:
+            raise HTTPException(HTTPStatus.NOT_FOUND, detail="MODEL_OUTLET_NOT_FOUND")
+        record_security_event("model_update", request=http_request, user_id=current_user.user_id,
+            tenant_id=current_user.tenant_id, details={"model_id": model_id, "migration_review_revision": request.expected_revision})
+        return JSONResponse(status_code=HTTPStatus.OK, content={"data": result})
+    except ModelOutletConflictError:
+        raise HTTPException(HTTPStatus.CONFLICT, detail="MODEL_OUTLET_VERSION_CONFLICT") from None
+    except ModelOutletValidationError as error:
+        raise HTTPException(HTTPStatus.UNPROCESSABLE_ENTITY, detail={"code": "MODEL_OUTLET_INVALID",
+            "details": {"category": error.category, "field": error.path}}) from None
