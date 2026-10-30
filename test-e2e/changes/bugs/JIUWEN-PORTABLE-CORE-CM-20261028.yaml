@@ -1,0 +1,46 @@
+schema_version: '1.0'
+change:
+  change_id: JIUWEN-PORTABLE-CORE-CM-20261028
+  change_type: bugfix
+  bug_id: JIUWEN-PORTABLE-CORE-CM-20261028
+  title: Preserve selected Core and saved CM switch in portable Agent configuration
+  description: Real R4 Skill fixture found that export and import omit agent_core.
+    The portable schema also omits enable_context_manager, losing an explicit false value.
+  observed_behavior: A Jiuwen Agent exports as the default smolagents and imports lose
+    its selected Core. A disabled CM switch is absent from export and resets on import.
+  expected_behavior: Both Core values and both CM switch values round trip unchanged;
+    legacy files without the fields retain historical smolagents and enabled CM defaults.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_assertion
+    description: Existing transfer UT checked other fields but not Core or CM identity.
+      The real Skill journey now asserts its owned exported target uses Jiuwen.
+  feature_contract_changed: false
+  no_case_change_reason: Lossless configuration and equivalent published Skill clone
+    are already required. Strengthen the existing fixture assertion without changing its acceptance.
+  affected_features:
+    existing:
+    - JIUWEN-RESOURCES
+    - JIUWEN-CONTEXT
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-REAL-UI-D4-001
+    modified:
+    - JIUWEN-SKILL-FILES-D4-001
+    added: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Export and import preserve both supported Core choices and both explicit CM states.
+    - Legacy files retain default Core and CM behavior and invalid Core values are rejected.
+    - Transfer dependency failures propagate and are never mistaken for a successful import.
+    reason: Isolated transfer field assertions detect the actual omissions; deployed
+      Skill and saved Core switch journeys provide the separate API and browser proof.
+    test_selectors:
+    - test/backend/services/test_agent_transfer_core_context.py
+  notes: Found during SDK R4. Keep existing permissions, model mapping, prompts,
+    immutable version selection, tool and Skill binding policies unchanged. No SQL is required.

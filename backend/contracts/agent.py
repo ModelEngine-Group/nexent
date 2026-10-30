@@ -562,6 +562,7 @@ class AgentIDRequest(BaseModel):
 
 class ExportAndImportAgentInfo(BaseModel):
     agent_core: Literal["smolagents", "jiuwen"] = "smolagents"
+    enable_context_manager: bool = True
     agent_id: int
     tenant_id: Optional[str] = None
     name: str
