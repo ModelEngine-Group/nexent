@@ -253,6 +253,8 @@ class NexentAgent(AgentResources):
                 config=ctx_config,
                 max_steps=agent_config.max_steps,
             )
+            from nexent.core.agents.prompt.policies import with_common_behavior
+
             context_items = apply_model_visible_tool_schemas_to_context_items(
                 list(context_items_override)
                 if context_items_override is not None
@@ -295,7 +297,8 @@ class NexentAgent(AgentResources):
                 )
             context_runtime = ManagedContextRuntime(
                 context_manager,
-                items=context_items,
+                items=(with_common_behavior(context_items, self.observer.lang)
+                       if any(item.type == ContextItemType.SYSTEM for item in context_items) else context_items),
             )
 
             # Build one code executor for this agent. Worker-agent orchestration
@@ -534,6 +537,9 @@ class NexentAgent(AgentResources):
                 workspace_path=self.workspace_path,
             )
             agent.stop_event = self.stop_event
+            agent._delegation_collaborators = [
+                *agent_config.worker_agents, *(agent_config.external_a2a_agents or []),
+            ]
 
             # Wire plan tool deps if the plan tools are present in agent_config.tools.
             # CoreAgent already knows enable_planning (set above); use that to gate wiring.

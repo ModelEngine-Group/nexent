@@ -11,6 +11,7 @@ from ...prompts import load_prompt
 from ..context.models import ContextItemInput, ContextItemType
 from .bundle import AgentPromptBundle, _thaw
 from .knowledge import render_knowledge_base_summaries, render_knowledge_scope_resources
+from .policies import with_common_behavior
 
 
 _RENDERER = Environment(undefined=StrictUndefined, autoescape=False)
@@ -343,7 +344,7 @@ class AgentPromptComposer:
             + composer.render_system_section("code_norms")
         )
         add_system("code_norms", code_norms, 20, 31, "platform")
-        return inputs
+        return with_common_behavior(inputs, language)
 
     def compatibility_templates(self) -> dict[str, Any]:
         """Provide mutable legacy SDK templates without mutating the bundle."""

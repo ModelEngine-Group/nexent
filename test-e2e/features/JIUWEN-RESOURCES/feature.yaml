@@ -9,6 +9,10 @@ feature:
   description: M3 resource bridge, lossless core selection and management-side trusted
     snapshots.
   business_rules:
+  - rule_id: JIUWEN-RESOURCES-RULE-005
+    description: Smolagents and Jiuwen share common behavior prompts and collaboration policy, and honor explicit latest-request
+      delegation through an authorized child before direct execution; live and restored nested
+      events reflect actual execution without replay or fabricated delegation.
   - rule_id: JIUWEN-RESOURCES-RULE-001
     description: Native and text calls share authorized tool/MCP/Skills execution,
       identity, observations and cleanup. Saved and transient agents pass explicit

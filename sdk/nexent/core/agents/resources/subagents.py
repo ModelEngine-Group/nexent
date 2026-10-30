@@ -85,6 +85,7 @@ class SubAgentToolWrapper:
         "_runtime_identity",
         "_task_extractor",
         "_invocation_factory",
+        "_on_success",
     })
 
     def __init__(
@@ -102,6 +103,7 @@ class SubAgentToolWrapper:
         # ``__setattr__`` below (which forwards everything to the inner
         # agent) does not interfere with our own construction.
         object.__setattr__(self, "_inner", inner_agent)
+        object.__setattr__(self, "_on_success", None)
         object.__setattr__(self, "_invocation_factory", invocation_factory)
         object.__setattr__(self, "_observer", observer)
         object.__setattr__(self, "_agent_id", agent_id)
@@ -153,6 +155,10 @@ class SubAgentToolWrapper:
             # raise on unknown attrs); fall back to storing it on the wrapper
             # so subsequent reads still work.
             object.__setattr__(self, item, value)
+
+    def set_success_callback(self, callback):
+        """Bind a parent-run completion hook without changing child configuration."""
+        self._on_success = callback
 
     # --- invocation --------------------------------------------------------
 
@@ -219,6 +225,8 @@ class SubAgentToolWrapper:
                         target = getattr(agent, "forward", agent) if forward_call else agent
                     result = target(*args, **kwargs)
                 manager.set_openinference_output(result)
+                if self._on_success is not None:
+                    self._on_success(self.name)
                 return result
         finally:
             end_kwargs = dict(self._runtime_identity)

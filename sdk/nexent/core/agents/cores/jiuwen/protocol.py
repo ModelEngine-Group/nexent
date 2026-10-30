@@ -9,6 +9,11 @@ from dataclasses import dataclass
 
 EXECUTION_TOOL = "nexent_execute_block"
 NATIVE_EXECUTION_TOOL = "nexent_execute_python"
+NATIVE_PROTOCOL_INSTRUCTION = (
+    "Return the user-facing final answer as ordinary Markdown, without final_answer protocol tags. "
+    "Call nexent_execute_python with a complete Python code string to create files. "
+    "Code in ordinary prose or code tags is not executed in native mode."
+)
 PROTOCOL_INSTRUCTION = (
     "This outlet uses the controlled text execution protocol, not native function calls. "
     "Only complete <code>...</code> blocks request Python execution with the listed authorized tools. "

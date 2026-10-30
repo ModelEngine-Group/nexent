@@ -112,7 +112,10 @@ def test_ut_sdk_fps_009_special_names_and_no_redundant_automation_path():
     assert not (PROMPTS / "en/memory/dreaming_user_memory.yaml").exists()
     resources = list(PROMPTS.rglob("*.yaml"))
     expected = json.loads((ROOT / "test/assets/sdk_prompt_migration_hashes.json").read_text(encoding="utf-8"))
-    assert {path.relative_to(PROMPTS).as_posix() for path in resources} == set(expected)
+    shared_response_resources = {
+        f"{language}/agent/response_style.yaml" for language in ("zh", "en")
+    }
+    assert {path.relative_to(PROMPTS).as_posix() for path in resources} == set(expected) | shared_response_resources
     for resource in resources:
         if resource.stem.startswith(("nl2agent", "nl2skill", "agent_manager", "agent_worker")):
             continue
@@ -144,7 +147,7 @@ def test_ut_sdk_fps_011_languages_have_matching_paths_fields_and_jinja_variables
     en_paths = {p.relative_to(PROMPTS / "en") for p in (PROMPTS / "en").rglob("*.yaml")}
     zh_paths = {p.relative_to(PROMPTS / "zh") for p in (PROMPTS / "zh").rglob("*.yaml")}
     assert en_paths == zh_paths
-    assert len(en_paths) == 36
+    assert len(en_paths) == 37
     assert en_paths == zh_paths
 
     def flatten(value, prefix=""):

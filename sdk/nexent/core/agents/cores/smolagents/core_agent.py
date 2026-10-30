@@ -43,6 +43,7 @@ from nexent.core.agents.cores.smolagents.context_contracts import (
     native_context_messages,
     native_context_rebuild,
 )
+from nexent.core.agents.cores.smolagents.delegation import DelegationPolicy
 from nexent.core.agents.cores.smolagents.output_protocol import (
     ExecutableAction,
     ExplicitFinalAnswer,
@@ -64,6 +65,7 @@ from nexent.core.agents.cores.smolagents.verification import (
     render_guardrail_refusal,
     render_tool_input_refusal,
 )
+from nexent.core.agents.orchestration.delegation import DelegationError
 from nexent.core.agents.prompt import AgentPromptComposer
 from nexent.core.agents.prompt.clarification import clarification_policy
 from nexent.core.agents.prompt.user_context import has_current_time_marker, render_user_context
@@ -627,7 +629,9 @@ class CoreAgent(CodeAgent):
             self.plan_repo = PlanRepo(redis_client=redis_client)
 
     def initialize_system_prompt(self) -> str:
-        prompt = super().initialize_system_prompt()
+        from nexent.core.agents.prompt.policies import common_behavior_guidance
+
+        prompt = super().initialize_system_prompt() + "\n\n" + common_behavior_guidance(self.lang)
         if self.clarification_tool_name:
             prompt += "\n\n" + clarification_policy(
                 self.clarification_tool_name,
@@ -1240,6 +1244,23 @@ Additional Args:
                                 f" Unfinished plan steps: {details}.")
         return ChatMessage(role=MessageRole.USER, content=[{"type": "text", "text": instruction}])
 
+    def _validate_delegation_output(self, output):
+        """Check the complete proposal before any final-answer or execution branch."""
+        policy = getattr(self, "_delegation", None)
+        if policy is None or not policy.pending:
+            return
+        try:
+            if self._use_structured_outputs_internally:
+                code = json.loads(output)["code"]
+                code = extract_code_from_text(code, self.code_block_tags) or code
+            else:
+                code = parse_code_blobs(output)
+            if re.search(r"<final_answer>", str(output), re.IGNORECASE):
+                code = None
+        except (ValueError, TypeError, KeyError, AttributeError):
+            code = None
+        policy.validate_code(code)
+
     def _step_stream(self, memory_step: ActionStep) -> Generator[Any]:
         """
         Perform one step in the ReAct framework: the agent thinks, acts, and observes the result.
@@ -1258,6 +1279,11 @@ Additional Args:
             [ChatMessage(role=MessageRole.SYSTEM, content=[{"type": "text", "text": reminder}])]
             if strict_code_action else []
         )
+        delegation = getattr(self, "_delegation", None)
+        if delegation is not None and delegation.pending:
+            system_overlay.append(ChatMessage(
+                role=MessageRole.SYSTEM, content=[{"type": "text", "text": delegation.instruction}]
+            ))
         tail_overlay = [*getattr(self, "_protocol_repair_messages", [])]
         if strict_code_action:
             tail_overlay.append(ChatMessage(
@@ -1424,6 +1450,8 @@ Additional Args:
 
         if self.stop_event.is_set():
             raise RunTerminated()
+
+        self._validate_delegation_output(model_output)
 
         # Parse using the configured closed output protocol.
         try:
@@ -1779,6 +1807,20 @@ Additional Args:
         agent.run("What is the result of 2 power 3.7384?")
         ```
         """
+        collaborators = getattr(self, "_delegation_collaborators", None)
+        if collaborators is None:
+            collaborators = list((getattr(self, "managed_agents", {}) or {}).values())
+        self._delegation = DelegationPolicy(
+            task, collaborators,
+            enabled=(getattr(self, "output_protocol", "code_action") == "code_action"
+                     and getattr(getattr(self, "observer", None), "enable_nl2a_wrapper", False) is not True),
+        )
+        if self._delegation.pending and not self._delegation.names:
+            raise DelegationError("DELEGATION_UNAVAILABLE")
+        for tool in (getattr(self, "managed_agents", {}) or {}).values():
+            bind = getattr(tool, "set_success_callback", None)
+            if callable(bind):
+                bind(self._delegation.record_dispatch)
         max_steps = max_steps or self.max_steps
         # Append current time before the workspace path in the user task rather than the
         # system prompt. This keeps the system prefix stable so prompt/KV caches
@@ -2068,6 +2110,21 @@ Additional Args:
                     final_answer_source=terminal.source,
                 )
 
+            except DelegationError as error:
+                if self.stop_event.is_set():
+                    raise RunTerminated() from error
+                interrupted = True
+                self._resolve_deferred_model_attempt(
+                    getattr(action_step, "model_output_message", None), accepted=False,
+                )
+                if not self._delegation.allow_correction():
+                    raise ModelOutputProtocolExhaustedError("DELEGATION_REQUIRED") from error
+                self._protocol_repair_messages[:] = [ChatMessage(
+                    role=MessageRole.USER,
+                    content=[{"type": "text", "text": self._delegation.instruction + " " + _ACTION_FORMAT_REMINDER}],
+                )]
+                continue
+
             except NonterminalThoughtTurn:
                 if self.stop_event.is_set():
                     raise RunTerminated()
@@ -2233,6 +2290,8 @@ Additional Args:
                 self.agent_name, ProcessType.MAX_STEPS_REACHED, max_steps_data)
             # _handle_max_steps_reached already yields the final step internally
             # and sets action_step.error, so don't yield again to avoid duplicate error
+            if getattr(self, "_delegation", None) is not None and self._delegation.pending:
+                raise ModelOutputProtocolExhaustedError("DELEGATION_REQUIRED")
             final_answer = self._handle_max_steps_reached(task)
             if not has_meaningful_visible_content(final_answer):
                 final_answer = self._controlled_protocol_failure()

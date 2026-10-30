@@ -248,5 +248,22 @@ def test_clarification_policy_is_not_injected_into_other_protocols(kind):
             patch("nexent.core.agents.cores.smolagents.agent.CoreAgent") as core:
         factory.create_single_agent(config, _managed_context=kind == "child")
     assert core.call_args.kwargs["enable_clarification"] is False
-    assert core.call_args.kwargs["context_runtime"].items == [item]
+    runtime_items = core.call_args.kwargs["context_runtime"].items
+    assert runtime_items[0] == item
+    assert [entry.id for entry in runtime_items] == ["system:policy", "system:common_behavior"]
+    assert all(entry.id != "system:clarification_protocol" for entry in runtime_items)
     assert config.context_items == [item]
+
+
+def test_common_behavior_keeps_legacy_fallback_tool_instructions():
+    factory = _factory()
+    config = AgentConfig(name="agent", description="test", model_name="main", tools=[])
+    with patch.object(factory, "create_model", return_value=MagicMock()), \
+            patch("nexent.core.agents.cores.smolagents.agent.CoreAgent") as core:
+        factory.create_single_agent(config)
+    runtime = core.call_args.kwargs["context_runtime"]
+    assert runtime.items == []
+    fallback = "Saved business instructions and child_echo tool definition"
+    runtime.prepare_run(memory=MagicMock(), fallback_system_prompt=fallback)
+    assert runtime._run_context.items[0].id == "system:fallback"
+    assert runtime._run_context.items[0].content["text"] == fallback

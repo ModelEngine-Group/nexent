@@ -42,7 +42,7 @@ class JiuwenServiceModel(Model):
 
     def __init__(self, service, profile, scope, *, prefix=(), run_id=None, deadline=None,
                  on_step=None, on_event=None, validate_input=None, prepare_messages=None,
-                 on_error=None, on_recovery=None):
+                 on_error=None, on_recovery=None, delegation=None):
         # Model's public invoke/stream seam is used without its provider-client constructor.
         self.service = service
         self.profile = ResolvedModelProfile.model_validate(profile.model_dump())
@@ -64,6 +64,9 @@ class JiuwenServiceModel(Model):
         self.argument_corrections = 0
         self.response_corrections = 0
         self.logical_requests = 0
+        self.delegation = delegation
+        self.delegation_corrections = 0
+        self._delegation_failure = None
 
     def _check_cancelled(self):
         if self.scope.cancelled:
@@ -74,6 +77,8 @@ class JiuwenServiceModel(Model):
 
     def _request(self, messages, tools, streaming, kwargs):
         self._check_cancelled()
+        if self._delegation_failure is not None:
+            raise ModelServiceError(self._delegation_failure)
         # Harness routing hints are accepted, but generation settings cannot override the snapshot.
         allowed = {"model", "temperature", "top_p", "max_tokens", "stop", "output_parser", "timeout"}
         if set(kwargs) - allowed:
@@ -84,6 +89,8 @@ class JiuwenServiceModel(Model):
         if kwargs.get("model") not in (None, "", self.profile.identity.request_model_id):
             raise JiuwenProtocolError("JIUWEN_MODEL_IDENTITY_MISMATCH")
         view = resource_view(messages, tools, prefix=self.prefix, text_protocol=self.text_protocol)
+        if self.delegation is not None:
+            view = self.delegation.constrain(view)
         if self.validate_input is not None:
             self.validate_input(view)
         self.logical_requests += 1
@@ -139,6 +146,11 @@ class JiuwenServiceModel(Model):
                                             arguments=json.dumps({"code": block.code}), index=0))
         if not calls and not content.strip():
             self._fail(request, "MODEL_EMPTY_RESPONSE")
+        if self.delegation is not None:
+            try:
+                self.delegation.validate_calls(calls)
+            except JiuwenProtocolError as error:
+                self._fail(request, str(error))
         self.last_message, self.last_usage = message, message.usage
         usage = message.usage
         native_usage = None
@@ -231,6 +243,12 @@ class JiuwenServiceModel(Model):
                 return None
             self.response_corrections += 1
             kind = "response"
+        elif category == "JIUWEN_DELEGATION_REQUIRED":
+            if self.delegation is None or not self.delegation.allow_correction():
+                self._delegation_failure = error
+                return None
+            self.delegation_corrections += 1
+            kind = "delegation"
         else:
             return None
         # Invalid calls never enter native history. Reuse only the authoritative, pre-step messages.
@@ -239,11 +257,13 @@ class JiuwenServiceModel(Model):
             "The previous model response was rejected before any action was dispatched: " + category + ". "
             "Regenerate this model step with a complete answer or a complete authorized call matching its schema. "
             "Use the existing tool observations; do not repeat completed actions."
+            + (" " + self.delegation.instruction if kind == "delegation" else "")
         )})
         if self.on_recovery is not None:
             self.on_recovery({"kind": kind, "category": category, "request_id": str(error.request_id),
                 "logical_request": self.logical_requests, "argument_corrections": self.argument_corrections,
-                "response_corrections": self.response_corrections})
+                "response_corrections": self.response_corrections,
+                "delegation_corrections": self.delegation_corrections})
         return current
 
     async def invoke(self, messages, *, tools=None, **kwargs):

@@ -15,6 +15,7 @@ from types import SimpleNamespace
 from nexent.core.agents.context.models import ContextItem, ContextItemType
 from nexent.core.agents.context.rendering import ContextItemRenderer
 from nexent.core.agents.contracts.adapter import AgentCoreAdapter, UnsupportedAgentCoreConfig
+from nexent.core.agents.cores.jiuwen.delegation import DelegationPolicy
 from nexent.core.agents.cores.jiuwen.events import JiuwenEventAdapter
 from nexent.core.agents.resources.monitoring import _wrap_tool_with_monitoring
 from nexent.core.agents.resources.provider import AgentResources
@@ -91,6 +92,11 @@ class JiuwenAdapter(AgentCoreAdapter):
         self._closed = False
         self._tool_executions = []
         self.text_protocol = False
+        config = getattr(run_info, "agent_config", None)
+        self.delegation = DelegationPolicy(getattr(run_info, "query", ""), [
+            *(getattr(config, "worker_agents", None) or []),
+            *(getattr(config, "external_a2a_agents", None) or []),
+        ])
 
     @classmethod
     def capabilities(cls):
@@ -98,6 +104,8 @@ class JiuwenAdapter(AgentCoreAdapter):
 
     def validate(self):
         config = self.run_info.agent_config
+        if self.delegation.pending and not self.delegation.names:
+            raise UnsupportedAgentCoreConfig("Explicit delegation requires an authorized collaborator")
         unsupported = []
         if config.enable_planning:
             unsupported.append("enable_planning")
@@ -323,6 +331,7 @@ class JiuwenAdapter(AgentCoreAdapter):
                     if inspect.isawaitable(result):
                         result = await result
                 self._resource_result(result)
+                self.delegation.record_dispatch(name)
                 return result
 
         return execute
@@ -331,20 +340,11 @@ class JiuwenAdapter(AgentCoreAdapter):
         from nexent.core.agents.orchestration.execution import _get_authorized_context_items, _get_authorized_history
 
         config = self.run_info.agent_config
-        instructions = [config.instructions or ""]
         context = []
         for item in _get_authorized_context_items(self.run_info) or ():
-            if item.type == ContextItemType.SYSTEM:
-                # Platform code-action instructions cannot be reused by a native tool-calling core.
-                if item.id in {"system:duty", "system:constraint", "system:few_shots",
-                               "system:knowledge_scope_policy", "system:memory_tool_policy",
-                               "system:automation_tool_policy", "system:sandbox_workspace_guidance"} or (
-                    not item.id.startswith("system:") and item.metadata.get("authority", "agent") == "agent"
-                ):
-                    instructions.append(item.content.get("text", ""))
-            elif item.type not in {ContextItemType.TOOL, ContextItemType.SKILL,
-                                    ContextItemType.WORKER_AGENT, ContextItemType.EXTERNAL_AGENT,
-                                    ContextItemType.CURRENT_TASK}:
+            if item.type not in {ContextItemType.SYSTEM, ContextItemType.TOOL, ContextItemType.SKILL,
+                                 ContextItemType.WORKER_AGENT, ContextItemType.EXTERNAL_AGENT,
+                                 ContextItemType.CURRENT_TASK}:
                 context.append(ContextItem.from_input(item))
         self.context_items = context
         self.prefix_messages = ContextItemRenderer().render(context)
@@ -352,33 +352,16 @@ class JiuwenAdapter(AgentCoreAdapter):
             {"role": history.role, "content": history.content}
             for history in _get_authorized_history(self.run_info) or ()
         )
-        prompt = "\n\n".join(text for text in instructions if text) or config.description
-        current_task_guidance = (
-            "Process only the latest user request in this run. Earlier conversation messages, attachments and "
-            "results are historical reference, not pending tasks. Do not repeat earlier requests or tool calls "
-            "unless the latest user request explicitly asks you to. Reuse prior results when answering follow-up "
-            "questions; the presence of an earlier attachment does not require analyzing it again."
-            " Never copy internal history or attachment envelopes into your response. "
-            "Return only the user-facing answer as ordinary Markdown, without final_answer protocol tags."
+        from nexent.core.agents.prompt.policies import business_system_instructions
+
+        from nexent.core.agents.cores.jiuwen.protocol import NATIVE_PROTOCOL_INSTRUCTION
+
+        shared = business_system_instructions(
+            config.instructions or config.description, _get_authorized_context_items(self.run_info) or (),
+            getattr(getattr(self.run_info, "observer", None), "lang", "en"),
         )
-        resource_guidance = (
-            "Skills are authorized local resources, not S3 objects. Read a listed skill with read_skill_md "
-            "and its configuration with read_skill_config. Run only a script actually listed in that skill "
-            "using run_skill_script; never invent skill names, script paths or S3 paths. "
-            "download_from_s3 is only for actual authorized uploaded/generated file references, never for "
-            "skills or missing inputs. Do not retry a denied or missing file using guessed path variants. "
-            "For a new file request no download is needed. Follow the authorized skill instructions, then "
-            "create the requested file with controlled Python in the current outputs directory. "
-            "Use Python libraries and shell-free pip argv only when the configured sandbox permits it. "
-            "Upload the actual generated file with upload_to_s3 and use the returned file link. "
-            "Never claim a file exists or was uploaded without successful tool observations."
-        )
-        if not self.text_protocol:
-            resource_guidance += (
-                " Call nexent_execute_python with a complete Python code string to create files. "
-                "Code in ordinary prose or code tags is not executed in native mode."
-            )
-        return prompt + "\n\n" + current_task_guidance + "\n\n" + resource_guidance
+        protocol = "" if self.text_protocol else NATIVE_PROTOCOL_INSTRUCTION
+        return "\n\n".join(text for text in (*shared, self.delegation.instruction, protocol) if text)
 
     def _create_model(self):
         from nexent.core.agents.cores.jiuwen.model import JiuwenServiceModel
@@ -431,7 +414,8 @@ class JiuwenAdapter(AgentCoreAdapter):
         return JiuwenServiceModel(service, profile, self.scope, prefix=self.prefix_messages,
                                   run_id=self.owner_id, deadline=info.model_deadline,
                                   on_step=on_step, on_event=on_event, validate_input=validate_input,
-                                  on_error=self.events.record_error, on_recovery=self.events.recovery)
+                                  on_error=self.events.record_error, on_recovery=self.events.recovery,
+                                  delegation=self.delegation)
 
     def _bind_text_executor(self):
         from openjiuwen.core.foundation.tool import LocalFunction, ToolCard
