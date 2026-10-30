@@ -22,7 +22,9 @@ from test_asset_lib import ValidationIssue, case_index, change_index, discover_d
 def validate(root: Path, phase: str, regenerate: bool,
              require_acceptance_cases: list[str] | None = None,
              require_ut_changes: list[str] | None = None,
-             require_preparation_cases: list[str] | None = None) -> list[ValidationIssue]:
+             require_preparation_cases: list[str] | None = None, *, daily=False) -> list[ValidationIssue]:
+    if daily and regenerate:
+        raise ValueError("Daily validation must not regenerate repository assets")
     issues: list[ValidationIssue] = []
     issues.extend(validate_features.validate(root))
     issues.extend(validate_cases.validate(root))
@@ -36,8 +38,10 @@ def validate(root: Path, phase: str, regenerate: bool,
             issues.append(ValidationIssue(root / "test-e2e/changes", change_id, "Current product Change requires traditional_ut assessment"))
     for change_id, change in changes.items():
         if "traditional_ut" in change:
-            issues.extend(ValidationIssue(root / "test-e2e/changes", change_id, problem)
-                          for problem in validate_changes.traditional_ut_issues(root, change["traditional_ut"], phase))
+            for problem in validate_changes.traditional_ut_issues(root, change["traditional_ut"], phase, typed_missing=True):
+                issues.append(ValidationIssue(root / "test-e2e/changes", change_id,
+                                              problem.message if isinstance(problem, ValidationIssue) else problem,
+                                              problem.code if isinstance(problem, ValidationIssue) else "UNCLASSIFIED"))
     if require_acceptance_cases:
         cases, _ = case_index(discover_documents(root, "cases"))
         for case_id in require_acceptance_cases:
@@ -56,19 +60,21 @@ def validate(root: Path, phase: str, regenerate: bool,
         root, phase, require_preparation_cases=require_preparation_cases or ())
     issues.extend(execution_issues)
     if issues:
-        return issues
+        from validation_policy import report
+        if not daily or not report(root, issues, registry["cases"])["ready"]:
+            return issues
     for path, expected in generate_feature_links.expected_pages(root).items():
         if regenerate:
             path.write_text(expected, encoding="utf-8")
         elif not path.is_file() or path.read_text(encoding="utf-8") != expected:
-            issues.append(ValidationIssue(path, "", "Generated Feature navigation is missing or stale"))
+            issues.append(ValidationIssue(path, "", "Generated Feature navigation is missing or stale", "DERIVED_VIEW_STALE"))
     registry_path = root / "test-e2e/infra/generated/registry.json"
     expected_registry = json.dumps(registry, ensure_ascii=False, indent=2) + "\n"
     if regenerate:
         registry_path.parent.mkdir(parents=True, exist_ok=True)
         registry_path.write_text(expected_registry, encoding="utf-8")
     elif registry_path.is_file() and registry_path.read_text(encoding="utf-8") != expected_registry:
-        issues.append(ValidationIssue(registry_path, "", "Generated execution registry is stale"))
+        issues.append(ValidationIssue(registry_path, "", "Generated execution registry is stale", "DERIVED_VIEW_STALE"))
     excel_path = root / "test-e2e/infra/generated/Nexent_测试基线.xlsx"
     if regenerate:
         generate_excel.write_workbook(root, excel_path)
@@ -77,7 +83,7 @@ def validate(root: Path, phase: str, regenerate: bool,
             expected = Path(temporary_directory) / "expected.xlsx"
             generate_excel.write_workbook(root, expected)
             if excel_path.is_file() and generate_excel.workbook_snapshot(expected) != generate_excel.workbook_snapshot(excel_path):
-                issues.append(ValidationIssue(excel_path, "", "Generated Excel view is stale"))
+                issues.append(ValidationIssue(excel_path, "", "Generated Excel view is stale", "DERIVED_VIEW_STALE"))
     return issues
 
 
@@ -86,6 +92,8 @@ def main() -> int:
     parser.add_argument("--root", type=Path)
     parser.add_argument("--phase", choices=("design", "implementation"), default="implementation")
     parser.add_argument("--generate", action="store_true")
+    parser.add_argument("--daily-report", type=Path,
+                        help="Write a typed Daily preflight report outside the checkout; never generate views")
     parser.add_argument("--require-acceptance-case", action="append", default=[], metavar="CASE_ID",
                         help="Require obligation metadata for an added or acceptance-modified Case; repeat per Case")
     parser.add_argument("--require-ut-change", action="append", default=[], metavar="CHANGE_ID",
@@ -94,6 +102,24 @@ def main() -> int:
                         help="Require an explicit preparation declaration for a changed online Case; repeat per Case")
     args = parser.parse_args()
     root = repository_root(args.root)
+    if args.daily_report:
+        if args.generate or args.phase != "implementation" or args.daily_report.resolve().is_relative_to(root):
+            parser.error("Daily reports require implementation mode, no generation, and an output outside the checkout")
+        from suite_runtime import save
+        from validation_policy import report
+        try:
+            issues = validate(root, args.phase, False, args.require_acceptance_case, args.require_ut_change,
+                              args.require_preparation_case, daily=True)
+            execution_issues, registry = validate_execution.inspect(root)
+            issues = list(dict.fromkeys([*issues, *execution_issues]))
+        except Exception as exc:
+            # Unknown parser/IO failures are global; do not expose arbitrary YAML values.
+            issues = [ValidationIssue(root / "test-e2e", "", f"Asset inspection failed ({type(exc).__name__})")]
+            registry = {"cases": []}
+        validation = report(root, issues, registry["cases"])
+        save(args.daily_report, validation)
+        print(render_issues(root, issues) if issues else "Daily asset validation passed.")
+        return 0 if validation["ready"] else 1
     issues = validate(root, args.phase, args.generate, args.require_acceptance_case, args.require_ut_change,
                       args.require_preparation_case)
     if issues:

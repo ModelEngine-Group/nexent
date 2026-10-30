@@ -75,11 +75,14 @@ def config(repo, home):
     return payload
 
 
-def selection(repo, args):
+def selection(repo, args, *, daily=False, worker=False):
     issues, registry = inspect(repo)
-    if issues:
+    if issues and not (daily or worker):
         raise ValueError(f"Invalid test assets: {len(issues)} binding issues")
     records = registry["cases"]
+    if issues:
+        from validation_policy import apply_blocks, report
+        records = apply_blocks(records, report(repo, issues, records))
     selected_ids = set(args.case or [])
     if args.change:
         found = []
@@ -328,20 +331,33 @@ def worker(repo, home, record, directory, settings):
 def execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False):
     from deployment_exceptions import assert_recovered, catalog, execute_campaign, groups
     assert_recovered(home)
+    validation = None
+    if daily:
+        from validation_policy import evaluate
+        validation, all_records = evaluate(repo)
+        by_id = {record["case_id"]: record for record in all_records}
+        if len(records) != len(by_id) or {record["case_id"] for record in records} != set(by_id):
+            raise ValueError("Daily must account for the full validated registry")
+        records = [by_id[record["case_id"]] for record in records]
     rules = catalog(repo)
     if any(profile != "local" for profile in groups(records, rules)):
         if resume:
             raise RuntimeError("Resume deployment campaigns only after recovery; select unresolved Cases for a new run")
-        issues, registry = inspect(repo)
-        if issues:
-            raise ValueError("Invalid execution assets")
+        if not daily:
+            issues, registry = inspect(repo)
+            if issues:
+                raise ValueError("Invalid execution assets")
+            all_records = registry["cases"]
         return execute_campaign(repo, home, records, settings, daily=daily, publish_latest=publish_latest,
-                                execute_one=_execute, all_records=registry["cases"], hook=execute_hooks,
-                                machine_env=machine_environment)
-    return _execute(repo, home, records, settings, daily=daily, resume=resume, publish_latest=publish_latest)
+                                execute_one=partial(_execute, validation_report=validation) if daily else _execute,
+                                all_records=all_records, hook=execute_hooks,
+                                machine_env=machine_environment, validation_report=validation)
+    return _execute(repo, home, records, settings, daily=daily, resume=resume, publish_latest=publish_latest,
+                    validation_report=validation)
 
 
-def _execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False, directory=None, on_result=None):
+def _execute(repo, home, records, settings, *, daily=False, resume=None, publish_latest=False, directory=None,
+             on_result=None, validation_report=None):
     directory = directory or home / "runs/repository-daily" / (now().replace(":", "").replace("+", "-") + "-" + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True, exist_ok=False)
     if os.name != "nt":
@@ -364,6 +380,8 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
     save(directory / "provenance.json", provenance)
     save(directory / "plan.json", {"cases": records})
     save(directory / "pipeline.json", settings)
+    if validation_report is not None:
+        save(directory / "asset-validation.json", validation_report)
     reused_rows = {row["case_id"]: row for row in resume["rows"]} if resume else {}
     rows, error = [], None
     previous_handler = signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
@@ -372,12 +390,15 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
     print(f"Local batch: {directory}", flush=True)
     try:
         env = machine_environment(home, repo)
+        if validation_report is not None and not validation_report.get("ready"):
+            raise RuntimeError("Global or unclassified asset validation failure")
         if (home / "state/deployment-guard/pending.json").exists():
             raise RuntimeError("Pending deployment recovery exists; recover the owned environment before running")
         state["stages"]["D0"] = "RUNNING"
         save(directory / "status.json", state)
-        validation = logged([sys.executable, str(repo / "test-e2e/infra/tools/validate_test_assets.py"),
-                             "--phase", "implementation"], repo, env, directory / "logs/validate.log", 180)
+        validation = 0 if validation_report is not None else logged(
+            [sys.executable, str(repo / "test-e2e/infra/tools/validate_test_assets.py"),
+             "--phase", "implementation"], repo, env, directory / "logs/validate.log", 180)
         if validation:
             raise RuntimeError("Formal asset validation failed")
         static_rows = static_inventory(home, selected=required_static)
@@ -407,7 +428,12 @@ def _execute(repo, home, records, settings, *, daily=False, resume=None, publish
                 case_started_at = now()
                 case_started_clock = time.monotonic()
                 reused = reused_rows.get(case_id)
-                if reused:
+                if record.get("asset_blocked"):
+                    row = {"case_id": case_id, "stage": stage, "result": "BLOCKED",
+                           "reason": "Case execution asset is missing or invalid; inspect asset-validation.json",
+                           "acceptance_status": "INCOMPLETE", "evidence": ["asset-validation.json"]}
+                    save(directory / "cases" / case_id / "receipt.json", row)
+                elif reused:
                     row = reused
                     if record["status"] == "active" and record.get("execution"):
                         save(directory / "cases" / case_id / "receipt.json", {
@@ -533,7 +559,7 @@ def main(argv=None):
                     print(json.dumps({"ready": False, "problems": problems}, ensure_ascii=False, indent=2))
                     return 2
                 return execute(repo, home, records, settings, resume=resume)
-        records = selection(repo, args)
+        records = selection(repo, args, daily=args.mode == "daily", worker=args.mode == "worker")
         if args.mode == "worker":
             if not args.batch_dir or len(records) != 1:
                 parser.error("Worker requires one Case and a batch directory")
