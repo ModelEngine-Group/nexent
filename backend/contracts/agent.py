@@ -217,6 +217,8 @@ class AgentRequest(BaseModel):
     clarification_response: Optional[ClarificationResponse] = None
     conversation_id: Optional[int] = None
     history: Optional[List[HistoryItem]] = None
+    retry_user_message_id: Optional[int] = Field(default=None, gt=0, strict=True)
+    retry_message_index: Optional[int] = Field(default=None, ge=0, strict=True)
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
     agent_id: Optional[int] = None
@@ -273,6 +275,10 @@ class AgentRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_workbench_entrypoint(self):
+        if self.retry_message_index is not None and self.retry_user_message_id is None:
+            raise ValueError("Retry requires an original user message ID")
+        if self.retry_user_message_id is not None and (not self.conversation_id or self.is_debug):
+            raise ValueError("Retry requires a persisted conversation")
         if (
             self.entrypoint == "workbench"
             and self.workbench is None

@@ -23,7 +23,7 @@ from contracts.errors.exceptions import AppException, ConversationNotFoundError,
 from contracts.constants.constants import CHAT_MODE_VALUES
 from management.db.conversation.repository import create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message, get_latest_assistant_message_id, get_latest_user_message_id, get_last_unit_for_message, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
 from management.db.model.repository import get_model_by_model_id
-from management.db.conversation.repository import append_conversation_user_message
+from management.db.conversation.repository import append_conversation_user_message, resolve_conversation_retry_user
 from management.services.model.adapter import get_llm_adapter_from_config
 from management.services.configuration.tenant.settings import tenant_config_manager
 from nexent.core.agents.prompt.auxiliary import compose_auxiliary_prompt
@@ -257,6 +257,15 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     User messages do not need unit records.
     """
     source = MessageSource(getattr(request, "_message_source", MessageSource.CHAT))
+    retry_id = getattr(request, "retry_user_message_id", None)
+    if type(retry_id) is int:
+        message_id, message_index = resolve_conversation_retry_user(
+            request.conversation_id, user_id, retry_id, request.retry_message_index,
+            strip_current_time_prefix(request.query), request.minio_files,
+        )
+        request._runtime_user_message_id = message_id
+        request._runtime_user_message_index = message_index
+        return
     message_id, message_index = append_conversation_user_message(
         request.conversation_id, strip_current_time_prefix(request.query), request.minio_files, user_id,
         **({"message_source": source} if source != MessageSource.CHAT else {}),

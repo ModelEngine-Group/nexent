@@ -25,6 +25,7 @@ import { createWorkbenchAgentDraft } from "@/features/workbench/agentCreationDra
 import { ApiError } from "@/services/api";
 import { notifyWorkbenchConfigResolved } from "@/features/workbench/runtimeEvents";
 import log from "@/lib/logger";
+import { acknowledgeConversationUser } from "@/lib/conversationRetry";
 import { adaptNexentOutputStream } from "@/lib/nexentOutputAdapter";
 import { completeTrailingToolCalls } from "@/lib/toolCallStatus";
 import type { SourceAttributes } from "@/types/source";
@@ -474,7 +475,6 @@ export interface VerificationPanelPart {
 }
 
 // Accumulated total duration across all steps
-
 
 /**
  * Parses a backend `token_count` payload into a `StepTokenCount` entry.
@@ -1007,7 +1007,11 @@ export function attachExecutionLogsToTool(
   targetToolCall.result = (targetToolCall.result ?? "") + chunk.content;
   if (chunk.is_error) {
     targetToolCall.isError = true;
-    targetToolCall.status = { type: "incomplete", reason: "error", error: chunk.content };
+    targetToolCall.status = {
+      type: "incomplete",
+      reason: "error",
+      error: chunk.content,
+    };
   }
   return true;
 }
@@ -1276,7 +1280,11 @@ export function parseVerification(chunk: {
  * collapsible card flips from its running indicator to a finished state
  * without needing a separate per-message registry.
  */
-export function markSubAgentRunFinished(parts: any[], runId: string, executionStatus?: "completed" | "failed" | "stopped"): void {
+export function markSubAgentRunFinished(
+  parts: any[],
+  runId: string,
+  executionStatus?: "completed" | "failed" | "stopped"
+): void {
   for (const part of parts) {
     if (part && part.metadata && part.metadata.runId === runId) {
       part.metadata.isRunning = false;
@@ -1378,7 +1386,10 @@ function buildTimingFromTokenCount(
 
   runSteps.push(parsed);
   pushStepTokenCount(parsed);
-  const totalDuration = runSteps.reduce((total, step) => total + step.duration, 0);
+  const totalDuration = runSteps.reduce(
+    (total, step) => total + step.duration,
+    0
+  );
 
   return buildTimingResult(
     Date.now(), // streamStartTime - approximate
@@ -1780,12 +1791,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
               : undefined,
           persist_history:
             isEphemeralRuntime && custom?.persistCreationHistory === true,
-          retry_message_index: isEphemeralRuntime
-            ? custom?.retry_message_index
-            : undefined,
-          retry_user_message_id: isEphemeralRuntime
-            ? custom?.retry_user_message_id
-            : undefined,
+          retry_message_index: custom?.retry_message_index,
+          retry_user_message_id: custom?.retry_user_message_id,
           workbench_config: isEphemeralRuntime ? creationConfig : undefined,
           draft_snapshot: isNl2Skill ? custom?.draftSnapshot : undefined,
           language: isNl2Skill ? custom?.language : undefined,
@@ -1827,6 +1834,16 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         },
         (version) => {
           if (!userAborted) custom?.onWorkbenchConfigVersion?.(version);
+        },
+        (id, index) => {
+          if (
+            !userAborted &&
+            !isResume &&
+            !isEphemeralRuntime &&
+            lastUserIndex >= 0
+          ) {
+            acknowledgeConversationUser(messages[lastUserIndex].id, id, index);
+          }
         }
       );
       if (userAborted) {
@@ -2422,7 +2439,12 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         )
       ),
       ...(output.adapter.status ? { status: output.adapter.status } : {}),
-      metadata: { custom: { ...(nl2a ? { nl2a } : {}), stepTokenCounts: [...runStepTokenCounts] } },
+      metadata: {
+        custom: {
+          ...(nl2a ? { nl2a } : {}),
+          stepTokenCounts: [...runStepTokenCounts],
+        },
+      },
     });
 
     const streamStartTime = Date.now();
@@ -2525,7 +2547,10 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           // Handle token_count - store timing for final yield
           if (chunk.type === "token_count") {
-            storedTiming = buildTimingFromTokenCount(chunk.content, runStepTokenCounts);
+            storedTiming = buildTimingFromTokenCount(
+              chunk.content,
+              runStepTokenCounts
+            );
             continue; // Don't yield for internal data chunks
           }
 
@@ -2770,7 +2795,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
                 flushOpenReasoning(closing.invocationId);
               }
               activeSubAgents.delete(invocationId!);
-              markSubAgentRunFinished(contentParts, closing.runId, payload.status);
+              markSubAgentRunFinished(
+                contentParts,
+                closing.runId,
+                payload.status
+              );
             }
             // Pick the next active invocation id so subsequent reasoning /
             // tool parts default to a still-open sibling when present.

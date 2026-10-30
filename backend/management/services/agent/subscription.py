@@ -1027,6 +1027,11 @@ async def run_agent_stream(
         headers["run_id"] = debug_run_id
     if agent_request.conversation_id is not None:
         headers["conversation_id"] = str(agent_request.conversation_id)
+    for field, header in [("_runtime_user_message_id", "X-User-Message-Id"),
+                          ("_runtime_user_message_index", "X-User-Message-Index")]:
+        value = getattr(agent_request, field, None)
+        if type(value) is int and value >= 0:
+            headers[header] = str(value)
     runtime_metadata_version = getattr(agent_request, "_runtime_metadata_version", None)
     if runtime_metadata_version is not None:
         headers["X-Runtime-Metadata-Version"] = str(runtime_metadata_version)

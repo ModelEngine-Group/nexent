@@ -32,10 +32,10 @@ def history_db(monkeypatch):
     monkeypatch.setattr(module, "get_db_session", session)
     monkeypatch.setattr(module, "_get_user_tenant", lambda _: {"tenant_id": "tenant"})
 
-    def message(mid, role, content, status="completed", files=None, deleted="N"):
+    def message(mid, role, content, status="completed", files=None, deleted="N", index=None):
         with engine.begin() as connection:
-            connection.execute(text("INSERT INTO nexent.conversation_message_t VALUES (:id, 1, :id, :role, :body, :files, :status, :deleted)"),
-                               {"id": mid, "role": role, "body": content, "files": json.dumps(files) if files else None, "status": status, "deleted": deleted})
+            connection.execute(text("INSERT INTO nexent.conversation_message_t VALUES (:id, 1, :idx, :role, :body, :files, :status, :deleted)"),
+                               {"id": mid, "idx": mid if index is None else index, "role": role, "body": content, "files": json.dumps(files) if files else None, "status": status, "deleted": deleted})
 
     def unit(uid, mid, kind, content, status="completed", deleted="N"):
         with engine.begin() as connection:
@@ -44,6 +44,20 @@ def history_db(monkeypatch):
 
     yield module, message, unit
     engine.dispose()
+
+
+def test_followup_uses_latest_retry_once_and_preserves_same_text_turn(history_db):
+    module, message, _ = history_db
+    message(1, "user", "Same", index=0)
+    message(2, "assistant", "First answer", index=1)
+    message(10, "assistant", "Third answer", index=1)
+    message(7, "assistant", "Second answer", index=1)
+    message(20, "user", "Same", index=2)
+    message(21, "assistant", "Independent repeated question answer", index=3)
+    message(22, "user", "Next", index=4)
+    turns = module.get_historical_context(1, 22, "owner", "tenant")["conversation_turns"]
+    assert [turn["user_message_id"] for turn in turns] == [1, 20]
+    assert [turn["assistant_final_answer"] for turn in turns] == ["Third answer", "Independent repeated question answer"]
 
 
 def test_stop_followup_keeps_original_task_and_saved_results(history_db):

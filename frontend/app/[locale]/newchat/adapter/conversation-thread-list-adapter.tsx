@@ -14,8 +14,6 @@ import {
   useAui,
 } from "@assistant-ui/react";
 import type {
-  ChatModelRunOptions,
-  ChatModelRunResult,
   CompleteAttachment,
   ExportedMessageRepositoryItem,
   GenericThreadHistoryAdapter,
@@ -62,7 +60,6 @@ import {
   searchImagesRegistry,
   isReasoningChunkType,
   skillFileUploadsRegistry,
-  remoteChatModelAdapter,
   parseStepTokenCount,
   parsePlan,
   parsePlanStepUpdate,
@@ -1391,7 +1388,11 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
 
       // An NL2Agent turn may consist only of an interactive card boundary.
       // Keep the message so its restored metadata can render the card.
-      if (historicalNl2a && content.length === 0) {
+      if (
+        (historicalNl2a ||
+          (msg.role === "assistant" && msg.status === "streaming")) &&
+        content.length === 0
+      ) {
         content.push({ type: "text", text: "" });
       }
 
@@ -1432,7 +1433,16 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         id: messageId,
         role: msg.role,
         content,
-        ...(restoredRuntimeStatus ? {status: restoredRuntimeStatus} : {}),
+        // A persisted running flag does not represent an attached local stream.
+        // The shared resume hook reconnects it under the original user boundary.
+        ...(restoredRuntimeStatus
+          ? {
+              status:
+                restoredRuntimeStatus.type === "running"
+                  ? { type: "complete" as const, reason: "unknown" as const }
+                  : restoredRuntimeStatus,
+            }
+          : {}),
         ...(createdAt ? { createdAt } : {}),
         ...(msg.role === "user" && attachments.length > 0
           ? { attachments }
@@ -1456,39 +1466,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
     }
     return {
       ...repository,
-      unstable_resume: detail.streaming_message?.status === "streaming",
     };
-  }
-
-  async *resume(
-    options: ChatModelRunOptions
-  ): AsyncGenerator<ChatModelRunResult, void> {
-    const remoteId = this.getRemoteId();
-    if (!remoteId) {
-      log.warn(
-        "[history-adapter] Cannot resume without a remote conversation ID"
-      );
-      return;
-    }
-
-    const custom = (options.runConfig?.custom ?? {}) as Record<string, unknown>;
-    const resumedRun = remoteChatModelAdapter.run({
-      ...options,
-      runConfig: {
-        ...options.runConfig,
-        custom: {
-          ...custom,
-          threadId: remoteId,
-          resume: true,
-        },
-      },
-    });
-
-    if (Symbol.asyncIterator in resumedRun) {
-      yield* resumedRun;
-      return;
-    }
-    yield await resumedRun;
   }
 
   // `append` is intentionally a no-op: in the remote-thread-list flow, message

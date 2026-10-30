@@ -356,6 +356,45 @@ def append_conversation_user_message(
         return message_id, index
 
 
+def resolve_conversation_retry_user(
+    conversation_id: int, user_id: str, message_id: int, message_index: Optional[int],
+    content: str, minio_files,
+) -> tuple[int, int]:
+    """Authorize a retry boundary without appending another user turn."""
+    def file_keys(value):
+        if isinstance(value, str):
+            value = json.loads(value)
+        return [item.get("object_name") or item.get("url") or item.get("name")
+                if isinstance(item, dict) else item for item in (value or [])]
+
+    with get_db_session() as session:
+        _lock_conversation_limit_scope(session, f"conversation-turn-limit:{conversation_id}")
+        owned = session.scalar(select(ConversationRecord.conversation_id).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id, ConversationRecord.delete_flag == "N",
+        ))
+        if owned is None:
+            raise ConversationNotFoundError("Conversation not found")
+        target = session.scalar(select(ConversationMessage).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.message_id == message_id,
+            ConversationMessage.created_by == user_id,
+            ConversationMessage.message_role == "user", ConversationMessage.delete_flag == "N",
+        ))
+        if (target is None or target.message_index is None or target.message_index < 0
+                or (message_index is not None and target.message_index != message_index)
+                or target.message_content != content or file_keys(target.minio_files) != file_keys(minio_files)):
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Invalid retry target")
+        answer = session.scalar(select(ConversationMessage.message_id).where(
+            ConversationMessage.conversation_id == conversation_id,
+            ConversationMessage.message_index == target.message_index + 1,
+            ConversationMessage.message_role == "assistant", ConversationMessage.delete_flag == "N",
+        ).limit(1))
+        if answer is None:
+            raise AppException(ErrorCode.COMMON_VALIDATION_ERROR, "Retry target has no answer")
+        return target.message_id, target.message_index
+
+
 def _resolve_clarification_response(session, conversation_id, user_id, role, raw):
     """Resolve an owned latest form before writing either side of the response."""
     from contracts.clarification import ClarificationResponse, normalize_form
@@ -1064,7 +1103,7 @@ def get_conversation_messages(conversation_id: int) -> List[Dict[str, Any]]:
         stmt = (
             select(ConversationMessage)
             .where(ConversationMessage.conversation_id == conversation_id, ConversationMessage.delete_flag == "N")
-            .order_by(asc(ConversationMessage.message_index))
+            .order_by(asc(ConversationMessage.message_index), asc(ConversationMessage.message_id))
         )
 
         # Execute the query
@@ -2688,7 +2727,7 @@ def get_historical_context(
                 ConversationMessage.delete_flag == "N",
                 ConversationMessage.message_role.in_(["user", "assistant"]),
             )
-            .order_by(asc(ConversationMessage.message_index))
+            .order_by(asc(ConversationMessage.message_index), desc(ConversationMessage.message_id))
         ).all()
 
         turns: List[Dict[str, Any]] = []
