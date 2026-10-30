@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from management.db.client import get_db_session, minio_client
 from management.db.models import AgentInfo, AgentRelation, ConversationRecord
-from management.services.permission.identity.authentication_helpers import (
+from gateway.authentication.auth import (
     generate_session_jwt,
 )
 
@@ -117,7 +117,7 @@ def main():
 
     def follow(agent, version, model, conversation, marker, rows, label):
         cid, events, final, later = run(agent, version, model,
-            "只根据本会话已完成的结果，回复上轮结果和验收编号。不要调用工具或子智能体，不要重复之前任务。",
+            "只根据本会话已完成的结果，回复上轮结果和上轮用户指定的验收编号（不要使用内部运行ID）。不要调用工具或子智能体，不要重复之前任务。",
             label + "_follow", conversation)
         assert cid == conversation and marker in final
         assert not [e for e in events if e.get("type") in {"tool", "subagent_start"}], "Follow-up replayed resources"
@@ -157,7 +157,7 @@ def main():
         def skills():
             marker = "SKILLS_" + directory.name
             cid, events, final, rows = run(child, child_version, inputs["child_model"],
-                f"帮我生成一个简单docx文件，正文包含{marker}。必须遵循docx Skill的JavaScript/docx库工作流，实际运行生成脚本，不要改用python-docx。实际生成并上传，回复文件链接和验收编号。", "skills")
+                f"本次用户指定的验收编号为{marker}。帮我生成一个简单docx文件，正文包含该编号。必须遵循docx Skill的JavaScript/docx库工作流，实际运行生成脚本，不要改用python-docx。实际生成并上传，回复上传工具原样返回的s3://文件链接和上述用户指定验收编号，不要使用内部运行ID或自造HTTP域名。", "skills")
             names = [e.get("tool_name") for e in events if e.get("type") == "tool"]
             assert "read_skill_md" in names and "nexent_execute_python" in names and "upload_to_s3" in names
             assert "download_from_s3" not in names
@@ -169,7 +169,7 @@ def main():
 
         def mcp():
             agent, (version, core, models) = clone(inputs["knowledge_source"], "mcp", "jiuwen", inputs["child_model"],
-                enabled_tool_ids=[inputs["mcp_tool_id"]], duty_prompt="Use the configured external MCP tool to answer actual current date queries.")
+                enabled_tool_ids=[inputs["mcp_tool_id"]], prompt="Use the configured external MCP tool to answer actual current date queries.")
             assert core == "jiuwen"
             marker = "MCP_" + directory.name
             cid, events, final, rows = run(agent, version, models[0],
@@ -201,7 +201,7 @@ def main():
         def mixed():
             agent, (version, core, models) = clone(inputs["knowledge_source"], "parent", "smolagents", inputs["parent_model"],
                 enabled_tool_ids=[], related_agents=[{"agent_id": child, "version_no": child_version}],
-                duty_prompt="Delegate every document generation task to the configured file generation child. Report the actual child file link and result. Never generate the document yourself.")
+                prompt="Delegate every document generation task to the configured file generation child. Report the actual child file link and result. Never generate the document yourself.")
             with get_db_session() as session:
                 relation = session.query(AgentRelation).filter_by(parent_agent_id=agent, version_no=version, delete_flag="N").one()
                 assert relation.selected_agent_id == child and relation.selected_agent_version_no == child_version
@@ -226,7 +226,14 @@ def main():
                     "child_docx_verified": True, "workspace_script_verified": True,
                     "child_tools": names, "no_replay": True}
 
-        for label, execute in [("external_mcp", mcp), ("knowledge", knowledge), ("skills", skills), ("mixed_core", mixed)]:
+        available_scenarios = [("external_mcp", mcp), ("knowledge", knowledge), ("skills", skills), ("mixed_core", mixed)]
+        selected = inputs.get("diagnostic_scenarios", [label for label, _ in available_scenarios])
+        assert selected and len(set(selected)) == len(selected)
+        assert set(selected).issubset({label for label, _ in available_scenarios}), "Unknown diagnostic scenario"
+        report["not_executed"] = [label for label, _ in available_scenarios if label not in selected]
+        for label, execute in available_scenarios:
+            if label not in selected:
+                continue
             try:
                 report["scenarios"][label] = execute()
             except Exception as error:  # noqa: BLE001 -- Retain each diagnostic failure and continue independent scenarios.
@@ -274,8 +281,9 @@ def main():
             if config:
                 config.close()
                 runtime.close()
-        report["status"] = "PASS" if (len(report["scenarios"]) == 4 and
-            all(row["completed"] for row in report["scenarios"].values()) and report.get("cleanup")) else "FAIL"
+        report["status"] = (("PASS" if len(report["scenarios"]) == 4 else "PARTIAL_PASS")
+            if (report["scenarios"] and all(row["completed"] for row in report["scenarios"].values())
+                and report.get("cleanup")) else "FAIL")
         save()
         print("RESOURCE_RESULT=" + json.dumps(report), flush=True)
     return report["status"] == "PASS"

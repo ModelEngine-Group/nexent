@@ -39,7 +39,9 @@ def test_factory_service_protocol_loop(monkeypatch, protocol, scenario):
     observations = json.dumps(state["requests"][1]["messages"])
     assert "Tool execution error" not in observations
     if protocol == "native":
-        assert [tool["function"]["name"] for tool in state["requests"][0]["tools"]] == ["add"]
+        assert [tool["function"]["name"] for tool in state["requests"][0]["tools"]] == [
+            "add", "nexent_execute_python",
+        ]
         assert any(item.get("tool_call_id") == "provider-call-1" and item["content"] == "5"
                    for item in state["requests"][1]["messages"])
     else:

@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 from management.db.client import get_db_session, minio_client
 from management.db.models import AgentInfo, ConversationMessage, ConversationRecord
-from management.services.permission.identity.authentication_helpers import generate_session_jwt
+from gateway.authentication.auth import generate_session_jwt
 
 
 def digest(value):
@@ -56,10 +56,10 @@ def main():
         with get_db_session() as session:
             draft = session.query(AgentInfo).filter_by(agent_id=source, version_no=0, delete_flag="N").one()
             published = session.query(AgentInfo).filter_by(agent_id=source, version_no=draft.current_version_no).one()
-            assert published.agent_core == "jiuwen"
+            assert published.agent_core in {"smolagents", "jiuwen"}, "Unsupported source Core"
             originals = session.query(ConversationRecord).filter_by(agent_id=source, created_by=user).all()
             conversations = {row.conversation_id: history(row.conversation_id) for row in originals}
-            keys = ["model_ids", "business_logic_model_id", "duty_prompt",
+            keys = ["model_ids", "business_logic_model_id", "prompt",
                     "enable_context_manager", "max_steps", "provide_run_summary", "verification_config",
                     "enable_protocol_repair_retry", "requested_output_tokens", "context_policy", "model_params_override"]
             fields = {key: getattr(published, key) for key in keys}
@@ -95,14 +95,15 @@ def main():
                 checked(config.post("/skills/instance/update", json={"agent_id": state["agent_id"],
                     "skill_id": skill["skill_id"], "enabled": True, "version_no": 0,
                     "config_values": skill.get("config_values") or {}}))
+            checked(config.post(f"/agent/{state['agent_id']}/publish", json={"version_name": "Skill-files-real"}))
             cloned = export_agent(config, state["agent_id"])
             clone = cloned["agent_info"][str(state["agent_id"])]
-            for key in ["model_ids", "duty_prompt", "skill_names"]:
+            assert clone["agent_core"] == "jiuwen", "Owned target must use Jiuwen"
+            for key in ["model_ids", "prompt", "skill_names"]:
                 assert clone[key] == entry[key], "Clone mismatch: " + key
             left = [{k: v for k, v in t.items() if k != "agent_id"} for t in entry["tools"]]
             right = [{k: v for k, v in t.items() if k != "agent_id"} for t in clone["tools"]]
             assert sorted(left, key=str) == sorted(right, key=str), "Clone tool mismatch"
-            checked(config.post(f"/agent/{state['agent_id']}/publish", json={"version_name": "Skill-files-real"}))
             print(json.dumps({"setup": True, "docx_skill": True, "equivalent_configuration": True}))
         elif mode == "select-model":
             model = int(sys.argv[3])

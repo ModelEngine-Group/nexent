@@ -12,7 +12,7 @@ from pathlib import Path
 import httpx
 from management.db.client import get_db_session, minio_client
 from management.db.models import AgentInfo, ConversationMessage, ConversationRecord
-from management.services.permission.identity.authentication_helpers import generate_session_jwt
+from gateway.authentication.auth import generate_session_jwt
 
 
 def digest(value):
@@ -44,7 +44,7 @@ def main():
             reference = next(f for f in files if f.get("type", "").startswith("image/"))
             draft = session.query(AgentInfo).filter_by(agent_id=source, version_no=0, delete_flag="N").one()
             published = session.query(AgentInfo).filter_by(agent_id=source, version_no=draft.current_version_no).one()
-            keys = ["business_logic_model_id", "model_ids", "duty_prompt", "constraint_prompt", "few_shots_prompt",
+            keys = ["business_logic_model_id", "model_ids", "prompt",
                     "enable_context_manager", "context_policy", "max_steps", "requested_output_tokens",
                     "provide_run_summary", "enable_protocol_repair_retry", "verification_config", "model_params_override"]
             values = {k: getattr(published, k) for k in keys}
@@ -90,7 +90,7 @@ def main():
                                                                           "release_note": "Owned real UI validation"}))
             cloned = checked(config.post("/agent/export", json={"agent_id": state["agent_id"]}))["data"]
             clone_info = cloned["agent_info"][str(state["agent_id"])]
-            for key in ["tools", "model_ids", "business_logic_model_id", "duty_prompt", "constraint_prompt", "few_shots_prompt"]:
+            for key in ["tools", "model_ids", "business_logic_model_id", "prompt"]:
                 left, right = info.get(key), clone_info.get(key)
                 if key == "tools":
                     left = sorted([{k: v for k, v in t.items() if k != "agent_id"} for t in left], key=lambda t: t["name"])

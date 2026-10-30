@@ -20,7 +20,7 @@ export default defineConfig({
     locale: "zh-CN",
     // Use the full Chromium binary rather than the headless shell: the shell
     // cancels blob-backed attachment downloads, which PW-FILE-01 exercises.
-    channel: "chromium",
+    channel: process.env.NEXENT_TEST_BROWSER_CHANNEL || "chromium",
     actionTimeout: Number(process.env.D4_ACTION_TIMEOUT_MS || "30000"),
     navigationTimeout: Number(process.env.D4_NAVIGATION_TIMEOUT_MS || "60000"),
     screenshot: "off",
