@@ -3423,6 +3423,7 @@ class TestSkillAppRemainingExceptionMappings:
         expected = skill_app_creation.HTTPException(status_code=409, detail="conflict")
         mocker.patch.object(skill_app_creation, "create_nl2skill_stream", side_effect=expected)
         request = MagicMock(
+            conversation_id=None,
             language=None,
             persist_history=False,
             workbench_config=None,

@@ -445,26 +445,18 @@ def resolve_workbench_config(
         origin="SYSTEM",
     )
     child_mounts = tuple(child_identities)
-    if canonical.model_id is not None:
-        model_info = get_model_by_model_id(
-            canonical.model_id, tenant_id=tenant_id
-        )
-        if not is_model_available(model_info):
-            raise WorkbenchError("WORKBENCH_MODEL_NOT_ALLOWED")
-
     snapshot["skill_instances"] = skill_db.search_skills_for_agent(
         agent_id=int(root_identity.agent_id),
         tenant_id=tenant_id,
         version_no=int(root_identity.version_no),
     )
-    generation = canonical.generation_config
     root = PublishedRootDescriptor(
         identity=root_identity,
         published_snapshot=deepcopy(snapshot),
     )
     overlay = RootRuntimeOverlay(
-        model_id=canonical.model_id,
-        requested_output_tokens=generation.requested_output_tokens,
+        model_id=None,
+        requested_output_tokens=canonical.requested_output_tokens,
         skill_mounts=tuple(
             value.model_dump(mode="json") for value in canonical.skill_mounts
         ),

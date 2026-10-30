@@ -235,10 +235,10 @@ async def build_nl2skill_run_info(
         system_prompt=template.get("system_prompt", ""),
         model_name=cite_name,
     )
-    if request.model_id is not None or request.generation_config is not None:
+    if request.model_id is not None or request.model_parameter_preferences or getattr(request, "_runtime_model_parameter_preferences", {}):
         model_info = resolve_creator_model(
             model_config_list, agent_config, tenant_id, request.model_id,
-            request.generation_config.model_dump(exclude_unset=True) if request.generation_config else None,
+            getattr(request, "_runtime_model_parameter_preferences", request.model_parameter_preferences),
             model_info,
         )
     input_budget, capacity_snapshot, resolved_capacity = _resolve_input_budget(model_info)
@@ -257,6 +257,7 @@ async def build_nl2skill_run_info(
         compaction_target_tokens=context_budget.compaction_target_tokens if context_budget else 0,
     )
     run_info = AgentRunInfo(
+        tenant_id=tenant_id,
         query=template.get("user_prompt") or final_query,
         model_config_list=model_config_list,
         observer=MessageObserver(lang=template_language),

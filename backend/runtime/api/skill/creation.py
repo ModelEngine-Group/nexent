@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import logging
+from nexent.core.concurrency import run_blocking
 from http import HTTPStatus
 from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -39,6 +40,13 @@ async def nl2skill_run_api(
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     try:
+        if request.conversation_id is not None:
+            from management.services.conversation.model_preferences import read_model_preferences
+            preference_user, _ = get_current_user_id(authorization)
+            saved = await run_blocking("creator-model-preferences", read_model_preferences, request.conversation_id, preference_user)
+            request.__dict__["_runtime_model_parameter_preferences"] = saved["model_parameter_preferences"]
+            if request.model_id is None:
+                request.model_id = saved.get("selected_model_id")
         stream = await create_nl2skill_stream(
             request=request,
             tenant_id=tenant_id,
@@ -52,6 +60,8 @@ async def nl2skill_run_api(
                 query=request.query,
                 minio_files=request.minio_files,
                 workbench_config=request.workbench_config,
+                model_parameter_preferences=request.model_parameter_preferences,
+                selected_model_id=request.model_id,
                 agent_id=None,
                 user_id=user_id,
                 tenant_id=tenant_id,
