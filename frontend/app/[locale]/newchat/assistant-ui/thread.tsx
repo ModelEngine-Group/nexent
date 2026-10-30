@@ -176,6 +176,7 @@ import { VerificationPanel } from "../ui/verification-panel";
 import { cn } from "@/lib/utils";
 import { AuthenticatedImage } from "../ui/authenticated-image";
 import { copyToClipboard } from "@/lib/clipboard";
+import { useMessageClipboardCopy } from "@/hooks/useClipboardCopy";
 import { formatWarningText } from "@/lib/warningText";
 import { useConversationShare } from "./use-conversation-share";
 import { ConversationShareContext } from "./conversation-share-context";
@@ -1625,6 +1626,9 @@ const AssistantMessage: FC<{
 const AssistantActionBar: FC = () => {
   const { t } = useTranslation();
   const aui = useAui();
+  const { onCopy, isCopying } = useMessageClipboardCopy(() => {
+    message.error(t("agentUsageGuide.copyFailed"));
+  });
   const creationMode = useAuiState((s) => {
     const custom = s.thread.composer.runConfig.custom as
       { runtimeMode?: string } | undefined;
@@ -1668,7 +1672,7 @@ const AssistantActionBar: FC = () => {
       className="aui-assistant-action-bar-root text-muted-foreground animate-in fade-in col-start-3 row-start-2 -ml-1 flex w-full items-center gap-1 duration-200"
     >
       <div className="flex items-center gap-1">
-        <ActionBarPrimitive.Copy asChild>
+        <ActionBarPrimitive.Copy asChild disabled={isCopying} onClick={onCopy}>
           <TooltipIconButton tooltip={t("chat.thread.copy")}>
             <AuiIf condition={(s) => s.message.isCopied}>
               <CheckIcon className="animate-in zoom-in-50 fade-in duration-200 ease-out" />
