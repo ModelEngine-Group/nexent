@@ -424,7 +424,7 @@ agent_run_manager_module.agent_run_manager.reserve_agent_capacity = MagicMock(
 )
 # Give monkeypatch concrete attributes rather than dynamically synthesized children.
 for _method in ("reserve_agent_run", "release_agent_run_reservation",
-                "unregister_agent_run", "get_agent_run_info", "stop_agent_run"):
+                "register_agent_run", "unregister_agent_run", "get_agent_run_info", "stop_agent_run"):
     setattr(agent_run_manager_module.agent_run_manager, _method,
             getattr(agent_run_manager_module.agent_run_manager, _method))
 sys.modules["agents.agent_run_manager"] = agent_run_manager_module
