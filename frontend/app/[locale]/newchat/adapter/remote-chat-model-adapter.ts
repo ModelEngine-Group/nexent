@@ -3,13 +3,14 @@
 "use client";
 
 import i18next from "i18next";
+import {
+  persistModelDrafts,
+  snapshotModelDrafts,
+  acknowledgeModelDrafts,
+} from "@/lib/conversationModelDrafts";
 import type { ReasoningEffort } from "@/types/modelConfig";
 import { isReasoningEffort } from "@/lib/modelReasoning";
-import {
-  snapshotTurnModelControls,
-  type TurnModelControls,
-  type RuntimeGenerationOverrides,
-} from "@/features/model-controls/turnControls";
+import type { TurnModelControls } from "@/features/model-controls/turnControls";
 import { rejectModelSelection } from "@/features/model-controls/rejectedSelection";
 
 import type {
@@ -304,6 +305,7 @@ export interface Nl2aMessage {
 }
 
 interface NexentRunConfig {
+  modelPreferenceScope?: string;
   threadId?: string;
   onServerConversationId?: (serverId: string, initialQuestion?: string) => void;
   onGenerationStopped?: (conversationId: number) => void;
@@ -1423,14 +1425,11 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const creationConfig = custom?.creationWorkbenchConfig
       ? structuredClone(custom.creationWorkbenchConfig)
       : undefined;
-    const creatorTurn = custom?.turnModelControls
-      ? structuredClone(custom.turnModelControls)
-      : creationConfig?.model_id != null
-        ? snapshotTurnModelControls(
-            creationConfig.model_id,
-            creationConfig.generation_config
-          )
-        : undefined;
+    const creatorTurn = custom?.turnModelControls ?? undefined;
+    const preferenceScope = custom?.modelPreferenceScope ?? unstable_threadId;
+    const draftSnapshot = preferenceScope
+      ? snapshotModelDrafts(preferenceScope)
+      : {};
     let nl2AgentId =
       typeof custom?.agentId === "string"
         ? Number(custom.agentId)
@@ -1568,33 +1567,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     // Pass selected model if provided via ModelContext (registered by ModelSelector)
     // For agent-debug mode, prefer the model passed via custom (from the compare panel selector)
     const modelName = context.config?.modelName;
-    const reasoningEffort = context.config?.reasoningEffort;
-    const reasoningBudgetTokens = (
-      context.config as { reasoningBudgetTokens?: number } | undefined
-    )?.reasoningBudgetTokens;
-    const reasoningCapability = (
-      context.config as
-        | {
-            reasoningCapability?: {
-              status?: string;
-              controls?: Array<{ type?: string }>;
-              levels?: string[];
-              control?: string;
-            };
-          }
-        | undefined
-    )?.reasoningCapability;
-    const reasoningSupported =
-      reasoningCapability?.status === "supported" &&
-      Boolean(
-        reasoningCapability.controls?.length ||
-        reasoningCapability.levels?.length ||
-        reasoningCapability.control === "toggle"
-      );
-    const hasBudgetSelection =
-      typeof reasoningBudgetTokens === "number" &&
-      Number.isInteger(reasoningBudgetTokens) &&
-      reasoningBudgetTokens >= 0;
     const modelIdFromCustom = custom?.modelId;
 
     if (isAgentDebug && modelIdFromCustom) {
@@ -1604,91 +1576,21 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       // Normal mode: use the model from ModelContext
       requestBody.model_id = Number(modelName);
     }
-    if (
-      !isResume &&
-      reasoningSupported &&
-      !hasBudgetSelection &&
-      typeof reasoningEffort === "string" &&
-      reasoningEffort &&
-      reasoningEffort !== "auto"
-    ) {
-      requestBody.reasoning_effort = reasoningEffort;
-    }
-    if (
-      !isResume &&
-      reasoningSupported &&
-      hasBudgetSelection &&
-      reasoningBudgetTokens > 0
-    ) {
-      requestBody.reasoning_budget_tokens = reasoningBudgetTokens;
-    }
-
-    log.log(
-      "[ChatModelAdapter] Sending agent request through conversation service"
-    );
-    log.log(
-      `[ChatModelAdapter] model_id=${requestBody.model_id}, isAgentDebug=${isAgentDebug}, customModelId=${modelIdFromCustom}`
-    );
-
-    // Workbench v3 owns model selection; legacy composer state is only a projection.
     const workbenchConfig = custom?.workbenchConfig;
-    if (workbenchConfig) {
-      requestBody.model_id = workbenchConfig.model_id ?? undefined;
-      // Workbench generation_config is authoritative for this run. Do not let
-      // the shared selector's ordinary-chat effort/budget override it.
-      delete requestBody.reasoning_effort;
-      delete requestBody.reasoning_budget_tokens;
-    }
-    if (!workbenchConfig) {
-      const modelContext = context.config as
-        | {
-            deepThinking?: boolean;
-            reasoningEffort?: string;
-            temperature?: number;
-            top_p?: number;
-          }
-        | undefined;
-      if (modelContext?.deepThinking !== undefined) {
-        requestBody.generation_config = {
-          deep_thinking: modelContext.deepThinking,
-          ...(hasBudgetSelection
-            ? { reasoning_budget_tokens: reasoningBudgetTokens }
-            : {}),
-          ...(modelContext.deepThinking &&
-          !hasBudgetSelection &&
-          isReasoningEffort(modelContext.reasoningEffort)
-            ? { thinking_effort: modelContext.reasoningEffort }
-            : {}),
-        };
-      }
-      if (
-        !isAgentDebug &&
-        !isResume &&
-        (modelContext?.temperature != null || modelContext?.top_p != null)
-      ) {
-        requestBody.generation_config = {
-          ...(requestBody.generation_config as
-            RuntimeGenerationOverrides | undefined),
-          ...snapshotTurnModelControls(
-            Number(requestBody.model_id),
-            modelContext
-          ).generation_config,
-        };
+    if (creatorTurn && (isNl2Agent || isNl2Skill))
+      requestBody.model_id = creatorTurn.model_id;
+    if (abortSignal?.aborted) return;
+    if (!isResume && preferenceScope) {
+      if (hasServerConversationId && !isAgentDebug) {
+        await persistModelDrafts(preferenceScope, numericServerThreadId);
+      } else {
+        requestBody.model_parameter_preferences = draftSnapshot;
       }
     }
-    if (isNl2Agent || isNl2Skill) {
-      const turn = creatorTurn;
-      if (turn) {
-        requestBody.model_id = turn.model_id;
-        requestBody.generation_config = { ...turn.generation_config };
-      }
-      // One authority per creator turn; compatibility top-level fields are not duplicated.
-      delete requestBody.reasoning_effort;
-      delete requestBody.reasoning_budget_tokens;
-    }
+    if (abortSignal?.aborted) return;
 
-    let backendConversationId = hasServerConversationId
-      ? numericServerThreadId
+    let backendConversationId = requestBody.conversation_id
+      ? Number(requestBody.conversation_id)
       : null;
     let backendRunId: string | null = null;
     let backendStopPromise: Promise<void> | null = null;
@@ -1782,8 +1684,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           draft_snapshot: isNl2Skill ? custom?.draftSnapshot : undefined,
           language: isNl2Skill ? custom?.language : undefined,
           model_id: requestBody.model_id as number | undefined,
-          generation_config: requestBody.generation_config as
-            RuntimeGenerationOverrides | undefined,
+          model_parameter_preferences:
+            requestBody.model_parameter_preferences as
+              Record<string, Record<string, unknown>> | undefined,
           metadata: custom?.runtimeMetadata,
           expected_metadata_version: custom?.runtimeMetadataVersion,
           entrypoint: workbenchConfig ? "workbench" : undefined,
@@ -1793,6 +1696,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         abortSignal,
         (conversationId) => {
           const numericId = Number(conversationId);
+          if (numericId > 0 && preferenceScope)
+            acknowledgeModelDrafts(preferenceScope, draftSnapshot);
           if (!Number.isNaN(numericId) && numericId > 0) {
             backendConversationId = numericId;
             if (userAborted) {

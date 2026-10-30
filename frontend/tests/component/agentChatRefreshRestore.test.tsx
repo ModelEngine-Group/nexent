@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 import React from "react";
@@ -254,7 +255,15 @@ describe("newchat refresh restore wiring", () => {
 
   it("passes the last viewed conversation as the runtime's initial thread", () => {
     window.sessionStorage.setItem(CONVERSATION_KEY, "77");
-    render(<Home />);
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <Home />
+      </QueryClientProvider>
+    );
 
     expect(capturedRuntimeOptions?.threadId).toBeUndefined();
     expect(capturedRuntimeOptions?.initialThreadId).toBe("77");
@@ -287,7 +296,15 @@ describe("newchat refresh restore wiring", () => {
   it("starts on the landing when the user returns via navigation, not refresh", () => {
     // First visit: the stored conversation is restored, like a refresh.
     window.sessionStorage.setItem(CONVERSATION_KEY, "77");
-    const { unmount } = render(<Home />);
+    const { unmount } = render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <Home />
+      </QueryClientProvider>
+    );
     expect(capturedRuntimeOptions?.initialThreadId).toBe("77");
 
     // Leaving the chat route (e.g. to the agent workbench) runs the unmount
@@ -298,14 +315,30 @@ describe("newchat refresh restore wiring", () => {
     // Returning through the menu therefore starts on the landing page.
     // (The mocked runtime hook overwrites the captured options on every
     // render, so they can be asserted directly after the second render.)
-    render(<Home />);
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <Home />
+      </QueryClientProvider>
+    );
     expect(capturedRuntimeOptions?.initialThreadId).toBeUndefined();
     expect(screen.getByText("Agent list")).toBeInTheDocument();
   });
 
   it("reopens a blank conversation of the stored agent when no conversation was saved", async () => {
     window.sessionStorage.setItem(AGENT_KEY, "41");
-    render(<Home />);
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <Home />
+      </QueryClientProvider>
+    );
 
     expect(capturedRuntimeOptions?.initialThreadId).toBeUndefined();
     expect(
@@ -317,7 +350,15 @@ describe("newchat refresh restore wiring", () => {
     window.sessionStorage.setItem(CONVERSATION_KEY, "77");
     window.sessionStorage.setItem(AGENT_KEY, "41");
     window.history.replaceState({}, "", "/zh/newchat?agent_id=41");
-    render(<Home />);
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <Home />
+      </QueryClientProvider>
+    );
 
     expect(capturedRuntimeOptions?.initialThreadId).toBeUndefined();
     // The deep link still selects the agent.
@@ -327,7 +368,15 @@ describe("newchat refresh restore wiring", () => {
   });
 
   it("starts on the landing page when nothing was stored", () => {
-    render(<Home />);
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <Home />
+      </QueryClientProvider>
+    );
 
     expect(capturedRuntimeOptions?.initialThreadId).toBeUndefined();
     expect(screen.getByText("Agent list")).toBeInTheDocument();
@@ -339,7 +388,15 @@ describe("newchat refresh restore wiring", () => {
     // marker must survive this window for a second refresh to restore.
     usePublishedAgentList.mockReturnValue({ isLoading: true, agents: [] });
     try {
-      render(<Home />);
+      render(
+        <QueryClientProvider
+          client={
+            new QueryClient({ defaultOptions: { queries: { retry: false } } })
+          }
+        >
+          <Home />
+        </QueryClientProvider>
+      );
 
       expect(window.sessionStorage.getItem(CONVERSATION_KEY)).toBe("77");
     } finally {
@@ -360,7 +417,15 @@ describe("newchat refresh restore wiring", () => {
       },
       thread: { isLoading: false, isRunning: false },
     };
-    render(<Home />);
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <Home />
+      </QueryClientProvider>
+    );
 
     await user.click(screen.getByText("select agent"));
     await screen.findByText("Agent chat: Fixed Agent");
@@ -375,7 +440,15 @@ describe("newchat refresh restore wiring", () => {
 
   it("stores the agent id while the user is in an unsent blank conversation", async () => {
     const user = userEvent.setup();
-    render(<Home />);
+    render(
+      <QueryClientProvider
+        client={
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        }
+      >
+        <Home />
+      </QueryClientProvider>
+    );
 
     await user.click(screen.getByText("select agent"));
     await screen.findByText("Agent chat: Fixed Agent");

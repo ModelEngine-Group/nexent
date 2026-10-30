@@ -139,6 +139,10 @@ export interface PublishedAgent {
 }
 
 export interface ModelParamsOverrideEntry {
+  parameter_values?: Record<string, unknown>;
+  context_window_tokens?: number;
+  custom_overrides?: Record<string, unknown>;
+  /** Historical fields accepted only while reading older Agent versions. */
   temperature?: number | null;
   top_p?: number | null;
   extra_params?: Record<string, unknown> | null;
