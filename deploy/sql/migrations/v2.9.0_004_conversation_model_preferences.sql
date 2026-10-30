@@ -4,7 +4,6 @@ ALTER TABLE nexent.conversation_record_t ADD COLUMN IF NOT EXISTS selected_model
 COMMENT ON COLUMN nexent.conversation_record_t.selected_model_id IS
     'Root model selected for this Agent conversation; NULL inherits the Agent default.';
 
-
 -- Extend existing conversation configuration; preferences never enter model-visible metadata.
 ALTER TABLE nexent.conversation_record_t
     ADD COLUMN IF NOT EXISTS model_parameter_preferences JSONB NOT NULL DEFAULT '{}'::jsonb,
