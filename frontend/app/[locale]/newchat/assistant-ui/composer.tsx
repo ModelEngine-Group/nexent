@@ -964,7 +964,13 @@ const ComposerSendOrCancel: FC<{
   disabled?: boolean;
 }> = ({ onSend, disabled }) => {
   const { t } = useTranslation();
-  const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
+  // A draft may consist of attachments only; keep the send control usable for
+  // such drafts instead of forcing keyboard-only submission.
+  const canSend = useAuiState(
+    (state) =>
+      state.composer.text.trim().length > 0 ||
+      state.composer.attachments.length > 0
+  );
 
   return (
     <>
@@ -999,7 +1005,7 @@ const ComposerSendOrCancel: FC<{
             <Button
               size="icon"
               className="size-8 ml-0 rounded-md border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-50 aria-disabled:bg-transparent aria-disabled:text-muted-foreground [&_svg]:size-4"
-              disabled={disabled || !hasText}
+              disabled={disabled || !canSend}
               aria-label={t("chat.composer.send")}
             >
               <Send />

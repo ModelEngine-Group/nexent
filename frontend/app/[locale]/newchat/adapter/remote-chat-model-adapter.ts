@@ -1460,7 +1460,22 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       ? JSON.stringify(structuredNl2AgentInput)
       : visibleQuery;
 
-    if (!isResume && !query) {
+    // Extract MinIO file metadata from the last user message's attachments.
+    // The attachment adapter has already uploaded them by the time `run`
+    // is called (assistant-ui calls `send()` before `run()`).
+    const minioFiles = isResume
+      ? []
+      : extractMinioFiles(messages[lastUserIndex], (name) =>
+          log.warn(
+            "[ChatModelAdapter] Attachment missing upload metadata, skipping:",
+            name
+          )
+        );
+
+    // A turn may consist of attachments only. The backend accepts an empty
+    // query and joins the file descriptions into the agent input, so such
+    // turns must still be sent instead of being dropped silently.
+    if (!isResume && !query && minioFiles.length === 0) {
       log.warn("[ChatModelAdapter] No user query found in messages");
       return;
     }
@@ -1510,18 +1525,6 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
         ...(historicalFiles.length > 0 ? { minio_files: historicalFiles } : {}),
       };
     });
-
-    // Extract MinIO file metadata from the last user message's attachments.
-    // The attachment adapter has already uploaded them by the time `run`
-    // is called (assistant-ui calls `send()` before `run()`).
-    const minioFiles = isResume
-      ? []
-      : extractMinioFiles(messages[lastUserIndex], (name) =>
-          log.warn(
-            "[ChatModelAdapter] Attachment missing upload metadata, skipping:",
-            name
-          )
-        );
 
     // Build request payload. Resume only needs the conversation identity; the
     // backend owns the original query and execution state.
@@ -2401,18 +2404,29 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
     // Generate a stable message ID for this stream so MarkdownText can look up sources
     const messageId = `msg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const buildStreamResult = (content: any[]): ChatModelRunResult => ({
-      content: collapseSubAgentParts(
-        content.map((part) =>
-          part.type === "data" &&
-          part.name === "clarification" &&
-          (userAborted || content.some((item) => item.isError))
-            ? { ...part, data: { ...part.data, completed: false } }
-            : part
-        )
-      ),
-      metadata: nl2a ? { custom: { nl2a } } : undefined,
-    });
+    const buildStreamResult = (content: any[]): ChatModelRunResult => {
+      // Snapshot this run's accumulated per-step token counts onto the message
+      // metadata so every assistant message owns its own usage data. The local
+      // runtime rebuilds `metadata.custom` from the initial custom plus the
+      // latest yielded chunk, so all custom keys (nl2a included) must be
+      // resent on every yield to survive the next merge.
+      const custom: Record<string, unknown> = {};
+      if (nl2a) custom.nl2a = nl2a;
+      if (stepTokenCounts.length > 0)
+        custom.stepTokenCounts = [...stepTokenCounts];
+      return {
+        content: collapseSubAgentParts(
+          content.map((part) =>
+            part.type === "data" &&
+            part.name === "clarification" &&
+            (userAborted || content.some((item) => item.isError))
+              ? { ...part, data: { ...part.data, completed: false } }
+              : part
+          )
+        ),
+        metadata: Object.keys(custom).length > 0 ? { custom } : undefined,
+      };
+    };
 
     const streamStartTime = Date.now();
     let firstTokenTime: number | undefined;
