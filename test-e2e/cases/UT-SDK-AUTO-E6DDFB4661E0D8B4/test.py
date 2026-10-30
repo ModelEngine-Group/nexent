@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import logging
@@ -5,7 +6,7 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 
 import pytest
 
-from nexent.core.agents.managed_mcp import ManagedMCPToolCollection
+from nexent.core.agents.resources.mcp import ManagedMCPToolCollection
 from nexent.consts.mcp_errors import MCPConnectionTimeoutError
 
 

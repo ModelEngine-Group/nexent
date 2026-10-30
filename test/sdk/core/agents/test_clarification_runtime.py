@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Exercise the real CodeAgent loop with a deterministic model and executor."""
 import json
 import threading
@@ -8,8 +9,9 @@ import pytest
 from smolagents import Tool
 from smolagents.models import ChatMessage, Model
 
-from nexent.core.agents.context import ContextManager, ContextManagerConfig, ManagedContextRuntime
-from nexent.core.agents.core_agent import CoreAgent
+from nexent.core.agents.context import ContextManager, ContextManagerConfig
+from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.core.utils.observer import MessageObserver
 
@@ -172,9 +174,10 @@ def test_cancel_exception_bypasses_ordinary_exception_handlers():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("invalid_output", [False, True])
 async def test_worker_drains_card_or_terminal_protocol_error(monkeypatch, invalid_output):
-    from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo
-    from nexent.core.agents.nexent_agent import NexentAgent
-    from nexent.core.agents.run_agent import agent_run
+    from nexent.core.agents.contracts.config import AgentConfig
+    from nexent.core.agents.contracts.run import AgentRunInfo
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    from nexent.core.agents.orchestration.entry import agent_run
     from nexent.core.concurrency import LanePolicy, ThreadManager
 
     model = ScriptedModel(["bare answer"] * 3 if invalid_output else [f"思考：请用户补充信息。\n代码：\n<code>{CODE}</code>"])

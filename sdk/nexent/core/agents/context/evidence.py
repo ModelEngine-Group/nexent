@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Run-scoped aggregation for one evidence record per agent loop."""
 
 from __future__ import annotations
@@ -7,7 +9,7 @@ import logging
 from dataclasses import asdict, replace
 from threading import Lock
 
-from ...context_runtime.contracts import ContextEvidence
+from nexent.core.agents.contracts.context import ContextEvidence
 
 
 logger = logging.getLogger("context_evidence")

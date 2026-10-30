@@ -11,7 +11,7 @@ from management.db.model.repository import get_model_records
 from management.services.configuration.tenant.settings import tenant_config_manager
 from management.services.model.runtime_snapshot import restore_runtime_model_snapshot
 from management.services.model.names import add_repo_to_name, get_model_name_from_config
-from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.agents.contracts.config import ModelConfig
 from nexent.core.models.prompt_cache import resolve_prompt_cache_profile
 
 logger = logging.getLogger("create_agent_info")

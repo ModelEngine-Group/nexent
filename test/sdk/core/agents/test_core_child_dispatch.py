@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Child selection, snapshot isolation and adapter ownership contracts."""
 
 from concurrent.futures import Future
@@ -7,10 +8,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ModelConfig
-from nexent.core.agents.core_adapters.children import child_run_info, invoke_child
-from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
-from nexent.core.agents.core_adapters.smolagents import SmolagentsAdapter
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
+from nexent.core.agents.orchestration.children import child_run_info, invoke_child
+from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+from nexent.core.agents.cores.smolagents.adapter import SmolagentsAdapter
 from nexent.core.concurrency import RunCancellationScope
 from nexent.core.utils.observer import MessageObserver
 
@@ -49,7 +51,7 @@ def test_child_factory_selects_core_and_always_closes(mocker, failure):
     adapter.run.return_value = "child-result"
     if failure:
         getattr(adapter, failure).side_effect = RuntimeError("controlled failure")
-    factory = mocker.patch("nexent.core.agents.core_adapters.children.AgentCoreFactory.create", return_value=adapter)
+    factory = mocker.patch("nexent.core.agents.factory.AgentCoreFactory.create", return_value=adapter)
     if failure:
         with pytest.raises(RuntimeError, match="controlled failure"):
             invoke_child(info, "child-task")
@@ -62,7 +64,7 @@ def test_child_factory_selects_core_and_always_closes(mocker, failure):
 
 @pytest.mark.parametrize("task", ["", " ", None, 1])
 def test_empty_or_non_string_child_task_allocates_nothing(mocker, task):
-    factory = mocker.patch("nexent.core.agents.core_adapters.children.AgentCoreFactory.create")
+    factory = mocker.patch("nexent.core.agents.factory.AgentCoreFactory.create")
     with pytest.raises(ValueError):
         invoke_child(Mock(), task)
     factory.assert_not_called()

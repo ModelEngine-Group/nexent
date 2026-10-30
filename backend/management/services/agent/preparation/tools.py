@@ -33,7 +33,7 @@ from management.services.knowledge_base.service import (
 )
 from management.services.model.adapter import get_llm_adapter, get_vlm_adapter
 from management.services.model.resolver import get_rerank_model
-from nexent.core.agents.agent_model import AgentConfig, ToolConfig
+from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
 from nexent.core.agents.prompt import get_builtin_tool_descriptions
 from nexent.core.concurrency import run_blocking
 from nexent.core.tools.parallel_executor import ParallelExecutorTool

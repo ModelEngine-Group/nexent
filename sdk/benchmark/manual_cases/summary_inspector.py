@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Standalone Summary Inspector — quick evaluation of compression prompt/schema quality.
 
@@ -42,7 +43,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from nexent.core.agents.context import ContextManagerConfig, compress_history_offline
-from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.agents.contracts.config import ModelConfig
 from nexent.core.models.openai_llm import OpenAIModel
 
 from eval_utils import eval_text

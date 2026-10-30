@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """AGENT-CORE-D3-001: Native Jiuwen execution through the Nexent managed worker."""
 
 import asyncio
@@ -12,10 +13,11 @@ from pathlib import Path
 import httpx
 import pytest
 
-from nexent.core.agents.agent_model import AgentConfig, AgentHistory, AgentRunInfo, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
 from nexent.core.agents.context.models import ContextItemInput, ContextItemType
-from nexent.core.agents.context_input import ContextInput
-from nexent.core.agents.run_agent import agent_run
+from nexent.core.agents.contracts.context import ContextInput
+from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.core.utils.observer import MessageObserver
 
@@ -63,8 +65,8 @@ def test_AGENT_CORE_D3_001_native_worker(
 ):
     from openjiuwen.core.runner import Runner
 
-    from nexent.core.agents import nexent_agent
-    from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
+    from nexent.core.agents.cores.smolagents import agent as nexent_agent
+    from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
 
     calls = []
 

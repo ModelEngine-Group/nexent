@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Shared CM capacity must survive Jiuwen observations without changing execution policy."""
 
 import json
@@ -6,12 +7,13 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from nexent.core.agent_runtime_support.output import StepObservation
-from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo
+from nexent.core.agents.contracts.output import StepObservation
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.context import ContextManagerConfig
-from nexent.core.agents.context.runtime import ManagedContextRuntime
-from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
-from nexent.core.agents.core_adapters.jiuwen_context import JiuwenContextBridge
+from nexent.core.agents.cores.smolagents.context import ManagedContextRuntime
+from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+from nexent.core.agents.cores.jiuwen.context import JiuwenContextBridge
 from nexent.core.concurrency import RunCancellationScope
 from nexent.core.model_service.contracts import AssistantMessage, ModelError, TokenUsage
 from nexent.core.utils.observer import MessageObserver

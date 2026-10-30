@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import threading
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from copy import deepcopy
@@ -140,7 +141,7 @@ def _execute_tasks(tasks, names, timeout, max_workers, *, lane="model-tool-io"):
 
     manager = get_current_thread_manager()
     if manager is None:
-        from ..agents.run_agent import _get_default_agent_thread_manager
+        from nexent.core.agents.orchestration.entry import _get_default_agent_thread_manager
 
         manager = _get_default_agent_thread_manager()
     requested_limit = max(1, int(max_workers))

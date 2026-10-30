@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """CMSR-D1-003: semantic repair uses the same streamed attempt lifecycle."""
 
 import json
@@ -8,9 +9,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from nexent.core.agents.core_agent import CoreAgent
-from nexent.core.agents import core_agent as agent_module
-from nexent.core.agents.output_protocol import ModelOutputProtocolError
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+from nexent.core.agents.cores.smolagents import core_agent as agent_module
+from nexent.core.agents.cores.smolagents.output_protocol import ModelOutputProtocolError
 from nexent.core.utils.observer import MessageObserver
 
 pytestmark = [pytest.mark.case_id("CMSR-D1-003"), pytest.mark.stage("D1")]

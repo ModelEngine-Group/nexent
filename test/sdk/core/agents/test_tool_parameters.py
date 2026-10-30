@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Regression tests for configured MCP call arguments."""
 
 from copy import copy
@@ -5,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from nexent.core.agents.tool_parameters import apply_mcp_tool_parameters
-from nexent.core.agents.tool_user_context import apply_user_context_to_mcp_tool
+from nexent.core.agents.resources.tool_parameters import apply_mcp_tool_parameters
+from nexent.core.agents.resources.tool_user_context import apply_user_context_to_mcp_tool
 
 
 @pytest.mark.parametrize("style", ["keywords", "mapping", "positional"])

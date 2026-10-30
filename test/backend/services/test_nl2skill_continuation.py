@@ -8,7 +8,7 @@ from smolagents.memory import AgentMemory
 import services.nl2skill_service as service
 from contracts.agent import NL2SkillRunRequest
 from nexent.core.agents.context import ContextManager, ContextManagerConfig
-from nexent.core.agents.run_agent import _get_authorized_history
+from nexent.core.agents.orchestration.entry import _get_authorized_history
 
 
 @pytest.mark.asyncio

@@ -122,7 +122,7 @@ monitoring_stub.MonitoringConfig = MagicMock
 sys.modules['nexent'] = types.ModuleType('nexent')
 sys.modules['nexent.core'] = types.ModuleType('nexent.core')
 sys.modules['nexent.core.agents'] = types.ModuleType('nexent.core.agents')
-sys.modules['nexent.core.agents.agent_model'] = agent_model_stub
+sys.modules['nexent.core.agents.contracts.config'] = agent_model_stub
 sys.modules['nexent.monitor'] = monitoring_stub
 sys.modules['nexent.monitor.monitoring'] = monitoring_stub
 sys.modules['management.db.client'] = MagicMock()
@@ -134,7 +134,7 @@ sys.modules['management.db.agent.repository'] = MagicMock()
 sys.modules["management.services.agent.preparation.run"] = MagicMock()
 sys.modules["management.services.agent.preparation.tools"] = MagicMock()
 
-sys.modules['nexent.core.agents.run_agent'] = MagicMock()
+sys.modules['nexent.core.agents.orchestration.entry'] = MagicMock()
 sys.modules['gateway.authentication.auth'] = MagicMock()
 sys.modules['gateway.authentication.auth'].get_current_user_id.return_value = ('test_user', 'test_tenant')
 sys.modules['management.services.configuration.tenant.settings'] = MagicMock()

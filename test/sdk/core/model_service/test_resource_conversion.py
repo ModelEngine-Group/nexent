@@ -1,12 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Authorized resources cross a stable conversion boundary without execution."""
 
 import json
 
 import pytest
-from nexent.core.agent_runtime_support.contracts import (
-    ResourceItem,
-    RuntimeResourceView,
-)
+from nexent.core.agents.contracts.resources import ResourceItem, RuntimeResourceView
 from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
 from nexent.core.model_service.contracts import ModelMessage, ToolCall, ToolDefinition
 from nexent.core.model_service.resource_conversion import (

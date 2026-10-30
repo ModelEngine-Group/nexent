@@ -4,7 +4,7 @@
 
 import pytest
 from pydantic import ValidationError
-from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.agents.contracts.config import ModelConfig
 
 from contracts.agent import WorkbenchGenerationConfig, RuntimeGenerationOverrides, NL2SkillRunRequest
 from contracts.errors.exceptions import RunModelControlsError

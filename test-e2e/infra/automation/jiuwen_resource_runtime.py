@@ -20,11 +20,12 @@ if sys.platform == "win32":
         sys.path.append(str(Path(httpx.__file__).resolve().parents[1] / folder))
 
 from jiuwen_bridge_fixture import profile_for
-from nexent.core.agents import nexent_agent
-from nexent.core.agents.agent_model import AgentConfig, AgentHistory, AgentRunInfo, ModelConfig, ToolConfig
-from nexent.core.agents.core_agent import CoreAgent
-from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
-from nexent.core.agents.run_agent import agent_run
+import nexent.core.tools as nexent_agent
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.core.utils.observer import MessageObserver
 
@@ -136,7 +137,7 @@ async def run_resources(monkeypatch, tmp_path, url, protocol, scenario="normal",
                   "isolated_skills_root": True}
     sandbox = None
     if docker_sandbox:
-        from nexent.core.agents.sandbox import SandboxConfig, SandboxLevel
+        from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel
 
         parameters["workspace_path"] = str(tmp_path / "run")
         sandbox = SandboxConfig(level=SandboxLevel.DOCKER, docker_image="nexent/nexent-sandbox-full:latest",
@@ -169,7 +170,16 @@ async def run_resources(monkeypatch, tmp_path, url, protocol, scenario="normal",
                                 model_name="fixture", max_steps=6, tools=tools),
     )
     async def consume(run_info):
-        return [json.loads(event) async for event in agent_run(run_info, thread_manager=manager)]
+        events = []
+        try:
+            async for event in agent_run(run_info, thread_manager=manager):
+                events.append(json.loads(event))
+        except asyncio.CancelledError:
+            if scenario != "cancel" or not run_info.stop_event.is_set():
+                raise
+            await asyncio.wait_for(asyncio.wrap_future(run_info.thread_future), timeout=5)
+            events.extend(json.loads(event) for event in run_info.observer.get_cached_message())
+        return events
 
     async def cancel_when_mcp_started():
         async with httpx.AsyncClient(trust_env=False) as client:

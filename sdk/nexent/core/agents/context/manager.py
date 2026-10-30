@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Managed context assembly for fine-grained items and adaptive compaction."""
 
 from __future__ import annotations
@@ -12,11 +14,8 @@ from dataclasses import asdict, is_dataclass, replace
 from enum import Enum
 from typing import Any, Dict, Optional, Sequence
 
-from smolagents.memory import ActionStep, AgentMemory, TaskStep
-from smolagents.models import ChatMessage, MessageRole
+from nexent.core.agents.contracts.context import ContextEvidence, FinalContext, ModelMessage
 
-from ...context_runtime.contracts import ContextEvidence, FinalContext
-from ..summary_cache import CompressionCallRecord
 from .budget import extract_message_text, message_role
 from .config import ContextManagerConfig
 from .history_compression import HistoryCompressor, HistorySummaryCandidate
@@ -27,6 +26,7 @@ from .policy import ContextProcessingMode, resolve_policy
 from .run_context import ManagedRunContext
 from .selection import select_context_items
 from .step_renderer import StepRenderer
+from .summary_cache import CompressionCallRecord
 
 
 logger = logging.getLogger("agent_context")
@@ -78,7 +78,7 @@ class ContextManager:
 
     def prepare_run_context(
         self,
-        memory: AgentMemory,
+        memory,
         fallback_system_prompt: str,
         items: Optional[Sequence[Any]] = None,
     ) -> ManagedRunContext:
@@ -119,25 +119,14 @@ class ContextManager:
             selection_decision=decision,
         )
 
-    def assemble_final_context(
-        self,
-        *,
-        model: Any,
-        memory: AgentMemory,
-        current_run_start_idx: int,
-        tools: Sequence[Any] | None = None,
-        purpose: str = "step",
-        task: str | None = None,
-        final_answer_templates: Optional[Dict[str, Any]] = None,
-        run_context: ManagedRunContext | None = None,
-        force_compaction: bool = False,
-        request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
-        request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
-    ) -> FinalContext:
-        """Project legacy memory once, then use the Core-independent assembly path."""
-        run_context = run_context or self.prepare_run_context(memory, "")
-        return self.assemble_context_items(
-            model=model, current_items=self._project_current_run(memory, current_run_start_idx),
+    def assemble_final_context(self, *, model, memory, current_run_start_idx,
+                               tools=None, purpose="step", task=None, final_answer_templates=None,
+                               run_context=None, force_compaction=False,
+                               request_system_messages=(), request_tail_messages=()):
+        """Compatibility entry for the old native-memory SDK interface."""
+        from .compatibility import assemble_legacy_context
+        return assemble_legacy_context(
+            self, model=model, memory=memory, current_run_start_idx=current_run_start_idx,
             tools=tools, purpose=purpose, task=task, final_answer_templates=final_answer_templates,
             run_context=run_context, force_compaction=force_compaction,
             request_system_messages=request_system_messages, request_tail_messages=request_tail_messages,
@@ -154,8 +143,8 @@ class ContextManager:
         final_answer_templates: Optional[Dict[str, Any]] = None,
         run_context: ManagedRunContext | None = None,
         force_compaction: bool = False,
-        request_system_messages: Sequence[ChatMessage | dict[str, object]] = (),
-        request_tail_messages: Sequence[ChatMessage | dict[str, object]] = (),
+        request_system_messages: Sequence[ModelMessage] = (),
+        request_tail_messages: Sequence[ModelMessage] = (),
     ) -> FinalContext:
         if purpose != "step" and (request_system_messages or request_tail_messages):
             raise ValueError("Request-only action messages require step purpose")
@@ -518,73 +507,15 @@ class ContextManager:
         return [replacement_by_id.get(item.id, item) for item in result]
 
 
-    def _neutral_action_content(self, step: ActionStep, action_index: int) -> dict[str, Any]:
-        """Preserve completed-action evidence without upstream protocol labels."""
-        return {
-            "step_number": getattr(step, "step_number", action_index + 1),
-            "tool_calls": self._to_json_value(getattr(step, "tool_calls", None)),
-            "observations": self._to_json_value(getattr(step, "observations", None)),
-            "error": str(getattr(step, "error", "")) if getattr(step, "error", None) else None,
-            "result": self._to_json_value(getattr(step, "action_output", None)),
-        }
+    def _neutral_action_content(self, step, action_index):
+        """Compatibility entry for callers with native memory records."""
+        from .compatibility import memory_adapter
+        return memory_adapter(self)._neutral_action_content(step, action_index)
 
-    def _project_current_run(self, memory: AgentMemory, start: int) -> list[ContextItem]:
-        projected: list[ContextItem] = []
-        action_index = planning_index = 0
-        for index, step in enumerate(memory.steps[start:]):
-            cached = self._current_item_cache.get(id(step))
-            if cached is not None:
-                projected.append(cached)
-                if cached.type == ContextItemType.CURRENT_ACTION:
-                    action_index += 1
-                elif cached.type == ContextItemType.CURRENT_PLANNING:
-                    planning_index += 1
-                continue
-            if isinstance(step, TaskStep):
-                item = ContextItem.from_input(
-                    ContextItemInput(
-                        id=f"current_task:{index}",
-                        type=ContextItemType.CURRENT_TASK,
-                        content={"text": step.task or ""},
-                        metadata={"layout_order": index, "run_order": index},
-                    )
-                )
-                projected.append(item)
-            elif isinstance(step, ActionStep):
-                content = self._neutral_action_content(step, action_index)
-                # Render completed actions from structured fields instead of
-                # smolagents ActionStep.to_messages(). The upstream rendering
-                # injects protocol labels such as "Calling tools:" and
-                # "Observation:" into the next model request, which can prime
-                # reasoning models to emit a configured stop sequence. The
-                # neutral representation preserves the executable action,
-                # outcome, error, result, and ordering without changing how
-                # the live ReAct step is parsed or executed.
-                item = ContextItem.from_input(
-                    ContextItemInput(
-                        id=f"current_action:{action_index}",
-                        type=ContextItemType.CURRENT_ACTION,
-                        content=content,
-                        metadata={"layout_order": action_index, "run_order": index},
-                    )
-                )
-                projected.append(item)
-                action_index += 1
-            elif step.__class__.__name__ == "PlanningStep":
-                item = ContextItem.from_input(
-                    ContextItemInput(
-                        id=f"current_planning:{planning_index}",
-                        type=ContextItemType.CURRENT_PLANNING,
-                        content={"text": "\n".join(extract_message_text(m) for m in step.to_messages())},
-                        metadata={"layout_order": planning_index, "run_order": index},
-                    )
-                )
-                projected.append(item)
-                planning_index += 1
-            else:
-                continue
-            self._current_item_cache[id(step)] = item
-        return projected
+    def _project_current_run(self, memory, start):
+        """Compatibility entry; production Core bridges project their own memory."""
+        from .compatibility import memory_adapter
+        return memory_adapter(self)._project_current_run(memory, start)
 
     def _persist_candidate(self, candidate: HistorySummaryCandidate) -> str:
         sink = self.config.history_summary_sink
@@ -659,25 +590,9 @@ class ContextManager:
         }
 
     def render_memory_messages(self, memory):
-        messages = []
-        if memory.system_prompt:
-            messages.extend(memory.system_prompt.to_messages())
-        action_index = 0
-        for step in memory.steps:
-            if isinstance(step, ActionStep):
-                item = ContextItem.from_input(
-                    ContextItemInput(
-                        id=f"summary_action:{action_index}",
-                        type=ContextItemType.CURRENT_ACTION,
-                        content=self._neutral_action_content(step, action_index),
-                        metadata={"layout_order": action_index},
-                    )
-                )
-                messages.extend(self.build_context_messages([item]))
-                action_index += 1
-            else:
-                messages.extend(step.to_messages())
-        return messages
+        """Compatibility entry for display-only native memory rendering."""
+        from .compatibility import memory_adapter
+        return memory_adapter(self).render_memory_messages(memory)
 
     def register_item(self, item):
         normalized = self._item_source([item])[0]

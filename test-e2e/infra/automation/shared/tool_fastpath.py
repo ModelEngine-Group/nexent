@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Controlled executors and official-tool fixtures shared by fast-path Cases."""
 
 from __future__ import annotations
@@ -7,9 +8,7 @@ from smolagents.local_python_executor import CodeOutput, LocalPythonExecutor
 from smolagents.models import ChatMessage, MessageRole
 from smolagents.monitoring import TokenUsage
 
-from nexent.core.agents.tool_fastpath import (
-    DeferredToolExecutor,
-)
+from nexent.core.agents.cores.smolagents.tool_fastpath import DeferredToolExecutor
 from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
 
 

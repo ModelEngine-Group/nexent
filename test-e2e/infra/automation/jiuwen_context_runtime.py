@@ -17,14 +17,10 @@ from threading import Event
 from unittest.mock import Mock
 
 from jiuwen_bridge_fixture import profile_for
-from nexent.core.agents.agent_model import (
-    AgentConfig,
-    AgentRunInfo,
-    ModelConfig,
-    ToolConfig,
-)
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.context import ContextManagerConfig
-from nexent.core.agents.run_agent import agent_run
+from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.core.utils.observer import MessageObserver
 from sqlalchemy import create_engine, insert, select, text
@@ -151,7 +147,8 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
         get_historical_context,
     )
     from management.db.models import ConversationMessageUnit
-    from nexent.core.agents import nexent_agent
+    from nexent.core.agents.cores.smolagents import agent as nexent_agent
+    import nexent.core.tools as shared_tool_types
     from management.services.conversation.service import (
         persist_history_summary_candidate,
     )
@@ -240,6 +237,7 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
             effects.append("once")
             return "TOOL_RESULT_ALPHA"
     monkeypatch.setattr(nexent_agent, "RememberTool", RememberTool, raising=False)
+    monkeypatch.setattr(shared_tool_types, "RememberTool", RememberTool, raising=False)
     monitoring = Mock()
     monitoring.trace_llm_request.side_effect = lambda *a, **k: nullcontext(None)
     monkeypatch.setattr("nexent.core.model_service.service.get_monitoring_manager", lambda: monitoring)
@@ -310,8 +308,16 @@ async def run_context_scenario(monkeypatch, engine, original="smolagents", proto
                     await asyncio.sleep(0.01)
                 raise AssertionError("Summary did not start")
             canceller = asyncio.create_task(cancel_summary()) if fault == "cancel_summary" else None
+            output = []
             try:
-                output = [json.loads(chunk) async for chunk in agent_run(info, thread_manager=manager)]
+                try:
+                    async for chunk in agent_run(info, thread_manager=manager):
+                        output.append(json.loads(chunk))
+                except asyncio.CancelledError:
+                    if fault != "cancel_summary" or not info.stop_event.is_set():
+                        raise
+                    await asyncio.wait_for(asyncio.wrap_future(info.thread_future), timeout=5)
+                    output.extend(json.loads(chunk) for chunk in info.observer.get_cached_message())
             finally:
                 if canceller:
                     await canceller

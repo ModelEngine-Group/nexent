@@ -11,7 +11,7 @@ from dataclasses import dataclass, replace
 from math import isfinite
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
-from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.agents.contracts.config import AgentConfig
 
 from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
 from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE

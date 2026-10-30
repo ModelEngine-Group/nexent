@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Interactive context debugger REPL.
 
 Type user messages one at a time. Each line runs one agent turn against an
@@ -65,7 +66,7 @@ from agent_runner import build_agent_run_info, run_agent_with_tracking
 _OUT = sys.stdout
 
 from nexent.core.agents.context import ContextManager, ContextManagerConfig
-from nexent.core.agents.agent_model import AgentHistory
+from nexent.core.agents.contracts.run import AgentHistory
 from nexent.core.utils.token_estimation import estimate_tokens_text
 
 from ctx_debugger import ContextDebugger, attach_debugger, resolve_trace_path
@@ -159,7 +160,7 @@ class Session:
     def _install_agent_patch(self):
         """Patch CoreAgent.__init__ so each turn's fresh agent wires its
         model/observer/tools/executor layers onto this session's debugger."""
-        from nexent.core.agents.core_agent import CoreAgent
+        from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
 
         dbg = self.debugger
         if getattr(CoreAgent, "_ctxdbg_orig_init", None) is None:

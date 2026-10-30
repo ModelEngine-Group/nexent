@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from nexent.core.agents.agent_model import AgentConfig, ModelConfig
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 from management.services.model.runtime_options import compile_model_runtime_profile
 from management.services.model.runtime_provisioning import (
     build_runtime_outlet_snapshot,
@@ -122,7 +122,7 @@ def test_compile_rejects_protected_extra_fields_and_missing_profile(saved):
 
 
 def test_effective_request_budget_takes_precedence_over_saved_agent_output(saved):
-    from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
+    from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
     from nexent.core.concurrency import RunCancellationScope
 
     profile = restore_runtime_model_snapshot(saved, "tenant")

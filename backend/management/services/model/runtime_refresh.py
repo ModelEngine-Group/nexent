@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 def refresh_saved_outlet(record, profile, revision):
     """Preserve saved declarations and capabilities on legacy management edits."""
-    from nexent.core.agents.agent_model import ModelConfig
+    from nexent.core.agents.contracts.config import ModelConfig
     from nexent.core.model_service.compatibility.legacy_config import (
         legacy_extra_body,
         legacy_thinking_enabled,

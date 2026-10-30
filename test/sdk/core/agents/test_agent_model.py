@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """
-Unit tests for sdk.nexent.core.agents.agent_model module.
+Unit tests for sdk.nexent.core.agents.contracts.config module.
 
 This module tests all Pydantic models and related constants:
 - Protocol constants (PROTOCOL_JSONRPC, PROTOCOL_HTTP_JSON, PROTOCOL_GRPC)
@@ -173,7 +173,7 @@ def _create_mock_modules():
     mock_botocore_crt.CRT_SUPPORTED_AUTH_TYPES = []
 
     # Mock A2AAgentInfo
-    mock_a2a_agent_proxy = ModuleType("sdk.nexent.core.agents.a2a_agent_proxy")
+    mock_a2a_agent_proxy = ModuleType("sdk.nexent.core.agents.resources.a2a")
     mock_a2a_agent_proxy_class = MagicMock()
     setattr(mock_a2a_agent_proxy, "A2AAgentInfo", mock_a2a_agent_proxy_class)
 
@@ -207,7 +207,7 @@ def _create_mock_modules():
         "botocore.args": mock_botocore_args,
         "botocore.regions": mock_botocore_regions,
         "botocore.crt": mock_botocore_crt,
-        "sdk.nexent.core.agents.a2a_agent_proxy": mock_a2a_agent_proxy,
+        "sdk.nexent.core.agents.resources.a2a": mock_a2a_agent_proxy,
         "paramiko": MagicMock(),
         "boto3": MagicMock(),
         "tiktoken": MagicMock(),
@@ -233,48 +233,21 @@ for name, module in _module_mocks.items():
 # ---------------------------------------------------------------------------
 
 def _load_agent_model_module():
-    """Load agent_model module directly."""
-    # Use cross-platform path construction
-    # __file__ is C:\xuyaqi\develop\nexent\test\sdk\core\agents\test_agent_model.py
-    # We need to go up 5 levels to get to C:\xuyaqi\develop\nexent
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-    agent_model_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "agent_model.py")
+    """Load canonical configuration and run contracts for shared assertions."""
+    from importlib import import_module
 
-    sys.modules["sdk"] = ModuleType("sdk")
-    sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
-    sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
-    sys.modules["sdk.nexent.core.agents"] = ModuleType("sdk.nexent.core.agents")
-    models_package = ModuleType("sdk.nexent.core.models")
-    models_package.__path__ = []
-    capacity_budget = ModuleType("sdk.nexent.core.models.capacity_budget")
-    class ContextBudgetSnapshot(BaseModel):
-        fingerprint: str = "budget"
-    capacity_budget.ContextBudgetSnapshot = ContextBudgetSnapshot
-    sys.modules["sdk.nexent.core.models"] = models_package
-    sampling_spec = importlib.util.spec_from_file_location(
-        "sdk.nexent.core.models.sampling",
-        os.path.join(project_root, "sdk", "nexent", "core", "models", "sampling.py"),
-    )
-    sampling_module = importlib.util.module_from_spec(sampling_spec)
-    sampling_spec.loader.exec_module(sampling_module)
-    sys.modules["sdk.nexent.core.models.sampling"] = sampling_module
-    sys.modules["sdk.nexent.core.models.capacity_budget"] = capacity_budget
-    context_package = ModuleType("sdk.nexent.core.agents.context")
-    context_package.__path__ = []
-    context_models = ModuleType("sdk.nexent.core.agents.context.models")
-    class ContextItemInput(BaseModel):
-        id: str = "item"
-    context_models.ContextItemInput = ContextItemInput
-    sys.modules["sdk.nexent.core.agents.context"] = context_package
-    sys.modules["sdk.nexent.core.agents.context.models"] = context_models
-
-    spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.agent_model", agent_model_path)
-    module = importlib.util.module_from_spec(spec)
-    module.__package__ = "sdk.nexent.core.agents"
-    sys.modules["sdk.nexent.core.agents.agent_model"] = module
-
-    spec.loader.exec_module(module)
-    return module
+    sdk = Path(__file__).resolve().parents[4] / "sdk"
+    for name in ("nexent", "nexent.core", "nexent.core.agents", "nexent.core.agents.contracts", "nexent.core.models"):
+        if name not in sys.modules:
+            package = ModuleType(name)
+            package.__path__ = [str(sdk / name.replace(".", "/"))]
+            sys.modules[name] = package
+    sys.modules["nexent.core.agents.resources.a2a"] = _module_mocks["sdk.nexent.core.agents.resources.a2a"]
+    configuration = import_module("nexent.core.agents.contracts.config")
+    running = import_module("nexent.core.agents.contracts.run")
+    exports = {name: value for name, value in vars(configuration).items() if not name.startswith("_")}
+    exports.update(AgentHistory=running.AgentHistory, AgentRunInfo=running.AgentRunInfo)
+    return types.SimpleNamespace(**exports)
 
 
 agent_model_module = _load_agent_model_module()
@@ -903,7 +876,7 @@ def test_certificate_preference_reaches_proxy(preference):
     config = agent_model_module.ExternalA2AAgentConfig(
         agent_id="peer", name="Peer", url="https://peer", **preference)
     config.to_a2a_agent_info()
-    proxy_info = _module_mocks["sdk.nexent.core.agents.a2a_agent_proxy"].A2AAgentInfo
+    proxy_info = _module_mocks["sdk.nexent.core.agents.resources.a2a"].A2AAgentInfo
     assert proxy_info.call_args.kwargs["ssl_verify"] is preference.get("ssl_verify", True)
     proxy_info.reset_mock()
 
@@ -1067,7 +1040,7 @@ class TestExternalA2AAgentConfig:
         agent_info = config.to_a2a_agent_info()
 
         # Verify the mock was called with correct arguments
-        mock_a2a_agent_proxy_class = _module_mocks["sdk.nexent.core.agents.a2a_agent_proxy"].A2AAgentInfo
+        mock_a2a_agent_proxy_class = _module_mocks["sdk.nexent.core.agents.resources.a2a"].A2AAgentInfo
         mock_a2a_agent_proxy_class.assert_called_once()
         call_kwargs = mock_a2a_agent_proxy_class.call_args[1]
         assert call_kwargs["agent_id"] == "convert-agent"

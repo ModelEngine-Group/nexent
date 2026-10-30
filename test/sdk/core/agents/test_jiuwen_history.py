@@ -10,16 +10,9 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from nexent.core.agents.agent_model import (
-    AgentConfig,
-    AgentHistory,
-    AgentRunInfo,
-    ModelConfig,
-)
-from nexent.core.agents.core_adapters.jiuwen import (
-    JiuwenAdapter,
-    _prepend_context_messages,
-)
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
+from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter, _prepend_context_messages
 from nexent.core.concurrency.cancellation import RunCancellationScope
 from nexent.core.model_service.contracts import AssistantMessage as ServiceMessage
 from nexent.core.model_service.contracts import ModelEvent
@@ -134,14 +127,14 @@ def test_history_preserves_native_tool_calls_and_structured_content(dictionary_i
 
 
 def test_native_prompt_and_retry_configuration(monkeypatch, saved_profile):
-    from nexent.core.agents.core_adapters import jiuwen
+    from nexent.core.agents.cores.jiuwen import adapter as jiuwen
 
     adapter = adapter_with_history([AgentHistory(role="user", content="Analyze an old image")], saved_profile)
     adapter.run_info.thread_manager = SimpleNamespace()
     monkeypatch.setattr(adapter, "_skill_rails", list)
     bind_executor = Mock()
     monkeypatch.setattr(adapter, "_bind_text_executor", bind_executor)
-    monkeypatch.setattr(jiuwen, "NexentAgent", lambda **kwargs: SimpleNamespace(
+    monkeypatch.setattr(jiuwen, "AgentResources", lambda **kwargs: SimpleNamespace(
         _prepare_file_workspace=lambda query: query,
     ))
     factory = Mock()

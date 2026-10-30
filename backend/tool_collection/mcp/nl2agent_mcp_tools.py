@@ -10,7 +10,7 @@ import unicodedata
 from typing import Annotated, Any, Literal
 
 from fastmcp.server.dependencies import get_http_request
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from pydantic import (
     BaseModel, ConfigDict, Field, StrictBool, StringConstraints,
     ValidationError, field_validator, model_validator,

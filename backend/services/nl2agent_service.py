@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 from urllib.parse import quote, urljoin
 
-from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import (
     ContextItemInput,
     ContextItemType,

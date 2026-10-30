@@ -7,19 +7,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from nexent.core.agents.agent_model import (
-    AgentConfig,
-    AgentRunInfo,
-    ModelConfig,
-    ToolConfig,
-)
-from nexent.core.agents.core_adapters.base import UnsupportedAgentCoreConfig
-from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
-from nexent.core.agents.core_adapters.jiuwen_messages import resource_view
-from nexent.core.agents.core_adapters.jiuwen_protocol import (
-    EXECUTION_TOOL,
-    NATIVE_EXECUTION_TOOL,
-)
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
+from nexent.core.agents.contracts.adapter import UnsupportedAgentCoreConfig
+from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+from nexent.core.agents.cores.jiuwen.messages import resource_view
+from nexent.core.agents.cores.jiuwen.protocol import EXECUTION_TOOL, NATIVE_EXECUTION_TOOL
 from nexent.core.utils.observer import MessageObserver
 from test_jiuwen_model_service import saved_profile as _saved_profile
 
@@ -30,8 +23,8 @@ saved_profile = _saved_profile
 def test_executor_registration_reuses_sandbox_and_keeps_self_out_of_bindings(mocker, text_mode):
     executor = Mock()
     executor_result = SimpleNamespace(output="created.docx", logs="written", is_final_answer=False)
-    execute = mocker.patch("nexent.core.agents.sandbox._execute_with_tool_context", return_value=executor_result)
-    build = mocker.patch("nexent.core.agents.sandbox.build_python_executor")
+    execute = mocker.patch("nexent.core.agents.sandbox.execution._execute_with_tool_context", return_value=executor_result)
+    build = mocker.patch("nexent.core.agents.sandbox.execution.build_python_executor")
     adapter = JiuwenAdapter(SimpleNamespace(agent_config=SimpleNamespace(name="files")))
     adapter.text_protocol = text_mode
     adapter.resources = SimpleNamespace(agent=SimpleNamespace(python_executor=executor))
@@ -59,8 +52,8 @@ def test_native_executor_is_model_visible_but_text_internal_entry_is_never_adver
 
 
 def test_native_guidance_uses_authorized_skill_api_not_guessed_s3_paths(mocker):
-    mocker.patch("nexent.core.agents.run_agent._get_authorized_context_items", return_value=[])
-    mocker.patch("nexent.core.agents.run_agent._get_authorized_history", return_value=[])
+    mocker.patch("nexent.core.agents.orchestration.execution._get_authorized_context_items", return_value=[])
+    mocker.patch("nexent.core.agents.orchestration.execution._get_authorized_history", return_value=[])
     info = SimpleNamespace(agent_config=SimpleNamespace(name="files", instructions="Write files", description=""))
     adapter = JiuwenAdapter(info)
     prompt = adapter._compile_context()

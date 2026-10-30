@@ -6,7 +6,7 @@ from collections.abc import Callable
 import math
 from typing import Any
 
-from nexent.core.agents.agent_model import AgentConfig, ModelConfig
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 
 from contracts.errors.exceptions import RunModelControlsError
 from management.db.model.repository import get_model_by_model_id

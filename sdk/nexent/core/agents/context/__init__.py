@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unified agent context domain with lazy public exports."""
 
 from __future__ import annotations
@@ -8,8 +10,8 @@ from typing import Any
 
 _EXPORTS = {
     "ContextItem": (".models", "ContextItem"),
-    "ContextItemInput": (".models", "ContextItemInput"),
-    "ContextItemType": (".models", "ContextItemType"),
+    "ContextItemInput": ("nexent.core.agents.contracts.context", "ContextItemInput"),
+    "ContextItemType": ("nexent.core.agents.contracts.context", "ContextItemType"),
     "SystemContextItem": (".models", "SystemContextItem"),
     "ToolContextItem": (".models", "ToolContextItem"),
     "SkillContextItem": (".models", "SkillContextItem"),
@@ -27,7 +29,6 @@ _EXPORTS = {
     "ContextItemRenderingError": (".rendering", "ContextItemRenderingError"),
     "ContextManager": (".manager", "ContextManager"),
     "ContextManagerConfig": (".config", "ContextManagerConfig"),
-    "ManagedContextRuntime": (".runtime", "ManagedContextRuntime"),
     "ManagedRunContext": (".run_context", "ManagedRunContext"),
     "HistoryCompressor": (".history_compression", "HistoryCompressor"),
     "HistorySummaryCandidate": (".history_compression", "HistorySummaryCandidate"),

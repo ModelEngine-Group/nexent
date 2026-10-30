@@ -214,8 +214,8 @@ class MockAgentVerificationConfig:
         return types.SimpleNamespace(enabled=bool((value or {}).get("enabled", False)))
 
 sys.modules['nexent.core.utils.observer'] = MagicMock(MessageObserver=mock_message_observer)
-sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
-    "nexent.core.agents.agent_model",
+sys.modules['nexent.core.agents.contracts.config'] = _create_stub_module(
+    "nexent.core.agents.contracts.config",
     AgentHistory=AgentHistory,
     ModelConfig=MagicMock(),
     AgentConfig=MagicMock(),
@@ -225,8 +225,11 @@ sys.modules['nexent.core.agents.agent_model'] = _create_stub_module(
     AgentVerificationConfig=MockAgentVerificationConfig,
     MessageObserver=MagicMock(),
 )
-sys.modules['nexent.core.agents.agent_context'] = _create_stub_module(
-    "nexent.core.agents.agent_context",
+sys.modules['nexent.core.agents.contracts.run'] = _create_stub_module(
+    "nexent.core.agents.contracts.run", AgentHistory=AgentHistory, AgentRunInfo=MagicMock(),
+)
+sys.modules['nexent.core.agents.context'] = _create_stub_module(
+    "nexent.core.agents.context",
     ContextManager=MagicMock(),
     ContextManagerConfig=MagicMock(),
 )
@@ -267,8 +270,8 @@ def _load_stub_prompt_bundle(*, is_manager, language, **kwargs):
 
 _prompt_loader_stub.load_agent_prompt_bundle = _load_stub_prompt_bundle
 sys.modules[_prompt_loader_stub.__name__] = _prompt_loader_stub
-sys.modules['nexent.core.agents.summary_config'] = _create_stub_module(
-    "nexent.core.agents.summary_config",
+sys.modules['nexent.core.agents.context.config'] = _create_stub_module(
+    "nexent.core.agents.context.config",
     ContextManagerConfig=MagicMock(),
 )
 sys.modules['nexent.core.models.prompt_cache'] = _create_stub_module(
@@ -389,13 +392,13 @@ class MockSandboxConfig:
 
 
 sandbox_module = _create_stub_module(
-    "nexent.core.agents.sandbox",
+    "nexent.core.agents.sandbox.config",
     SandboxConfig=MockSandboxConfig,
 )
 nexent_agents_module.sandbox = sandbox_module
 
 nexent_agent_module = _create_stub_module(
-    "nexent.core.agents.nexent_agent",
+    "nexent.core.agents.cores.smolagents.agent",
     get_local_python_authorized_imports=MagicMock(
         return_value=["sdk_default_import"]
     ),
@@ -496,11 +499,11 @@ mock_model_config = MagicMock()
 mock_tool_config = MagicMock()
 mock_agent_run_info = MagicMock()
 
-sys.modules['nexent.core.agents.agent_model'].AgentConfig = mock_agent_config
-sys.modules['nexent.core.agents.agent_model'].ModelConfig = mock_model_config
-sys.modules['nexent.core.agents.agent_model'].ToolConfig = mock_tool_config
-sys.modules['nexent.core.agents.agent_model'].AgentRunInfo = mock_agent_run_info
-sys.modules['nexent.core.agents.agent_model'].AgentVerificationConfig = MockAgentVerificationConfig
+sys.modules['nexent.core.agents.contracts.config'].AgentConfig = mock_agent_config
+sys.modules['nexent.core.agents.contracts.config'].ModelConfig = mock_model_config
+sys.modules['nexent.core.agents.contracts.config'].ToolConfig = mock_tool_config
+sys.modules['nexent.core.agents.contracts.run'].AgentRunInfo = mock_agent_run_info
+sys.modules['nexent.core.agents.contracts.config'].AgentVerificationConfig = MockAgentVerificationConfig
 sys.modules['nexent.core.utils.observer'].MessageObserver = mock_message_observer
 
 # Stub parallel_executor so that create_agent_info can import ParallelExecutorTool

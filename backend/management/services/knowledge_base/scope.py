@@ -8,7 +8,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional
 
-from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.agents.contracts.config import AgentConfig
 
 from management.services.agent.resource_resolver import _resolve_runtime_tool_records
 from contracts.errors.exceptions import ValidationError

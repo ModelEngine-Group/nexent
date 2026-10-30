@@ -4,7 +4,7 @@
 
 import pytest
 from runtime.adapters.nexent.sandbox import resolve_sandbox_config
-from nexent.core.agents.sandbox import SandboxLevel, SandboxScope
+from nexent.core.agents.sandbox.config import SandboxLevel, SandboxScope
 
 
 def resolve(db_policy, env_policy):

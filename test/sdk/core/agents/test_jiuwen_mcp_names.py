@@ -4,8 +4,8 @@
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from nexent.core.agents.agent_model import ToolConfig
-from nexent.core.agents.core_adapters import mcp
+from nexent.core.agents.contracts.config import ToolConfig
+from nexent.core.agents.cores.jiuwen import mcp
 from nexent.core.concurrency import RunCancellationScope
 from openjiuwen.core.foundation.tool.mcp.base import McpToolCard
 

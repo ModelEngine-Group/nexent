@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import json
 import logging
 
@@ -9,7 +10,7 @@ from nexent.core.utils.observer import MessageObserver
 
 from nexent.core.agents.context import ContextItemInput, ContextManager, ContextManagerConfig
 from nexent.core.agents.context.evidence import ContextEvidenceCollector
-from nexent.core.context_runtime.contracts import ContextEvidence
+from nexent.core.agents.contracts.context import ContextEvidence
 from nexent.core.agents.context.history_compression import (
     HistorySummaryInput,
     _validate_summary_contract,

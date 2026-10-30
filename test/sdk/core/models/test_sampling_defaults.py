@@ -5,7 +5,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from nexent.core.agents.agent_model import ModelConfig
+from nexent.core.agents.contracts.config import ModelConfig
 from nexent.core.models.openai_llm import OpenAIModel
 from nexent.core.models.openai_long_context_model import OpenAILongContextModel
 

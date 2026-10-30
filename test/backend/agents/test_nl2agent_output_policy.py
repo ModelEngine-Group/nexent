@@ -3,7 +3,7 @@
 
 import pytest
 
-from nexent.core.agents.agent_model import AgentConfig
+from nexent.core.agents.contracts.config import AgentConfig
 
 from management.services.agent.creation import create_nl2agent_agent_config
 

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Low-dependency tests for the ContextManager runtime."""
 from __future__ import annotations
 
@@ -18,9 +19,9 @@ _BOOTSTRAP_MODULES = (
     "nexent.core.agents.context.manager",
     "nexent.core.agents.context.models",
     "nexent.core.agents.context.run_context",
-    "nexent.core.agents.context.runtime",
-    "nexent.core.context_runtime",
-    "nexent.core.context_runtime.contracts",
+    "nexent.core.agents.cores.smolagents.context",
+    "nexent.core.agents.cores.smolagents.context_contracts",
+    "nexent.core.agents.cores.smolagents.context_contracts",
     "smolagents.memory",
     "smolagents.models",
     "smolagents.tools",
@@ -42,7 +43,7 @@ def _bootstrap():
         ("nexent.core", ROOT / "core"),
         ("nexent.core.agents", ROOT / "core" / "agents"),
         ("nexent.core.agents.context", ROOT / "core" / "agents" / "context"),
-        ("nexent.core.context_runtime", ROOT / "core" / "context_runtime"),
+        ("nexent.core.agents.cores.smolagents.context_contracts", ROOT / "core" / "context_runtime"),
     ):
         package = types.ModuleType(name)
         package.__path__ = [str(path)]
@@ -77,8 +78,8 @@ def _bootstrap():
     models_module.ContextItem = type("ContextItem", (), {})
     models_module.ContextItemInput = type("ContextItemInput", (), {})
     sys.modules[models_module.__name__] = models_module
-    _load("nexent.core.context_runtime.contracts", "core/context_runtime/contracts.py")
-    managed = _load("nexent.core.agents.context.runtime", "core/agents/context/runtime.py")
+    _load("nexent.core.agents.cores.smolagents.context_contracts", "core/context_runtime/contracts.py")
+    managed = _load("nexent.core.agents.cores.smolagents.context", "core/agents/context/runtime.py")
     return managed, snapshot
 
 
@@ -124,7 +125,7 @@ class _ContextManager:
     def assemble_final_context(self, **kwargs):
         self.calls.append(("assemble_final_context", kwargs["purpose"], kwargs.get("tools")))
         self.force_compactions.append(kwargs.get("force_compaction", False))
-        contracts = sys.modules["nexent.core.context_runtime.contracts"]
+        contracts = sys.modules["nexent.core.agents.cores.smolagents.context_contracts"]
         return contracts.FinalContext(
             messages=[{"role": "system", "content": kwargs["purpose"]}],
             tools=list(kwargs.get("tools") or ()),

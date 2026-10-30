@@ -6,7 +6,7 @@
 import json
 
 from contracts.constants.constants import LANGUAGE
-from nexent.core.agents.agent_model import AgentConfig, ToolConfig
+from nexent.core.agents.contracts.config import AgentConfig, ToolConfig
 from nexent.core.agents.context import ContextItemInput, ContextItemType
 from nexent.core.agents.prompt.meta import compose_nl2agent_system
 from nexent.core.tools.parallel_executor import ParallelExecutorTool

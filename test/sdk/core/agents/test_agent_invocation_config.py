@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Configuration cloning preserves services but isolates invocation data."""
 
 from dataclasses import dataclass
@@ -7,14 +8,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from nexent.core.agents.agent_model import (
-    AgentConfig,
-    ToolConfig,
-    copy_invocation_config,
-)
-from nexent.core.agents.nexent_agent import NexentAgent
-from nexent.core.agents.sandbox import SandboxConfig, SandboxLevel
-from nexent.core.agents.tool_fastpath import DeferredToolExecutor
+from nexent.core.agents.contracts.config import AgentConfig, ToolConfig, copy_invocation_config
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
+from nexent.core.agents.sandbox.config import SandboxConfig, SandboxLevel
+from nexent.core.agents.cores.smolagents.tool_fastpath import DeferredToolExecutor
 from nexent.core.tools.read_skill_config_tool import ReadSkillConfigTool
 from nexent.core.utils.observer import MessageObserver
 
@@ -64,7 +61,7 @@ def test_clone_preserves_cycles_without_sharing_mutable_metadata():
 
 
 def test_invocation_factory_passes_isolated_config_and_original_client_to_tools(monkeypatch):
-    from nexent.core.agents import nexent_agent
+    from nexent.core.agents.cores.smolagents import agent as nexent_agent
 
     class FakeCore:
         def __init__(self, **kwargs):
@@ -103,7 +100,8 @@ def test_invocation_factory_passes_isolated_config_and_original_client_to_tools(
     (False, None), (False, ["ReadSkillConfigTool"]),
 ])
 def test_child_invocations_inherit_fastpath_policy_and_release_distinct_executors(monkeypatch, enabled, allowed):
-    from nexent.core.agents import nexent_agent, sandbox
+    from nexent.core.agents.cores.smolagents import agent as nexent_agent
+    from nexent.core.agents.sandbox import execution as sandbox
 
     executors = []
 

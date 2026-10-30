@@ -1,0 +1,59 @@
+schema_version: '1.0'
+change:
+  change_id: SDK-AGENT-DIRECTORY-R2-20261027
+  change_type: refactor
+  title: Separate common Agent orchestration resources and smolagents execution
+  description: Extract common resource ownership and task orchestration, route Jiuwen to the shared provider and
+    collect the smolagents implementation behind its Adapter.
+  feature_contract_changed: false
+  no_case_change_reason: Existing model, resource, collaboration, output and cancellation contracts are retained.
+    Architecture and partial-preparation ownership need traditional UT; runtime Cases are reused.
+  affected_features:
+    existing:
+    - JIUWEN-MODEL-BRIDGE
+    - JIUWEN-RESOURCES
+    - JIUWEN-OUTPUT
+    - JIUWEN-CONTEXT
+    modified: []
+    added: []
+    retired: []
+  affected_cases:
+    existing:
+    - JIUWEN-MODEL-BRIDGE-D3-001
+    - JIUWEN-RESOURCES-D3-001
+    - JIUWEN-RESOURCES-D3-002
+    - JIUWEN-OUTPUT-D3-001
+    - JIUWEN-RESOURCES-D5-001
+    - JIUWEN-CONTEXT-D3-001
+    modified: []
+    added: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Common preparation and orchestration never construct a smolagents agent for Jiuwen.
+    - Main and child invocation use the same Adapter lifecycle without a production executor callback.
+    - Tool parameters, user identity, Skills authorization, workspace and file results remain isolated.
+    - Partial preparation, completion, errors and cancellation release owned resources exactly once.
+    - Old imports preserve canonical types while models and model-interface compatibility stay frozen.
+    reason: Existing execution suites prove retained behavior; new ownership and dependency assertions prove the
+      extraction without duplicating the runtime Cases as D1.
+    test_selectors:
+    - test/sdk/core/agents/test_resource_orchestration_boundaries.py
+    - test/sdk/core/agents/test_canonical_agent_imports.py
+    - test/sdk/core/agents/test_nexent_agent.py
+    - test/sdk/core/agents/test_run_agent.py
+    - test/sdk/core/agents/test_core_agent.py
+    - test/sdk/core/agents/test_core_agent_planning.py
+    - test/sdk/core/agents/test_nexent_agent_sandbox_construction.py
+    - test/sdk/core/agents/test_subagent_resource_ownership.py
+    - test/sdk/core/agents/test_a2a_agent_proxy.py
+    - test/sdk/core/agents/test_a2a_active_cancellation.py
+    - test/backend/agents/test_create_agent_info.py
+  notes: Product baseline is f1d515ffc plus the uncommitted R1 worktree. SDK model directories remain untouched.
+    No production deployment or provider version upgrade. Fixed scripts retain assertions and patch canonical tool
+    registries. The cancellation helper accepts the documented stream CancelledError only for the explicit cancellation
+    scenario, waits for the worker, and still verifies stopped outcome, exact call counts, no side effects and zero
+    active owners. On 2026-10-29, obsolete compatibility UT file selectors were rebound to canonical/removal tests
+    by SDK-AGENT-CANONICAL-IMPORTS-20261029. Original old-import execution claims describe this historical stage
+    only.

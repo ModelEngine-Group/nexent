@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Shared CM consumption and native tool association regression contracts."""
 
 from threading import Event
@@ -5,11 +6,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.context import ContextItem, ContextItemInput, ContextManagerConfig
 from nexent.core.agents.context.history_compression import HistorySummaryInput
 from nexent.core.agents.context.rendering import ContextItemRenderer
-from nexent.core.agents.core_adapters.jiuwen_context import JiuwenContextBridge, SummaryModel
+from nexent.core.agents.cores.jiuwen.context import JiuwenContextBridge, SummaryModel
 from nexent.core.concurrency import RunCancellationScope
 from nexent.core.concurrency.cancellation import RunTerminated
 from nexent.core.utils.observer import MessageObserver

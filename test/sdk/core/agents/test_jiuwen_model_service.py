@@ -9,9 +9,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from nexent.core.agents.core_adapters.jiuwen_messages import resource_view
-from nexent.core.agents.core_adapters.jiuwen_model import JiuwenServiceModel
-from nexent.core.agents.core_adapters.jiuwen_protocol import JiuwenProtocolError
+from nexent.core.agents.cores.jiuwen.messages import resource_view
+from nexent.core.agents.cores.jiuwen.model import JiuwenServiceModel
+from nexent.core.agents.cores.jiuwen.protocol import JiuwenProtocolError
 from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
 from nexent.core.model_service.contracts import (
     AssistantMessage,
@@ -276,9 +276,10 @@ async def test_mid_stream_cancellation_closes(saved_profile):
 def test_adapter_requires_trusted_matching_snapshot(saved_profile, variant):
     from threading import Event
 
-    from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ModelConfig
-    from nexent.core.agents.core_adapters.base import UnsupportedAgentCoreConfig
-    from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
+    from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
+    from nexent.core.agents.contracts.run import AgentRunInfo
+    from nexent.core.agents.contracts.adapter import UnsupportedAgentCoreConfig
+    from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
     data = saved_profile.model_dump()
     if variant == "unsaved":
         data["outlet_id"] = data["connection"]["credential_ref"]["model_id"] = None
@@ -294,8 +295,8 @@ def test_adapter_requires_trusted_matching_snapshot(saved_profile, variant):
 
 
 def test_request_output_budget_cannot_be_silently_ignored(saved_profile):
-    from nexent.core.agents.core_adapters.base import UnsupportedAgentCoreConfig
-    from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
+    from nexent.core.agents.contracts.adapter import UnsupportedAgentCoreConfig
+    from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
 
     cap = saved_profile.parameter_values.get("max_output_tokens", saved_profile.parameter_values.get("max_tokens"))
     info = SimpleNamespace(agent_config=SimpleNamespace(requested_output_tokens=None),
@@ -308,7 +309,7 @@ def test_request_output_budget_cannot_be_silently_ignored(saved_profile):
 
 @pytest.mark.parametrize("invalid", [None, "tools", "refusal", "nontext"])
 def test_context_summary_accepts_shared_chat_messages_and_validates_completion(saved_profile, invalid):
-    from nexent.core.agents.core_adapters.jiuwen_context import SummaryModel
+    from nexent.core.agents.cores.jiuwen.context import SummaryModel
     from smolagents.models import ChatMessage, MessageRole
 
     service = Mock()

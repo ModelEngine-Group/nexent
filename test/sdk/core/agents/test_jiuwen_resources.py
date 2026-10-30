@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Resource bridge validation, loop ownership and captured MCP parameters."""
 
 import asyncio
@@ -8,12 +9,9 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from jsonschema import ValidationError
-from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
-from nexent.core.agents.core_adapters.jiuwen_resources import JiuwenResourceBridge
-from nexent.core.agents.core_adapters.mcp import (
-    JiuwenMCPCollection,
-    _ManagedNativeClient,
-)
+from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+from nexent.core.agents.cores.jiuwen.resources import JiuwenResourceBridge
+from nexent.core.agents.cores.jiuwen.mcp import JiuwenMCPCollection, _ManagedNativeClient
 from nexent.core.concurrency import (
     LanePolicy,
     ManagedTaskSpec,
@@ -105,7 +103,7 @@ async def test_business_entry_awaits_both_async_functions_and_returned_awaitable
 @pytest.mark.asyncio
 @pytest.mark.parametrize("authorized", [True, False, "empty"])
 async def test_skill_root_and_name_must_both_belong_to_the_same_authorized_snapshot(tmp_path, authorized):
-    from nexent.core.agents.core_adapters.skills import NexentSkillRail
+    from nexent.core.agents.cores.jiuwen.skills import NexentSkillRail
 
     first, second = tmp_path / "first", tmp_path / "second"
     path = first / ("allowed" if authorized else "second_only") / "SKILL.md"

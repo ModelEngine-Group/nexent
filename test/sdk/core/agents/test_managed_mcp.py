@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 import threading
 from concurrent.futures import CancelledError
@@ -7,7 +8,7 @@ from unittest.mock import MagicMock
 import mcp.types
 import mcpadapt.core
 import pytest
-from nexent.core.agents.managed_mcp import ManagedMCPToolCollection
+from nexent.core.agents.resources.mcp import ManagedMCPToolCollection
 from nexent.consts.mcp_errors import MCPConnectionTimeoutError, MCPToolTimeoutError
 from nexent.core.concurrency import LanePolicy, RunCancellationScope, ThreadManager
 

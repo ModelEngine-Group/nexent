@@ -265,7 +265,7 @@ def run_async(coro):
                 finally:
                     new_loop.close()
 
-            from nexent.core.agents.run_agent import _get_default_agent_thread_manager
+            from nexent.core.agents.orchestration.entry import _get_default_agent_thread_manager
             from nexent.core.concurrency import ManagedTaskSpec, get_current_thread_manager
 
             manager = get_current_thread_manager() or _get_default_agent_thread_manager()

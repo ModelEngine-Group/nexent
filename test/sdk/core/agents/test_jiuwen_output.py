@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Public output ordering, explicit finality, call correlation and error contracts."""
 
 import json
@@ -5,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
-from nexent.core.agent_runtime_support.output import RunResult, StepObservation
-from nexent.core.agents.core_adapters.events import JiuwenEventAdapter
+from nexent.core.agents.contracts.output import RunResult, StepObservation
+from nexent.core.agents.cores.jiuwen.events import JiuwenEventAdapter
 from nexent.core.model_service.contracts import AssistantMessage, TokenUsage, ToolCall
 from nexent.core.utils.observer import MessageObserver
 
@@ -96,8 +97,9 @@ def test_native_llm_output_does_not_duplicate_canonical_model_events():
                                    '{"status":"error","message":"Skill error"}'])
 def test_explicit_resource_failure_status_survives_later_text(result):
     from threading import Event
-    from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo
-    from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
+    from nexent.core.agents.contracts.config import AgentConfig
+    from nexent.core.agents.contracts.run import AgentRunInfo
+    from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
 
     observer=MessageObserver()
     info=AgentRunInfo(query="Current",observer=observer,stop_event=Event(),model_config_list=[],
@@ -116,13 +118,14 @@ def test_explicit_resource_failure_status_survives_later_text(result):
 
 def test_reused_run_info_does_not_keep_old_core_terminal(mocker):
     from threading import Event
-    from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo
-    from nexent.core.agents.run_agent import _agent_run_thread
+    from nexent.core.agents.contracts.config import AgentConfig
+    from nexent.core.agents.contracts.run import AgentRunInfo
+    from nexent.core.agents.orchestration.entry import _agent_run_thread
 
     info=AgentRunInfo(query="New task",observer=MessageObserver(),stop_event=Event(),model_config_list=[],
                      agent_config=AgentConfig(name="agent",description="Fixture",model_name="fixture",tools=[]))
     info.run_result=RunResult(turn_id="old",status="completed",end_reason="runner_answer",final_content="Old")
     info.stop_event.set()
-    mocker.patch("nexent.core.agents.core_adapters.AgentCoreFactory.create")
+    mocker.patch("nexent.core.agents.factory.AgentCoreFactory.create")
     _agent_run_thread(info)
     assert info.run_result is None and info.attempt_outcome=="stopped"

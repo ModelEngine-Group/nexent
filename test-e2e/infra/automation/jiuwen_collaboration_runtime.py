@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Real model/A2A HTTP fixtures for configured mixed-Core invocations."""
 
 import asyncio
@@ -7,16 +9,11 @@ from threading import Event
 from unittest.mock import Mock
 
 from jiuwen_bridge_fixture import profile_for
-from nexent.core.agents.agent_model import (
-    AgentConfig,
-    AgentRunInfo,
-    ExternalA2AAgentConfig,
-    ModelConfig,
-    ToolConfig,
-)
-from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
-from nexent.core.agents.core_adapters.smolagents import SmolagentsAdapter
-from nexent.core.agents.run_agent import agent_run
+from nexent.core.agents.contracts.config import AgentConfig, ExternalA2AAgentConfig, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
+from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+from nexent.core.agents.cores.smolagents.adapter import SmolagentsAdapter
+from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.core.utils.observer import MessageObserver
 
@@ -137,7 +134,8 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
         cards.extend(card.id for card in adapter.native_agent.ability_manager.list())
     monkeypatch.setattr(JiuwenAdapter, "prepare", prepare)
     async with collaboration_provider(parent_core, child_core, protocol, remote_protocol, fault) as (url, state):
-        from nexent.core.agents import nexent_agent
+        from nexent.core.agents.cores.smolagents import agent as nexent_agent
+        import nexent.core.tools as shared_tool_types
         from smolagents import Tool
 
         class ChildEchoTool(Tool):
@@ -155,7 +153,9 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
                 raise AssertionError("Child cannot execute parent resources")
 
         monkeypatch.setattr(nexent_agent, "ChildEchoTool", ChildEchoTool, raising=False)
+        monkeypatch.setattr(shared_tool_types, "ChildEchoTool", ChildEchoTool, raising=False)
         monkeypatch.setattr(nexent_agent, "ParentOnlyTool", ParentOnlyTool, raising=False)
+        monkeypatch.setattr(shared_tool_types, "ParentOnlyTool", ParentOnlyTool, raising=False)
 
         def model(path, temperature, credential, outlet):
             profile = profile_for(url + path, protocol)
@@ -189,7 +189,7 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
             name: LanePolicy(name=name, max_workers=2 if name == "sandbox" and fault != "capacity" else 1, max_queue_size=8)
             for name in ("agent-run", "model-tool-io", "mcp-session", "background-service", "sandbox", "control-io")})
         manager.start()
-        info = AgentRunInfo(query="PARENT_TASK_ONLY", agent_config=root,
+        info = AgentRunInfo(query="Call the subagent delegate. PARENT_TASK_ONLY", agent_config=root,
             model_config_list=[model("/parent", 0.9, "parent-only", 7)], observer=MessageObserver(lang="en"),
             stop_event=Event(), thread_manager=manager, collaboration_timeout_seconds=0.4 if fault == "capacity" else 5,
             tenant_id="spike-tenant", user_context={"user_id": "trusted"})
@@ -198,13 +198,24 @@ async def run_collaboration(monkeypatch, parent_core="jiuwen", child_core="jiuwe
                 await asyncio.sleep(0.01)
             info.stop_event.set()
         canceller = asyncio.create_task(cancel()) if fault == "cancel" else None
+        output = []
+        cancelled = False
         try:
-            output = [json.loads(event) async for event in agent_run(info, thread_manager=manager)]
+            async for event in agent_run(info, thread_manager=manager):
+                output.append(json.loads(event))
+        except asyncio.CancelledError:
+            # The public stream stops immediately on user cancellation. Inspect
+            # only the real owned observer after the worker has drained below.
+            if fault not in {"cancel", "capacity", "timeout"} or not info.stop_event.is_set():
+                raise
+            cancelled = True
         finally:
             if canceller:
                 await canceller
             drained = await manager.shutdown(timeout=5)
             assert not drained.stuck_execution_ids
+        if cancelled:
+            output.extend(json.loads(event) for event in info.observer.get_cached_message())
         for _ in range(50):
             if not fault or state["closed"]:
                 break

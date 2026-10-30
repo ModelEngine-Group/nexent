@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Convert already-authorized resources; execution and prompt policy stay in Runtime."""
 
 import json
 from typing import Literal
 from uuid import uuid4
 
-from nexent.core.agent_runtime_support.contracts import RuntimeResourceView as _RuntimeResourceView
+from nexent.core.agents.contracts.resources import RuntimeResourceView as _RuntimeResourceView
 from nexent.core.model_service.contracts import ModelMessage, ModelRequest
 from nexent.core.model_service.profiles.contracts import ProfileContract, VersionedReference
 from nexent.core.model_service.profiles.instruction_mapping import validate_instruction_mapping

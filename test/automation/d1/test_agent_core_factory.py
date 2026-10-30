@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Formal factory, configuration compilation and observer contracts."""
 
 import asyncio
@@ -7,12 +8,14 @@ from types import SimpleNamespace
 
 import pytest
 
-from nexent.core.agents.agent_model import AgentConfig, AgentHistory, AgentRunInfo, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
 from nexent.core.agents.context.models import ContextItemInput, ContextItemType
-from nexent.core.agents.core_adapters import AgentCoreAdapter, AgentCoreFactory, UnsupportedAgentCoreConfig
-from nexent.core.agents.core_adapters.events import JiuwenEventAdapter
-from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter, _tool_schema
-from nexent.core.agents.core_adapters.smolagents import SmolagentsAdapter
+from nexent.core.agents.contracts.adapter import AgentCoreAdapter, UnsupportedAgentCoreConfig
+from nexent.core.agents.factory import AgentCoreFactory
+from nexent.core.agents.cores.jiuwen.events import JiuwenEventAdapter
+from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter, _tool_schema
+from nexent.core.agents.cores.smolagents.adapter import SmolagentsAdapter
 from nexent.core.utils.observer import MessageObserver
 
 
@@ -96,7 +99,7 @@ def test_AGENT_CORE_D1_002_native_config_and_fail_closed(monkeypatch, tmp_path):
     with pytest.raises(UnsupportedAgentCoreConfig, match="prompt_cache"):
         JiuwenAdapter(info).validate()
 
-    from nexent.core.agents.core_adapters.skills import NexentSkillRail
+    from nexent.core.agents.cores.jiuwen.skills import NexentSkillRail
 
     root = tmp_path / "library"
     allowed = root / "allowed" / "SKILL.md"

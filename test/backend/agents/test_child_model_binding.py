@@ -4,7 +4,7 @@
 
 import pytest
 import management.services.agent.preparation.run as service
-from nexent.core.agents.agent_model import AgentConfig, ModelConfig
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 
 
 def config(name, core="jiuwen", children=None):

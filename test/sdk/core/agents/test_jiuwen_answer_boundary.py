@@ -5,12 +5,8 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from nexent.core.agent_runtime_support.answer import (
-    AnswerBoundaryError,
-    PublicTextFilter,
-    normalize_public_answer,
-)
-from nexent.core.agents.core_adapters.events import JiuwenEventAdapter
+from nexent.core.agents.output.answer import AnswerBoundaryError, PublicTextFilter, normalize_public_answer
+from nexent.core.agents.cores.jiuwen.events import JiuwenEventAdapter
 from nexent.core.model_service.contracts import AssistantMessage
 from nexent.core.utils.observer import MessageObserver
 

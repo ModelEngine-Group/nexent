@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Bounded recovery through the actual Runner, model transport and tool dispatcher."""
 
 import asyncio
@@ -160,7 +161,7 @@ def test_bounded_recovery_without_effect_replay(
 def test_recovery_respects_remaining_run_budget(monkeypatch, fault):
     import time
 
-    from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
+    from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
 
     monkeypatch.setattr(bridge, "provider", provider)
     original = JiuwenAdapter._create_model

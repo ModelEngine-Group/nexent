@@ -1,29 +1,18 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Immutable, fine-grained context items used by the managed runtime."""
 
 from __future__ import annotations
 
 import json
 from copy import deepcopy
-from enum import Enum, IntEnum
+from enum import IntEnum
 from threading import Lock
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
 
-
-class ContextItemType(str, Enum):
-    SYSTEM = "system"
-    TOOL = "tool"
-    SKILL = "skill"
-    MEMORY = "memory"
-    KNOWLEDGE_BASE = "knowledge_base"
-    WORKER_AGENT = "worker_agent"
-    EXTERNAL_AGENT = "external_agent"
-    HISTORY_SUMMARY = "history_summary"
-    CONVERSATION_TURN = "conversation_turn"
-    CURRENT_TASK = "current_task"
-    CURRENT_PLANNING = "current_planning"
-    CURRENT_ACTION = "current_action"
+from nexent.core.agents.contracts.context import ContextItemInput, ContextItemType
 
 
 class ContextSection(IntEnum):
@@ -41,62 +30,6 @@ class ContextSection(IntEnum):
     CURRENT_TASK = 90
     CURRENT_PLANNING = 100
     CURRENT_ACTION = 110
-
-
-class ContextItemInput(BaseModel):
-    """Serializable backend-to-SDK DTO; it never carries database objects."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    id: str = Field(min_length=1)
-    type: ContextItemType
-    content: dict[str, Any]
-    source: tuple[str, ...] = ()
-    priority: int = 10
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("content", "metadata")
-    @classmethod
-    def _require_serializable(cls, value: Any) -> Any:
-        try:
-            json.dumps(value, ensure_ascii=False)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("context input payload must be JSON serializable") from exc
-        return value
-
-    @field_validator("metadata")
-    @classmethod
-    def _reject_source_objects(cls, value: dict[str, Any]) -> dict[str, Any]:
-        if "_source_component" in value:
-            raise ValueError("_source_component fallback is not permitted")
-        return value
-
-    @model_validator(mode="after")
-    def _validate_payload(self) -> "ContextItemInput":
-        required_fields = {
-            ContextItemType.TOOL: ("name",),
-            ContextItemType.SKILL: ("name",),
-            ContextItemType.WORKER_AGENT: ("name",),
-            ContextItemType.EXTERNAL_AGENT: ("agent_id", "name"),
-            ContextItemType.HISTORY_SUMMARY: ("summary", "covered_through_message_id"),
-            ContextItemType.CONVERSATION_TURN: (
-                "user_message", "assistant_final_answer",
-                "user_message_id", "assistant_message_id",
-            ),
-        }.get(self.type, ())
-        missing = [name for name in required_fields if self.content.get(name) is None]
-        if missing:
-            raise ValueError(f"{self.type.value} content missing fields: {', '.join(missing)}")
-        if self.type == ContextItemType.MEMORY and not any(
-            self.content.get(name) for name in ("memory", "content", "text")
-        ):
-            raise ValueError("memory content requires memory, content or text")
-        if self.type in {
-            ContextItemType.SYSTEM, ContextItemType.KNOWLEDGE_BASE,
-            ContextItemType.CURRENT_TASK, ContextItemType.CURRENT_PLANNING,
-        } and "template" not in self.content and not isinstance(self.content.get("text"), str):
-            raise ValueError(f"{self.type.value} content requires text")
-        return self
 
 
 class ContextItem(BaseModel):

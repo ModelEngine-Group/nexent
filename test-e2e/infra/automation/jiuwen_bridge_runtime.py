@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Real factory/worker/transport collaboration shared by the two runtime Cases."""
 
 import asyncio
@@ -7,11 +9,12 @@ from contextlib import nullcontext
 from unittest.mock import Mock
 
 from jiuwen_bridge_fixture import profile_for, provider
-from nexent.core.agents import nexent_agent
-from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ModelConfig, ToolConfig
-from nexent.core.agents.core_agent import CoreAgent
-from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
-from nexent.core.agents.run_agent import agent_run
+import nexent.core.tools as nexent_agent
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
+from nexent.core.agents.cores.smolagents.core_agent import CoreAgent
+from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.core.utils.observer import MessageObserver
 
@@ -22,6 +25,8 @@ async def run_worker(monkeypatch, protocol, scenario="normal"):
 
     monkeypatch.setattr("openjiuwen.core.foundation.llm.model.create_model_client", forbidden)
     monkeypatch.setattr(CoreAgent, "__init__", forbidden)
+    from nexent.core.agents.cores.smolagents.agent import NexentAgent
+    monkeypatch.setattr(NexentAgent, "__init__", forbidden)
     # Keep real model transport and observer events, but isolate the external monitoring sink.
     monitoring = Mock()
     monitoring.trace_llm_request.side_effect = lambda *args, **kwargs: nullcontext(None)

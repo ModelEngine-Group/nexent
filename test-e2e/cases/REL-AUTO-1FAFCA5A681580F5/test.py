@@ -57,7 +57,7 @@ def _install_shutdown_collaborators(monkeypatch, *, raise_thread_shutdown: bool)
     from infrastructure.concurrency import runtime_thread_manager
     from management.services.agent.run_state import runtime_state_service
     from management.services.agent import run as agent_run
-    import nexent.core.agents.sandbox as sandbox_mod
+    import nexent.core.agents.sandbox.execution as sandbox_mod
 
     events: list[tuple[str, object]] = []
 

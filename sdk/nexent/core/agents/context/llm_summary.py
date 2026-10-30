@@ -1,18 +1,21 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """LLM call orchestration for summary generation with retry and error handling."""
 
+import inspect
 import logging
 import re
-import inspect
+from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from smolagents.models import ChatMessage, MessageRole
+from nexent.core.agents.contracts.context import ContextMessage
 
-from ..summary_cache import CompressionCallRecord
+from ...utils.observer import MessageObserver
 from .budget import _is_context_length_error
 from .config import ContextManagerConfig
-from ...utils.observer import MessageObserver
+from .summary_cache import CompressionCallRecord
 
 
 logger = logging.getLogger("agent_context.llm_summary")
@@ -168,12 +171,14 @@ class LLMSummary:
                 f"Conversation content to summarize:\n{text}"
             )
         messages = [
-            ChatMessage(role=MessageRole.SYSTEM,
+            ContextMessage(role="system",
                         content=[{"type": "text", "text": system_prompt}]),
-            ChatMessage(role=MessageRole.USER,
+            ContextMessage(role="user",
                         content=[{"type": "text", "text": user_prompt}]),
         ]
-        parameters = inspect.signature(model.__call__).parameters
+        parameters = getattr(model, "context_call_parameters", None)
+        if not isinstance(parameters, Mapping):
+            parameters = inspect.signature(model.__call__).parameters
         accepts_kwargs = any(
             parameter.kind == inspect.Parameter.VAR_KEYWORD
             for parameter in parameters.values()
@@ -229,7 +234,7 @@ class LLMSummary:
 
     @staticmethod
     def _msg_char_count(messages) -> int:
-        """Count characters in a list of ChatMessage objects."""
+        """Count characters in a list of context messages."""
         total = 0
         for msg in messages:
             content = getattr(msg, "content", "")

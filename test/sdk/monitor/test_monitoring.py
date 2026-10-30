@@ -961,7 +961,7 @@ class TestAgentObservability:
 
     @patch('sdk.nexent.monitor.monitoring.trace')
     def test_record_final_context_evidence_adds_content_free_event(self, mock_trace):
-        from nexent.core.context_runtime.contracts import ContextEvidence
+        from nexent.core.agents.contracts.context import ContextEvidence
         with patch('sdk.nexent.monitor.monitoring.OPENTELEMETRY_AVAILABLE', True):
             manager = self._enabled_manager()
             mock_span = MagicMock()

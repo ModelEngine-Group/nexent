@@ -15,16 +15,10 @@ from pathlib import Path
 import httpx
 from management.db.client import get_db_session
 from management.db.models import ConversationMessage, ModelRecord, UserTenant
-from nexent.core.agents import nexent_agent
-from nexent.core.agents.agent_model import (
-    AgentConfig,
-    AgentHistory,
-    AgentRunInfo,
-    ExternalA2AAgentConfig,
-    ModelConfig,
-    ToolConfig,
-)
-from nexent.core.agents.run_agent import agent_run
+from nexent.core.agents.cores.smolagents import agent as nexent_agent
+from nexent.core.agents.contracts.config import AgentConfig, ExternalA2AAgentConfig, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
+from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.core.utils.observer import MessageObserver
 from management.services.configuration.user.memory import get_memory_switch

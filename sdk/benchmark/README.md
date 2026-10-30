@@ -303,7 +303,7 @@ for check in summary_checks:
 Run compression on pure text pairs without agent, using the same prompt and schema:
 
 ```python
-from nexent.core.agents.agent_context import compress_history_offline
+from nexent.core.agents.context import compress_history_offline
 
 result = compress_history_offline(
     pairs=[("What user said", "What assistant did"), ...],

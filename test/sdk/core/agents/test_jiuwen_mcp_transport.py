@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit regressions for native MCP transport configuration."""
 
 from unittest.mock import AsyncMock, MagicMock
@@ -5,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from openjiuwen.core.foundation.tool.mcp.base import McpServerConfig
 
-from nexent.core.agents.core_adapters.mcp import _ConfiguredNativeClient
+from nexent.core.agents.cores.jiuwen.mcp import _ConfiguredNativeClient
 
 
 @pytest.mark.asyncio

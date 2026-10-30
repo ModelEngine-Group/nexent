@@ -49,17 +49,13 @@ from management.services.model.run_budget import (
     _resolve_context_budget,
     _resolve_input_budget,
 )
-from nexent.core.agents.agent_model import (
-    AgentConfig,
-    AgentVerificationConfig,
-    ToolConfig,
-)
+from nexent.core.agents.contracts.config import AgentConfig, AgentVerificationConfig, ToolConfig
 from nexent.core.agents.context import (
     ContextManagerConfig,
     PolicyLayers,
     resolve_policy,
 )
-from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
+from nexent.core.agents.cores.smolagents.agent import get_local_python_authorized_imports
 from nexent.core.agents.prompt import AgentPromptComposer
 from nexent.core.concurrency import run_blocking
 from nexent.memory import models as memory_models

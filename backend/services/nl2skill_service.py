@@ -10,7 +10,7 @@ import threading
 from collections.abc import AsyncIterator
 from typing import Any
 
-from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
+from nexent.core.agents.contracts.run import AgentHistory, AgentRunInfo
 from nexent.core.agents.context import ContextManagerConfig
 from runtime.adapters.nexent.runner import agent_run
 from nexent.core.utils.observer import MessageObserver

@@ -37,19 +37,19 @@ _stub_nexent_openai_model()
 # Exercise the real Jinja renderer used by SDK prompt assembly.
 import jinja2
 
-# Stub nexent.core.agents.agent_model to satisfy imports in contracts.agent and agent_run_manager
-agent_model_mod = types.ModuleType("nexent.core.agents.agent_model")
+# Stub nexent.core.agents.contracts.config to satisfy imports in contracts.agent and agent_run_manager
+agent_model_mod = types.ModuleType("nexent.core.agents.contracts.config")
 agent_model_mod.ToolConfig = object
 agent_model_mod.AgentRunInfo = object
 sys.modules["nexent.core.agents"] = types.ModuleType("nexent.core.agents")
 sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
-sys.modules["nexent.core.agents.agent_model"] = agent_model_mod
+sys.modules["nexent.core.agents.contracts.config"] = agent_model_mod
 
-# Stub nexent.core.agents.agent_context for agent_run_manager import
-agent_context_mod = types.ModuleType("nexent.core.agents.agent_context")
+# Stub nexent.core.agents.context for agent_run_manager import
+agent_context_mod = types.ModuleType("nexent.core.agents.context")
 agent_context_mod.ContextManager = object
 agent_context_mod.ContextManagerConfig = object
-sys.modules["nexent.core.agents.agent_context"] = agent_context_mod
+sys.modules["nexent.core.agents.context"] = agent_context_mod
 
 # Stub management.services.agent.lifecycle to avoid importing the real module
 agent_run_manager_mod = types.ModuleType("management.services.agent.lifecycle")

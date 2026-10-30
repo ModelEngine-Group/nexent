@@ -1,10 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit contracts for the controlled text execution grammar."""
 
 import pytest
-from nexent.core.agents.core_adapters.jiuwen_protocol import (
-    JiuwenProtocolError,
-    parse_execution_blocks,
-)
+from nexent.core.agents.cores.jiuwen.protocol import JiuwenProtocolError, parse_execution_blocks
 
 
 @pytest.mark.parametrize("text,code", [

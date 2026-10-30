@@ -7,7 +7,7 @@ from typing import List, Optional
 
 from contracts.constants.constants import PROTOCOL_JSONRPC
 from management.services.knowledge_base.service import ElasticSearchService
-from nexent.core.agents.agent_model import ExternalA2AAgentConfig, ToolConfig
+from nexent.core.agents.contracts.config import ExternalA2AAgentConfig, ToolConfig
 
 logger = logging.getLogger("create_agent_info")
 logger.setLevel(logging.INFO)

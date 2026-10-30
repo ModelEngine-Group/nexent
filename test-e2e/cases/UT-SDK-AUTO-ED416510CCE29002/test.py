@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +8,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nexent.core.agents.a2a_agent_proxy import A2AAgentInfo, ExternalA2AAgentProxy
+from nexent.core.agents.resources.a2a import A2AAgentInfo, ExternalA2AAgentProxy
 
 
 class FakeCancellationScope:

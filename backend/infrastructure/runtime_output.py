@@ -3,12 +3,8 @@
 
 import json
 
-from nexent.core.agent_runtime_support.answer import (
-    AnswerBoundaryError,
-    PublicTextFilter,
-    normalize_public_answer,
-)
-from nexent.core.agent_runtime_support.output import RunResult
+from nexent.core.agents.output.answer import AnswerBoundaryError, PublicTextFilter, normalize_public_answer
+from nexent.core.agents.contracts.output import RunResult
 
 
 def is_runtime_event(event):

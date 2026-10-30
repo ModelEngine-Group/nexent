@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """SAI-D1-002: case-local preserved component regression."""
 import threading
 from types import SimpleNamespace
 
 import pytest
-from nexent.core.agents.nexent_agent import NexentAgent
+from nexent.core.agents.cores.smolagents.agent import NexentAgent
 from nexent.core.concurrency import ManagedTaskSpec
 from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
 from shared.sai_component import (

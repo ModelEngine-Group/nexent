@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 """
-Unit tests for sdk.nexent.core.agents.a2a_agent_proxy module.
+Unit tests for nexent.core.agents.resources.a2a module.
 
 Tests cover:
 - A2AAgentInfo dataclass
@@ -9,7 +9,7 @@ Tests cover:
 - A2AAgentProxyTool class
 - ExternalA2AAgentWrapper class
 
-Uses direct module loading to bypass the sdk.nexent package __init__.py
+Uses direct module loading to bypass the nexent package __init__.py
 which has heavy dependencies (mem0, smolagents, etc.) not needed for testing
 this specific module.
 """
@@ -131,7 +131,7 @@ _mock_stream_response = MagicMock()
 
 
 # ---------------------------------------------------------------------------
-# Build minimal module mock hierarchy to satisfy sdk.nexent.core imports
+# Build minimal module mock hierarchy to satisfy nexent.core imports
 # ---------------------------------------------------------------------------
 
 def _create_mock_modules():
@@ -141,8 +141,8 @@ def _create_mock_modules():
     # Mock httpx
     mock_modules["httpx"] = _mock_httpx
 
-    # sdk.nexent.core.utils.observer
-    mock_observer = ModuleType("sdk.nexent.core.utils.observer")
+    # nexent.core.utils.observer
+    mock_observer = ModuleType("nexent.core.utils.observer")
 
     class ProcessType:
         STEP_COUNT = "STEP_COUNT"
@@ -171,7 +171,7 @@ def _create_mock_modules():
 
     setattr(mock_observer, "MessageObserver", MessageObserver)
     setattr(mock_observer, "ProcessType", ProcessType)
-    mock_modules["sdk.nexent.core.utils.observer"] = mock_observer
+    mock_modules["nexent.core.utils.observer"] = mock_observer
 
     # smolagents module
     mock_smolagents = ModuleType("smolagents")
@@ -194,13 +194,7 @@ _mock_modules = _create_mock_modules()
 # Register mocks in sys.modules and load target module directly
 # ---------------------------------------------------------------------------
 
-_original_modules = {}
-for name, module in _mock_modules.items():
-    if name in sys.modules:
-        _original_modules[name] = sys.modules[name]
-    sys.modules[name] = module
-
-
+@patch.dict(sys.modules, _mock_modules)
 def _load_a2a_agent_proxy_module():
     """Load a2a_agent_proxy module directly from source file.
 
@@ -214,14 +208,14 @@ def _load_a2a_agent_proxy_module():
     → project_root (e.g. C:/xuyaqi/develop/nexent)
     """
     project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-    module_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "a2a_agent_proxy.py")
+    module_path = os.path.join(project_root, "sdk", "nexent", "core", "agents", "resources", "a2a.py")
 
     # Set up package hierarchy so the module can find its siblings
     sys.modules["sdk"] = ModuleType("sdk")
-    sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
-    sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
-    sys.modules["sdk.nexent.core.agents"] = ModuleType("sdk.nexent.core.agents")
-    concurrency_module = ModuleType("sdk.nexent.core.concurrency")
+    sys.modules["nexent"] = ModuleType("nexent")
+    sys.modules["nexent.core"] = ModuleType("nexent.core")
+    sys.modules["nexent.core.agents"] = ModuleType("nexent.core.agents")
+    concurrency_module = ModuleType("nexent.core.concurrency")
 
     class ManagedTaskSpec:
         def __init__(self, task_name, owner, close_hook=None):
@@ -240,12 +234,12 @@ def _load_a2a_agent_proxy_module():
     concurrency_module.ManagedTaskSpec = ManagedTaskSpec
     concurrency_module.RunCancellationScope = MagicMock
     concurrency_module.get_current_thread_manager = lambda: DirectTestManager()
-    sys.modules["sdk.nexent.core.concurrency"] = concurrency_module
+    sys.modules["nexent.core.concurrency"] = concurrency_module
 
-    spec = importlib.util.spec_from_file_location("sdk.nexent.core.agents.a2a_agent_proxy", module_path)
+    spec = importlib.util.spec_from_file_location("nexent.core.agents.resources.a2a", module_path)
     module = importlib.util.module_from_spec(spec)
-    module.__package__ = "sdk.nexent.core.agents"
-    sys.modules["sdk.nexent.core.agents.a2a_agent_proxy"] = module
+    module.__package__ = "nexent.core.agents.resources"
+    sys.modules["nexent.core.agents.resources.a2a"] = module
     spec.loader.exec_module(module)
     return module
 

@@ -72,7 +72,7 @@ _ATTRIBUTE_PATHS_BLOCKED = {
 def _scan_shell_calls(code: str) -> list[str]:
     """Static AST scan – returns a list of human-readable violation descriptions.
 
-    Mirrors the behaviour of ``nexent.core.agents.sandbox._scan_shell_calls``
+    Mirrors the behaviour of ``nexent.core.agents.sandbox.execution._scan_shell_calls``
     closely enough that the UT decision paths match production semantics.
     """
     try:
@@ -262,14 +262,14 @@ def _install_sys_modules_stubs() -> None:
     sys.modules["nexent.core.concurrency"] = concurrency_mock
     _nexent_core.concurrency = concurrency_mock
 
-    run_agent_mock = types.ModuleType("nexent.core.agents.run_agent")
+    run_agent_mock = types.ModuleType("nexent.core.agents.orchestration.entry")
     run_agent_mock.agent_run = lambda *a, **kw: None
-    sys.modules["nexent.core.agents.run_agent"] = run_agent_mock
+    sys.modules["nexent.core.agents.orchestration.entry"] = run_agent_mock
     _nexent_core_agents.run_agent = run_agent_mock
 
-    sandbox_mock = types.ModuleType("nexent.core.agents.sandbox")
+    sandbox_mock = types.ModuleType("nexent.core.agents.sandbox.execution")
     sandbox_mock._scan_shell_calls = staticmethod(_scan_shell_calls)
-    sys.modules["nexent.core.agents.sandbox"] = sandbox_mock
+    sys.modules["nexent.core.agents.sandbox.execution"] = sandbox_mock
     _nexent_core_agents.sandbox = sandbox_mock
 
     # ---- adapters ----------------------------------------------------------

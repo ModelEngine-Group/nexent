@@ -177,9 +177,9 @@ sys.modules["infrastructure.concurrency"] = _thread_lifecycle_module
 sys.modules["nexent.core.agents"] = MagicMock()
 sys.modules["nexent.core.agents"].__path__ = [str(Path(__file__).resolve().parents[3] / "sdk/nexent/core/agents")]
 sys.modules["nexent.core.agents"].__spec__ = importlib.machinery.ModuleSpec("nexent.core.agents", loader=None, is_package=True)
-sys.modules["nexent.core.agents.agent_model"] = nexent_agent_model_mock
-sys.modules["nexent.core.agents.run_agent"] = MagicMock()
-context_input_mock = types.ModuleType("nexent.core.agents.context_input")
+sys.modules["nexent.core.agents.contracts.config"] = nexent_agent_model_mock
+sys.modules["nexent.core.agents.orchestration.entry"] = MagicMock()
+context_input_mock = types.ModuleType("nexent.core.agents.contracts.context")
 
 
 class MockContextInput:
@@ -188,9 +188,10 @@ class MockContextInput:
 
 
 context_input_mock.ContextInput = MockContextInput
-sys.modules["nexent.core.agents.context_input"] = context_input_mock
+sys.modules["nexent.core.agents.contracts.context"] = context_input_mock
 context_items_mock = types.ModuleType("nexent.core.agents.context")
 context_items_mock.ContextItemInput = MagicMock()
+context_input_mock.ContextItemInput = context_items_mock.ContextItemInput
 sys.modules["nexent.core.agents.context"] = context_items_mock
 
 # Mock other nexent submodules
@@ -567,7 +568,7 @@ sys.modules["infrastructure.observability.bootstrap"] = MagicMock()
 # STEP 2: Now import after all mocks are in place
 # =============================================================================
 
-from nexent.core.agents.agent_model import ToolConfig
+from nexent.core.agents.contracts.config import ToolConfig
 from contracts.agent import AgentNameBatchCheckItem, AgentNameBatchCheckRequest, AgentNameBatchRegenerateItem, AgentNameBatchRegenerateRequest
 
 # Set up mock for nexent.monitor
@@ -5694,7 +5695,7 @@ async def test__stream_agent_chunks_persists_and_unregisters(monkeypatch):
         yield json.dumps({"type": "model_output_code", "content": "pass"})
         yield json.dumps({"type": "final_answer", "content": "All done."})
 
-    monkeypatch.setitem(sys.modules, "nexent.core.agents.run_agent", MagicMock())
+    monkeypatch.setitem(sys.modules, "nexent.core.agents.orchestration.entry", MagicMock())
     monkeypatch.setattr(
         "management.services.agent.execution.agent_run", fake_agent_run, raising=False
     )
@@ -7652,7 +7653,7 @@ async def test_import_agent_includes_model_names(
     mock_create_agent.return_value = {"agent_id": 999}
 
     # Create import data with model_name and business_logic_model_name
-    from nexent.core.agents.agent_model import ToolConfig as NexentToolConfig
+    from nexent.core.agents.contracts.config import ToolConfig as NexentToolConfig
 
     tool_config = NexentToolConfig(
         class_name="TestTool",
@@ -11022,6 +11023,8 @@ async def test_import_agent_impl_already_imported():
     from management.services.agent.service import import_agent_impl
     from contracts.agent import ExportAndImportDataFormat, ExportAndImportAgentInfo
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
+    mock_agent_info.agent_core = "smolagents"
+    mock_agent_info.enable_context_manager = True
     mock_agent_info.agent_id = 1
     mock_agent_info.name = 'agent_1'
     mock_agent_info.display_name = 'Agent 1'
@@ -11382,6 +11385,8 @@ async def test_import_agent_by_agent_id_publish_version_error(
     from contracts.agent import ExportAndImportAgentInfo
 
     mock_agent_info = MagicMock(spec=ExportAndImportAgentInfo)
+    mock_agent_info.agent_core = "smolagents"
+    mock_agent_info.enable_context_manager = True
     mock_agent_info.agent_id = 1
     mock_agent_info.name = "valid_name"
     mock_agent_info.display_name = "Valid Name"

@@ -8,14 +8,15 @@ import threading
 
 import pytest
 
-from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo
+from nexent.core.agents.contracts.config import AgentConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.concurrency import LanePolicy, ThreadManager
 from nexent.core.utils.observer import MessageObserver
 
 
 @pytest.mark.asyncio
 async def test_stop_signal_closes_consumer_before_blocked_worker_finishes(monkeypatch):
-    module = importlib.import_module("nexent.core.agents.run_agent")
+    module = importlib.import_module("nexent.core.agents.orchestration.entry")
     entered, release = threading.Event(), threading.Event()
 
     def provider_worker(_run_info):

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Plan management tools for the agent.
 
 These two tools implement v1.4 of the planning feature: instead of relying on
@@ -98,7 +99,7 @@ class CreatePlanTool(Tool):
     def forward(self, title: str, steps: list) -> dict:
         # Local import avoids pulling agent_model into the tool module's
         # import graph; agent_model imports from us via __init__.
-        from ..agents.agent_model import AgentPlan, PlanStep
+        from nexent.core.agents.contracts.config import AgentPlan, PlanStep
 
         if not isinstance(steps, list) or len(steps) < 3:
             raise ValueError(

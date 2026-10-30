@@ -8,7 +8,7 @@ import pytest
 
 import management.services.agent.preparation.run as service
 from contracts.conversation import HistoryItem
-from nexent.core.agents.agent_model import AgentConfig, ModelConfig
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
 
 
 @pytest.mark.parametrize("core,current_upload", [("jiuwen", False), ("jiuwen", True), ("smolagents", False)])

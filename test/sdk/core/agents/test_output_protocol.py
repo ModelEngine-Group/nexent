@@ -1,15 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Acceptance tests for the closed CodeAgent output protocol."""
 
 import pytest
-from nexent.core.agents.output_protocol import (
-    ExecutableAction,
-    ExplicitFinalAnswer,
-    ModelOutputProtocolError,
-    NonterminalThought,
-    ProtocolErrorReason,
-    classify_model_output,
-    has_meaningful_visible_content,
-)
+from nexent.core.agents.cores.smolagents.output_protocol import ExecutableAction, ExplicitFinalAnswer, ModelOutputProtocolError, NonterminalThought, ProtocolErrorReason, classify_model_output, has_meaningful_visible_content
 
 
 @pytest.mark.parametrize(

@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """AGENT-CORE-D5-001: Cancellation, MCP deadlines and native resource isolation."""
 
 import asyncio
@@ -8,9 +9,10 @@ from threading import Event
 import httpx
 import pytest
 
-from nexent.core.agents.agent_model import AgentConfig, AgentRunInfo, ModelConfig, ToolConfig
-from nexent.core.agents.core_adapters.jiuwen import JiuwenAdapter
-from nexent.core.agents.run_agent import agent_run
+from nexent.core.agents.contracts.config import AgentConfig, ModelConfig, ToolConfig
+from nexent.core.agents.contracts.run import AgentRunInfo
+from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+from nexent.core.agents.orchestration.entry import agent_run
 from nexent.core.concurrency import RunCancellationScope
 from nexent.core.utils.observer import MessageObserver
 
@@ -46,7 +48,7 @@ def test_AGENT_CORE_D5_001_cancellation_deadline_and_isolation(native_manager, n
     from openjiuwen.core.runner import Runner
 
     from nexent.consts.mcp_errors import MCPToolTimeoutError
-    from nexent.core.agents.core_adapters.mcp import JiuwenMCPCollection
+    from nexent.core.agents.cores.jiuwen.mcp import JiuwenMCPCollection
 
     info = make_run(native_manager, native_provider)
 

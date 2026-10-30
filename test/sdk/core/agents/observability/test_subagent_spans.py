@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """UT-SDK-TRACE-005/007: real sub-agent hierarchy and context restoration."""
 
 from types import SimpleNamespace
 
 import pytest
-from nexent.core.agents.a2a_agent_proxy import ExternalA2AAgentWrapper
-from nexent.core.agents.subagent_wrapper import SubAgentToolWrapper
+from nexent.core.agents.resources.a2a import ExternalA2AAgentWrapper
+from nexent.core.agents.resources.subagents import SubAgentToolWrapper
 from nexent.monitor import (
     AgentRunMetadata,
     agent_monitoring_context,

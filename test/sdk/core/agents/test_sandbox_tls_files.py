@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Real POSIX filesystem boundaries of the container's TLS bootstrap."""
 
 import importlib.util
@@ -18,7 +19,7 @@ pytestmark = pytest.mark.skipif(sys.platform != 'linux', reason='Container POSIX
 
 @pytest.fixture
 def bootstrap(monkeypatch):
-    source = Path(__file__).resolve().parents[4] / 'sdk/nexent/core/agents/sandbox_tls.py'
+    source = Path(__file__).resolve().parents[4] / 'sdk/nexent/core/agents/sandbox/tls.py'
     spec = importlib.util.spec_from_file_location('standalone_tls', source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

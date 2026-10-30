@@ -12,10 +12,15 @@ from contextlib import contextmanager
 from pathlib import Path
 
 MODULES = {
-    "nexent.core.agents.nexent_agent": "core/agents/nexent_agent.py",
-    "nexent.core.agents.agent_model": "core/agents/agent_model.py",
-    "nexent.core.agents.subagent_wrapper": "core/agents/subagent_wrapper.py",
-    "nexent.core.agents.sandbox": "core/agents/sandbox.py",
+    "nexent.core.agents.cores.smolagents.agent": "core/agents/cores/smolagents/agent.py",
+    "nexent.core.agents.contracts.config": "core/agents/contracts/config.py",
+    "nexent.core.agents.contracts.run": "core/agents/contracts/run.py",
+    "nexent.core.agents.resources.subagents": "core/agents/resources/subagents.py",
+    "nexent.core.agents.sandbox": "core/agents/sandbox/__init__.py",
+    "nexent.core.agents.sandbox.execution": "core/agents/sandbox/execution.py",
+    "nexent.core.agents.sandbox.config": "core/agents/sandbox/config.py",
+    "nexent.core.agents.sandbox.compatibility": "core/agents/sandbox/compatibility.py",
+    "nexent.core.agents.sandbox.tls": "core/agents/sandbox/tls.py",
     "nexent.core.concurrency.cancellation": "core/concurrency/cancellation.py",
 }
 
@@ -68,6 +73,9 @@ def verification_image(repo: Path):
         definition = Path(scratch) / "Dockerfile"
         definition.write_text(
             "FROM nexent/nexent:latest\n"
+            "RUN /opt/backend/.venv/bin/python -c \"from pathlib import Path; import shutil; "
+            "p=Path('/opt/backend/.venv/lib/python3.11/site-packages/nexent').resolve(); "
+            "assert p.name=='nexent' and p.parent.name=='site-packages'; shutil.rmtree(p)\"\n"
             "COPY nexent/ /opt/backend/.venv/lib/python3.11/site-packages/nexent/\n"
             f"LABEL nexent.sai.verification={uuid.uuid4().hex}\n",
             encoding="utf-8",

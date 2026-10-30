@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """D1 contracts for tags, HITL, model catalog, logging and sandbox cleanup."""
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-SDK-019")
 def test_sandbox_tool_bridge_uses_managed_thread_and_closes_it() -> None:
-    import nexent.core.agents.sandbox as sandbox
+    import nexent.core.agents.sandbox.execution as sandbox
 
     source = Path(sandbox.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
