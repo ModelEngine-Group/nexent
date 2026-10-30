@@ -2480,6 +2480,10 @@ deployment_render_helm_chart_values() {
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf '  service:\n    type: "NodePort"\n    port: %s\n    nodePort: 30016\n' "${OPS_PORT:-5016}"
   printf '  config:\n    logLevel: %s\n' "$(deployment_yaml_quote "$(printf '%s' "${LOG_LEVEL:-INFO}" | tr '[:upper:]' '[:lower:]')")"
+  printf '    isDebug: %s\n' "$(deployment_yaml_quote "${IS_DEBUG:-false}")"
+  printf '    logMaxBytes: %s\n' "${LOG_MAX_BYTES:-52428800}"
+  printf '    logRotationInterval: %s\n' "${LOG_ROTATION_INTERVAL:-1}"
+  printf '    logBackupCount: %s\n' "${LOG_BACKUP_COUNT:-30}"
   printf 'nexent-web:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"

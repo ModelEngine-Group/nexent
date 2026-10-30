@@ -31,7 +31,7 @@ def test_ops_isolated_start_and_restart(tmp_path):
         }
     }
     environment.update(
-        PYTHON_DOTENV_DISABLED='1', OPS_PORT=str(port), LOG_LEVEL='info',
+        PYTHON_DOTENV_DISABLED='1', OPS_PORT=str(port), LOG_LEVEL='info', LOG_DIR=str(tmp_path / 'persistent-logs'),
     )
     # Audit the real launcher rather than substituting its application or clients.
     bootstrap = '''
@@ -42,9 +42,11 @@ import sys
 class BusinessImportGuard(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if fullname.split('.')[0] in {
-            'management', 'runtime', 'infrastructure', 'nexent', 'redis',
+            'management', 'runtime', 'nexent', 'redis',
             'elasticsearch', 'minio', 'supabase', 'sqlalchemy', 'psycopg2',
         }:
+            raise RuntimeError('Forbidden business import: ' + fullname)
+        if fullname.startswith('infrastructure.') and fullname != 'infrastructure.logging':
             raise RuntimeError('Forbidden business import: ' + fullname)
 
 def audit(event, args):
@@ -100,3 +102,8 @@ runpy.run_path('ops_service.py', run_name='__main__')
                     process.wait(timeout=5)
             assert process.poll() is not None
         assert 'Forbidden ' not in log_path.read_text(encoding='utf-8')
+        persisted = tmp_path / 'persistent-logs/ops/nexent_ops.log'
+        assert persisted.is_file()
+        contents = persisted.read_text(encoding='utf-8')
+        assert contents.count('Started server process') >= attempt + 1
+        assert 'GET /health/live' in contents

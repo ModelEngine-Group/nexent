@@ -5,7 +5,7 @@ case:
   case_id: OPS-BOOTSTRAP-D5-001
   feature_id: OPS-BOOTSTRAP
   requirement_ids: [OPS-BOOTSTRAP-20261026]
-  business_rule_ids: [OPS-BOOTSTRAP-RULE-01, OPS-BOOTSTRAP-RULE-02, OPS-BOOTSTRAP-RULE-03]
+  business_rule_ids: [OPS-BOOTSTRAP-RULE-01, OPS-BOOTSTRAP-RULE-02, OPS-BOOTSTRAP-RULE-03, OPS-BOOTSTRAP-RULE-06]
   title: Operations process starts and restarts without business infrastructure
   type: RELIABILITY
   priority: P1
@@ -28,10 +28,14 @@ case:
   - order: 3
     action: Terminate the process, restart it on the same port, and repeat health requests before cleanup.
     expected: The replacement process becomes ready within the deadline and all child processes are reaped.
+  - order: 4
+    action: Read the same log directory after each start and restart.
+    expected: The ops file contains both server startups and health access records; the first run is retained after restart.
   expected_results:
   - Startup and restart each reach readiness within 20 seconds without configured external services.
   - Health responses match the process-local contract and no business API is exposed.
   - All owned subprocesses exit during cleanup.
+  - Server and access logs are appended to the persistent ops file across process restarts.
   forbidden_side_effects:
   - Importing management, runtime, infrastructure clients or the Agent SDK.
   - Opening outbound connections or running SQL migrations.
@@ -41,6 +45,10 @@ case:
     steps: [1, 2, 3]
     expected_results: [1, 2, 3]
     forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: File logging retains startup and access evidence across a process restart without external clients.
+    steps: [4]
+    expected_results: [4]
   risk_type: RELIABILITY
   risk: A shared backend import or startup hook silently makes operations depend on the business stack.
   condition:

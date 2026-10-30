@@ -17,7 +17,9 @@ feature:
   - rule_id: OPS-BOOTSTRAP-RULE-04
     description: Docker and Kubernetes application selection include ops; infrastructure-only selection excludes it. Deployment command failures and Kubernetes readiness failures propagate to the caller.
   - rule_id: OPS-BOOTSTRAP-RULE-05
-    description: Helm uses the shared backend image, explicit minimal env and process probes without business secrets or volumes; service port defaults to 5016 with configurable NodePort 30016 or ClusterIP.
+    description: Helm uses the shared backend image, explicit minimal env and process probes without business secrets or business volumes; only persistent logs are mounted. Service port defaults to 5016 with configurable NodePort 30016 or ClusterIP.
+  - rule_id: OPS-BOOTSTRAP-RULE-06
+    description: Ops application and Uvicorn logs go to console and rotating persistent files using shared logging settings, without Elasticsearch. Kubernetes separates files per pod to avoid concurrent rotation.
   required_test_stages: [D1, D5]
   source:
     requirement_ids: [OPS-BOOTSTRAP-20261026]

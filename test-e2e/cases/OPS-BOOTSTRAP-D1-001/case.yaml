@@ -21,7 +21,7 @@ case:
   - Application selection starts ops through the correct development or production Compose file.
   - Infrastructure-only selection issues no core startup and disables the ops Helm dependency.
   - Compose failure is propagated to the caller.
-  - The root chart renders ops with the shared image, consistent ports and probes, no business envFrom or mounts, and configuration rollout checksums.
+  - The root chart renders ops with the shared image, consistent ports and probes, no business envFrom or mounts, only a logs PVC, and configuration rollout checksums.
   - Kubernetes readiness includes ops and propagates an ops readiness failure.
   steps:
   - order: 1
@@ -37,7 +37,7 @@ case:
   - Both application modes select and start ops with the existing backend services.
   - Infrastructure-only emits no core command and disables ops in Helm selection.
   - A failed Compose invocation makes core deployment fail.
-  - Helm renders consistent ops image, ports, probes and config checksums without business credentials or storage; Kubernetes readiness failure propagates.
+  - Helm renders consistent ops image, ports, probes and config checksums with only a persistent logs mount and no business credentials or storage; Kubernetes readiness failure propagates.
   forbidden_side_effects: [Calling real Docker or contacting a Kubernetes cluster.]
   acceptance:
   - id: AC-01

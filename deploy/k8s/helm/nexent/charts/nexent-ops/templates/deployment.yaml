@@ -1,4 +1,5 @@
 {{- $global := default dict .Values.global -}}
+{{- $logs := dig "sharedStorage" "logs" (dict) $global -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,7 +23,7 @@ spec:
         app: nexent-ops
       annotations:
         checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" $global | quote }}
-        checksum/ops-config: {{ dict "port" .Values.service.port "logLevel" .Values.config.logLevel | toJson | sha256sum | quote }}
+        checksum/ops-config: {{ dict "port" .Values.service.port "config" .Values.config | toJson | sha256sum | quote }}
     spec:
       automountServiceAccountToken: false
       terminationGracePeriodSeconds: 30
@@ -38,10 +39,24 @@ spec:
             - name: http
               containerPort: {{ .Values.service.port }}
           env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: LOG_DIR
+              value: "/mnt/nexent-data/logs/$(POD_NAME)"
             - name: OPS_PORT
               value: {{ .Values.service.port | quote }}
             - name: LOG_LEVEL
               value: {{ .Values.config.logLevel | quote }}
+            - name: IS_DEBUG
+              value: {{ .Values.config.isDebug | quote }}
+            - name: LOG_MAX_BYTES
+              value: {{ .Values.config.logMaxBytes | quote }}
+            - name: LOG_ROTATION_INTERVAL
+              value: {{ .Values.config.logRotationInterval | quote }}
+            - name: LOG_BACKUP_COUNT
+              value: {{ .Values.config.logBackupCount | quote }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "off"
             - name: PYTHON_DOTENV_DISABLED
@@ -67,3 +82,10 @@ spec:
             timeoutSeconds: 2
           resources:
 {{ toYaml .Values.resources | indent 12 }}
+          volumeMounts:
+            - name: ops-logs
+              mountPath: /mnt/nexent-data/logs
+      volumes:
+        - name: ops-logs
+          persistentVolumeClaim:
+            claimName: {{ default .Values.logs.existingClaim $logs.existingClaim }}

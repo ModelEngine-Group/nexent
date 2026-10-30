@@ -53,13 +53,14 @@ def test_app_instances_do_not_share_readiness():
         assert second.state.ready is False
 
 
-@pytest.mark.parametrize(('level', 'expected'), [('INFO', 20), ('DEBUG', 10), ('WARNING', 30), ('INVALID', 20)])
-def test_launcher_uses_operations_settings(mocker, level, expected):
+def test_launcher_uses_operations_settings(mocker):
     run = mocker.patch('ops_service.uvicorn.run')
     mocker.patch('ops_service.OPS_PORT', 12345)
-    mocker.patch('ops_service.LOG_LEVEL', level)
+    config = {'version': 1}
+    build_config = mocker.patch('ops_service.build_logging_config', return_value=config)
     ops_service.main()
-    run.assert_called_once_with(ops_service.app, host='0.0.0.0', port=12345, log_level=expected)
+    build_config.assert_called_once_with()
+    run.assert_called_once_with(ops_service.app, host='0.0.0.0', port=12345, log_config=config)
 
 
 def config_process(overrides):

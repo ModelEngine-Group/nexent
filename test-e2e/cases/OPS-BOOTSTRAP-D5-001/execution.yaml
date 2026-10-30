@@ -6,3 +6,4 @@ implementations:
   selector: test_ops_isolated_start_and_restart
 acceptance_bindings:
   AC-01: [test_ops_isolated_start_and_restart]
+  AC-02: [test_ops_isolated_start_and_restart]

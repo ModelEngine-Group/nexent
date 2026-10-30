@@ -123,14 +123,19 @@ deployment_render_helm_chart_values
         application_checksum = pod['metadata']['annotations']['checksum/ops-config']
         spec = pod['spec']
         assert spec['automountServiceAccountToken'] is False
-        assert not spec.get('volumes') and not spec.get('initContainers')
+        assert not spec.get('initContainers')
+        assert spec['volumes'] == [{'name': 'ops-logs', 'persistentVolumeClaim': {'claimName': 'nexent-logs'}}]
         assert len(spec['containers']) == 1
         container = spec['containers'][0]
         assert container['image'] == 'example.invalid/shared/backend:ops-check'
         assert container['command'] == ['/opt/nexent/scripts/start-backend.sh', 'python', 'backend/ops_service.py']
-        assert not container.get('envFrom') and not container.get('volumeMounts')
-        assert {env['name']: env['value'] for env in container['env']} == {
+        assert not container.get('envFrom')
+        assert container['volumeMounts'] == [{'name': 'ops-logs', 'mountPath': '/mnt/nexent-data/logs'}]
+        assert next(env for env in container['env'] if env['name'] == 'POD_NAME')['valueFrom']['fieldRef']['fieldPath'] == 'metadata.name'
+        assert {env['name']: env['value'] for env in container['env'] if 'value' in env} == {
             'OPS_PORT': '15016', 'LOG_LEVEL': 'debug',
+            'LOG_DIR': '/mnt/nexent-data/logs/$(POD_NAME)', 'IS_DEBUG': 'false',
+            'LOG_MAX_BYTES': '52428800', 'LOG_ROTATION_INTERVAL': '1', 'LOG_BACKUP_COUNT': '30',
             'NEXENT_SQL_STARTUP_MODE': 'off', 'PYTHON_DOTENV_DISABLED': '1',
         }
         assert container['ports'] == [{'name': 'http', 'containerPort': 15016}]
