@@ -4,8 +4,8 @@ module: CHAT-MESSAGE
 case:
   case_id: CHAT-MODEL-CONTROLS-D3-001
   feature_id: CHAT-MODEL-CONTROLS
-  requirement_ids: [CHAT-MODEL-CONTROLS-20261014, CHAT-SAMPLING-20261016, CHAT-SAMPLING-DISPLAY-20261019]
-  business_rule_ids: [CHAT-MODEL-CONTROLS-RULE-002, CHAT-MODEL-CONTROLS-RULE-003, CHAT-MODEL-CONTROLS-RULE-004, CHAT-MODEL-CONTROLS-RULE-006]
+  requirement_ids: [CHAT-MODEL-CONTROLS-20261014, CHAT-SAMPLING-20261016, CHAT-SAMPLING-DISPLAY-20261019, SESSION-CONTROLS-BOUNDARY-20261026]
+  business_rule_ids: [CHAT-MODEL-CONTROLS-RULE-002, CHAT-MODEL-CONTROLS-RULE-003, CHAT-MODEL-CONTROLS-RULE-004, CHAT-MODEL-CONTROLS-RULE-006, CHAT-MODEL-CONTROLS-RULE-007]
   title: 实际运行根模型、思考参数与上下文容量同源
   type: INTEGRATION
   priority: P0
@@ -25,7 +25,7 @@ case:
   steps:
     - order: 1
       action: Run each applicable path with explicit selected-B and distinctive backend model parameters; capture actual provider HTTP requests and resolved root/capacity snapshots.
-      expected: Root requests reach B endpoint with B provider model and selected ID; capacity/input/context strategy follows B rather than default-A. Ordinary Agent overrides still apply only in their original scope.
+      expected: Root requests reach B endpoint with B provider model and selected ID; capacity/input/context strategy follows B rather than default-A. Sampling and thinking overrides retain their original scope; historical Agent output/window overrides are ignored and actual max_tokens and capacity inherit outlet B.
     - order: 2
       action: Execute effort variants supported by B and budget variants on budget-B, including omitted controls, explicit off and auto with concrete versus provider-default baselines.
       expected: Concrete controls reach provider unchanged through its original mapping; absent preserves base config, off disables active reasoning, auto uses selected-model defaults, budget has no conflicting effort and zero is not sent as a zero limit.
@@ -38,6 +38,9 @@ case:
     - order: 5
       action: Clear model sampling configuration and send omitted, null, partial and explicit-zero sampling through ordinary and creator paths; compare model-list effective metadata and actual provider wire.
       expected: Null continues inheritance per field through Agent and model to shared SDK defaults 1.0/1.0. The displayed metadata matches model-level runtime defaults; Agent overrides retain priority only in Agent scope. Root reasoning, capacity, custom fields and independent models remain intact; stored global sampling stays null.
+    - order: 6
+      action: Run Agent debug with canonical disabled and enabled reasoning, temperature and Top P overrides.
+      expected: The selected outlet receives the exact canonical values while Agent definitions and global outlet defaults remain unchanged.
   expected_results:
     - Actual selected root, provider endpoint/model and capacity source agree for ordinary and creator runtime paths.
     - All supported reasoning intents preserve exact semantics and existing sampling/output/custom settings.
@@ -53,6 +56,11 @@ case:
   execution:
     profiles: [{name: mock, required_services: [model-provider, http-fixture]}]
   acceptance:
+    - id: AC-04
+      description: Debug uses the same canonical model controls without changing persisted definitions.
+      steps: [6]
+      expected_results: [1, 2, 3]
+      forbidden_side_effects: [1, 2]
     - id: AC-01
       description: Selected model identity and capacity survive the actual integration chain.
       steps: [1]

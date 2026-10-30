@@ -16,8 +16,7 @@ feature:
     description: One validated session selection supplies initial and subsequent composers, immutable turn requests and creation
       snapshots.
   - rule_id: CHAT-MODEL-CONTROLS-RULE-003
-    description: Presence-aware overrides distinguish omitted, disabled, automatic, supported effort and budget without changing
-      legacy model parameters.
+    description: Both Agent conversation modes use one per-outlet preference format and outlet to Agent to conversation merging; historical Workbench values migrate once, without retaining a second editable parameter store.
   - rule_id: CHAT-MODEL-CONTROLS-RULE-004
     description: The selected root model supplies provider binding and capacity while preserving independent models and target
       Agent configuration.
@@ -30,12 +29,17 @@ feature:
       must not silently disappear on provider retry. Configured Agent/model defaults are displayed as numbers with exact slider
       positions without creating overrides. Null inherits per field through Agent/model configuration to shared SDK defaults
       temperature 1.0 and top_p 1.0; read-only model-list effective_sampling uses those same defaults without filling stored values.
+  - rule_id: CHAT-MODEL-CONTROLS-RULE-007
+    description: Context/input/output token length limits belong exclusively to model onboarding/editing. Agent and conversation controls do not expose or accept new length overrides; historical length values inherit the frozen outlet. Reasoning token budgets remain configurable from declared thinking rules. Upstream compact degree display and trigger summary consume the same shared preference query.
   required_test_stages:
   - D2
   - D3
   - D4
+  - D5
   source:
     requirement_ids:
+    - SESSION-CONTROLS-BOUNDARY-20261026
+    - SESSION-MODEL-UNIFY-20261020
     - CHAT-MODEL-CONTROLS-20261014
     - CHAT-WORKBENCH-REFINEMENTS-20261015
     - CHAT-WORKBENCH-HEADER-DEFAULTS-20261015

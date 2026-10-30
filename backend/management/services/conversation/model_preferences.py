@@ -89,6 +89,7 @@ def read_model_preference_view(conversation_id, outlet_id, user_id, tenant_id):
     except ModelOutletValidationError as error:
         issues.append({"category": error.category, "field": error.path})
     return {"version": saved["version"], "parameter_values": values, "defaults": profile.parameter_values,
+            "reasoning_status": profile.capabilities.reasoning.status,
             "output_limit": profile.capabilities.context.output_limit,
             "field_specs": profile.parameter_rules, "config_revision": profile.config_revision, "issues": issues}
 

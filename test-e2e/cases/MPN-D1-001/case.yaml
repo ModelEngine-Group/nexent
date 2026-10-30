@@ -1,0 +1,69 @@
+schema_version: '1.0'
+stage: D1
+module: SDK-MODEL-SERVICE
+case:
+  case_id: MPN-D1-001
+  feature_id: SDK-MODEL-PROFILE-NORMALIZATION
+  business_rule_ids:
+  - SDK-MODEL-PROFILE-NORMALIZATION-RULE-01
+  - SDK-MODEL-PROFILE-NORMALIZATION-RULE-02
+  - SDK-MODEL-PROFILE-NORMALIZATION-RULE-03
+  title: Pinned catalog composes source semantics and origins atomically
+  type: SDK-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: The catalog component checks submission inputs, inherits and normalizes the complete pinned inventory with deterministic versions and exact provenance, rejecting invalid catalogs without partial publication.
+  preconditions:
+  - The repository contains the pinned 67-source inventory and code-owned source conversion policies.
+  - Controlled temporary copies may alter source bytes, declared digests and conversion policies without changing repository files.
+  test_data:
+    source_count: 67
+    model_count: 26
+    provider_count: 6
+    provider_model_count: 35
+  steps:
+  - order: 1
+    action: Load the pinned inventory through the catalog component twice and inspect China-region model and provider entries.
+    expected: Both loads produce the same immutable complete catalog and revision; identity, inherited capability limits and field origins agree with the pinned source data.
+  - order: 2
+    action: Change a declared source value in a temporary catalog and update only its manifest digest; then change the registered conversion policy version in a controlled context.
+    expected: Each valid source or rule change changes the catalog revision and the affected normalized value or mapping provenance; the original catalog remains unchanged.
+  - order: 3
+    action: Introduce an invalid consumed field, invalid inherited model reference or unregistered upstream version in controlled copies and execute the submission checker; also confirm reference metadata does not prevent conversion.
+    expected: Each full load fails with an explicit sanitized source diagnostic; no partial catalog is returned and a previously loaded catalog remains usable.
+  expected_results:
+  - The complete pinned inventory is normalized through real submission checking, reading, inheritance and conversion collaboration; runtime does not invoke the submission validator.
+  - Revision identity accounts for source bytes and mapping/parser versions; field origins retain source and rule ownership.
+  - Invalid catalogs fail atomically without mutating the previously returned catalog.
+  forbidden_side_effects:
+  - No provider HTTP requests, environment credential reads or database writes occur.
+  - No mutation of repository source files or previously returned immutable catalog values occurs.
+  unit_boundary: Real SDK catalog component collaboration across inventory reading, submission validation, inheritance, conversion, profile normalization and revision calculation; temporary local catalog files control the external filesystem boundary. Existing UT covers each helper independently, but not full inventory publication, cross-layer provenance and revision behavior.
+  inputs:
+  - Complete pinned authored TOML inventory and code-owned conversion policies
+  - Controlled source/rule changes and invalid catalog variants
+  assertions:
+  - Complete counts, China provider identities, selected exact model capabilities and provenance survive the full component pipeline
+  - Relevant source and mapping changes affect revision; repeated unchanged loads are deterministic
+  - Errors return structured sanitized diagnostics and never a partially published or mutated catalog
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Full submission checking and runtime normalization preserve capabilities and source provenance without external services or runtime submission validation.
+    steps: [1]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1, 2]
+  - id: AC-02
+    description: Valid source and mapping changes produce a changed deterministic revision while preserving the original snapshot.
+    steps: [2]
+    expected_results: [2]
+    forbidden_side_effects: [2]
+  - id: AC-03
+    description: Invalid catalogs fail atomically and leave previously loaded results usable.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [1, 2]

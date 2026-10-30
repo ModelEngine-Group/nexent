@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-MANUAL-PROFILE-PREVIEW-20261022
+  change_type: bugfix
+  bug_id: MODEL-MANUAL-PROFILE-PREVIEW-20261022
+  title: Show model parameters immediately after manual profile selection
+  description: Separate profile parameter display from required deployment identity input.
+  observed_behavior: Manual profile selection leaves the parameter panel empty until a model ID is typed.
+  expected_behavior: Show profile defaults immediately, preserve manual selection and edits after the ID changes, and retain save validation.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing units cover name-first defaults and manual selection retention after typing an ID, but not the profile-first empty-ID flow.
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Extend the owning onboarding component tests; no backend changes or duplicate formal D1.
+    behaviors:
+    - Profile-first defaults appear without a request model ID or backend preview.
+    - Manual profile, sampling and capacity edits survive name changes and final save.
+    - Thinking prefills from the profile even with endpoint present and model ID absent.
+    - Empty form remains empty and saving still requires real identity and endpoint.
+    test_selectors:
+    - frontend/tests/component/modelOutletAddForm.test.tsx
+    - frontend/tests/component/modelOutletBatch.test.tsx
+    - frontend/tests/component/modelOutletEditing.test.tsx
+  affected_features:
+    existing: []
+    modified: [V5-PW-MODEL-01]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [PW-MODEL-01]
+    modified: []
+    added: []
+    retired: []
+  notes: Approved SPEC MANUAL-PROFILE-PREVIEW-20261022 AC-MP-01 through AC-MP-03. Preserve PW-MODEL-01, do not claim the full Agent journey was rerun. Owning UT and targeted actual dev browser provide the changed timing and state proof. No image build or remote update.

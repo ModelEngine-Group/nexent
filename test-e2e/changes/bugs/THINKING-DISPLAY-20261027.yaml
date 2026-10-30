@@ -1,0 +1,51 @@
+schema_version: '1.0'
+change:
+  change_id: THINKING-DISPLAY-20261027
+  change_type: bugfix
+  bug_id: THINKING-DISPLAY-20261027
+  title: Resolve thinking controls consistently across model, Agent and conversation pages
+  description: Share declared toggle, effort-none and always-on state without inventing request bindings or changing reset semantics.
+  observed_behavior: A GLM outlet with reasoning_effort low and no toggle appears off in model management but on in Agent and conversation controls; effort none is also inferred as enabled.
+  expected_behavior: All consumers use the saved outlet rules. A separate toggle controls its declared boolean, effort none controls its canonical effort field, and confirmed reasoning without an off control displays the existing switch checked and disabled. Viewing must not create boolean overrides.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing component tests did not compare degree-only management and Agent displays or cover effort-none controls. Add those variants and retain the current explicit-override reset assertions.
+  feature_contract_changed: false
+  affected_features:
+    existing: [CHAT-MODEL-CONTROLS, BE-MODEL-OUTLET-PERSISTENCE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [MOP-D3-001, CHAT-MODEL-CONTROLS-D3-001, CHAT-MODEL-CONTROLS-D3-002]
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Shared management and Agent controls expose always-on GLM effort without a synthetic toggle
+    - Effort-none controls persist only reasoning_effort and preserve reset by deletion
+    - Supported reasoning without controls differs from unknown custom configuration
+    - Preference read views expose the saved outlet reasoning status without writes
+    test_selectors:
+    - frontend/tests/component/modelThinkingSettings.test.tsx
+    - frontend/tests/component/modelParameterLayers.test.tsx
+    - frontend/tests/component/modelSelectorPreferences.test.tsx
+    - test/backend/services/test_conversation_model_preferences_service.py
+    reason: Existing frontend component contracts and Python service UT cover the regression at its actual boundary; a duplicate formal D1 adds no independent proof.
+  notes: >-
+    Approved scope and TD-01 through TD-04 are recorded in the existing sibling
+    nexent-doc model-access-native-agent SPEC.md, TECHNICAL-DESIGN.md and
+    THINKING-DISPLAY-20261027.md. Three new frontend assertions fail on the old code.
+    Reuse the three selected D3 Cases for persistence and runtime regressions;
+    their contracts and assertions are unchanged and do not prove UI rendering.
+    The shared provider fixture records non-streaming auxiliary title requests
+    separately from streaming Agent requests, avoiding a completion-order race
+    in the existing last-request assertions while retaining both request logs.
+    Real container browser evidence separately verifies model management, Agent,
+    ordinary conversation and Workbench. Reset button semantics and provider
+    binding rules are unchanged. No new D1 Case or stage quota is introduced.
+
+  # TD-05: user requested the existing disabled switch instead of a new status label.

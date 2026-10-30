@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-CHECK-SAVE-20261023
+  change_type: bugfix
+  bug_id: MODEL-CHECK-SAVE-20261023
+  title: Preserve checked draft results and expose edit checks
+  description: Share safe edit probes and verified check-result persistence across single, batch and editing.
+  observed_behavior: Profile edit has no probe entry and draft checks are lost on creation.
+  expected_behavior: Explicit checks use current edit values; backend verified receipts persist matching success/failure atomically without rechecking.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Prior tests required save-only behavior but did not assert preservation of an explicit draft check or an edit probe entry.
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Owning component tests cover button lifecycle and payload; existing queue/summary tests cover shared boundaries. No duplicate D1.
+    behaviors:
+    - Edit probes use the unsaved patch and resolve omitted credentials on the backend.
+    - Matching signed success/failure receipts survive create and edit; saves never invoke the provider.
+    - Effective request or credential changes invalidate receipts while display-only changes preserve them.
+    - Forged, expired, cross-tenant and stale-revision proof cannot write a checked status.
+    test_selectors:
+    - frontend/tests/component/modelOutletAddForm.test.tsx
+    - frontend/tests/component/modelOutletBatch.test.tsx
+    - frontend/tests/component/modelOutletEditing.test.tsx
+    - test/backend/services/test_model_outlet_validation_service.py
+    - test/backend/services/test_model_outlet_update_service.py
+    - test/backend/database/test_model_outlet_db.py
+    - frontend/tests/component/modelCheckSummary.test.tsx
+    - frontend/tests/component/modelCheckConcurrency.test.tsx
+    - frontend/tests/component/modelCheckQueue.test.tsx
+  affected_features:
+    existing: []
+    modified: [BE-MODEL-OUTLET-PERSISTENCE, V5-PW-MODEL-01]
+    added: []
+    retired: []
+  affected_cases:
+    existing: [PW-MODEL-01]
+    modified: [MOP-D3-001]
+    added: []
+    retired: []
+  notes: Approved CONNECTIVITY-SAVE-PROPOSAL-20261023 ECS-01 through ECS-04. Strengthen MOP-D3-001 with actual PostgreSQL commits and use targeted dev browser/controlled peer acceptance. Existing UT supplies component coverage; no duplicate D1. No image build or remote update.

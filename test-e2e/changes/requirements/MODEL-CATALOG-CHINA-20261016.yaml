@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-CATALOG-CHINA-20261016
+  change_type: requirement
+  requirement_id: MODEL-CATALOG-CHINA-20261016
+  title: Expand China provider and model source inventory
+  description: Union the existing inventory with reviewed China providers and current model families; keep authored local provider evidence distinct from copied upstream sources.
+  affected_features:
+    existing: [SDK-MODEL-PROFILE-CATALOG, SDK-MODEL-PROFILE-NORMALIZATION]
+    added: []
+    modified: [SDK-MODEL-PROFILE-CATALOG]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [MPN-D1-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    reason: Existing integrity and parser suites own source selection and validation. Extend inventory assertions and local-origin error/provenance checks without duplicating them as a new D1.
+    behaviors:
+    - Preserve the complete old inventory and add the requested provider/model records.
+    - Every copied combination with declared reasoning controls has exact versioned request bindings and preserves its domains without invented defaults.
+    - All copied bytes match pinned hashes and inheritance dependencies are present.
+    - Local provider sources require explicit origin, revision and official documentation URL.
+    - Local references retain local provenance through normalization; no live-service qualification is inferred.
+    test_selectors:
+    - test/sdk/core/model_service/test_catalog_inventory.py
+    - test/sdk/core/model_service/test_source_reader.py
+    - test/sdk/core/model_service/test_catalog_normalization.py
+    - test/backend/services/test_model_profile_catalog_matrix.py
+  no_case_change_reason: Reuse MPN-D1-001 only for unchanged atomic normalization regression. New inventory/origin assertions belong to UT; dev API/browser inspection verifies visibility. No model execution or new adapter is introduced and live provider qualification remains separate.
+  notes: Existing resolved outlets and VLM behavior stay unchanged. Final container verification is pending before push.

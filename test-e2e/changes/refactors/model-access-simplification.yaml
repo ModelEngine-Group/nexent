@@ -1,0 +1,29 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-ACCESS-SIMPLIFY-20261019
+  change_type: refactor
+  title: Move profile checks before submission and unify internal parameter handling
+  description: Replace external mapping rules with code policies, restrict source checks to consumed facts before submission, and normalize legacy inputs at read boundaries.
+  affected_features:
+    existing: [SDK-MODEL-PROFILE-COMPOSITION, SDK-MODEL-PROFILE-PARAMETERS, BE-MODEL-OUTLET-PERSISTENCE]
+    added: []
+    modified: [SDK-MODEL-PROFILE-NORMALIZATION]
+    retired: []
+  affected_cases:
+    existing: [MPC-D1-001, MOP-D3-001]
+    added: []
+    modified: [MPN-D1-001]
+    retired: []
+  feature_contract_changed: true
+  traditional_ut:
+    decision: strengthen
+    reason: Reuse existing mapping, catalog, Agent, preference and update tests; replace removed rule-file assumptions with conversion and submission/runtime boundary assertions.
+    behaviors:
+    - Validate consumed facts before submission without validating reference metadata
+    - Preserve conversion values, source lineage, unknown false and zero semantics
+    - Normalize historical inputs once and preserve scope, deletion and thinking dependencies
+    test_selectors:
+    - test/sdk/core/model_service/test_source_mapping.py
+    - test/sdk/core/model_service/test_catalog_normalization.py
+    - test/backend/services/test_agent_model_parameters.py
+  notes: User approved SIMPLIFY-01 on 2026-10-19; remote PR mutations require separate approval of local stack partitions. Formal runtime and migration cases remain required regressions, not replaced by UT.

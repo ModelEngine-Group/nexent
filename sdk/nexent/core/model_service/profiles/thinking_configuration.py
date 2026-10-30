@@ -150,7 +150,18 @@ def configure_outlet_policy(profile, *, thinking_control=None, thinking_mode=Non
     """Apply the same finite allowed policy changes in services and persistence guards."""
     from nexent.core.model_service.profiles.protocol_parameters import ensure_outlet_sampling_rules
 
-    result = configure_thinking_degree(configure_thinking(ensure_outlet_sampling_rules(profile), thinking_control), thinking_mode)
+    result = ensure_outlet_sampling_rules(profile)
+    if thinking_mode == "default":
+        # Remove conditional degree rules before removing their operator switch.
+        result = configure_thinking(configure_thinking_degree(result, thinking_mode), thinking_control)
+    else:
+        result = configure_thinking_degree(configure_thinking(result, thinking_control), thinking_mode)
+    if thinking_mode == "default" and thinking_control == "profile_default":
+        data = result.model_dump(mode="json")
+        degree = data["provenance"]["provider_metadata"].get("operator_thinking_degree")
+        if degree is not None:
+            degree["status"] = result.capabilities.reasoning.status
+        result = ResolvedModelProfile.model_validate(data)
     if has_credential is not None:
         data = result.model_dump(mode="json")
         data["bindings"]["auth"] = {"ref": "bearer_token_v1" if has_credential else "no_auth_v1", "version": 1}

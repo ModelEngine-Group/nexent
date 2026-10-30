@@ -13,6 +13,7 @@ from management.db.model.repository import get_model_by_model_id, get_valid_mode
 from management.db.agent.repository import is_system_agent
 from management.services.permission.identity.display import enrich_cas_usernames
 from management.utils.serialization import convert_string_to_list
+from management.services.model.resolver import is_model_configured
 from contracts.agent import AgentUnavailableReason
 from management.services.agent.a2a.validation import validate_a2a_agent_name
 
@@ -963,7 +964,7 @@ async def list_published_agents_impl(
             available_model_ids = [
                 model_id
                 for model_id in valid_model_ids
-                if (model_cache.get(model_id) or {}).get("connect_status") == "available"
+                if is_model_configured(model_cache.get(model_id))
             ]
             agent_info["model_ids"] = available_model_ids
 

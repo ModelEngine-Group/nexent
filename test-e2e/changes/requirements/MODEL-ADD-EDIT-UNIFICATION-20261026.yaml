@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-ADD-EDIT-UNIFICATION-20261026
+  change_type: requirement
+  requirement_id: MODEL-ADD-EDIT-UNIFICATION-20261026
+  title: Share model onboarding and saved outlet configuration
+  description: Unify profile previews and forms while preserving frozen edits, explicit reselection, credentials and one runtime snapshot.
+  traditional_ut:
+    decision: strengthen
+    reason: Reuse onboarding, editing, thinking and outlet persistence tests; add service parity, frozen-version and conflict regression assertions. No duplicate D1.
+    behaviors:
+    - Catalog-only previews and complete drafts return the same profile parameters.
+    - Ordinary edits retain saved rules while explicit reselection recomposes trusted references.
+    - Shared UI exposes declared controls consistently and identifies manual presets.
+    - Incompatible values and stale revisions cannot silently overwrite saved values.
+    - Credential keep/clear/replace and signed check invalidation remain unchanged.
+    test_selectors:
+    - test/backend/services/test_model_outlet_unified_editor.py
+    - test/backend/database/test_model_outlet_db.py
+    - frontend/tests/component/modelOutletAddForm.test.tsx
+    - frontend/tests/component/modelOutletEditing.test.tsx
+    - frontend/tests/component/modelThinkingSettings.test.tsx
+  affected_features:
+    existing: []
+    modified: [BE-MODEL-OUTLET-PERSISTENCE]
+    added: []
+    retired: []
+  affected_cases:
+    existing: []
+    modified: [MOP-D3-001]
+    added: []
+    retired: []
+  notes: Approved AEU-01 through AEU-06. Actual PostgreSQL reselection strengthens existing persistence Case; browser and real-service acceptance use workstation dev. No image build or remote update.
