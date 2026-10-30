@@ -118,3 +118,38 @@ def test_terminal_bounds_and_private_diagnostics(caplog, finish, tools, expected
                         HEADER_CANARY, "x-diagnostic-test-marker"):
             assert private not in caplog.text
         assert '"chunks"' in caplog.text
+
+
+@pytest.mark.parametrize("persistent_empty", [False, True])
+def test_agent_repairs_exhausted_empty_http_without_user_errors(persistent_empty):
+    """Exercise real CoreAgent, context assembly, model retries and observer over HTTP."""
+    from nexent.core.agents.core_agent import CoreAgent
+    from nexent.core.agents.context import ContextManager, ContextManagerConfig, ManagedContextRuntime
+    from nexent.core.agents.output_protocol import ModelOutputProtocolExhaustedError
+
+    sequence = [({"role": "assistant", "reasoning_content": SECRET}, "stop")] * 2
+    if not persistent_empty:
+        sequence.append(({"role": "assistant", "content": "<final_answer>RECOVERED</final_answer>"}, "stop"))
+    with provider(sequence) as (model, observer, requests):
+        agent = CoreAgent(
+            observer=observer, model=model, tools=[], name="silent_recovery",
+            enable_protocol_repair_retry=True, max_steps=3,
+            context_runtime=ManagedContextRuntime(ContextManager(ContextManagerConfig(), max_steps=3)),
+        )
+        if persistent_empty:
+            with pytest.raises(ModelOutputProtocolExhaustedError):
+                agent.run("Return a final answer without tools.")
+            assert len(requests) == 6
+        else:
+            result = agent.run("Return a final answer without tools.")
+            assert str(result) == "RECOVERED"
+            assert len(requests) == 3
+            assert len(agent.memory.steps) == 2  # Task plus the accepted action, without failed repairs.
+        events = [json.loads(raw) for raw in observer.message_query]
+        assert not any(event.get("type") in {"error", "model_error", "warning"} for event in events)
+        assert not any(SECRET in str(event.get("content", "")) for event in events if event.get("type") == "final_answer")
+        assert not any(getattr(step, "tool_calls", None) for step in agent.memory.steps)
+        if not persistent_empty:
+            assert phases(observer).count("commit") == 1
+            assert phases(observer).count("rollback") == 2
+            assert "protocol" in str(requests[2]["messages"]).lower()
