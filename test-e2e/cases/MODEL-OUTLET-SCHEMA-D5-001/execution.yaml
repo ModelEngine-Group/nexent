@@ -1,9 +1,9 @@
 schema_version: '1.0'
-case_id: MOS-D5-001
+case_id: MODEL-OUTLET-SCHEMA-D5-001
 implementations:
 - framework: pytest
   file: test.py
-  selector: MOS-D5-001
+  selector: MODEL-OUTLET-SCHEMA-D5-001
   profiles: [real_smoke]
 acceptance_bindings:
   AC-01: [test_upgrade_preserves_values_and_repeats]

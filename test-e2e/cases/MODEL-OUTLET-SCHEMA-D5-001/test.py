@@ -14,7 +14,7 @@ from management.db.models import ConversationRecord, ModelRecord
 from shared.factories.scratch_database import isolated_schema_database
 from shared.postgres import postgres_connect_kwargs, postgres_scalar, postgres_sql
 
-pytestmark = [pytest.mark.case_id("MOS-D5-001"), pytest.mark.stage("D5")]
+pytestmark = [pytest.mark.case_id("MODEL-OUTLET-SCHEMA-D5-001"), pytest.mark.stage("D5")]
 ROOT = Path(__file__).resolve().parents[3]
 COLUMNS = {
     "reasoning_supported": "boolean",

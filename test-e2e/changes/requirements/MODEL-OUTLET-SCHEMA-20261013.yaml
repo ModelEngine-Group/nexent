@@ -12,7 +12,7 @@ change:
     retired: []
   affected_cases:
     existing: []
-    added: [MOS-D5-001]
+    added: [MODEL-OUTLET-SCHEMA-D5-001]
     modified: []
     retired: []
   traditional_ut:

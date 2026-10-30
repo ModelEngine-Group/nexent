@@ -73,6 +73,7 @@ domains:
     feature_id_patterns: ['^V5-DEP-']
 # Explicit exceptions outrank broad categories; ambiguous unmatched work stays unassigned.
 feature_overrides:
+  BE-MODEL-OUTLET-SCHEMA: model
   AGENT-EDITOR-WORKFLOWS: agent_config
   AGENT-LIST-VIEWS: agent_repository
   AGENT-PUBLICATION: agent_config

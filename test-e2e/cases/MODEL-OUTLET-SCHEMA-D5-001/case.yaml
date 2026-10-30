@@ -2,7 +2,7 @@ schema_version: '1.0'
 stage: D5
 module: MODEL-SERVICE
 case:
-  case_id: MOS-D5-001
+  case_id: MODEL-OUTLET-SCHEMA-D5-001
   feature_id: BE-MODEL-OUTLET-SCHEMA
   business_rule_ids: [BE-MODEL-OUTLET-SCHEMA-RULE-01, BE-MODEL-OUTLET-SCHEMA-RULE-02, BE-MODEL-OUTLET-SCHEMA-RULE-03, BE-MODEL-OUTLET-SCHEMA-RULE-04]
   title: Upgrade and repeat model outlet schema without data loss

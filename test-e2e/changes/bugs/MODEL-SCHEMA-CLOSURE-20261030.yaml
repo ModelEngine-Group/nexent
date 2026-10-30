@@ -20,7 +20,7 @@ change:
   affected_cases:
     existing: []
     added: []
-    modified: [MOS-D5-001]
+    modified: [MODEL-OUTLET-SCHEMA-D5-001]
     retired: []
   traditional_ut:
     decision: reuse
