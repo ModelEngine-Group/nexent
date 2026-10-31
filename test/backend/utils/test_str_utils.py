@@ -29,7 +29,7 @@ class TestStrUtils:
         """Both tags present: remove the whole block including inner content"""
         text = "This text has <think>some thinking content</think> in it."
         result = remove_think_blocks(text)
-        assert result == " in it."
+        assert result == "This text has  in it."
 
     def test_remove_think_blocks_multiple_tags(self):
         """Multiple blocks should all be removed"""
@@ -59,7 +59,7 @@ class TestStrUtils:
         """Uppercase/lowercase tags should be removed (case-insensitive)"""
         text = "Text with <THINK>uppercase</THINK> tags"
         result = remove_think_blocks(text)
-        assert result == " tags"
+        assert result == "Text with  tags"
 
     def test_convert_list_to_string_none_input(self):
         """None input should return empty string"""
