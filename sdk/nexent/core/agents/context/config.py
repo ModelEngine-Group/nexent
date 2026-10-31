@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Configuration for context management and compression."""
 
 import logging
@@ -27,6 +28,7 @@ class ContextManagerConfig:
     # and are intentionally not retained as runtime attributes.
     soft_input_budget_tokens: InitVar[int | None] = None
     hard_input_budget_tokens: InitVar[int | None] = None
+    execution_history: Any = None
     keep_recent_steps: int = 4
     enable_long_term_memory_selection: bool = True
 

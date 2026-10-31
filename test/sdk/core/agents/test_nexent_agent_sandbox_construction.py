@@ -35,6 +35,24 @@ def test_constructor_creates_run_scoped_mapping(factory, tmp_path):
     assert str(factory.workspace_mapping.container_root) == '/mnt/work/run'
 
 
+@pytest.mark.parametrize('history_enabled', [False, True])
+@pytest.mark.parametrize('deferred', [False, True])
+def test_execution_reader_enables_host_bridge_without_business_tools(construction, mocker, history_enabled, deferred):
+    from nexent.core.agents.context.execution_history import ExecutionHistory
+
+    c = construction
+    c.factory.observer.execution_history = ExecutionHistory() if history_enabled else None
+    c.factory.tool_fastpath_enabled = deferred
+    mocker.patch.object(c.factory, '_push_file_workspace_to_sandbox')
+    mocker.patch.object(c.factory, '_initialize_sandbox_workspaces')
+    c.factory.create_single_agent(c.config)
+    if deferred:
+        wrapper = c.core.call_args.kwargs['executor']
+        wrapper.send_tools({})
+        wrapper('import math')
+    assert c.build.call_args.kwargs['host_tools_exist'] is history_enabled
+
+
 def test_explicit_local_bind_config_keeps_mapping_disabled(tmp_path):
     config = sandbox.SandboxConfig(workspace_mode='bind', container_workspace_root='/mnt/work')
     agent = NexentAgent(Mock(spec=MessageObserver), [], Event(), sandbox_config=config, workspace_path=str(tmp_path))
