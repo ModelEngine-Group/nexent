@@ -134,7 +134,7 @@ deployment_i18n_format() {
       validation.https_key_invalid_pem) printf '%s' '私钥文件不是合法的 PEM 格式：%s' ;;
       validation.https_pair_mismatch) printf '%s' '证书与私钥不匹配（公钥不一致）。' ;;
       validation.https_passphrase_wrong) printf '%s' '私钥密码错误，无法解密私钥。' ;;
-      validation.https_passphrase_required) printf '%s' '该私钥受密码保护，需要提供私钥密码（NEXENT_HTTPS_KEY_PASSPHRASE 或交互输入）。' ;;
+      validation.https_passphrase_required) printf '%s' '该私钥受密码保护，需要提供私钥密码（NEXENT_HTTPS_KEY_PASSPHRASE 或 --https-key-passphrase）。' ;;
       validation.https_materialize_failed) printf '%s' '准备 Nginx 证书文件失败（目标目录：%s）。' ;;
       validation.https_cert_expired) printf '%s' '证书已过期（到期时间：%s）。' ;;
       validation.https_cert_expiring_soon) printf '%s' '⚠️ 证书将在 30 天内到期（到期时间：%s），建议尽快更换。' ;;
@@ -230,7 +230,7 @@ deployment_i18n_format() {
       validation.https_key_invalid_pem) printf '%s' 'Private key file is not valid PEM: %s' ;;
       validation.https_pair_mismatch) printf '%s' 'Certificate and private key do not match (public keys differ).' ;;
       validation.https_passphrase_wrong) printf '%s' 'Wrong private key passphrase: decryption failed.' ;;
-      validation.https_passphrase_required) printf '%s' 'The private key is passphrase-protected; provide the passphrase (NEXENT_HTTPS_KEY_PASSPHRASE or interactive input).' ;;
+      validation.https_passphrase_required) printf '%s' 'The private key is passphrase-protected; provide the passphrase (NEXENT_HTTPS_KEY_PASSPHRASE or --https-key-passphrase).' ;;
       validation.https_materialize_failed) printf '%s' 'Failed to prepare the Nginx certificate files (target directory: %s).' ;;
       validation.https_cert_expired) printf '%s' 'Certificate has expired (notAfter: %s).' ;;
       validation.https_cert_expiring_soon) printf '%s' '⚠️ Certificate expires within 30 days (notAfter: %s); consider replacing it soon.' ;;
@@ -1288,29 +1288,31 @@ deployment_validate() {
 }
 
 deployment_https_key_check() {
-  # Bash 3.2-safe key check for any key type (RSA, EC, Ed25519...): builds
-  # -passin args only when a passphrase exists. Uses -check when available
-  # (OpenSSL; validates the key itself) and falls back to plain parsing on
-  # LibreSSL, where -check is unsupported for non-RSA keys.
+  # Bash 3.2-safe key check for any key type (RSA, EC, Ed25519...). The
+  # passphrase source is always explicit and stdin is detached so OpenSSL
+  # never prompts on the controlling terminal: an empty 'pass:' fails fast
+  # for an encrypted key instead of blocking a non-interactive run. Uses
+  # -check when available (OpenSSL; validates the key itself) and falls back
+  # to plain parsing on LibreSSL, where -check is unsupported for non-RSA keys.
   local key_file="$1"
   local passphrase="$2"
-  if [ -n "$passphrase" ]; then
-    openssl pkey -in "$key_file" -check -noout -passin "pass:$passphrase" >/dev/null 2>&1 \
-      || openssl pkey -in "$key_file" -noout -passin "pass:$passphrase" >/dev/null 2>&1
-  else
-    openssl pkey -in "$key_file" -check -noout >/dev/null 2>&1 \
-      || openssl pkey -in "$key_file" -noout >/dev/null 2>&1
-  fi
+  openssl pkey -in "$key_file" -check -noout -passin "pass:$passphrase" >/dev/null 2>&1 </dev/null \
+    || openssl pkey -in "$key_file" -noout -passin "pass:$passphrase" >/dev/null 2>&1 </dev/null
+}
+
+deployment_https_key_is_encrypted() {
+  # Detect a passphrase-protected PEM key from its header instead of asking
+  # OpenSSL to decrypt it. Covers traditional (Proc-Type: 4,ENCRYPTED) and
+  # PKCS#8 (BEGIN ENCRYPTED PRIVATE KEY) containers.
+  local key_file="$1"
+  [ -r "$key_file" ] \
+    && grep -qE '^(Proc-Type: 4,ENCRYPTED|-----BEGIN ENCRYPTED PRIVATE KEY-----)' "$key_file" 2>/dev/null
 }
 
 deployment_https_key_pubkey() {
   local key_file="$1"
   local passphrase="$2"
-  if [ -n "$passphrase" ]; then
-    openssl pkey -in "$key_file" -pubout -passin "pass:$passphrase" 2>/dev/null
-  else
-    openssl pkey -in "$key_file" -pubout 2>/dev/null
-  fi
+  openssl pkey -in "$key_file" -pubout -passin "pass:$passphrase" </dev/null 2>/dev/null
 }
 
 deployment_https_validate_cert_pair() {
@@ -1329,13 +1331,10 @@ deployment_https_validate_cert_pair() {
   if ! deployment_https_key_check "$key_file" "$passphrase"; then
     if [ -n "$passphrase" ]; then
       deployment_error "$(deployment_i18n validation.https_passphrase_wrong)"
+    elif deployment_https_key_is_encrypted "$key_file"; then
+      deployment_error "$(deployment_i18n validation.https_passphrase_required)"
     else
-      # A key that fails without a passphrase may be passphrase-protected.
-      if deployment_https_key_check "$key_file" "" >/dev/null 2>&1; then
-        deployment_error "$(deployment_i18n validation.https_passphrase_required)"
-      else
-        deployment_error "$(deployment_i18n validation.https_key_invalid_pem "$key_file")"
-      fi
+      deployment_error "$(deployment_i18n validation.https_key_invalid_pem "$key_file")"
     fi
     return 1
   fi
@@ -2925,10 +2924,11 @@ deployment_https_ensure_self_signed_cert() {
   if [ -r "$cert_file" ] && [ -r "$key_file" ]; then
     # pkey supports RSA/EC keys; -check is unavailable on LibreSSL, so only
     # verify the key parses successfully.
-    if openssl x509 -in "$cert_file" -noout >/dev/null 2>&1 && openssl pkey -in "$key_file" -noout >/dev/null 2>&1; then
+    if openssl x509 -in "$cert_file" -noout >/dev/null 2>&1 \
+      && openssl pkey -in "$key_file" -noout -passin pass: >/dev/null 2>&1 </dev/null; then
       local reused_cert_pubkey reused_key_pubkey reused_end_date reused_epoch_end
       reused_cert_pubkey="$(openssl x509 -in "$cert_file" -pubkey -noout 2>/dev/null | openssl sha256 2>/dev/null || true)"
-      reused_key_pubkey="$(openssl pkey -in "$key_file" -pubout 2>/dev/null | openssl sha256 2>/dev/null || true)"
+      reused_key_pubkey="$(openssl pkey -in "$key_file" -pubout -passin pass: </dev/null 2>/dev/null | openssl sha256 2>/dev/null || true)"
       if [ -n "$reused_cert_pubkey" ] && [ "$reused_cert_pubkey" = "$reused_key_pubkey" ]; then
         reused_end_date="$(openssl x509 -in "$cert_file" -noout -enddate 2>/dev/null | cut -d= -f2)"
         reused_epoch_end="$(date -j -f '%b %e %H:%M:%S %Y GMT' "$reused_end_date" +%s 2>/dev/null || date -d "$reused_end_date" +%s 2>/dev/null || true)"
