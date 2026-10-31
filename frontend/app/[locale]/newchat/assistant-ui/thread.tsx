@@ -64,6 +64,14 @@ import {
 import { Sources } from "../ui/sources";
 import { SourcesPanel } from "../ui/sources-panel";
 import {
+  ConversationArtifactsButton,
+  ConversationArtifactsPanel,
+} from "../ui/artifacts-panel";
+import {
+  useConversationArtifacts,
+  type ConversationArtifact,
+} from "../utils/conversation-artifacts";
+import {
   SourcesPanelProvider,
   useSourcesPanel,
   type SourcesPanelSelection,
@@ -335,6 +343,11 @@ export const Thread: FC<ThreadProps> = ({
   };
 
   const messages = useAuiState((s) => s.thread.messages);
+  // Conversation-wide agent-generated files feed the artifacts entry above the
+  // composer and the side panel it opens. Computed here so both the button and
+  // the panel share one aggregation pass over the thread messages.
+  const conversationArtifacts = useConversationArtifacts(messages);
+  const [artifactsOpen, setArtifactsOpen] = useState(false);
   const currentThreadTitle = useAuiState((s) => {
     const currentThread = s.threads.threadItems.find(
       (item) => item.id === s.threads.mainThreadId
@@ -482,6 +495,9 @@ export const Thread: FC<ThreadProps> = ({
           onCreateShare={createShare}
           selection={selection}
           onPanelClose={close}
+          conversationArtifacts={conversationArtifacts}
+          artifactsOpen={artifactsOpen}
+          onArtifactsOpenChange={setArtifactsOpen}
         />
         <Dialog
           open={Boolean(manualShareUrl)}
@@ -588,6 +604,9 @@ interface ThreadViewProps {
   onCreateShare: () => void;
   selection: SourcesPanelSelection | null;
   onPanelClose: () => void;
+  conversationArtifacts: ConversationArtifact[];
+  artifactsOpen: boolean;
+  onArtifactsOpenChange: (open: boolean) => void;
   variant: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
@@ -650,6 +669,9 @@ const ThreadView: FC<ThreadViewProps> = ({
   onCreateShare,
   selection,
   onPanelClose,
+  conversationArtifacts,
+  artifactsOpen,
+  onArtifactsOpenChange,
   variant,
   skillFiles,
   onSkillFileSelect,
@@ -852,6 +874,12 @@ const ThreadView: FC<ThreadViewProps> = ({
             {!newChatDesign && (!debugLayout || hasMessages) && (
               <ThreadScrollToBottom />
             )}
+            {conversationArtifacts.length > 0 && (
+              <ConversationArtifactsButton
+                count={conversationArtifacts.length}
+                onClick={() => onArtifactsOpenChange(true)}
+              />
+            )}
             {!hasMessages &&
               emptyFooterContent &&
               (debugLayout ? (
@@ -908,6 +936,12 @@ const ThreadView: FC<ThreadViewProps> = ({
         citationContext={selection?.citationContext}
         selectionToken={selection ?? undefined}
         onClose={onPanelClose}
+      />
+
+      <ConversationArtifactsPanel
+        open={artifactsOpen}
+        artifacts={conversationArtifacts}
+        onClose={() => onArtifactsOpenChange(false)}
       />
     </ThreadPrimitive.Root>
   );

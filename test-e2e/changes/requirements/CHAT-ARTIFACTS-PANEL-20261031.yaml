@@ -1,0 +1,47 @@
+schema_version: "1.0"
+change:
+  change_id: CHAT-ARTIFACTS-PANEL-20261031
+  change_type: requirement
+  requirement_id: CHAT-ARTIFACTS-PANEL-20261031
+  title: 对话产物面板聚合多轮生成的文件
+  description:
+    'Collect every agent-generated file across a conversation and expose
+    it through a persistent entry above the composer ("view all artifacts") that
+    opens a side panel listing each artifact with preview (shared FilePreviewDrawer)
+    and download. Aggregation covers both the streaming path (marker text parts
+    carrying skillFileAttachments) and the history-restore path (skillFileUploadsRegistry).'
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/component/conversationArtifacts.test.tsx
+    behaviors:
+      - collectConversationArtifacts gathers attachments from assistant messages via
+        streamed cumulative parts, falls back to the history registry for restored
+        messages, keeps keys unique across streaming chunks whose attachment ids restart,
+        skips user messages, and tolerates invalid createdAt values.
+      - ConversationArtifactsPanel renders each artifact with icon, size and generated-at
+        metadata, opens the shared FilePreviewDrawer for preview, prefers download_url
+        and falls back to object storage or raw preview URLs, and hides when closed.
+      - ConversationArtifactsButton stays hidden without artifacts and opens the panel
+        on click.
+    reason: |-
+      The feature is a frontend aggregation over already-proven contracts: the SSE
+      files/skill_files chunk parsing, the FilePreviewDrawer rendering, and the
+      storageService download path all have existing coverage and are reused
+      unchanged. No new inter-component, service or protocol boundary is introduced,
+      so per the D1 admission rules ("a feature need not add a D1 if UT and
+      higher-layer tests already supply the necessary proof") the targeted UT is
+      sufficient and no formal Case is added.
+  notes: |
+    Core scope requested by the user; extension candidates (artifact grouping by turn,
+    share-page availability, office online preview) are intentionally deferred.
