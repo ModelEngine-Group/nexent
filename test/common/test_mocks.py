@@ -6,6 +6,7 @@ This module provides shared mocking utilities to avoid code duplication
 across test files that need to mock database, storage, and external service dependencies.
 """
 
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import types
 from functools import lru_cache
@@ -47,17 +48,18 @@ def bootstrap_test_env() -> Dict[str, Any]:
 
     mock_const = MagicMock()
     consts_module = _create_module("consts", const=mock_const)
-    sys.modules["consts.const"] = mock_const
+    sys.modules["contracts.constants.environment"] = mock_const
+    install_business_constant_stubs(mock_const)
     # Real default for the A2A invocation timeout so backend modules doing
-    # `from consts.const import A2A_AGENT_INVOCATION_TIMEOUT_SECONDS` bind a
-    # numeric value instead of an auto-created MagicMock attribute.
+    # `from contracts.constants.environment import A2A_AGENT_INVOCATION_TIMEOUT_SECONDS`
+    # bind a numeric value instead of an auto-created MagicMock attribute.
     mock_const.A2A_AGENT_INVOCATION_TIMEOUT_SECONDS = 900.0
 
     boto3_mock = MagicMock()
     sys.modules.setdefault("boto3", boto3_mock)
 
     client_module = _create_module(
-        "backend.database.client",
+        "management.db.client",
         MinioClient=MagicMock(),
         PostgresClient=MagicMock(),
         db_client=MagicMock(),
@@ -66,7 +68,11 @@ def bootstrap_test_env() -> Dict[str, Any]:
         minio_client=MagicMock(),
         postgres_client=MagicMock(),
     )
-    sys.modules["database.client"] = client_module
+    sys.modules["management.db.client"] = client_module
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
+    from test.common.database_stubs import install_serialization_stub
+    install_serialization_stub(sys.modules["management.db.client"])
     if "database" not in sys.modules:
         _create_module("database")
 
@@ -80,9 +86,9 @@ def bootstrap_test_env() -> Dict[str, Any]:
     _create_module("nexent.core")
     _create_module("nexent.core.models", OpenAIVLModel=MagicMock(), OpenAILongContextModel=MagicMock())
 
-    mock_model_management_db = types.ModuleType("database.model_management_db")
+    mock_model_management_db = types.ModuleType("management.db.model.repository")
     mock_model_management_db.get_model_by_model_id = MagicMock(return_value=None)
-    sys.modules["database.model_management_db"] = mock_model_management_db
+    sys.modules["management.db.model.repository"] = mock_model_management_db
 
     return {
         "mock_const": mock_const,
@@ -101,7 +107,7 @@ def setup_common_mocks():
     Setup common mocks for external dependencies used across multiple test files.
 
     This includes mocks for:
-    - Database modules (database, database.db_models, etc.)
+    - Database modules (database, management.db.models, etc.)
     - Storage modules (nexent.storage, boto3)
     - External libraries (sqlalchemy, psycopg2, jinja2)
     - Configuration modules (consts)
@@ -128,7 +134,8 @@ def setup_common_mocks():
     }
 
     sys.modules['consts'] = consts_mock
-    sys.modules['consts.const'] = consts_mock.const
+    sys.modules['contracts.constants.environment'] = consts_mock.const
+    install_business_constant_stubs(consts_mock.const)
 
     # Mock boto3
     boto3_mock = MagicMock()
@@ -170,10 +177,10 @@ def setup_common_mocks():
     db_tenant_config_mock = MagicMock()
 
     sys.modules['database'] = db_mock
-    sys.modules['database.db_models'] = db_models_mock
-    sys.modules['database.model_management_db'] = db_model_management_mock
-    sys.modules['database.tenant_config_db'] = db_tenant_config_mock
-    sys.modules['backend.database.db_models'] = db_models_mock
+    sys.modules['management.db.models'] = db_models_mock
+    sys.modules['management.db.model.repository'] = db_model_management_mock
+    sys.modules['management.db.configuration.tenant'] = db_tenant_config_mock
+    sys.modules['management.db.models'] = db_models_mock
 
     # Mock sqlalchemy with submodules
     sqlalchemy_mock = MagicMock()

@@ -31,7 +31,7 @@ MCP 协议支持多种编程语言：
 在开始之前，请安装 FastMCP：
 
 ```bash
-pip install fastmcp
+uv pip install fastmcp
 ```
 
 ### 📝 基础示例

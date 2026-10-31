@@ -1,0 +1,8 @@
+services:
+  nexent-elasticsearch:
+    volumes: !override
+      - nexent-es-data:/usr/share/elasticsearch/data
+
+volumes:
+  nexent-es-data:
+    external: true

@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 # Ensure the script is executed with bash (required for arrays and [[ ]])
 if [ -z "$BASH_VERSION" ]; then
@@ -12,7 +13,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-CONST_FILE="$PROJECT_ROOT/backend/consts/const.py"
+CONST_FILE="$PROJECT_ROOT/backend/contracts/constants/environment.py"
 DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
 DEPLOYMENT_COMMON="$DEPLOY_ROOT/common/common.sh"
 VERSION_HELPER="$DEPLOY_ROOT/common/version.sh"
@@ -1213,7 +1214,7 @@ deploy_core_services() {
   local service
   for service in $DEPLOYMENT_SELECTED_DOCKER_SERVICES; do
     case "$service" in
-      nexent-config|nexent-runtime|nexent-mcp|nexent-northbound|nexent-web|nexent-data-process)
+      nexent-config|nexent-runtime|nexent-mcp|nexent-northbound|nexent-web|nexent-data-process|nexent-ops)
         core_services+=("$service")
         ;;
     esac
@@ -1802,9 +1803,9 @@ main_deploy() {
   APP_VERSION="$(get_app_version)"
   if [ -z "$APP_VERSION" ]; then
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-      echo "❌ 获取应用版本失败，请检查 VERSION 或 backend/consts/const.py"
+      echo "❌ 获取应用版本失败，请检查 VERSION 或 backend/contracts/constants/environment.py"
     else
-      echo "❌ Failed to get app version, please check VERSION or backend/consts/const.py"
+      echo "❌ Failed to get app version, please check VERSION or backend/contracts/constants/environment.py"
     fi
     exit 1
   fi

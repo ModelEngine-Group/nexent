@@ -1,0 +1,69 @@
+Release v2.8.0
+
+Merge develop into main for the v2.8.0 release.
+
+Range: 118 commits, 5631 files changed (+428281 / -133732), covering everything
+merged after the v2.7.0 release through 61412bf1a.
+
+Highlights
+- Agent Workbench becomes the default entry point; the standalone Home page is
+  hidden by default and can be re-enabled through ENABLE_AGENT_WORKBENCH and
+  HIDE_HOME_PAGE.
+- AIDP knowledge-base management is completed end to end: detail pages, document
+  preview from served bytes, graph search with jargon-coverage reranking, source
+  metadata, and image preview and download.
+- A2A agent collaboration is available, with an adapter layer, capability
+  catalog, validation modules, a publication tab with access details, and a
+  per-agent TLS verification switch.
+- Security audit logging now covers backend management APIs.
+- DeepSeek built-in web search is available as a tool.
+- Model calls honour unified temperature and top_p overrides.
+- Local tools can run without the sandbox through NEXENT_TOOL_FASTPATH_ENABLED,
+  and official tool actions defer Docker startup.
+
+Refactoring and improvements
+- Agent prompts move into the SDK layer, consolidating 42 backend prompt files
+  into the SDK bundle. A simple question now costs roughly half the tokens it
+  did in v2.6.1 (about 6k to 3k).
+- The data-processing pipeline runs on Celery prefork instead of Ray, adding
+  DP_PARSE_* and QUEUES tunables.
+- Management services are reorganised by business domain; model, agent, and
+  tool contracts are unified.
+- Agent and chat workflows are redesigned around a shared resource picker.
+- Official agent bundles expand from 11 to 26 across 7 domains, while official
+  skill bundles are trimmed from 28 to 23: the five file-system skill archives
+  are dropped because their tools (create_file, create_directory,
+  delete_file, delete_directory, list_directory, read_file, move_item) ship
+  built into the SDK. Upgrades preserve any archives already present under
+  ~/nexent/official-skills-zip because deploy.sh copies without pruning.
+
+Notable fixes
+- Model selection is restored for regular user sessions and the workbench.
+- Knowledge-base deletion now clears agent and conversation bindings.
+- Concurrent calls to the same agent no longer leave the sandbox kernel
+  unhealthy.
+- SSE responses are no longer buffered by proxies.
+- CAS login shows bound accounts and usernames correctly.
+- Conversation pins persist on the server, and automation runs survive restarts.
+
+Upgrade notes
+- SQL migrations consolidate into v2.8.0_merged_migrations.sql, with
+  v2.8.0_001_a2a_ssl_verify.sql added on top and v2.6.1_002 removed.
+  Existing databases apply only the new bundle; identity checksums for the
+  previously shipped files are unchanged, so no historical migration re-runs.
+- Migrations drop the retired prompt-template table and Agent binding columns,
+  merge constraint_prompt and few_shots_prompt into duty_prompt, and clear
+  legacy /space menu permissions. The changes are irreversible, so take a
+  database backup before upgrading.
+- New environment variables include TZ, the NEXENT_HTTPS_* group, the DP_PARSE_*
+  group, QUEUES, ENABLE_AGENT_WORKBENCH, HIDE_HOME_PAGE, the
+  NEXENT_TOOL_FASTPATH_* group, and the NEXENT_SANDBOX_* group. See
+  deploy/env/.env.example.
+- Container timezone defaults to Asia/Shanghai.
+- Optional nginx HTTPS termination is available through NEXENT_HTTPS_MODE.
+
+Validation
+- Applied the migration bundle with the real runner against PostgreSQL: a
+  v2.7.0 database skips every historical file and applies only v2.8.0, and a
+  second run skips the bundle too. Fresh installs reach the same schema.
+- Frontend, backend, and SDK suites plus copyright and asset checks pass on CI.

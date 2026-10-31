@@ -101,6 +101,8 @@ nexent-common:
 nexent-config:
   enabled: true
   replicaCount: 1
+nexent-ops:
+  enabled: true
 nexent-runtime:
   enabled: true
   replicaCount: 1

@@ -53,14 +53,13 @@ ARG MIRROR
 ARG TARGETARCH
 ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
 
-RUN --mount=type=cache,id=nexent-main-pip-${TARGETARCH},target=/root/.cache/pip,sharing=locked \
-    pip install uv $(test -n "$MIRROR" && echo "-i $MIRROR")
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /usr/local/bin/
 WORKDIR /opt/backend
 
 # Layer 0: install base dependencies. backend extras reference the local sdk
 # via [tool.uv.sources], so the sdk must exist before uv sync resolves.
 COPY backend/pyproject.toml /opt/backend/pyproject.toml
-COPY sdk /opt/sdk
+COPY sdk/pyproject.toml /opt/sdk/pyproject.toml
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     uv sync --link-mode copy $(test -n "$MIRROR" && echo "-i $MIRROR")
 RUN mkdir -p "$TIKTOKEN_CACHE_DIR" && \

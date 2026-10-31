@@ -39,22 +39,9 @@ sys.modules['management.services.skill.transfer'] = MagicMock()
 
 from management.services.permission import asset_owner as asset_owner_visibility_mock
 
-from consts.exceptions import (
-    NoInviteCodeException,
-    IncorrectInviteCodeException,
-    UserRegistrationException,
-    UnauthorizedError,
-    AppException,
-    TenantResourceLimitError,
-    ValidationError,
-)
-from consts.error_code import ErrorCode
-from consts.const import (
-    ASSET_OWNER_ROLE,
-    ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL,
-    ASSET_OWNER_INVITE_CODE_TYPE,
-    ASSET_OWNER_TENANT_ID,
-)
+from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, UnauthorizedError, AppException, TenantResourceLimitError, ValidationError
+from contracts.errors.codes import ErrorCode
+from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_SIGNUP_USE_OAUTH_DETAIL, ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_TENANT_ID
 
 ASSET_OWNER_RESOURCES_ROUTE = "/asset-owner-resources"
 
@@ -64,38 +51,27 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
 
 # Stub database modules used by user_management_service to avoid loading real SQLAlchemy client
-_db_client_stub = types.ModuleType("database.client")
+_db_client_stub = types.ModuleType("management.db.client")
 _db_client_stub.get_db_session = MagicMock()
 _db_client_stub.as_dict = MagicMock()
 _db_client_stub.MinioClient = MagicMock(return_value=minio_client_mock)
-sys.modules["database.client"] = _db_client_stub
-sys.modules["database.token_db"] = MagicMock()
-sys.modules["database.model_management_db"] = MagicMock()
-sys.modules["database.user_tenant_db"] = MagicMock()
-sys.modules["database.group_db"] = MagicMock()
-sys.modules["database.db_models"] = MagicMock()
+sys.modules["management.db.client"] = _db_client_stub
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.identity.token"] = MagicMock()
+sys.modules["management.db.model.repository"] = MagicMock()
+sys.modules["management.db.identity.user_tenant"] = MagicMock()
+sys.modules["management.db.identity.group"] = MagicMock()
+sys.modules["management.db.models"] = MagicMock()
 
-with patch('backend.database.client.MinioClient', return_value=minio_client_mock):
-    from management.services.permission.identity.authentication import (
-        set_auth_token_to_client,
-        get_authorized_client,
-        get_current_user_from_client,
-        validate_token,
-        extend_session,
-        check_auth_service_health,
-        signup_user_with_invitation,
-        parse_supabase_response,
-        verify_invite_code,
-        signin_user,
-        refresh_user_token,
-        get_session_by_authorization,
-        get_user_info,
-        format_role_permissions,
-        get_provider_username,
-    )
+with patch('management.db.client.MinioClient', return_value=minio_client_mock):
+    from gateway.authentication.auth import set_auth_token_to_client, get_authorized_client, get_current_user_from_client, validate_token, get_session_by_authorization
+    from management.services.permission.identity.authentication import extend_session, check_auth_service_health, signup_user_with_invitation, parse_supabase_response, verify_invite_code, signin_user, refresh_user_token, get_user_info, format_role_permissions, get_provider_username
 
 
 class TestGetProviderUsername(unittest.TestCase):
@@ -172,8 +148,8 @@ class TestSetAuthTokenToClient(unittest.TestCase):
 class TestGetAuthorizedClient(unittest.TestCase):
     """Test get_authorized_client"""
 
-    @patch('management.services.permission.identity.authentication.get_supabase_client')
-    @patch('management.services.permission.identity.authentication.set_auth_token_to_client')
+    @patch('gateway.authentication.auth.get_supabase_client')
+    @patch('gateway.authentication.auth.set_auth_token_to_client')
     def test_get_client_with_authorization(self, mock_set_token, mock_get_client):
         """Test getting client with authorization header"""
         mock_client = MagicMock()
@@ -184,8 +160,8 @@ class TestGetAuthorizedClient(unittest.TestCase):
         self.assertEqual(result, mock_client)
         mock_set_token.assert_called_once_with(mock_client, "test-token")
 
-    @patch('management.services.permission.identity.authentication.get_supabase_client')
-    @patch('management.services.permission.identity.authentication.set_auth_token_to_client')
+    @patch('gateway.authentication.auth.get_supabase_client')
+    @patch('gateway.authentication.auth.set_auth_token_to_client')
     def test_get_client_without_authorization(self, mock_set_token, mock_get_client):
         """Test getting client without authorization header"""
         mock_client = MagicMock()
@@ -258,9 +234,9 @@ class TestGetCurrentUserFromClient(unittest.TestCase):
 class TestValidateToken(unittest.TestCase):
     """Test validate_token"""
 
-    @patch('management.services.permission.identity.authentication.get_current_user_from_client')
-    @patch('management.services.permission.identity.authentication.set_auth_token_to_client')
-    @patch('management.services.permission.identity.authentication.get_supabase_client')
+    @patch('gateway.authentication.auth.get_current_user_from_client')
+    @patch('gateway.authentication.auth.set_auth_token_to_client')
+    @patch('gateway.authentication.auth.get_supabase_client')
     def test_validate_token_success(self, mock_get_client, mock_set_token, mock_get_user):
         """Test successful token validation"""
         mock_client = MagicMock()
@@ -274,9 +250,9 @@ class TestValidateToken(unittest.TestCase):
         self.assertEqual(user, mock_user)
         mock_set_token.assert_called_once_with(mock_client, "test-token")
 
-    @patch('management.services.permission.identity.authentication.get_current_user_from_client')
-    @patch('management.services.permission.identity.authentication.set_auth_token_to_client')
-    @patch('management.services.permission.identity.authentication.get_supabase_client')
+    @patch('gateway.authentication.auth.get_current_user_from_client')
+    @patch('gateway.authentication.auth.set_auth_token_to_client')
+    @patch('gateway.authentication.auth.get_supabase_client')
     def test_validate_token_no_user(self, mock_get_client, mock_set_token, mock_get_user):
         """Test token validation with no user"""
         mock_client = MagicMock()
@@ -288,9 +264,9 @@ class TestValidateToken(unittest.TestCase):
         self.assertFalse(is_valid)
         self.assertIsNone(user)
 
-    @patch('management.services.permission.identity.authentication.get_current_user_from_client')
-    @patch('management.services.permission.identity.authentication.set_auth_token_to_client')
-    @patch('management.services.permission.identity.authentication.get_supabase_client')
+    @patch('gateway.authentication.auth.get_current_user_from_client')
+    @patch('gateway.authentication.auth.set_auth_token_to_client')
+    @patch('gateway.authentication.auth.get_supabase_client')
     def test_validate_token_exception(self, mock_get_client, mock_set_token, mock_get_user):
         """Test token validation exception"""
         mock_client = MagicMock()
@@ -1024,7 +1000,7 @@ class TestSignupUserWithInvitation(unittest.IsolatedAsyncioTestCase):
 
     async def test_signup_user_with_weak_password(self):
         """Test signup with weak password raises AppException (line 143)"""
-        from consts.error_code import ErrorCode
+        from contracts.errors.codes import ErrorCode
 
         with self.assertRaises(AppException) as context:
             await signup_user_with_invitation("test@example.com", "weak", invite_code="VALID123")
@@ -1403,7 +1379,7 @@ class TestRefreshUserToken(unittest.IsolatedAsyncioTestCase):
     """Test refresh_user_token"""
 
     @patch('management.services.permission.identity.authentication.extend_session')
-    @patch('management.services.permission.identity.authentication.get_authorized_client')
+    @patch('management.services.permission.identity.authentication.get_supabase_client')
     async def test_refresh_token_success(self, mock_get_client, mock_extend_session):
         """Test successful token refresh"""
         mock_client = MagicMock()
@@ -1417,14 +1393,14 @@ class TestRefreshUserToken(unittest.IsolatedAsyncioTestCase):
         }
         mock_extend_session.return_value = session_info
 
-        result = await refresh_user_token("Bearer old-token", "refresh-token")
+        result = await refresh_user_token("old-token", "refresh-token")
 
         self.assertEqual(result, session_info)
-        mock_get_client.assert_called_once_with("Bearer old-token")
+        mock_get_client.assert_called_once_with()
         mock_extend_session.assert_called_once_with(mock_client, "refresh-token")
 
     @patch('management.services.permission.identity.authentication.extend_session')
-    @patch('management.services.permission.identity.authentication.get_authorized_client')
+    @patch('management.services.permission.identity.authentication.get_supabase_client')
     async def test_refresh_token_failure(self, mock_get_client, mock_extend_session):
         """Test token refresh failure"""
         mock_client = MagicMock()
@@ -1432,7 +1408,7 @@ class TestRefreshUserToken(unittest.IsolatedAsyncioTestCase):
         mock_extend_session.return_value = None
 
         with self.assertRaises(ValueError) as context:
-            await refresh_user_token("Bearer old-token", "refresh-token")
+            await refresh_user_token("old-token", "refresh-token")
 
         self.assertEqual(str(context.exception), "Refresh token failed, the token may have expired")
 
@@ -1440,7 +1416,7 @@ class TestRefreshUserToken(unittest.IsolatedAsyncioTestCase):
 class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
     """Test get_session_by_authorization"""
 
-    @patch('management.services.permission.identity.authentication.validate_token')
+    @patch('gateway.authentication.auth.validate_token')
     async def test_get_session_success(self, mock_validate_token):
         """Test successful session retrieval"""
         mock_user = MagicMock()
@@ -1460,7 +1436,7 @@ class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(result, expected)
 
-    @patch('management.services.permission.identity.authentication.validate_token')
+    @patch('gateway.authentication.auth.validate_token')
     async def test_get_session_default_role(self, mock_validate_token):
         """Test session retrieval with default role"""
         mock_user = MagicMock()
@@ -1473,7 +1449,7 @@ class TestGetSessionByAuthorization(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["user"]["role"], "user")
 
-    @patch('management.services.permission.identity.authentication.validate_token')
+    @patch('gateway.authentication.auth.validate_token')
     async def test_get_session_invalid_token(self, mock_validate_token):
         """Test session retrieval with invalid token"""
         mock_validate_token.return_value = (False, None)
@@ -1720,8 +1696,8 @@ class TestFormatRolePermissions(unittest.TestCase):
 class TestCreateToken(unittest.IsolatedAsyncioTestCase):
     """Tests for create_token function in user_management_service."""
 
-    @patch('database.token_db.soft_delete_tokens_by_user')
-    @patch('database.client.get_db_session')
+    @patch('management.db.identity.token.soft_delete_tokens_by_user')
+    @patch('management.db.client.get_db_session')
     @patch('management.services.permission.identity.authentication.create_token_record')
     @patch('management.services.permission.identity.authentication.generate_access_key')
     def test_create_token_success(
@@ -1732,7 +1708,7 @@ class TestCreateToken(unittest.IsolatedAsyncioTestCase):
         mock_soft_delete_tokens,
     ):
         """Test successful token creation."""
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         mock_generate_access_key.return_value = "nexent-abc123"
         mock_create_token_record.return_value = {
@@ -1771,7 +1747,7 @@ class TestListTokensByUser(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.permission.identity.authentication.list_tokens_by_user_record')
     def test_list_tokens_by_user_success(self, mock_list_tokens, mock_mask_access_key):
         """Test successful token listing."""
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         mock_list_tokens.return_value = [
             {"token_id": 1, "access_key": "nexent-key1", "user_id": "user-123"},
@@ -1797,7 +1773,7 @@ class TestListTokensByUser(unittest.IsolatedAsyncioTestCase):
             side_effect=lambda key: f"masked:{key}")
     @patch('management.services.permission.identity.authentication.list_tokens_by_user_record')
     def test_list_tokens_by_user_admin_receives_complete_key(self, mock_list_tokens, mock_mask_access_key):
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         stored_key = "nexent-7593775c8d8798ae7565495b"
         mock_list_tokens.return_value = [
@@ -1820,7 +1796,7 @@ class TestListTokensByUser(unittest.IsolatedAsyncioTestCase):
             side_effect=lambda key: f"masked:{key}")
     @patch('management.services.permission.identity.authentication.list_tokens_by_user_record')
     def test_list_tokens_by_user_dev_masks_middle(self, mock_list_tokens, mock_mask_access_key):
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         mock_list_tokens.return_value = [
             {"token_id": 1, "access_key": "nexent-1234567890abcdef", "user_id": "user-123"}
@@ -1836,7 +1812,7 @@ class TestListTokensByUser(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.permission.identity.authentication.list_tokens_by_user_record')
     def test_list_tokens_by_user_empty(self, mock_list_tokens):
         """Test listing tokens when user has none."""
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         mock_list_tokens.return_value = []
 
@@ -1851,7 +1827,7 @@ class TestDeleteToken(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.permission.identity.authentication.delete_token_record')
     def test_delete_token_success(self, mock_delete_token):
         """Test successful token deletion."""
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         mock_delete_token.return_value = True
 
@@ -1863,7 +1839,7 @@ class TestDeleteToken(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.permission.identity.authentication.delete_token_record')
     def test_delete_token_not_found(self, mock_delete_token):
         """Test deleting non-existent token."""
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         mock_delete_token.return_value = False
 
@@ -1880,7 +1856,7 @@ class TestUpdatePassword(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.permission.identity.authentication.get_user_tenant_by_user_id')
     async def test_update_password_success(self, mock_get_tenant, mock_get_client, mock_validate_strength):
         """Test successful password update."""
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         mock_validate_strength.return_value = True
         mock_get_tenant.return_value = {"user_email": "test@example.com"}
@@ -1903,7 +1879,7 @@ class TestUpdatePassword(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.permission.identity.authentication.validate_password_strength')
     async def test_update_password_weak_password(self, mock_validate_strength):
         """Test password update with weak password."""
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         mock_validate_strength.return_value = False
 
@@ -1915,7 +1891,7 @@ class TestUpdatePassword(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.permission.identity.authentication.validate_password_strength')
     async def test_update_password_same_as_old(self, mock_validate_strength):
         """Test password update with new password same as old."""
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         mock_validate_strength.return_value = True
 
@@ -1929,7 +1905,7 @@ class TestUpdatePassword(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.permission.identity.authentication.get_user_tenant_by_user_id')
     async def test_update_password_user_not_found(self, mock_get_tenant, mock_get_client, mock_validate_strength):
         """Test password update when user tenant not found."""
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         mock_validate_strength.return_value = True
         mock_get_tenant.return_value = None
@@ -1946,7 +1922,7 @@ class TestUpdatePassword(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.permission.identity.authentication.get_user_tenant_by_user_id')
     async def test_update_password_missing_email(self, mock_get_tenant, mock_get_client, mock_validate_strength):
         """Test password update when user email is missing."""
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         mock_validate_strength.return_value = True
         mock_get_tenant.return_value = {"user_email": None}
@@ -1963,7 +1939,7 @@ class TestUpdatePassword(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.permission.identity.authentication.get_user_tenant_by_user_id')
     async def test_update_password_invalid_old_password(self, mock_get_tenant, mock_get_client, mock_validate_strength):
         """Test password update with incorrect old password."""
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         mock_validate_strength.return_value = True
         mock_get_tenant.return_value = {"user_email": "test@example.com"}
@@ -1981,7 +1957,7 @@ class TestUpdatePassword(unittest.IsolatedAsyncioTestCase):
     @patch('management.services.permission.identity.authentication.get_user_tenant_by_user_id')
     async def test_update_password_update_user_error(self, mock_get_tenant, mock_get_client, mock_validate_strength):
         """Test password update when update_user fails."""
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         mock_validate_strength.return_value = True
         mock_get_tenant.return_value = {"user_email": "test@example.com"}
@@ -2008,7 +1984,7 @@ class TestAssetOwnerUserManagement(unittest.IsolatedAsyncioTestCase):
     def test_format_role_permissions_excludes_asset_owner_route_when_disabled(
         self, mock_filter_routes,
     ):
-        import management.services.permission.asset_owner as aov
+        from management.services.permission import asset_owner as aov
 
         mock_filter_routes.side_effect = aov.filter_accessible_routes_for_asset_owner_feature
         from management.services.permission.identity.authentication import format_role_permissions
@@ -2109,10 +2085,10 @@ class TestAdditionalUserManagementCoverage(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(validate_password_strength("Abcdefgh"))
         self.assertTrue(validate_password_strength("Abcdefg1"))
 
-    @patch("management.services.permission.identity.authentication.get_current_user_from_client")
-    @patch("management.services.permission.identity.authentication.set_auth_token_to_client")
-    @patch("management.services.permission.identity.authentication.get_supabase_client")
-    @patch("management.services.permission.identity.authentication.ensure_cas_session_active_from_authorization")
+    @patch("gateway.authentication.auth.get_current_user_from_client")
+    @patch("gateway.authentication.auth.set_auth_token_to_client")
+    @patch("gateway.authentication.auth.get_supabase_client")
+    @patch("gateway.authentication.auth.ensure_cas_session_active_from_authorization")
     def test_validate_token_checks_cas_session(self, mock_cas, mock_get_client, mock_set_token, mock_get_user):
         user = MagicMock()
         mock_get_client.return_value = MagicMock()
@@ -2158,7 +2134,7 @@ class TestAdditionalUserManagementCoverage(unittest.IsolatedAsyncioTestCase):
 
         session.get.assert_called_once()
         _, kwargs = session.get.call_args
-        from management.services.permission.identity import authentication as ums
+        import management.services.permission.identity.authentication as ums
 
         self.assertEqual(kwargs["headers"], {"apikey": ums.SUPABASE_KEY})
 

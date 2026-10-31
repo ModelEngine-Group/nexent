@@ -21,17 +21,14 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import CreateSchema, DropSchema
 
-from apps import conversation_management_app as routes
-from consts.exceptions import AppException
-from consts.model import MessageRequest, MessageUnit
+from management.api.conversation import conversation_management as routes
+from contracts.errors.exceptions import AppException
+from contracts.conversation import MessageRequest, MessageUnit
 from contracts.conversation import MessageSource, encode_activity_cursor
-from database import conversation_db as db
-from database import workbench_pin_db as pins
-from database.client import db_client
-from database.db_models import (
-    ConversationMessage, ConversationMessageUnit, ConversationRecord,
-    ConversationSourceImage, ConversationSourceSearch,
-)
+from management.db.conversation import repository as db
+from management.db.conversation import pins as pins
+from management.db.client import db_client
+from management.db.models import ConversationMessage, ConversationMessageUnit, ConversationRecord, ConversationSourceImage, ConversationSourceSearch
 from management.services.automation.conversation import AutomationConversationAdapter
 from management.services.conversation.service import save_message
 
@@ -195,3 +192,20 @@ def test_mixed_source_quota_activity_and_cursor(persistence):
     tail = client.get("/api/conversation/list", params={**params, "cursor": legacy_cursor}).json()["data"]
     assert [row["conversation_id"] for row in tail["items"]] == [2]
     assert tail["items"][0]["last_activity_time"] == pinned[2]["last_activity_time"]
+
+
+    # A legacy history with no activity becomes recent on its first visible message.
+    with sessions() as session:
+        assert session.get(ConversationRecord, 2).last_activity_time is None
+    db.create_conversation_message(
+        {"conversation_id": 2, "message_idx": 0, "role": "user", "content": "resume legacy history"},
+        "owner",
+    )
+    with sessions() as session:
+        resumed = session.get(ConversationRecord, 2).last_activity_time
+        assert resumed.tzinfo is None and resumed > answered
+        assert resumed <= datetime.now(timezone.utc).replace(tzinfo=None)
+    resumed_page = client.get("/api/conversation/list", params=params).json()["data"]
+    assert resumed_page["items"][0]["conversation_id"] == 2
+    assert resumed_page["items"][0]["last_activity_time"] == int(resumed.replace(tzinfo=timezone.utc).timestamp() * 1000)
+    assert resumed_page["metadata"] == {"total": 3, "today": 2, "last_7_days": 0, "older": 1}

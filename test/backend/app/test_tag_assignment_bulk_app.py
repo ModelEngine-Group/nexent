@@ -1,6 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import pytest
-from apps import tag_management_app
-from consts.model import TagAssignmentBulkReplaceRequest
+from management.api.tag import tag_management as tag_management_app
+from contracts.tag import TagAssignmentBulkReplaceRequest
 
 
 @pytest.mark.asyncio

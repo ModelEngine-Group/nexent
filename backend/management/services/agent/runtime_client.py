@@ -6,14 +6,10 @@ from typing import AsyncIterator, Literal
 import httpx
 from fastapi.responses import StreamingResponse
 
-from consts.const import RUNTIME_SERVICE_URL
-from consts.exceptions import (
-    RuntimeServiceTimeoutError,
-    RuntimeServiceUnavailableError,
-    RuntimeUpstreamError,
-)
-from consts.model import AgentRequest
-from management.services.permission.identity.authentication_helpers import generate_internal_runtime_jwt
+from contracts.constants.environment import RUNTIME_SERVICE_URL
+from contracts.errors.exceptions import RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError
+from contracts.agent import AgentRequest
+from gateway.authentication.auth import generate_internal_runtime_jwt
 from infrastructure.http.client import create_httpx_client
 
 

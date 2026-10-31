@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from consts.model import NL2SkillRunRequest
-import services.nl2skill_service as nl2skill_service
+from contracts.agent import NL2SkillRunRequest
+from services import nl2skill_service as nl2skill_service
 from services.nl2skill_service import (
     _assemble_draft_content,
     _convert_history,
@@ -23,7 +23,7 @@ from services.nl2skill_service import (
     build_nl2skill_run_info,
     create_nl2skill_stream,
 )
-from agents.nl2skill_agent import NL2SKILL_NAME, create_nl2skill_agent_config
+from management.services.skill.creation import NL2SKILL_NAME, create_nl2skill_agent_config
 
 
 def test_create_nl2skill_agent_config_sets_ephemeral_runtime_options():

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """D1 backend unit contracts derived from the functional baseline.
 
 These tests import production modules directly and never import Nexent's old
@@ -7,6 +9,7 @@ boundary; assertions describe user-visible policy, not implementation calls.
 
 from __future__ import annotations
 
+import gateway.authentication.auth as depends_dependencies
 from types import SimpleNamespace
 
 import pytest
@@ -19,13 +22,15 @@ STAGE = pytest.mark.stage("D1")
 @STAGE
 @pytest.mark.case_id("UT-BE-001")
 def test_permission_core_flow(monkeypatch: pytest.MonkeyPatch) -> None:
-    from permissions import depends, rbac
+    import permissions.depends as depends
+    from permissions import rbac
     from permissions.models import CurrentUser
     from permissions.tenant_scope import resolve_personal_target_tenant
 
     monkeypatch.setattr(depends, "IS_SPEED_MODE", False)
-    monkeypatch.setattr(depends, "get_current_user_context", lambda token: ("u1", "t1", "ADMIN"))
-    user = depends.authenticate("Bearer verified", None)
+    monkeypatch.setattr(depends_dependencies, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(depends_dependencies, "get_current_user_context", lambda token: ("u1", "t1", "ADMIN"))
+    user = depends_dependencies.authenticate("Bearer verified", None)
     assert user == CurrentUser("u1", "t1", "ADMIN")
 
     monkeypatch.setattr(rbac, "_INITIALIZED", True)
@@ -46,23 +51,3 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
         tokenizer_family="openai",
         capability_profile_version=version,
     )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

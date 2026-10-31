@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 import types
 from unittest.mock import MagicMock
@@ -9,16 +11,22 @@ import pytest
 sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "../../.."))
 
 
-# Stub database.client
-client_mod = types.ModuleType("database.client")
+# Stub management.db.client
+client_mod = types.ModuleType("management.db.client")
 client_mod.get_db_session = MagicMock(name="get_db_session")
 client_mod.filter_property = MagicMock(name="filter_property")
-sys.modules["database.client"] = client_mod
-sys.modules["backend.database.client"] = client_mod
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 
 # Stub db_models
-db_models_mod = types.ModuleType("database.db_models")
+db_models_mod = types.ModuleType("management.db.models")
 
 class MemoryUserConfig:
     user_id = MagicMock(name="MemoryUserConfig.user_id")
@@ -27,11 +35,11 @@ class MemoryUserConfig:
 
 
 db_models_mod.MemoryUserConfig = MemoryUserConfig
-sys.modules["database.db_models"] = db_models_mod
-sys.modules["backend.database.db_models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
 
 
-from backend.database.memory_config_db import soft_delete_all_configs_by_user_id
+from management.db.memory.config import soft_delete_all_configs_by_user_id
 
 
 @pytest.fixture
@@ -52,7 +60,7 @@ def test_soft_delete_all_configs_by_user_id_success(monkeypatch, mock_session_ct
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
 
-    monkeypatch.setattr("backend.database.memory_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.config.get_db_session", lambda: ctx)
 
     ok = soft_delete_all_configs_by_user_id("user-1", actor="user-1")
 
@@ -71,7 +79,7 @@ def test_soft_delete_all_configs_by_user_id_failure(monkeypatch, mock_session_ct
     mock_query.filter.return_value = mock_filter
     session.query.return_value = mock_query
 
-    monkeypatch.setattr("backend.database.memory_config_db.get_db_session", lambda: ctx)
+    monkeypatch.setattr("management.db.memory.config.get_db_session", lambda: ctx)
 
     ok = soft_delete_all_configs_by_user_id("user-2", actor="user-2")
 

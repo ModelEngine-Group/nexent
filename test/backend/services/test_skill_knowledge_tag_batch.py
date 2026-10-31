@@ -6,10 +6,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from apps import tag_management_app
-from database.skill_db import get_skills_for_tag_read
-from database.knowledge_db import get_knowledge_records_for_tag_read
-from database.tag_management_db import TagManagementDB
+from management.api.tag import tag_management as tag_management_app
+from management.db.skill.repository import get_skills_for_tag_read
+from management.db.knowledge_base.repository import get_knowledge_records_for_tag_read
+from management.db.tag.repository import TagManagementDB
 from management.services.knowledge_base import permission
 from management.services.tag.library import TagManagementService
 from management.services.tag.resources import AuthenticatedCaller
@@ -106,8 +106,8 @@ def test_knowledge_without_user_membership_denies_without_group_lookup(monkeypat
 
 
 @pytest.mark.parametrize("loader,module,id_field,ids", [
-    (get_skills_for_tag_read, "database.skill_db", "skill_id", [1, 2]),
-    (get_knowledge_records_for_tag_read, "database.knowledge_db", "index_name", ["a", "b"]),
+    (get_skills_for_tag_read, "management.db.skill.repository", "skill_id", [1, 2]),
+    (get_knowledge_records_for_tag_read, "management.db.knowledge_base.repository", "index_name", ["a", "b"]),
 ])
 def test_visibility_queries_are_single_tenant_scoped_in_reads(monkeypatch, loader, module, id_field, ids):
     session = MagicMock()

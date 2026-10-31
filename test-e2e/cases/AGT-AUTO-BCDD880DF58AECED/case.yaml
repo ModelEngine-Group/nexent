@@ -27,7 +27,7 @@ case:
     action: 在本地工作区准备记忆预检索集成测试环境，注入固定 tenant_id/user_id/agent_id 与开启 memory_switch 的 memory_context；测试代码不得读取生产凭据。
     expected: create_agent_config 在记忆预检索阶段通过 run_blocking("memory-presearch", lane="model-tool-io", owner="runtime") 并发执行，功能结果与代码契约一致，测试过程无未处理异常。
   - order: 2
-    action: 直接调用 backend/agents/create_agent_info.py 的 create_agent_config 构造最小有效 Agent 配置，记录记忆预检索是否经 run_blocking("memory-presearch",
+    action: 直接调用 backend/management/services/agent/preparation/compiler.py 的 create_agent_config 构造最小有效 Agent 配置，记录记忆预检索是否经 run_blocking("memory-presearch",
       lane="model-tool-io", owner="runtime") 并发执行及返回结果。
     expected: 外部记忆 provider 搜索失败时记录 event=external_provider_search_failed 并降级为 external_results=None，长短期记忆与预检索继续执行，不阻断 Agent
       配置构建。

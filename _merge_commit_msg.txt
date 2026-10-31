@@ -1,0 +1,34 @@
+merge(develop): sync v2.8.1 hotfix fixes from main
+
+Merge the v2.8.1 hotfix line back into develop so the production fixes are
+not lost on the next release. The hotfix branch shipped 6 fixes; one of them
+(browser tab branding, #4215) already landed on develop independently, so
+this merge contributes the remaining 5.
+
+Fixes brought back
+- Paginate agent conversation history by group with scoped infinite
+  scrolling, fixing slow loading and scroll lag in long sessions (#4225).
+  Adds conversation_agent_history_db plus new conversation contracts and
+  management endpoints.
+- Resume chat after an SSE disconnect instead of leaving the conversation
+  stuck (#4221). Adjusts the agent subscription lifecycle and adds
+  lifecycle coverage.
+- Accept externally registered A2A agents whose names contain special
+  characters (#4212). Relaxes agent invocation name validation and aligns
+  the NL2Agent naming path.
+- Carry the configured default model into the agent editor instead of
+  forcing a manual reselect (#4228). Also fixes missing Agent Space tags
+  and inconsistent card layout and actions.
+- Fix the default agent count on the conversation page and the duplicate
+  conversation-detail API calls (aaad6f07d).
+
+Already on develop, kept as-is
+- Browser tab branding (#4215) landed on develop as 105e3eca1 with
+  identical content, so this merge does not duplicate it.
+
+Merge conventions
+- Merge commit, no squash: the hotfix ancestry must stay intact so the
+  next develop-to-main release does not re-merge these commits.
+- No SQL migrations in this range; existing databases need no action.
+- VERSION on main is still v2.8.0 while the v2.8.1 tag exists. Bump it on
+  the next commit that touches versioning.

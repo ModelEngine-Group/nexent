@@ -71,7 +71,7 @@ def test_msrf_d1_001():
 
     for path in MODEL.rglob("*.py"):
         assert len(path.read_text(encoding="utf-8-sig").splitlines()) <= 1500, path
-    assert len((ROOT / "backend/contracts/model.py").read_text().splitlines()) <= 1500
+    assert len((ROOT / "backend/contracts/model.py").read_text(encoding="utf-8").splitlines()) <= 1500
 
     for folder in ("backend", "sdk", "test", "test-e2e"):
         for path in _python_sources(folder):

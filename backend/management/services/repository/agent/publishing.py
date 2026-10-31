@@ -2,29 +2,15 @@
 
 from typing import Any, Dict, Optional
 
-from consts.agent_repository import (
-    STATUS_PENDING_REVIEW,
-    STATUS_REJECTED,
-    STATUS_SHARED,
-    VALID_REPOSITORY_STATUSES,
-)
-from consts.const import SYSTEM_TENANT_ID
-from consts.exceptions import UnauthorizedError
-from consts.model import AgentRepositorySnapshot
-from consts.notification import (
-    EVENT_TYPE_REPOSITORY_REVIEW_PENDING,
-    RESOURCE_TYPE_AGENT_REPOSITORY,
-)
-from database.agent_db import search_agent_info_by_agent_id
-from database.agent_repository_db import (
-    get_agent_repository_by_agent_id,
-    get_agent_repository_by_id,
-    insert_agent_repository_record,
-    update_agent_repository_by_id,
-    update_agent_repository_status_by_id,
-)
-from database.agent_version_db import search_version_by_version_no
-from database.user_tenant_db import get_user_tenant_by_user_id
+from contracts.constants.constants import STATUS_PENDING_REVIEW, STATUS_REJECTED, STATUS_SHARED, VALID_REPOSITORY_STATUSES
+from contracts.constants.constants import SYSTEM_TENANT_ID
+from contracts.errors.exceptions import UnauthorizedError
+from contracts.agent import AgentRepositorySnapshot
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
+from management.db.agent.repository import search_agent_info_by_agent_id
+from management.db.agent.catalog import get_agent_repository_by_agent_id, get_agent_repository_by_id, insert_agent_repository_record, update_agent_repository_by_id, update_agent_repository_status_by_id
+from management.db.agent.version import search_version_by_version_no
+from management.db.identity.user_tenant import get_user_tenant_by_user_id
 from management.services.agent.icon import read_icon_image
 from management.services.agent.service import (
     collect_skill_zip_entries,

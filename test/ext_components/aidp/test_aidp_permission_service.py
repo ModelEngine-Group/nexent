@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ``aidp_permission_service``.
 
 Exercises the v7.1 permission matrix by stubbing the local DB helpers
@@ -56,7 +58,7 @@ from ext_components.aidp.consts.aidp_exceptions import (  # noqa: E402
     AidpKbPermissionDeniedError,
     AidpGroupValidationError,
 )
-from consts.const import CAN_EDIT_ALL_USER_ROLES  # noqa: E402
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
 
 
 # --- Helpers --------------------------------------------------------------

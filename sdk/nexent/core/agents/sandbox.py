@@ -3178,7 +3178,7 @@ class SandboxPoolManager:
                 raise RuntimeError("Docker sandbox FAILED phase=dependency; local fallback is disabled")
             logger_.error(
                 "DockerExecutor requires smolagents[docker]. "
-                "Install it with: pip install 'smolagents[docker]'. "
+                "Install it with: uv pip install 'smolagents[docker]'. "
                 "Falling back to LocalPythonExecutor."
             )
             return _wrap_executor(
@@ -3328,7 +3328,7 @@ class SandboxPoolManager:
         except ImportError as exc:
             logger_.error(
                 "WasmExecutor requires smolagents[wasm]. "
-                "Install it with: pip install 'smolagents[wasm]'. "
+                "Install it with: uv pip install 'smolagents[wasm]'. "
                 "Falling back to LocalPythonExecutor."
             )
             return _wrap_executor(

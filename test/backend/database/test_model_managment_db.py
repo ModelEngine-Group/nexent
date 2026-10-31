@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import importlib
 import sys
 import pytest
@@ -8,7 +9,7 @@ from types import SimpleNamespace
 # Mock consts module first to avoid ModuleNotFoundError during module import
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
-# Set required constants on consts.const for tests
+# Set required constants on contracts.constants.environment for tests
 consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
 consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
 consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
@@ -25,8 +26,9 @@ consts_mock.const.DEFAULT_MAXIMUM_CHUNK_SIZE = 1536
 
 # Register mocked consts module in sys.modules
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
-sys.modules['consts.model'] = consts_mock.model
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
+install_business_contract_stubs(consts_mock.model)
 
 # Mock utils module used by target module
 utils_mock = MagicMock()
@@ -35,7 +37,7 @@ utils_mock.auth_utils.get_current_user_id = MagicMock(return_value=("test_user_i
 
 # Register mocked utils module in sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['management.services.permission.identity.authentication_helpers'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -51,12 +53,14 @@ client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 
 # Register mocked client module in sys.modules
-sys.modules['backend.database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 """Now that dependencies are mocked, import the module under test.
 Access functions via the module object to avoid direct function imports.
 """
-model_mgmt_db = importlib.import_module("backend.database.model_management_db")
+model_mgmt_db = importlib.import_module("management.db.model.repository")
 
 @pytest.fixture
 def mock_session():
@@ -79,9 +83,9 @@ def test_get_models_by_tenant_factory_type(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = mock_session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
     # patch as_dict
-    monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.model.repository.as_dict", lambda obj: obj.__dict__)
 
     tenant_id = "tenant1"
     model_factory = "openai"
@@ -115,9 +119,9 @@ def test_get_model_records_fills_default_chunk_sizes(monkeypatch):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+        "management.db.model.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+        "management.db.model.repository.as_dict", lambda obj: obj.__dict__)
 
     records = model_mgmt_db.get_model_records(
         {"model_type": "embedding"}, tenant_id="tenant2")
@@ -146,7 +150,7 @@ def test_get_model_by_model_id_fills_default_chunk_sizes(monkeypatch):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+        "management.db.model.repository.get_db_session", lambda: mock_ctx)
 
     out = model_mgmt_db.get_model_by_model_id(3, tenant_id="tenant3")
     assert out is not None
@@ -163,7 +167,7 @@ def test_create_model_record(monkeypatch):
     mock_stmt.values.return_value = mock_stmt
 
     mock_insert = MagicMock(return_value=mock_stmt)
-    monkeypatch.setattr("backend.database.model_management_db.insert", mock_insert)
+    monkeypatch.setattr("management.db.model.repository.insert", mock_insert)
 
     session = MagicMock()
     session.execute.return_value = mock_result
@@ -171,12 +175,16 @@ def test_create_model_record(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
 
     # Mock clean_string_values and add_creation_tracking
-    monkeypatch.setattr("backend.database.model_management_db.db_client.clean_string_values", lambda x: x)
-    monkeypatch.setattr("backend.database.model_management_db.add_creation_tracking", lambda x, uid: x)
-    monkeypatch.setattr("backend.database.model_management_db.func.current_timestamp", MagicMock())
+    # Patch the class attribute: ``db_client`` is an instance and the helper is a
+    # @staticmethod, so patching the instance does not shadow it on every pytest.
+    monkeypatch.setattr(
+        "management.db.client.PostgresClient.clean_string_values", lambda x: x
+    )
+    monkeypatch.setattr("management.db.model.repository.add_creation_tracking", lambda x, uid: x)
+    monkeypatch.setattr("management.db.model.repository.func.current_timestamp", MagicMock())
 
     model_data = {"model_name": "test", "model_type": "llm"}
     result = model_mgmt_db.create_model_record(model_data, user_id="u1", tenant_id="t1")
@@ -195,7 +203,7 @@ def test_update_model_record(monkeypatch):
     mock_stmt.values.return_value = mock_stmt
 
     mock_update = MagicMock(return_value=mock_stmt)
-    monkeypatch.setattr("backend.database.model_management_db.update", mock_update)
+    monkeypatch.setattr("management.db.model.repository.update", mock_update)
 
     session = MagicMock()
     session.execute.return_value = mock_result
@@ -203,12 +211,16 @@ def test_update_model_record(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
 
     # Mock clean_string_values and add_update_tracking
-    monkeypatch.setattr("backend.database.model_management_db.db_client.clean_string_values", lambda x: x)
-    monkeypatch.setattr("backend.database.model_management_db.add_update_tracking", lambda x, uid: x)
-    monkeypatch.setattr("backend.database.model_management_db.func.current_timestamp", MagicMock())
+    # Patch the class attribute: ``db_client`` is an instance and the helper is a
+    # @staticmethod, so patching the instance does not shadow it on every pytest.
+    monkeypatch.setattr(
+        "management.db.client.PostgresClient.clean_string_values", lambda x: x
+    )
+    monkeypatch.setattr("management.db.model.repository.add_update_tracking", lambda x, uid: x)
+    monkeypatch.setattr("management.db.model.repository.func.current_timestamp", MagicMock())
 
     update_data = {"model_name": "updated"}
     result = model_mgmt_db.update_model_record(1, update_data, user_id="u1", tenant_id="t1")
@@ -224,7 +236,7 @@ def test_fail_detecting_models_on_startup(monkeypatch):
     mock_stmt.where.return_value = mock_stmt
     mock_stmt.values.return_value = mock_stmt
     mock_update = MagicMock(return_value=mock_stmt)
-    monkeypatch.setattr("backend.database.model_management_db.update", mock_update)
+    monkeypatch.setattr("management.db.model.repository.update", mock_update)
 
     session = MagicMock()
     session.execute.return_value = mock_result
@@ -232,7 +244,7 @@ def test_fail_detecting_models_on_startup(monkeypatch):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.model_management_db.get_db_session", lambda: mock_ctx
+        "management.db.model.repository.get_db_session", lambda: mock_ctx
     )
 
     assert model_mgmt_db.fail_detecting_models_on_startup() == 3
@@ -250,7 +262,7 @@ def test_delete_model_record(monkeypatch):
     mock_stmt.values.return_value = mock_stmt
 
     mock_update = MagicMock(return_value=mock_stmt)
-    monkeypatch.setattr("backend.database.model_management_db.update", mock_update)
+    monkeypatch.setattr("management.db.model.repository.update", mock_update)
 
     session = MagicMock()
     session.execute.return_value = mock_result
@@ -258,11 +270,11 @@ def test_delete_model_record(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
 
     # Mock add_update_tracking
-    monkeypatch.setattr("backend.database.model_management_db.add_update_tracking", lambda x, uid: x)
-    monkeypatch.setattr("backend.database.model_management_db.func.current_timestamp", MagicMock())
+    monkeypatch.setattr("management.db.model.repository.add_update_tracking", lambda x, uid: x)
+    monkeypatch.setattr("management.db.model.repository.func.current_timestamp", MagicMock())
 
     result = model_mgmt_db.delete_model_record(1, user_id="u1", tenant_id="t1")
 
@@ -287,8 +299,8 @@ def test_get_model_records_with_tenant_id(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.as_dict", lambda obj: obj.__dict__)
 
     records = model_mgmt_db.get_model_records({"model_type": "llm"}, tenant_id="tenant4")
     assert len(records) == 1
@@ -313,8 +325,8 @@ def test_get_model_records_with_none_filter(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.as_dict", lambda obj: obj.__dict__)
 
     records = model_mgmt_db.get_model_records({"display_name": None}, tenant_id="tenant5")
     assert len(records) == 1
@@ -338,8 +350,8 @@ def test_get_model_by_display_name(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.as_dict", lambda obj: obj.__dict__)
 
     result = model_mgmt_db.get_model_by_display_name("GPT-4", "tenant6")
     assert result is not None
@@ -364,8 +376,8 @@ def test_get_model_id_by_display_name(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.as_dict", lambda obj: obj.__dict__)
 
     result = model_mgmt_db.get_model_id_by_display_name("GPT-4", "tenant7")
     assert result == 7
@@ -416,7 +428,7 @@ def test_get_model_by_model_id_with_tenant_id(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
 
     result = model_mgmt_db.get_model_by_model_id(8, tenant_id="tenant8")
     assert result is not None
@@ -440,8 +452,8 @@ def test_get_model_by_name_factory(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.model_management_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.as_dict", lambda obj: obj.__dict__)
 
     result = model_mgmt_db.get_model_by_name_factory("gpt-4", "openai", "tenant9")
     assert result is not None
@@ -486,7 +498,7 @@ def test_get_model_by_model_id_not_found(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
     assert model_mgmt_db.get_model_by_model_id(999, tenant_id="t") is None
 
 
@@ -507,7 +519,7 @@ def test_get_valid_model_ids_all_valid(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
 
     # All model IDs are valid
     result = model_mgmt_db.get_valid_model_ids([1, 2, 3], "tenant1")
@@ -525,7 +537,7 @@ def test_get_valid_model_ids_some_deleted(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
 
     # Model 2 was deleted (delete_flag='Y'), so only 1 and 3 should be returned
     result = model_mgmt_db.get_valid_model_ids([1, 2, 3], "tenant1")
@@ -543,7 +555,7 @@ def test_get_valid_model_ids_preserves_order(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
 
     # Original order should be preserved for valid IDs
     result = model_mgmt_db.get_valid_model_ids([2, 3, 1], "tenant1")
@@ -561,7 +573,7 @@ def test_get_valid_model_ids_none_deleted(monkeypatch):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.model_management_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
 
     # All models were deleted
     result = model_mgmt_db.get_valid_model_ids([1, 2, 3], "tenant1")
@@ -585,7 +597,7 @@ def _patch_session(monkeypatch, scalars_first, scalars_all=None):
     ctx.__enter__.return_value = session
     ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.model_management_db.get_db_session", lambda: ctx)
+        "management.db.model.repository.get_db_session", lambda: ctx)
     return session
 
 

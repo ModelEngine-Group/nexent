@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Shared loading, hashing, and validation for formal Nexent test assets."""
 
 from __future__ import annotations
@@ -41,6 +43,8 @@ class ValidationIssue:
     path: Path
     location: str
     message: str
+    code: str = "UNCLASSIFIED"
+    case_id: str | None = None
 
     def render(self, root: Path) -> str:
         try:

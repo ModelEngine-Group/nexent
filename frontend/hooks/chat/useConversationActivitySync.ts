@@ -41,10 +41,7 @@ export function useConversationActivitySync(
     () => ["conversation-activity", scopeKey, conversationType],
     [scopeKey, conversationType]
   );
-  useForegroundRefresh(
-    queryKey,
-    conversationType === "workbench" && Boolean(scopeKey)
-  );
+  useForegroundRefresh(queryKey, Boolean(scopeKey));
   const query = useQuery({
     queryKey,
     staleTime: CONVERSATION_SYNC_FRESHNESS_MS,

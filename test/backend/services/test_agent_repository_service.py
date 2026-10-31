@@ -2,6 +2,7 @@
 
 """Unit tests for agent marketplace repository service."""
 
+from test.common.contract_stubs import install_business_contract_stubs
 from test.backend.management.import_patching import patch_import_context, patch_import_object_context, set_import_attribute
 
 import sys
@@ -38,33 +39,33 @@ _agent_repo_db_mock.increment_agent_repository_downloads = MagicMock(return_valu
 _agent_repo_db_mock.sum_agent_repository_downloads_by_agent_ids = MagicMock(return_value={})
 _agent_repo_db_mock.fetch_draft_agent_mine_metadata = MagicMock(return_value={})
 _agent_repo_db_mock.list_agent_repository_by_agent_ids = MagicMock(return_value=[])
-sys.modules["database.agent_repository_db"] = _agent_repo_db_mock
+sys.modules["management.db.agent.catalog"] = _agent_repo_db_mock
 
 _user_tenant_db_mock = MagicMock()
 _user_tenant_db_mock.get_user_tenant_by_user_id = MagicMock()
-sys.modules["database.user_tenant_db"] = _user_tenant_db_mock
+sys.modules["management.db.identity.user_tenant"] = _user_tenant_db_mock
 
 _agent_db_mock = MagicMock()
 _agent_db_mock.search_agent_info_by_agent_id = MagicMock()
-_agent_db_mock.batch_get_agent_main_flags = MagicMock(return_value={})
-sys.modules["database.agent_db"] = _agent_db_mock
+_agent_db_mock.batch_get_agent_version_main_flags = MagicMock(return_value={})
+sys.modules["management.db.agent.repository"] = _agent_db_mock
 
 _agent_version_db_mock = MagicMock()
 _agent_version_db_mock.search_version_by_version_no = MagicMock()
-sys.modules["database.agent_version_db"] = _agent_version_db_mock
+sys.modules["management.db.agent.version"] = _agent_version_db_mock
 
 _tag_management_db_mock = MagicMock()
-sys.modules["database.tag_management_db"] = _tag_management_db_mock
+sys.modules["management.db.tag.repository"] = _tag_management_db_mock
 
 # Additional DB mocks required because agent_repository_service imports
 # repository_import_precheck → skill_service, which depends on these modules.
-sys.modules.setdefault("database.skill_db", MagicMock())
-sys.modules.setdefault("database.group_db", MagicMock())
-sys.modules.setdefault("database.client", MagicMock())
-sys.modules.setdefault("database.knowledge_db", MagicMock())
-sys.modules.setdefault("database.model_management_db", MagicMock())
-sys.modules.setdefault("database.remote_mcp_db", MagicMock())
-sys.modules.setdefault("database.tool_db", MagicMock())
+sys.modules.setdefault("management.db.skill.repository", MagicMock())
+sys.modules.setdefault("management.db.identity.group", MagicMock())
+sys.modules.setdefault("management.db.client", MagicMock())
+sys.modules.setdefault("management.db.knowledge_base.repository", MagicMock())
+sys.modules.setdefault("management.db.model.repository", MagicMock())
+sys.modules.setdefault("management.db.mcp.remote", MagicMock())
+sys.modules.setdefault("management.db.tool.repository", MagicMock())
 sys.modules.setdefault("management.services.model.adapter", MagicMock())
 sys.modules.setdefault("management.services.configuration.tenant.settings", MagicMock())
 
@@ -144,7 +145,7 @@ _consts_model_mock.ModelConnectStatusEnum = _ModelConnectStatusEnum
 _consts_model_mock.ToolSourceEnum = _ToolSourceEnum
 _consts_model_mock.RepositoryImportRequirementItem = _RepositoryImportRequirementItem
 _consts_model_mock.RepositoryImportPrecheckResponse = _RepositoryImportPrecheckResponse
-sys.modules["consts.model"] = _consts_model_mock
+install_business_contract_stubs(_consts_model_mock)
 
 _agent_service_mock = MagicMock()
 _agent_service_mock.collect_skill_zip_entries = MagicMock(return_value=[])
@@ -171,9 +172,9 @@ sys.modules["management.services.agent.service"] = _agent_service_mock
 _notification_service_mock = MagicMock()
 sys.modules["management.services.notification.service"] = _notification_service_mock
 
-from consts.const import ASSET_OWNER_TENANT_ID
-from consts.exceptions import UnauthorizedError
-from consts.notification import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from contracts.errors.exceptions import UnauthorizedError
+from contracts.constants.constants import EVENT_TYPE_REPOSITORY_REVIEW_PENDING, RESOURCE_TYPE_AGENT_REPOSITORY
 
 from management.services.repository.agent import listing as ars
 
@@ -190,6 +191,7 @@ def _repository_record(
     *,
     agent_repository_id: int = 1,
     agent_id: int = 10,
+    version_no: int = 1,
     status: str = "not_shared",
     publisher_tenant_id: str = "tenant_a",
     publisher_user_id: str = "user_a",
@@ -197,6 +199,7 @@ def _repository_record(
     return {
         "agent_repository_id": agent_repository_id,
         "agent_id": agent_id,
+        "version_no": version_no,
         "author": "author",
         "name": "agent_one",
         "display_name": "Agent One",
@@ -541,7 +544,9 @@ def test_list_repository_listings_exposes_main_agent_flag():
     with patch.object(
         ars, "list_agent_repository_summaries", return_value=records
     ), patch.object(
-        ars, "batch_get_agent_main_flags", return_value={10: True, 11: False}
+        ars,
+        "batch_get_agent_version_main_flags",
+        return_value={(10, 1): True, (11, 1): False},
     ):
         result = ars.list_agent_repository_listings_impl("tenant_a", status="shared")
 
@@ -549,12 +554,30 @@ def test_list_repository_listings_exposes_main_agent_flag():
     assert flags == {10: True, 11: False}
 
 
+def test_list_repository_listings_reads_flag_from_published_version():
+    """A draft toggle must not change an already-published listing badge."""
+    records = [_listing_record(1, 10, datetime(2024, 1, 1), version_no=2)]
+    # The draft row (version 0) was switched to a non-main agent after publish;
+    # the published version row still carries the main-agent flag.
+    version_flags = {(10, 0): False, (10, 2): True}
+
+    with patch.object(
+        ars, "list_agent_repository_summaries", return_value=records
+    ), patch.object(
+        ars, "batch_get_agent_version_main_flags", return_value=version_flags
+    ) as mock_flags:
+        result = ars.list_agent_repository_listings_impl("tenant_a", status="shared")
+
+    assert result["items"][0]["is_main_agent"] is True
+    mock_flags.assert_called_once_with([(10, 2)])
+
+
 def test_list_repository_listings_defaults_main_agent_flag_when_unknown():
     records = [_listing_record(1, 10, datetime(2024, 1, 1))]
 
     with patch.object(
         ars, "list_agent_repository_summaries", return_value=records
-    ), patch.object(ars, "batch_get_agent_main_flags", return_value={}):
+    ), patch.object(ars, "batch_get_agent_version_main_flags", return_value={}):
         result = ars.list_agent_repository_listings_impl("tenant_a", status="shared")
 
     assert result["items"][0]["is_main_agent"] is True
@@ -567,22 +590,38 @@ def test_get_agent_repository_listing_detail_exposes_main_agent_flag():
     with patch.object(
         ars, "get_agent_repository_by_id", return_value=record
     ), patch.object(
-        ars, "batch_get_agent_main_flags", return_value={10: False}
+        ars, "batch_get_agent_version_main_flags", return_value={(10, 1): False}
     ):
         result = ars.get_agent_repository_listing_detail_impl(1, "tenant_a")
 
     assert result["is_main_agent"] is False
 
 
-def test_get_agent_main_flags_degrades_to_empty_on_lookup_error():
+def test_apply_agent_main_flags_degrades_to_default_on_lookup_error():
+    records = [{"agent_id": 1, "version_no": 2}]
+
     with patch.object(
         ars,
-        "batch_get_agent_main_flags",
+        "batch_get_agent_version_main_flags",
         side_effect=RuntimeError("database unavailable"),
     ):
-        assert ars._get_agent_main_flags([1, 2]) == {}
+        ars._apply_agent_main_flags(records)
 
-    assert ars._get_agent_main_flags([]) == {}
+    assert records[0]["is_main_agent"] is True
+
+
+def test_apply_agent_main_flags_skips_records_without_usable_version():
+    records = [
+        {"agent_id": None, "version_no": 2},
+        {"agent_id": 1, "version_no": None},
+        {"agent_id": 1, "version_no": "v1"},
+    ]
+
+    with patch.object(ars, "batch_get_agent_version_main_flags") as mock_flags:
+        ars._apply_agent_main_flags(records)
+
+    mock_flags.assert_not_called()
+    assert [record["is_main_agent"] for record in records] == [True, True, True]
 
 
 def test_repository_id_sort_key_defaults_unusable_ids_to_minus_one():
@@ -1822,7 +1861,7 @@ def test_delete_official_agent_removes_bundle_sources_and_listing(tmp_path):
         "agent_info_json": {"agent_info": {"10": {}, "child": {}, "11": {}}},
     }
 
-    with patch("consts.const.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch_import_object_context(
+    with patch("contracts.constants.environment.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch_import_object_context(
         ars, "get_agent_repository_by_id", return_value=record
     ), patch_import_object_context(ars, "delete_agent_by_id") as mock_delete_agent, patch_import_object_context(
         ars, "soft_delete_agent_repository_record", return_value=1
@@ -1875,7 +1914,7 @@ def test_delete_official_agent_rejects_already_deleted_listing(tmp_path):
         "name": "medical-assistant",
     }
 
-    with patch("consts.const.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch_import_object_context(
+    with patch("contracts.constants.environment.OFFICIAL_AGENTS_PATH", str(tmp_path)), patch_import_object_context(
         ars, "get_agent_repository_by_id", return_value=record
     ), patch_import_object_context(
         ars, "soft_delete_agent_repository_record", return_value=0

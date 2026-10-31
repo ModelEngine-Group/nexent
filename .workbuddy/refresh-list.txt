@@ -1,0 +1,80 @@
+表格：10-22未通过用例
+Sheet：10-22未通过用例   |   列 [18]=处理进度   [19]=处理结论／备注
+
+【 1】行 23｜CTR-016
+  [18] 环境缺失待运维；
+  [19] 缺 config/ext-knowledge.yaml，需运维按 infra/config/ext-knowledge.example.yaml 创建并挂载 mock。用例本身依赖声明合规（http-fixture 属 ext-served 子集），无需改用例
+
+【 2】行 24｜CTR-017
+  [18] 环境缺失待运维；
+  [19] 同 CTR-016，环境未就绪。配置补齐后两条同时解除阻断
+
+【 3】行 25｜PW-MEDIA-STT-01
+  [18] 已修复测试用例；
+  [19] 原定位器 getByPlaceholder('发送消息...') 失效：composer.tsx:703/715 的 placeholder 被显式置空。改用 [data-workbench-composer] / .aui-lexical-input，新增 ChatPage.composerText() 读取 innerText
+
+【 4】行 26｜PW-MEDIA-VLM-01
+  [18] 已修复测试用例；
+  [19] [data-composer-action-trigger] 全库零匹配。改用 ComposerAddAttachment 的可访问名「添加附件」（TooltipIconButton 的 tooltip 会输出 sr-only 文本）
+
+【 5】行 27｜PW-MODEL-01
+  [18] 已修复测试用例；
+  [19] debug 面板已改为 @assistant-ui Thread，textarea[placeholder] 在元素类型层面就不匹配。新增 AgentPage.debugComposer()，统一替换 5 处失效定位
+
+【 6】行 28｜PW-MODEL-02
+  [18] 已修复测试用例；
+  [19] 知识库页无 role=heading 标题（KnowledgeConfiguration.tsx 无 h1/h2/heading）。断言改为互斥双态：创建工具栏 / 未配置向量模型提示
+
+【 7】行 29｜REL-02
+  [18] 环境缺失待运维；
+  [19] 声明 required_mock_services:[model-provider] 属 ext-served 子集，同缺 ext-knowledge.yaml；环境侧补齐即可，用例无需改
+
+【 8】行 32｜UT-FE-005
+  [18] 已修复测试用例；
+  [19] 三重问题：①硬编码 /portal basePath（实现用 withBasePath 运行时拼接）②撞 i18n 模块级缓存 commonMessageRequests ③mock 漏 ok 字段。已加 vi.resetModules() 并补 ok
+
+【 9】行 33｜UT-FE-AUTO-190989439ADD3E0F
+  [18] 已修复测试用例；
+  [19] UserProfileComp 直接调用 useQuery，测试缺 QueryClientProvider。已在 renderWithUser 中包装 Provider
+
+【10】行 34｜UT-FE-AUTO-63334E6F5D10C7FD
+  [18] 已修复测试用例；
+  [19] mock 了 14 个模块却漏掉唯一使用 TanStack Query 的 useAccountMonitoring。已补 vi.mock（对齐 accountMenu.test.tsx 的做法）
+
+【11】行 35｜UT-FE-AUTO-877E165BC61D430D
+  [18] 已修复测试用例；
+  [19] 原断言 grep 源文件函数名，而 #4155 已把实现从 TagDefinitionManagementModal（现 50 行壳组件）迁到 TagDefinitionManagementPanel。改为按候选列表读归属组件，避免重构即碎
+
+【12】行 36｜API-AUTO-DDE7582FFE405D54
+  [18] 已修复测试用例；
+  [19] 期望同租户内两个同名 Agent 产生 conflict_agents>=2，但 update_agent_info_impl 创建时就调 generate_unique_agent_value 自动加后缀改名，该前提不成立。返回 1 条是正确行为，已改为断言自动改名契约
+
+【13】行 37｜MON-D3-TRACE-NAME-001
+  [18] 证据缺失待补；
+  [19] 无 junit.xml，失败原因仅填 blocked。需运行器把阻断原因写入结构化字段才能归因，当前无法判定是用例问题还是业务问题
+
+【14】行 38｜NAV-MENU-D4-001
+  [18] 已修复测试用例；
+  [19] execution.yaml 完全缺少 preparation 段（对照 PW-UI-02 有 families/anchors/special_assets/d4_groups 四字段）。已补齐
+
+【15】行 39｜PW-AUTH-01
+  [18] 已修复测试用例；
+  [19] 「智能体开发」是 SideNavigation 的 isSection:true 项，被 accessibleMenuItems 的 !route.isSection 过滤，永不上屏。改用导航项「工作台」
+
+【16】行 40｜PW-RESOURCE-01
+  [18] 已分析，待产品确认；
+  [19] 知识库 tab 为条件渲染：!enableAidpKnowledge 才显示（代码注释明确 AIDP 启用时由 /knowledges 统一入口管理）。用例未适配该环境开关，需按实际部署配置调整断言
+
+【17】行 41｜PW-UI-01
+  [18] 已修复测试用例；
+  [19] 「简体中文」渲染在头像菜单→语言设置→二级子菜单（avatarDropdown.tsx 用 children），用例未展开两级菜单。新增 AuthPage.switchLanguageTo() 先 hover 展开
+
+【18】行 42｜PW-UI-02
+  [18] 已修复产品缺陷；
+  [19] StandardModal.tsx 原 keyboard={false} 禁用 ESC（叠加 closable=false 与 mask.closable=false，三条关闭路径全禁）。@rc-component/dialog 默认 keyboard=true，属封装主动覆盖。新增 closeOnEscape 默认 true，附双向验证单测（缺陷版 fail / 修复版 pass）。待产品确认是否恢复右上角 X
+
+【19】行 43｜REL-AUTO-80AA755E2436D269
+  [18] 已修复测试用例；
+  [19] monkeypatch 打在 quota 模块，但 get_usage 定义在 usage.py:503 且调用本模块导入的符号，桩从未生效（真实账本读到 0）。已同时 patch usage_service
+
+✅ 19 行行号已逐一校验，与最新表格完全一致

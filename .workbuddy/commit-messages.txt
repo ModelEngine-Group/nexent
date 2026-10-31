@@ -1,0 +1,95 @@
+fix(modal): restore Escape dismissal in StandardModal
+
+Replace the hard-coded keyboard={false} with a closeOnEscape prop defaulting to
+true. The underlying rc-component dialog already defaults keyboard to true and
+only invokes onClose when it is truthy, so the wrapper was overriding a working
+default and trapping keyboard users in the dialog, which violates WCAG 2.1.2
+and the ARIA APG Dialog pattern.
+
+Both current call sites tolerate Escape. CreateAgentModal holds one form field
+plus a template picker, so the loss is cheap; HighFidelityPromptEditModal still
+needs a separate decision.
+
+Cover both branches in standardModalEscape.test.tsx and add a shared
+renderWithProviders helper for Provider-hungry component tests. The assertion
+fails after 1187 ms against the pre-change build and passes once the fix lands,
+and createAgentModal.test.tsx still passes 7/7.
+
+---
+
+test(e2e): realign D4 page objects with the current composer and navigation
+
+Move the composer anchors onto data-workbench-composer and the Lexical
+contenteditable. composer.tsx renders an explicit empty placeholder and no
+longer exposes a textarea, so getByPlaceholder and inputValue could never
+resolve; add ChatPage.composerText to read innerText and strip zero-width
+characters.
+
+Replace the five stale debug-panel textarea locators with
+AgentPage.debugComposer, because the panel now renders an assistant-ui Thread
+and the agent.debug.placeholder key survives without any caller.
+
+Add AuthPage.switchLanguageTo to expand the avatar submenu before selecting a
+language, drop the removed data-composer-action-trigger in favour of the
+添加附件 accessible name, and stop asserting a role=heading title that the
+knowledge list never renders.
+
+---
+
+test(e2e): correct assertions that drifted from product behaviour
+
+Align API-AUTO-DDE7582FFE405D54 with the create-time rename contract.
+update_agent_info_impl already calls generate_unique_agent_value, so a tenant
+can never hold two identical draft names and a single conflict entry is the
+correct result; the case previously expected two.
+
+Reset modules and supply ok in UT-FE-005, which hard-coded a /portal base path
+and reused the module-level locale cache across assertions. Wrap
+UT-FE-AUTO-190989439ADD3E0F in QueryClientProvider, mock the missing
+useAccountMonitoring in UT-FE-AUTO-63334E6F5D10C7FD, and resolve
+UT-FE-AUTO-877E165BC61D430D through the owning component after the tag
+management consolidation moved the implementation out of the modal shell.
+
+Patch the usage module in REL-AUTO-80AA755E2436D269, because
+QuotaService.get_usage calls the symbol it imports rather than the one the quota
+module re-exports, and fill in the missing preparation block in NAV-MENU-D4-001
+together with the affected PW cases.
+
+---
+
+test(frontend): supply useRouter in next/navigation mocks
+
+Both suites stub next/navigation with only the hook they import, but the
+component tree reaches useRouter through ClientLayout, so vitest throws a
+missing export before any assertion runs.
+
+sharedShellLayout.test.tsx recovers from 10 failing to 10 passing.
+agentPublishAndSharePage.test.tsx keeps five failures caused by missing
+agent.version.versionName translations, which reproduce with the pre-change
+StandardModal and are therefore out of scope here.
+
+---
+
+test(e2e): verify the D1 frontend cases against the current identity contract
+
+The three suites previously asserted behaviour that the product no longer has,
+so they failed even after their harness problems were repaired.
+
+TopNavbar stopped rendering the account area in #4058, which moved the identity
+into the SideNavigation rail. UT-FE-AUTO-63334E6F5D10C7FD kept asserting
+username, email and "-" against that header, so the expectation is now inverted
+into a guard that the header stays free of identity text, and the identity rules
+run through AvatarDropdown, the component both surfaces mount.
+
+UT-FE-AUTO-190989439ADD3E0F asserted that a local user's username is never read
+at all, by throwing from a getter. UserProfileComp legitimately passes
+user?.username down and only getUserDisplayName decides whether to use it, so
+the case now asserts that the rendered value never comes from that field.
+
+UT-FE-005 read resourcesCustom.en.common, which only carries the custom overlay,
+and inspected the returned carrier after a failed load, which is never populated
+on the error path. Read resources.en.common and observe the surviving bundle
+through the live i18n instance instead.
+
+All four D1 frontend cases now pass locally through run_cases.py, and
+validate_execution.py still reports 704 cases / 702 implementations as valid.

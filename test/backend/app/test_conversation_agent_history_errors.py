@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from test_conversation_management_app import conversation_mocks, router
-from consts.exceptions import TokenExpiredError
+from contracts.errors.exceptions import TokenExpiredError
 
 
 @pytest.mark.parametrize("path,service", [

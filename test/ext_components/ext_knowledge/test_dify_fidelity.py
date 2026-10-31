@@ -27,8 +27,8 @@ def test_datasets_listing_maps_seed_to_datamate_format(mock_base_url, require_re
 
 
 def test_datasets_401_maps_to_dify_auth_error(mock_base_url, http_client, require_real_nexent):
-    from consts.error_code import ErrorCode
-    from consts.exceptions import AppException
+    from contracts.errors.codes import ErrorCode
+    from contracts.errors.exceptions import AppException
     from management.services.knowledge_base.providers.dify import fetch_dify_datasets_impl
 
     plan = http_client.post("/_mock/fail-next", json={"service": "dify", "count": 1, "status": 401})

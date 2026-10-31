@@ -23,7 +23,12 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
 
-from ...consts.mcp_errors import is_mcp_timeout_error
+from ...consts.mcp_errors import (
+    classify_mcp_failure,
+    find_mcp_server_url,
+    is_mcp_timeout_error,
+    mcp_failure_message,
+)
 from ...monitor import AgentRunMetadata, get_agent_monitoring_context, get_monitoring_manager
 from ..model_errors import ModelInvocationTerminalError
 from ..models.openai_llm import OpenAIModel
@@ -680,36 +685,33 @@ class NexentAgent:
         """create a tool instance according to the tool config"""
         if not isinstance(tool_config, ToolConfig):
             raise TypeError("tool_config must be a ToolConfig object")
-        try:
-            class_name = tool_config.class_name
-            source = tool_config.source
+        class_name = tool_config.class_name
+        source = tool_config.source
 
-            if source == "local":
-                tool_obj = self.create_local_tool(tool_config)
-            elif source == "mcp":
-                tool_obj = self.create_mcp_tool(class_name)
-                tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
-            elif source == "langchain":
-                tool_obj = self.create_langchain_tool(tool_config)
-            elif source == "builtin":
-                tool_obj = self.create_builtin_tool(tool_config)
-            else:
-                raise ValueError(f"unsupported tool source: {source}")
-            mapping = getattr(self, "workspace_mapping", None)
-            if mapping is not None and class_name in {
-                "CreateFileTool", "ReadFileTool", "DeleteFileTool", "DownloadFromS3Tool", "UploadToS3Tool",
-            }:
-                tool_obj.workspace_mapping = mapping
-                if class_name in {"CreateFileTool", "ReadFileTool", "DeleteFileTool"}:
-                    tool_obj.init_path = str(mapping.host_root / "outputs")
-            if source in {"local", "builtin", "mcp"}:
-                try:
-                    setattr(tool_obj, "_nexent_execute_on_host", True)
-                except (AttributeError, TypeError):
-                    pass
-            return tool_obj
-        except Exception as e:
-            raise ValueError(f"Error in creating tool: {e}")
+        if source == "local":
+            tool_obj = self.create_local_tool(tool_config)
+        elif source == "mcp":
+            tool_obj = self.create_mcp_tool(class_name)
+            tool_obj = apply_mcp_tool_parameters(tool_obj, tool_config.params)
+        elif source == "langchain":
+            tool_obj = self.create_langchain_tool(tool_config)
+        elif source == "builtin":
+            tool_obj = self.create_builtin_tool(tool_config)
+        else:
+            raise ValueError(f"unsupported tool source: {source}")
+        mapping = getattr(self, "workspace_mapping", None)
+        if mapping is not None and class_name in {
+            "CreateFileTool", "ReadFileTool", "DeleteFileTool", "DownloadFromS3Tool", "UploadToS3Tool",
+        }:
+            tool_obj.workspace_mapping = mapping
+            if class_name in {"CreateFileTool", "ReadFileTool", "DeleteFileTool"}:
+                tool_obj.init_path = str(mapping.host_root / "outputs")
+        if source in {"local", "builtin", "mcp"}:
+            try:
+                setattr(tool_obj, "_nexent_execute_on_host", True)
+            except (AttributeError, TypeError):
+                pass
+        return tool_obj
 
     def _wrap_subagent(
         self,
@@ -1571,6 +1573,30 @@ class NexentAgent:
                 except Exception as e:
                     if is_mcp_timeout_error(e):
                         raise
+                    category, leaf = classify_mcp_failure(e)
+                    if category:
+                        # Keep the ReAct loop alive: the model receives the
+                        # friendly text and can switch tools or tell the user.
+                        content = mcp_failure_message(
+                            category,
+                            getattr(observer, "lang", "en"),
+                            server=find_mcp_server_url(e),
+                            leaf=leaf,
+                        )
+                        logger.error(
+                            "event=agent_step_mcp_failure agent=%s category=%s",
+                            self.agent.agent_name,
+                            category,
+                            exc_info=True,
+                        )
+                        observer.add_message(
+                            agent_name=self.agent.agent_name,
+                            process_type=ProcessType.ERROR,
+                            content=content,
+                            error_code=f"mcp_{category}",
+                            retryable=True,
+                        )
+                        raise ValueError(f"Error in interaction: {content}")
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
                                          content=f"Error in interaction: {str(e)}")
                     raise ValueError(f"Error in interaction: {str(e)}")

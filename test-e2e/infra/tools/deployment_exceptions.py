@@ -235,7 +235,8 @@ class ModeSwitch:
         save(self.directory / "restoration.json", {"status": "RESTORED", "at": now(), "backup": str(self.backup)})
 
 
-def execute_campaign(repo, home, records, settings, *, daily, publish_latest, execute_one, all_records, hook, machine_env):
+def execute_campaign(repo, home, records, settings, *, daily, publish_latest, execute_one, all_records, hook, machine_env,
+                     validation_report=None):
     """Run only selected exceptions, restore Local on failure, and finalize once."""
     from report_ownership import enrich
 
@@ -252,10 +253,13 @@ def execute_campaign(repo, home, records, settings, *, daily, publish_latest, ex
     report_records, warnings = enrich(repo, records, provenance["head"])
     save(directory / "plan.json", {"cases": records})
     save(directory / "provenance.json", provenance)
-    save(directory / "report-ownership.json", {"warnings": warnings, "cases": report_records})
+    save(directory / "report-ownership.json", {
+        "head": provenance["head"], "warnings": warnings, "cases": report_records})
     save(directory / "deployment-plan.json", {key: [r["case_id"] for r in group] for key, group in selected.items()})
     save(directory / "status.json", state)
     save(directory / "pipeline.json", settings)
+    if validation_report is not None:
+        save(directory / "asset-validation.json", validation_report)
     switch = ModeSwitch(repo, home, directory, settings, env, hook)
     rows, error, restoration_ok = [], None, False
     old_handler = signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))

@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nexent 架构图集 · 调用层次细版</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: #ffffff; color: #2c2c2a; margin: 0; padding: 32px; line-height: 1.6; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 500; margin: 0 0 4px; }
+  h2 { font-size: 16px; font-weight: 500; margin: 36px 0 4px; }
+  p.meta { font-size: 13px; color: #5f5e5a; margin: 0 0 20px; }
+  p.note { font-size: 13px; color: #444441; margin: 8px 0 0; }
+  svg { display: block; width: 100%; height: auto; margin-top: 12px; }
+  .t { font: 400 14px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #2c2c2a; }
+  .ts { font: 400 12px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #5f5e5a; }
+  .th { font: 500 14px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; fill: #2c2c2a; }
+  .box { fill: #f7f6f3; stroke: #888780; }
+  .arr { stroke: #888780; stroke-width: 1.5; fill: none; }
+  .leader { stroke: #b4b2a9; stroke-width: 0.5; stroke-dasharray: 4 3; fill: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Nexent 架构图集 · 调用层次细版</h1>
+<p class="meta">2026-10-13 · 图1/图2 为调用层次细版（现状），图3/图4 为解耦目标与迁移 · 配套：decoupling-management-competitiveness-2026-10-12.md</p>
+
+<h2>图1 · 调用层次总图（现状，19 条编号调用边）</h2>
+<p class="note">红色边 = 解耦要消除的耦合（C2 管理面持有运行会话、C3 runtime 直读配置表）。端口与路由前缀均经代码核实。</p>
+<svg viewBox="0 0 680 620" role="img"><title>Nexent 调用层次总图</title><desc>五层调用层次：调用方、边缘BFF、服务面、执行依赖、存储；19 条编号调用边带协议与端口，C2/C3 问题边标红</desc>
+<defs><marker id="a1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect x="140" y="28" width="150" height="34" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="215" y="45" text-anchor="middle" dominant-baseline="central">Web UI · 浏览器</text>
+<rect x="390" y="28" width="150" height="34" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="465" y="45" text-anchor="middle" dominant-baseline="central">开放调用方 · API/A2A</text>
+<rect x="255" y="86" width="170" height="32" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="340" y="102" text-anchor="middle" dominant-baseline="central">nginx :3100 · TLS 终结</text>
+<rect x="120" y="142" width="440" height="46" rx="8" class="box" stroke-width="0.5"/>
+<text class="th" x="340" y="157" text-anchor="middle" dominant-baseline="central">Next BFF · nexent-web :3000（server.js）</text>
+<text class="ts" x="340" y="175" text-anchor="middle" dominant-baseline="central">前缀路由：runtime 前缀→:5014 · 其余 /api→:5010 · /nb→:5013 · WS→:5014</text>
+<rect x="40" y="232" width="118" height="62" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text class="th" x="99" y="255" text-anchor="middle" dominant-baseline="central" fill="#0C447C">Management</text>
+<text class="ts" x="99" y="275" text-anchor="middle" dominant-baseline="central" fill="#185FA5">config :5010</text>
+<rect x="168" y="232" width="118" height="62" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text class="th" x="227" y="255" text-anchor="middle" dominant-baseline="central" fill="#085041">Runtime</text>
+<text class="ts" x="227" y="275" text-anchor="middle" dominant-baseline="central" fill="#0F6E56">:5014</text>
+<rect x="296" y="232" width="96" height="62" rx="8" class="box" stroke-width="0.5"/>
+<text class="th" x="344" y="255" text-anchor="middle" dominant-baseline="central">北向</text>
+<text class="ts" x="344" y="275" text-anchor="middle" dominant-baseline="central">:5013</text>
+<rect x="402" y="232" width="96" height="62" rx="8" class="box" stroke-width="0.5"/>
+<text class="th" x="450" y="255" text-anchor="middle" dominant-baseline="central">MCP 服务</text>
+<text class="ts" x="450" y="275" text-anchor="middle" dominant-baseline="central">:5011 / :5015</text>
+<rect x="596" y="142" width="60" height="340" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text class="th" x="626" y="162" text-anchor="middle" dominant-baseline="central" fill="#633806">Monitor</text>
+<text class="ts" x="626" y="184" text-anchor="middle" dominant-baseline="central" fill="#854F0B">SDK</text>
+<text class="ts" x="626" y="200" text-anchor="middle" dominant-baseline="central" fill="#854F0B">buffer</text>
+<text class="ts" x="626" y="216" text-anchor="middle" dominant-baseline="central" fill="#854F0B">→PG</text>
+<text class="ts" x="626" y="240" text-anchor="middle" dominant-baseline="central" fill="#854F0B">OTLP</text>
+<text class="ts" x="626" y="256" text-anchor="middle" dominant-baseline="central" fill="#854F0B">可选</text>
+<rect x="168" y="344" width="118" height="48" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="227" y="368" text-anchor="middle" dominant-baseline="central">MCP 容器（docker）</text>
+<rect x="300" y="344" width="110" height="48" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="355" y="368" text-anchor="middle" dominant-baseline="central">sandbox 容器池</text>
+<rect x="420" y="344" width="80" height="48" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="460" y="368" text-anchor="middle" dominant-baseline="central">docker.sock</text>
+<rect x="508" y="344" width="88" height="48" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="552" y="360" text-anchor="middle" dominant-baseline="central">data-process</text>
+<text class="ts" x="552" y="376" text-anchor="middle" dominant-baseline="central">:5012</text>
+<rect x="50" y="436" width="100" height="46" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="100" y="459" text-anchor="middle" dominant-baseline="central">PostgreSQL</text>
+<rect x="160" y="436" width="80" height="46" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="200" y="459" text-anchor="middle" dominant-baseline="central">Redis</text>
+<rect x="250" y="436" width="80" height="46" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="290" y="459" text-anchor="middle" dominant-baseline="central">ES 向量</text>
+<rect x="340" y="436" width="80" height="46" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="380" y="459" text-anchor="middle" dominant-baseline="central">MinIO</text>
+<rect x="430" y="436" width="80" height="46" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="470" y="459" text-anchor="middle" dominant-baseline="central">OTLP</text>
+<path class="arr" d="M215,62 C250,72 280,78 300,86" fill="none" marker-end="url(#a1)"/>
+<path class="arr" d="M465,62 C430,72 400,78 380,86" fill="none" marker-end="url(#a1)"/>
+<path class="arr" d="M340,118 L340,142" fill="none" marker-end="url(#a1)"/>
+<path class="arr" d="M260,188 C250,204 240,216 232,232" fill="none" stroke="#0F6E56" marker-end="url(#a1)"/>
+<path class="arr" d="M200,188 C160,204 120,216 102,232" fill="none" stroke="#185FA5" marker-end="url(#a1)"/>
+<path class="arr" d="M420,188 C390,204 360,216 346,232" fill="none" stroke="#5F5E5A" marker-end="url(#a1)"/>
+<path class="arr" d="M296,255 L286,255" fill="none" stroke="#5F5E5A" marker-end="url(#a1)"/>
+<path class="arr" d="M158,270 L168,270" fill="none" stroke="#D85A30" marker-end="url(#a1)"/>
+<path class="arr" d="M99,294 L99,320 L552,320 L552,344" fill="none" stroke="#185FA5" marker-end="url(#a1)"/>
+<path class="arr" d="M140,294 L140,332 L460,332 L460,344" fill="none" stroke="#185FA5" marker-end="url(#a1)"/>
+<path class="arr" d="M227,294 L227,344" fill="none" stroke="#0F6E56" marker-end="url(#a1)"/>
+<path class="arr" d="M262,294 C300,318 330,326 350,344" fill="none" stroke="#0F6E56" marker-end="url(#a1)"/>
+<path class="arr" d="M185,294 C140,340 115,400 103,436" fill="none" stroke="#D85A30" marker-end="url(#a1)"/>
+<path class="arr" d="M286,282 L293,282 L293,436" fill="none" stroke="#0F6E56" marker-end="url(#a1)"/>
+<path class="arr" d="M200,294 L200,310 L415,310 L415,436" fill="none" stroke="#0F6E56" marker-end="url(#a1)"/>
+<path class="arr" d="M200,294 L200,310 L165,310 L165,436" fill="none" stroke="#0F6E56" marker-end="url(#a1)"/>
+<path class="arr" d="M55,294 L55,436" fill="none" stroke="#185FA5" marker-end="url(#a1)"/>
+<path class="arr" d="M626,482 L626,500 L100,500 L100,482" fill="none" stroke="#854F0B" marker-end="url(#a1)"/>
+<path class="arr" d="M596,459 L510,459" fill="none" stroke="#854F0B" marker-end="url(#a1)"/>
+<text class="ts" x="243" y="206" fill="#0F6E56">③</text>
+<text class="ts" x="140" y="206" fill="#185FA5">④</text>
+<text class="ts" x="392" y="206" fill="#5F5E5A">⑤</text>
+<text class="ts" x="288" y="248" fill="#5F5E5A">⑦</text>
+<text class="ts" x="160" y="264" fill="#D85A30">⑧</text>
+<text class="ts" x="330" y="314" fill="#185FA5">⑨</text>
+<text class="ts" x="300" y="328" fill="#185FA5">⑩</text>
+<text class="ts" x="231" y="322" fill="#0F6E56">⑪</text>
+<text class="ts" x="312" y="310" fill="#0F6E56">⑫</text>
+<text class="ts" x="118" y="380" fill="#D85A30">⑬</text>
+<text class="ts" x="296" y="380" fill="#0F6E56">⑭</text>
+<text class="ts" x="418" y="380" fill="#0F6E56">⑮</text>
+<text class="ts" x="168" y="380" fill="#0F6E56">⑯</text>
+<text class="ts" x="58" y="380" fill="#185FA5">⑲</text>
+<text class="ts" x="350" y="494" fill="#854F0B">⑰ 监控记录批量写</text>
+<text class="ts" x="548" y="452" fill="#854F0B">⑱</text>
+<text class="ts" x="40" y="530">①② HTTPS 入站 · ③ BFF→runtime SSE（agent/run|stop|automations、conversation、share、file）</text>
+<text class="ts" x="40" y="548">④ BFF→config 其余 /api · ⑤ BFF→北向 /nb · ⑥ WS upgrade→runtime（语音/实时）</text>
+<text class="ts" x="40" y="566">⑦ 北向→runtime forward_agent_run · ⑧ config→runtime a2a/评测代理（C2 红）· ⑨ config→data-process</text>
+<text class="ts" x="40" y="584">⑩ config→docker.sock MCP 生命周期 · ⑪⑫ SDK 直连 MCP 容器/sandbox · ⑬ runtime 直读配置表（C3 红）</text>
+<text class="ts" x="40" y="602">⑭⑮⑯ SDK→ES/MinIO、Redis 租约 · ⑰ 遥测写 PG/OTLP · ⑲ config→PG 配置与审计写</text>
+</svg>
+
+<h2>图2 · agent 执行调用链（函数级）</h2>
+<p class="note">一次 agent/run 的完整垂直链路：BFF 前缀路由 → runtime API → 编排 → SDK 核心 → 工具/模型；棕色为侧信道（事件回推、状态外置、遥测）。</p>
+<svg viewBox="0 0 680 660" role="img"><title>agent 执行调用链</title><desc>从调用方到模型层的八层垂直调用链，含侧信道与 C1/C3 问题标注</desc>
+<defs><marker id="a2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect x="60" y="24" width="250" height="40" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="185" y="38" text-anchor="middle" dominant-baseline="central">Web UI · POST /api/agent/run（SSE）</text>
+<text class="ts" x="185" y="54" text-anchor="middle" dominant-baseline="central">services/api.ts · API_BASE_URL=/api</text>
+<rect x="360" y="24" width="250" height="40" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="485" y="38" text-anchor="middle" dominant-baseline="central">北向 /nb/v1 · A2A server</text>
+<text class="ts" x="485" y="54" text-anchor="middle" dominant-baseline="central">northbound/a2a_service 进程内转发</text>
+<rect x="180" y="88" width="320" height="40" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="340" y="102" text-anchor="middle" dominant-baseline="central">Next BFF · server.js handleAllApiProxy</text>
+<text class="ts" x="340" y="118" text-anchor="middle" dominant-baseline="central">runtime 前缀命中 → RUNTIME_HTTP_BACKEND :5014（SSE 超时档）</text>
+<rect x="150" y="152" width="380" height="40" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text class="ts" x="340" y="166" text-anchor="middle" dominant-baseline="central" fill="#085041">Runtime API 层 · agent_runtime_router</text>
+<text class="ts" x="340" y="182" text-anchor="middle" dominant-baseline="central" fill="#0F6E56">management/services/agent/run.py · run_agent → StreamingResponse（C1）</text>
+<rect x="150" y="216" width="380" height="52" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text class="ts" x="340" y="232" text-anchor="middle" dominant-baseline="central" fill="#085041">编排层 · run_context.build_agent_run_context</text>
+<text class="ts" x="340" y="248" text-anchor="middle" dominant-baseline="central" fill="#0F6E56">create_agent_run_info：直读 agent/version/tool/model/knowledge 表（C3）</text>
+<text class="ts" x="340" y="262" text-anchor="middle" dominant-baseline="central" fill="#0F6E56">preprocess_manager · agent_run_manager · 线程池 ManagedTaskSpec</text>
+<rect x="150" y="292" width="380" height="40" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text class="ts" x="340" y="306" text-anchor="middle" dominant-baseline="central" fill="#085041">执行核心 · SDK nexent.core.agents.run_agent</text>
+<text class="ts" x="340" y="322" text-anchor="middle" dominant-baseline="central" fill="#0F6E56">agent_run 工具循环 · DeferredAgentRun · observer 事件</text>
+<rect x="60" y="356" width="140" height="48" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="130" y="372" text-anchor="middle" dominant-baseline="central">KB 检索工具</text>
+<text class="ts" x="130" y="388" text-anchor="middle" dominant-baseline="central">→ ES 向量查询</text>
+<rect x="210" y="356" width="140" height="48" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="280" y="372" text-anchor="middle" dominant-baseline="central">MCP 工具客户端</text>
+<text class="ts" x="280" y="388" text-anchor="middle" dominant-baseline="central">→ MCP 容器 sse/mcp</text>
+<rect x="360" y="356" width="130" height="48" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="425" y="372" text-anchor="middle" dominant-baseline="central">sandbox 工具</text>
+<text class="ts" x="425" y="388" text-anchor="middle" dominant-baseline="central">→ docker 容器池</text>
+<rect x="500" y="356" width="120" height="48" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="560" y="372" text-anchor="middle" dominant-baseline="central">文件/多模态工具</text>
+<text class="ts" x="560" y="388" text-anchor="middle" dominant-baseline="central">→ MinIO/解析</text>
+<rect x="150" y="428" width="380" height="40" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text class="ts" x="340" y="442" text-anchor="middle" dominant-baseline="central" fill="#0C447C">模型层 · OpenAIModel → provider 网关 → 外部 LLM</text>
+<text class="ts" x="340" y="458" text-anchor="middle" dominant-baseline="central" fill="#185FA5">LLMTokenTracker/MonitoringManager 包装：ttft/token/错误率</text>
+<rect x="60" y="492" width="140" height="48" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text class="ts" x="130" y="508" text-anchor="middle" dominant-baseline="central" fill="#633806">streaming_channel</text>
+<text class="ts" x="130" y="524" text-anchor="middle" dominant-baseline="central" fill="#854F0B">SSE 事件回推 BFF/UI</text>
+<rect x="210" y="492" width="140" height="48" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text class="ts" x="280" y="508" text-anchor="middle" dominant-baseline="central" fill="#633806">runtime_state</text>
+<text class="ts" x="280" y="524" text-anchor="middle" dominant-baseline="central" fill="#854F0B">Redis 会话/停止信号</text>
+<rect x="360" y="492" width="130" height="48" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text class="ts" x="425" y="508" text-anchor="middle" dominant-baseline="central" fill="#633806">memory 摄入</text>
+<text class="ts" x="425" y="524" text-anchor="middle" dominant-baseline="central" fill="#854F0B">FA 抽取/ingest 事件</text>
+<rect x="500" y="492" width="120" height="48" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text class="ts" x="560" y="508" text-anchor="middle" dominant-baseline="central" fill="#633806">monitoring buffer</text>
+<text class="ts" x="560" y="524" text-anchor="middle" dominant-baseline="central" fill="#854F0B">批量写 PG/OTLP</text>
+<path class="arr" d="M185,64 C220,72 260,80 290,88" fill="none" marker-end="url(#a2)"/>
+<path class="arr" d="M485,64 C450,72 410,80 390,88" fill="none" marker-end="url(#a2)"/>
+<path class="arr" d="M340,128 L340,152" fill="none" marker-end="url(#a2)"/>
+<path class="arr" d="M340,192 L340,216" fill="none" marker-end="url(#a2)"/>
+<path class="arr" d="M340,268 L340,292" fill="none" marker-end="url(#a2)"/>
+<path class="arr" d="M250,332 C210,340 160,348 135,356" fill="none" marker-end="url(#a2)"/>
+<path class="arr" d="M310,332 C295,340 285,348 281,356" fill="none" marker-end="url(#a2)"/>
+<path class="arr" d="M390,332 C405,340 418,348 423,356" fill="none" marker-end="url(#a2)"/>
+<path class="arr" d="M440,332 C480,340 530,348 555,356" fill="none" marker-end="url(#a2)"/>
+<path class="arr" d="M340,404 L340,428" fill="none" marker-end="url(#a2)"/>
+<path class="arr" d="M250,468 C210,476 160,484 135,492" fill="none" stroke="#854F0B" marker-end="url(#a2)"/>
+<path class="arr" d="M310,468 C295,476 285,484 281,492" fill="none" stroke="#854F0B" marker-end="url(#a2)"/>
+<path class="arr" d="M390,468 C405,476 418,484 423,492" fill="none" stroke="#854F0B" marker-end="url(#a2)"/>
+<path class="arr" d="M440,468 C480,476 530,484 555,492" fill="none" stroke="#854F0B" marker-end="url(#a2)"/>
+<text class="ts" x="40" y="576">读路径（实线）：调用→BFF→runtime API→编排→SDK 核心→工具/模型；侧信道（棕色）：事件回推与状态外置</text>
+<text class="ts" x="40" y="594">C1：run.py 位于 management 目录却在 runtime 进程执行 · C3：编排层直读五类配置表，应改版本快照</text>
+<text class="ts" x="40" y="612">停止路径：UI /api/agent/stop → BFF → runtime → runtime_state Redis 置停止信号 → 工具循环检查退出</text>
+<text class="ts" x="40" y="630">自动化/评测路径：config 进程内 forward_agent_run（⑧，C2）或 automation scheduler 租约领取后进程内执行</text>
+</svg>
+
+<h2>图3 · 解耦目标架构（四平面 + 三类契约）</h2>
+<svg viewBox="0 0 680 580" role="img"><title>Nexent 解耦目标架构</title><desc>Gateway 之下 Management、Runtime、MCP/北向、Observability 四个平面，经配置发布、运行、遥测三类契约通信，共享存储按写归属受控</desc>
+<defs><marker id="a3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect x="170" y="36" width="150" height="36" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="245" y="54" text-anchor="middle" dominant-baseline="central">Frontend Invoke · Web UI</text>
+<rect x="360" y="36" width="150" height="36" rx="8" class="box" stroke-width="0.5"/>
+<text class="ts" x="435" y="54" text-anchor="middle" dominant-baseline="central">开放 API · A2A Invoke</text>
+<rect x="140" y="96" width="400" height="48" rx="8" class="box" stroke-width="0.5"/>
+<text class="th" x="340" y="112" text-anchor="middle" dominant-baseline="central">Gateway · nginx:3100 TLS → web:3000</text>
+<text class="ts" x="340" y="130" text-anchor="middle" dominant-baseline="central">统一鉴权 · 路由 · SSE 透传（proxy_buffering off）</text>
+<path class="arr" d="M245,72 C270,80 300,86 318,92" fill="none" marker-end="url(#a3)"/>
+<path class="arr" d="M435,72 C410,80 382,86 364,92" fill="none" marker-end="url(#a3)"/>
+<path class="arr" d="M300,144 C240,152 150,158 114,166" fill="none" marker-end="url(#a3)"/>
+<path class="arr" d="M330,144 C305,152 278,158 266,166" fill="none" marker-end="url(#a3)"/>
+<path class="arr" d="M362,144 C385,152 404,158 414,166" fill="none" marker-end="url(#a3)"/>
+<path class="arr" d="M392,144 C460,152 540,158 566,166" fill="none" marker-end="url(#a3)"/>
+<rect x="40" y="170" width="140" height="110" rx="10" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text class="th" x="110" y="192" text-anchor="middle" dominant-baseline="central" fill="#0C447C">Management 平面</text>
+<text class="ts" x="110" y="214" text-anchor="middle" dominant-baseline="central" fill="#185FA5">配置真相源 · 版本注册表</text>
+<text class="ts" x="110" y="232" text-anchor="middle" dominant-baseline="central" fill="#185FA5">资产/权限/配额/审计</text>
+<text class="ts" x="110" y="250" text-anchor="middle" dominant-baseline="central" fill="#185FA5">:5010 · 不含执行逻辑</text>
+<rect x="193" y="170" width="140" height="110" rx="10" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text class="th" x="263" y="192" text-anchor="middle" dominant-baseline="central" fill="#085041">Runtime 平面</text>
+<text class="ts" x="263" y="214" text-anchor="middle" dominant-baseline="central" fill="#0F6E56">agent 执行 · 线程容量</text>
+<text class="ts" x="263" y="232" text-anchor="middle" dominant-baseline="central" fill="#0F6E56">会话/流 · 租约调度</text>
+<text class="ts" x="263" y="250" text-anchor="middle" dominant-baseline="central" fill="#0F6E56">:5014 · 快照只读</text>
+<rect x="346" y="170" width="140" height="110" rx="10" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<text class="th" x="416" y="192" text-anchor="middle" dominant-baseline="central" fill="#444441">MCP / 北向平面</text>
+<text class="ts" x="416" y="214" text-anchor="middle" dominant-baseline="central" fill="#5F5E5A">MCP 容器与市场</text>
+<text class="ts" x="416" y="232" text-anchor="middle" dominant-baseline="central" fill="#5F5E5A">北向开放 API /nb/v1</text>
+<text class="ts" x="416" y="250" text-anchor="middle" dominant-baseline="central" fill="#5F5E5A">:5011 :5013 :5015</text>
+<rect x="500" y="170" width="140" height="110" rx="10" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text class="th" x="570" y="192" text-anchor="middle" dominant-baseline="central" fill="#633806">Observability 平面</text>
+<text class="ts" x="570" y="214" text-anchor="middle" dominant-baseline="central" fill="#854F0B">metrics · trace · 计量</text>
+<text class="ts" x="570" y="232" text-anchor="middle" dominant-baseline="central" fill="#854F0B">告警规则 · SLO</text>
+<text class="ts" x="570" y="250" text-anchor="middle" dominant-baseline="central" fill="#854F0B">摄入 + 查询 API（新增）</text>
+<rect x="50" y="300" width="170" height="44" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text class="ts" x="135" y="316" text-anchor="middle" dominant-baseline="central" fill="#0C447C">① 配置发布契约</text>
+<text class="ts" x="135" y="332" text-anchor="middle" dominant-baseline="central" fill="#185FA5">带版本快照 · Mgmt→Runtime</text>
+<rect x="245" y="300" width="170" height="44" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text class="ts" x="330" y="316" text-anchor="middle" dominant-baseline="central" fill="#085041">② 运行契约</text>
+<text class="ts" x="330" y="332" text-anchor="middle" dominant-baseline="central" fill="#0F6E56">run/stop/status/capacity</text>
+<rect x="440" y="300" width="190" height="44" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text class="ts" x="535" y="316" text-anchor="middle" dominant-baseline="central" fill="#633806">③ 遥测上报 / 查询契约</text>
+<text class="ts" x="535" y="332" text-anchor="middle" dominant-baseline="central" fill="#854F0B">异步批量上行 · 查询 API 下行</text>
+<path class="arr" d="M105,280 C108,288 112,292 116,296" fill="none" stroke="#185FA5" marker-end="url(#a3)"/>
+<path class="arr" d="M240,280 C210,288 175,292 158,296" fill="none" stroke="#0F6E56" marker-end="url(#a3)"/>
+<path class="arr" d="M268,280 C280,288 300,292 315,296" fill="none" stroke="#0F6E56" marker-end="url(#a3)"/>
+<path class="arr" d="M290,280 C350,290 430,292 470,296" fill="none" stroke="#0F6E56" marker-end="url(#a3)"/>
+<path class="arr" d="M570,280 C566,288 562,292 558,296" fill="none" stroke="#854F0B" marker-end="url(#a3)"/>
+<rect x="40" y="380" width="600" height="76" rx="12" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<text class="th" x="340" y="398" text-anchor="middle" dominant-baseline="central" fill="#444441">共享存储 · 写归属受控</text>
+<rect x="56" y="412" width="138" height="32" rx="6" fill="#FFFFFF" stroke="#B4B2A9" stroke-width="0.5"/>
+<text class="ts" x="125" y="428" text-anchor="middle" dominant-baseline="central">PostgreSQL · 配置/审计/计量</text>
+<rect x="204" y="412" width="138" height="32" rx="6" fill="#FFFFFF" stroke="#B4B2A9" stroke-width="0.5"/>
+<text class="ts" x="273" y="428" text-anchor="middle" dominant-baseline="central">Redis · 运行时态/租约</text>
+<rect x="352" y="412" width="138" height="32" rx="6" fill="#FFFFFF" stroke="#B4B2A9" stroke-width="0.5"/>
+<text class="ts" x="421" y="428" text-anchor="middle" dominant-baseline="central">ES/MinIO · 知识向量/文件</text>
+<rect x="500" y="412" width="138" height="32" rx="6" fill="#FFFFFF" stroke="#B4B2A9" stroke-width="0.5"/>
+<text class="ts" x="569" y="428" text-anchor="middle" dominant-baseline="central">OTLP · 可选外链导出</text>
+<rect x="40" y="472" width="600" height="40" rx="10" class="box" stroke-width="0.5"/>
+<text class="ts" x="340" y="492" text-anchor="middle" dominant-baseline="central">部署底座 · compose/helm 子 chart 独立 replicas · sandbox 池 · 健康契约 live/ready 统一</text>
+<text class="ts" x="40" y="536">阶段：P0a 边界清理（即刻） · P0b 审计+计量管道（26Q4） · P1 配置快照+三维配额+灰度（27Q1） · P2 身份+可观测管理面（27Q2）</text>
+<text class="ts" x="40" y="556">原则：模块化单体 + 进程切分 + 契约约束；不引入 MQ、不拆微服务；边界由 CI import 检查固化</text>
+</svg>
+
+<h2>图4 · 解耦迁移五阶段与验收</h2>
+<svg viewBox="0 0 680 190" role="img"><title>解耦迁移五阶段</title><desc>P0a 到 P3 五个阶段及各自验收要点</desc>
+<defs><marker id="a4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+<rect x="40" y="40" width="108" height="56" rx="8" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<text class="th" x="94" y="60" text-anchor="middle" dominant-baseline="central" fill="#444441">P0a</text>
+<text class="ts" x="94" y="78" text-anchor="middle" dominant-baseline="central">边界清理</text>
+<rect x="161" y="40" width="108" height="56" rx="8" fill="#E6F1FB" stroke="#185FA5" stroke-width="0.5"/>
+<text class="th" x="215" y="60" text-anchor="middle" dominant-baseline="central" fill="#0C447C">P0b</text>
+<text class="ts" x="215" y="78" text-anchor="middle" dominant-baseline="central" fill="#185FA5">合规基座</text>
+<rect x="282" y="40" width="108" height="56" rx="8" fill="#E1F5EE" stroke="#0F6E56" stroke-width="0.5"/>
+<text class="th" x="336" y="60" text-anchor="middle" dominant-baseline="central" fill="#085041">P1</text>
+<text class="ts" x="336" y="78" text-anchor="middle" dominant-baseline="central" fill="#0F6E56">成本与版本治理</text>
+<rect x="403" y="40" width="108" height="56" rx="8" fill="#FAEEDA" stroke="#854F0B" stroke-width="0.5"/>
+<text class="th" x="457" y="60" text-anchor="middle" dominant-baseline="central" fill="#633806">P2</text>
+<text class="ts" x="457" y="78" text-anchor="middle" dominant-baseline="central" fill="#854F0B">身份+可观测</text>
+<rect x="524" y="40" width="108" height="56" rx="8" fill="#F1EFE8" stroke="#888780" stroke-width="0.5"/>
+<text class="th" x="578" y="60" text-anchor="middle" dominant-baseline="central" fill="#444441">P3</text>
+<text class="ts" x="578" y="78" text-anchor="middle" dominant-baseline="central">管理台整合</text>
+<path class="arr" d="M148,68 L157,68" fill="none" marker-end="url(#a4)"/>
+<path class="arr" d="M269,68 L278,68" fill="none" marker-end="url(#a4)"/>
+<path class="arr" d="M390,68 L399,68" fill="none" marker-end="url(#a4)"/>
+<path class="arr" d="M511,68 L520,68" fill="none" marker-end="url(#a4)"/>
+<text class="ts" x="94" y="120" text-anchor="middle">run.py 归属迁移</text>
+<text class="ts" x="94" y="136" text-anchor="middle">代理无状态化</text>
+<text class="ts" x="94" y="152" text-anchor="middle">CI import 检查</text>
+<text class="ts" x="215" y="120" text-anchor="middle">audit_log_t 表化</text>
+<text class="ts" x="215" y="136" text-anchor="middle">token 计量入账</text>
+<text class="ts" x="215" y="152" text-anchor="middle">共用异步管道</text>
+<text class="ts" x="336" y="120" text-anchor="middle">runtime 快照只读</text>
+<text class="ts" x="336" y="136" text-anchor="middle">三维配额+告警</text>
+<text class="ts" x="336" y="152" text-anchor="middle">灰度发布 v1</text>
+<text class="ts" x="457" y="120" text-anchor="middle">OIDC+扫码登录</text>
+<text class="ts" x="457" y="136" text-anchor="middle">用量大盘+trace</text>
+<text class="ts" x="457" y="152" text-anchor="middle">告警规则管理</text>
+<text class="ts" x="578" y="120" text-anchor="middle">统一管理台</text>
+<text class="ts" x="578" y="136" text-anchor="middle">自定义角色</text>
+<text class="ts" x="578" y="152" text-anchor="middle">契约 OpenAPI 化</text>
+</svg>
+</div>
+</body>
+</html>

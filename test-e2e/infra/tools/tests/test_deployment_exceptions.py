@@ -243,6 +243,10 @@ def test_campaign_restores_on_failures_and_accounts_for_every_case(tmp_path, fai
     assert env_path.read_bytes() == original
     directories = list((home / "runs/repository-daily").glob("deployment-*"))
     summary = json.loads((directories[0] / "summary.json").read_text())
+    ownership = json.loads((directories[0] / "report-ownership.json").read_text())
+    provenance = json.loads((directories[0] / "provenance.json").read_text())
+    assert ownership["head"] == provenance["head"] == "a" * 40
+    assert {item["case_id"] for item in ownership["cases"]} == {item["case_id"] for item in records[:2]}
     assert summary["recorded"] == summary["planned"] == 2
     assert result == (0 if failure is None else 1)
     assert (home / modes.MARKER).exists() == (failure == "restore-local")

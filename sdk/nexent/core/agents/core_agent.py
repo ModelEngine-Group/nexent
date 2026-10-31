@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     import PIL.Image
 
 from .agent_model import AgentVerificationConfig
-from ...consts.mcp_errors import is_mcp_timeout_error, propagate_mcp_timeout
+from ...consts.mcp_errors import classify_mcp_failure, find_mcp_server_url, is_mcp_timeout_error, mcp_failure_message, propagate_mcp_timeout
 from ..context_runtime.contracts import ContextRuntime, UnconfiguredContextRuntime
 from .verification import (
     VerificationController,
@@ -1724,6 +1724,23 @@ Additional Args:
                     Group(Text("Execution logs:", style="bold"), Text(partial_logs)), level=LogLevel.INFO,
                 )
             error_msg, _ = self._screen_execution_output(str(e), code_action)
+            category, leaf = classify_mcp_failure(e)
+            if category:
+                # This text becomes the ReAct observation: keep it short and
+                # actionable; the full exception tree goes to the log only.
+                error_msg = mcp_failure_message(
+                    category,
+                    getattr(getattr(self, "observer", None), "lang", "en"),
+                    server=find_mcp_server_url(e),
+                    leaf=leaf,
+                )
+                logger.error(
+                    "event=mcp_code_execution_failure agent=%s step=%s category=%s",
+                    self.name,
+                    memory_step.step_number,
+                    category,
+                    exc_info=True,
+                )
             self.logger.log(
                 f"[Code Execution] step={memory_step.step_number} failed after {exec_duration_ms:.1f}ms: {error_msg}",
                 level=LogLevel.ERROR,

@@ -69,12 +69,12 @@ def _install_stubs():
             self.extra = extra
 
     _consts = _register_package("consts")
-    _consts.error_code = _mk_mod("consts.error_code", ErrorCode=_ErrorCode)
-    _consts.exceptions = _mk_mod("consts.exceptions", AppException=_AppException)
+    _consts.error_code = _mk_mod("contracts.errors.codes", ErrorCode=_ErrorCode)
+    _consts.exceptions = _mk_mod("contracts.errors.exceptions", AppException=_AppException)
 
     _db = _register_package("database")
     _db.evaluator_db = _mk_mod(
-        "database.evaluator_db", **{n: MagicMock(name=n) for n in _DB_IMPL_NAMES}
+        "management.db.evaluation.evaluator", **{n: MagicMock(name=n) for n in _DB_IMPL_NAMES}
     )
 
     _svc = _register_package("services")
@@ -136,7 +136,7 @@ def bundle():
     tmpl = MagicMock(name="load_prompt")
 
     for n, m in db_impls.items():
-        setattr(sys.modules["database.evaluator_db"], n, m)
+        setattr(sys.modules["management.db.evaluation.evaluator"], n, m)
     sys.modules["management.services.evaluation.runs"].validate_code_evaluator = code_val
     sys.modules["management.services.agent.profile"].fetch_agent_profile = profile
     sys.modules["management.services.agent.profile"].format_agent_profile_context = fmt_profile

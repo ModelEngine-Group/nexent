@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Nexent 微服务架构演进图</title>
+</head>
+<body style="margin:0;background:#ffffff;">
+
+<div data-document-role="page" data-label="现状微服务架构" style="position:relative;width:1600px;height:900px;background:#ffffff;font-family:'Microsoft YaHei','PingFang SC',sans-serif;overflow:hidden;">
+
+  <div style="position:absolute;left:60px;top:40px;width:900px;">
+    <div style="font-size:36px;font-weight:bold;color:#1a1a2e;">Nexent 现状微服务架构（代码仓实际部署单元）</div>
+    <div style="font-size:17px;color:#777;margin-top:6px;">依据 deploy/docker/compose + k8s/helm 盘点 · 2026-10 · 绿=已实现 · 蓝=部分实现能力</div>
+  </div>
+
+  <div style="position:absolute;left:60px;top:130px;width:220px;height:26px;background:#1d9e75;border-radius:5px;color:#fff;font-size:15px;line-height:26px;text-align:center;">已实现服务</div>
+  <div style="position:absolute;left:300px;top:130px;width:220px;height:26px;background:#378add;border-radius:5px;color:#fff;font-size:15px;line-height:26px;text-align:center;">部分实现能力</div>
+
+  <div style="position:absolute;left:60px;top:180px;width:300px;height:96px;background:#e8f7ef;border:3px solid #1d9e75;border-radius:10px;padding:12px 16px;">
+    <div style="font-size:20px;font-weight:bold;color:#0a3d2e;">nginx 网关 <span style="font-size:14px;font-weight:normal;color:#0a5c42;">:3100 TLS</span></div>
+    <div style="font-size:14px;color:#0a3d2e;margin-top:6px;">✓ SSE 透传（buffering off）<br>✓ 静态入口 → nexent-web</div>
+  </div>
+
+  <div style="position:absolute;left:400px;top:180px;width:520px;height:96px;background:#e8f7ef;border:3px solid #1d9e75;border-radius:10px;padding:12px 16px;">
+    <div style="font-size:20px;font-weight:bold;color:#0a3d2e;">nexent-web <span style="font-size:14px;font-weight:normal;color:#0a5c42;">:3000 · Next.js BFF（server.js）</span></div>
+    <div style="font-size:14px;color:#0a3d2e;margin-top:6px;">✓ 前缀分流：runtime 前缀→:5014 · 其余 /api→:5010<br>✓ /nb→:5013 · WebSocket→:5014</div>
+  </div>
+
+  <div style="position:absolute;left:330px;top:284px;font-size:24px;color:#555;">↓ ↓ ↓</div>
+
+  <div style="position:absolute;left:60px;top:320px;width:520px;height:170px;background:#e8f7ef;border:3px solid #1d9e75;border-radius:10px;padding:14px 18px;">
+    <div style="font-size:21px;font-weight:bold;color:#0a3d2e;">nexent-config 管理服务 <span style="font-size:15px;font-weight:normal;color:#0a5c42;">:5010</span></div>
+    <div style="font-size:14px;color:#5c8a79;margin-top:2px;">config_service.py · 40+ 路由</div>
+    <div style="font-size:14px;color:#0a3d2e;margin-top:8px;line-height:1.8;">✓ 多租户/用户/邀请/分组/API Key<br>✓ 模型管理 + 能力画像（capacity_profiles）<br>✓ MCP 市场/远程 MCP · 知识库/技能/评测/记忆/A2A</div>
+  </div>
+
+  <div style="position:absolute;left:620px;top:320px;width:520px;height:170px;background:#e8f7ef;border:3px solid #1d9e75;border-radius:10px;padding:14px 18px;">
+    <div style="font-size:21px;font-weight:bold;color:#0a3d2e;">nexent-runtime 运行时服务 <span style="font-size:15px;font-weight:normal;color:#0a5c42;">:5014</span></div>
+    <div style="font-size:14px;color:#5c8a79;margin-top:2px;">runtime_service.py · agent 执行</div>
+    <div style="font-size:14px;color:#0a3d2e;margin-top:8px;line-height:1.8;">✓ agent 执行流（run/stop/SSE）· 会话/分享/文件/语音<br>✓ 自动化调度（租约式）· 任务恢复<br>✓ 线程容量管理 · sandbox 容器池</div>
+  </div>
+
+  <div style="position:absolute;left:60px;top:510px;width:330px;height:110px;background:#e8f7ef;border:3px solid #1d9e75;border-radius:10px;padding:12px 16px;">
+    <div style="font-size:20px;font-weight:bold;color:#0a3d2e;">nexent-mcp <span style="font-size:14px;font-weight:normal;color:#0a5c42;">:5011 / :5015</span></div>
+    <div style="font-size:14px;color:#0a3d2e;margin-top:6px;">✓ MCP 工具服务<br>✓ 容器生命周期（docker.sock）</div>
+  </div>
+
+  <div style="position:absolute;left:420px;top:510px;width:330px;height:110px;background:#e8f7ef;border:3px solid #1d9e75;border-radius:10px;padding:12px 16px;">
+    <div style="font-size:20px;font-weight:bold;color:#0a3d2e;">nexent-northbound <span style="font-size:14px;font-weight:normal;color:#0a5c42;">:5013</span></div>
+    <div style="font-size:14px;color:#0a3d2e;margin-top:6px;">✓ 北向开放 API /nb/v1<br>✓ A2A server（进程内转发 runtime）</div>
+  </div>
+
+  <div style="position:absolute;left:780px;top:510px;width:360px;height:110px;background:#e8f7ef;border:3px solid #1d9e75;border-radius:10px;padding:12px 16px;">
+    <div style="font-size:20px;font-weight:bold;color:#0a3d2e;">nexent-data-process <span style="font-size:14px;font-weight:normal;color:#0a5c42;">:5012</span></div>
+    <div style="font-size:14px;color:#0a3d2e;margin-top:6px;">✓ 文件解析 / PDF 转换<br>✓ 图像处理（config 调用）</div>
+  </div>
+
+  <div style="position:absolute;left:60px;top:640px;width:1080px;height:80px;background:#f1efe8;border:2px solid #888;border-radius:10px;padding:10px 16px;">
+    <div style="font-size:17px;font-weight:bold;color:#444;">基础设施层</div>
+    <div style="font-size:14px;color:#555;margin-top:4px;">PostgreSQL（业务+监控记录） · Redis（运行态/租约） · Elasticsearch（向量） · MinIO（对象存储） · supabase 认证 · sandbox 容器池</div>
+  </div>
+
+  <div style="position:absolute;left:1170px;top:180px;width:370px;height:540px;background:#e6f1fb;border:3px solid #378add;border-radius:10px;padding:14px 18px;">
+    <div style="font-size:19px;font-weight:bold;color:#0c3a66;">部分实现能力（待补齐）</div>
+    <div style="font-size:14px;color:#0c3a66;margin-top:10px;line-height:2.0;">
+      ◐ 监控读：仅 2 路由，无前端页<br>
+      ◐ 配额：仅存储字节，无 token 维度<br>
+      ◐ 审计：仅 [SEC_AUDIT] 日志行<br>
+      &nbsp;&nbsp;&nbsp;无表 / 无 API / 无 UI（#2189）<br>
+      ◐ SSO：CAS/OAuth 有，OIDC/扫码无<br>
+      ◐ 版本：发布/回滚有，灰度无<br>
+      ◐ 遥测写侧：SDK buffer→PG ✓<br>
+      &nbsp;&nbsp;&nbsp;缺 /metrics、trace 查询、告警<br>
+      ◐ 配置读取：直读草稿表，无快照<br>
+      ◐ 执行引擎 run.py 在 management 目录<br>
+      &nbsp;&nbsp;&nbsp;却由 runtime 进程加载（归属错位）
+    </div>
+  </div>
+
+</div>
+
+<div data-document-role="page" data-label="未来微服务演进" style="position:relative;width:1600px;height:900px;background:#ffffff;font-family:'Microsoft YaHei','PingFang SC',sans-serif;overflow:hidden;">
+
+  <div style="position:absolute;left:60px;top:40px;width:1000px;">
+    <div style="font-size:36px;font-weight:bold;color:#1a1a2e;">未来微服务演进（解耦目标）</div>
+    <div style="font-size:17px;color:#777;margin-top:6px;">P0a 边界清理 → P0b 合规基座(26Q4) → P1 成本与版本治理(27Q1) → P2 身份+可观测(27Q2) → P3 管理台整合(27Q3)</div>
+  </div>
+
+  <div style="position:absolute;left:60px;top:130px;width:150px;height:26px;background:#1d9e75;border-radius:5px;color:#fff;font-size:14px;line-height:26px;text-align:center;">已实现</div>
+  <div style="position:absolute;left:220px;top:130px;width:170px;height:26px;background:#378add;border-radius:5px;color:#fff;font-size:14px;line-height:26px;text-align:center;">部分实现</div>
+  <div style="position:absolute;left:400px;top:130px;width:210px;height:26px;background:#fff;border:2px dashed #d84a4a;border-radius:5px;color:#d84a4a;font-size:14px;line-height:22px;text-align:center;">未实现（规划中）</div>
+
+  <div style="position:absolute;left:60px;top:180px;width:480px;height:86px;background:#e8f7ef;border:3px solid #1d9e75;border-radius:10px;padding:10px 16px;">
+    <div style="font-size:19px;font-weight:bold;color:#0a3d2e;">nginx 网关 + nexent-web BFF <span style="font-size:13px;font-weight:normal;color:#0a5c42;">:3100 / :3000</span></div>
+    <div style="font-size:14px;color:#0a3d2e;margin-top:4px;">✓ 保持现有前缀分流 · 新增观测/管理台路由</div>
+  </div>
+
+  <div style="position:absolute;left:580px;top:180px;width:420px;height:86px;background:#e8f7ef;border:3px solid #1d9e75;border-radius:10px;padding:10px 16px;">
+    <div style="font-size:19px;font-weight:bold;color:#0a3d2e;">nexent-mcp / northbound / data-process</div>
+    <div style="font-size:14px;color:#0a3d2e;margin-top:4px;">✓ :5011/:5015 · :5013 · :5012 · 保持现状</div>
+  </div>
+
+  <div style="position:absolute;left:60px;top:286px;width:480px;height:150px;background:#e8f7ef;border:3px solid #1d9e75;border-radius:10px;padding:12px 16px;">
+    <div style="font-size:20px;font-weight:bold;color:#0a3d2e;">nexent-config 管理服务（强化）<span style="font-size:14px;font-weight:normal;color:#0a5c42;">:5010</span></div>
+    <div style="font-size:14px;color:#0a3d2e;margin-top:6px;line-height:1.8;">✓ 多租户/权限/模型管理（现有）<br>✓ 版本快照发布 publish 固化（存量能力）<br><span style="color:#378add;">◐ 版本服务升级 → 灰度/审批（见右下）</span></div>
+  </div>
+
+  <div style="position:absolute;left:580px;top:286px;width:480px;height:150px;background:#e8f7ef;border:3px solid #1d9e75;border-radius:10px;padding:12px 16px;">
+    <div style="font-size:20px;font-weight:bold;color:#0a3d2e;">nexent-runtime 运行时服务（纯化）<span style="font-size:14px;font-weight:normal;color:#0a5c42;">:5014</span></div>
+    <div style="font-size:14px;color:#0a3d2e;margin-top:6px;line-height:1.8;">✓ agent 执行/自动化/会话（现有）<br>✓ P0a：run.py 归属迁回 runtime 包<br><span style="color:#378add;">◐ 配置改版本快照加载（替换直读草稿表）</span></div>
+  </div>
+
+  <div style="position:absolute;left:60px;top:466px;width:1000px;height:80px;background:#f1efe8;border:2px solid #888;border-radius:10px;padding:10px 16px;">
+    <div style="font-size:17px;font-weight:bold;color:#444;">基础设施层（演进）</div>
+    <div style="font-size:14px;color:#555;margin-top:4px;">观测数据先同库异连接池（现状已有 get_monitoring_db_session）→ 后独立存储 · 写入管道补 spool/死信重放</div>
+  </div>
+
+  <div style="position:absolute;left:60px;top:576px;width:1000px;height:120px;background:#fdf0f0;border:3px dashed #d84a4a;border-radius:10px;padding:12px 16px;">
+    <div style="font-size:20px;font-weight:bold;color:#701f1f;">nexent-observability 观测服务（第四平面）【未实现】</div>
+    <div style="font-size:14px;color:#701f1f;margin-top:6px;line-height:1.8;">✗ 统一摄入管道（模型记录/span/审计/计量共用异步批量）&nbsp;&nbsp;✗ metrics 聚合 + /metrics 端点<br>✗ trace 存储 + 会话级 trace 查询 API&nbsp;&nbsp;✗ 告警规则引擎 + SLO 管理&nbsp;&nbsp;✗ 租户级 FinOps 用量大盘</div>
+  </div>
+
+  <div style="position:absolute;left:60px;top:726px;width:320px;height:150px;background:#fdf0f0;border:3px dashed #d84a4a;border-radius:10px;padding:12px 14px;">
+    <div style="font-size:17px;font-weight:bold;color:#701f1f;">审计合规服务【未实现】</div>
+    <div style="font-size:13px;color:#701f1f;margin-top:6px;line-height:1.7;">✗ audit_log_t 表化（SQL migrations）<br>✗ 查询/过滤/CSV 导出 API+UI（#2189）<br>✗ 与计量共用异步写入管道</div>
+  </div>
+
+  <div style="position:absolute;left:400px;top:726px;width:320px;height:150px;background:#fdf0f0;border:3px dashed #d84a4a;border-radius:10px;padding:12px 14px;">
+    <div style="font-size:17px;font-weight:bold;color:#701f1f;">计量计费服务【未实现】</div>
+    <div style="font-size:13px;color:#701f1f;margin-top:6px;line-height:1.7;">✗ token/调用次数计量入账（buffer 已有数据）<br>✗ 三维配额 存储×token×调用（#2854/#2807）<br>✗ 80%/95% 预算告警</div>
+  </div>
+
+  <div style="position:absolute;left:740px;top:726px;width:320px;height:150px;background:#fdf0f0;border:3px dashed #d84a4a;border-radius:10px;padding:12px 14px;">
+    <div style="font-size:17px;font-weight:bold;color:#701f1f;">版本发布增强【未实现】</div>
+    <div style="font-size:13px;color:#701f1f;margin-top:6px;line-height:1.7;">✗ 灰度/金丝雀发布（按租户/分组）<br>✗ staging-prod 环境位 · 发布审批链<br>✗ runtime 快照只读加载强制化</div>
+  </div>
+
+  <div style="position:absolute;left:1170px;top:180px;width:370px;height:250px;background:#fdf0f0;border:3px dashed #d84a4a;border-radius:10px;padding:14px 16px;">
+    <div style="font-size:18px;font-weight:bold;color:#701f1f;">身份纵深强化【未实现】</div>
+    <div style="font-size:14px;color:#701f1f;margin-top:8px;line-height:1.9;">✗ OIDC + SSO 界面化配置<br>✗ 企微/钉钉/飞书扫码 ≥1 家<br>✗ 自定义角色（RBAC 去 SQL 硬编码）</div>
+  </div>
+
+  <div style="position:absolute;left:1170px;top:460px;width:370px;height:250px;background:#fdf0f0;border:3px dashed #d84a4a;border-radius:10px;padding:14px 16px;">
+    <div style="font-size:18px;font-weight:bold;color:#701f1f;">统一管理台【未实现】</div>
+    <div style="font-size:14px;color:#701f1f;margin-top:8px;line-height:1.9;">✗ 全局检索/批量操作（#3449）<br>✗ SU 改密入口（#3413）<br>✗ 结构化错误信息 · 契约 OpenAPI 化</div>
+  </div>
+
+</div>
+
+</body>
+</html>
