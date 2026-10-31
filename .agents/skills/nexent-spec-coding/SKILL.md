@@ -20,7 +20,8 @@ Develop Nexent from an evidence-backed SPEC while keeping product behavior, form
 | Work | Required reference |
 | --- | --- |
 | Choose the SPEC maintenance mode | [spec-maintenance-guide.md](references/spec-maintenance-guide.md) |
-| Fix a bug with or without an existing SPEC | [spec-maintenance-guide.md](references/spec-maintenance-guide.md), [bugfix-design-template.md](references/bugfix-design-template.md), and `nexent-test-assets`'s bugfix reference |
+| Simple fix | [spec-maintenance-guide.md](references/spec-maintenance-guide.md#simple-fix) |
+| Fix a bug outside Simple fix, with or without an existing SPEC | [spec-maintenance-guide.md](references/spec-maintenance-guide.md), [bugfix-design-template.md](references/bugfix-design-template.md), and `nexent-test-assets`'s bugfix reference |
 | Create or revise `proposal.md` | [proposal-template.md](references/proposal-template.md) |
 | Create or revise `design.md`; design formal D1-D5 cases | [design-template.md](references/design-template.md) and [test-design-guide.md](references/test-design-guide.md) |
 | Create or revise `task.md` | [task-template.md](references/task-template.md) |
@@ -29,7 +30,23 @@ Develop Nexent from an evidence-backed SPEC while keeping product behavior, form
 
 Use `nexent-test-assets` for the concrete Feature, Case, execution binding, schema, and Excel formats. `proposal.md` owns the current-change acceptance criteria, `design.md` owns design rationale and test strategy, and `task.md` owns the change-level traceability and evidence record.
 
+## Writing the documents
+
+Write for the people deciding the change and implementing it. Use familiar terms, concrete subjects and verbs, and focused sentences and paragraphs. Explain necessary domain terms when first used; preserve precision without inventing abstract labels. Scale detail to the change rather than filling every available section.
+
+Keep each document's purpose clear: `proposal.md` explains the problem, intended behavior, scope and acceptance; `design.md` explains implementation choices and trade-offs; `task.md` records implementation work and execution evidence. State a requirement once and reference it elsewhere. Explicit product or external compatibility constraints still belong with the requirements, even when technical.
+
+Maintain one current explanation. Replace or remove obsolete requirements, designs and task descriptions in place, updating affected references instead of appending corrections or retaining superseded versions. Do not add history sections or archives by default. Keep the actual implementation baseline distinct from planned changes, and preserve valid acceptance obligations and factual execution evidence.
+
+Follow the relevant template for drafting rules: [proposal](references/proposal-template.md) for problems and expected behavior, [design](references/design-template.md) for the overall approach and significant decisions, and [tasks](references/task-template.md) for concrete deliverables, dependencies and completion evidence. Read only the template needed for the current work. These are drafting instructions, not an additional review, approval or validation stage.
+
+For changes involving a multi-step user journey or frontend/backend coordination, show the journey from the user's initial action to the visible outcome before describing individual parts. Keep the user-facing flow in proposal.md; include an overall interaction diagram and cross-layer responsibilities in design.md. Follow the templates for the relevant branches and level of detail; simple changes do not require a diagram.
+
+Explain the overall design before its details, and distinguish existing, reused, changed and new behavior. Group implementation tasks by deliverable and dependency; each task needs a concrete result and a way to establish completion. Keep related tests and documentation with the affected work once its interfaces are stable; reserve final verification for integration and the existing delivery gates. This organization does not remove or defer required UT, formal Case design, scripts/bindings, preparation/cleanup, validation or acceptance evidence. Use the existing test and verification references for those requirements rather than repeating their rules in every task.
+
 ## Bugfix route
+
+First classify [Simple fix](references/spec-maintenance-guide.md#simple-fix): a straightforward, bounded modification with clear intent that preserves business rules, interfaces, data handling and functional behavior. Follow its lightweight implementation and verification route without creating SPEC documents or a bug Change record solely for process compliance. Maintain any actually affected formal assets under their own validation/traceability rules. The gated workflow below applies to other bugs.
 
 For a bug, search the existing SPEC and formal assets before selecting the document scope. With a usable SPEC, follow its Feature/business-rule/Case links and check actual callers and scripts to determine affected behavior; update only relevant sections. Without a usable SPEC, create a lightweight `design.md` using the bugfix template. Define the complete coherent capability that owns the bug, its final expected behavior and existing Feature/Case coverage. Keep the current fix and verification scope explicit. A missing SPEC does not require creating `proposal.md` or `task.md`, reconstructing unrelated capabilities, or completing historical test coverage.
 
@@ -65,7 +82,7 @@ Implement the minimum change needed to satisfy the defined behavior, following e
 
 ### 4. Implement fixed tests and case-local bindings
 
-After product implementation, implement each affected D1-D5 primary script beside `test-e2e/cases/<Case-ID>/case.yaml`; keep reusable helpers under `test-e2e/infra/automation/`. Add or update that Case's `execution.yaml` with framework, file, selector, and declared profile/asset needs. Then run full binding and traceability validation. Do not hand-edit the derived registry.
+Once the affected product interfaces are stable, implement each affected D1-D5 primary script with its corresponding work increment beside `test-e2e/cases/<Case-ID>/case.yaml`; keep reusable helpers under `test-e2e/infra/automation/`. Do not wait for all product work to finish before testing early increments; formal Case/acceptance design still precedes product implementation, except the existing focused-regression route. Add or update that Case's `execution.yaml` with framework, file, selector, and declared profile/asset needs. Then run full binding and traceability validation. Do not hand-edit the derived registry.
 
 For added/changed active automated D2-D5 Cases, make preparation and cleanup explicit even for self-contained proofs. Record resource ownership, logical dependencies, cleanup/recovery and the primary responsibility domain in the design/task traceability; use nexent-test-assets' [preparation and delivery gate](../nexent-test-assets/references/test-implementation.md#preparation-and-delivery-gate). An empty family list requires a self-contained rationale and verified resource release.
 

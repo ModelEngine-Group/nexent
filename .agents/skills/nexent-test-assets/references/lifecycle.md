@@ -16,7 +16,7 @@ For every new/current product Change, add traditional_ut with decision (reuse/st
 
 ## Bug
 
-Follow [bugfix.md](bugfix.md). With a usable SPEC, follow and confirm its Feature/rule/Case associations. Without one, use `nexent-spec-coding`'s lightweight design.md, defining the coherent capability and the same D1-D5 matrix without requiring a proposal/task set. Record a bug Change under `test-e2e/changes/bugs/`, with impact evidence and selected Cases. Reuse or strengthen existing coverage first; zero additions is valid. Record no gap or an unavailable baseline accurately rather than claiming coverage is absent. Update Feature/Case contracts only when changed or missing; historical coverage gaps are separate work.
+Follow [bugfix.md](bugfix.md), classifying Simple fix first. This category needs no SPEC or bug Change record solely for process compliance; report scope and verification in the PR description or delivery response, and maintain any actually affected formal assets under their own rules. For other bugs, with a usable SPEC, follow and confirm its Feature/rule/Case associations. Without one, use `nexent-spec-coding`'s lightweight design.md, defining the coherent capability and the same D1-D5 matrix without requiring a proposal/task set. Record a bug Change under `test-e2e/changes/bugs/`, with impact evidence and selected Cases. Reuse or strengthen existing coverage first; zero additions is valid. Record no gap or an unavailable baseline accurately rather than claiming coverage is absent. Update Feature/Case contracts only when changed or missing; historical coverage gaps are separate work.
 
 ## Change record paths
 
