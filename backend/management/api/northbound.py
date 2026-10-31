@@ -57,8 +57,8 @@ from fastapi.responses import (
     Response,
     StreamingResponse,
 )
-from gateway.authentication.auth import generate_session_jwt, get_user_language
-from gateway.authentication.northbound_auth import get_northbound_context as _get_northbound_context
+from management.security.session import generate_session_jwt, get_user_language
+from management.security.api_key import get_northbound_context as _get_northbound_context
 from management.db.identity.user_tenant import get_user_role_by_tenant
 from management.db.knowledge_base.repository import get_index_name_by_knowledge_name
 from management.services.agent.a2a.service import (

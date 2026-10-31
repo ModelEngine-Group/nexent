@@ -202,6 +202,7 @@ services:
       - "5013:5013"
     environment:
       GATEWAY_AUTH_ENABLED: "true"
+      GATEWAY_PORT: "5013"
       JWT_ISSUER: "${JWT_ISSUER:-nexent}"
       JWT_SECRET: "${JWT_SECRET:?Gateway requires the configured JWT_SECRET}"
       GATEWAY_SIGNING_SECRET: "${GATEWAY_SIGNING_SECRET:-}"
@@ -209,9 +210,9 @@ services:
       GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
       GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
       GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"
-    command: ["uvicorn", "gateway.edge:app", "--host", "0.0.0.0", "--port", "5013", "--no-proxy-headers"]
+    entrypoint: ["python", "backend/gateway_service.py"]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5013/health/ready', timeout=2)"]
+      test: ["CMD", "python", "-m", "gateway.healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3

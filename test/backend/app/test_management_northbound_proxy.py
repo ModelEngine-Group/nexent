@@ -12,7 +12,7 @@ import pytest
 
 from test.backend.app import test_northbound_base_app as fixtures
 from test.backend.gateway.test_edge_integration import serve
-from gateway.edge import create_edge_app
+from gateway.application import create_gateway_app
 
 
 @pytest.mark.local_only
@@ -24,7 +24,7 @@ async def test_gateway_forwards_original_northbound_and_a2a_paths_to_management(
     with patch.object(fixtures.northbound_base_app_module, "recover_northbound_tasks_on_startup", new=AsyncMock()):
         with serve(fixtures.app) as management_port:
             origin = f"http://127.0.0.1:{management_port}"
-            app = create_edge_app(upstreams={"management": origin, "runtime": origin, "northbound": origin})
+            app = create_gateway_app(authentication=False, upstreams={"management": origin, "runtime": origin, "northbound": origin})
             with serve(app) as gateway_port:
                 async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{gateway_port}", trust_env=False) as client:
                     for prefix in ("", "/api"):

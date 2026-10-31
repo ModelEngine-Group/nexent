@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 
 from contracts.authentication import CredentialKind
 from contracts.errors.exceptions import TokenExpiredError
-from gateway.authentication import auth as identity, auth as internal, northbound_auth as northbound
-from gateway.authentication.auth import extract_bearer_token
-from gateway.authentication.auth import authenticate_identity
+from management.security import session as identity, session as internal, api_key as northbound
+from management.security.session import extract_bearer_token
+from management.security.session import authenticate_identity
 
 
 @pytest.mark.parametrize(
@@ -151,7 +151,7 @@ def test_session_token_cannot_be_used_for_internal_runtime(session_policy, monke
 
 
 def test_gateway_authentication_maps_an_invalid_api_key_to_401(monkeypatch):
-    from gateway.authentication.northbound_auth import get_northbound_context
+    from management.security.api_key import get_northbound_context
     from fastapi import Depends
 
     monkeypatch.setattr(northbound, "require_active_account", lambda uid: {})
@@ -241,7 +241,7 @@ def test_pending_account_token_cannot_be_used_as_a_browser_session(session_polic
 def test_pending_oauth_identity_requires_signed_purpose_and_provider(
     session_policy, monkeypatch
 ):
-    from gateway.authentication import auth as oauth
+    from management.security import session as oauth
     from contracts.constants.constants import OAUTH_PENDING_PURPOSE
     from contracts.errors.exceptions import OAuthLinkError
 

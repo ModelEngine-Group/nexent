@@ -2,5 +2,4 @@ fastapi==0.115.12
 uvicorn==0.34.0
 httpx==0.28.1
 websockets==15.0.1
-python-dotenv==1.1.0
 PyJWT==2.10.1

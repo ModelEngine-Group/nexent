@@ -20,7 +20,7 @@ _MODULES_TO_RESTORE = [
     "management.services.permission.identity.oauth",
     "management.services.skill.transfer",
     "management.services.tool.configuration",
-    "gateway.authentication.auth",
+    "management.security.session",
 ]
 _ORIGINAL_MODULES = {name: sys.modules.get(name) for name in _MODULES_TO_RESTORE}
 
@@ -61,7 +61,7 @@ sys.modules["management.db.identity.user_tenant"] = MagicMock()
 sys.modules["management.services.permission.identity.oauth"] = MagicMock()
 sys.modules["management.services.skill.transfer"] = MagicMock()
 sys.modules["management.services.tool.configuration"] = MagicMock()
-sys.modules["gateway.authentication.auth"] = MagicMock()
+sys.modules["management.security.session"] = MagicMock()
 
 from management.services.permission.identity.cas import (  # noqa: E402
     CasAuthenticationError,

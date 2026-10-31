@@ -445,7 +445,7 @@ utils_module.__path__ = [
     os.path.join(os.path.dirname(__file__), "../../../backend/utils")
 ]
 sys.modules["utils"] = utils_module
-sys.modules["gateway.authentication.auth"] = MagicMock()
+sys.modules["management.security.session"] = MagicMock()
 sys.modules["utils.thread_utils"] = MagicMock()
 sys.modules["infrastructure.observability.knowledge"] = MagicMock()
 

@@ -23,7 +23,7 @@ def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
     from management.db.identity.user_tenant import update_user_tenant_role
     from management.services.permission import api_keys
     from management.api import northbound as routes
-    from gateway.authentication import northbound_auth
+    from management.security import api_key as northbound_auth
 
     client, auth, helpers, models = runtime
     client.app.include_router(routes.router)
@@ -82,7 +82,7 @@ def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
 
 def test_native_http_identity_password_and_api_keys(runtime):
     client, auth, helpers, models = runtime
-    from gateway.authentication import northbound_auth as northbound
+    from management.security import api_key as northbound
     assert client.get("/api/user/service_health").status_code == 200
     data = register(client)
     token = data["session"]["access_token"]
@@ -284,7 +284,7 @@ def test_native_account_bootstrap_and_cas_provisioning(runtime):
 
 def test_native_http_revoke_disables_credentials_and_api_keys(runtime):
     client, auth, helpers, models = runtime
-    from gateway.authentication import northbound_auth as northbound
+    from management.security import api_key as northbound
     data = register(client)
     token = data["session"]["access_token"]
     issued_key = client.post("/api/user/tokens", headers=bearer(token))

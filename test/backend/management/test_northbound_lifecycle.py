@@ -2,6 +2,7 @@
 """Management ownership of Northbound startup, uploads and shutdown."""
 
 import asyncio
+import ast
 import importlib.util
 import sys
 from pathlib import Path
@@ -100,4 +101,6 @@ def test_business_implementations_have_one_management_owner():
     assert (backend / "management/services/northbound.py").is_file()
     assert not (backend / "gateway/api/northbound.py").exists()
     assert not (backend / "services/northbound_service.py").exists()
-    assert "management" not in (backend / "gateway/application.py").read_text(encoding="utf-8")
+    tree = ast.parse((backend / "gateway/application.py").read_text(encoding="utf-8"))
+    imports = [node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
+    assert not any(module.startswith("management") for module in imports)

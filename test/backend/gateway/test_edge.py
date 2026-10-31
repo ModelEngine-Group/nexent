@@ -4,7 +4,7 @@
 import httpx
 import pytest
 
-from gateway.edge import create_edge_app
+from gateway.application import create_gateway_app
 from gateway.routing import select_upstream, filtered_headers
 
 
@@ -25,7 +25,7 @@ async def test_partial_upstream_failure_closes_stream_without_retry():
         requests.append(request)
         return httpx.Response(200, stream=BrokenStream())
 
-    app = create_edge_app(authentication=False, transport=httpx.MockTransport(upstream))
+    app = create_gateway_app(authentication=False, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
             with pytest.raises(httpx.ReadError):
@@ -68,7 +68,7 @@ async def test_http_preserves_body_query_status_and_cookies():
         return httpx.Response(409, stream=httpx.ByteStream(b"event: token\n\n"), headers=[
             ("content-type", "text/event-stream"), ("set-cookie", "a=1"), ("set-cookie", "b=2")])
 
-    app = create_edge_app(transport=httpx.MockTransport(upstream))
+    app = create_gateway_app(authentication=False, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
             response = await client.post("/api/agent/run?q=a%2Fb&q=2", content=b"payload")
@@ -90,7 +90,7 @@ async def test_upstream_errors(error, status):
         calls.append(request)
         raise error("secret upstream detail")
 
-    app = create_edge_app(transport=httpx.MockTransport(upstream))
+    app = create_gateway_app(authentication=False, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
             response = await client.get("/api/model/list")
@@ -107,7 +107,7 @@ async def test_upstream_cookies_never_leak_between_users():
         seen.append(request.headers.get("cookie"))
         return httpx.Response(200, stream=httpx.ByteStream(b"ok"), headers={"set-cookie": "session=alice; Path=/"})
 
-    app = create_edge_app(transport=httpx.MockTransport(upstream))
+    app = create_gateway_app(authentication=False, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
             await client.get("/api/user/current_user_info")
@@ -119,4 +119,4 @@ async def test_upstream_cookies_never_leak_between_users():
 @pytest.mark.parametrize("origin", ["ftp://host", "http://user:pass@host", "http://host/path", "http://host?q=1"])
 def test_reject_invalid_upstream(origin):
     with pytest.raises(ValueError):
-        create_edge_app(upstreams={"management": origin})
+        create_gateway_app(authentication=False, upstreams={"management": origin})

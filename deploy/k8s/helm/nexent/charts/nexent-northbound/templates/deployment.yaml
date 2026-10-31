@@ -36,8 +36,10 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-          command: ["uvicorn", "gateway.edge:app", "--host", "0.0.0.0", "--port", "5013", "--no-proxy-headers"]
+          command: ["python", "backend/gateway_service.py"]
           env:
+            - name: GATEWAY_PORT
+              value: "5013"
             - name: GATEWAY_AUTH_ENABLED
               value: "true"
             - name: JWT_ISSUER

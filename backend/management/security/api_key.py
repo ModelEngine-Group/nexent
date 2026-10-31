@@ -20,7 +20,7 @@ from contracts.errors.exceptions import (
     UnauthorizedError,
 )
 from fastapi import HTTPException, Request
-from gateway.authentication.auth import extract_bearer_token, require_active_account
+from management.security.session import extract_bearer_token, require_active_account
 from infrastructure.security.signatures import (
     calculate_hmac_signature,
     validate_timestamp,
@@ -114,110 +114,56 @@ def validate_aksk_authentication(
 # ---------------------------------------------------------------------------
 
 
+def _require_api_key_record(access_key: str) -> dict:
+    """Resolve one active credential and account for an authentication attempt."""
+    if not access_key:
+        raise TokenExpiredError("Invalid access key")
+    record = get_token_by_access_key(access_key)
+    if not record or record.get("delete_flag") == "Y":
+        raise TokenExpiredError("Invalid or inactive access key")
+    if not record.get("user_id"):
+        raise TokenExpiredError("No user associated with this access key")
+    require_active_account(record["user_id"])
+    return record
+
+
 def validate_bearer_token(authorization: Optional[str]) -> Tuple[bool, Optional[dict]]:
-    """
-    Validate Bearer token (API Key) from Authorization header.
-
-    Args:
-        authorization: Authorization header value (e.g., "Bearer nexent-xxxxx")
-
-    Returns:
-        Tuple of (is_valid, token_info_dict)
-        - is_valid: True if token exists and is active
-        - token_info: Token information dict if valid, None otherwise
-    """
-    if not authorization:
-        logger.warning("No authorization header provided")
-        return False, None
-
-    # Extract token from "Bearer <token>" format
+    """Keep the boolean compatibility API over the common credential resolver."""
     try:
-        token = extract_bearer_token(authorization)
-    except UnauthorizedError:
-        return False, None
-
-    if not token:
-        logger.warning("Empty bearer token")
-        return False, None
-
-    # Look up token in database
-    try:
-        token_info = get_token_by_access_key(token)
-        if token_info and token_info.get("delete_flag") != "Y":
-            require_active_account(token_info.get("user_id"))
-            logger.debug(
-                f"Token validated successfully for user {token_info.get('user_id')}"
-            )
-            return True, token_info
-        else:
-            logger.warning("Invalid or inactive token")
-            return False, None
-    except Exception as e:
-        logger.error(f"Error validating bearer token: {str(e)}")
+        return True, _require_api_key_record(extract_bearer_token(authorization))
+    except Exception as exc:
+        logger.warning("API key validation failed (%s)", type(exc).__name__)
         return False, None
 
 
 def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
-    """
-    Get user_id and tenant_id from access_key by querying user_token_info_t and user_tenant_t.
-
-    Args:
-        access_key: The access key (API Key) from the Authorization header.
-
-    Returns:
-        Dict containing user_id and tenant_id.
-
-    Raises:
-        UnauthorizedError: If the access key is not found or invalid.
-    """
-    if not access_key:
-        raise TokenExpiredError("Invalid access key")
-
-    # Query token from user_token_info_t
-    token_info = get_token_by_access_key(access_key)
-    if not token_info or token_info.get("delete_flag") == "Y":
-        raise TokenExpiredError("Invalid or inactive access key")
-
-    user_id = token_info.get("user_id")
-    if not user_id:
-        raise TokenExpiredError("No user associated with this access key")
-
-    # Query tenant from user_tenant_t
-    require_active_account(user_id)
-    user_tenant_record = get_user_tenant_by_user_id(user_id)
-    if not user_tenant_record or not user_tenant_record.get("tenant_id"):
+    """Resolve the credential and its active tenant using one credential query."""
+    record = _require_api_key_record(access_key)
+    user_id = record["user_id"]
+    membership = get_user_tenant_by_user_id(user_id)
+    if not membership or not membership.get("tenant_id"):
         raise TokenExpiredError("No active tenant relationship for this access key")
-    tenant_id = user_tenant_record["tenant_id"]
-
-    return {
-        "user_id": user_id,
-        "tenant_id": tenant_id,
-        "token_id": token_info.get("token_id"),
-    }
+    return {"user_id": user_id, "tenant_id": membership["tenant_id"], "token_id": record.get("token_id")}
 
 
 
 def authenticate_api_key(authorization: Optional[str], request=None) -> AuthenticatedIdentity:
-        from gateway.authentication.auth import _gateway_identity
+    from management.security.session import _gateway_identity
 
-        identity = _gateway_identity("api_key")
-        if identity is not None:
-            return AuthenticatedIdentity(identity["user_id"], identity["tenant_id"],
-                                         role=identity.get("role", ""), language=identity.get("language", "zh"),
-                                         token_id=identity.get("token_id"), kind=CredentialKind.API_KEY)
-        valid, record = validate_bearer_token(authorization)
-        if not valid or not record:
+    identity = _gateway_identity("api_key")
+    if identity is not None:
+        return AuthenticatedIdentity(identity["user_id"], identity["tenant_id"],
+                                     role=identity.get("role", ""), language=identity.get("language", "zh"),
+                                     token_id=identity.get("token_id"), kind=CredentialKind.API_KEY)
+    try:
+        resolved = get_user_and_tenant_by_access_key(extract_bearer_token(authorization))
+        if not resolved:
             raise TokenExpiredError("Invalid or missing bearer token")
-        resolved = get_user_and_tenant_by_access_key(
-            extract_bearer_token(authorization)
-        )
-        return AuthenticatedIdentity(
-            resolved.get("user_id") or "",
-            resolved.get("tenant_id") or "",
-            token_id=resolved.get("token_id"),
-            language=get_user_language(request),
-            kind=CredentialKind.API_KEY,
-        )
+    except Exception as exc:
+        raise TokenExpiredError("Invalid or missing bearer token") from exc
+    return AuthenticatedIdentity(resolved.get("user_id") or "", resolved.get("tenant_id") or "",
+                                 token_id=resolved.get("token_id"), language=get_user_language(request),
+                                 kind=CredentialKind.API_KEY)
 
 
 async def get_northbound_context(request: Request) -> NorthboundContext:

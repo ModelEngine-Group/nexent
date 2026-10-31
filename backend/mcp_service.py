@@ -462,7 +462,7 @@ class TenantMCPRouter:
             return
         if authorization:
             try:
-                from gateway.authentication.auth import get_current_user_id
+                from management.security.session import get_current_user_id
 
                 _, authenticated_tenant_id = get_current_user_id(authorization.decode())
             except Exception:

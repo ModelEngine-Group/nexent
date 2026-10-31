@@ -23,7 +23,7 @@ from management.db.evaluation.annotation import (
     list_annotation_schemas,
     update_annotation_schema,
 )
-from gateway.authentication.auth import get_current_user_id
+from management.security.session import get_current_user_id
 
 
 logger = logging.getLogger("evaluation_annotation_app")

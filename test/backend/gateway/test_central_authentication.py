@@ -11,7 +11,9 @@ import pytest
 from fastapi import FastAPI
 
 from contracts.constants import environment
-from gateway.edge import create_edge_app
+from gateway import application
+from gateway.application import create_gateway_app
+from gateway.configuration import GatewaySettings
 from infrastructure.security.gateway_identity import (
     IDENTITY_HEADER, IdentityError, identity_context, sign_identity, verify_identity, verify_lookup,
 )
@@ -25,6 +27,8 @@ def auth_config(monkeypatch):
     monkeypatch.setattr(environment, "JWT_SECRET", KEY)
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", KEY)
     monkeypatch.setattr(environment, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(application, "load_settings", lambda: GatewaySettings(jwt_secret=environment.JWT_SECRET,
+                        jwt_issuer=environment.JWT_ISSUER, signing_secret=environment.GATEWAY_SIGNING_SECRET))
 
 
 def session(user="u1", key=KEY, **extra):
@@ -49,7 +53,7 @@ async def test_gateway_overwrites_spoofed_identity_and_resolves_current_state(au
                                     request.url.path, request.url.query)
         return httpx.Response(200, stream=httpx.ByteStream(json.dumps(principal).encode()))
 
-    app = create_edge_app(authentication=True, transport=httpx.MockTransport(upstream))
+    app = create_gateway_app(authentication=True, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
             response = await client.get("/api/users/list", headers={"Authorization": "bearer\t" + session(), IDENTITY_HEADER: "spoofed"})
@@ -74,7 +78,7 @@ async def test_rejected_credentials_never_reach_lookup_or_business(auth_config, 
     if credential == "wrong-signature": headers["Authorization"] = "Bearer " + session(key=KEY + "bad")
     if credential == "pending": headers["Authorization"] = "Bearer " + session(purpose="pending-oauth")
     if credential == "wrong-audience": headers["Authorization"] = "Bearer " + session(aud="runtime")
-    app = create_edge_app(authentication=True, transport=httpx.MockTransport(upstream))
+    app = create_gateway_app(authentication=True, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
             response = await client.get("/api/users/list", headers=headers)
@@ -91,7 +95,7 @@ async def test_identity_rejection_or_unavailability_never_reaches_business(auth_
         calls.append(request.url.path)
         return httpx.Response(status, json={"secret": "must not be reflected"})
 
-    app = create_edge_app(authentication=True, transport=httpx.MockTransport(upstream))
+    app = create_gateway_app(authentication=True, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
             response = await client.get("/api/users/list", headers={"Authorization": "Bearer " + session()})
@@ -140,7 +144,7 @@ async def test_login_and_cors_preflight_require_no_existing_user(auth_config):
         seen.append(request)
         return httpx.Response(200, stream=httpx.ByteStream(b"login result"))
 
-    app = create_edge_app(authentication=True, transport=httpx.MockTransport(upstream))
+    app = create_gateway_app(authentication=True, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
             response = await client.post("/api/user/signin")
@@ -154,7 +158,7 @@ async def test_login_and_cors_preflight_require_no_existing_user(auth_config):
 async def test_enabled_gateway_fails_startup_without_signing_configuration(monkeypatch):
     monkeypatch.setattr(environment, "JWT_SECRET", "")
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", "")
-    app = create_edge_app(authentication=True)
+    app = create_gateway_app(authentication=True, settings=GatewaySettings())
     with pytest.raises(IdentityError, match="not configured"):
         async with app.router.lifespan_context(app):
             pytest.fail("Gateway started without signing configuration")
@@ -163,7 +167,7 @@ async def test_enabled_gateway_fails_startup_without_signing_configuration(monke
 def test_compatibility_identity_helpers_consume_context_without_credential_queries(monkeypatch):
     from contracts.authentication import CredentialKind
     from contracts.errors.exceptions import TokenExpiredError
-    from gateway.authentication import auth
+    from management.security import session as auth
 
     def forbidden(*args, **kwargs):
         raise AssertionError("Business helper revalidated external credentials")
@@ -200,7 +204,7 @@ async def test_frontend_root_user_probe_and_cookie_transport_remain_compatible(a
         return httpx.Response(200, stream=httpx.ByteStream(json.dumps(principal).encode()))
 
     cookie = session()
-    app = create_edge_app(authentication=True, transport=httpx.MockTransport(upstream))
+    app = create_gateway_app(authentication=True, transport=httpx.MockTransport(upstream))
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
             response = await client.get("/user/current_user_info")

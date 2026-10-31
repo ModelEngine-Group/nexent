@@ -72,7 +72,7 @@ from management.services.agent.versions import (
     compare_versions_impl,
     list_published_agents_impl,
 )
-from gateway.authentication.auth import get_current_user_info, get_current_user_id, verify_internal_runtime_jwt
+from management.security.session import get_current_user_info, get_current_user_id, verify_internal_runtime_jwt
 
 agent_config_router = APIRouter(prefix="/agent")
 

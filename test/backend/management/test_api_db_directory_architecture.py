@@ -23,7 +23,7 @@ def test_obsolete_implementation_packages_are_empty(legacy):
     assert not list((BACKEND / legacy).glob("*.py"))
 
 
-@pytest.mark.parametrize("service", ["management", "gateway", "runtime", "data_process"])
+@pytest.mark.parametrize("service", ["management", "runtime", "data_process"])
 def test_business_api_modules_are_importable_packages(service):
     api = BACKEND / service / "api"
     assert (api / "__init__.py").is_file()

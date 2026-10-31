@@ -24,7 +24,8 @@ from websockets.asyncio.client import connect
 from websockets.exceptions import InvalidStatus
 
 from contracts.constants import environment
-from gateway.edge import create_edge_app
+from gateway.application import create_gateway_app
+from gateway.configuration import GatewaySettings
 from infrastructure.security.gateway_identity import IDENTITY_HEADER, identity_context, sign_identity, sign_lookup
 from infrastructure.security.identity_middleware import GatewayIdentityMiddleware
 from management.api.identity import gateway_identity as lookup_routes
@@ -153,7 +154,7 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
                            "iat": now, "exp": now + 60, **overrides}, secret, algorithm="HS256")
 
     with serve(management) as management_url, serve(runtime) as runtime_url:
-        edge = create_edge_app(authentication=True, upstreams={
+        edge = create_gateway_app(authentication=True, settings=GatewaySettings(jwt_secret=secret, jwt_issuer=environment.JWT_ISSUER, signing_secret=secret), upstreams={
             "management": management_url, "northbound": management_url, "runtime": runtime_url})
         with serve(edge) as gateway_url:
             async with httpx.AsyncClient(trust_env=False, timeout=10) as client:

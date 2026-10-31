@@ -7,9 +7,10 @@ services:
       dockerfile: deploy/images/dockerfiles/gateway/Dockerfile
     restart: unless-stopped
     ports:
-      - "${NEXENT_GATEWAY_PORT:-5016}:5016"
+      - "${NEXENT_GATEWAY_PORT:-5016}:5013"
     environment:
       GATEWAY_AUTH_ENABLED: "true"
+      GATEWAY_PORT: "5013"
       DEPLOYMENT_VERSION: "${DEPLOYMENT_VERSION:-full}"
       JWT_ISSUER: "${JWT_ISSUER:-nexent}"
       JWT_SECRET: "${JWT_SECRET:?Gateway requires the configured JWT_SECRET}"

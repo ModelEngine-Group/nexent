@@ -68,14 +68,14 @@ def test_compose_gateway_has_no_business_dependencies(filename):
     compose = yaml.safe_load((ROOT / "deploy/docker/compose" / filename).read_text(encoding="utf-8"))
     gateway = compose["services"]["nexent-northbound"]
     assert "NEXENT_GATEWAY_IMAGE" in gateway["image"]
-    assert "gateway.edge:app" in gateway["command"]
-    assert "5013" in gateway["command"]
+    assert gateway["entrypoint"] == ["python", "backend/gateway_service.py"]
+    assert gateway["environment"]["GATEWAY_PORT"] == "5013"
     assert gateway["environment"]["GATEWAY_AUTH_ENABLED"] == "true"
     assert "JWT_ISSUER" in gateway["environment"]
     assert "JWT_SECRET" in gateway["environment"]
-    assert not {"env_file", "volumes", "user", "entrypoint"} & gateway.keys()
+    assert not {"env_file", "volumes", "user", "command"} & gateway.keys()
     assert set(gateway["depends_on"]) == {"nexent-config", "nexent-runtime"}
-    assert "5013/health/ready" in gateway["healthcheck"]["test"][-1]
+    assert gateway["healthcheck"]["test"] == ["CMD", "python", "-m", "gateway.healthcheck"]
 
 
 def test_helm_gateway_is_independent_and_scalable(tmp_path):
@@ -105,7 +105,7 @@ def test_helm_gateway_is_independent_and_scalable(tmp_path):
     pod = deployment["spec"]["template"]["spec"]
     container = pod["containers"][0]
     assert container["image"] == "nexent/nexent-gateway:latest"
-    assert "gateway.edge:app" in container["command"]
+    assert container["command"] == ["python", "backend/gateway_service.py"]
     assert container["securityContext"]["runAsNonRoot"] is True
     assert not {"envFrom", "volumeMounts"} & container.keys()
     assert "volumes" not in pod
@@ -113,7 +113,7 @@ def test_helm_gateway_is_independent_and_scalable(tmp_path):
     assert env["JWT_SECRET"]["valueFrom"]["secretKeyRef"]["key"] == "JWT_SECRET"
     assert env["GATEWAY_SIGNING_SECRET"]["valueFrom"]["secretKeyRef"]["optional"] is True
     assert set(env) == {"JWT_SECRET", "JWT_ISSUER", "GATEWAY_SIGNING_SECRET", "GATEWAY_AUTH_ENABLED",
-                        "GATEWAY_MANAGEMENT_URL", "GATEWAY_NORTHBOUND_URL", "GATEWAY_RUNTIME_URL", "DEPLOYMENT_VERSION"}
+                        "GATEWAY_MANAGEMENT_URL", "GATEWAY_NORTHBOUND_URL", "GATEWAY_RUNTIME_URL", "DEPLOYMENT_VERSION", "GATEWAY_PORT"}
 
 
 def test_offline_application_includes_gateway():

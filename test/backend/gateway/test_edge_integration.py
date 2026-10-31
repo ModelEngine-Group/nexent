@@ -15,7 +15,7 @@ from fastapi.responses import StreamingResponse
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosedError
 
-from gateway.edge import create_edge_app
+from gateway.application import create_gateway_app
 
 
 @contextmanager
@@ -62,7 +62,7 @@ async def test_real_http_sse_and_websocket():
 
     with serve(upstream) as upstream_port:
         origin = f"http://127.0.0.1:{upstream_port}"
-        edge = create_edge_app(upstreams=dict.fromkeys(["runtime", "management", "northbound"], origin))
+        edge = create_gateway_app(authentication=False, upstreams=dict.fromkeys(["runtime", "management", "northbound"], origin))
         with serve(edge) as edge_port:
             async with httpx.AsyncClient(trust_env=False) as client:
                 async with client.stream("POST", f"http://127.0.0.1:{edge_port}/api/agent/run") as response:
@@ -104,7 +104,7 @@ async def test_sse_client_disconnect_closes_upstream():
 
     with serve(upstream) as upstream_port:
         origin = f"http://127.0.0.1:{upstream_port}"
-        edge = create_edge_app(authentication=False, upstreams=dict.fromkeys(["runtime", "management", "northbound"], origin))
+        edge = create_gateway_app(authentication=False, upstreams=dict.fromkeys(["runtime", "management", "northbound"], origin))
         with serve(edge) as edge_port:
             async with httpx.AsyncClient(trust_env=False) as client:
                 async with client.stream("POST", f"http://127.0.0.1:{edge_port}/api/agent/run") as response:
@@ -134,7 +134,7 @@ async def test_websocket_abrupt_disconnect_reclaims_peer(disconnect_side):
 
     with serve(upstream) as upstream_port:
         origin = f"http://127.0.0.1:{upstream_port}"
-        edge = create_edge_app(authentication=False, upstreams=dict.fromkeys(["runtime", "management", "northbound"], origin))
+        edge = create_gateway_app(authentication=False, upstreams=dict.fromkeys(["runtime", "management", "northbound"], origin))
         with serve(edge) as edge_port:
             async with connect(f"ws://127.0.0.1:{edge_port}/api/voice/stt/ws") as ws:
                 assert await ws.recv() == "ready"

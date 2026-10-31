@@ -3,7 +3,8 @@
 
 from starlette.responses import JSONResponse
 
-from contracts.authentication_routes import canonical_path, is_runtime_service_request
+from gateway.protocol.routes import canonical_path
+from infrastructure.security.service_routes import is_runtime_service_request
 from infrastructure.security.gateway_identity import (
     IDENTITY_HEADER, LOOKUP_PATH, IdentityError, enabled, identity_context, signing_key, verify_identity,
 )

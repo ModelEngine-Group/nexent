@@ -342,7 +342,7 @@ async def complete_pending_oauth_account(
         use_invitation_code,
     )
     from management.services.tool.configuration import init_tool_list_for_tenant
-    from gateway.authentication.auth import calculate_expires_at, generate_session_jwt
+    from management.security.session import calculate_expires_at, generate_session_jwt
 
     pending = pending_identity
     provider = pending["provider"]

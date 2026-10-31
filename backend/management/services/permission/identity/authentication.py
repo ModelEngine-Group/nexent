@@ -15,7 +15,7 @@ from management.db.identity.token import (
 
 from pydantic import EmailStr
 
-from gateway.authentication.auth import (
+from management.security.session import (
     get_current_user_id,
     generate_session_jwt,
     require_active_account,

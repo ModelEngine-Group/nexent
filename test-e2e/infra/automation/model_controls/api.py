@@ -2,7 +2,7 @@
 
 """Actual router/DTO/RBAC contracts with an isolated service boundary."""
 
-import gateway.authentication.auth as depends_dependencies
+import management.security.session as depends_dependencies
 import json
 from dataclasses import dataclass, field
 

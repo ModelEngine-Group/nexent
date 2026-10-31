@@ -11,7 +11,7 @@ import pytest
 from contracts.errors.exceptions import UnauthorizedError, TenantResourceLimitError
 from infrastructure.security.passwords import hash_password
 from management.services.permission.identity import authentication as auth
-from gateway.authentication import auth as helpers
+from management.security import session as helpers
 
 
 @pytest.fixture

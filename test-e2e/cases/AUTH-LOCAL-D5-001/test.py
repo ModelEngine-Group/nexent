@@ -42,7 +42,7 @@ def test_legacy_api_only_keys_survive_upgrade_and_replay(monkeypatch):
     from sqlalchemy.orm import sessionmaker
     from management.db.client import db_client
     from management.db import models
-    from gateway.authentication import northbound_auth
+    from management.security import api_key as northbound_auth
 
     sql = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
     with disposable_database() as dsn:

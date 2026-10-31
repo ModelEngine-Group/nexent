@@ -260,7 +260,7 @@ async def _get_northbound_context_fake(request):
     )
 
 northbound_app_module._get_northbound_context = _get_northbound_context_fake
-sys.modules['gateway.authentication.northbound_auth'] = northbound_app_module
+sys.modules['management.security.api_key'] = northbound_app_module
 northbound_app_module.get_northbound_context = _get_northbound_context_fake
 
 # Mock management.api.file.file_management - used by northbound_knowledge_app
@@ -337,12 +337,12 @@ database_a2a_module.PROTOCOL_HTTP_JSON = "http+json"
 database_a2a_module.PROTOCOL_JSONRPC = "jsonrpc"
 sys.modules['management.db.a2a.repository'] = database_a2a_module
 
-# Mock gateway.authentication.auth (referenced by northbound_app._get_northbound_context)
-auth_utils_module = types.ModuleType("gateway.authentication.auth")
+# Mock management.security.session (referenced by northbound_app._get_northbound_context)
+auth_utils_module = types.ModuleType("management.security.session")
 auth_utils_module.validate_bearer_token = MagicMock(return_value=(True, {"user_id": "test", "tenant_id": "test"}))
 auth_utils_module.generate_session_jwt = MagicMock(return_value="jwt-token")
 auth_utils_module.get_current_user_id = MagicMock(return_value=("test", "test"))
-sys.modules['gateway.authentication.auth'] = auth_utils_module
+sys.modules['management.security.session'] = auth_utils_module
 
 # Mock management.services.knowledge_base.ingestion to avoid database/storage imports
 file_management_utils_module = types.ModuleType("management.services.knowledge_base.ingestion")
