@@ -258,7 +258,7 @@ def test_native_account_bootstrap_and_cas_provisioning(runtime):
     assert bootstrap_super_admin("suadmin@nexent.com", "DifferentPass123") == {
         "exists": True
     }
-    with pytest.raises(AccountConflictError, match="migrate.py --apply"):
+    with pytest.raises(AccountConflictError, match="migrate_docker.py --apply"):
         bootstrap_super_admin("another-su@example.com", "", check_only=True)
     account = get_account_by_email("suadmin@nexent.com")
     assert verify_password("BootstrapPass123", account["password_hash"])

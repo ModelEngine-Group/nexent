@@ -19,7 +19,7 @@ pytestmark = [pytest.mark.case_id("AUTH-LOCAL-D5-001"), pytest.mark.stage("D5")]
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "test-e2e/infra/automation"))
 from local_auth import disposable_database, initialize_target
-from deploy.sql.tools.supabase_to_postgres.migrate import (
+from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
     MigrationConflict,
     import_users,
     read_source_users,
@@ -251,7 +251,7 @@ def test_account_migration_source_snapshot_without_audit_import(target, capsys):
             "POSTGRES_DB": params["dbname"],
             "NEXENT_POSTGRES_PASSWORD": params["password"],
         }
-        command = [sys.executable, str(ROOT / "deploy/sql/tools/supabase_to_postgres/migrate.py")]
+        command = [sys.executable, str(ROOT / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py")]
 
         def run_cli(*args):
             result = subprocess.run(command + list(args), cwd=ROOT / "backend", env=env,

@@ -23,7 +23,7 @@ def test_existing_su_blocks_before_missing_or_password_branch(mocker, check_only
     mocker.patch("management.db.identity.account.lock_account_keys")
     mocker.patch("management.db.identity.account.get_account_by_email", return_value=None)
     create = mocker.patch("management.db.identity.account.create_account")
-    with pytest.raises(AccountConflictError, match="migrate.py --apply"):
+    with pytest.raises(AccountConflictError, match="migrate_docker.py --apply"):
         bootstrap_super_admin("suadmin@nexent.com", "", check_only=check_only)
     create.assert_not_called()
 
@@ -50,7 +50,7 @@ def test_pending_account_requires_credentials_before_bootstrap(mocker, check_onl
         "source_metadata": {"credential_migration_pending": True}, "account_status": "disabled",
     })
     create = mocker.patch("management.db.identity.account.create_account")
-    with pytest.raises(AccountConflictError, match="migrate.py --apply"):
+    with pytest.raises(AccountConflictError, match="migrate_docker.py --apply"):
         bootstrap_super_admin("suadmin@nexent.com", "", check_only=check_only)
     create.assert_not_called()
 

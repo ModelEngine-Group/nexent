@@ -8,8 +8,8 @@ import json
 
 import pytest
 
-from deploy.sql.tools.supabase_to_postgres import migrate as migration
-from deploy.sql.tools.supabase_to_postgres.migrate import (
+from deploy.sql.tools.supabase_to_postgres import migrate_docker as migration
+from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
     _run_worker,
     _source_target,
     deployment_status,

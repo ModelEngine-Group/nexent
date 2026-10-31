@@ -6,7 +6,8 @@ import json
 
 import pytest
 
-from deploy.sql.tools.supabase_to_postgres import migrate, migrate_k8s
+from deploy.sql.tools.supabase_to_postgres import migrate_docker as migrate
+from deploy.sql.tools.supabase_to_postgres import migrate_k8s
 
 
 @pytest.fixture

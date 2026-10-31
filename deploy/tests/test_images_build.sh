@@ -163,7 +163,7 @@ assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:latest" "interactiv
 assert_contains "$(cat "$PROJECT_ROOT/deploy/images/dockerfiles/main/Dockerfile")" \
   "COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres" \
   "main image must package the standalone account migration tools"
-[ -f "$PROJECT_ROOT/deploy/sql/tools/supabase_to_postgres/migrate.py" ] || fail "migration entry point is missing"
+[ -f "$PROJECT_ROOT/deploy/sql/tools/supabase_to_postgres/migrate_docker.py" ] || fail "migration entry point is missing"
 [ -f "$PROJECT_ROOT/deploy/sql/tools/supabase_to_postgres/migration.py" ] || fail "migration implementation is missing"
 
 echo "All image build tests passed."

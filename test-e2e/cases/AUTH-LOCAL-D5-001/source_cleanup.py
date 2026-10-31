@@ -54,7 +54,7 @@ def assert_source_cleanup(root, target):
                    "POSTGRES_USER": params["user"], "NEXENT_POSTGRES_PASSWORD": params["password"],
                    "SUPABASE_MIGRATION_DB_CONTAINER": names["db"], "SUPABASE_MIGRATION_AUTH_CONTAINER": names["auth"],
                    "SUPABASE_MIGRATION_KONG_CONTAINER": names["kong"], "SUPABASE_MIGRATION_NETWORK": "unused-" + run_id}
-            command = [sys.executable, str(root / "deploy/sql/tools/supabase_to_postgres/migrate.py"), "--source-container", names["db"], "--wait-timeout", "30"]
+            command = [sys.executable, str(root / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py"), "--source-container", names["db"], "--wait-timeout", "30"]
             preview = subprocess.run(command, env=env, capture_output=True, text=True)
             assert preview.returncode == 0, preview.stderr
             assert json.loads(preview.stdout)["dry_run"]

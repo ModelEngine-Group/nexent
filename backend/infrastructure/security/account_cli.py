@@ -27,7 +27,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
         account = get_account_by_email(email, session)
         if account:
             if (account.get("source_metadata") or {}).get("credential_migration_pending"):
-                raise AccountConflictError("Account credentials await migration; run the host migrate.py --apply first")
+                raise AccountConflictError("Account credentials await migration; run the host migrate_docker.py --apply first")
             members = (
                 session.execute(
                     select(UserTenant).where(
@@ -54,7 +54,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
             )
         ).first():
             raise AccountConflictError(
-                "An SU membership already exists. Verify its account and email; if not migrated, run the host migrate.py --apply against this PostgreSQL database first"
+                "An SU membership already exists. Verify its account and email; if not migrated, run the host migrate_docker.py --apply against this PostgreSQL database first"
             )
         if session.execute(
             select(UserTenant.user_id).where(

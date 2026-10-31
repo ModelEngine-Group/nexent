@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deploy.sql.tools.supabase_to_postgres import migrate as settings
+from deploy.sql.tools.supabase_to_postgres import migrate_docker as settings
 
 
 @pytest.fixture

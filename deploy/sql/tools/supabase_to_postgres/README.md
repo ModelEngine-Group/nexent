@@ -2,7 +2,7 @@
 
 ## Automatic deployment
 
-Run the normal `deploy.sh`. Docker invokes `migrate.py`; Kubernetes invokes the
+Run the normal `deploy.sh`. Docker invokes `migrate_docker.py`; Kubernetes invokes the
 dedicated `migrate_k8s.py`, sharing account import logic. Users do not run a separate migration
 command or install host database packages. The deployment host requires Python
 3.8+, Docker or kubectl, and access to the original source data.
@@ -17,7 +17,7 @@ container's password is reused without prompting. Source reads are read-only.
 
 Config then runs the normal versioned SQL migration runner. After it records
 `v2.9.0_001_local_user_accounts.sql` at the expected checksum, deployment runs
-`migrate.py` with `--apply` using Config's existing Python/database dependencies.
+`migrate_docker.py` with `--apply` using Config's existing Python/database dependencies.
 Account import and its data checkpoint commit in one transaction. Deployment
 then removes the selected source DB/Auth/Kong containers and records cleanup,
 before creating/checking the super admin. Data volumes and backups remain.
@@ -42,7 +42,7 @@ deployment refuses to create an empty source for historical login identities.
 ### Kubernetes entry point
 
 Kubernetes `deploy.sh` automatically uses `migrate_k8s.py`. It shares account
-mapping/import and checkpoints with `migrate.py`, while handling Kubernetes
+mapping/import and checkpoints with `migrate_docker.py`, while handling Kubernetes
 source startup and actual PVC/PV bindings separately. A source Deployment scaled
 to zero is scaled to one and awaited. Custom existing claims are discovered from
 the pod template; every bound PV is archived and protected with `Retain` before
@@ -84,13 +84,13 @@ file is rewritten. Normal backend/SDK environment configuration is unaffected.
 3. Run the host-side preview. It never writes account rows.
 
 ```sh
-python deploy/sql/tools/supabase_to_postgres/migrate.py
+python deploy/sql/tools/supabase_to_postgres/migrate_docker.py
 ```
 
 4. Review counts/conflicts, then explicitly apply:
 
 ```sh
-python deploy/sql/tools/supabase_to_postgres/migrate.py --apply
+python deploy/sql/tools/supabase_to_postgres/migrate_docker.py --apply
 ```
 
 For a default local source the tool discovers the existing Supabase database
@@ -104,7 +104,7 @@ and retry. A dry-run may start the existing source container but never imports
 rows or removes containers. If multiple candidates exist, select one explicitly:
 
 ```sh
-python deploy/sql/tools/supabase_to_postgres/migrate.py --source-container supabase_db
+python deploy/sql/tools/supabase_to_postgres/migrate_docker.py --source-container supabase_db
 ```
 
 Use `--no-start-source` to reject a stopped container and `--wait-timeout 60` to
@@ -120,7 +120,7 @@ uses exact names, never application-wide Compose down, and does not delete data
 volumes or backups. A remote source selected only by HOST/PORT does not cause
 local container removal. If cleanup fails after commit, the command reports
 `Account migration committed; source cleanup failed`; the accounts remain
-migrated. Correct Docker access/configuration and use `migrate.py down` with
+migrated. Correct Docker access/configuration and use `migrate_docker.py down` with
 the original source names to finish cleanup; repeating the importer is safe.
 
 ## Historical API-only identities
@@ -159,7 +159,7 @@ PostgreSQL cluster's credentials.
 # Environment may instead come from --env-file /private/path/legacy.env.
 export ROOT_DIR=/absolute/path/to/original/nexent-data
 # If already exported, SUPABASE_POSTGRES_PASSWORD is reused; otherwise up prompts.
-python deploy/sql/tools/supabase_to_postgres/migrate.py up
+python deploy/sql/tools/supabase_to_postgres/migrate_docker.py up
 ```
 
 Default `up` selects only the legacy database, publishing PostgreSQL on loopback
@@ -173,9 +173,9 @@ To restore old GoTrue and Kong as well, provide the original `JWT_SECRET`,
 `SUPABASE_KEY`, `SERVICE_ROLE_KEY`, and Kong `DASHBOARD_PASSWORD` through the environment/file:
 
 ```sh
-python deploy/sql/tools/supabase_to_postgres/migrate.py up --with-auth
+python deploy/sql/tools/supabase_to_postgres/migrate_docker.py up --with-auth
 # Optional relocated production compatibility overlay:
-python deploy/sql/tools/supabase_to_postgres/migrate.py up --with-auth --production
+python deploy/sql/tools/supabase_to_postgres/migrate_docker.py up --with-auth --production
 ```
 
 GoTrue/Kong are explicit `legacy-auth` profile services. The production overlay
@@ -187,14 +187,14 @@ Then run the host-side importer using the same source credentials and environmen
 file. Preserve the normal target PostgreSQL settings:
 
 ```sh
-python deploy/sql/tools/supabase_to_postgres/migrate.py
-python deploy/sql/tools/supabase_to_postgres/migrate.py --apply
+python deploy/sql/tools/supabase_to_postgres/migrate_docker.py
+python deploy/sql/tools/supabase_to_postgres/migrate_docker.py --apply
 ```
 
 After verification, manually remove legacy containers:
 
 ```sh
-python deploy/sql/tools/supabase_to_postgres/migrate.py down
+python deploy/sql/tools/supabase_to_postgres/migrate_docker.py down
 ```
 
 `down` stops/removes only the three configured Supabase container names. It
@@ -233,7 +233,7 @@ than command-line arguments or committed configuration.
 
 ## Data contract and layout
 
-`migrate.py` contains deployment orchestration, manual CLI, configuration, source
+`migrate_docker.py` contains deployment orchestration, manual CLI, configuration, source
 container handling, validation and transactional import. Runtime login code does
 not import this operator tool.
 

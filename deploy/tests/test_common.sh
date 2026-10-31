@@ -1351,7 +1351,7 @@ PYTHON
 chmod +x "$TMP_DIR/auto-auth-bin/python3"
 export AUTH_HOOK_ARGUMENTS="$TMP_DIR/auth-hook-arguments"
 PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts prepare docker
-assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate.py" "deployment must use the consolidated migration script"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate_docker.py" "deployment must use the consolidated migration script"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "$DEPLOYMENT_ROOT_ENV" "deployment must pass its actual root environment path"
 assert_not_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "prepare must not import accounts"
 PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts apply kubernetes custom-namespace

@@ -630,7 +630,7 @@ def _worker(job):
                         if cursor.fetchone()[0]:
                             raise MigrationConflict("Historical account credentials remain pending; source snapshot is incomplete")
                     cursor.execute(f"INSERT INTO {table} (migration_id,checksum,status,app_version,source_file) VALUES (%s,%s,'applied','2.9.0',%s) ON CONFLICT (migration_id) DO UPDATE SET checksum=excluded.checksum,status='applied',executed_at=now(),app_version=excluded.app_version,source_file=excluded.source_file",
-                                   (marker, job["checksum"], str(HERE / "migrate.py")))
+                                   (marker, job["checksum"], str(HERE / "migrate_docker.py")))
         print(json.dumps(result))
     finally:
         connection.close()
@@ -640,7 +640,7 @@ def _run_worker(args, job):
     script = Path(__file__).read_text(encoding="utf-8")
     loader = '''import json,sys
 p=json.load(sys.stdin)
-n={"__name__":"auth_migration_worker","__file__":"/opt/deploy/sql/tools/supabase_to_postgres/migrate.py"}
+n={"__name__":"auth_migration_worker","__file__":"/opt/deploy/sql/tools/supabase_to_postgres/migrate_docker.py"}
 exec(compile(p["script"],n["__file__"],"exec"),n)
 try:
     n["_worker"](p["job"])

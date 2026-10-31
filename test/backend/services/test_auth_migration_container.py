@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from deploy.sql.tools.supabase_to_postgres import migrate as runtime
-from deploy.sql.tools.supabase_to_postgres.migrate import MigrationSetupError
+from deploy.sql.tools.supabase_to_postgres import migrate_docker as runtime
+from deploy.sql.tools.supabase_to_postgres.migrate_docker import MigrationSetupError
 
 
 @pytest.mark.parametrize("running", [True, False])
@@ -76,14 +76,14 @@ def test_malformed_inspect_data_is_sanitized(mocker):
 
 def test_managed_source_connection_wait_is_bounded(mocker, monkeypatch, capsys):
     import psycopg2
-    from deploy.sql.tools.supabase_to_postgres import migrate
+    from deploy.sql.tools.supabase_to_postgres import migrate_docker as migrate
 
     mocker.patch.object(migrate, "load_settings", return_value={})
     mocker.patch.object(migrate, "connections", return_value=({"password": "secret"}, {}, True))
     prepare = mocker.patch.object(migrate, "prepare_source")
     mocker.patch.object(migrate.time, "monotonic", side_effect=[0, 100])
     mocker.patch("psycopg2.connect", side_effect=psycopg2.OperationalError("secret"))
-    monkeypatch.setattr("sys.argv", ["migrate.py", "--wait-timeout", "1"])
+    monkeypatch.setattr("sys.argv", ["migrate_docker.py", "--wait-timeout", "1"])
     assert migrate.main() == 1
     prepare.assert_called_once()
     output = capsys.readouterr().err
@@ -92,12 +92,12 @@ def test_managed_source_connection_wait_is_bounded(mocker, monkeypatch, capsys):
 
 
 def test_explicit_source_never_starts_a_container(mocker, monkeypatch):
-    from deploy.sql.tools.supabase_to_postgres import migrate
+    from deploy.sql.tools.supabase_to_postgres import migrate_docker as migrate
 
     mocker.patch.object(migrate, "load_settings", return_value={})
     mocker.patch.object(migrate, "connections", return_value=({}, {}, False))
     prepare = mocker.patch.object(migrate, "prepare_source")
     mocker.patch("psycopg2.connect", side_effect=RuntimeError("stop"))
-    monkeypatch.setattr("sys.argv", ["migrate.py"])
+    monkeypatch.setattr("sys.argv", ["migrate_docker.py"])
     assert migrate.main() == 1
     prepare.assert_not_called()

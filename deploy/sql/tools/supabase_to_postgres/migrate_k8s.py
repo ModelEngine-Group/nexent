@@ -1,14 +1,14 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Kubernetes deployment entry point; account import is shared with migrate.py."""
+"""Kubernetes deployment entry point; account import is shared with migrate_docker.py."""
 
 import hashlib
 import json
 import sys
 
 try:
-    from . import migrate
+    from . import migrate_docker as migrate
 except ImportError:
-    import migrate
+    import migrate_docker as migrate
 
 
 def source_target(args, values):

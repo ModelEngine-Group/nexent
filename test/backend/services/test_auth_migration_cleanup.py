@@ -5,10 +5,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from deploy.sql.tools.supabase_to_postgres import migrate
+from deploy.sql.tools.supabase_to_postgres import migrate_docker as migrate
 
 migration = source_container = migrate
-from deploy.sql.tools.supabase_to_postgres.migrate import MigrationSetupError
+from deploy.sql.tools.supabase_to_postgres.migrate_docker import MigrationSetupError
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ def cli(mocker):
 @pytest.mark.parametrize("apply", [False, True])
 def test_cleanup_only_after_successful_apply_and_closed_transaction(mocker, cli, apply):
     events, importer, cleanup = cli
-    mocker.patch("sys.argv", ["migrate.py"] + (["--apply"] if apply else []))
+    mocker.patch("sys.argv", ["migrate_docker.py"] + (["--apply"] if apply else []))
     assert migrate.main() == 0
     assert importer.call_args.kwargs["dry_run"] is not apply
     assert events == (["commit", "close", "cleanup"] if apply else ["commit", "close"])
@@ -41,7 +41,7 @@ def test_cleanup_only_after_successful_apply_and_closed_transaction(mocker, cli,
 def test_failed_import_preserves_containers_for_retry(mocker, cli):
     events, importer, cleanup = cli
     importer.side_effect = migration.MigrationConflict("identity conflict")
-    mocker.patch("sys.argv", ["migrate.py", "--apply"])
+    mocker.patch("sys.argv", ["migrate_docker.py", "--apply"])
     assert migrate.main() == 1
     assert events == ["rollback", "close"]
     cleanup.assert_not_called()
@@ -50,7 +50,7 @@ def test_failed_import_preserves_containers_for_retry(mocker, cli):
 def test_remote_source_does_not_remove_local_containers(mocker, cli):
     events, importer, cleanup = cli
     mocker.patch.object(migrate, "connections", return_value=({}, {}, False))
-    mocker.patch("sys.argv", ["migrate.py", "--apply"])
+    mocker.patch("sys.argv", ["migrate_docker.py", "--apply"])
     assert migrate.main() == 0
     cleanup.assert_not_called()
 
@@ -59,7 +59,7 @@ def test_remote_source_does_not_remove_local_containers(mocker, cli):
 def test_cleanup_error_reports_committed_data_without_leaking_driver_values(mocker, cli, capsys, error):
     events, importer, cleanup = cli
     cleanup.side_effect = error
-    mocker.patch("sys.argv", ["migrate.py", "--apply"])
+    mocker.patch("sys.argv", ["migrate_docker.py", "--apply"])
     assert migrate.main() == 1
     output = capsys.readouterr()
     assert "migration committed; source cleanup failed" in output.err
@@ -68,7 +68,7 @@ def test_cleanup_error_reports_committed_data_without_leaking_driver_values(mock
 
 
 def test_source_stack_cleanup_uses_exact_selected_db_and_retains_volumes(mocker):
-    from deploy.sql.tools.supabase_to_postgres import migrate as legacy_stack
+    from deploy.sql.tools.supabase_to_postgres import migrate_docker as legacy_stack
 
     values = source_container.source_stack_configuration({}, "supabase-original-db")
     assert values["SUPABASE_MIGRATION_DB_CONTAINER"] == "supabase-original-db"

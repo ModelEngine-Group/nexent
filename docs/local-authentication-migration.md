@@ -70,14 +70,14 @@ during cutover. The following sequence is the optional manual recovery path.
    with an actionable message. Do not paste credentials into saved commands.
 
    ```sh
-   python deploy/sql/tools/supabase_to_postgres/migrate.py
+   python deploy/sql/tools/supabase_to_postgres/migrate_docker.py
    ```
 
    If the old containers were removed, manually restore the old database from
    its existing data directory first:
 
    ```sh
-   python deploy/sql/tools/supabase_to_postgres/migrate.py up
+   python deploy/sql/tools/supabase_to_postgres/migrate_docker.py up
    ```
 
    Set ROOT_DIR to the original deployment storage root or SUPABASE_DATA_DIR to
@@ -95,7 +95,7 @@ during cutover. The following sequence is the optional manual recovery path.
 6. After preflight succeeds, explicitly apply from the host:
 
    ```sh
-   python deploy/sql/tools/supabase_to_postgres/migrate.py --apply
+   python deploy/sql/tools/supabase_to_postgres/migrate_docker.py --apply
    ```
 
    Accounts share one target transaction. A failure rolls back
@@ -113,7 +113,7 @@ during cutover. The following sequence is the optional manual recovery path.
 9. Verify old-user password login, original user IDs and business ownership,
    password change, API keys, provider binding and CAS single logout. Retire the
    old auth services only after these checks. Normal application processes do not need source database access.
-   Remove legacy containers after verification with `migrate.py down`, using
+   Remove legacy containers after verification with `migrate_docker.py down`, using
    the same environment file. The teardown retains original bind data and volumes.
 
 The import copies `auth.users`, retains `auth.identities` snapshots within the
@@ -212,7 +212,7 @@ pending placeholders from the earlier draft are repaired on replay; explicit
 disablement/deletion and revoked keys remain effective. New API-only batches
 create accounts, memberships, group links and keys in one transaction.
 
-For local sources, a successful host-side `migrate.py --apply` also stops and
+For local sources, a successful host-side `migrate_docker.py --apply` also stops and
 removes the selected DB and configured Supabase Auth/Kong containers, retaining
 data volumes and backups. Preview or import failure preserves the stack. Configure
 custom legacy container names as described in the migration-tool README. Cleanup

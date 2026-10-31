@@ -27,7 +27,7 @@ def assert_automatic_upgrade(root, temporary):
     password = "IsolatedAutoTest123"
     user_id = str(uuid4())
     encoded = bcrypt.hashpw(b"original-password", bcrypt.gensalt(rounds=4)).decode()
-    script = root / "deploy/sql/tools/supabase_to_postgres/migrate.py"
+    script = root / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py"
     sql_file = root / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql"
     env = {**os.environ, "SUPABASE_MIGRATION_DB_CONTAINER": names["db"],
            "SUPABASE_MIGRATION_AUTH_CONTAINER": names["auth"], "SUPABASE_MIGRATION_KONG_CONTAINER": names["kong"],
