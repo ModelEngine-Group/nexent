@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 # Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
 
 import importlib.util
@@ -34,7 +35,7 @@ def aidp_module():
     register_module("sdk.nexent", nexent_pkg)
 
     core_pkg = ModuleType("sdk.nexent.core")
-    core_pkg.__path__ = []
+    core_pkg.__path__ = [os.path.join(PROJECT_ROOT, "sdk", "nexent", "core")]
     register_module("sdk.nexent.core", core_pkg)
 
     tools_pkg = ModuleType("sdk.nexent.core.tools")
@@ -187,8 +188,8 @@ class TestAidpSearchToolInit:
                 reranking_mode="high_accuracy",
                 rewrite_enable=True,
                 related_search_enable=True,
-                score_threshold=1.5,
-                top_k=200,
+                score_threshold=1.0,
+                top_k=100,
                 multi_modal=True,
                 observer=mock_observer,
             )
@@ -245,18 +246,21 @@ class TestAidpSearchToolInit:
 
         assert "kds_list must be a valid JSON array" in str(exc_info.value)
 
-    def test_init_invalid_modes_fall_back(self, aidp_module, mock_observer):
+    def test_init_reads_official_legacy_method_without_revalidation(self, aidp_module, mock_observer, monkeypatch):
         mock_client = MagicMock()
         aidp_module.http_client_manager.get_sync_client.return_value = mock_client
 
+        def unexpected(*args, **kwargs):
+            raise AssertionError("Persisted retrieval configuration must not be revalidated")
+        monkeypatch.setattr(aidp_module, "validate_config", unexpected, raising=False)
         tool = aidp_module.AidpSearchTool(
                 server_url="https://aidp.example.com",
                 api_key="jwt-token",
                 tenant_id="aidp",
                 kds_list='["kb1"]',
-                search_method="bad-method",
+                search_method="hybrid_search",
                 reranking_enable=True,
-                reranking_mode="bad-mode",
+                reranking_mode="performance",
                 rewrite_enable=False,
                 related_search_enable=False,
                 score_threshold=0.0,
@@ -265,7 +269,7 @@ class TestAidpSearchToolInit:
                 observer=mock_observer,
             )
 
-        assert tool.search_method == "hybrid_search"
+        assert tool.search_method == "vector_search|full_text_search|graph_search"
         assert tool.reranking_mode == "performance"
 
 
@@ -292,13 +296,16 @@ class TestAidpSearchToolForward:
             json={
                 "query": "find images",
                 "kds_list": ["kb1", "kb2"],
-                "search_method": "hybrid_search",
+                "search_method": "vector_search|full_text_search|graph_search",
                 "reranking_enable": True,
                 "rewrite_enable": True,
                 "related_search_enable": True,
                 "score_threshold": 0.7,
-                "top_k": 2,
-                "multi_modal": True,
+                "topk": 2,
+                "multi_modal_enable": True,
+                "query_expansion_enable": False,
+                "hybrid_search_config": {"hybrid_top_k": 0, "vector_candidates": 10, "full_text_candidates": 10, "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0},
+                "graph_search_config": {"graph_top_k": 0, "graph_score_threshold": 0.0, "graph_reranking_enable": True},
                 "reranking_mode": "high_accuracy",
             },
         )
@@ -390,7 +397,7 @@ class TestAidpSearchToolForward:
         with pytest.raises(Exception) as exc_info:
             aidp_tool.forward("query")
 
-        assert "AIDP HTTP error: boom" in str(exc_info.value)
+        assert "AIDP HTTP error: request failed (HTTPError" in str(exc_info.value)
 
     def test_forward_invalid_response_shape_raises_wrapped_exception(self, aidp_tool):
         mock_response = MagicMock()
@@ -401,7 +408,7 @@ class TestAidpSearchToolForward:
         with pytest.raises(Exception) as exc_info:
             aidp_tool.forward("query")
 
-        assert "AIDP search error: Invalid AIDP response" in str(exc_info.value)
+        assert "AIDP response field 'result' must be a list" in str(exc_info.value)
 
 
 class TestAidpBuildImageUrl:
@@ -892,8 +899,8 @@ class TestExecuteRequestRetry:
         assert len(records) == 1
         assert aidp_tool._mock_http_client.post.call_count == 2
 
-    def test_retry_503_all_attempts_exhausted_raises_503_specific(self, aidp_tool, monkeypatch):
-        """All 3 attempts return 503. Should raise AidpSearchError with 503-specific message."""
+    def test_retry_503_all_attempts_exhausted_raises_shared_error(self, aidp_tool, monkeypatch):
+        """All three failures use the shared status and attempt-count error."""
         resp_503 = self._make_response(503)
         aidp_tool._mock_http_client.post.return_value = resp_503
 
@@ -902,7 +909,7 @@ class TestExecuteRequestRetry:
 
         with pytest.raises(Exception) as exc_info:
             aidp_tool._execute_request("query", ["kb1"])
-        assert "temporarily unavailable" in str(exc_info.value).lower() or "503" in str(exc_info.value)
+        assert "HTTP 503 after 3 attempts" in str(exc_info.value)
         assert aidp_tool._mock_http_client.post.call_count == 3
 
     def test_retry_502_all_attempts_exhausted_raises_generic(self, aidp_tool, monkeypatch):
@@ -918,12 +925,12 @@ class TestExecuteRequestRetry:
         assert "502" in str(exc_info.value)
         assert aidp_tool._mock_http_client.post.call_count == 3
 
-    def test_no_retry_on_400(self, aidp_tool):
+    def test_no_retry_on_400(self, aidp_tool, aidp_module):
         """400 is not a retryable status. Should raise immediately after one call."""
         resp_400 = self._make_response(400)
         aidp_tool._mock_http_client.post.return_value = resp_400
 
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(aidp_module.AidpSearchError, match="HTTP 400 after 1 attempts"):
             aidp_tool._execute_request("query", ["kb1"])
         assert aidp_tool._mock_http_client.post.call_count == 1
 

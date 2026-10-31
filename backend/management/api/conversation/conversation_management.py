@@ -409,7 +409,7 @@ async def update_conversation_workbench_config_endpoint(
         ) from exc
     except WorkbenchError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
-    except ValueError as exc:
+    except (ValueError, ValidationError) as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail={"code": "WORKBENCH_CONFIG_INVALID"}
         ) from exc

@@ -948,9 +948,9 @@ class TestUpdateToolInfoImpl:
         self, mock_create_update, mock_require_edit, mock_query_tools
     ):
         """Test update_tool_info_impl when version_no is 0"""
-        mock_request = Mock(spec=ToolInstanceInfoRequest)
-        mock_request.version_no = 0
-        mock_request.__dict__ = {"agent_id": 1, "tool_id": 1, "version_no": 0}
+        from types import SimpleNamespace
+
+        mock_request = SimpleNamespace(agent_id=1, tool_id=1, version_no=0, params={})
         mock_tool_instance = {"id": 1, "name": "test_tool"}
         mock_create_update.return_value = mock_tool_instance
         mock_query_tools.return_value = [
@@ -977,6 +977,7 @@ class TestUpdateToolInfoImpl:
             def __init__(self):
                 self.agent_id = 1
                 self.tool_id = 1
+                self.params = {}
                 # Explicitly do not set version_no
 
         mock_request = MockToolInfoWithoutVersion()
@@ -6033,6 +6034,57 @@ async def test_call_mcp_tool_enforces_runtime_timeout(monkeypatch):
             "slow_tool",
             {},
         )
+
+
+@pytest.mark.parametrize("params,rejected", [
+    ({"hybrid_top_k": 8, "graph_top_k": 5}, True),
+    ({"reranking_enable": False, "graph_reranking_enable": True}, True),
+    ({"top_k": True}, True),
+    ({"top_k": 10, "vector_candidates": 10}, False),
+])
+def test_aidp_policy_checked_once_before_persistence(mocker, params, rejected):
+    from types import SimpleNamespace
+    from contracts.errors.exceptions import ValidationError
+    mocker.patch.object(_tool_cfg_service, "require_agent_draft_edit")
+    mocker.patch.object(_tool_cfg_service, "query_all_tools", return_value=[{
+        "tool_id": 9, "name": "ind_aidp_search", "is_available": True,
+    }])
+    persist = mocker.patch.object(_tool_cfg_service, "create_or_update_tool_by_tool_info")
+    provider = mocker.patch.object(_tool_cfg_service, "_resolve_aidp_snapshot")
+    duplicate_check = mocker.patch.object(_tool_cfg_service, "_validate_tool_param_ranges")
+    request = SimpleNamespace(agent_id=1, tool_id=9, version_no=0, params=params)
+    if rejected:
+        with pytest.raises(ValidationError):
+            _tool_cfg_service.update_tool_info_impl(request, "tenant", "user")
+        persist.assert_not_called()
+    else:
+        _tool_cfg_service.update_tool_info_impl(request, "tenant", "user")
+        assert request.params == {"top_k": 10, "vector_candidates": 10}
+        persist.assert_called_once()
+    provider.assert_not_called()
+    duplicate_check.assert_not_called()
+
+
+def test_aidp_catalog_optional_candidates_are_numeric_and_following(mocker):
+    from typing import Optional
+    from pydantic import Field
+    class CatalogTool:
+        name="ind_aidp_search"
+        description="fixture"
+        inputs={}
+        output_type="string"
+        category="search"
+        def __init__(self, vector_candidates: int=Field(default=10,ge=1,le=500),
+                     graph_reranking_enable: bool=Field(default=True)):
+            pass
+    from management.services.tool import discovery
+    mocker.patch.object(discovery, "get_local_tools_classes", return_value=[CatalogTool])
+    records=discovery.get_local_tools()
+    params={p["name"]:p for p in records[0].params}
+    assert params["vector_candidates"]["type"]=="integer"
+    assert params["vector_candidates"]["default"] == 10
+    assert params["vector_candidates"]["constraints"]=={"ge":1,"le":500}
+    assert params["graph_reranking_enable"]["type"]=="boolean"
 
 class TestDeepSeekSearchConfiguration:
     @pytest.mark.asyncio

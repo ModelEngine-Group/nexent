@@ -81,7 +81,9 @@ def test_apply_workbench_runtime_plan_attaches_all_runtime_overrides(monkeypatch
     monkeypatch.setitem(sys.modules, "management.services.agent.workbench", workbench)
     monkeypatch.setitem(sys.modules, "management.services.knowledge_base.mount", runtime_mount)
 
-    agent_run.apply_workbench_runtime_plan(request, canonical, plan, "tenant-a")
+    agent_run.apply_workbench_runtime_plan(
+        request, canonical, plan, "tenant-a",
+    )
 
     snapshot.assert_called_once_with(9, "tenant-a", 3)
     mount.assert_called_once_with(
@@ -195,14 +197,36 @@ async def test_prepare_agent_run_forwards_workbench_runtime_state(
 async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeypatch):
     from fastapi import Request
     from contracts.agent import WorkbenchSessionConfig
-    canonical = WorkbenchSessionConfig.model_validate({'mode': 'single_agent_chat', 'agent_mounts': [{'agent_id': 7, 'version_no': 3}]})
-    request = _request(entrypoint='workbench', workbench=None, expected_workbench_config_version=2)
-    conversation = {'conversation_id': 123, 'workbench_config': canonical.model_dump(mode='json'), 'workbench_config_version': 2, 'runtime_metadata': {'existing': True}, 'runtime_metadata_version': 4, 'knowledge_scope': None}
-    plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99)))
+
+    canonical = WorkbenchSessionConfig.model_validate(
+        {
+            "mode": "single_agent_chat",
+            "agent_mounts": [{"agent_id": 7, "version_no": 3}],
+        }
+    )
+    request = _request(
+        entrypoint="workbench",
+        workbench=None,
+        expected_workbench_config_version=2,
+    )
+    conversation = {
+        "conversation_id": 123,
+        "workbench_config": canonical.model_dump(mode="json"),
+        "workbench_config_version": 2,
+        "runtime_metadata": {"existing": True},
+        "runtime_metadata_version": 4,
+        "knowledge_scope": None,
+    }
+    plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99, version_no=5)))
     apply_plan = MagicMock()
-    apply_plan.side_effect = lambda agent_request, *_args: agent_request.__dict__.update({'agent_id': 99, 'version_no': 5})
-    update_config = MagicMock(return_value={'workbench_config_version': 3, 'runtime_metadata': {'existing': True}})
-    workbench = ModuleType('management.services.agent.workbench')
+    apply_plan.side_effect = lambda agent_request, *_args, **_kwargs: agent_request.__dict__.update(
+        {"agent_id": 99, "version_no": 5}
+    )
+    update_config = MagicMock(
+        return_value={"workbench_config_version": 3, "runtime_metadata": {"existing": True}}
+    )
+
+    workbench = ModuleType("management.services.agent.workbench")
     workbench.assert_workbench_version = MagicMock()
     workbench.resolve_workbench_config = MagicMock(return_value=(canonical, plan))
     monkeypatch.setitem(sys.modules, 'management.services.agent.workbench', workbench)
@@ -236,11 +260,12 @@ async def test_run_agent_stream_resolves_and_persists_existing_workbench(monkeyp
     workbench.resolve_workbench_config.assert_called_once_with(canonical, tenant_id='tenant-a', is_debug=False, user_id='user-a')
     apply_plan.assert_called_once_with(request, canonical, plan, 'tenant-a')
     update_config.assert_called_once()
-    assert request.__dict__['_workbench_config_version'] == 3
-    assert request.__dict__['_runtime_metadata_snapshot'] == {'existing': True}
-    assert request.__dict__['_runtime_metadata_version'] == 4
-    assert response.headers['x-workbench-config-version'] == '3'
-    assert any(('workbench_config_resolved' in chunk for chunk in chunks))
+    assert "validate_retrieval" not in update_config.call_args.kwargs
+    assert request.__dict__["_workbench_config_version"] == 3
+    assert request.__dict__["_runtime_metadata_snapshot"] == {"existing": True}
+    assert request.__dict__["_runtime_metadata_version"] == 4
+    assert response.headers["x-workbench-config-version"] == "3"
+    assert any("workbench_config_resolved" in chunk for chunk in chunks)
 
 
 @pytest.mark.asyncio

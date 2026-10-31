@@ -1,9 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
 
+import nexent.core.ext_components.aidp.retrieval_client as retrieval_client
 import nexent.core.tools.ind_aidp_search_tool as ind_aidp_search_tool_module
 from nexent.core.tools.ind_aidp_search_tool import (
     IndependentAidpSearchError,
@@ -53,7 +56,7 @@ def test_retries_transient_status_and_uses_bearer(monkeypatch):
     ]
     tool._http_client = MagicMock()
     tool._http_client.post.side_effect = responses
-    monkeypatch.setattr(ind_aidp_search_tool_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(retrieval_client.time, "sleep", lambda _: None)
 
     assert tool._execute_request("question") == []
     assert tool._http_client.post.call_count == 2
@@ -180,11 +183,15 @@ def test_validate_base_url_rejects_bad_inputs():
     )
 
 
-def test_init_rejects_invalid_search_method_and_rerank_mode():
-    with pytest.raises(ValueError, match="search_method"):
-        make_tool(search_method="magic")
-    with pytest.raises(ValueError, match="reranking_mode"):
-        make_tool(reranking_mode="magic")
+def test_init_reads_official_legacy_method_without_revalidation(monkeypatch):
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Persisted retrieval configuration must not be revalidated")
+    monkeypatch.setattr(ind_aidp_search_tool_module, "validate_config", unexpected, raising=False)
+    tool = make_tool(search_method="hybrid_search", top_k=7, reranking_enable=False)
+    payload = tool._payload("q")
+    assert payload["search_method"] == "vector_search|full_text_search|graph_search"
+    assert payload["hybrid_search_config"]["vector_candidates"] == 10
+    assert payload["graph_search_config"]["graph_reranking_enable"] is False
     with pytest.raises(ValueError, match="tenant_id"):
         make_tool(tenant_id="")
 
@@ -194,7 +201,7 @@ def test_payload_embeds_rerank_mode_when_reranking_enabled():
     payload = tool._payload("q", kds_list=["kb-2"])
     assert payload["kds_list"] == ["kb-2"]
     assert payload["reranking_mode"] == "performance"
-    assert payload["multi_modal"] is True
+    assert payload["multi_modal_enable"] is True
     assert 0.0 <= payload["score_threshold"] <= 1.0
 
 
@@ -203,7 +210,7 @@ def test_exhausts_retries_then_raises(monkeypatch):
     request = httpx.Request("POST", tool._retrieve_url())
     tool._http_client = MagicMock()
     tool._http_client.post.return_value = httpx.Response(503, request=request)
-    monkeypatch.setattr(ind_aidp_search_tool_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(retrieval_client.time, "sleep", lambda _: None)
 
     with pytest.raises(IndependentAidpSearchError, match="HTTP 503"):
         tool._execute_request("question")
@@ -237,7 +244,8 @@ def test_forward_rejects_empty_query_and_wraps_http_errors():
     with pytest.raises(ValueError, match="query"):
         tool.forward("   ")
 
-    tool._execute_request = MagicMock(side_effect=httpx.HTTPError("boom"))
+    tool._http_client = MagicMock()
+    tool._http_client.post.side_effect = httpx.HTTPError("boom")
     with pytest.raises(IndependentAidpSearchError, match="HTTP error"):
         tool.forward("question")
 

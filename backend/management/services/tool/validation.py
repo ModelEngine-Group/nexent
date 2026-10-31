@@ -27,6 +27,10 @@ from management.services.tool.common import (
 )
 from management.services.tool.langchain import discover_langchain_modules
 from nexent.core.concurrency import run_blocking
+from nexent.core.ext_components.aidp.constants import (
+    AIDP_SEARCH_TOOL_NAME, AIDP_SEARCH_TOOL_NAMES, INDEPENDENT_AIDP_SEARCH_TOOL_NAME,
+)
+from nexent.core.ext_components.aidp.retrieval_config import validate_config
 from nexent.monitor import set_monitoring_context, set_monitoring_operation
 from pydantic_core import PydanticUndefined
 
@@ -315,7 +319,9 @@ def _validate_local_tool(
                 if k not in ["rerank_model", "rerank", "rerank_model_name"]
             }
             tool_instance = tool_class(**filtered_params)
-        elif tool_name in ("haotian_search", "aidp_search", "ind_aidp_search"):
+        elif tool_name in ("haotian_search", *AIDP_SEARCH_TOOL_NAMES):
+            if tool_name in AIDP_SEARCH_TOOL_NAMES:
+                validate_config(params or {})
             # Haotian and AIDP share the same instantiation shape: drop the
             # backend-only rerank keys and explicitly set observer=None
             # (otherwise Python falls back to the FieldInfo default, which
@@ -327,7 +333,7 @@ def _validate_local_tool(
                 if k not in ["observer", "rerank_model", "rerank"]
             }
             filtered_params["observer"] = None
-            if tool_name == "ind_aidp_search":
+            if tool_name == INDEPENDENT_AIDP_SEARCH_TOOL_NAME:
                 # Older UI builds incorrectly sent the independent AIDP KDS
                 # selection under the local-search name ``index_names``.
                 # Normalize that alias without ever replacing the independent
@@ -335,7 +341,7 @@ def _validate_local_tool(
                 legacy_index_names = filtered_params.pop("index_names", None)
                 if not filtered_params.get("kds_list") and legacy_index_names:
                     filtered_params["kds_list"] = legacy_index_names
-            if tool_name == "aidp_search":
+            if tool_name == AIDP_SEARCH_TOOL_NAME:
                 # AIDP credentials are sourced from ``contracts.constants.environment`` (i.e. the
                 # process environment). Inject them here exactly as
                 # ``create_agent_info`` does at runtime, so validation builds

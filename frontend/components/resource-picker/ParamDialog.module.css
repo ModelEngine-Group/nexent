@@ -1,3 +1,5 @@
+/* Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved. */
+
 @font-face {
   font-family: "HarmonyOS Sans SC";
   src: url("/fonts/harmonyos-sans-sc/HarmonyOS_Sans_SC_Regular.ttf")
@@ -55,7 +57,7 @@
 .dialog :global(input.ant-input) {
   height: 28px !important;
   padding: 0 12px !important;
-  border-radius: 2px !important;
+  border-radius: 6px !important;
   font-size: 14px !important;
   line-height: 22px !important;
 }
@@ -67,7 +69,7 @@
 
 .dialog :global(.ant-input-number) {
   height: 28px;
-  border-radius: 2px;
+  border-radius: 6px;
 }
 
 .dialog :global(.ant-input-number-input) {
@@ -97,12 +99,29 @@
   background: #efefef !important;
 }
 
+.resetLink {
+  margin-right: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #777;
+  font-family: "Huawei Sans", "HarmonyOS Sans SC", sans-serif;
+  font-size: 12px;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+.resetLink:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .cancelButton,
 .confirmButton {
   width: 96px !important;
   height: 32px !important;
   padding: 5px 16px !important;
-  border-radius: 4px !important;
+  border-radius: 6px !important;
   font-family: "Huawei Sans", "HarmonyOS Sans SC", sans-serif !important;
   font-size: 14px !important;
   line-height: 22px !important;

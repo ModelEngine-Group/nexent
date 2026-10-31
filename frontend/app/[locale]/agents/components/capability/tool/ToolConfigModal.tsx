@@ -2,17 +2,18 @@
 
 "use client";
 
+import { AidpRetrievalParamsForm } from "@/components/tool-config/AidpRetrievalParamsForm";
+import {
+  aidpDefaults,
+  aidpErrors,
+  isAidpTool,
+  mergeAidpConfig,
+  resolveAidpConfig,
+} from "@/lib/aidpRetrievalConfig";
+
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Input,
-  InputNumber,
-  Tag,
-  Form,
-  Select,
-  Skeleton,
-  App,
-} from "antd";
+import { Input, InputNumber, Tag, Form, Select, Skeleton, App } from "antd";
 import type { FormInstance } from "antd";
 
 // Delay setFieldValue to the next microtask so the form is guaranteed to be mounted.
@@ -182,8 +183,24 @@ function withExtraToolParams(
   params: ToolParam[],
   toolName?: string
 ): ToolParam[] {
+  const complete = [...params];
+  if (isAidpTool(toolName))
+    for (const [name, value] of Object.entries(aidpDefaults)) {
+      if (!complete.some((p) => p.name === name))
+        complete.push({
+          name,
+          value,
+          required: false,
+          type:
+            typeof value === "boolean" || name === "graph_reranking_enable"
+              ? "boolean"
+              : typeof value === "string"
+                ? "string"
+                : "number",
+        });
+    }
   return withAnalyzeToolModelParam(
-    withRerankParams(params, toolName),
+    withRerankParams(complete, toolName),
     toolName
   );
 }
@@ -196,7 +213,9 @@ function BooleanSwitchInput({
   value?: boolean;
   onChange?: (value: boolean) => void;
 }) {
-  return <ParamSwitch checked={!!value} onChange={(next) => onChange?.(next)} />;
+  return (
+    <ParamSwitch checked={!!value} onChange={(next) => onChange?.(next)} />
+  );
 }
 
 export default function ToolConfigModal({
@@ -220,15 +239,22 @@ export default function ToolConfigModal({
 
   // Tool test panel visibility state
   const [testPanelVisible, setTestPanelVisible] = useState(false);
-  const revealTestSection = useCallback((section: HTMLDivElement | null) => {
-    if (!section || !testPanelVisible) return;
-    requestAnimationFrame(() => {
-      const body = section.closest<HTMLElement>('[data-config-part="body"]');
-      if (!body || !section.isConnected) return;
-      const top = section.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
-      body.scrollTo({ top, behavior: "smooth" });
-    });
-  }, [testPanelVisible]);
+  const [aidpConfigOpen, setAidpConfigOpen] = useState(false);
+  const revealTestSection = useCallback(
+    (section: HTMLDivElement | null) => {
+      if (!section || !testPanelVisible) return;
+      requestAnimationFrame(() => {
+        const body = section.closest<HTMLElement>('[data-config-part="body"]');
+        if (!body || !section.isConnected) return;
+        const top =
+          section.getBoundingClientRect().top -
+          body.getBoundingClientRect().top +
+          body.scrollTop;
+        body.scrollTo({ top, behavior: "smooth" });
+      });
+    },
+    [testPanelVisible]
+  );
 
   // Knowledge base selector state
   const [kbSelectorVisible, setKbSelectorVisible] = useState(false);
@@ -378,6 +404,10 @@ export default function ToolConfigModal({
 
   // Reset testPanelKbIds to [] on modal open (before config KB IDs are loaded).
   // This prevents stale test panel KB when switching between tools with different KBs.
+  useEffect(() => {
+    if (isOpen) setAidpConfigOpen(false);
+  }, [isOpen, tool?.id]);
+
   useEffect(() => {
     const wasClosed = !prevIsOpenRef.current;
     prevIsOpenRef.current = isOpen;
@@ -1455,7 +1485,35 @@ export default function ToolConfigModal({
     }
   }, [formValues]);
 
+  const aidpValues = mergeAidpConfig(
+    Object.fromEntries(currentParams.map((p) => [p.name, p.value]))
+  );
+  const aidpInvalid =
+    isAidpTool(tool?.name) && Object.keys(aidpErrors(aidpValues)).length > 0;
+  const aidpResolvedValues = resolveAidpConfig(aidpValues);
+  const aidpDefaultValues = resolveAidpConfig({});
+  const aidpCustomized = Object.keys(aidpDefaultValues).some(
+    (key) => aidpResolvedValues[key] !== aidpDefaultValues[key]
+  );
+  const toolParamLabel = (name: string) =>
+    isAidpTool(tool?.name) &&
+    ["server_url", "api_key", "tenant_id", "kds_list"].includes(name)
+      ? t(`aidpRetrieval.toolParams.${name}`)
+      : name;
+
+  const applyAidpPatch = (patch: Record<string, unknown>) => {
+    const fields: Record<string, unknown> = {};
+    const updated = currentParams.map((param, index) => {
+      if (!(param.name in patch)) return param;
+      fields[`param_${index}`] = patch[param.name];
+      return { ...param, value: patch[param.name] };
+    });
+    form.setFieldsValue(fields);
+    setCurrentParams(updated);
+  };
+
   const handleSave = async () => {
+    if (aidpInvalid) return;
     // Mark that user has attempted to submit the form
     setHasSubmitted(true);
 
@@ -2208,7 +2266,10 @@ export default function ToolConfigModal({
     <>
       <ParamDialog
         variant="tool"
-        description={getLocalizedDescription(tool?.description, tool?.description_zh)}
+        description={getLocalizedDescription(
+          tool?.description,
+          tool?.description_zh
+        )}
         open={isOpen}
         title={
           <span className="flex items-center gap-2">
@@ -2236,7 +2297,19 @@ export default function ToolConfigModal({
           isLoading ? t("common.button.saving") : t("common.confirm")
         }
         cancelText={t("common.cancel")}
-        confirmDisabled={isLoading || hasFormErrors || hasEmptyRequired}
+        destroyOnHidden={isAidpTool(tool?.name)}
+        onReset={
+          isAidpTool(tool?.name)
+            ? () => applyAidpPatch({ ...aidpDefaults })
+            : undefined
+        }
+        resetText={
+          isAidpTool(tool?.name) ? t("aidpRetrieval.reset") : undefined
+        }
+        resetDisabled={isLoading}
+        confirmDisabled={
+          isLoading || hasFormErrors || hasEmptyRequired || aidpInvalid
+        }
       >
         <div className="flex items-center gap-1.5 text-[14px] font-bold leading-6 text-[#191919]">
           {t("toolConfig.title.paramConfig")}
@@ -2248,276 +2321,312 @@ export default function ToolConfigModal({
             form={form}
             layout="vertical"
             onValuesChange={(changedValues, allValues) => {
-                // Track if user has modified the datamate server_url field
-                if (
-                  tool?.name === "datamate_search" &&
-                  knowledgeBaseDataMateUrl &&
-                  !hasUserModifiedDatamateUrl
-                ) {
-                  const serverUrlFieldIndex = currentParams.findIndex(
-                    (p) => p.name === "server_url"
-                  );
-                  if (serverUrlFieldIndex >= 0) {
-                    const fieldName = `param_${serverUrlFieldIndex}`;
-                    if (changedValues[fieldName] !== undefined) {
-                      setHasUserModifiedDatamateUrl(true);
-                    }
+              // Track if user has modified the datamate server_url field
+              if (
+                tool?.name === "datamate_search" &&
+                knowledgeBaseDataMateUrl &&
+                !hasUserModifiedDatamateUrl
+              ) {
+                const serverUrlFieldIndex = currentParams.findIndex(
+                  (p) => p.name === "server_url"
+                );
+                if (serverUrlFieldIndex >= 0) {
+                  const fieldName = `param_${serverUrlFieldIndex}`;
+                  if (changedValues[fieldName] !== undefined) {
+                    setHasUserModifiedDatamateUrl(true);
                   }
                 }
-              }}
-              onFieldsChange={(_, allFields) => {
-                setHasFormErrors(
-                  allFields.some((field) => (field.errors?.length ?? 0) > 0)
-                );
-              }}
-            >
-              <div className="w-full">
-                {currentParams.map((param, index) => {
-                  if (param.name === "rerank_model_name" && !isRerankEnabled) {
-                    return null;
-                  }
-                  // Hide server_url / api_key for AIDP search - now read from environment variables
-                  if (
-                    toolKbType === "aidp_search" &&
-                    (param.name === "server_url" || param.name === "api_key")
-                  ) {
-                    return null;
-                  }
-                  const fieldName = `param_${index}`;
-                  const rules: any[] = [];
+              }
+            }}
+            onFieldsChange={(_, allFields) => {
+              setHasFormErrors(
+                allFields.some((field) => (field.errors?.length ?? 0) > 0)
+              );
+            }}
+          >
+            <div className="w-full">
+              {currentParams.map((param, index) => {
+                if (isAidpTool(tool?.name) && param.name in aidpDefaults)
+                  return null;
+                if (param.name === "rerank_model_name" && !isRerankEnabled) {
+                  return null;
+                }
+                // Hide server_url / api_key for AIDP search - now read from environment variables
+                if (
+                  toolKbType === "aidp_search" &&
+                  (param.name === "server_url" || param.name === "api_key")
+                ) {
+                  return null;
+                }
+                const fieldName = `param_${index}`;
+                const rules: any[] = [];
 
-                  // Add required validation rule
-                  if (param.required) {
-                    rules.push({
-                      required: true,
-                      message: t("toolConfig.validation.required"),
-                    });
-                  }
+                // Add required validation rule
+                if (param.required) {
+                  rules.push({
+                    required: true,
+                    message: t("toolConfig.validation.required"),
+                  });
+                }
 
-                  // Add numeric constraint validation (ge/gt/le/lt)
-                  if (
-                    param.type === TOOL_PARAM_TYPES.NUMBER &&
-                    param.constraints
-                  ) {
-                    const { ge, gt, le, lt } = param.constraints;
-                    rules.push({
-                      validator: async (_: any, value: any) => {
-                        if (
-                          value === undefined ||
-                          value === null ||
-                          value === ""
-                        ) {
-                          return Promise.resolve();
-                        }
-                        const num = Number(value);
-                        if (Number.isNaN(num)) {
-                          return Promise.reject(
-                            t("toolConfig.validation.number.invalid")
-                          );
-                        }
-                        if (ge !== undefined && num < ge) {
-                          return Promise.reject(
-                            t("toolConfig.validation.number.min", { min: ge })
-                          );
-                        }
-                        if (gt !== undefined && num <= gt) {
-                          return Promise.reject(
-                            t("toolConfig.validation.number.gt", { value: gt })
-                          );
-                        }
-                        if (le !== undefined && num > le) {
-                          return Promise.reject(
-                            t("toolConfig.validation.number.max", { max: le })
-                          );
-                        }
-                        if (lt !== undefined && num >= lt) {
-                          return Promise.reject(
-                            t("toolConfig.validation.number.lt", { value: lt })
-                          );
-                        }
+                // Add numeric constraint validation (ge/gt/le/lt)
+                if (
+                  param.type === TOOL_PARAM_TYPES.NUMBER &&
+                  param.constraints
+                ) {
+                  const { ge, gt, le, lt } = param.constraints;
+                  rules.push({
+                    validator: async (_: any, value: any) => {
+                      if (
+                        value === undefined ||
+                        value === null ||
+                        value === ""
+                      ) {
                         return Promise.resolve();
-                      },
-                    });
-                  }
+                      }
+                      const num = Number(value);
+                      if (Number.isNaN(num)) {
+                        return Promise.reject(
+                          t("toolConfig.validation.number.invalid")
+                        );
+                      }
+                      if (ge !== undefined && num < ge) {
+                        return Promise.reject(
+                          t("toolConfig.validation.number.min", { min: ge })
+                        );
+                      }
+                      if (gt !== undefined && num <= gt) {
+                        return Promise.reject(
+                          t("toolConfig.validation.number.gt", { value: gt })
+                        );
+                      }
+                      if (le !== undefined && num > le) {
+                        return Promise.reject(
+                          t("toolConfig.validation.number.max", { max: le })
+                        );
+                      }
+                      if (lt !== undefined && num >= lt) {
+                        return Promise.reject(
+                          t("toolConfig.validation.number.lt", { value: lt })
+                        );
+                      }
+                      return Promise.resolve();
+                    },
+                  });
+                }
 
-                  // Add URL validation for server_url parameter
-                  if (param.name === "server_url") {
-                    rules.push({
-                      validator: async (_: any, value: any) => {
-                        if (!value) return Promise.resolve();
+                // Add URL validation for server_url parameter
+                if (param.name === "server_url") {
+                  rules.push({
+                    validator: async (_: any, value: any) => {
+                      if (!value) return Promise.resolve();
+                      try {
+                        // Check if value is a valid URL
+                        let url: URL;
                         try {
-                          // Check if value is a valid URL
-                          let url: URL;
-                          try {
-                            url = new URL(value);
-                          } catch {
-                            return Promise.reject(
-                              t("knowledgeBase.error.invalidUrlFormat")
-                            );
-                          }
-                          // Check if protocol is http or https
-                          if (
-                            url.protocol !== "http:" &&
-                            url.protocol !== "https:"
-                          ) {
-                            return Promise.reject(
-                              t("knowledgeBase.error.invalidUrlProtocol")
-                            );
-                          }
-                          return Promise.resolve();
+                          url = new URL(value);
                         } catch {
                           return Promise.reject(
                             t("knowledgeBase.error.invalidUrlFormat")
                           );
                         }
-                      },
-                    });
-                  }
+                        // Check if protocol is http or https
+                        if (
+                          url.protocol !== "http:" &&
+                          url.protocol !== "https:"
+                        ) {
+                          return Promise.reject(
+                            t("knowledgeBase.error.invalidUrlProtocol")
+                          );
+                        }
+                        return Promise.resolve();
+                      } catch {
+                        return Promise.reject(
+                          t("knowledgeBase.error.invalidUrlFormat")
+                        );
+                      }
+                    },
+                  });
+                }
 
-                  // Add init_path validation - non-empty string if provided
-                  if (param.name === "init_path") {
+                // Add init_path validation - non-empty string if provided
+                if (param.name === "init_path") {
+                  rules.push({
+                    validator: async (_: any, value: any) => {
+                      if (!value || value.trim() === "") {
+                        return Promise.reject(
+                          t("toolConfig.validation.initPathEmpty")
+                        );
+                      }
+                      return Promise.resolve();
+                    },
+                  });
+                }
+
+                // Add custom validator for knowledge base selector fields (index_names/dataset_ids)
+                // Since these fields use custom display without form control, we need custom validation
+                if (
+                  toolRequiresKbSelection &&
+                  toolKbType !== "aidp_search" &&
+                  (param.name === "index_names" ||
+                    param.name === "dataset_ids" ||
+                    param.name === "kds_list")
+                ) {
+                  rules.push({
+                    validator: async () => {
+                      // Check if any knowledge base has been selected
+                      if (selectedKbIds.length === 0) {
+                        return Promise.reject(
+                          t("toolConfig.validation.selectKb")
+                        );
+                      }
+                      return Promise.resolve();
+                    },
+                  });
+                }
+
+                // Add type-specific validation rules
+                switch (param.type) {
+                  case TOOL_PARAM_TYPES.ARRAY:
                     rules.push({
                       validator: async (_: any, value: any) => {
-                        if (!value || value.trim() === "") {
-                          return Promise.reject(
-                            t("toolConfig.validation.initPathEmpty")
-                          );
-                        }
-                        return Promise.resolve();
-                      },
-                    });
-                  }
-
-                  // Add custom validator for knowledge base selector fields (index_names/dataset_ids)
-                  // Since these fields use custom display without form control, we need custom validation
-                  if (
-                    toolRequiresKbSelection &&
-                    toolKbType !== "aidp_search" &&
-                    (param.name === "index_names" ||
-                      param.name === "dataset_ids" ||
-                      param.name === "kds_list")
-                  ) {
-                    rules.push({
-                      validator: async () => {
-                        // Check if any knowledge base has been selected
-                        if (selectedKbIds.length === 0) {
-                          return Promise.reject(
-                            t("toolConfig.validation.selectKb")
-                          );
-                        }
-                        return Promise.resolve();
-                      },
-                    });
-                  }
-
-                  // Add type-specific validation rules
-                  switch (param.type) {
-                    case TOOL_PARAM_TYPES.ARRAY:
-                      rules.push({
-                        validator: async (_: any, value: any) => {
-                          if (!value) return Promise.resolve();
-                          try {
-                            const parsed =
-                              typeof value === "string"
-                                ? JSON.parse(value)
-                                : value;
-                            if (!Array.isArray(parsed)) {
-                              return Promise.reject(
-                                t("toolConfig.validation.array.invalid")
-                              );
-                            }
-                            return Promise.resolve();
-                          } catch {
+                        if (!value) return Promise.resolve();
+                        try {
+                          const parsed =
+                            typeof value === "string"
+                              ? JSON.parse(value)
+                              : value;
+                          if (!Array.isArray(parsed)) {
                             return Promise.reject(
                               t("toolConfig.validation.array.invalid")
                             );
                           }
-                        },
-                      });
-                      break;
-                    case TOOL_PARAM_TYPES.OBJECT:
-                      rules.push({
-                        validator: async (_: any, value: any) => {
-                          if (!value) return Promise.resolve();
-                          try {
-                            const parsed =
-                              typeof value === "string"
-                                ? JSON.parse(value)
-                                : value;
-                            if (
-                              typeof parsed !== "object" ||
-                              Array.isArray(parsed)
-                            ) {
-                              return Promise.reject(
-                                t("toolConfig.validation.object.invalid")
-                              );
-                            }
-                            return Promise.resolve();
-                          } catch {
+                          return Promise.resolve();
+                        } catch {
+                          return Promise.reject(
+                            t("toolConfig.validation.array.invalid")
+                          );
+                        }
+                      },
+                    });
+                    break;
+                  case TOOL_PARAM_TYPES.OBJECT:
+                    rules.push({
+                      validator: async (_: any, value: any) => {
+                        if (!value) return Promise.resolve();
+                        try {
+                          const parsed =
+                            typeof value === "string"
+                              ? JSON.parse(value)
+                              : value;
+                          if (
+                            typeof parsed !== "object" ||
+                            Array.isArray(parsed)
+                          ) {
                             return Promise.reject(
                               t("toolConfig.validation.object.invalid")
                             );
                           }
-                        },
-                      });
-                      break;
-                  }
+                          return Promise.resolve();
+                        } catch {
+                          return Promise.reject(
+                            t("toolConfig.validation.object.invalid")
+                          );
+                        }
+                      },
+                    });
+                    break;
+                }
 
-                  return (
-                    <Form.Item
-                      key={param.name}
-                      required={false}
-                      colon={false}
-                      label={
-                        <ParamLabel
-                          label={
-                            (tool.origin_name || tool.name) === "deepseek_search" &&
-                            param.name === "only_high_quality"
-                              ? t("toolConfig.deepseek.onlyHighQuality")
-                              : param.name
-                          }
-                          required={param.required}
-                          info={Boolean(
-                            getLocalizedDescription(
-                              param.description,
-                              param.description_zh
-                            )
-                          )}
-                          infoText={getLocalizedDescription(
+                return (
+                  <Form.Item
+                    key={param.name}
+                    required={false}
+                    colon={false}
+                    label={
+                      <ParamLabel
+                        label={
+                          (tool.origin_name || tool.name) ===
+                            "deepseek_search" &&
+                          param.name === "only_high_quality"
+                            ? t("toolConfig.deepseek.onlyHighQuality")
+                            : toolParamLabel(param.name)
+                        }
+                        required={param.required}
+                        info={Boolean(
+                          getLocalizedDescription(
                             param.description,
                             param.description_zh
-                          )}
-                          size="md"
-                        />
-                      }
-                      name={
-                        toolRequiresKbSelection &&
-                        (param.name === "index_names" ||
-                          param.name === "dataset_ids" ||
-                          param.name === "kds_list")
-                          ? undefined
-                          : fieldName
-                      }
-                      rules={rules}
-                      style={{ marginBottom: 16 }}
-                    >
-                      {/* For KB selector, use custom display (Form.Item doesn't control value) */}
-                      {toolRequiresKbSelection &&
+                          )
+                        )}
+                        infoText={getLocalizedDescription(
+                          param.description,
+                          param.description_zh
+                        )}
+                        size="md"
+                      />
+                    }
+                    name={
+                      toolRequiresKbSelection &&
                       (param.name === "index_names" ||
                         param.name === "dataset_ids" ||
                         param.name === "kds_list")
-                        ? renderKbSelectorInput(param, index)
-                        : renderParamInput(param, index)}
-                    </Form.Item>
-                  );
-                })}
-              </div>
-            </Form>
-          </div>
-          <div
-            ref={revealTestSection}
-            className="flex flex-col gap-4"
-          >
+                        ? undefined
+                        : fieldName
+                    }
+                    rules={rules}
+                    style={{ marginBottom: 16 }}
+                  >
+                    {/* For KB selector, use custom display (Form.Item doesn't control value) */}
+                    {toolRequiresKbSelection &&
+                    (param.name === "index_names" ||
+                      param.name === "dataset_ids" ||
+                      param.name === "kds_list")
+                      ? renderKbSelectorInput(param, index)
+                      : renderParamInput(param, index)}
+                  </Form.Item>
+                );
+              })}
+              {isAidpTool(tool?.name) && (
+                <div className="mt-2 border-t border-[#EEEEEE] pt-2">
+                  <button
+                    type="button"
+                    aria-expanded={aidpConfigOpen}
+                    onClick={() => setAidpConfigOpen((current) => !current)}
+                    className="flex h-8 w-full items-center gap-1.5 border-0 bg-transparent p-0 text-left"
+                  >
+                    <span className="text-[14px] font-bold leading-[22px] text-[#191919]">
+                      {t("aidpRetrieval.toolSection.title")}
+                    </span>
+                    <SectionChevron expanded={aidpConfigOpen} />
+                    <span
+                      className={`ml-auto text-[12px] leading-[18px] ${
+                        aidpInvalid ? "text-[#C83E3E]" : "text-[#777]"
+                      }`}
+                    >
+                      {aidpInvalid
+                        ? t("aidpRetrieval.invalid")
+                        : aidpCustomized
+                          ? t("aidpRetrieval.toolSection.customized")
+                          : t("aidpRetrieval.toolSection.defaults")}
+                    </span>
+                  </button>
+                  {aidpConfigOpen ? (
+                    <div className="pt-4">
+                      <AidpRetrievalParamsForm
+                        values={aidpValues}
+                        disabled={isLoading}
+                        scope="tool"
+                        onChange={applyAidpPatch}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </Form>
+        </div>
+        <div ref={revealTestSection} className="flex flex-col gap-4">
           <SectionHeader
             title={t("toolConfig.button.testTool")}
             expanded={testPanelVisible}
@@ -2525,85 +2634,83 @@ export default function ToolConfigModal({
           />
           {testPanelVisible && (
             <ToolTestPanel
-                visible={testPanelVisible}
-                tool={tool}
-                onClose={handleCloseTestPanel}
-                configParams={currentParams}
-                toolRequiresKbSelection={toolRequiresKbSelection}
-                knowledgeBases={knowledgeBases}
-                kbLoading={kbLoading}
-                selectedKbIds={selectedKbIds}
-                selectedKbDisplayNames={selectedKbDisplayNames}
-                onOpenKbSelector={(paramIndex) => {
-                  // For aidp_search and knowledge_base_search, mark that KB selection is from test panel
-                  if (
-                    toolKbType === "aidp_search" ||
-                    toolKbType === "ind_aidp_search" ||
-                    isKnowledgeBaseSearchTool
-                  ) {
-                    setIsTestPanelKbSelection(true);
-                  }
-                  // paramIndex === -1 means the call originates from the test
-                  // panel's KbSelectorDisplay, which doesn't know which slot in
-                  // currentParams holds the KB parameter. Resolve the real
-                  // index here so the KB selection updates the correct param
-                  // (and only the KB param) instead of overwriting param_0
-                  // (top_k for knowledge_base_search).
-                  const kbParamIndex =
-                    paramIndex === -1
-                      ? currentParams.findIndex(
-                          (p) =>
-                            p.name === "index_names" ||
-                            p.name === "dataset_ids" ||
-                            p.name === "kds_list"
-                        )
-                      : paramIndex;
-                  openKbSelector(kbParamIndex >= 0 ? kbParamIndex : 0, true);
-                }}
-                onKbSelectionChange={(ids, displayNames) => {
-                  // For aidp_search and knowledge_base_search, this is handled by onTestPanelKbSelect
+              visible={testPanelVisible}
+              tool={tool}
+              onClose={handleCloseTestPanel}
+              configParams={currentParams}
+              toolRequiresKbSelection={toolRequiresKbSelection}
+              knowledgeBases={knowledgeBases}
+              kbLoading={kbLoading}
+              selectedKbIds={selectedKbIds}
+              selectedKbDisplayNames={selectedKbDisplayNames}
+              onOpenKbSelector={(paramIndex) => {
+                // For aidp_search and knowledge_base_search, mark that KB selection is from test panel
+                if (
+                  toolKbType === "aidp_search" ||
+                  toolKbType === "ind_aidp_search" ||
+                  isKnowledgeBaseSearchTool
+                ) {
+                  setIsTestPanelKbSelection(true);
+                }
+                // paramIndex === -1 means the call originates from the test
+                // panel's KbSelectorDisplay, which doesn't know which slot in
+                // currentParams holds the KB parameter. Resolve the real
+                // index here so the KB selection updates the correct param
+                // (and only the KB param) instead of overwriting param_0
+                // (top_k for knowledge_base_search).
+                const kbParamIndex =
+                  paramIndex === -1
+                    ? currentParams.findIndex(
+                        (p) =>
+                          p.name === "index_names" ||
+                          p.name === "dataset_ids" ||
+                          p.name === "kds_list"
+                      )
+                    : paramIndex;
+                openKbSelector(kbParamIndex >= 0 ? kbParamIndex : 0, true);
+              }}
+              onKbSelectionChange={(ids, displayNames) => {
+                // For aidp_search and knowledge_base_search, this is handled by onTestPanelKbSelect
+                if (
+                  toolKbType !== "aidp_search" &&
+                  toolKbType !== "ind_aidp_search" &&
+                  !isKnowledgeBaseSearchTool
+                ) {
+                  setSelectedKbIds(ids);
+                  setSelectedKbDisplayNames(displayNames);
+                }
+              }}
+              onRemoveKb={(index, paramIndex) => {
+                if (paramIndex === -1) {
+                  // Called from test panel - for aidp_search and knowledge_base_search, this is handled by onTestPanelKbRemove
                   if (
                     toolKbType !== "aidp_search" &&
                     toolKbType !== "ind_aidp_search" &&
                     !isKnowledgeBaseSearchTool
                   ) {
-                    setSelectedKbIds(ids);
-                    setSelectedKbDisplayNames(displayNames);
+                    const newIds = selectedKbIds.filter((_, i) => i !== index);
+                    const newDisplayNames = selectedKbDisplayNames.filter(
+                      (_, i) => i !== index
+                    );
+                    setSelectedKbIds(newIds);
+                    setSelectedKbDisplayNames(newDisplayNames);
                   }
-                }}
-                onRemoveKb={(index, paramIndex) => {
-                  if (paramIndex === -1) {
-                    // Called from test panel - for aidp_search and knowledge_base_search, this is handled by onTestPanelKbRemove
-                    if (
-                      toolKbType !== "aidp_search" &&
-                      toolKbType !== "ind_aidp_search" &&
-                      !isKnowledgeBaseSearchTool
-                    ) {
-                      const newIds = selectedKbIds.filter(
-                        (_, i) => i !== index
-                      );
-                      const newDisplayNames = selectedKbDisplayNames.filter(
-                        (_, i) => i !== index
-                      );
-                      setSelectedKbIds(newIds);
-                      setSelectedKbDisplayNames(newDisplayNames);
-                    }
-                  } else {
-                    // Called from config panel
-                    removeKbFromSelection(index, paramIndex);
-                  }
-                }}
-                onTestPanelKbSelect={handleTestPanelKbSelect}
-                onTestPanelKbRemove={handleTestPanelKbRemove}
-                onTestPanelKbIdsChange={handleTestPanelKbIdsChange}
-                testPanelKbIds={testPanelKbIds}
-                testPanelKbDisplayNames={testPanelKbDisplayNames}
-                configInvalid={hasFormErrors || hasEmptyRequired}
-                toolKbType={toolKbType}
-                haotianKnowledgeSets={haotianKnowledgeSets}
-              />
-            )}
-          </div>
+                } else {
+                  // Called from config panel
+                  removeKbFromSelection(index, paramIndex);
+                }
+              }}
+              onTestPanelKbSelect={handleTestPanelKbSelect}
+              onTestPanelKbRemove={handleTestPanelKbRemove}
+              onTestPanelKbIdsChange={handleTestPanelKbIdsChange}
+              testPanelKbIds={testPanelKbIds}
+              testPanelKbDisplayNames={testPanelKbDisplayNames}
+              configInvalid={hasFormErrors || hasEmptyRequired || aidpInvalid}
+              toolKbType={toolKbType}
+              haotianKnowledgeSets={haotianKnowledgeSets}
+            />
+          )}
+        </div>
       </ParamDialog>
 
       {/* Knowledge Base Selector Modal */}

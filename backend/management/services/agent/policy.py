@@ -6,6 +6,8 @@ from copy import deepcopy
 from typing import Any, Optional
 
 from contracts.errors.exceptions import AgentToolImportError
+from nexent.core.ext_components.aidp.constants import AIDP_SEARCH_TOOL_CLASSES
+from nexent.core.ext_components.aidp.retrieval_config import prepare_config
 
 
 def build_sandbox_policy(tenant_id: str, agent_type: str) -> Optional[dict]:
@@ -111,3 +113,15 @@ AIDP_RUNTIME_PARAMS = frozenset(
         "kds_name_to_id_map",
     }
 )
+
+
+def prepare_import_retrieval_params(agent_info):
+    """Prepare user-uploaded policies before creating any agents or skills."""
+    for agent in agent_info.agent_info.values():
+        for tool in agent.tools:
+            if tool.class_name in AIDP_SEARCH_TOOL_CLASSES:
+                try:
+                    portable = portable_tool_params(tool.class_name, tool.params)
+                    tool.params = {**portable, **prepare_config(portable, {})}
+                except ValueError as exc:
+                    raise AgentToolImportError(str(exc)) from exc

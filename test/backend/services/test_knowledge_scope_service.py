@@ -554,3 +554,19 @@ def test_runtime_resources_only_describe_effective_source():
     assert "本地1" in content
     assert "AIDP 知识库" not in content
     assert "当前会话已禁用" not in content
+
+
+@pytest.mark.parametrize("legacy", [None, {}, {"top_k": 0}, {"top_k": 99}, {"api_key": "unused"}])
+def test_retired_retrieval_config_is_not_part_of_knowledge_scope(legacy):
+    from contracts.agent import WorkbenchSessionConfig
+
+    raw = {"local": {"mode": "override", "knowledge_ids": ["12"]},
+           "aidp": {"mode": "disabled"}, "retrieval_config": legacy}
+    scope = ConversationKnowledgeScopeRequest.model_validate(raw)
+    assert "retrieval_config" not in scope.model_dump(mode="json")
+    assert scope.local.knowledge_ids == ["12"]
+    workbench = WorkbenchSessionConfig.model_validate({"mode": "generic_chat", "knowledge_scope": raw})
+    dumped = workbench.model_dump(mode="json")["knowledge_scope"]
+    assert "retrieval_config" not in dumped
+    assert dumped["local"]["knowledge_ids"] == ["12"]
+    assert raw["retrieval_config"] == legacy

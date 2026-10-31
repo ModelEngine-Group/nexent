@@ -32,8 +32,12 @@ export function ParamDialog({
   maskClosable = false,
   confirmDisabled = false,
   confirmLoading = false,
+  onReset,
+  resetText,
+  resetDisabled = false,
   cancelDisabled = false,
   destroyOnHidden = false,
+  footer,
   children,
   variant,
 }: {
@@ -49,8 +53,13 @@ export function ParamDialog({
   maskClosable?: boolean;
   confirmDisabled?: boolean;
   confirmLoading?: boolean;
+  onReset?: () => void;
+  resetText?: string;
+  resetDisabled?: boolean;
   cancelDisabled?: boolean;
   destroyOnHidden?: boolean;
+  /** Replace the default footer; pass null to let the body render its own. */
+  footer?: ReactNode | null;
   children: ReactNode;
 }) {
   const { t } = useTranslation("common");
@@ -103,30 +112,44 @@ export function ParamDialog({
         <div data-config-part="body" className={styles.body}>
           {children}
         </div>
-        <div
-          data-config-part="footer"
-          className="flex h-8 shrink-0 justify-end gap-4"
-        >
-          <Button
-            autoInsertSpace={false}
-            onClick={onClose}
-            disabled={cancelDisabled}
-            className={styles.cancelButton}
+        {footer === undefined ? (
+          <div
+            data-config-part="footer"
+            className="flex h-8 shrink-0 justify-end gap-4"
           >
-            {cancelText ?? t("common.cancel")}
-          </Button>
-          {onConfirm && (
+            {onReset ? (
+              <button
+                type="button"
+                className={styles.resetLink}
+                disabled={resetDisabled}
+                onClick={onReset}
+              >
+                {resetText ?? t("common.reset")}
+              </button>
+            ) : null}
             <Button
               autoInsertSpace={false}
-              onClick={onConfirm}
-              disabled={confirmDisabled}
-              loading={confirmLoading}
-              className={styles.confirmButton}
+              onClick={onClose}
+              disabled={cancelDisabled}
+              className={styles.cancelButton}
             >
-              {confirmText ?? t("common.confirm")}
+              {cancelText ?? t("common.cancel")}
             </Button>
-          )}
-        </div>
+            {onConfirm && (
+              <Button
+                autoInsertSpace={false}
+                onClick={onConfirm}
+                disabled={confirmDisabled}
+                loading={confirmLoading}
+                className={styles.confirmButton}
+              >
+                {confirmText ?? t("common.confirm")}
+              </Button>
+            )}
+          </div>
+        ) : (
+          footer
+        )}
       </div>
     </Modal>
   );
