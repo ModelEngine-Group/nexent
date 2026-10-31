@@ -1,4 +1,5 @@
-"""Unit tests for ``backend.apps.evaluation_set_app``."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Unit tests for ``management.api.evaluation.evaluation_set``."""
 
 import io
 import json
@@ -9,8 +10,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-
-from consts.exceptions import AppException
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
@@ -122,13 +121,13 @@ if _adapters_pkg is None or not getattr(_adapters_pkg, "__path__", None):
 # class keeps these tests faithful to production behaviour.
 # ---------------------------------------------------------------------------
 def _exc(error_code, message):
-    from consts.exceptions import AppException
+    from contracts.errors.exceptions import AppException
 
     return AppException(error_code, message)
 
 
 def _code(name):
-    from consts.error_code import ErrorCode
+    from contracts.errors.codes import ErrorCode
 
     return getattr(ErrorCode, name)
 
@@ -145,7 +144,7 @@ def client():
     from fastapi import FastAPI
     from middleware.exception_handler import ExceptionHandlerMiddleware
 
-    from backend.apps.evaluation_set_app import router
+    from management.api.evaluation.evaluation_set import router
 
     app = FastAPI()
     app.add_middleware(ExceptionHandlerMiddleware)
@@ -158,11 +157,11 @@ def client():
 def _mock_service_impl(service_module, **impl_overrides):
     """Replace the imported service functions on the app module with mocks.
 
-    The app does ``from services.evaluation_set_service import (
+    The app does ``from management.services.evaluation.sets import (
         create_evaluation_set_from_cases, ...,
     )``, so the names live on the app module itself.
     """
-    from backend.apps import evaluation_set_app
+    from management.api.evaluation import evaluation_set as evaluation_set_app
 
     # Default mocks for each public service function.
     defaults = {
@@ -391,6 +390,42 @@ class TestUploadEvaluationSet:
         assert response.status_code == 400, response.text
         assert "Unsupported file type" in response.json()["message"]
 
+    def test_upload_rejects_oversized_file_before_parsing(self, client, mocker):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+        mocker.patch.object(evaluation_set_app, "MAX_EVALUATION_SET_FILE_SIZE_MB", 1)
+        mocker.patch.object(evaluation_set_app, "MAX_EVALUATION_SET_FILE_SIZE_BYTES", 3)
+        evaluation_set_app.parse_evaluation_cases_from_excel = MagicMock(
+            side_effect=AssertionError("oversized files must be rejected before parsing")
+        )
+
+        response = client.post(
+            "/evaluation-sets/upload",
+            data={"name": "test"},
+            files=[("files", ("set.xlsx", b"1234", "application/octet-stream"))],
+        )
+
+        assert response.status_code == 413, response.text
+        payload = response.json()
+        assert payload["code"] == "000403"
+        assert payload["details"] == {
+            "resource": "evaluation_set_file",
+            "filename": "set.xlsx",
+            "limit_mb": 1,
+            "limit_bytes": 3,
+            "actual_bytes": 4,
+        }
+        evaluation_set_app.parse_evaluation_cases_from_excel.assert_not_called()
+
+    def test_upload_config_returns_effective_file_size_limit(self, client):
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+
+        response = client.get("/evaluation-sets/config")
+
+        assert response.status_code == 200
+        assert response.json()["data"]["max_file_size_mb"] == 20
+
 
 # ---------------------------------------------------------------------------
 # GET /evaluation-sets/template
@@ -529,7 +564,7 @@ class TestCreateValidation:
         evaluation_set_app.create_empty_evaluation_set.assert_not_called()
 
     def test_401_on_unauthorized(self, client):
-        from consts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         evaluation_set_app = _mock_service_impl(None)
         evaluation_set_app.get_current_user_id = MagicMock(
@@ -553,9 +588,9 @@ class TestUploadErrorPaths:
         # the AppException propagates).
         import asyncio
 
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
 
-        from backend.apps.evaluation_set_app import upload_evaluation_set_api
+        from management.api.evaluation.evaluation_set import upload_evaluation_set_api
 
         evaluation_set_app = _mock_service_impl(None)
         _mock_auth(evaluation_set_app)
@@ -865,55 +900,14 @@ class TestAppExceptionPropagation:
 
 
 # ---------------------------------------------------------------------------
-# Helpers — _parse_docx_to_text / _validate_and_parse_docx / _resolve_target_set
+# Helpers — _resolve_target_set
 # ---------------------------------------------------------------------------
 
 
-def _make_docx_bytes(*paragraphs):
-    from docx import Document
-
-    doc = Document()
-    for p in paragraphs:
-        doc.add_paragraph(p)
-    buf = io.BytesIO()
-    doc.save(buf)
-    return buf.getvalue()
-
-
 def _app_mod():
-    from backend.apps import evaluation_set_app
+    from management.api.evaluation import evaluation_set as evaluation_set_app
 
     return evaluation_set_app
-
-
-class TestParseDocxToText:
-    def test_returns_non_empty_paragraphs(self):
-        text = _app_mod()._parse_docx_to_text(_make_docx_bytes("line one", "  ", "line two"))
-        assert text == "line one\n\nline two"
-
-
-class TestValidateAndParseDocx:
-    def test_rejects_non_docx(self):
-        with pytest.raises(Exception) as ei:
-            _app_mod()._validate_and_parse_docx(b"x", "a.pdf")
-        assert ei.value.error_code == _code("COMMON_VALIDATION_ERROR")
-
-    def test_rejects_oversized_file(self):
-        with pytest.raises(Exception) as ei:
-            _app_mod()._validate_and_parse_docx(b"x" * (20 * 1024 * 1024 + 1), "a.docx")
-        assert ei.value.error_code == _code("COMMON_VALIDATION_ERROR")
-
-    def test_parse_failure(self):
-        with pytest.raises(AppException) as ei:
-            _app_mod()._validate_and_parse_docx(b"not a real docx", "a.docx")
-        assert ei.value.error_code == _code("COMMON_VALIDATION_ERROR")
-
-    def test_success(self):
-        content, name = _app_mod()._validate_and_parse_docx(
-            _make_docx_bytes("hello world"), "a.docx"
-        )
-        assert "hello world" in content
-        assert name == "a.docx"
 
 
 class TestResolveTargetSet:
@@ -970,7 +964,7 @@ class TestGenerateCasesAsync:
             None, create_empty_evaluation_set=MagicMock(return_value={"evaluation_set_id": 5})
         )
         _mock_auth(evaluation_set_app)
-        evaluation_set_app.pool = MagicMock()
+        evaluation_set_app.config_thread_manager = MagicMock()
 
         response = client.post(
             "/evaluation-sets/generate-cases-async",
@@ -981,51 +975,59 @@ class TestGenerateCasesAsync:
         evaluation_set_app._update_generation_status.assert_called_once_with(
             5, "t1", "GENERATING", 0
         )
-        evaluation_set_app.pool.submit.assert_called_once()
-        args = evaluation_set_app.pool.submit.call_args.args
-        assert args[0] is evaluation_set_app._generate_cases_async
-        assert args[1:] == (5, "t1", "u1", "gen", 5, 3, None, None, None, True, None)
+        evaluation_set_app.config_thread_manager.submit.assert_called_once()
+        args = evaluation_set_app.config_thread_manager.submit.call_args.args
+        assert args[0] == "evaluation"
+        assert args[1].task_name == "evaluation-set-generation"
+        assert args[2] is evaluation_set_app._generate_cases_async
+        assert args[3:] == (5, "t1", "u1", "gen", 5, 3, None, True, None)
 
     def test_json_target_set_id(self, client):
         evaluation_set_app = _mock_service_impl(None)
         _mock_auth(evaluation_set_app)
-        evaluation_set_app.pool = MagicMock()
+        evaluation_set_app.config_thread_manager = MagicMock()
 
         response = client.post(
             "/evaluation-sets/generate-cases-async",
             json={"description": "gen", "count": 5, "model_id": 3, "target_set_id": 9},
         )
         assert response.status_code == 200
-        args = evaluation_set_app.pool.submit.call_args.args
-        assert args[1] == 9
+        args = evaluation_set_app.config_thread_manager.submit.call_args.args
+        assert args[3] == 9
         assert args[10] is False  # is_new=False
 
-    def test_multipart_with_docx(self, client):
+    def test_knowledge_base_names_forwarded(self, client):
         evaluation_set_app = _mock_service_impl(None)
         _mock_auth(evaluation_set_app)
-        evaluation_set_app.pool = MagicMock()
-        # fastapi 0.139 ships its own fastapi.datastructures.UploadFile while
-        # Request.form() returns starlette.datastructures.UploadFile, so the
-        # endpoint's isinstance guard is False in this environment.  Align the
-        # module-level UploadFile with the runtime class to exercise the DOCX
-        # parsing path.
-        from starlette.datastructures import UploadFile as StarletteUploadFile
-
-        evaluation_set_app.UploadFile = StarletteUploadFile
+        evaluation_set_app.config_thread_manager = MagicMock()
 
         response = client.post(
             "/evaluation-sets/generate-cases-async",
-            data={"payload": json.dumps(
-                {"description": "gen", "count": 5, "model_id": 3, "target_set_id": 9}
-            )},
-            files=[("file", ("cases.docx", _make_docx_bytes("hello"), "application/octet-stream"))],
-            headers={"Authorization": "Bearer x"},
+            json={
+                "description": "gen",
+                "count": 5,
+                "model_id": 3,
+                "target_set_id": 9,
+                "knowledge_base_names": ["kb1", "kb2"],
+            },
         )
         assert response.status_code == 200, response.text
-        args = evaluation_set_app.pool.submit.call_args.args
-        assert args[1] == 9
-        assert args[7] == "hello"  # file_content extracted from docx
-        assert args[8] == "cases.docx"
+        args = evaluation_set_app.config_thread_manager.submit.call_args.args
+        assert args[3] == 9
+        assert args[11] == ["kb1", "kb2"]
+
+    def test_multipart_body_rejected(self, client):
+        # The endpoint is JSON-only: a multipart body (e.g. the removed file
+        # upload) fails request validation instead of reaching the handler.
+        evaluation_set_app = _mock_service_impl(None)
+        _mock_auth(evaluation_set_app)
+
+        response = client.post(
+            "/evaluation-sets/generate-cases-async",
+            data={"payload": json.dumps({"description": "gen", "model_id": 3})},
+            headers={"Authorization": "Bearer x"},
+        )
+        assert response.status_code == 422
 
     def test_target_set_in_use_409(self, client):
         evaluation_set_app = _mock_service_impl(
@@ -1053,7 +1055,7 @@ class TestGenerateCasesAsync:
         # The generate endpoint has no dedicated UnauthorizedError handler, so
         # the legacy UnauthorizedError falls through to the generic handler and
         # is wrapped as SYSTEM_INTERNAL_ERROR (500).
-        from consts.exceptions import UnauthorizedError
+        from contracts.errors.exceptions import UnauthorizedError
 
         evaluation_set_app = _mock_service_impl(None)
         evaluation_set_app.get_current_user_id = MagicMock(
@@ -1069,8 +1071,8 @@ class TestGenerateCasesAsync:
     def test_500_on_exception(self, client):
         evaluation_set_app = _mock_service_impl(None)
         _mock_auth(evaluation_set_app)
-        evaluation_set_app.pool = MagicMock()
-        evaluation_set_app.pool.submit.side_effect = RuntimeError("boom")
+        evaluation_set_app.config_thread_manager = MagicMock()
+        evaluation_set_app.config_thread_manager.submit.side_effect = RuntimeError("boom")
 
         response = client.post(
             "/evaluation-sets/generate-cases-async",

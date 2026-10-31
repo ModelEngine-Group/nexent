@@ -1,0 +1,84 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-F2FC05F0ACCC25B1
+  feature_id: F-171
+  business_rule_ids:
+  - F-171-RULE-01
+  title: knowledge_base_search scope 解析(permission_denied/unavailable/fallback_to_all)与 notice+results 结构化输出(reference_mark/显示名转换)｜核心流程
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: knowledge_base_search scope 解析(permission_denied/unavailable/fallback_to_all)与 notice+results 结构化输出(reference_mark/显示名转换)｜核心流程
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 被测函数为纯函数，无需真实向量库、embedding/rerank 模型或外部知识库；scope 列表、显示名映射与结果对象均在内存中构造。
+  test_data:
+    legacy_asset_declaration: 无外部资产：纯函数单测，configured_scope/available_scope/requested_scope 列表、display_name_to_index_map 映射及
+      SearchResultTextMessage 结果对象均在内存中构造，不读取生产凭据。
+  steps:
+  - order: 1
+    action: 导入被测对象：sdk/nexent/core/utils/tools_common_message.py 的 resolve_knowledge_search_scope、build_knowledge_search_response、KnowledgeSearchScope，以及
+      sdk/nexent/core/tools/knowledge_base_search_tool.py 的 KnowledgeBaseSearchTool._convert_to_display_names；构造最小内存输入（configured_scope/available_scope/requested_scope
+      列表与 display_name_to_index_map 映射）。
+    expected: resolve_knowledge_search_scope 返回 KnowledgeSearchScope；requested_scope 为空时 used_scope=available、scope_was_specified=False、fallback_to_all=False、permission_denied_scope/unavailable_scope
+      均为空。
+  - order: 2
+    action: 执行 resolve_knowledge_search_scope 未指定 scope 路径：requested_scope 为 None 或空列表，记录 used_scope/permission_denied_scope/unavailable_scope/fallback_to_all/scope_was_specified
+      五个字段。
+    expected: requested_scope 非空时：used_scope 仅含 requested ∩ available；配置内但不可用项进入 permission_denied_scope（仅 permission_tracking_enabled=True）；非配置项进入
+      unavailable_scope。
+  - order: 3
+    action: 执行 resolve_knowledge_search_scope 指定 scope 路径：a) 请求项属于 configured 且 available → 进入 used_scope；b) 请求项属于 configured
+      但不属于 available（permission_tracking_enabled=True）→ 进入 permission_denied_scope；c) 请求项不属于 configured → 进入 unavailable_scope；d)
+      requested 非空但 used_scope 为空且 available 非空 → fallback_to_all=True 且 used_scope 回退为 available；e) permission_tracking_enabled=False
+      时 permission_denied_scope 恒为空。
+    expected: fallback_to_all 在 requested 非空、used_scope 为空且 available 非空时为 True，且 used_scope 回退为全部 available。
+  - order: 4
+    action: 执行 build_knowledge_search_response 各 notice 分支：used_scope 为空且有 filtered_notice、used_scope 为空且无 filtered_notice、fallback_to_all
+      拓宽、非 fallback 的 filtered、scope_was_specified、未指定 scope 六类输入，并覆盖 results 为空且 used_scope 非空时 notice 尾部追加 "No relevant
+      information was found."；解析返回 JSON 的 notice 与 results 两个键。
+    expected: build_knowledge_search_response 返回合法 JSON，含 notice 与 results 两个键；notice 文本符合分支语义（过滤提示包含 permission_denied/unavailable
+      范围、拓宽/剩余可用/未指定 scope 措辞），results 为空且 used_scope 非空时 notice 尾部追加 "No relevant information was found."。
+  - order: 5
+    action: 验证结构化结果与显示名转换：构造含 tool_sign、cite_index 的 SearchResultTextMessage 并调用 to_model_dict，断言 results 中每条结果的 reference_mark
+      形如 "[[<tool_sign><cite_index>]]"；通过 display_name_to_index_map 将 used_scope/permission_denied_scope/unavailable_scope
+      的 index_name 转换为显示名后写入 notice。
+    expected: results 中每条含 reference_mark，值为 "[[<tool_sign><cite_index>]]"；提供 display_name_to_index_map 时 notice 中的 scope
+      使用显示名，未映射项保持原名。
+  - order: 6
+    action: 验证纯函数无副作用：重复调用结果一致，输入序列不被修改，不发起外部网络/真实模型调用，不输出明文凭据。
+    expected: 纯函数无副作用：重复调用结果一致，无半写入/重复副作用，不产生外部网络调用，日志不出现明文凭据。
+  expected_results:
+  - resolve_knowledge_search_scope 返回 KnowledgeSearchScope；requested_scope 为空时 used_scope=available、scope_was_specified=False、fallback_to_all=False、permission_denied_scope/unavailable_scope
+    均为空。
+  - requested_scope 非空时：used_scope 仅含 requested ∩ available；配置内但不可用项进入 permission_denied_scope（仅 permission_tracking_enabled=True）；非配置项进入
+    unavailable_scope。
+  - fallback_to_all 在 requested 非空、used_scope 为空且 available 非空时为 True，且 used_scope 回退为全部 available。
+  - build_knowledge_search_response 返回合法 JSON，含 notice 与 results 两个键；notice 文本符合分支语义（过滤提示包含 permission_denied/unavailable
+    范围、拓宽/剩余可用/未指定 scope 措辞），results 为空且 used_scope 非空时 notice 尾部追加 "No relevant information was found."。
+  - results 中每条含 reference_mark，值为 "[[<tool_sign><cite_index>]]"；提供 display_name_to_index_map 时 notice 中的 scope 使用显示名，未映射项保持原名。
+  - 纯函数无副作用：重复调用结果一致，无半写入/重复副作用，不产生外部网络调用，日志不出现明文凭据。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 483
+  unit_boundary: Core Agent
+  inputs:
+  - 无外部资产：纯函数单测，configured_scope/available_scope/requested_scope 列表、display_name_to_index_map 映射及 SearchResultTextMessage
+    结果对象均在内存中构造，不读取生产凭据。
+  assertions:
+  - resolve_knowledge_search_scope 返回 KnowledgeSearchScope；requested_scope 为空时 used_scope=available、scope_was_specified=False、fallback_to_all=False、permission_denied_scope/unavailable_scope
+    均为空。
+  - requested_scope 非空时：used_scope 仅含 requested ∩ available；配置内但不可用项进入 permission_denied_scope（仅 permission_tracking_enabled=True）；非配置项进入
+    unavailable_scope。
+  - fallback_to_all 在 requested 非空、used_scope 为空且 available 非空时为 True，且 used_scope 回退为全部 available。
+  - build_knowledge_search_response 返回合法 JSON，含 notice 与 results 两个键；notice 文本符合分支语义（过滤提示包含 permission_denied/unavailable
+    范围、拓宽/剩余可用/未指定 scope 措辞），results 为空且 used_scope 非空时 notice 尾部追加 "No relevant information was found."。
+  - results 中每条含 reference_mark，值为 "[[<tool_sign><cite_index>]]"；提供 display_name_to_index_map 时 notice 中的 scope 使用显示名，未映射项保持原名。
+  - 纯函数无副作用：重复调用结果一致，无半写入/重复副作用，不产生外部网络调用，日志不出现明文凭据。

@@ -1,5 +1,9 @@
-"""Unit tests for backend.database.agent_repository_db."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+"""Unit tests for management.db.agent.catalog."""
+
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 from datetime import datetime
 from unittest.mock import MagicMock
@@ -15,7 +19,8 @@ consts_mock.const = MagicMock()
 consts_mock.const.CAN_EDIT_ALL_USER_ROLES = frozenset({"admin"})
 consts_mock.const.PERMISSION_EDIT = "edit"
 sys.modules["consts"] = consts_mock
-sys.modules["consts.const"] = consts_mock.const
+sys.modules["contracts.constants.environment"] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 agent_repository_consts = MagicMock()
 agent_repository_consts.STATUS_NOT_SHARED = "not_shared"
@@ -25,7 +30,7 @@ agent_repository_consts.STATUS_SHARED = "shared"
 agent_repository_consts.OWNERSHIP_ALL = "all"
 agent_repository_consts.OWNERSHIP_CREATED = "created"
 agent_repository_consts.OWNERSHIP_OTHERS = "others"
-sys.modules["consts.agent_repository"] = agent_repository_consts
+install_shared_contract_stub(agent_repository_consts, 'agent_repository')
 
 boto3_mock = MagicMock()
 sys.modules["boto3"] = boto3_mock
@@ -34,13 +39,19 @@ client_mock = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
-sys.modules["database.client"] = client_mock
-sys.modules["backend.database.client"] = client_mock
+sys.modules["management.db.client"] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.client"] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 group_db_mock = MagicMock()
 group_db_mock.query_group_ids_by_user = MagicMock(return_value=[])
-sys.modules["database.group_db"] = group_db_mock
-sys.modules["backend.database.group_db"] = group_db_mock
+sys.modules["management.db.identity.group"] = group_db_mock
+sys.modules["management.db.identity.group"] = group_db_mock
 
 
 class _AgentRepositoryModel:
@@ -58,7 +69,7 @@ class _AgentRepositoryModel:
     submitted_by = MagicMock(name="submitted_by")
     tags = MagicMock(name="tags")
     tool_count = MagicMock(name="tool_count")
-    icon = MagicMock(name="icon")
+    icon_url = MagicMock(name="icon_url")
     downloads = MagicMock(name="downloads")
     version_name = MagicMock(name="version_name")
     agent_info_json = MagicMock(name="agent_info_json")
@@ -102,25 +113,11 @@ db_models_mock = MagicMock()
 db_models_mock.AgentRepository = _AgentRepositoryModel
 db_models_mock.AgentInfo = _AgentInfoModel
 db_models_mock.AgentVersion = _AgentVersionModel
-sys.modules["database.db_models"] = db_models_mock
-sys.modules["backend.database.db_models"] = db_models_mock
+sys.modules["management.db.models"] = db_models_mock
+sys.modules["management.db.models"] = db_models_mock
 
-from backend.database import agent_repository_db as repo_db  # noqa: E402
-from backend.database.agent_repository_db import (  # noqa: E402
-    fetch_draft_agent_mine_metadata,
-    get_agent_repository_by_agent_id,
-    get_agent_repository_by_id,
-    increment_agent_repository_downloads,
-    insert_agent_repository_record,
-    list_agent_repository_by_agent_ids,
-    list_agent_repository_by_publisher,
-    list_agent_repository_summaries,
-    reset_agent_repository_status,
-    sum_agent_repository_downloads_by_agent_ids,
-    update_agent_repository_by_id,
-    update_agent_repository_status_by_id,
-    upsert_agent_repository_record,
-)
+from management.db.agent import catalog as repo_db
+from management.db.agent.catalog import fetch_draft_agent_mine_metadata, get_agent_repository_by_agent_id, get_agent_repository_by_id, increment_agent_repository_downloads, insert_agent_repository_record, list_agent_repository_by_agent_ids, list_agent_repository_by_publisher, list_agent_repository_summaries, reset_agent_repository_status, sum_agent_repository_downloads_by_agent_ids, update_agent_repository_by_id, update_agent_repository_status_by_id, upsert_agent_repository_record
 
 STATUS_NOT_SHARED = "not_shared"
 
@@ -146,7 +143,7 @@ class MockAgentRepository:
             "tags": ["tag1"],
             "tool_count": 2,
             "version_name": "v1",
-            "icon": "icon",
+            "icon_url": "icon_url",
             "downloads": 0,
             "status": STATUS_NOT_SHARED,
             "delete_flag": "N",
@@ -163,6 +160,7 @@ class MockSummaryRow:
         defaults = {
             "agent_repository_id": 1,
             "agent_id": 10,
+            "version_no": 1,
             "author": "author",
             "submitted_by": None,
             "name": "test-agent",
@@ -172,9 +170,10 @@ class MockSummaryRow:
             "tags": ["tag1"],
             "tool_count": 2,
             "version_name": "v1",
-            "icon": "icon",
+            "icon_url": "icon_url",
             "downloads": 0,
             "content": None,
+            "create_time": datetime(2024, 1, 1),
         }
         defaults.update(kwargs)
         for key, value in defaults.items():
@@ -508,9 +507,12 @@ def test_list_agent_repository_summaries_returns_expected_shape(monkeypatch, moc
     assert len(result) == 1
     assert result[0]["agent_repository_id"] == 2
     assert result[0]["agent_id"] == 20
+    assert result[0]["version_no"] == 1
+    assert result[0]["create_time"] == datetime(2024, 1, 1)
     assert set(result[0].keys()) == {
         "agent_repository_id",
         "agent_id",
+        "version_no",
         "author",
         "submitted_by",
         "name",
@@ -520,9 +522,10 @@ def test_list_agent_repository_summaries_returns_expected_shape(monkeypatch, moc
         "tags",
         "tool_count",
         "version_name",
-        "icon",
+        "icon_url",
         "downloads",
         "content",
+        "create_time",
     }
 
 
@@ -749,6 +752,23 @@ def test_list_agent_repository_by_agent_ids_success(monkeypatch, mock_session):
     assert result[0]["version_name"] == "v1"
     assert result[0]["create_time"] == row.create_time
     assert result[0]["content"] is None
+
+
+def test_list_agent_repository_by_agent_ids_filters_publisher_user(monkeypatch, mock_session):
+    session, query = mock_session
+    inner_query = MagicMock()
+    inner_query.filter.return_value = inner_query
+    inner_query.order_by.return_value.all.return_value = []
+    query.filter.return_value = inner_query
+    _patch_session(monkeypatch, session)
+
+    list_agent_repository_by_agent_ids(
+        [10], statuses=["pending_review"],
+        publisher_tenant_id="tenant-1", publisher_user_id="alice",
+    )
+
+    assert inner_query.filter.call_count == 1
+    _AgentRepositoryModel.publisher_user_id.__eq__.assert_called_with("alice")
 
 
 def test_update_agent_repository_status_by_id_persists_content(monkeypatch, mock_session):

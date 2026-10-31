@@ -18,7 +18,6 @@ agent_config:
   max_steps: 15
   enable_context_manager: true
   provide_run_summary: false
-  prompt_template_id: 0
   current_version_no: 1
   verification_config:
     enabled: false
@@ -39,18 +38,9 @@ agent_config:
 
 # Prompt Configuration
 prompts:
-  # Role description - core responsibilities and capabilities.
-  duty_prompt: |
+  prompt: |
     你是一个专业的数学解题助手，负责解答各类数学计算问题。你具备出色的逻辑推理与数值计算能力，能够准确理解题目并推导出正确结果。你能够严格按照要求，仅输出最终的数字答案，确保结果简洁精准。
 
-  # Constraints - behavior limits and rules.
-  constraint_prompt: ""
-
-  # Example conversations - few-shot examples.
-  few_shots_prompt: ""
-
-# Prompt Template (system_default, id=0)
-# This is the template used to generate the final system prompt
 prompt_template:
   template_id: 0
   template_name: system_default
@@ -135,14 +125,14 @@ prompt_template:
          - 用简单的Python编写代码
          - 遵循python代码规范和python语法
          - 根据格式规范正确调用工具/助手
-         - 考虑到代码执行与展示用户代码的区别，使用'<code>代码</code>'表达运行代码，使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码
-         - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用'<DISPLAY:语言类型>代码</DISPLAY>'表达展示代码。
+         - 考虑到代码执行与展示用户代码的区别，使用'<code>代码</code>'表达运行代码，使用'<display:语言类型>代码</display>'表达展示代码
+         - 注意运行的代码不会被用户看到，所以如果用户需要看到代码，你需要使用'<display:语言类型>代码</display>'表达展示代码。
          - **重要**：代码执行后，系统会返回 "Observation:" 标记的内容（这是真实的执行结果）。请基于这些真实结果继续下一步思考，**不要在代码执行前自行编造观察结果**。
 
-      在思考结束后，当Agent认为可以回答用户问题，那么可以不生成代码，直接生成最终回答给到用户并停止循环。
+      在思考结束后，当Agent认为可以回答用户问题，必须输出唯一一对 `<final_answer>...</final_answer>`，将最终回答放在标签内；标签外不得有任何内容。
 
       ### python代码规范
-      1. 如果认为是需要执行的代码，使用'<code>代码</code>'格式；如果是不需要执行仅用于展示的代码，使用'<DISPLAY:语言类型>代码</DISPLAY>'格式，其中语言类型例如python、java、javascript等；
+      1. 如果认为是需要执行的代码，使用'<code>代码</code>'格式；如果是不需要执行仅用于展示的代码，使用'<display:语言类型>代码</display>'格式，其中语言类型例如python、java、javascript等；
       2. 只使用已定义的变量，变量将在多次调用之间持续保持；
       3. 使用"print()"函数让下一次的模型调用看到对应变量信息；
       4. 正确使用工具/助手的入参，使用关键字参数，不要用字典形式；
@@ -334,6 +324,6 @@ available_models:
 # 1. This agent uses the system_default prompt template (id=0)
 # 2. Context manager is enabled (enable_context_manager: true)
 # 3. No tools, sub-agents, or skills are configured
-# 4. The duty_prompt defines the agent's role as a math problem solver
+# 4. The prompt defines the agent's role as a math problem solver
 # 5. Verification is disabled (enabled: false)
 # 6. For benchmark testing, use this configuration to reproduce the agent's behavior

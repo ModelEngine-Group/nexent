@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import {
@@ -209,7 +211,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       estimatedRowHeight: 112,
       estimatedItemHeights: null,
     });
-  const { appConfig, modelConfig } = useConfig();
+  const { appConfig } = useConfig();
   const [state, dispatch] = useReducer(knowledgeBaseReducer, {
     knowledgeBases: [],
     selectedIds: [],
@@ -222,19 +224,8 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     dataMateSyncError: undefined,
   });
 
-  // Keep currentEmbeddingModel aligned with configured embedding displayName
-  // (KB embeddingModel is stored as display_name).
-  useEffect(() => {
-    const displayName = modelConfig?.embedding?.displayName?.trim() || null;
-    if (displayName !== state.currentEmbeddingModel) {
-      dispatch({
-        type: KNOWLEDGE_BASE_ACTION_TYPES.SET_MODEL,
-        payload: displayName,
-      });
-    }
-  }, [modelConfig?.embedding?.displayName, state.currentEmbeddingModel]);
-
-  // Check if knowledge base is selectable - memoized with useCallback
+  // Knowledge bases use their own embedding model. Global model configuration
+  // must not prevent a knowledge base with content from being selected.
   const isKnowledgeBaseSelectable = useCallback(
     (kb: KnowledgeBase): boolean => {
       // Check if knowledge base has content (documents or chunks)
@@ -246,51 +237,43 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         return false;
       }
 
-      // DataMate knowledge bases are selectable if they have content (even if model doesn't match)
-      if (kb.source === "datamate") {
-        return true;
-      }
-
-      if (kb.embeddingModel === "unknown") {
-        return true;
-      }
-
-      const currentEmbeddingModel = state.currentEmbeddingModel?.trim() || "";
-      const currentMultiEmbeddingModel =
-        modelConfig?.multiEmbedding?.displayName?.trim() || "";
-
-      if (kb.is_multimodal) {
-        // Multimodal KB is selectable as long as current multimodal model is configured.
-        return !!currentMultiEmbeddingModel;
-      }
-
-      // Text KB is selectable as long as current embedding model is configured.
-      return !!currentEmbeddingModel;
+      return true;
     },
-    [modelConfig?.multiEmbedding?.displayName, state.currentEmbeddingModel]
+    []
   );
 
-  // Check if knowledge base has model mismatch (for display purposes).
-  // Compare configured displayName with KB embeddingModel (stored as display_name).
-  const hasKnowledgeBaseModelMismatch = useCallback(
-    (kb: KnowledgeBase): boolean => {
-      if (kb.embeddingModel === "unknown") {
-        return false;
-      }
-      if (kb.source === "datamate") {
-        return false;
-      }
+  // Kept for context API compatibility; model availability is checked by the
+  // knowledge base page against the knowledge base's own model record.
+  const hasKnowledgeBaseModelMismatch = useCallback(() => false, []);
 
-      if (kb.is_multimodal) {
-        const multiEmbeddingModel =
-          modelConfig?.multiEmbedding?.displayName?.trim() || "";
-        return multiEmbeddingModel !== kb.embeddingModel.trim();
-      }
-
-      const currentEmbeddingModel = state.currentEmbeddingModel?.trim() || "";
-      return currentEmbeddingModel !== kb.embeddingModel.trim();
+  const dataMateEndpoint = appConfig?.datamateUrl ?? null;
+  const readCatalogPage = useCallback(
+    async (
+      skipHealthCheck: boolean,
+      includeDataMateSync: boolean,
+      query: KnowledgeBaseListQuery
+    ) => {
+      const result = await knowledgeBaseService.getKnowledgeBasesInfo(
+        skipHealthCheck,
+        includeDataMateSync,
+        null,
+        dataMateEndpoint,
+        query,
+        { strict: true }
+      );
+      if (!includeDataMateSync || !dataMateEndpoint) return result;
+      // Sync may append all external records; read the canonical page afterwards.
+      const page = await knowledgeBaseService.getKnowledgeBasesInfo(
+        true,
+        false,
+        null,
+        dataMateEndpoint,
+        query,
+        { strict: true }
+      );
+      return { ...page, dataMateSyncError: result.dataMateSyncError };
     },
-    [modelConfig?.multiEmbedding?.displayName, state.currentEmbeddingModel]
+    [dataMateEndpoint]
   );
 
   // Load knowledge base data (supports force fetch from server and load selected status) - optimized with useCallback
@@ -315,14 +298,12 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         localStorage.removeItem("preloaded_kb_data");
         localStorage.removeItem("kb_cache");
 
-        const result = await knowledgeBaseService.getKnowledgeBasesInfo(
+        const result = await readCatalogPage(
           skipHealthCheck,
           includeDataMateSync,
-          null,
-          appConfig?.datamateUrl ?? null,
           {
             ...queryRef.current,
-            offset: 0,
+            offset: queryRef.current.offset ?? 0,
             limit:
               query?.limit ??
               queryRef.current.limit ??
@@ -379,7 +360,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         }
       }
     },
-    [appConfig?.datamateUrl, t]
+    [readCatalogPage, t]
   );
 
   const loadMoreKnowledgeBases = useCallback(async () => {
@@ -387,17 +368,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     const requestId = listRequestIdRef.current;
     setIsLoadingMore(true);
     try {
-      const result = await knowledgeBaseService.getKnowledgeBasesInfo(
-        true,
-        false,
-        null,
-        appConfig?.datamateUrl ?? null,
-        {
-          ...queryRef.current,
-          offset: listPagination.nextOffset ?? state.knowledgeBases.length,
-          limit: KNOWLEDGE_BASE_PAGE_SIZE,
-        }
-      );
+      const result = await readCatalogPage(true, false, {
+        ...queryRef.current,
+        offset: listPagination.nextOffset ?? state.knowledgeBases.length,
+        limit: KNOWLEDGE_BASE_PAGE_SIZE,
+      });
       if (requestId !== listRequestIdRef.current) return;
       const merged = [...state.knowledgeBases, ...result.knowledgeBases].filter(
         (kb, index, items) =>
@@ -420,7 +395,7 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
       setIsLoadingMore(false);
     }
   }, [
-    appConfig?.datamateUrl,
+    readCatalogPage,
     isLoadingMore,
     listPagination.hasMore,
     listPagination.nextOffset,
@@ -548,7 +523,8 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
           type: KNOWLEDGE_BASE_ACTION_TYPES.ERROR,
           payload: t("knowledgeBase.error.deleteRetry"),
         });
-        return false;
+        // Keep the original API error so the caller can show its EDS code/details.
+        throw error;
       }
     },
     [state.knowledgeBases, state.selectedIds, state.activeKnowledgeBase]
@@ -558,17 +534,11 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
   const refreshKnowledgeBaseData = useCallback(
     async (forceRefresh = false) => {
       try {
-        const result = await knowledgeBaseService.getKnowledgeBasesInfo(
-          false,
-          true,
-          null,
-          appConfig?.datamateUrl ?? null,
-          {
-            ...queryRef.current,
-            offset: 0,
-            limit: queryRef.current.limit ?? KNOWLEDGE_BASE_PAGE_SIZE,
-          }
-        );
+        const result = await readCatalogPage(false, true, {
+          ...queryRef.current,
+          offset: queryRef.current.offset ?? 0,
+          limit: queryRef.current.limit ?? KNOWLEDGE_BASE_PAGE_SIZE,
+        });
 
         dispatch({
           type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS,
@@ -618,23 +588,17 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         });
       }
     },
-    [state.activeKnowledgeBase]
+    [state.activeKnowledgeBase, readCatalogPage]
   );
 
   // Add a function to refresh the knowledge base data with DataMate sync and create records
   const refreshKnowledgeBaseDataWithDataMate = useCallback(async () => {
     try {
-      const result = await knowledgeBaseService.getKnowledgeBasesInfo(
-        false,
-        true,
-        null,
-        appConfig?.datamateUrl ?? null,
-        {
-          ...queryRef.current,
-          offset: 0,
-          limit: queryRef.current.limit ?? KNOWLEDGE_BASE_PAGE_SIZE,
-        }
-      );
+      const result = await readCatalogPage(false, true, {
+        ...queryRef.current,
+        offset: queryRef.current.offset ?? 0,
+        limit: queryRef.current.limit ?? KNOWLEDGE_BASE_PAGE_SIZE,
+      });
 
       dispatch({
         type: KNOWLEDGE_BASE_ACTION_TYPES.FETCH_SUCCESS,
@@ -690,56 +654,12 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
         payload: "Failed to refresh knowledge base data with DataMate",
       });
     }
-  }, [state.activeKnowledgeBase]);
+  }, [state.activeKnowledgeBase, readCatalogPage]);
 
   // Initial data loading - with optimized dependencies
   useEffect(() => {
     // Use ref to track if data has been loaded to avoid duplicate loading
     let initialDataLoaded = false;
-
-    // Get current model config at initial load (use displayName to match KB embeddingModel)
-    const loadInitialData = async () => {
-      if (modelConfig?.embedding?.displayName) {
-        dispatch({
-          type: KNOWLEDGE_BASE_ACTION_TYPES.SET_MODEL,
-          payload: modelConfig.embedding.displayName,
-        });
-      }
-
-      // Don't load knowledge base list here, wait for knowledgeBaseDataUpdated event
-    };
-
-    loadInitialData();
-
-    // Listen for embedding model change event (detail.model is displayName)
-    const handleEmbeddingModelChange = (e: CustomEvent) => {
-      const newModel = e.detail.model || null;
-
-      // If model changes
-      if (newModel !== state.currentEmbeddingModel) {
-        dispatch({
-          type: KNOWLEDGE_BASE_ACTION_TYPES.SET_MODEL,
-          payload: newModel,
-        });
-
-        // Reload knowledge base list when model changes
-        fetchKnowledgeBases(true, true, true);
-      }
-    };
-
-    // Listen for env config change event
-    const handleEnvConfigChanged = () => {
-      // Reload env related config
-      if (modelConfig?.embedding?.displayName !== state.currentEmbeddingModel) {
-        dispatch({
-          type: KNOWLEDGE_BASE_ACTION_TYPES.SET_MODEL,
-          payload: modelConfig?.embedding?.displayName || null,
-        });
-
-        // Reload knowledge base list when model changes
-        fetchKnowledgeBases(true, true, true);
-      }
-    };
 
     // Listen for knowledge base data update event
     const handleKnowledgeBaseDataUpdated = (e: Event) => {
@@ -756,33 +676,17 @@ export const KnowledgeBaseProvider: React.FC<KnowledgeBaseProviderProps> = ({
     };
 
     window.addEventListener(
-      "embeddingModelChanged",
-      handleEmbeddingModelChange as EventListener
-    );
-    window.addEventListener(
-      "configChanged",
-      handleEnvConfigChanged as EventListener
-    );
-    window.addEventListener(
       "knowledgeBaseDataUpdated",
       handleKnowledgeBaseDataUpdated as EventListener
     );
 
     return () => {
       window.removeEventListener(
-        "embeddingModelChanged",
-        handleEmbeddingModelChange as EventListener
-      );
-      window.removeEventListener(
-        "configChanged",
-        handleEnvConfigChanged as EventListener
-      );
-      window.removeEventListener(
         "knowledgeBaseDataUpdated",
         handleKnowledgeBaseDataUpdated as EventListener
       );
     };
-  }, [fetchKnowledgeBases, state.currentEmbeddingModel]);
+  }, [fetchKnowledgeBases]);
 
   // Memoized context value to prevent unnecessary re-renders
   const contextValue = useMemo(

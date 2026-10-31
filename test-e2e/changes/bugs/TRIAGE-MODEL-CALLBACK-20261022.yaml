@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: TRIAGE-MODEL-CALLBACK-20261022
+  change_type: bugfix
+  bug_id: TRIAGE-MODEL-CALLBACK-20261022
+  title: Reject invalid controlled model callbacks
+  description: Recorded during the October 22 owner-specific triage. Product implementation is intentionally pending.
+  observed_behavior: Thread forwards an unavailable model ID to its parent even when internal controls reject it.
+  expected_behavior: Invalid candidates do not reach the parent callback or replace a valid controlled selection.
+  escaped_stage: D1
+  coverage_gap:
+    type: no_gap
+    description: The existing formal Case detects the behavior once its unrelated setup failure is removed.
+  feature_contract_changed: false
+  affected_features:
+    existing:
+    - F-065
+    - CHAT-MODEL-CONTROLS
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - UT-FE-AUTO-02FA904A1C3AD386
+    added: []
+    modified: []
+    retired: []
+  notes: Record only; no product fix or acceptance PASS is claimed. Reproduction, evidence, scope limits and future verification
+    are recorded in docs/handoffs/2026-10-22-pyh-agent-test-triage.md. Assess traditional UT and SPEC impact when implementing
+    the product repair.

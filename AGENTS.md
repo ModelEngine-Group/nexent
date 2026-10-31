@@ -1,180 +1,51 @@
-# AGENTS
+# Nexent project instructions
 
-<!-- Skills section removed -->
+## Repository map
 
-<skills_system priority="1">
+- `backend/` contains the FastAPI HTTP API; `sdk/nexent/` contains the agent framework.
+- `frontend/` contains the Next.js UI. Deployment resources live in `deploy/`, `docker/`, and `k8s/`.
+- Python tests live in `test/backend/` and `test/sdk/`.
 
-## Available Skills
+## Shared constraints
 
-<!-- SKILLS_TABLE_START -->
-<usage>
-When users ask to perform tasks, check if any of the available skills below can help complete the task more effectively. Skills provide specialized capabilities and domain knowledge.
+- Write code comments, docstrings, TODOs, and configuration comments in English. User-facing strings may use supported languages; this does not prescribe conversation language.
+- Every new or modified source file (`.py`, `.sh`, `.sql`, `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`) must start with the copyright header `Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.` (the end year tracks the current year, e.g. `2025-2027` in 2027) in the file's comment style (`#` for Python/Shell, `--` for SQL, `//` for TypeScript/JavaScript), placed after shebang/encoding lines. The `Copyright Header Check` CI job rejects changed files missing it; verify or fix locally with `python scripts/check_copyright.py [--fix] <files...>`.
+- In backend/SDK Python code, centralize environment reads in `backend/contracts/constants/environment.py`. Backend callers import from `contracts.constants.environment`; SDK code accepts parameters and must not read environment variables or introduce `from_env()` methods.
+- Every SQL file under `deploy/sql/` already merged into the target branch is immutable, including initialization and Supabase SQL. Do not edit, rename, or delete it. Add versioned migrations under `deploy/sql/migrations/`; application version is `APP_VERSION` in `backend/contracts/constants/environment.py`.
+- Preserve existing HTTP routes, payloads, and response contracts when applying conventions to new code.
 
-How to use skills:
-- Invoke: `npx openskills read <skill-name>` (run in your shell)
-  - For multiple: `npx openskills read skill-one,skill-two`
-- The skill content will load with detailed instructions on how to complete the task
-- Base directory provided in output for resolving bundled resources (references/, scripts/, assets/)
+## Load rules for the task
 
-Usage notes:
-- Only use skills listed in <available_skills> below
-- Do not invoke a skill that is already loaded in your context
-- Each skill invocation is stateless
-</usage>
+Before editing or reviewing these areas, read the linked skill and only its applicable references. Paths are relative to this root. Read files directly if the client has no skill loader; no package download is required. For cross-layer work, load each relevant skill. Documentation-only work does not require unrelated coding skills.
 
-<available_skills>
+| Task or affected area | Entry point |
+| --- | --- |
+| Backend endpoints, services, database access, backend/SDK configuration, SQL migrations | [.agents/skills/nexent-backend/SKILL.md](.agents/skills/nexent-backend/SKILL.md) |
+| Frontend pages, UI, hooks, API services, types, styles, localization | [.agents/skills/nexent-frontend/SKILL.md](.agents/skills/nexent-frontend/SKILL.md) |
+| Requirement or bug lifecycle, SPEC traceability, and delivery gates | [.agents/skills/nexent-spec-coding/SKILL.md](.agents/skills/nexent-spec-coding/SKILL.md) |
+| Requirement-driven Feature catalog, D1-D5 case-local tests and bindings, generated registry and Excel view under `test-e2e/` | [.agents/skills/nexent-test-assets/SKILL.md](.agents/skills/nexent-test-assets/SKILL.md) |
+| Python unit tests for every product change: unit behavior, boundaries, errors and regressions | [.agents/skills/nexent-python-tests/SKILL.md](.agents/skills/nexent-python-tests/SKILL.md) |
 
-<skill>
-<name>prompts-writing</name>
-<description>Create, refine, and optimize high-quality YAML prompts for AI assistants. Use when working with prompt templates, system prompts, agent prompts, or any prompt engineering tasks. Provides structure guidelines, template patterns, and quality standards for YAML-based prompts.</description>
-<location>project</location>
-</skill>
+These Markdown files are the maintained rules. `.cursor/rules/` contains compatibility entry points with the original Cursor triggers. Edit canonical rules when changing policy. See [migration decisions](docs/agent-rules-migration.md) when maintaining this setup.
 
-<skill>
-<name>skill-creator</name>
-<description>Guide for creating effective skills. This skill should be used when users want to create a new skill (or update an existing skill) that extends Claude's capabilities with specialized knowledge, workflows, or tool integrations.</description>
-<location>project</location>
-</skill>
+## Development and verification
 
-</available_skills>
-<!-- SKILLS_TABLE_END -->
+- Traditional UT and formal D1-D5 are permanently separate, complementary suites. Every product-code change must assess both; implement or reuse applicable UT and formal Cases. Do not manufacture edits or a five-stage quota. Non-behavior-only changes may use an explicit documented exemption; missing prerequisites are blockers, not exemptions.
+- Before submitting a product-code PR, run relevant traditional UT locally. New/changed behavior needs success, boundary and error assertions; bugfixes need a regression that detects the defect (reuse is valid when demonstrated). PR CI must run its configured UT set; required-check enforcement belongs to GitHub branch protection and is not established by these instructions. Do not change workflows or remote protection without authorization.
+- Preserve all existing D1 Cases and scripts; overlap with UT is not grounds for deletion, retirement or relabeling. New D1 should prove a component contract with real internal collaboration and controlled external boundaries; D3 proves inter-component/service/protocol runtime integration. Choose by proof boundary, not function calls or mocks. Use no extra layer when it adds no necessary evidence.
+- Before adding new D1, inspect actual existing UT/formal inputs and assertions, record the remaining gap and additional component evidence, and apply nexent-test-assets' admission rules. A Feature needs no D1 quota; sufficient unit proof stays in UT. For code already developed, use its test-backfill mode rather than generating a Case per function or restarting development. Preserve required higher-boundary checks.
+- Keep traditional UT results/coverage separate from formal functional results; frontend and Python coverage percentages are never combined. A collected script passing is not evidence that every written acceptance requirement was implemented. Record acceptance implementation gaps and distinguish execution from completeness.
+- Backend setup uses Python 3.11. From `backend/`, run `uv sync --extra data-process --extra test`; this includes the editable local `nexent[dev]` distribution (Python imports remain `nexent`). Add `--index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision` for CUDA 13.0; select `pytorch-cpu` with the same upgrade flags to switch back. Both variants use the same extra. Use uv 0.13.6.
+- Run targeted tests from the root using the configured backend environment, for example `pytest test/backend/apps/test_agent_app.py -v`. The broader runner is `python test/run_all_test.py`. Confirm the interpreter works before testing.
+- Formal D1-D5 assets live in `test-e2e/`; use `python test-e2e/infra/tools/validate_test_assets.py --phase implementation` to check generated views and `python test-e2e/infra/tools/run_cases.py <Case-ID> --test-home <local-test-data>` for targeted execution. Keep machine-local configuration and results outside Git.
+- For added/changed formal assets, follow nexent-test-assets' preparation/delivery gate: confirm responsibility routing, declare active automated D2-D5 preparation (including justified self-contained empty families), and verify owned cleanup. Reconcile the current target branch and repeat strict validation before delivery/merge; record the tested revision and actual preparation-test-cleanup evidence.
+- From `frontend/`, `npm run dev` starts development. `npm run check-all` runs type-check, lint, format checking, and build; individual checks are in `frontend/package.json`.
+- Match verification to changed behavior and report checks actually run or blocked. For instruction-only edits, validate paths, skill metadata, scope, and rule coverage; application suites are unnecessary.
+- Python imports follow standard library, third-party, then project order. SDK Ruff configuration uses a 119-character line limit.
 
-</skills_system>
+## Docker compatibility
 
----
-
-## Project Overview
-
-Nexent is a zero-code platform for auto-generating AI agents. Monorepo with:
-- `backend/` - FastAPI HTTP API
-- `sdk/nexent/` - Core agent framework (pip package)
-- `frontend/` - Next.js web UI
-- `docker/` & `k8s/` - Deployment configs
-
----
-
-## Developer Commands
-
-### Backend (Python 3.11)
-
-```bash
-# Setup
-cd backend && uv sync --extra data-process --extra test
-
-# Install SDK for development
-cd backend && uv pip install -e "../sdk[dev]"
-```
-
-### Run Tests
-
-```bash
-# From project root, with backend venv activated
-source backend/.venv/bin/activate && python test/run_all_test.py
-
-# Single test file
-pytest test/backend/apps/test_agent_app.py -v
-```
-
-### Frontend (Next.js)
-
-```bash
-cd frontend
-npm run dev          # Development server
-npm run check-all    # type-check + lint + format + build
-```
-
-### Docker Deployment
-
-```bash
-cd docker
-cp deploy/env/.env.example deploy/env/.env  # Fill required configs
-bash deploy.sh        # Interactive deployment
-```
-
-### Docker Compatibility
-
-- Keep Docker deployments compatible with Docker Engine 18.09 (API v1.39). The Docker Compose CLI may be a current
-  version; do not assume that the Compose CLI itself is legacy.
-- Do not require daemon capabilities introduced after API v1.39, such as GPU device requests, cgroup namespace modes,
-  or healthcheck `start_interval`, unless an Engine version check and an 18.09-compatible fallback are provided.
-- Values under an `environment` mapping must be strings. Always quote YAML boolean-like and numeric values such as
-  `true`, `false`, `yes`, `no`, `on`, `off`, `0022`, and port numbers.
-- Boolean fields defined by the Compose schema, such as `privileged` and `external`, should remain native booleans.
-
----
-
-## Architecture
-
-### Environment Variables
-
-**Single source of truth**: `backend/consts/const.py`
-
-- NO direct `os.getenv()` / `os.environ.get()` outside this file
-- SDK (`sdk/nexent/`) NEVER reads env vars - accepts config via parameters
-- Services read from `consts.const` and pass to SDK
-
-### Backend Layer Structure
-
-| Layer | Path | Responsibility |
-|-------|------|----------------|
-| Apps | `backend/apps/` | HTTP boundary: parse input, call services, map exceptions to HTTP |
-| Services | `backend/services/` | Business logic orchestration, raise domain exceptions |
-| Consts | `backend/consts/` | Env vars (`const.py`), exceptions (`exceptions.py`), error codes |
-
-**Exception flow**: Services raise domain exceptions → Apps map to HTTP status codes
-
----
-
-## Database Migrations
-
-**Location**: `deploy/sql/`
-
-**Critical rule**: Every `.sql` file that already exists in the target branch is immutable.
-
-- This rule applies to all migration, init, and Supabase SQL files without exception.
-- Do not modify, rename, or delete an existing SQL file after it has been merged.
-- Make database changes only by adding a new versioned migration file under `deploy/sql/migrations/`.
-
-**Version**: Tracked in `backend/consts/const.py` as `APP_VERSION`
-
----
-
-## Testing Conventions
-
-- pytest only (no unittest)
-- Mock at import site with fully-qualified path:
-  ```python
-  mocker.patch("backend.services.agent_service.AgentService.run", return_value={...})
-  ```
-- Async tests: `@pytest.mark.asyncio`
-- Test structure: `test/backend/` and `test/sdk/`
-
----
-
-## Code Style
-
-- English-only comments and docstrings (enforced by `.cursor/rules/english_comments.mdc`)
-- Import order: stdlib → third-party → project
-- Line length: 119 (sdk ruff config)
-
----
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `backend/consts/const.py` | All env var definitions, APP_VERSION |
-| `backend/consts/exceptions.py` | Domain exceptions (AgentRunException, LimitExceededError, etc.) |
-| `docker/init.sql` | Database schema for Docker Compose |
-| `k8s/helm/.../init.sql` | Database schema for Kubernetes |
-| `test/run_all_test.py` | Test runner with coverage |
-
----
-
-## Reference Files
-
-Existing instruction files with detailed rules:
-- `CLAUDE.md` - Backend architecture, env var management, app/service layer rules
-- `.cursor/rules/environment_variable.mdc` - Env var centralization
-- `.cursor/rules/pytest_unit_test_rules.mdc` - Testing patterns
-- `.cursor/rules/english_comments.mdc` - Comment language enforcement
+- Support Docker Engine 18.09 / API v1.39; the Compose CLI may be current.
+- Newer daemon capabilities, including GPU device requests, cgroup namespace modes, and healthcheck `start_interval`, require an Engine version check and an 18.09-compatible fallback.
+- Quote boolean-like and numeric values in Compose `environment` mappings. Schema boolean fields such as `privileged` and `external` remain booleans.
+- Inspect current deployment scripts and `deploy/env/.env.example` for deployment work. Deployment execution remains limited to the user's authorized scope.

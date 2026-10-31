@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-ADVANCED-OPTION-VISIBILITY-20261020
+  change_type: requirement
+  requirement_id: AGENT-ADVANCED-OPTION-VISIBILITY-20261020
+  title: Expose protocol repair directly in Advanced settings
+  description: Move the existing combined strict-output-protocol and silent-repair control from More into Advanced, using the same checkbox styling as adjacent boolean options; More contains only guardrails.
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/component/agentConfigLayout.test.tsx
+      - frontend/tests/component/agentAdvancedHints.test.tsx
+    behaviors:
+      - Advanced exposes the existing protocol repair control without opening More.
+      - More contains guardrails only and no duplicate protocol repair control.
+      - Protocol repair shares the checkbox styling of adjacent Advanced options, with a separate help button.
+      - The six Advanced parameters with existing descriptions expose unchanged localized tooltips through separate help buttons; clicking help never changes configuration and remains available in read-only mode. Max steps and run summary have no original description and no help button.
+      - Existing defaults, update handler and read-only protection remain unchanged through component reuse.
+    reason: Presentation-only relocation; page composition UT proves containment and visibility. Python, API, runtime and risk boundaries are unchanged; existing formal editor Cases remain intact.
+  notes: Baseline ../nexent-doc/docs/Developing/dev-agent-config-visual-spacing/design.md, AV-001 through AV-006. Frontend composition UT PASS 7/7 and help interaction UT PASS 3/3. Existing locale files match HEAD; no newly authored descriptions remain. Type-check, targeted ESLint, Prettier, copyright and diff whitespace checks PASS. Implementation formal-asset validation PASS. No formal execution or browser visual fit is claimed.

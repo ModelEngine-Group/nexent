@@ -1,14 +1,17 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from apps import memory_dreaming_app
+from management.api.memory import memory_dreaming as memory_dreaming_app
+from contracts import memory as memory_dreaming_app_management_memory_memory_dreaming
 
 
 def test_ac009_user_scope_does_not_require_agent_id():
-    assert memory_dreaming_app.DreamingRunRequest().target_user_id is None
+    assert memory_dreaming_app_management_memory_memory_dreaming.DreamingRunRequest().target_user_id is None
 
 
 def test_ac011_parameters_show_effective_read_only_configuration(monkeypatch):
@@ -52,13 +55,13 @@ def test_ac078_parameters_apply_persisted_overrides(monkeypatch):
 
 def test_ac078_schedule_validation_covers_exclusive_fields():
     with pytest.raises(ValidationError):
-        memory_dreaming_app.DreamingScheduleRequest(
+        memory_dreaming_app_management_memory_memory_dreaming.DreamingScheduleRequest(
             rule_type="CRON", cron_expr="0 3 * * *", interval_seconds=3600
         )
     with pytest.raises(ValidationError):
-        memory_dreaming_app.DreamingScheduleRequest(rule_type="INTERVAL")
+        memory_dreaming_app_management_memory_memory_dreaming.DreamingScheduleRequest(rule_type="INTERVAL")
     with pytest.raises(ValidationError):
-        memory_dreaming_app.DreamingScheduleRequest(
+        memory_dreaming_app_management_memory_memory_dreaming.DreamingScheduleRequest(
             rule_type="INTERVAL", interval_seconds=3600, cron_expr="0 3 * * *"
         )
 
@@ -105,7 +108,7 @@ def test_ac009_run_uses_authenticated_scope(monkeypatch):
         lambda _authorization: ("user-1", "tenant-1"),
     )
     result = memory_dreaming_app.run_dreaming(
-        memory_dreaming_app.DreamingRunRequest(agent_id="agent-1"),
+        memory_dreaming_app_management_memory_memory_dreaming.DreamingRunRequest(agent_id="agent-1"),
         authorization="Bearer token",
     )
     assert result == {"run_id": 1, "status": "queued"}
@@ -152,7 +155,7 @@ def test_ac008_service_failure_maps_to_500(monkeypatch):
         "get_current_user_id",
         lambda _authorization: ("user", "tenant"),
     )
-    request = memory_dreaming_app.DreamingRunRequest(agent_id="agent")
+    request = memory_dreaming_app_management_memory_memory_dreaming.DreamingRunRequest(agent_id="agent")
     with pytest.raises(HTTPException) as exc:
         memory_dreaming_app.run_dreaming(
             request,
@@ -196,7 +199,7 @@ def test_ac033_schedule_is_validated_and_saved(monkeypatch):
     monkeypatch.setattr(
         memory_dreaming_app.memory_dreaming_db, "upsert_schedule", saved
     )
-    payload = memory_dreaming_app.DreamingScheduleRequest(
+    payload = memory_dreaming_app_management_memory_memory_dreaming.DreamingScheduleRequest(
         agent_id="agent-1",
         enabled=True,
         rule_type="CRON",
@@ -222,6 +225,6 @@ def test_ac033_schedule_is_validated_and_saved(monkeypatch):
 )
 def test_ac034_invalid_schedule_is_rejected(values):
     with pytest.raises(ValidationError):
-        memory_dreaming_app.DreamingScheduleRequest(
+        memory_dreaming_app_management_memory_memory_dreaming.DreamingScheduleRequest(
             agent_id="agent-1", enabled=True, **values
         )

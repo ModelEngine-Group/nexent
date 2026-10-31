@@ -10,7 +10,7 @@
 # ---------------------------------------------------------------------
 # Stage 1: builder - install uv and the Nexent SDK with all of its
 # tool-side dependencies so the runtime stage can copy them in as a
-# pre-built artifact (no `pip install` happens at sandbox startup).
+# pre-built artifact (no package installation happens at sandbox startup).
 # ---------------------------------------------------------------------
 FROM python:3.11-slim AS builder
 
@@ -40,13 +40,12 @@ RUN --mount=type=cache,id=nexent-sandbox-apt-cache-${TARGETARCH},target=/var/cac
     apt-get update && \
     apt-get install -y --no-install-recommends curl build-essential
 
-RUN --mount=type=cache,id=nexent-sandbox-pip-${TARGETARCH},target=/root/.cache/pip,sharing=locked \
-    pip install uv $(test -n "$MIRROR" && echo "-i $MIRROR")
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /usr/local/bin/
 
 WORKDIR /opt
 
 # Copy SDK source first (and pyproject.toml) so uv can resolve deps.
-# The sandbox does not run `pip install` at startup; everything here is
+# The sandbox does not install packages at startup; everything here is
 # pre-installed in the image so that DockerExecutor.start_kernel_gateway
 # can hand control to a Jupyter kernel immediately.
 COPY sdk/pyproject.toml /opt/sdk/pyproject.toml
@@ -62,20 +61,24 @@ RUN --mount=type=cache,id=nexent-sandbox-uv-${TARGETARCH},target=/root/.cache/uv
 # Stage 2: runtime - minimal Python image with Jupyter Kernel Gateway
 # (smolagents DockerExecutor's default IPC channel) and a non-root
 # `sandbox` user. The DockerExecutor will run this image with
-# network_mode=none and per-run resource limits; the image itself only
+# the configured network mode and per-run resource limits; the image itself
 # enforces the in-container invariants (non-root, workdir, libs).
 # ---------------------------------------------------------------------
 FROM python:3.11-slim AS runtime
 
+COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /usr/local/bin/
+
 ARG APT_MIRROR
 ARG TARGETARCH
 LABEL authors="nexent"
+LABEL org.opencontainers.image.title="Nexent Sandbox" \
+      org.opencontainers.image.description="Default lightweight Nexent sandbox runtime" \
+      io.nexent.sandbox.variant="lightweight"
 
 USER root
 RUN umask 0022
 
-# Minimal apt surface: curl is required by some tools to fetch the
-# /files endpoints; libgomp1 is needed by numpy/scipy wheels.
+# Install runtime utilities and libgomp1 for numpy/scipy wheels.
 RUN --mount=type=cache,id=nexent-sandbox-apt-cache-${TARGETARCH},target=/var/cache/apt,sharing=locked \
     --mount=type=cache,id=nexent-sandbox-apt-lists-${TARGETARCH},target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean && \
@@ -93,14 +96,18 @@ RUN --mount=type=cache,id=nexent-sandbox-apt-cache-${TARGETARCH},target=/var/cac
     apt-get update && \
     apt-get install -y --no-install-recommends \
         curl \
+        vim \
+        procps \
+        wget \
+        less \
         libgomp1 \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
 # Install Jupyter Kernel Gateway - the IPC channel smolagents DockerExecutor
 # uses to send code actions and stream back observations.
-RUN --mount=type=cache,id=nexent-sandbox-pip-${TARGETARCH},target=/root/.cache/pip,sharing=locked \
-    pip install --no-cache-dir \
+RUN --mount=type=cache,id=nexent-sandbox-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
+    uv pip install --system --link-mode copy \
         jupyter_kernel_gateway \
         jupyter_client \
         ipykernel
@@ -114,7 +121,7 @@ COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/pytho
 # ---------------------------------------------------------------------
 # Stage 2.5: pre-install the LLM-friendly Python library whitelist
 # (design doc §6.4). Versions are pinned with upper bounds so upstream
-# releases do not silently break reproducibility. No auto-`pip install`
+# releases do not silently break reproducibility. No automatic package installation
 # happens at sandbox execution time; missing imports return a structured
 # diagnostic that nudges the LLM toward supported packages.
 # ---------------------------------------------------------------------
@@ -122,8 +129,8 @@ FROM runtime AS with-libs
 
 ARG MIRROR
 
-RUN --mount=type=cache,id=nexent-sandbox-pip-${TARGETARCH},target=/root/.cache/pip,sharing=locked \
-    pip install --no-cache-dir \
+RUN --mount=type=cache,id=nexent-sandbox-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
+    uv pip install --system --link-mode copy \
         "numpy>=1.26.4,<2.0" \
         "pandas>=2.0,<3.0" \
         "requests>=2.31,<3.0" \

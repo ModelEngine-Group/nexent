@@ -1,5 +1,6 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
-Unit tests for backend/services/mcp_management_service.py
+Unit tests for backend/management/services/repository/mcp/service.py
 """
 
 import unittest
@@ -22,21 +23,27 @@ db_client_mock.as_dict = MagicMock()
 db_client_mock.filter_property = MagicMock()
 db_client_mock.MinioClient = MagicMock()
 
-sys.modules['database.client'] = db_client_mock
-sys.modules['backend.database.client'] = db_client_mock
+sys.modules['management.db.client'] = db_client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = db_client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock database submodules
-sys.modules['database.market_mcp_db'] = MagicMock()
+sys.modules['management.db.mcp.market'] = MagicMock()
 sys.modules['database.market_review_db'] = MagicMock()
-sys.modules['database.remote_mcp_db'] = MagicMock()
-sys.modules['database.db_models'] = MagicMock()
-sys.modules['database.user_tenant_db'] = MagicMock()
+sys.modules['management.db.mcp.remote'] = MagicMock()
+sys.modules['management.db.models'] = MagicMock()
+sys.modules['management.db.identity.user_tenant'] = MagicMock()
 
-sys.modules['backend.database.market_mcp_db'] = sys.modules['database.market_mcp_db']
+sys.modules['management.db.mcp.market'] = sys.modules['management.db.mcp.market']
 sys.modules['backend.database.market_review_db'] = sys.modules['database.market_review_db']
-sys.modules['backend.database.remote_mcp_db'] = sys.modules['database.remote_mcp_db']
-sys.modules['backend.database.db_models'] = sys.modules['database.db_models']
-sys.modules['backend.database.user_tenant_db'] = sys.modules['database.user_tenant_db']
+sys.modules['management.db.mcp.remote'] = sys.modules['management.db.mcp.remote']
+sys.modules['management.db.models'] = sys.modules['management.db.models']
+sys.modules['management.db.identity.user_tenant'] = sys.modules['management.db.identity.user_tenant']
 
 storage_client_mock = MagicMock()
 minio_mock = MagicMock()
@@ -50,9 +57,9 @@ try:
 except Exception:
     pass
 
-from consts.exceptions import McpNotFoundError, McpNameConflictError, UnauthorizedError
+from contracts.errors.exceptions import McpNotFoundError, McpNameConflictError, UnauthorizedError
 
-from backend.services.mcp_management_service import (
+from management.services.repository.mcp.service import (
     _to_community_card,
     _get_mcp_review_admin_scope,
     _resolve_author_display_name,
@@ -74,7 +81,7 @@ from backend.services.mcp_management_service import (
 )
 
 # Re-patch exception references in the module
-import backend.services.mcp_management_service as svc_mod
+from management.services.repository.mcp import service as svc_mod
 svc_mod.McpNotFoundError = McpNotFoundError
 svc_mod.McpNameConflictError = McpNameConflictError
 svc_mod.UnauthorizedError = UnauthorizedError
@@ -161,7 +168,7 @@ class TestMcpNotificationHelpers(unittest.TestCase):
         )
         self.assertEqual(details["content"], "")
 
-    @patch("backend.services.mcp_management_service.create_repository_pending_review_notification")
+    @patch("management.services.repository.mcp.service.create_repository_pending_review_notification")
     def test_create_pending_review_notification(self, mock_create):
         _create_mcp_pending_review_notification(
             tenant_id="tid",
@@ -176,8 +183,8 @@ class TestMcpNotificationHelpers(unittest.TestCase):
         self.assertEqual(kwargs["unique_id"], 2)
         self.assertEqual(kwargs["details"]["content"], "please review")
 
-    @patch("backend.services.mcp_management_service.deactivate_notifications")
-    @patch("backend.services.mcp_management_service.create_repository_review_notification")
+    @patch("management.services.repository.mcp.service.deactivate_notifications")
+    @patch("management.services.repository.mcp.service.create_repository_review_notification")
     def test_handle_review_status_notifications_shared_with_content(
         self, mock_review, mock_deactivate
     ):
@@ -193,8 +200,8 @@ class TestMcpNotificationHelpers(unittest.TestCase):
         self.assertEqual(mock_review.call_args.kwargs["details"]["content"], "approved note")
         mock_deactivate.assert_called_once()
 
-    @patch("backend.services.mcp_management_service.deactivate_notifications")
-    @patch("backend.services.mcp_management_service.create_repository_review_notification")
+    @patch("management.services.repository.mcp.service.deactivate_notifications")
+    @patch("management.services.repository.mcp.service.create_repository_review_notification")
     def test_handle_review_status_notifications_without_content(
         self, mock_review, mock_deactivate
     ):
@@ -241,7 +248,7 @@ class TestToCommunityCard(unittest.TestCase):
         self.assertIsNone(card["registryJson"])
 
     def test_author_display_name_resolved(self):
-        with patch('backend.services.mcp_management_service.get_user_tenant_by_user_id') as mock_get:
+        with patch('management.services.repository.mcp.service.get_user_tenant_by_user_id') as mock_get:
             mock_get.return_value = {"user_email": "user@example.com"}
             card = _to_community_card({"user_id": "uid"})
             self.assertEqual(card["authorDisplayName"], "user@example.com")
@@ -262,7 +269,7 @@ class TestToCommunityCard(unittest.TestCase):
         self.assertEqual(card["ingroupPermission"], "EDIT")
         self.assertEqual(card["sharedFields"], {"serverUrl": True, "authorizationToken": False})
 
-    @patch('backend.services.mcp_management_service.get_mcp_record_by_id_and_tenant', side_effect=Exception('DB error'))
+    @patch('management.services.repository.mcp.service.get_mcp_record_by_id_and_tenant', side_effect=Exception('DB error'))
     def test_source_mcp_lookup_exception_handled(self, mock_get):
         """_to_community_card should handle get_mcp_record_by_id_and_tenant exception gracefully."""
         card = _to_community_card({
@@ -275,7 +282,7 @@ class TestToCommunityCard(unittest.TestCase):
 
     def test_container_port_included(self):
         """_to_community_card includes containerPort from source MCP record."""
-        with patch('database.remote_mcp_db.get_mcp_record_by_id_and_tenant') as mock_get:
+        with patch('management.db.mcp.remote.get_mcp_record_by_id_and_tenant') as mock_get:
             mock_get.return_value = {
                 "container_port": 8080,
                 "authorization_token": "tok",
@@ -296,31 +303,31 @@ class TestToCommunityCard(unittest.TestCase):
 class TestGetMcpReviewAdminScope(unittest.TestCase):
     """Test _get_mcp_review_admin_scope checks user role."""
 
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     def test_admin_returns_tenant_id(self, mock_get):
         mock_get.return_value = {"user_role": "ADMIN"}
         result = _get_mcp_review_admin_scope("uid", "tid")
         self.assertEqual(result, "tid")
 
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     def test_super_admin_returns_none(self, mock_get):
         mock_get.return_value = {"user_role": "SUPER_ADMIN"}
         result = _get_mcp_review_admin_scope("uid", "tid")
         self.assertIsNone(result)
 
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     def test_su_returns_none(self, mock_get):
         mock_get.return_value = {"user_role": "SU"}
         result = _get_mcp_review_admin_scope("uid", "tid")
         self.assertIsNone(result)
 
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     def test_dev_raises_unauthorized(self, mock_get):
         mock_get.return_value = {"user_role": "DEV"}
         with self.assertRaises(UnauthorizedError):
             _get_mcp_review_admin_scope("uid", "tid")
 
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     def test_no_role_found_raises(self, mock_get):
         mock_get.return_value = {}
         with self.assertRaises(UnauthorizedError):
@@ -330,18 +337,18 @@ class TestGetMcpReviewAdminScope(unittest.TestCase):
 class TestResolveAuthorDisplayName(unittest.TestCase):
     """Test _resolve_author_display_name resolves user_id to email."""
 
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     def test_resolves_email(self, mock_get):
         mock_get.return_value = {"user_email": "  author@test.com  "}
         result = _resolve_author_display_name("uid")
         self.assertEqual(result, "author@test.com")
 
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     def test_none_user_id(self, mock_get):
         result = _resolve_author_display_name(None)
         self.assertIsNone(result)
 
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     def test_no_email_in_record(self, mock_get):
         mock_get.return_value = {}
         result = _resolve_author_display_name("uid")
@@ -412,7 +419,7 @@ class TestValidateMarketStatusTransition(unittest.TestCase):
         )
         self.assertIsNone(result)
 
-    @patch('backend.services.mcp_management_service._resolve_user_email', return_value="admin@test.com")
+    @patch('management.services.repository.mcp.service._resolve_user_email', return_value="admin@test.com")
     def test_admin_publisher_transition_submit(self, mock_email):
         result = _validate_market_status_transition(
             user_role="ADMIN", current_status="not_shared", new_status="pending_review",
@@ -452,7 +459,7 @@ class TestValidateMarketStatusTransition(unittest.TestCase):
                 user_id="uid", tenant_id="tid",
             )
 
-    @patch('backend.services.mcp_management_service._resolve_user_email', return_value="user@test.com")
+    @patch('management.services.repository.mcp.service._resolve_user_email', return_value="user@test.com")
     def test_dev_valid_submit(self, mock_email):
         result = _validate_market_status_transition(
             user_role="DEV", current_status="not_shared", new_status="pending_review",
@@ -490,7 +497,7 @@ class TestValidateMarketStatusTransition(unittest.TestCase):
 
 class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
 
-    @patch('backend.services.mcp_management_service.get_mcp_market_records')
+    @patch('management.services.repository.mcp.service.get_mcp_market_records')
     async def test_list_empty(self, mock_get):
         mock_get.return_value = {"count": 0, "nextCursor": None, "items": []}
         result = await list_community_mcp_services(tenant_id="tid", user_id="uid", limit=30)
@@ -501,7 +508,7 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
             user_id="uid", user_group_ids=[],
         )
 
-    @patch('backend.services.mcp_management_service.get_mcp_market_records')
+    @patch('management.services.repository.mcp.service.get_mcp_market_records')
     async def test_list_with_items(self, mock_get):
         mock_get.return_value = {
             "count": 1, "nextCursor": None,
@@ -512,7 +519,7 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["items"][0]["name"], "svc1")
         self.assertEqual(result["items"][0]["marketId"], 1)
 
-    @patch('backend.services.mcp_management_service.get_mcp_market_records')
+    @patch('management.services.repository.mcp.service.get_mcp_market_records')
     async def test_list_with_filters(self, mock_get):
         mock_get.return_value = {"count": 0, "nextCursor": None, "items": []}
         await list_community_mcp_services(
@@ -525,7 +532,7 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
             user_id="uid", user_group_ids=[],
         )
 
-    @patch('backend.services.mcp_management_service.get_mcp_market_records')
+    @patch('management.services.repository.mcp.service.get_mcp_market_records')
     async def test_list_with_page(self, mock_get):
         mock_get.return_value = {
             "count": 1, "total": 4, "page": 2,
@@ -548,9 +555,9 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
 # list_community_mcp_tag_stats
 # ============================================================================
 
-    @patch('backend.services.mcp_management_service.query_group_ids_by_user')
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_records')
+    @patch('management.services.repository.mcp.service.query_group_ids_by_user')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_mcp_market_records')
     async def test_list_with_user_group_ids(self, mock_get, mock_tenant, mock_groups):
         """list_community_mcp_services should pass user_group_ids to get_mcp_market_records."""
         mock_tenant.return_value = {"user_role": "DEV"}
@@ -567,9 +574,9 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
             user_id="uid", user_group_ids=[2, 4],
         )
 
-    @patch('backend.services.mcp_management_service.query_group_ids_by_user', side_effect=Exception('query failed'))
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_records')
+    @patch('management.services.repository.mcp.service.query_group_ids_by_user', side_effect=Exception('query failed'))
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_mcp_market_records')
     async def test_list_handles_group_query_failure(self, mock_get, mock_tenant, mock_groups):
         """list_community_mcp_services should handle query_group_ids_by_user failure gracefully."""
         mock_tenant.return_value = {"user_role": "DEV"}
@@ -585,9 +592,9 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
             user_id="uid", user_group_ids=None,
         )
 
-    @patch('backend.services.mcp_management_service.query_group_ids_by_user')
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_records')
+    @patch('management.services.repository.mcp.service.query_group_ids_by_user')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_mcp_market_records')
     async def test_list_skips_group_filter_for_admin(self, mock_get, mock_tenant, mock_groups):
         """Admin users should skip group filtering (user_id None, user_group_ids None)."""
         mock_tenant.return_value = {"user_role": "ADMIN"}
@@ -606,7 +613,7 @@ class TestListCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
 
 class TestListCommunityMcpTagStats(unittest.TestCase):
 
-    @patch('backend.services.mcp_management_service.get_mcp_market_tag_stats_by_tenant')
+    @patch('management.services.repository.mcp.service.get_mcp_market_tag_stats_by_tenant')
     def test_list_tag_stats(self, mock_get):
         mock_get.return_value = [{"tag": "python", "count": 5}]
         result = list_community_mcp_tag_stats(tenant_id="tid")
@@ -620,8 +627,8 @@ class TestListCommunityMcpTagStats(unittest.TestCase):
 
 class TestListCommunityMcpReviewServices(unittest.IsolatedAsyncioTestCase):
 
-    @patch('backend.services.mcp_management_service.list_mcp_market_records_by_status')
-    @patch('backend.services.mcp_management_service._get_mcp_review_admin_scope')
+    @patch('management.services.repository.mcp.service.list_mcp_market_records_by_status')
+    @patch('management.services.repository.mcp.service._get_mcp_review_admin_scope')
     async def test_list_reviews(self, mock_scope, mock_list):
         mock_scope.return_value = "tid"
         mock_list.return_value = {
@@ -635,8 +642,8 @@ class TestListCommunityMcpReviewServices(unittest.IsolatedAsyncioTestCase):
         mock_scope.assert_called_once_with("uid", "tid")
         mock_list.assert_called_once()
 
-    @patch('backend.services.mcp_management_service.list_mcp_market_records_by_status')
-    @patch('backend.services.mcp_management_service._get_mcp_review_admin_scope')
+    @patch('management.services.repository.mcp.service.list_mcp_market_records_by_status')
+    @patch('management.services.repository.mcp.service._get_mcp_review_admin_scope')
     async def test_list_reviews_with_filters(self, mock_scope, mock_list):
         mock_scope.return_value = None
         mock_list.return_value = {"count": 0, "nextCursor": None, "items": []}
@@ -657,10 +664,10 @@ class TestListCommunityMcpReviewServices(unittest.IsolatedAsyncioTestCase):
 
 class TestPublishCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
-    @patch('backend.services.mcp_management_service.create_mcp_market_record')
-    @patch('backend.services.mcp_management_service._resolve_user_email')
-    @patch('backend.services.mcp_management_service.check_mcp_market_name_exists')
-    @patch('backend.services.mcp_management_service.get_mcp_record_by_id_and_tenant')
+    @patch('management.services.repository.mcp.service.create_mcp_market_record')
+    @patch('management.services.repository.mcp.service._resolve_user_email')
+    @patch('management.services.repository.mcp.service.check_mcp_market_name_exists')
+    @patch('management.services.repository.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_publish_success(self, mock_get, mock_check, mock_email, mock_create):
         mock_get.return_value = {
             "mcp_id": 1, "mcp_name": "svc", "mcp_server": "http://srv",
@@ -678,11 +685,11 @@ class TestPublishCommunityMcpService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(market_id, 42)
         mock_check.assert_called_once_with("svc", "tid")
 
-    @patch('backend.services.mcp_management_service.create_mcp_market_record')
-    @patch('backend.services.mcp_management_service._resolve_user_email')
-    @patch('backend.services.mcp_management_service.check_mcp_market_name_exists')
-    @patch('backend.services.mcp_management_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.mcp_management_service.update_mcp_record_manage_fields_by_id')
+    @patch('management.services.repository.mcp.service.create_mcp_market_record')
+    @patch('management.services.repository.mcp.service._resolve_user_email')
+    @patch('management.services.repository.mcp.service.check_mcp_market_name_exists')
+    @patch('management.services.repository.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch('management.services.repository.mcp.service.update_mcp_record_manage_fields_by_id')
     async def test_publish_with_shared_fields(self, mock_upd, mock_get, mock_check, mock_email, mock_create):
         """Publish should pass shared_fields to create_mcp_market_record and update source MCP."""
         mock_get.return_value = {
@@ -714,7 +721,7 @@ class TestPublishCommunityMcpService(unittest.IsolatedAsyncioTestCase):
         upd_kwargs = mock_upd.call_args[1]
         self.assertEqual(upd_kwargs["shared_fields"], shared)
 
-    @patch('backend.services.mcp_management_service.get_mcp_record_by_id_and_tenant')
+    @patch('management.services.repository.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_publish_not_found(self, mock_get):
         mock_get.return_value = None
         with self.assertRaises(McpNotFoundError):
@@ -722,8 +729,8 @@ class TestPublishCommunityMcpService(unittest.IsolatedAsyncioTestCase):
                 tenant_id="tid", user_id="uid", mcp_id=999,
             )
 
-    @patch('backend.services.mcp_management_service.check_mcp_market_name_exists')
-    @patch('backend.services.mcp_management_service.get_mcp_record_by_id_and_tenant')
+    @patch('management.services.repository.mcp.service.check_mcp_market_name_exists')
+    @patch('management.services.repository.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_publish_name_conflict(self, mock_get, mock_check):
         mock_get.return_value = {
             "mcp_id": 1, "mcp_name": "svc", "mcp_server": "http://srv",
@@ -737,10 +744,10 @@ class TestPublishCommunityMcpService(unittest.IsolatedAsyncioTestCase):
                 tenant_id="tid", user_id="uid", mcp_id=1,
             )
 
-    @patch('backend.services.mcp_management_service.create_mcp_market_record')
-    @patch('backend.services.mcp_management_service._resolve_user_email')
-    @patch('backend.services.mcp_management_service.check_mcp_market_name_exists')
-    @patch('backend.services.mcp_management_service.get_mcp_record_by_id_and_tenant')
+    @patch('management.services.repository.mcp.service.create_mcp_market_record')
+    @patch('management.services.repository.mcp.service._resolve_user_email')
+    @patch('management.services.repository.mcp.service.check_mcp_market_name_exists')
+    @patch('management.services.repository.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_publish_with_overrides(self, mock_get, mock_check, mock_email, mock_create):
         mock_get.return_value = {
             "mcp_id": 1, "mcp_name": "svc", "mcp_server": "http://srv",
@@ -771,11 +778,11 @@ class TestPublishCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
 class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
-    @patch('backend.services.mcp_management_service.update_mcp_market_status')
-    @patch('backend.services.mcp_management_service.update_mcp_market_record')
-    @patch('backend.services.mcp_management_service._resolve_user_email')
-    @patch('backend.services.mcp_management_service.check_mcp_market_name_exists')
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.update_mcp_market_status')
+    @patch('management.services.repository.mcp.service.update_mcp_market_record')
+    @patch('management.services.repository.mcp.service._resolve_user_email')
+    @patch('management.services.repository.mcp.service.check_mcp_market_name_exists')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_update_success(self, mock_get, mock_check, mock_email, mock_update_record, mock_update_status):
         mock_get.return_value = {
             "market_id": 1, "mcp_name": "svc",
@@ -794,7 +801,7 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
             review_status="pending_review", submitted_by="user@test.com",
         )
 
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_update_not_found(self, mock_get):
         mock_get.return_value = None
         with self.assertRaises(McpNotFoundError):
@@ -803,8 +810,8 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
                 name="x", description="d", tags=[], registry_json=None,
             )
 
-    @patch('backend.services.mcp_management_service.check_mcp_market_name_exists')
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.check_mcp_market_name_exists')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_update_name_conflict(self, mock_get, mock_check):
         mock_get.return_value = {
             "market_id": 1, "mcp_name": "old-name",
@@ -817,11 +824,11 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
                 name="taken-name", description="d", tags=[], registry_json=None,
             )
 
-    @patch('backend.services.mcp_management_service.update_mcp_market_status')
-    @patch('backend.services.mcp_management_service.update_mcp_market_record')
-    @patch('backend.services.mcp_management_service._resolve_user_email')
-    @patch('backend.services.mcp_management_service.check_mcp_market_name_exists')
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.update_mcp_market_status')
+    @patch('management.services.repository.mcp.service.update_mcp_market_record')
+    @patch('management.services.repository.mcp.service._resolve_user_email')
+    @patch('management.services.repository.mcp.service.check_mcp_market_name_exists')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_update_same_name_skips_check(self, mock_get, mock_check, mock_email, mock_update_record, mock_update_status):
         mock_get.return_value = {
             "market_id": 1, "mcp_name": "svc",
@@ -833,11 +840,11 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
         )
         mock_check.assert_not_called()
 
-    @patch('backend.services.mcp_management_service.update_mcp_market_status')
-    @patch('backend.services.mcp_management_service.update_mcp_market_record')
-    @patch('backend.services.mcp_management_service._resolve_user_email')
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
-    @patch('backend.services.mcp_management_service.update_mcp_record_manage_fields_by_id')
+    @patch('management.services.repository.mcp.service.update_mcp_market_status')
+    @patch('management.services.repository.mcp.service.update_mcp_market_record')
+    @patch('management.services.repository.mcp.service._resolve_user_email')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.update_mcp_record_manage_fields_by_id')
     async def test_update_with_shared_fields(self, mock_upd_mcp, mock_get, mock_email, mock_update_record, mock_update_status):
         """update_community_mcp_service should update shared_fields on source MCP record."""
         mock_get.return_value = {
@@ -859,10 +866,10 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["mcp_id"], 10)
         self.assertEqual(kwargs["shared_fields"], shared)
 
-    @patch('backend.services.mcp_management_service.update_mcp_market_status')
-    @patch('backend.services.mcp_management_service.update_mcp_market_record')
-    @patch('backend.services.mcp_management_service._resolve_user_email')
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.update_mcp_market_status')
+    @patch('management.services.repository.mcp.service.update_mcp_market_record')
+    @patch('management.services.repository.mcp.service._resolve_user_email')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_update_infers_transport_type(self, mock_get, mock_email, mock_update_record, mock_update_status):
         mock_get.return_value = {
             "market_id": 1, "mcp_name": "svc",
@@ -884,12 +891,12 @@ class TestUpdateCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
 class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
 
-    @patch('backend.services.mcp_management_service.create_repository_review_notification')
-    @patch('backend.services.mcp_management_service.deactivate_notifications')
-    @patch('backend.services.mcp_management_service.update_mcp_record_market_id_by_id')
-    @patch('backend.services.mcp_management_service.update_mcp_market_status')
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.create_repository_review_notification')
+    @patch('management.services.repository.mcp.service.deactivate_notifications')
+    @patch('management.services.repository.mcp.service.update_mcp_record_market_id_by_id')
+    @patch('management.services.repository.mcp.service.update_mcp_market_status')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_approve_shared_with_content(
         self, mock_get, mock_tenant, mock_status, mock_link_mcp, mock_deactivate, mock_review
     ):
@@ -913,10 +920,10 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
         )
         mock_deactivate.assert_called_once()
 
-    @patch('backend.services.mcp_management_service.update_mcp_record_market_id_by_id')
-    @patch('backend.services.mcp_management_service.update_mcp_market_status')
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.update_mcp_record_market_id_by_id')
+    @patch('management.services.repository.mcp.service.update_mcp_market_status')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_approve_shared(self, mock_get, mock_tenant, mock_status, mock_link_mcp):
         mock_get.return_value = {
             **PENDING_RECORD, "source_mcp_id": 1,
@@ -936,9 +943,9 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
             mcp_id=1, tenant_id="tid", user_id="uid", market_id=2,
         )
 
-    @patch('backend.services.mcp_management_service.update_mcp_market_status')
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.update_mcp_market_status')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_reject(self, mock_get, mock_tenant, mock_status):
         mock_get.return_value = PENDING_RECORD
         mock_tenant.return_value = {"user_role": "ADMIN"}
@@ -952,10 +959,10 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
             content=None,
         )
 
-    @patch('backend.services.mcp_management_service.update_mcp_market_status')
-    @patch('backend.services.mcp_management_service._resolve_user_email')
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.update_mcp_market_status')
+    @patch('management.services.repository.mcp.service._resolve_user_email')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_submit_for_review(self, mock_get, mock_tenant, mock_email, mock_status):
         mock_get.return_value = {**MARKET_RECORD, "review_status": "not_shared"}
         mock_tenant.return_value = {"user_role": "DEV"}
@@ -970,9 +977,9 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
             content=None,
         )
 
-    @patch('backend.services.mcp_management_service.update_mcp_market_status')
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.update_mcp_market_status')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_withdraw(self, mock_get, mock_tenant, mock_status):
         mock_get.return_value = PENDING_RECORD
         mock_tenant.return_value = {"user_role": "DEV"}
@@ -986,8 +993,8 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
             content=None,
         )
 
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_not_found(self, mock_get, mock_tenant):
         mock_get.return_value = None
         with self.assertRaises(McpNotFoundError):
@@ -996,8 +1003,8 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
                 market_id=999, new_status="shared",
             )
 
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_invalid_transition(self, mock_get, mock_tenant):
         mock_get.return_value = {**MARKET_RECORD, "review_status": "not_shared",
                                   "tenant_id": "tid", "user_id": "uid"}
@@ -1015,8 +1022,8 @@ class TestChangeMcpMarketStatus(unittest.IsolatedAsyncioTestCase):
 
 class TestApproveCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
-    @patch('backend.services.mcp_management_service.change_mcp_market_status')
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.change_mcp_market_status')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     async def test_approve_legacy(self, mock_tenant, mock_change):
         mock_tenant.return_value = {"user_role": "ADMIN"}
         await approve_community_mcp_service(
@@ -1028,7 +1035,7 @@ class TestApproveCommunityMcpService(unittest.IsolatedAsyncioTestCase):
             content=None,
         )
 
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     async def test_approve_unauthorized(self, mock_tenant):
         mock_tenant.return_value = {"user_role": "DEV"}
         with self.assertRaises(UnauthorizedError):
@@ -1043,8 +1050,8 @@ class TestApproveCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
 class TestRejectCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
-    @patch('backend.services.mcp_management_service.change_mcp_market_status')
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.change_mcp_market_status')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     async def test_reject_legacy(self, mock_tenant, mock_change):
         mock_tenant.return_value = {"user_role": "ADMIN"}
         await reject_community_mcp_service(
@@ -1056,7 +1063,7 @@ class TestRejectCommunityMcpService(unittest.IsolatedAsyncioTestCase):
             content=None,
         )
 
-    @patch('backend.services.mcp_management_service.get_user_tenant_by_user_id')
+    @patch('management.services.repository.mcp.service.get_user_tenant_by_user_id')
     async def test_reject_unauthorized(self, mock_tenant):
         mock_tenant.return_value = {"user_role": "DEV"}
         with self.assertRaises(UnauthorizedError):
@@ -1071,9 +1078,9 @@ class TestRejectCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
 class TestDeleteCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
-    @patch('backend.services.mcp_management_service.clear_mcp_record_market_id')
-    @patch('backend.services.mcp_management_service.delete_mcp_market_record_by_id')
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.clear_mcp_record_market_id')
+    @patch('management.services.repository.mcp.service.delete_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_delete_success(self, mock_get, mock_delete, mock_clear):
         mock_get.return_value = {"market_id": 1, "tenant_id": "tid"}
         await delete_community_mcp_service(
@@ -1084,7 +1091,7 @@ class TestDeleteCommunityMcpService(unittest.IsolatedAsyncioTestCase):
             tenant_id="tid", user_id="uid", market_id=1,
         )
 
-    @patch('backend.services.mcp_management_service.get_mcp_market_record_by_id')
+    @patch('management.services.repository.mcp.service.get_mcp_market_record_by_id')
     async def test_delete_not_found(self, mock_get):
         mock_get.return_value = None
         with self.assertRaises(McpNotFoundError):
@@ -1099,7 +1106,7 @@ class TestDeleteCommunityMcpService(unittest.IsolatedAsyncioTestCase):
 
 class TestListMyCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
 
-    @patch('backend.services.mcp_management_service.list_mcp_market_records_by_tenant_and_user')
+    @patch('management.services.repository.mcp.service.list_mcp_market_records_by_tenant_and_user')
     async def test_list_my_services(self, mock_market):
         mock_market.return_value = [MARKET_RECORD]
         result = await list_my_community_mcp_services(
@@ -1108,7 +1115,7 @@ class TestListMyCommunityMcpServices(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["count"], 1)
         mock_market.assert_called_once_with(tenant_id="tid", user_id="uid")
 
-    @patch('backend.services.mcp_management_service.list_mcp_market_records_by_tenant_and_user')
+    @patch('management.services.repository.mcp.service.list_mcp_market_records_by_tenant_and_user')
     async def test_list_my_services_multiple_statuses(self, mock_market):
         mock_market.return_value = [MARKET_RECORD, PENDING_RECORD]
         result = await list_my_community_mcp_services(

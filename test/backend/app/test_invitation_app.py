@@ -1,9 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import types
 import importlib.machinery
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
+import logging
 from typing import Optional
 
 # Add path for correct imports
@@ -25,15 +28,13 @@ minio_mock.client = MagicMock()
 
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes and models
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
-from consts.model import (
-    InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
-)
+from contracts.errors.exceptions import NotFoundException, ValidationError, UnauthorizedError, DuplicateError
+from contracts.identity import InvitationCreateRequest, InvitationUpdateRequest, InvitationListRequest
 
 # Import the modules we need
 from fastapi.testclient import TestClient
@@ -41,7 +42,7 @@ from http import HTTPStatus
 from fastapi import FastAPI
 
 # Create a test client with a fresh FastAPI app
-from apps.invitation_app import router
+from management.api.identity.invitation import router
 
 app = FastAPI()
 app.include_router(router)
@@ -72,8 +73,8 @@ class TestInvitationListing:
             }
         ]
 
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.get_invitations_list') as mock_list_invitations:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.get_invitations_list') as mock_list_invitations:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_list_invitations.return_value = mock_result
@@ -114,8 +115,8 @@ class TestInvitationListing:
             }
         ]
 
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.get_invitations_list') as mock_list_invitations:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.get_invitations_list') as mock_list_invitations:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_list_invitations.return_value = mock_result
@@ -146,7 +147,7 @@ class TestInvitationListing:
 
     def test_list_invitations_unauthorized(self):
         """Test invitation listing with unauthorized access"""
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user:
             mock_get_user.side_effect = UnauthorizedError("Invalid token")
 
             request_data = {
@@ -163,8 +164,8 @@ class TestInvitationListing:
 
     def test_list_invitations_unexpected_error(self):
         """Test invitation listing with unexpected error"""
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.get_invitations_list') as mock_list_invitations:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.get_invitations_list') as mock_list_invitations:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_list_invitations.side_effect = Exception("Database error")
@@ -198,8 +199,8 @@ class TestInvitationCreation:
             "created_by": "user-123"
         }
 
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.create_invitation_code') as mock_create_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.create_invitation_code') as mock_create_invitation:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_create_invitation.return_value = mock_invitation_info
@@ -230,8 +231,8 @@ class TestInvitationCreation:
             "capacity": 50
         }
 
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.create_invitation_code') as mock_create_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.create_invitation_code') as mock_create_invitation:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_create_invitation.return_value = mock_invitation_info
@@ -250,8 +251,8 @@ class TestInvitationCreation:
 
     def test_create_invitation_user_not_found(self):
         """Test invitation creation when user is not found"""
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.create_invitation_code') as mock_create_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.create_invitation_code') as mock_create_invitation:
 
             mock_get_user.return_value = ("user-999", "tenant-123")
             mock_create_invitation.side_effect = NotFoundException("User user-999 not found")
@@ -270,8 +271,8 @@ class TestInvitationCreation:
 
     def test_create_invitation_value_error(self):
         """Test invitation creation with value error"""
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.create_invitation_code') as mock_create_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.create_invitation_code') as mock_create_invitation:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_create_invitation.side_effect = ValueError("Invalid code type")
@@ -290,8 +291,8 @@ class TestInvitationCreation:
 
     def test_create_invitation_duplicate_code(self):
         """Test invitation creation with duplicate invitation code returns 409 Conflict"""
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.create_invitation_code') as mock_create_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.create_invitation_code') as mock_create_invitation:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_create_invitation.side_effect = DuplicateError("Invitation code 'ABC123' already exists")
@@ -310,6 +311,33 @@ class TestInvitationCreation:
             assert "Invitation code 'ABC123' already exists" in data["detail"]
 
 
+    def test_create_success_records_audit_entry(self, caplog):
+        """Test successful invitation creation records a security audit entry"""
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.create_invitation_code') as mock_create:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_create.return_value = {"invitation_id": 5, "invitation_code": "INVITE-ABC"}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/invitations",
+                    headers={"Authorization": "Bearer token"},
+                    json={"tenant_id": "tenant-1", "code_type": "USER_INVITE",
+                          "capacity": 10, "group_ids": [3, 4]},
+                )
+
+        assert response.status_code == HTTPStatus.CREATED
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=invitation_create" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert ('details={"invitation_code":"INVITE-ABC","code_type":"USER_INVITE",'
+                '"tenant_id":"tenant-1","capacity":10,"group_ids":[3,4]}') in messages[0]
+
+
 class TestInvitationUpdate:
     """Test invitation update endpoint"""
 
@@ -320,9 +348,9 @@ class TestInvitationUpdate:
             "invitation_code": "ABC123"
         }
 
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation, \
-             patch('apps.invitation_app.update_invitation_code') as mock_update_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation, \
+             patch('management.api.identity.invitation.update_invitation_code') as mock_update_invitation:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_get_invitation.return_value = mock_invitation_info
@@ -351,8 +379,8 @@ class TestInvitationUpdate:
             "invitation_code": "ABC123"
         }
 
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_get_invitation.return_value = mock_invitation_info
@@ -367,8 +395,8 @@ class TestInvitationUpdate:
 
     def test_update_invitation_not_found(self):
         """Test invitation update when invitation doesn't exist"""
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_get_invitation.return_value = None
@@ -383,7 +411,7 @@ class TestInvitationUpdate:
 
     def test_update_invitation_unauthorized(self):
         """Test invitation update with unauthorized access"""
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user:
             mock_get_user.side_effect = UnauthorizedError("Invalid token")
 
             request_data = {"capacity": 20}
@@ -393,6 +421,32 @@ class TestInvitationUpdate:
             assert response.status_code == HTTPStatus.UNAUTHORIZED
             data = response.json()
             assert "Invalid token" in data["detail"]
+
+
+    def test_update_success_records_audit_entry(self, caplog):
+        """Test successful invitation update records a security audit entry"""
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation, \
+             patch('management.api.identity.invitation.update_invitation_code') as mock_update:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_get_invitation.return_value = {"invitation_id": 5, "invitation_code": "INVITE-ABC"}
+            mock_update.return_value = True
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.put(
+                    "/invitations/INVITE-ABC",
+                    headers={"Authorization": "Bearer token"},
+                    json={"capacity": 20},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=invitation_update" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"invitation_code":"INVITE-ABC","updates":{"capacity":20}}' in messages[0]
 
 
 class TestInvitationRetrieval:
@@ -409,7 +463,7 @@ class TestInvitationRetrieval:
             "used_count": 2
         }
 
-        with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+        with patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation:
             mock_get_invitation.return_value = mock_invitation_info
 
             response = client.get("/invitations/ABC123")
@@ -422,7 +476,7 @@ class TestInvitationRetrieval:
 
     def test_get_invitation_not_found(self):
         """Test invitation retrieval when invitation doesn't exist"""
-        with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+        with patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation:
             mock_get_invitation.return_value = None
 
             response = client.get("/invitations/NOTFOUND")
@@ -433,7 +487,7 @@ class TestInvitationRetrieval:
 
     def test_get_invitation_unexpected_error(self):
         """Test invitation retrieval with unexpected error"""
-        with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+        with patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation:
             mock_get_invitation.side_effect = Exception("Database error")
 
             response = client.get("/invitations/ABC123")
@@ -448,7 +502,7 @@ class TestInvitationCodeCheck:
 
     def test_check_invitation_code_exists(self):
         """Test checking invitation code that exists"""
-        with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+        with patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation:
             mock_get_invitation.return_value = {
                 "invitation_id": 1,
                 "invitation_code": "ABC123",
@@ -467,7 +521,7 @@ class TestInvitationCodeCheck:
 
     def test_check_invitation_code_not_exists(self):
         """Test checking invitation code that doesn't exist"""
-        with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+        with patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation:
             mock_get_invitation.return_value = None
 
             response = client.get("/invitations/NOTFOUND/check")
@@ -480,7 +534,7 @@ class TestInvitationCodeCheck:
 
     def test_check_invitation_code_unexpected_error(self):
         """Test checking invitation code with unexpected error"""
-        with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+        with patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation:
             mock_get_invitation.side_effect = Exception("Database error")
 
             response = client.get("/invitations/ABC123/check")
@@ -495,7 +549,7 @@ class TestInvitationAvailability:
 
     def test_check_invitation_available_true(self):
         """Test invitation availability check when available"""
-        with patch('apps.invitation_app.check_invitation_available') as mock_check_available:
+        with patch('management.api.identity.invitation.check_invitation_available') as mock_check_available:
             mock_check_available.return_value = True
 
             response = client.get("/invitations/ABC123/available")
@@ -509,7 +563,7 @@ class TestInvitationAvailability:
 
     def test_check_invitation_available_false(self):
         """Test invitation availability check when not available"""
-        with patch('apps.invitation_app.check_invitation_available') as mock_check_available:
+        with patch('management.api.identity.invitation.check_invitation_available') as mock_check_available:
             mock_check_available.return_value = False
 
             response = client.get("/invitations/ABC123/available")
@@ -520,7 +574,7 @@ class TestInvitationAvailability:
 
     def test_check_invitation_available_unexpected_error(self):
         """Test invitation availability check with unexpected error"""
-        with patch('apps.invitation_app.check_invitation_available') as mock_check_available:
+        with patch('management.api.identity.invitation.check_invitation_available') as mock_check_available:
             mock_check_available.side_effect = Exception("Database error")
 
             response = client.get("/invitations/ABC123/available")
@@ -543,8 +597,8 @@ class TestInvitationUsage:
             "success": True
         }
 
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.use_invitation_code') as mock_use_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.use_invitation_code') as mock_use_invitation:
 
             mock_get_user.return_value = ("user-456", "tenant-123")
             mock_use_invitation.return_value = mock_usage_result
@@ -562,8 +616,8 @@ class TestInvitationUsage:
 
     def test_use_invitation_not_found(self):
         """Test invitation usage when invitation doesn't exist"""
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.use_invitation_code') as mock_use_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.use_invitation_code') as mock_use_invitation:
 
             mock_get_user.return_value = ("user-456", "tenant-123")
             mock_use_invitation.side_effect = NotFoundException("Invitation code not available")
@@ -576,7 +630,7 @@ class TestInvitationUsage:
 
     def test_use_invitation_unauthorized(self):
         """Test invitation usage with unauthorized access"""
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user:
             mock_get_user.side_effect = UnauthorizedError("Invalid token")
 
             response = client.post("/invitations/ABC123/use", headers={"Authorization": "Bearer invalid"})
@@ -584,6 +638,30 @@ class TestInvitationUsage:
             assert response.status_code == HTTPStatus.UNAUTHORIZED
             data = response.json()
             assert "Invalid token" in data["detail"]
+
+
+    def test_use_success_records_audit_entry(self, caplog):
+        """Test successful invitation usage records a security audit entry"""
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.use_invitation_code') as mock_use:
+
+            mock_get_user.return_value = ("user-1", "tenant-1")
+            mock_use.return_value = {"group_ids": [3]}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/invitations/INVITE-ABC/use",
+                    headers={"Authorization": "Bearer token"},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=invitation_use" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=user-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"invitation_code":"INVITE-ABC"}' in messages[0]
 
 
 class TestInvitationStatusUpdate:
@@ -596,8 +674,8 @@ class TestInvitationStatusUpdate:
             "invitation_code": "ABC123"
         }
 
-        with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation, \
-             patch('apps.invitation_app.update_invitation_code_status') as mock_update_status:
+        with patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation, \
+             patch('management.api.identity.invitation.update_invitation_code_status') as mock_update_status:
 
             mock_get_invitation.return_value = mock_invitation_info
             mock_update_status.return_value = True
@@ -618,8 +696,8 @@ class TestInvitationStatusUpdate:
             "invitation_code": "ABC123"
         }
 
-        with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation, \
-             patch('apps.invitation_app.update_invitation_code_status') as mock_update_status:
+        with patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation, \
+             patch('management.api.identity.invitation.update_invitation_code_status') as mock_update_status:
 
             mock_get_invitation.return_value = mock_invitation_info
             mock_update_status.return_value = False
@@ -633,7 +711,7 @@ class TestInvitationStatusUpdate:
 
     def test_update_invitation_status_not_found(self):
         """Test invitation status update when invitation doesn't exist"""
-        with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+        with patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation:
             mock_get_invitation.return_value = None
 
             response = client.post("/invitations/NOTFOUND/update-status")
@@ -649,8 +727,8 @@ class TestInvitationStatusUpdate:
             "invitation_code": "ABC123"
         }
 
-        with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation, \
-             patch('apps.invitation_app.update_invitation_code_status') as mock_update_status:
+        with patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation, \
+             patch('management.api.identity.invitation.update_invitation_code_status') as mock_update_status:
 
             mock_get_invitation.return_value = mock_invitation_info
             mock_update_status.side_effect = Exception("Database error")
@@ -672,9 +750,9 @@ class TestInvitationDeletion:
             "invitation_code": "ABC123"
         }
 
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation, \
-             patch('apps.invitation_app.delete_invitation_code') as mock_delete_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation, \
+             patch('management.api.identity.invitation.delete_invitation_code') as mock_delete_invitation:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_get_invitation.return_value = mock_invitation_info
@@ -692,8 +770,8 @@ class TestInvitationDeletion:
 
     def test_delete_invitation_not_found(self):
         """Test invitation deletion when invitation doesn't exist"""
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_get_invitation.return_value = None
@@ -706,8 +784,8 @@ class TestInvitationDeletion:
 
     def test_delete_invitation_unauthorized(self):
         """Test invitation deletion with unauthorized access"""
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.delete_invitation_code') as mock_delete_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.delete_invitation_code') as mock_delete_invitation:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_delete_invitation.side_effect = UnauthorizedError("User role USER not authorized to delete invitation codes")
@@ -715,7 +793,7 @@ class TestInvitationDeletion:
             # Need a valid invitation code for the request
             mock_invitation_info = {"invitation_id": 1, "invitation_code": "ABC123"}
 
-            with patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation:
+            with patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation:
                 mock_get_invitation.return_value = mock_invitation_info
 
                 response = client.delete("/invitations/ABC123", headers={"Authorization": "Bearer token"})
@@ -731,9 +809,9 @@ class TestInvitationDeletion:
             "invitation_code": "ABC123"
         }
 
-        with patch('apps.invitation_app.get_current_user_id') as mock_get_user, \
-             patch('apps.invitation_app.get_invitation_by_code') as mock_get_invitation, \
-             patch('apps.invitation_app.delete_invitation_code') as mock_delete_invitation:
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation, \
+             patch('management.api.identity.invitation.delete_invitation_code') as mock_delete_invitation:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_get_invitation.return_value = mock_invitation_info
@@ -744,3 +822,27 @@ class TestInvitationDeletion:
             assert response.status_code == HTTPStatus.BAD_REQUEST
             data = response.json()
             assert "Failed to delete invitation code" in data["detail"]
+
+    def test_delete_success_records_audit_entry(self, caplog):
+        """Test successful invitation deletion records a security audit entry"""
+        with patch('management.api.identity.invitation.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.invitation.get_invitation_by_code') as mock_get_invitation, \
+             patch('management.api.identity.invitation.delete_invitation_code') as mock_delete:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_get_invitation.return_value = {"invitation_id": 5, "invitation_code": "INVITE-ABC"}
+            mock_delete.return_value = True
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.delete(
+                    "/invitations/INVITE-ABC",
+                    headers={"Authorization": "Bearer token"},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=invitation_delete" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"invitation_code":"INVITE-ABC"}' in messages[0]

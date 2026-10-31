@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_business_constant_stubs
 import unittest
 import json
 import os
@@ -15,12 +17,16 @@ database_client_mock = MagicMock()
 database_client_mock.MinioClient = MagicMock()
 database_client_mock.get_db_session = MagicMock()
 database_client_mock.db_client = MagicMock()
-sys.modules['database.client'] = database_client_mock
+sys.modules['management.db.client'] = database_client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 botocore_client_mock = MagicMock()
 sys.modules['botocore.client'] = botocore_client_mock
 
-sys.modules['database.tenant_config_db'] = MagicMock()
+sys.modules['management.db.configuration.tenant'] = MagicMock()
 
 # Create mock functions
 mock_get_current_user_id = MagicMock()
@@ -39,18 +45,21 @@ const_mock = MagicMock()
 const_mock.DEPLOYMENT_VERSION = 'test_version'
 const_mock.APP_VERSION = 'v1.2.3'
 const_mock.ENABLE_AIDP_KNOWLEDGE = False
+const_mock.ENABLE_AGENT_WORKBENCH = False
+const_mock.HIDE_HOME_PAGE = False
 
 sys.modules['services.tenant_config_service'] = services_mock
-sys.modules['utils.auth_utils'] = auth_mock
-sys.modules['consts.const'] = const_mock
+sys.modules['gateway.authentication.auth'] = auth_mock
+sys.modules['contracts.constants.environment'] = const_mock
+install_business_constant_stubs(const_mock)
 
 # Now import FastAPI components and the router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from apps.tenant_config_app import router
+from management.api.configuration.tenant_config import router
 
 # Import the module to directly replace functions
-import apps.tenant_config_app as tenant_app
+from management.api.configuration import tenant_config as tenant_app
 
 class TestTenantConfigApp(unittest.TestCase):
     @classmethod
@@ -125,7 +134,9 @@ class TestTenantConfigApp(unittest.TestCase):
         self.assertIn("deployment_version", data)
         self.assertIn("app_version", data)
         self.assertIn("enable_aidp_knowledge", data)
-        self.assertEqual(len(data.keys()), 4)
+        self.assertIs(data["enable_agent_workbench"], False)
+        self.assertIs(data["hide_home_page"], False)
+        self.assertEqual(len(data.keys()), 6)
 
 
 if __name__ == '__main__':

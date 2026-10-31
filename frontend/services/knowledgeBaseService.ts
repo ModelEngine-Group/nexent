@@ -1,14 +1,19 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+import type { KnowledgeBaseDeletionPreview } from "@/types/knowledgeBase";
 // Unified encapsulation of knowledge base related API calls
 
 import i18n from "i18next";
 
-import { API_ENDPOINTS, ApiError } from "./api";
+import { API_ENDPOINTS, ApiError, fetchWithErrorHandling } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
+import { ErrorCode } from "@/const/errorCode";
 import {
   FILE_TYPES,
   EXTENSION_TO_TYPE_MAP,
   KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+  KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
 } from "@/const/knowledgeBase";
 import {
   Document,
@@ -46,6 +51,26 @@ const resolveIsMultimodal = (indexInfo: any, stats: any): boolean =>
 
 // Knowledge base service class
 class KnowledgeBaseService {
+  async previewBoundAgents(
+    indexName: string,
+    tenantId?: string | null
+  ): Promise<KnowledgeBaseDeletionPreview | null> {
+    try {
+      const endpoint = API_ENDPOINTS.knowledgeBase.boundAgents(indexName);
+      const query = tenantId
+        ? `?${new URLSearchParams({ tenant_id: tenantId })}`
+        : "";
+      const response = await fetchWithErrorHandling(`${endpoint}${query}`, {
+        method: "GET",
+        headers: getAuthHeaders(),
+      });
+      return await response.json();
+    } catch (error) {
+      log.warn("Knowledge base deletion preview unavailable:", error);
+      return null;
+    }
+  }
+
   // Check Elasticsearch health (force refresh, no caching for setup page)
   async checkHealth(): Promise<boolean> {
     try {
@@ -804,7 +829,8 @@ class KnowledgeBaseService {
     includeDataMateSync = true,
     tenantId: string | null = null,
     datamateUrl: string | null = null,
-    query?: KnowledgeBaseListQuery
+    query?: KnowledgeBaseListQuery,
+    options?: { strict?: boolean }
   ): Promise<KnowledgeBasesWithDataMateStatus> {
     try {
       const knowledgeBases: KnowledgeBase[] = [];
@@ -820,6 +846,8 @@ class KnowledgeBaseService {
         const isElasticsearchHealthy =
           skipHealthCheck || (await this.checkHealth());
         if (!isElasticsearchHealthy) {
+          if (options?.strict)
+            throw new Error("Knowledge base service unavailable");
           log.warn("Elasticsearch service unavailable");
         } else {
           // Build URL with tenant_id parameter for filtering
@@ -851,7 +879,16 @@ class KnowledgeBaseService {
           const response = await fetch(url.toString(), {
             headers: getAuthHeaders(),
           });
+          if (options?.strict && !response.ok)
+            throw new Error("Knowledge base catalog unavailable");
           const data = await response.json();
+          if (
+            options?.strict &&
+            (!Array.isArray(data.indices) ||
+              (data.indices.length > 0 && !Array.isArray(data.indices_info)))
+          ) {
+            throw new Error("Invalid knowledge base catalog response");
+          }
           const hasMore =
             typeof data.next_offset === "number" &&
             typeof data.total === "number" &&
@@ -894,6 +931,7 @@ class KnowledgeBaseService {
               return {
                 id: kbId,
                 knowledge_id: indexInfo.knowledge_id,
+                tags: Array.isArray(indexInfo.tags) ? indexInfo.tags : [],
                 name: kbName,
                 index_name: kbId, // Internal index_name for API calls
                 display_name: indexInfo.display_name || indexInfo.name,
@@ -952,6 +990,7 @@ class KnowledgeBaseService {
         }
       } catch (error) {
         log.error("Failed to get Elasticsearch indices:", error);
+        if (options?.strict) throw error;
       }
 
       // Sync DataMate knowledge bases and get the synced data (only if enabled and URL is configured)
@@ -1259,6 +1298,7 @@ class KnowledgeBaseService {
           typeof file.total_chunk_num === "number"
             ? file.total_chunk_num
             : null,
+        tags: Array.isArray(file.tags) ? file.tags : [],
       }));
     } catch (error) {
       log.error("Failed to get all files:", error);
@@ -1287,7 +1327,15 @@ class KnowledgeBaseService {
       if (
         files.some((file) => file.size > KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES)
       ) {
-        throw new Error(i18n.t("knowledgeBase.upload.fileTooLarge"));
+        throw new ApiError(
+          ErrorCode.FILE_TOO_LARGE,
+          "Knowledge base file exceeds the maximum size",
+          {
+            resource: "knowledge_file",
+            limit_bytes: KNOWLEDGE_BASE_MAX_FILE_SIZE_BYTES,
+            limit_mb: KNOWLEDGE_BASE_MAX_FILE_SIZE_MB,
+          }
+        );
       }
 
       // Create FormData object

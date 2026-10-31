@@ -242,7 +242,8 @@ flowchart LR
 |------|--------|------|
 | `ENABLE_TELEMETRY` | `false` | 监控总开关 |
 | `MONITORING_PROVIDER` | `otlp` | 监控 provider 和部署形态：`otlp`、`phoenix`、`langfuse`、`langsmith`、`grafana`、`zipkin` |
-| `MONITORING_DASHBOARD_URL` | 空 | 前端顶栏监控入口跳转 URL，后端只读取并透传该值；speed 模式下可见，标准模式下仅超级管理员可见 |
+| `MONITORING_DASHBOARD_URL` | 空 | 前端顶栏监控入口跳转 URL，后端只读取并透传该值 |
+| `MONITORING_DASHBOARD_ALLOWED_ROLES` | `SU,SPEED` | 可看到监控入口的角色，使用逗号分隔；配置为空时对所有角色隐藏 |
 | `MONITORING_PROJECT_NAME` | `nexent` | 平台项目名 |
 | `OTEL_SERVICE_NAME` | `nexent-backend` | OpenTelemetry service name |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://localhost:4318` | OTLP base endpoint |
@@ -260,7 +261,7 @@ flowchart LR
 | `MONITORING_INSTRUMENT_REQUESTS` | `false` | 是否启用 requests 自动 HTTP client span |
 | `MONITORING_FASTAPI_EXCLUDED_URLS` | 空 | FastAPI 自动埋点排除 URL，逗号分隔正则 |
 | `MONITORING_FASTAPI_EXCLUDE_SPANS` | `receive,send` | 排除 ASGI 内部 `receive/send` span，流式接口建议保持默认 |
-| `OTEL_COLLECTOR_VERSION` | `0.150.0` | 本地 OpenTelemetry Collector Contrib 镜像版本 |
+| `OTEL_COLLECTOR_VERSION` | `0.151.0` | 本地 OpenTelemetry Collector Contrib 镜像版本 |
 | `PHOENIX_VERSION` | `15` | 本地 Phoenix 镜像版本 |
 | `LANGFUSE_VERSION` | `3` | 本地 Langfuse Web/Worker 镜像版本 |
 | `LANGFUSE_POSTGRES_VERSION` | `15-alpine` | 本地 Langfuse Postgres 镜像版本 |
@@ -300,11 +301,12 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
 OTEL_EXPORTER_OTLP_PROTOCOL=http
 ```
 
-前端顶栏监控入口不再根据 provider 在代码中映射 UI 端口和路径。后端读取 `MONITORING_DASHBOARD_URL` 并通过 `/monitoring/status` 返回给前端；该值为空时前端不显示监控入口。speed 模式下配置 URL 后即可显示，标准模式下只有超级管理员可见。因此本地 Grafana 形态需要在 `deploy/env/monitoring.env` 中设置：
+前端顶栏监控入口不再根据 provider 在代码中映射 UI 端口和路径。后端读取 `MONITORING_DASHBOARD_URL` 和 `MONITORING_DASHBOARD_ALLOWED_ROLES`，并通过 `/monitoring/status` 返回给前端；URL 为空或当前角色不在允许列表时，前端不显示监控入口。因此本地 Grafana 形态需要在 `deploy/env/monitoring.env` 中设置：
 
 ```bash
 MONITORING_PROVIDER=grafana
 MONITORING_DASHBOARD_URL=http://localhost:3002/d/nexent-llm-agent/nexent-agent-trace-monitoring?orgId=1
+MONITORING_DASHBOARD_ALLOWED_ROLES=SU,ADMIN,SPEED
 ```
 
 ### Phoenix
@@ -387,9 +389,9 @@ bash deploy.sh docker --components infrastructure,monitoring --monitoring-provid
 
 部署脚本职责：
 
-- 创建或复用 `nexent-network`。
+- 创建或复用 `nexent_network`（所有 compose 文件统一声明的网络名）。
 - 首次启动时从 `monitoring.env.example` 生成 `monitoring.env`。
-- 根据 `MONITORING_PROVIDER` 或 `--stack` 选择 Docker Compose profile。
+- 根据 `MONITORING_PROVIDER`（或 `--monitoring-provider` 参数）选择 Docker Compose profile。
 - 根据部署形态设置 `OTEL_COLLECTOR_CONFIG_FILE`。
 - Langfuse 本地形态下，如果 `LANGFUSE_OTLP_AUTH_HEADER` 未显式配置，则使用初始化项目的 public/secret key 生成 Basic Auth header。
 - LangSmith 在线形态要求 `LANGSMITH_API_KEY`，启动时会校验该变量，避免 Collector 静默丢弃鉴权失败的 trace。
@@ -483,9 +485,8 @@ Collector trace pipeline 使用 `zipkin` exporter 转发到 `http://zipkin:9411/
 | `agent.run` | `NexentAgent.agent_run_with_observer` | AGENT | query、session、user、tenant、agent、metadata、tags | 作为一次 Agent 运行的顶层业务 trace |
 | `agent.run.loop` | `NexentAgent.agent_run_with_observer` | CHAIN | Agent loop、step、最终输出 | 追踪实际 Agent 执行生命周期 |
 | `{display_name or model_id}.generate` | `sdk/nexent/core/models/openai_llm.py` | LLM / generation | 模型、温度、top_p、消息、输入输出、token、TTFT、chunk 数 | LLM 性能、成本、输出和异常分析 |
-| `python_interpreter` | `sdk/nexent/core/agents/core_agent.py` | TOOL | 生成代码、step number、执行输出、日志、是否最终答案 | 观测 CodeAgent 解释器执行 |
+| `python_interpreter` | `sdk/nexent/core/agents/core_agent.py` | TOOL | 生成代码、step number、执行输出和日志 | 观测 CodeAgent 解释器执行 |
 | 真实工具名 | `sdk/nexent/core/agents/nexent_agent.py` | TOOL | local/MCP/langchain/builtin 工具输入输出 | 观测真实工具可用性、延迟、错误和输入输出 |
-| `FinalAnswerTool` | `sdk/nexent/core/agents/core_agent.py` | TOOL | 最终答案输出 | 让 Phoenix/Langfuse 中能明确看到最终答案节点 |
 | `monitor_endpoint` | SDK 兼容 API | AGENT / CHAIN | 自定义 operation、参数、错误 | 低层 escape hatch；不推荐业务层新增常规埋点 |
 | `start_agent_run` / `trace_agent_step` / `trace_retriever_call` | SDK 公共 API | AGENT / CHAIN / RETRIEVER | Agent metadata、输入输出、session、user | SDK 生命周期埋点和少量自定义层级埋点 |
 | `trace_tool_call` | SDK 公共 API | TOOL | 工具名、输入、输出、耗时、错误 | SDK 用户自定义工具埋点 |
@@ -509,7 +510,6 @@ Collector trace pipeline 使用 `zipkin` exporter 转发到 `http://zipkin:9411/
 | `llm.token_count.completion` | counter | model | 输出 token 成本 |
 | `llm.error.count` | counter | model、operation | LLM 错误率 |
 | `agent.step.count` | counter | agent、step type、tool | Agent 步骤和工具调用量 |
-| `agent.execution.duration` | histogram | agent、status | Agent 总耗时 |
 | `agent.error.count` | counter | agent、error type | Agent 异常统计 |
 
 ## Agent 运行数据流
@@ -530,10 +530,8 @@ flowchart TD
   Step --> LLM[Model.generate: LLM / generation]
   Step --> PY[python_interpreter: TOOL]
   PY --> Tool[Real local / MCP / langchain / builtin tool: TOOL]
-  PY --> Final[FinalAnswerTool: TOOL]
   LLM --> Attr1[OpenInference + Langfuse attrs]
   Tool --> Attr1
-  Final --> Attr1
   Attr1 --> OTel[OpenTelemetry Tracer/Meter Provider]
   OTel --> Collector[OTLP Collector]
   Collector --> Phoenix[Phoenix]
@@ -551,7 +549,6 @@ agent.run                         agent
    ├─ Model.generate               llm / generation
    ├─ python_interpreter           tool
    │  └─ RealTool                  tool
-   └─ FinalAnswerTool              tool
 ```
 
 FastAPI HTTP span 可以保留在最上层用于接口视角，也可以通过 `MONITORING_FASTAPI_EXCLUDED_URLS=/agent/run` 在 AI trace 视图中隐藏。
@@ -622,7 +619,7 @@ flowchart TB
 | Phoenix/Langfuse 中出现大量 `unknown POST /agent/run http ...` | 默认排除 FastAPI ASGI `receive/send` span；requests 自动埋点默认关闭；可配置隐藏 `/agent/run` HTTP span |
 | Langfuse 字段耦合过重 | 不写入 `langfuse.*` 专用 span 属性，仅保留 OTLP 转发和 OpenInference 语义 |
 | LLM span 不明显或缺输出 | LLM span 命名为 `{display_name or model_id}.generate`，并写入 `output.value` |
-| 工具 span 缺失 | 在 `NexentAgent.create_single_agent` 统一包装 local/MCP/langchain/builtin 工具，并在 `CoreAgent` 增加 `python_interpreter` 和 `FinalAnswerTool` span |
+| 工具 span 缺失 | 在 `NexentAgent.create_single_agent` 统一包装 local/MCP/langchain/builtin 工具，并在 `CoreAgent` 增加 `python_interpreter` span |
 | 单测漏掉 SDK 生命周期路径 | 增加 AgentRunMetadata、Agent/chain、LLM/Tool 继承上下文测试 |
 
 ## 使用建议

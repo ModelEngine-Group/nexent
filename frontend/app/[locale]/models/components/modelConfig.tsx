@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   forwardRef,
   useEffect,
@@ -5,87 +7,51 @@ import {
   useState,
   useRef,
   ReactNode,
+  useMemo,
+  useCallback,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, Col, Row, Space, App } from "antd";
-import { Plus, ShieldCheck, RefreshCw, PenLine } from "lucide-react";
-
+import { App } from "antd";
 import {
-  MODEL_TYPES,
-  MODEL_STATUS,
-  LAYOUT_CONFIG,
-  CARD_THEMES,
-} from "@/const/modelConfig";
-import { useConfig } from "@/hooks/useConfig";
-import { modelService } from "@/services/modelService";
+  Plus,
+  ShieldCheck,
+  RefreshCw,
+  Pencil,
+  Trash2,
+  Loader2,
+} from "lucide-react";
+import { ExclamationCircleFilled } from "@ant-design/icons";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { TooltipProvider } from "@/components/ui/tooltip";
+
+import { MODEL_TYPES, MODEL_STATUS } from "@/const/modelConfig";
+import { useConfig, CONFIG_QUERY_KEY } from "@/hooks/useConfig";
+import { usePermission } from "@/hooks/permission/usePermission";
+import { modelService, ModelError } from "@/services/modelService";
 import { loadMemoryConfig } from "@/services/memoryService";
-import { CapacityCoverage, ModelOption, ModelType } from "@/types/modelConfig";
+import {
+  ModelOption,
+  ModelType,
+  ModelConnectStatus,
+} from "@/types/modelConfig";
 import log from "@/lib/logger";
 
-import { ModelListCard } from "./model/ModelListCard";
 import { ModelAddDialog } from "./model/ModelAddDialog";
-import { ModelDeleteDialog } from "./model/ModelDeleteDialog";
+import { ModelEditDialog } from "./model/ModelEditDialog";
+import { ModelSlotSelect, buildModelSlots } from "./model/ModelSlotSelect";
+import { ModelLibraryList } from "./model/ModelLibraryList";
+import {
+  ModelManagerDialog,
+  ConnectionGroup,
+} from "./model/ModelManagerDialog";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { Can } from "@/components/permission/Can";
 import { useModelList } from "@/hooks/model/useModelList";
-
-// ModelConnectStatus type definition
-type ModelConnectStatus = (typeof MODEL_STATUS)[keyof typeof MODEL_STATUS];
-
-// Model data structure
-const getModelData = (t: any) => ({
-  llm: {
-    title: t("modelConfig.category.llm"),
-    options: [{ id: "main", name: t("modelConfig.option.mainModel") }],
-  },
-  embedding: {
-    title: t("modelConfig.category.embedding"),
-    options: [
-      {
-        id: MODEL_TYPES.EMBEDDING,
-        name: t("modelConfig.option.embeddingModel"),
-      },
-      {
-        id: MODEL_TYPES.MULTI_EMBEDDING,
-        name: t("modelConfig.option.multiEmbeddingModel"),
-      },
-    ],
-  },
-  reranker: {
-    title: t("modelConfig.category.reranker"),
-    options: [{ id: "reranker", name: t("modelConfig.option.rerankerModel") }],
-  },
-  multimodal: {
-    title: t("modelConfig.category.multimodal"),
-    options: [
-      {
-        id: MODEL_TYPES.VLM,
-        name: t("modelConfig.option.imageUnderstandingModel"),
-      },
-      {
-        id: MODEL_TYPES.VLM2,
-        name: t("modelConfig.option.imageGenerationModel"),
-      },
-      {
-        id: MODEL_TYPES.VLM3,
-        name: t("modelConfig.option.videoUnderstandingModel"),
-      },
-      {
-        id: MODEL_TYPES.VLM4,
-        name: t("modelConfig.option.audioUnderstandingModel"),
-      },
-    ],
-  },
-  voice: {
-    title: t("modelConfig.category.voice"),
-    options: [
-      { id: MODEL_TYPES.TTS, name: t("modelConfig.option.ttsModel") },
-      { id: MODEL_TYPES.STT, name: t("modelConfig.option.sttModel") },
-    ],
-  },
-});
 
 // Define the methods exposed by the component
 export interface ModelConfigSectionRef {
@@ -95,7 +61,6 @@ export interface ModelConfigSectionRef {
     embedding?: ModelConnectStatus;
     multi_embedding?: ModelConnectStatus;
   };
-  // Programmatically simulate a dropdown change and trigger onChange logic
   simulateDropdownChange: (
     category: string,
     option: string,
@@ -112,26 +77,43 @@ export const ModelConfigSection = forwardRef<
   ModelConfigSectionProps
 >((props, ref): ReactNode => {
   const { t } = useTranslation();
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
 
   const { skipVerification = false } = props;
   const { modelConfig, updateModelConfig, appConfig, saveConfig } = useConfig();
   const modelEngineEnable = appConfig?.modelEngineEnabled ?? false;
+  // #4008: default-slot changes are an update operation; the slot selects
+  // stay visible for read-only users but are disabled.
+  const { can: canPermission } = usePermission();
+  const canUpdateModels = canPermission("model:update");
 
-  const modelData = getModelData(t);
   const { confirm } = useConfirmModal();
 
-  // State management
+  /* ------------------ State ------------------ */
   const [models, setModels] = useState<ModelOption[]>([]);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [addModalDefaultIsBatch, setAddModalDefaultIsBatch] =
-    useState<boolean>(false);
-  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+  const [isAddModalV2Open, setIsAddModalV2Open] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [capacityCoverage, setCapacityCoverage] =
-    useState<CapacityCoverage | null>(null);
-  const  { invalidate } = useModelList();
+
+  // v2.6.1 redesign: add-model dialog (single/batch tab)
+  const [addDialogTab, setAddDialogTab] = useState<"single" | "batch">(
+    "single"
+  );
+
+  // Single model edit dialog
+  const [editingCardModel, setEditingCardModel] = useState<ModelOption | null>(
+    null
+  );
+
+  // v2.6.1 redesign: batch edit / delete dialog
+  const [managerMode, setManagerMode] = useState<"editGroup" | "deleteGroup">(
+    "editGroup"
+  );
+  const [isManagerOpen, setIsManagerOpen] = useState(false);
+  const [batchUpdating, setBatchUpdating] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+
+  const { invalidate } = useModelList();
   // Error state management
   const [errorFields, setErrorFields] = useState<{ [key: string]: boolean }>({
     "llm.main": false,
@@ -139,16 +121,15 @@ export const ModelConfigSection = forwardRef<
     "embedding.multi_embedding": false,
   });
 
-  // Controller for canceling API requests
   const abortControllerRef = useRef<AbortController | null>(null);
-  // Throttle timer
-  const throttleTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Per-row debounce timers for single-model connectivity probes, keyed by
+  // `${displayName}::${modelType}`. One shared timer made clicks on different
+  // rows cancel each other; per-row keys keep every clicked row's probe.
+  const verifyTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const scheduleAutoSave = () => {
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-    }
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(async () => {
       try {
         await saveConfig();
@@ -158,7 +139,6 @@ export const ModelConfigSection = forwardRef<
     }, 600);
   };
 
-  // Model selection state
   const [selectedModels, setSelectedModels] = useState<
     Record<string, Record<string, string>>
   >({
@@ -169,7 +149,7 @@ export const ModelConfigSection = forwardRef<
     voice: { tts: "", stt: "" },
   });
 
-  // Load model lists once config data is available from React Query
+  /* ------------------ Init load ------------------ */
   const initialLoadDoneRef = useRef(false);
   useEffect(() => {
     if (modelConfig && !initialLoadDoneRef.current) {
@@ -178,54 +158,253 @@ export const ModelConfigSection = forwardRef<
     }
   }, [modelConfig]);
 
-  // Listen to field error highlight events
+  /* ------------------ Missing field highlight ------------------ */
+  // v2.6.1 redesign: the default-model slots are always visible inline (the
+  // old flow opened the DefaultModelDialog first), so highlighting only needs
+  // to mark the slot and scroll it into view.
   useEffect(() => {
     const handleHighlightMissingField = (event: any) => {
       const { field } = event.detail;
-
       if (field === "llm.main" || field === "embedding.embedding") {
-        setErrorFields((prev) => ({
-          ...prev,
-          [field]: true,
-        }));
-
-        // Find the corresponding card and scroll it into view
+        setErrorFields((prev) => ({ ...prev, [field]: true }));
         setTimeout(() => {
-          const fieldParts = field.split(".");
-          const cardType = fieldParts[0];
-
-          const selector =
-            cardType === MODEL_TYPES.EMBEDDING
-              ? ".model-card:nth-child(2)"
-              : ".model-card:nth-child(1)";
-
-          const card = document.querySelector(selector);
-          if (card) {
-            card.scrollIntoView({ behavior: "smooth", block: "center" });
-          }
+          const el = document.querySelector<HTMLElement>(
+            `[data-error-field="${field}"]`
+          );
+          el?.scrollIntoView({ behavior: "smooth", block: "center" });
         }, 100);
       }
     };
-
     window.addEventListener(
       "highlightMissingField",
       handleHighlightMissingField
     );
-    return () => {
+    return () =>
       window.removeEventListener(
         "highlightMissingField",
         handleHighlightMissingField
       );
-    };
   }, []);
 
-  // Compute current embedding connectivity from selected models and model lists
+  /* ------------------ Derived: isDefaultFor mapping ------------------ */
+  const defaultSlotMap = useMemo<Record<string, string[]>>(() => {
+    const result: Record<string, string[]> = {};
+    for (const [cat, opts] of Object.entries(selectedModels)) {
+      for (const [opt, disp] of Object.entries(opts)) {
+        if (!disp) continue;
+        const key = `${cat}.${opt}`;
+        if (!result[disp]) result[disp] = [];
+        result[disp].push(key);
+      }
+    }
+    return result;
+  }, [selectedModels]);
+
+  /* ------------------ Card-level edit / delete ------------------ */
+  const handleCardEdit = useCallback((model: ModelOption) => {
+    setEditingCardModel(model);
+  }, []);
+
+  /**
+   * Blank the default-model slots that reference any of the given display
+   * names (deleted models must not keep occupying a slot). Shared by the
+   * single delete confirm and the batch delete dialog.
+   */
+  const clearDefaultSlotsFor = useCallback(
+    (displayNames: string[]) => {
+      const removed = new Set(displayNames);
+      let configUpdates: any = {};
+      const selectedPairs: [string, string, string][] = [
+        ["llm", "main", "llm"],
+        ["embedding", "embedding", "embedding"],
+        ["embedding", "multi_embedding", "multiEmbedding"],
+        ["reranker", "reranker", "rerank"],
+        ["multimodal", "vlm", "vlm"],
+        ["multimodal", "vlm2", "vlm2"],
+        ["multimodal", "vlm3", "vlm3"],
+        ["multimodal", "vlm4", "vlm4"],
+        ["voice", "stt", "stt"],
+        ["voice", "tts", "tts"],
+      ];
+      const blank = (voice: boolean) => {
+        const base = {
+          modelName: "",
+          displayName: "",
+          apiConfig: { apiKey: "", modelUrl: "" },
+        };
+        if (voice) {
+          return {
+            ...base,
+            modelFactory: "",
+            modelAppid: "",
+            accessToken: "",
+          };
+        }
+        return base;
+      };
+      selectedPairs.forEach(([cat, opt, cfgKey]) => {
+        const current = selectedModels[cat]?.[opt];
+        if (current && removed.has(current)) {
+          setSelectedModels((p) => ({
+            ...p,
+            [cat]: { ...p[cat], [opt]: "" },
+          }));
+          if (cfgKey === "embedding" || cfgKey === "multiEmbedding") {
+            configUpdates[cfgKey] = { ...blank(false), dimension: 0 };
+          } else if (cfgKey === "stt" || cfgKey === "tts") {
+            configUpdates[cfgKey] = blank(true);
+          } else {
+            configUpdates[cfgKey] = blank(false);
+          }
+        }
+      });
+      if (Object.keys(configUpdates).length > 0) {
+        updateModelConfig(configUpdates);
+        scheduleAutoSave();
+      }
+    },
+    [selectedModels, updateModelConfig]
+  );
+
+  const handleCardDelete = useCallback(
+    async (model: ModelOption) => {
+      modal.confirm({
+        title: t("model.deleteConfirm.title", {
+          defaultValue: "确认删除该模型？",
+        }),
+        icon: <ExclamationCircleFilled />,
+        content: (
+          <div>
+            <div style={{ marginBottom: 4 }}>
+              {t("model.deleteConfirm.content", {
+                name: model.displayName || model.name,
+                defaultValue: `删除后，如该模型被作为默认模型使用将一并被清空。`,
+              })}
+            </div>
+          </div>
+        ),
+        okText: t("common.confirm", { defaultValue: "删除" }),
+        cancelText: t("common.cancel", { defaultValue: "取消" }),
+        okButtonProps: { danger: true },
+        onOk: async () => {
+          try {
+            await modelService.deleteCustomModel(
+              model.displayName,
+              model.source
+            );
+          } catch (e: any) {
+            log.error("delete custom model failed", e);
+            const msg =
+              e instanceof ModelError
+                ? e.message
+                : t("modelConfig.error.deleteModelFailed", {
+                    defaultValue: "删除模型失败",
+                  });
+            message.error(msg);
+            throw e;
+          }
+          clearDefaultSlotsFor([model.displayName]);
+          message.success(
+            t("model.message.deleteSuccess", {
+              name: model.displayName,
+              defaultValue: `已删除：${model.displayName}`,
+            })
+          );
+          await loadModelLists(true);
+        },
+      });
+    },
+    [message, modal, t, clearDefaultSlotsFor]
+  );
+
+  /* ------------------ v2.6.1 redesign: batch operations ------------------ */
+
+  const handleBatchUpdateGroup = useCallback(
+    async (group: ConnectionGroup, patch: { apiKey: string; url: string }) => {
+      setBatchUpdating(true);
+      let failed = 0;
+      for (const m of group.models) {
+        try {
+          // Partial update: only api_key + base_url are sent; the backend
+          // leaves every other field untouched.
+          await modelService.updateSingleModel({
+            currentDisplayName: m.displayName,
+            url: patch.url,
+            apiKey: patch.apiKey,
+            source: m.source,
+          });
+        } catch (e: any) {
+          failed += 1;
+          log.error("batch update model failed", m.displayName, e);
+        }
+      }
+      setBatchUpdating(false);
+      if (failed === 0) {
+        message.success(
+          t("modelConfig.batchEdit.success", {
+            count: group.models.length,
+            defaultValue: `已更新 ${group.models.length} 个模型`,
+          })
+        );
+      } else {
+        message.warning(
+          t("modelConfig.batchEdit.partialFailure", {
+            failed,
+            total: group.models.length,
+            defaultValue: `${group.models.length} 个模型中 ${failed} 个更新失败`,
+          })
+        );
+      }
+      await loadModelLists(true);
+    },
+    [message, t]
+  );
+
+  const handleBatchDeleteModels = useCallback(
+    async (targets: ModelOption[]) => {
+      setBatchDeleting(true);
+      const failed: string[] = [];
+      for (const m of targets) {
+        try {
+          await modelService.deleteCustomModel(m.displayName, m.source);
+        } catch (e: any) {
+          failed.push(m.displayName);
+          log.error("batch delete model failed", m.displayName, e);
+        }
+      }
+      setBatchDeleting(false);
+      clearDefaultSlotsFor(
+        targets
+          .filter((m) => !failed.includes(m.displayName))
+          .map((m) => m.displayName)
+      );
+      if (failed.length === 0) {
+        message.success(
+          t("modelConfig.batchDelete.success", {
+            count: targets.length,
+            defaultValue: `已删除 ${targets.length} 个模型`,
+          })
+        );
+      } else {
+        message.warning(
+          t("modelConfig.batchDelete.partialFailure", {
+            failed: failed.length,
+            total: targets.length,
+            defaultValue: `${targets.length} 个模型中 ${failed.length} 个删除失败`,
+          })
+        );
+      }
+      await loadModelLists(true);
+    },
+    [message, t, clearDefaultSlotsFor]
+  );
+
+  /* ------------------ Connectivity resolution ------------------ */
   const getEmbeddingConnectivity = () => {
     const result: {
       embedding?: ModelConnectStatus;
       multi_embedding?: ModelConnectStatus;
     } = {};
-
     const resolveStatus = (
       displayName: string,
       modelType: ModelType
@@ -236,7 +415,6 @@ export const ModelConfigSection = forwardRef<
       );
       return model?.connect_status as ModelConnectStatus | undefined;
     };
-
     result.embedding = resolveStatus(
       selectedModels.embedding?.embedding,
       MODEL_TYPES.EMBEDDING as unknown as ModelType
@@ -245,11 +423,9 @@ export const ModelConfigSection = forwardRef<
       selectedModels.embedding?.multi_embedding,
       MODEL_TYPES.MULTI_EMBEDDING as unknown as ModelType
     );
-
     return result;
   };
 
-  // Expose methods to parent component
   useImperativeHandle(ref, () => ({
     verifyModels,
     getSelectedModels: () => selectedModels,
@@ -259,7 +435,6 @@ export const ModelConfigSection = forwardRef<
       option: string,
       displayName: string
     ) => {
-      // Directly apply model change to mimic Select onChange behavior
       await applyModelChange(category, option, displayName);
     },
   }));
@@ -269,152 +444,92 @@ export const ModelConfigSection = forwardRef<
     skipVerify: boolean = false,
     refreshAgentQueries: boolean = false
   ) => {
-    if (!modelConfig) return;
-
+    // Prefer the freshest cached config over the render-time closure value:
+    // callers may have just invalidated CONFIG_QUERY_KEY (e.g. a model create
+    // auto-configured default-model slots) and this component's cfg
+    // still points at the previous render's snapshot.
+    const cachedConfig = queryClient.getQueryData<any>(CONFIG_QUERY_KEY);
+    const cfg = cachedConfig?.models ?? modelConfig;
+    if (!cfg) return;
     try {
       await invalidate();
-      const [allModels, coverage] = await Promise.all([
-        modelService.getAllModels(),
-        modelService.getCapacityCoverage(),
-      ]);
 
-      // Update state with all models
+      const allModels = await modelService.getAllModels();
       setModels(allModels);
-      setCapacityCoverage(coverage);
+
+      const exists = (
+        disp: string,
+        typeChecker: (m: ModelOption) => boolean
+      ) =>
+        disp
+          ? allModels.some((m) => m.displayName === disp && typeChecker(m))
+          : true;
 
       if (refreshAgentQueries) {
         await queryClient.invalidateQueries({ queryKey: ["agents"] });
       }
 
       // Load selected models from configuration and check if models still exist
-      const llmMain = modelConfig.llm.displayName;
-      const llmMainExists = llmMain
-        ? allModels.some(
-            (m) => m.displayName === llmMain && m.type === MODEL_TYPES.LLM
-          )
-        : true;
+      const llmMain = cfg.llm.displayName;
+      const llmMainExists = exists(llmMain, (m) => m.type === MODEL_TYPES.LLM);
+      const embedding = cfg.embedding.displayName;
+      const embeddingExists = exists(
+        embedding,
+        (m) => m.type === MODEL_TYPES.EMBEDDING
+      );
+      const multiEmbedding = cfg.multiEmbedding.displayName;
+      const multiEmbeddingExists = exists(
+        multiEmbedding,
+        (m) => m.type === MODEL_TYPES.MULTI_EMBEDDING
+      );
+      const rerank = cfg.rerank.displayName;
+      const rerankExists = exists(rerank, (m) => m.type === MODEL_TYPES.RERANK);
+      const vlm = cfg.vlm.displayName;
+      const vlm2 = cfg.vlm2?.displayName || "";
+      const vlm3 = cfg.vlm3?.displayName || "";
+      const vlm4 = cfg.vlm4?.displayName || "";
+      const vlmExists = exists(vlm, (m) => m.type === MODEL_TYPES.VLM);
+      const vlm2Exists = exists(vlm2, (m) => m.type === MODEL_TYPES.VLM2);
+      const vlm3Exists = exists(vlm3, (m) => m.type === MODEL_TYPES.VLM3);
+      const vlm4Exists = exists(vlm4, (m) => m.type === MODEL_TYPES.VLM4);
+      const stt = cfg.stt.displayName;
+      const sttExists = exists(stt, (m) => m.type === MODEL_TYPES.STT);
+      const tts = cfg.tts.displayName;
+      const ttsExists = exists(tts, (m) => m.type === MODEL_TYPES.TTS);
 
-      const embedding = modelConfig.embedding.displayName;
-      const embeddingExists = embedding
-        ? allModels.some(
-            (m) =>
-              m.displayName === embedding && m.type === MODEL_TYPES.EMBEDDING
-          )
-        : true;
-
-      const multiEmbedding = modelConfig.multiEmbedding.displayName;
-      const multiEmbeddingExists = multiEmbedding
-        ? allModels.some(
-            (m) =>
-              m.displayName === multiEmbedding &&
-              m.type === MODEL_TYPES.MULTI_EMBEDDING
-          )
-        : true;
-
-      const rerank = modelConfig.rerank.displayName;
-      const rerankExists = rerank
-        ? allModels.some(
-            (m) => m.displayName === rerank && m.type === MODEL_TYPES.RERANK
-          )
-        : true;
-
-      const vlm = modelConfig.vlm.displayName;
-      const vlm2 = modelConfig.vlm2?.displayName || "";
-      const vlm3 = modelConfig.vlm3?.displayName || "";
-      const vlm4 = modelConfig.vlm4?.displayName || "";
-      const vlmExists = vlm
-        ? allModels.some(
-            (m) => m.displayName === vlm && m.type === MODEL_TYPES.VLM
-          )
-        : true;
-      const vlm2Exists = vlm2
-        ? allModels.some(
-            (m) => m.displayName === vlm2 && m.type === MODEL_TYPES.VLM2
-          )
-        : true;
-      const vlm3Exists = vlm3
-        ? allModels.some(
-            (m) => m.displayName === vlm3 && m.type === MODEL_TYPES.VLM3
-          )
-        : true;
-      const vlm4Exists = vlm4
-        ? allModels.some(
-            (m) => m.displayName === vlm4 && m.type === MODEL_TYPES.VLM4
-          )
-        : true;
-
-      const stt = modelConfig.stt.displayName;
-      const sttExists = stt
-        ? allModels.some(
-            (m) => m.displayName === stt && m.type === MODEL_TYPES.STT
-          )
-        : true;
-
-      const tts = modelConfig.tts.displayName;
-      const ttsExists = tts
-        ? allModels.some(
-            (m) => m.displayName === tts && m.type === MODEL_TYPES.TTS
-          )
-        : true;
-
-      // Create updated selected models object
       const updatedSelectedModels = {
-        llm: {
-          main: llmMainExists ? llmMain : "",
-        },
+        llm: { main: llmMainExists ? llmMain : "" },
         embedding: {
           embedding: embeddingExists ? embedding : "",
           multi_embedding: multiEmbeddingExists ? multiEmbedding : "",
         },
-        reranker: {
-          reranker: rerankExists ? rerank : "",
-        },
+        reranker: { reranker: rerankExists ? rerank : "" },
         multimodal: {
           vlm: vlmExists ? vlm : "",
           vlm2: vlm2Exists ? vlm2 : "",
           vlm3: vlm3Exists ? vlm3 : "",
           vlm4: vlm4Exists ? vlm4 : "",
         },
-        voice: {
-          tts: ttsExists ? tts : "",
-          stt: sttExists ? stt : "",
-        },
+        voice: { tts: ttsExists ? tts : "", stt: sttExists ? stt : "" },
       };
-
-      // Update state
       setSelectedModels(updatedSelectedModels);
 
-      // If any models were deleted, synchronize and update locally stored configuration
       const configUpdates: any = {};
-
-      if (!llmMainExists && llmMain) {
-        configUpdates.llm = {
-          modelName: "",
-          displayName: "",
-          apiConfig: { apiKey: "", modelUrl: "" },
-        };
-      }
-
+      const blank = () => ({
+        modelName: "",
+        displayName: "",
+        apiConfig: { apiKey: "", modelUrl: "" },
+      });
+      if (!llmMainExists && llmMain) configUpdates.llm = blank();
       if (!embeddingExists && embedding) {
-        configUpdates.embedding = {
-          modelName: "",
-          displayName: "",
-          apiConfig: { apiKey: "", modelUrl: "" },
-        };
+        configUpdates.embedding = { ...blank(), dimension: 0 };
       }
-
       if (!multiEmbeddingExists && multiEmbedding) {
-        configUpdates.multiEmbedding = {
-          modelName: "",
-          displayName: "",
-          apiConfig: { apiKey: "", modelUrl: "" },
-        };
+        configUpdates.multiEmbedding = { ...blank(), dimension: 0 };
       }
-
       if (!rerankExists && rerank) {
         configUpdates.rerank = { modelName: "", displayName: "" };
       }
-
       if (!vlmExists && vlm) {
         configUpdates.vlm = { modelName: "", displayName: "" };
       }
@@ -430,77 +545,70 @@ export const ModelConfigSection = forwardRef<
       if (!vlm4Exists && vlm4) {
         configUpdates.vlm4 = { modelName: "", displayName: "" };
       }
-
       if (!sttExists && stt) {
-        configUpdates.stt = { modelName: "", displayName: "" };
+        configUpdates.stt = {
+          modelName: "",
+          displayName: "",
+          modelFactory: "",
+          modelAppid: "",
+          accessToken: "",
+        };
       }
-
       if (!ttsExists && tts) {
-        configUpdates.tts = { modelName: "", displayName: "" };
+        configUpdates.tts = {
+          modelName: "",
+          displayName: "",
+          modelFactory: "",
+          modelAppid: "",
+          accessToken: "",
+        };
       }
-
-      // If there are configurations to update, update localStorage
       if (Object.keys(configUpdates).length > 0) {
         updateModelConfig(configUpdates);
-        // Persist cleared/adjusted selections
         scheduleAutoSave();
       }
 
-      // Check if there are configured models that need connectivity verification
       const hasConfiguredModels =
-        !!modelConfig.llm.modelName ||
-        !!modelConfig.embedding.modelName ||
-        !!modelConfig.multiEmbedding.modelName ||
-        !!modelConfig.rerank.modelName ||
-        !!modelConfig.vlm.modelName ||
-        !!modelConfig.vlm2?.modelName ||
-        !!modelConfig.vlm3?.modelName ||
-        !!modelConfig.vlm4?.modelName ||
-        !!modelConfig.tts.modelName ||
-        !!modelConfig.stt.modelName;
+        !!cfg.llm.modelName ||
+        !!cfg.embedding.modelName ||
+        !!cfg.multiEmbedding.modelName ||
+        !!cfg.rerank.modelName ||
+        !!cfg.vlm.modelName ||
+        !!cfg.vlm2?.modelName ||
+        !!cfg.vlm3?.modelName ||
+        !!cfg.vlm4?.modelName ||
+        !!cfg.tts.modelName ||
+        !!cfg.stt.modelName;
 
-      // Perform verification directly here instead of using setTimeout
-      // This ensures we use model data from the current function scope instead of relying on state updates
-      if (allModels.length > 0) {
-        if (hasConfiguredModels && !skipVerify) {
-          // Call internal verification function, passing model data and latest selected model information
-          verifyModelsInternal(allModels, updatedSelectedModels);
-        }
+      if (allModels.length > 0 && hasConfiguredModels && !skipVerify) {
+        verifyModelsInternal(allModels, updatedSelectedModels);
       }
     } catch (error) {
-      log.error(t("modelConfig.error.loadList"), error);
-      message.error(t("modelConfig.error.loadListFailed"));
+      log.error(t("cfg.error.loadList"), error);
+      message.error(t("cfg.error.loadListFailed"));
     }
   };
 
-  // Internal verification function that accepts model data as parameters and doesn't depend on state
+  /* ------------------ Verify models ------------------ */
   const verifyModelsInternal = async (
     allModels: ModelOption[],
-    modelsToCheck?: Record<string, Record<string, string>> // Optional parameter to pass latest selected models
+    modelsToCheck?: Record<string, Record<string, string>>
   ) => {
-    // If already verifying, don't execute again
-    if (isVerifying) {
-      return;
-    }
+    if (isVerifying) return;
+    if (allModels.length === 0) return;
+    const currentSelectedModels: Record<
+      string,
+      Record<string, string>
+    > = modelsToCheck || structuredClone(selectedModels);
 
-    // Ensure model data is loaded
-    if (allModels.length === 0) {
-      return;
-    }
-
-    // Use passed model selection data or current state
-    const currentSelectedModels = modelsToCheck || selectedModels;
-
-    // Check if there are selected models that need verification
     let hasSelectedModels = false;
-    for (const category in currentSelectedModels) {
-      for (const optionId in currentSelectedModels[category]) {
-        if (currentSelectedModels[category][optionId]) {
+    outer: for (const cat in currentSelectedModels) {
+      for (const opt in currentSelectedModels[cat]) {
+        if (currentSelectedModels[cat][opt]) {
           hasSelectedModels = true;
-          break;
+          break outer;
         }
       }
-      if (hasSelectedModels) break;
     }
 
     // If no selected models in state, try to get directly from configuration
@@ -551,28 +659,20 @@ export const ModelConfigSection = forwardRef<
     }
 
     setIsVerifying(true);
-
-    // Prepare a new AbortController
     const abortController = new AbortController();
     const signal = abortController.signal;
-
-    // Save reference for cancellation
     abortControllerRef.current = abortController;
 
     try {
-      // Prepare list of models to verify
       const modelsToVerify: Array<{
         category: string;
         optionId: string;
         modelName: string;
         modelType: ModelType;
       }> = [];
-
-      // Collect all models that need verification, using passed selected model data
       for (const [category, options] of Object.entries(currentSelectedModels)) {
         for (const [optionId, modelName] of Object.entries(options)) {
           if (!modelName) continue;
-
           let modelType = category as ModelType;
           if (category === "voice") {
             modelType =
@@ -587,29 +687,26 @@ export const ModelConfigSection = forwardRef<
                 ? MODEL_TYPES.MULTI_EMBEDDING
                 : MODEL_TYPES.EMBEDDING;
           }
-
-          // Add model to verification list
           modelsToVerify.push({
             category,
             optionId,
             modelName,
             modelType,
           });
-
-          // Update model status to "checking"
           updateModelStatus(modelName, modelType, MODEL_STATUS.CHECKING);
         }
       }
-
-      // If no models need verification, show message and return
       if (modelsToVerify.length === 0) {
-        message.info({ content: "没有需要验证的模型", key: "verifying" });
+        message.info({
+          content: t("modelConfig.message.noModelToVerify", {
+            defaultValue: "没有需要验证的模型",
+          }),
+          key: "verifying",
+        });
         setIsVerifying(false);
         abortControllerRef.current = null;
         return;
       }
-
-      // Verify all models in parallel
       await Promise.all(
         modelsToVerify.map(async ({ modelName, modelType }) => {
           try {
@@ -618,31 +715,23 @@ export const ModelConfigSection = forwardRef<
               modelType,
               signal
             );
-
-            // Update model status
             updateModelStatus(
               modelName,
               modelType,
               isConnected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE
             );
           } catch (error: any) {
-            // Check if request was cancelled
-            if (error.name === "AbortError") {
-              return;
-            }
-
+            if (error.name === "AbortError") return;
             log.error(`Failed to verify model ${modelName}:`, error);
             updateModelStatus(modelName, modelType, MODEL_STATUS.UNAVAILABLE);
           }
         })
       );
     } catch (error: any) {
-      // Check if request was cancelled
       if (error.name === "AbortError") {
         log.log("Verification cancelled by user");
         return;
       }
-
       log.error("Model verification failed:", error);
     } finally {
       if (!signal.aborted) {
@@ -652,93 +741,78 @@ export const ModelConfigSection = forwardRef<
     }
   };
 
-  // Verify all selected models
   const verifyModels = async () => {
-    // If already verifying, don't execute again
-    if (isVerifying) {
-      return;
-    }
-
-    // Ensure model data is loaded
-    if (models.length === 0) {
-      // Model data not yet loaded, skip verification
-      return;
-    }
-
-    // Call internal verification function
-    await verifyModelsInternal(models, selectedModels);
+    // v0 redesign: the button lives in the 默认配置 section, so it verifies
+    // only the models currently occupying default slots — not the whole
+    // library. Non-default models are checked per-row via the list action.
+    await verifyModelsInternal(models);
   };
 
-  // Open batch add dialog with ModelEngine provider pre-selected
-  const handleSyncModels = () => {
-    setAddModalDefaultIsBatch(true);
-    setIsAddModalOpen(true);
-  };
+  /* ------------------ Verify single ------------------ */
+  // Cancel any pending single-row probes when the page unmounts.
+  useEffect(
+    () => () => {
+      verifyTimersRef.current.forEach((timer) => clearTimeout(timer));
+      verifyTimersRef.current.clear();
+    },
+    []
+  );
 
-  // Verify single model connection status (with throttling logic)
   const verifyOneModel = async (displayName: string, modelType: ModelType) => {
-    // If empty model name, return directly
     if (!displayName) return;
-
-    // Immediately update status to "checking" for instant user feedback
+    // Flip the row to CHECKING immediately so the click is always visible,
+    // and debounce per row instead of on one shared timer: with a shared
+    // timer, clicks on different rows cancelled each other, leaving the
+    // earlier row without any feedback. A per-row timer can only be
+    // superseded by clicking that same row again — impossible through the
+    // UI while it is CHECKING (the row action disables itself), so every
+    // lit "detecting" status is guaranteed to reach a terminal one.
     updateModelStatus(displayName, modelType, MODEL_STATUS.CHECKING);
-
-    // If in throttling, clear previous timer
-    if (throttleTimerRef.current) {
-      clearTimeout(throttleTimerRef.current);
-    }
-
-    // Use throttling, delay 1s before verification to avoid repeated verification when switching models frequently
-    throttleTimerRef.current = setTimeout(async () => {
-      try {
-        // Use modelService to verify model
-        const isConnected = await modelService.verifyCustomModel(
-          displayName,
-          modelType
-        );
-
-        // Update model status
-        updateModelStatus(
-          displayName,
-          modelType,
-          isConnected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE
-        );
-      } catch (error: any) {
-        log.error(
-          t("modelConfig.error.verifyCustomModel", { model: displayName }),
-          error
-        );
-        updateModelStatus(displayName, modelType, MODEL_STATUS.UNAVAILABLE);
-      } finally {
-        throttleTimerRef.current = null;
-      }
-    }, 1000);
+    const key = `${displayName}::${modelType}`;
+    const timers = verifyTimersRef.current;
+    const pending = timers.get(key);
+    if (pending) clearTimeout(pending);
+    timers.set(
+      key,
+      setTimeout(async () => {
+        timers.delete(key);
+        try {
+          const isConnected = await modelService.verifyCustomModel(
+            displayName,
+            modelType
+          );
+          updateModelStatus(
+            displayName,
+            modelType,
+            isConnected ? MODEL_STATUS.AVAILABLE : MODEL_STATUS.UNAVAILABLE
+          );
+        } catch (error: any) {
+          log.error(
+            t("modelConfig.error.verifyCustomModel", { model: displayName }),
+            error
+          );
+          updateModelStatus(displayName, modelType, MODEL_STATUS.UNAVAILABLE);
+        }
+      }, 1000)
+    );
   };
 
-  // Apply model change logic (used by confirm modal)
+  /* ------------------ Apply change ------------------ */
   const applyModelChange = async (
     category: string,
     option: string,
     displayName: string
   ) => {
-    // Update selected models
     setSelectedModels((prev) => ({
       ...prev,
-      [category]: {
-        ...prev[category],
-        [option]: displayName,
-      },
+      [category]: { ...prev[category], [option]: displayName },
     }));
-
-    // If has value, clear error state
     if (displayName) {
       setErrorFields((prev) => ({
         ...prev,
         [`${category}.${option}`]: false,
       }));
     }
-
-    // Find complete model information to get API configuration
     let modelType = category as ModelType;
     if (category === "voice") {
       modelType =
@@ -753,17 +827,12 @@ export const ModelConfigSection = forwardRef<
           ? MODEL_TYPES.MULTI_EMBEDDING
           : MODEL_TYPES.EMBEDDING;
     }
-
     const modelInfo = models.find(
       (m) => m.displayName === displayName && m.type === modelType
     );
-
-    // If newly selected model has no status, set to "unchecked"
     if (modelInfo && !modelInfo.connect_status) {
       updateModelStatus(displayName, modelType, MODEL_STATUS.UNCHECKED);
     }
-
-    // Update configuration
     let configKey = category;
     if (
       category === MODEL_TYPES.EMBEDDING &&
@@ -779,14 +848,11 @@ export const ModelConfigSection = forwardRef<
     } else if (category === "voice" && option === "stt") {
       configKey = MODEL_TYPES.STT;
     }
-
     const apiConfig = modelInfo?.apiKey
       ? { apiKey: modelInfo.apiKey, modelUrl: modelInfo.apiUrl || "" }
       : { apiKey: "", modelUrl: "" };
-
     let configUpdate: any;
     if (!displayName) {
-      // Clearing selection should actively clear stored config
       if (configKey === "embedding" || configKey === "multiEmbedding") {
         configUpdate = {
           [configKey]: {
@@ -805,14 +871,7 @@ export const ModelConfigSection = forwardRef<
           },
         };
       }
-      // Clear STT specific fields
-      if (configKey === MODEL_TYPES.STT) {
-        configUpdate[configKey].modelFactory = "";
-        configUpdate[configKey].modelAppid = "";
-        configUpdate[configKey].accessToken = "";
-      }
-      // Clear TTS specific fields
-      if (configKey === MODEL_TYPES.TTS) {
+      if (configKey === MODEL_TYPES.STT || configKey === MODEL_TYPES.TTS) {
         configUpdate[configKey].modelFactory = "";
         configUpdate[configKey].modelAppid = "";
         configUpdate[configKey].accessToken = "";
@@ -821,46 +880,30 @@ export const ModelConfigSection = forwardRef<
       configUpdate = {
         [configKey]: {
           modelName: modelInfo?.name || "",
-          displayName: displayName,
+          displayName,
           apiConfig,
         },
       };
-      // embedding needs dimension field
       if (configKey === "embedding" || configKey === "multiEmbedding") {
         configUpdate[configKey].dimension = modelInfo?.maxTokens || 0;
       }
-      // Add STT specific fields
-      if (configKey === MODEL_TYPES.STT) {
-        configUpdate[configKey].modelFactory = modelInfo?.source || "";
-        configUpdate[configKey].modelAppid = modelInfo?.modelAppid || "";
-        configUpdate[configKey].accessToken = modelInfo?.accessToken || "";
-      }
-      // Add TTS specific fields
-      if (configKey === MODEL_TYPES.TTS) {
+      if (configKey === MODEL_TYPES.STT || configKey === MODEL_TYPES.TTS) {
         configUpdate[configKey].modelFactory = modelInfo?.source || "";
         configUpdate[configKey].modelAppid = modelInfo?.modelAppid || "";
         configUpdate[configKey].accessToken = modelInfo?.accessToken || "";
       }
     }
-
-    // embedding needs dimension field
     if (configKey === "embedding" || configKey === "multiEmbedding") {
       configUpdate[configKey].dimension = modelInfo?.maxTokens || undefined;
     }
-
-    // Model configuration update
     updateModelConfig(configUpdate);
-
-    // When selecting a new model, automatically verify the model connectivity
     if (displayName) {
       await verifyOneModel(displayName, modelType);
     }
-
-    // Schedule auto-save of the updated configuration to backend
     scheduleAutoSave();
   };
 
-  // Handle model changes (with confirmation for embedding changes)
+  /* ------------------ Handle model change (w/ confirm for embedding) ------------------ */
   const handleModelChange = async (
     category: string,
     option: string,
@@ -871,10 +914,8 @@ export const ModelConfigSection = forwardRef<
       category === MODEL_TYPES.EMBEDDING &&
       (option === MODEL_TYPES.EMBEDDING ||
         option === MODEL_TYPES.MULTI_EMBEDDING);
-
     if (isEmbeddingCategory && !skipConfirm) {
       const currentValue = selectedModels[category]?.[option] || "";
-      // Only prompt when modifying from a non-empty value to a different value
       if (currentValue && currentValue !== displayName) {
         const memoryEnabled =
           option === MODEL_TYPES.EMBEDDING
@@ -902,15 +943,12 @@ export const ModelConfigSection = forwardRef<
         });
         return;
       }
-      if (currentValue === displayName) {
-        return;
-      }
+      if (currentValue === displayName) return;
     }
-
     await applyModelChange(category, option, displayName);
   };
 
-  // Only update local UI state, no database operations involved
+  /* ------------------ Update model status (UI only) ------------------ */
   const updateModelStatus = (
     displayName: string,
     modelType: string,
@@ -918,254 +956,270 @@ export const ModelConfigSection = forwardRef<
   ) => {
     setModels((prev) => {
       const idx = prev.findIndex(
-        (model) => model.displayName === displayName && model.type === modelType
+        (m) => m.displayName === displayName && m.type === modelType
       );
       if (idx === -1) return prev;
       const updated = [...prev];
-      updated[idx] = {
-        ...updated[idx],
-        connect_status: status,
-      };
+      updated[idx] = { ...updated[idx], connect_status: status };
       return updated;
     });
   };
 
+  /* ------------------ Select options ------------------ */
+
+  /* ==================== v2.6.1 redesign: derived slot data ==================== */
+  const modelSlots = useMemo(() => buildModelSlots(t), [t]);
+  const configuredSlotCount = useMemo(
+    () =>
+      Object.values(selectedModels).reduce(
+        (acc, opts) => acc + Object.values(opts).filter(Boolean).length,
+        0
+      ),
+    [selectedModels]
+  );
+
+  /* ==================== Render ==================== */
   return (
     <>
-      <div
-        style={{
-          width: "100%",
-          margin: "0 auto",
-          height: "100%",
-          display: "flex",
-          flexDirection: "column",
-          gap: "12px",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            justifyContent: "flex-start",
-            gap: 8,
-            paddingRight: 12,
-            paddingTop: "16px",
-            marginLeft: "4px",
-            minHeight: LAYOUT_CONFIG.BUTTON_AREA_HEIGHT,
-            marginBottom: "16px",
-          }}
-        >
-          {modelEngineEnable && (
-            <Button
-              type="primary"
-              size="middle"
-              onClick={handleSyncModels}
-              icon={<RefreshCw size={16} />}
-            >
-              <span className="button-text-full">
-                {t("modelConfig.button.syncModelEngine")}
-              </span>
-            </Button>
-          )}
-          <Can permission="model:create">
-            <Button
-              type="primary"
-              size="middle"
-              icon={<Plus size={16} />}
-              onClick={() => {
-                setAddModalDefaultIsBatch(false);
-                setIsAddModalOpen(true);
-              }}
-            >
-              <span className="button-text-full">
-                {t("modelConfig.button.addCustomModel")}
-              </span>
-            </Button>
-          </Can>
-          <Can permission="model:update">
-            <Button
-              type="primary"
-              size="middle"
-              icon={<PenLine size={16} />}
-              onClick={() => setIsDeleteModalOpen(true)}
-            >
-              <span className="button-text-full">
-                {t("modelConfig.button.editCustomModel")}
-              </span>
-            </Button>
-          </Can>
-          <Button
-            type="primary"
-            size="middle"
-            icon={<ShieldCheck size={16} />}
-            onClick={verifyModels}
-            loading={isVerifying}
-          >
-            <span className="button-text-full">
-              {t("modelConfig.button.checkConnectivity")}
-            </span>
-          </Button>
-        </div>
+      <TooltipProvider delayDuration={150}>
+        {/* px-2 matches CARD_HEADER.PADDING so section titles align with the
+          page header ("模型设置") above. h-full: the default-config card
+          takes its natural height; the library section fills the rest and
+          scrolls its list internally. */}
+        <div className="flex h-full w-full flex-col gap-8 px-2">
+          {/* ========== Section 1: 默认配置 (inline slots, v0 redesign) ========== */}
+          <section className="shrink-0">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <h3 className="text-base font-semibold text-foreground">
+                  {t("modelConfig.section.defaultConfig", {
+                    defaultValue: "默认配置",
+                  })}
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  {t("modelConfig.section.defaultConfigHint", {
+                    defaultValue: "未配置模型时默认选用以下模型",
+                  })}
+                </span>
+                <Badge
+                  variant="secondary"
+                  className="tabular-nums text-[10px] font-normal"
+                >
+                  {t("modelConfig.section.configuredCount", {
+                    configured: configuredSlotCount,
+                    total: modelSlots.length,
+                    defaultValue: `已配置 ${configuredSlotCount}/${modelSlots.length}`,
+                  })}
+                </Badge>
+              </div>
+              <Can permission="model:update">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={verifyModels}
+                  disabled={isVerifying}
+                >
+                  {isVerifying ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="size-4" />
+                  )}
+                  {t("modelConfig.button.checkConnectivity")}
+                </Button>
+              </Can>
+            </div>
 
-        {capacityCoverage && capacityCoverage.bareCount > 0 && (
-          <Alert
-            type="warning"
-            showIcon
-            message={t("modelConfig.capacityCoverage.warning", {
-              bareCount: capacityCoverage.bareCount,
-              total: capacityCoverage.totalLlmVlm,
-            })}
-            description={t("modelConfig.capacityCoverage.description", {
-              suggestionCount: capacityCoverage.bareModels.filter(
-                (model) => model.suggestionAvailable
-              ).length,
-            })}
-            action={
-              <Button size="small" onClick={() => setIsDeleteModalOpen(true)}>
-                {t("modelConfig.capacityCoverage.manage")}
-              </Button>
-            }
-          />
-        )}
+            <Card className="gap-0 p-5 sm:p-6">
+              {/* Legend */}
+              <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b pb-4 text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {t("modelConfig.section.legendTitle", {
+                    defaultValue: "配置说明",
+                  })}
+                </span>
+                <span>
+                  {t("modelConfig.section.legendRequired", {
+                    defaultValue: "标注（必填）的模型系统运行必须配置",
+                  })}
+                </span>
+                <span>
+                  {t("modelConfig.section.legendRecommended", {
+                    defaultValue: "标注（推荐）的模型按需推荐配置",
+                  })}
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="size-2 rounded-full bg-emerald-500" />
+                  {t("modelConfig.section.legendDot", {
+                    defaultValue: "绿色代表已连通",
+                  })}
+                </span>
+              </div>
 
-        <div
-          style={{
-            width: "100%",
-            padding: "0 4px",
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-          <Row
-            gutter={[LAYOUT_CONFIG.CARD_GAP, LAYOUT_CONFIG.CARD_GAP]}
-            style={{ flex: 1 }}
-          >
-            {Object.entries(modelData).map(([key, category]) => (
-              <Col
-                xs={24}
-                md={8}
-                lg={8}
-                key={key}
-                style={{ height: "calc((100% - 12px) / 2)" }}
-              >
-                <Card
-                  title={
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        margin: "-12px -24px",
-                        padding: LAYOUT_CONFIG.CARD_HEADER_PADDING,
-                        paddingBottom: "12px",
-                        backgroundColor:
-                          CARD_THEMES[key as keyof typeof CARD_THEMES]
-                            .backgroundColor,
-                        borderBottom: `1px solid ${
-                          CARD_THEMES[key as keyof typeof CARD_THEMES]
-                            .borderColor
-                        }`,
-                        height: `${LAYOUT_CONFIG.HEADER_HEIGHT - 12}px`, // Subtract paddingBottom
+              {/* Flat slot grid (replaces the DefaultModelDialog). Slots stay
+                  visible for read-only users (model:read) but are disabled —
+                  changing default slots is an update operation (#4008). */}
+              <div className="grid grid-cols-1 gap-x-8 gap-y-5 pt-5 md:grid-cols-2 xl:grid-cols-3">
+                {modelSlots.map((slot) => (
+                  <ModelSlotSelect
+                    key={slot.fieldKey}
+                    slot={slot}
+                    models={models}
+                    value={selectedModels[slot.category]?.[slot.option] ?? ""}
+                    error={!!errorFields[slot.fieldKey]}
+                    disabled={!canUpdateModels}
+                    onChange={(displayName) =>
+                      handleModelChange(slot.category, slot.option, displayName)
+                    }
+                  />
+                ))}
+              </div>
+            </Card>
+          </section>
+
+          {/* ========== Section 2: 模型库 (fills the remaining height) ========== */}
+          <section className="flex min-h-0 w-full flex-1 flex-col gap-3">
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <h3 className="text-base font-semibold text-foreground">
+                  {t("modelConfig.section.modelLibrary", {
+                    defaultValue: "模型库",
+                  })}
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  {t("modelConfig.section.modelLibraryHint", {
+                    defaultValue: "管理已添加的全部模型",
+                  })}
+                </span>
+                <Badge
+                  variant="secondary"
+                  className="tabular-nums text-[10px] font-normal"
+                >
+                  {models.length}
+                </Badge>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {/* v2.6.1: add first, then the rest */}
+                <Can permission="model:create">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setAddDialogTab("single");
+                      setIsAddModalV2Open(true);
+                    }}
+                  >
+                    <Plus className="size-4" />
+                    {t("modelConfig.button.addModel", {
+                      defaultValue: "添加模型",
+                    })}
+                  </Button>
+                </Can>
+                {modelEngineEnable && (
+                  <Can permission="model:update">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setAddDialogTab("batch");
+                        setIsAddModalV2Open(true);
                       }}
                     >
-                      <h5
-                        style={{
-                          margin: 0,
-                          marginLeft: LAYOUT_CONFIG.MODEL_TITLE_MARGIN_LEFT,
-                          fontSize: "14px",
-                          lineHeight: "32px",
-                        }}
-                      >
-                        {category.title}
-                      </h5>
-                    </div>
-                  }
-                  variant="outlined"
-                  className="model-card"
-                  styles={{
-                    body: {
-                      padding: LAYOUT_CONFIG.CARD_BODY_PADDING,
-                      height: `calc(100% - ${LAYOUT_CONFIG.HEADER_HEIGHT}px)`,
-                    },
-                  }}
-                  style={{
-                    height: "100%",
-                    backgroundColor: "#ffffff",
-                    display: "flex",
-                    flexDirection: "column",
-                  }}
-                >
-                  <Space
-                    orientation="vertical"
-                    style={{
-                      width: "100%",
-                      height: "100%",
+                      <RefreshCw className="size-4" />
+                      {t("modelConfig.button.syncModelEngine")}
+                    </Button>
+                  </Can>
+                )}
+                <Can permission="model:update">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setManagerMode("editGroup");
+                      setIsManagerOpen(true);
                     }}
-                    size={12}
                   >
-                    {category.options.map((option) => (
-                      <ModelListCard
-                        key={option.id}
-                        type={
-                          key === "voice"
-                            ? option.id === MODEL_TYPES.TTS
-                              ? MODEL_TYPES.TTS
-                              : MODEL_TYPES.STT
-                            : key === "multimodal"
-                              ? (option.id as ModelType)
-                              : key === MODEL_TYPES.EMBEDDING &&
-                                  option.id === MODEL_TYPES.MULTI_EMBEDDING
-                                ? MODEL_TYPES.MULTI_EMBEDDING
-                                : key === "reranker"
-                                  ? MODEL_TYPES.RERANK
-                                  : (key as ModelType)
-                        }
-                        modelId={option.id}
-                        modelTypeName={option.name}
-                        selectedModel={selectedModels[key]?.[option.id] || ""}
-                        onModelChange={(modelName) =>
-                          handleModelChange(key, option.id, modelName)
-                        }
-                        models={models}
-                        onVerifyModel={verifyOneModel}
-                        errorFields={errorFields}
-                      />
-                    ))}
-                  </Space>
-                </Card>
-              </Col>
-            ))}
-          </Row>
+                    <Pencil className="size-4" />
+                    {t("modelConfig.batchEdit.title", {
+                      defaultValue: "批量修改",
+                    })}
+                  </Button>
+                </Can>
+                <Can permission="model:delete">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => {
+                      setManagerMode("deleteGroup");
+                      setIsManagerOpen(true);
+                    }}
+                  >
+                    <Trash2 className="size-4" />
+                    {t("modelConfig.batchDelete.title", {
+                      defaultValue: "批量删除",
+                    })}
+                  </Button>
+                </Can>
+              </div>
+            </div>
+
+            {/* -------------------- Model library list (v0 redesign) -------------------- */}
+            <ModelLibraryList
+              models={models}
+              defaultSlotMap={defaultSlotMap}
+              onCheck={verifyOneModel}
+              onEdit={handleCardEdit}
+              onDelete={handleCardDelete}
+            />
+          </section>
+
+          {/* -------------------- Dialogs -------------------- */}
+          {/* v2.6.1: add-model dialog (v0 design: single / batch tabs) */}
+          <ModelAddDialog
+            isOpen={isAddModalV2Open}
+            onClose={() => setIsAddModalV2Open(false)}
+            initialTab={addDialogTab}
+            onSuccess={async (newModel) => {
+              // Invalidate FIRST so the refetch completes before loadModelLists
+              // reads the cache (a model create may have auto-configured
+              // default-model slots that must be reflected immediately).
+              await queryClient.invalidateQueries({
+                queryKey: CONFIG_QUERY_KEY,
+              });
+              await loadModelLists(true);
+              if (newModel && newModel.name && newModel.type) {
+                setTimeout(() => {
+                  verifyOneModel(newModel.name, newModel.type);
+                }, 100);
+              }
+            }}
+          />
+
+          {/* v2.6.1 redesign: batch edit / delete by connection group */}
+          <ModelManagerDialog
+            open={isManagerOpen}
+            mode={managerMode}
+            models={models}
+            onClose={() => setIsManagerOpen(false)}
+            onUpdateGroup={handleBatchUpdateGroup}
+            onDeleteModels={handleBatchDeleteModels}
+            updating={batchUpdating}
+            deleting={batchDeleting}
+          />
+
+          {/* v2.6.1: per-model edit dialog (v0 design, single-page form) */}
+          {editingCardModel && (
+            <ModelEditDialog
+              key={editingCardModel.id}
+              model={editingCardModel}
+              onClose={() => setEditingCardModel(null)}
+              onSuccess={async () => {
+                setEditingCardModel(null);
+                await loadModelLists(true);
+              }}
+            />
+          )}
         </div>
-
-        <ModelAddDialog
-          isOpen={isAddModalOpen}
-          onClose={() => setIsAddModalOpen(false)}
-          onSuccess={async (newModel) => {
-            await loadModelLists(true, true);
-            message.success(t("modelConfig.message.addSuccess"));
-
-            if (newModel && newModel.name && newModel.type) {
-              setTimeout(() => {
-                verifyOneModel(newModel.name, newModel.type);
-              }, 100);
-            }
-          }}
-          defaultProvider="modelengine"
-          defaultIsBatchImport={addModalDefaultIsBatch}
-        />
-
-        <ModelDeleteDialog
-          isOpen={isDeleteModalOpen}
-          onClose={() => setIsDeleteModalOpen(false)}
-          onSuccess={async () => {
-            await loadModelLists(true, true);
-            return;
-          }}
-          models={models}
-          capacityCoverage={capacityCoverage}
-        />
-      </div>
+      </TooltipProvider>
     </>
   );
 });

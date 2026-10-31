@@ -1,5 +1,11 @@
-"""Unit tests for backend.apps.agent_repository_app module."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+"""Unit tests for management.api.agent.agent_repository module."""
+
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_contract_stubs
+import importlib
+import json
 import os
 import sys
 import types
@@ -15,14 +21,17 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.insert(0, backend_dir)
 
-sys.modules.setdefault("services.agent_repository_service", MagicMock())
-sys.modules.setdefault("utils.auth_utils", MagicMock())
+# Load the real sync module before this API test installs shared dependency stubs.
+# Otherwise its MagicMock remains in sys.modules when sync service tests collect.
+importlib.import_module("management.services.repository.agent.sync")
+sys.modules.setdefault("management.services.repository.agent.listing", MagicMock())
+sys.modules.setdefault("gateway.authentication.auth", MagicMock())
 
-consts_model = types.ModuleType("consts.model")
+consts_model = types.ModuleType("contracts.agent")
 
 
 class _AgentRepositoryListingCreateRequest(BaseModel):
-    icon: Optional[str] = None
+    icon_url: Optional[str] = None
     downloads: int = Field(0, ge=0)
     tags: Optional[List[str]] = None
     tool_count: Optional[int] = Field(None, ge=0)
@@ -34,18 +43,32 @@ class _SkillResolution(BaseModel):
     new_name: Optional[str] = None
 
 
+class _KnowledgeBaseResolution(BaseModel):
+    knowledge_name: str
+    action: str
+
+
 consts_model.AgentRepositoryListingCreateRequest = _AgentRepositoryListingCreateRequest
 consts_model.SkillResolution = _SkillResolution
-sys.modules["consts.model"] = consts_model
+consts_model.KnowledgeBaseResolution = _KnowledgeBaseResolution
 
-consts_exceptions_mock = types.ModuleType("consts.exceptions")
+class _TagAssignmentFilter(BaseModel):
+    definition_id: int
+    value_ids: list[int]
+
+
+consts_model.TagAssignmentFilter = _TagAssignmentFilter
+install_business_contract_stubs(consts_model)
+
+consts_exceptions_mock = types.ModuleType("contracts.errors.exceptions")
 consts_exceptions_mock.SkillDuplicateError = type('SkillDuplicateError', (Exception,), {})
 consts_exceptions_mock.UnauthorizedError = type('UnauthorizedError', (Exception,), {})
 consts_exceptions_mock.NotFoundException = type('NotFoundException', (Exception,), {})
 consts_exceptions_mock.ValidationError = type('ValidationError', (Exception,), {})
 consts_exceptions_mock.AppException = type('AppException', (Exception,), {})
 consts_exceptions_mock.ForbiddenError = type('ForbiddenError', (Exception,), {})
-sys.modules["consts.exceptions"] = consts_exceptions_mock
+consts_exceptions_mock.AgentToolImportError = type("AgentToolImportError", (ValueError,), {})
+install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
 
 consts_pkg = sys.modules.get("consts")
 if consts_pkg is None:
@@ -61,11 +84,105 @@ _ForbiddenError = consts_exceptions_mock.ForbiddenError
 _AppException = consts_exceptions_mock.AppException
 _SkillDuplicateError = consts_exceptions_mock.SkillDuplicateError
 
-from apps.agent_repository_app import agent_repository_router
+from management.api.agent.agent_repository import agent_repository_router, sync_official_agents_api
 
 app = FastAPI()
 app.include_router(agent_repository_router)
 client = TestClient(app)
+
+
+def test_upload_repository_icon_uses_separate_route(mocker):
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    upload = mocker.patch(
+        "management.api.agent.agent_repository.upload_agent_repository_icon_impl",
+        new_callable=AsyncMock,
+        return_value={"icon_url": "/api/repository/agent/7/versions/2/icon/image-id"},
+    )
+    response = client.post(
+        "/repository/agent/7/versions/2/icon",
+        files={"file": ("icon.png", b"image", "image/png")},
+    )
+    assert response.status_code == 200
+    upload.assert_awaited_once_with(7, 2, "tenant-1", "user-1", b"image")
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code"),
+    [
+        (ValueError("invalid icon"), 400),
+        (_UnauthorizedError("no listing access"), 403),
+    ],
+)
+def test_upload_repository_icon_maps_service_errors(mocker, error, status_code):
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    upload = mocker.patch(
+        "management.api.agent.agent_repository.upload_agent_repository_icon_impl",
+        new_callable=AsyncMock,
+        side_effect=error,
+    )
+
+    response = client.post(
+        "/repository/agent/7/versions/2/icon",
+        files={"file": ("icon.png", b"image", "image/png")},
+    )
+
+    assert response.status_code == status_code
+    assert response.json()["detail"] == str(error)
+    upload.assert_awaited_once_with(7, 2, "tenant-1", "user-1", b"image")
+
+
+def test_repository_icon_read_requires_listing_access(mocker):
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("user-1", "tenant-1"),
+    )
+    read = mocker.patch(
+        "management.api.agent.agent_repository.get_agent_repository_icon_impl",
+        side_effect=FileNotFoundError("Repository icon not found"),
+    )
+    response = client.get("/repository/agent/7/versions/2/icon/image-id")
+    assert response.status_code == 404
+    read.assert_called_once_with(7, 2, "image-id", "tenant-1")
+
+
+@pytest.mark.asyncio
+async def test_sync_official_agents_api_accepts_loopback_request(mocker):
+    request = MagicMock()
+    request.client.host = "127.0.0.1"
+    mock_sync = mocker.patch(
+        "management.api.agent.agent_repository.sync_official_agents",
+        new_callable=AsyncMock,
+        return_value=[{"name": "medical-assistant"}],
+    )
+
+    response = await sync_official_agents_api(
+        request,
+        profiles="medical",
+    )
+
+    assert response.body == (
+        b'{"synchronized":1,"items":[{"name":"medical-assistant"}]}'
+    )
+    mock_sync.assert_awaited_once_with(
+        profiles="medical",
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_official_agents_api_rejects_non_loopback_request():
+    request = MagicMock()
+    request.client.host = "172.20.0.5"
+
+    with pytest.raises(Exception) as error:
+        await sync_official_agents_api(request)
+
+    assert error.value.status_code == 403
 
 
 @pytest.fixture
@@ -79,10 +196,10 @@ def test_list_agent_repository_listings_api_success(
 ):
     """Test list API forwards query parameters to service."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_list = mocker.patch(
-        "apps.agent_repository_app.list_agent_repository_listings_impl",
+        "management.api.agent.agent_repository.list_agent_repository_listings_impl",
     )
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
@@ -99,6 +216,7 @@ def test_list_agent_repository_listings_api_success(
         page=1,
         page_size=10,
         search=None,
+        sort_by_update_time=False,
     )
 
 
@@ -108,10 +226,10 @@ def test_list_agent_repository_listings_api_passes_agent_id(
 ):
     """Test list API forwards agent_id query parameter to service."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_list = mocker.patch(
-        "apps.agent_repository_app.list_agent_repository_listings_impl",
+        "management.api.agent.agent_repository.list_agent_repository_listings_impl",
     )
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
@@ -130,6 +248,7 @@ def test_list_agent_repository_listings_api_passes_agent_id(
         page=1,
         page_size=10,
         search=None,
+        sort_by_update_time=False,
     )
 
 
@@ -139,10 +258,10 @@ def test_list_agent_repository_listings_api_passes_pending_review_status(
 ):
     """Test list API forwards pending_review status to service."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_list = mocker.patch(
-        "apps.agent_repository_app.list_agent_repository_listings_impl",
+        "management.api.agent.agent_repository.list_agent_repository_listings_impl",
     )
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
@@ -161,6 +280,7 @@ def test_list_agent_repository_listings_api_passes_pending_review_status(
         page=1,
         page_size=10,
         search=None,
+        sort_by_update_time=False,
     )
 
 
@@ -170,10 +290,10 @@ def test_list_agent_repository_listings_api_passes_pagination_and_search(
 ):
     """Test list API forwards pagination and search query parameters to service."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_list = mocker.patch(
-        "apps.agent_repository_app.list_agent_repository_listings_impl",
+        "management.api.agent.agent_repository.list_agent_repository_listings_impl",
     )
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
@@ -200,16 +320,168 @@ def test_list_agent_repository_listings_api_passes_pagination_and_search(
         page=2,
         page_size=6,
         search="alpha",
+        sort_by_update_time=False,
     )
+
+
+def test_list_agent_repository_listings_api_passes_tag_filter(
+    mocker,
+    mock_auth_header,
+):
+    """Test list API forwards an exact repository tag filter."""
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list = mocker.patch(
+        "management.api.agent.agent_repository.list_agent_repository_listings_impl",
+        return_value={"items": []},
+    )
+
+    response = client.get("/repository/agent?tag=operations", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    mock_list.assert_called_once_with(
+        "test_tenant_id",
+        status=None,
+        agent_id=None,
+        page=1,
+        page_size=10,
+        search=None,
+        tag="operations",
+        sort_by_update_time=False,
+    )
+
+
+def test_list_agent_repository_listings_api_passes_search_tag_predicates(
+    mocker,
+    mock_auth_header,
+):
+    """Test listing API forwards structured tag matches for text search."""
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list = mocker.patch(
+        "management.api.agent.agent_repository.list_agent_repository_listings_impl",
+        return_value={"items": []},
+    )
+
+    response = client.get(
+        "/repository/agent",
+        headers=mock_auth_header,
+        params={
+            "search": "智能体类别",
+            "search_tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert mock_list.call_args.kwargs["search_tag_predicates"] == [
+        _TagAssignmentFilter(definition_id=1, value_ids=[2])
+    ]
+
+
+def test_list_agent_repository_listings_api_passes_tag_predicates(
+    mocker,
+    mock_auth_header,
+):
+    """Test listing API forwards structured tag filters."""
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list = mocker.patch(
+        "management.api.agent.agent_repository.list_agent_repository_listings_impl",
+        return_value={"items": []},
+    )
+
+    response = client.get(
+        "/repository/agent",
+        headers=mock_auth_header,
+        params={
+            "tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    assert mock_list.call_args.kwargs["tag_predicates"] == [
+        _TagAssignmentFilter(definition_id=1, value_ids=[2])
+    ]
+
+
+def test_list_agent_repository_listings_api_passes_sort_selector(
+    mocker,
+    mock_auth_header,
+):
+    """Test listing API forwards the latest-first sort selector to the service."""
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list = mocker.patch(
+        "management.api.agent.agent_repository.list_agent_repository_listings_impl",
+        return_value={"items": []},
+    )
+
+    response = client.get(
+        "/repository/agent?sort_by_update_time=true",
+        headers=mock_auth_header,
+    )
+
+    assert response.status_code == 200
+    assert mock_list.call_args.kwargs["sort_by_update_time"] is True
+
+
+def test_list_agent_repository_listings_api_returns_main_agent_flag(
+    mocker,
+    mock_auth_header,
+):
+    """Test listing API response carries the main-agent flag through to the client."""
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mocker.patch(
+        "management.api.agent.agent_repository.list_agent_repository_listings_impl",
+        return_value={"items": [{"agent_repository_id": 1, "is_main_agent": False}]},
+    )
+
+    response = client.get("/repository/agent", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    assert response.json()["items"][0]["is_main_agent"] is False
+
+
+def test_list_agent_repository_tag_stats_api(mocker, mock_auth_header):
+    """Test tag-stat endpoint returns the service result for the caller tenant."""
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_stats = mocker.patch(
+        "management.api.agent.agent_repository.list_agent_repository_tag_stats_impl",
+        return_value=[{"tag": "operations", "count": 2}],
+    )
+
+    response = client.get("/repository/agent/tags", headers=mock_auth_header)
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [{"tag": "operations", "count": 2}]}
+    mock_stats.assert_called_once_with("test_tenant_id")
 
 
 def test_create_agent_repository_listing_api_success(mocker, mock_auth_header):
     """Test create_agent_repository_listing_api success case."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_create_listing = mocker.patch(
-        "apps.agent_repository_app.create_agent_repository_listing_impl",
+        "management.api.agent.agent_repository.create_agent_repository_listing_impl",
         new_callable=AsyncMock,
     )
 
@@ -242,10 +514,10 @@ def test_create_agent_repository_listing_api_success(mocker, mock_auth_header):
 def test_create_agent_repository_listing_api_draft_version(mocker, mock_auth_header):
     """Test create_agent_repository_listing_api with draft version (version_no=0)."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_create_listing = mocker.patch(
-        "apps.agent_repository_app.create_agent_repository_listing_impl",
+        "management.api.agent.agent_repository.create_agent_repository_listing_impl",
         new_callable=AsyncMock,
     )
 
@@ -276,10 +548,10 @@ def test_create_agent_repository_listing_api_draft_version(mocker, mock_auth_hea
 def test_create_agent_repository_listing_api_bad_request(mocker, mock_auth_header):
     """Test create_agent_repository_listing_api with ValueError."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_create_listing = mocker.patch(
-        "apps.agent_repository_app.create_agent_repository_listing_impl",
+        "management.api.agent.agent_repository.create_agent_repository_listing_impl",
         new_callable=AsyncMock,
     )
 
@@ -298,10 +570,10 @@ def test_create_agent_repository_listing_api_bad_request(mocker, mock_auth_heade
 def test_create_agent_repository_listing_api_rejects_asset_owner(mocker, mock_auth_header):
     """Test create_agent_repository_listing_api rejects ASSET_OWNER agents with 400."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_create_listing = mocker.patch(
-        "apps.agent_repository_app.create_agent_repository_listing_impl",
+        "management.api.agent.agent_repository.create_agent_repository_listing_impl",
         new_callable=AsyncMock,
     )
 
@@ -320,10 +592,10 @@ def test_create_agent_repository_listing_api_rejects_asset_owner(mocker, mock_au
 def test_create_agent_repository_listing_api_exception(mocker, mock_auth_header):
     """Test create_agent_repository_listing_api propagates unknown exceptions."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_create_listing = mocker.patch(
-        "apps.agent_repository_app.create_agent_repository_listing_impl",
+        "management.api.agent.agent_repository.create_agent_repository_listing_impl",
         new_callable=AsyncMock,
     )
 
@@ -340,10 +612,10 @@ def test_create_agent_repository_listing_api_exception(mocker, mock_auth_header)
 def test_update_agent_repository_status_api_success(mocker, mock_auth_header):
     """Test update_agent_repository_status_api passes tenant_id to service."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_update_status = mocker.patch(
-        "apps.agent_repository_app.update_agent_repository_status_impl",
+        "management.api.agent.agent_repository.update_agent_repository_status_impl",
     )
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
@@ -375,10 +647,10 @@ def test_update_agent_repository_status_api_success(mocker, mock_auth_header):
 def test_update_agent_repository_status_api_unauthorized(mocker, mock_auth_header):
     """Test update_agent_repository_status_api maps UnauthorizedError to 401."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_update_status = mocker.patch(
-        "apps.agent_repository_app.update_agent_repository_status_impl",
+        "management.api.agent.agent_repository.update_agent_repository_status_impl",
     )
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
@@ -397,10 +669,10 @@ def test_update_agent_repository_status_api_unauthorized(mocker, mock_auth_heade
 def test_update_agent_repository_status_api_bad_request(mocker, mock_auth_header):
     """Test update_agent_repository_status_api maps ValueError to 400."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_update_status = mocker.patch(
-        "apps.agent_repository_app.update_agent_repository_status_impl",
+        "management.api.agent.agent_repository.update_agent_repository_status_impl",
     )
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
@@ -419,10 +691,10 @@ def test_update_agent_repository_status_api_bad_request(mocker, mock_auth_header
 def test_create_agent_repository_listing_api_passes_card_fields(mocker, mock_auth_header):
     """Test create listing API forwards card_fields from request body."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_create_listing = mocker.patch(
-        "apps.agent_repository_app.create_agent_repository_listing_impl",
+        "management.api.agent.agent_repository.create_agent_repository_listing_impl",
         new_callable=AsyncMock,
     )
 
@@ -435,7 +707,7 @@ def test_create_agent_repository_listing_api_passes_card_fields(mocker, mock_aut
     }
 
     payload = {
-        "icon": "🤖",
+        "icon_url": None,
         "tags": ["代码审查", "自定义"],
         "downloads": 0,
     }
@@ -461,10 +733,10 @@ def test_list_my_editable_agents_api_success_default_ownership(
 ):
     """Test mine API returns items and counts with default ownership."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_list_mine = mocker.patch(
-        "apps.agent_repository_app.list_my_editable_agents_impl",
+        "management.api.agent.agent_repository.list_my_editable_agents_impl",
         new_callable=AsyncMock,
     )
 
@@ -512,10 +784,10 @@ def test_list_my_editable_agents_api_passes_ownership_filter(
 ):
     """Test mine API forwards ownership query parameter to service."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_list_mine = mocker.patch(
-        "apps.agent_repository_app.list_my_editable_agents_impl",
+        "management.api.agent.agent_repository.list_my_editable_agents_impl",
         new_callable=AsyncMock,
     )
 
@@ -549,16 +821,78 @@ def test_list_my_editable_agents_api_passes_ownership_filter(
     )
 
 
+def test_list_my_editable_agents_api_passes_tag_predicates(
+    mocker,
+    mock_auth_header,
+):
+    """Test mine API parses and forwards structured tag filters."""
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list_mine = mocker.patch(
+        "management.api.agent.agent_repository.list_my_editable_agents_impl",
+        new_callable=AsyncMock,
+        return_value={"items": [], "counts": {}, "pagination": {"total": 0}},
+    )
+
+    response = client.get(
+        "/repository/agent/mine",
+        headers=mock_auth_header,
+        params={
+            "tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    tag_predicates = mock_list_mine.call_args.kwargs["tag_predicates"]
+    assert tag_predicates == [_TagAssignmentFilter(definition_id=1, value_ids=[2])]
+
+
+def test_list_my_editable_agents_api_passes_search_tag_predicates(
+    mocker,
+    mock_auth_header,
+):
+    """Test mine API forwards structured tag matches for text search."""
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("test_user_id", "test_tenant_id"),
+    )
+    mock_list_mine = mocker.patch(
+        "management.api.agent.agent_repository.list_my_editable_agents_impl",
+        new_callable=AsyncMock,
+        return_value={"items": [], "counts": {}, "pagination": {"total": 0}},
+    )
+
+    response = client.get(
+        "/repository/agent/mine",
+        headers=mock_auth_header,
+        params={
+            "search": "智能体类别",
+            "search_tag_predicates": json.dumps(
+                [{"definition_id": 1, "value_ids": [2]}]
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert mock_list_mine.call_args.kwargs["search_tag_predicates"] == [
+        _TagAssignmentFilter(definition_id=1, value_ids=[2])
+    ]
+
+
 def test_list_my_editable_agents_api_passes_pagination_and_search(
     mocker,
     mock_auth_header,
 ):
     """Test mine API forwards pagination and search query parameters to service."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_list_mine = mocker.patch(
-        "apps.agent_repository_app.list_my_editable_agents_impl",
+        "management.api.agent.agent_repository.list_my_editable_agents_impl",
         new_callable=AsyncMock,
     )
 
@@ -598,10 +932,10 @@ def test_list_my_editable_agents_api_passes_new_agent_padding(
 ):
     """Test mine API forwards new_agent_padding query parameter to service."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_list_mine = mocker.patch(
-        "apps.agent_repository_app.list_my_editable_agents_impl",
+        "management.api.agent.agent_repository.list_my_editable_agents_impl",
         new_callable=AsyncMock,
     )
 
@@ -641,10 +975,10 @@ def test_list_my_editable_agents_api_passes_agent_id(
 ):
     """Test mine API forwards agent_id query parameter to service."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_list_mine = mocker.patch(
-        "apps.agent_repository_app.list_my_editable_agents_impl",
+        "management.api.agent.agent_repository.list_my_editable_agents_impl",
         new_callable=AsyncMock,
     )
 
@@ -681,10 +1015,10 @@ def test_list_my_editable_agents_api_passes_agent_id(
 def test_list_my_editable_agents_api_bad_request(mocker, mock_auth_header):
     """Test mine API maps ValueError to 400."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_list_mine = mocker.patch(
-        "apps.agent_repository_app.list_my_editable_agents_impl",
+        "management.api.agent.agent_repository.list_my_editable_agents_impl",
         new_callable=AsyncMock,
     )
 
@@ -706,21 +1040,23 @@ def test_get_agent_repository_listing_detail_api_passes_tenant_id(
 ):
     """Test detail API forwards caller tenant_id to service."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_get_detail = mocker.patch(
-        "apps.agent_repository_app.get_agent_repository_listing_detail_impl",
+        "management.api.agent.agent_repository.get_agent_repository_listing_detail_impl",
     )
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
     mock_get_detail.return_value = {
         "agent_repository_id": 42,
         "name": "agent_one",
+        "is_main_agent": False,
     }
 
     response = client.get("/repository/agent/42", headers=mock_auth_header)
 
     assert response.status_code == 200
+    assert response.json()["is_main_agent"] is False
     mock_get_detail.assert_called_once_with(42, "test_tenant_id")
 
 
@@ -730,10 +1066,10 @@ def test_import_agent_from_repository_api_passes_tenant_id(
 ):
     """Test import API forwards caller tenant_id to service."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_import = mocker.patch(
-        "apps.agent_repository_app.import_agent_from_repository_impl",
+        "management.api.agent.agent_repository.import_agent_from_repository_impl",
         new_callable=AsyncMock,
     )
 
@@ -751,7 +1087,26 @@ def test_import_agent_from_repository_api_passes_tenant_id(
         tenant_id="test_tenant_id",
         authorization=mock_auth_header["Authorization"],
         skill_resolutions=None,
+        model_ids=None,
+        embedding_model_ids=None,
+        knowledge_base_resolutions=None,
+        user_id="test_user_id",
+        return_root_id=True,
     )
+
+
+def test_import_tool_parameter_error_returns_400(mocker, mock_auth_header):
+    from contracts.errors.exceptions import AgentToolImportError
+
+    mocker.patch("management.api.agent.agent_repository.get_current_user_id", return_value=("user", "test_tenant_id"))
+    mocker.patch(
+        "management.api.agent.agent_repository.import_agent_from_repository_impl",
+        new_callable=AsyncMock,
+        side_effect=AgentToolImportError("Incompatible tool parameter"),
+    )
+    response = client.post("/repository/agent/42/import", headers=mock_auth_header)
+    assert response.status_code == 400
+    assert "Incompatible tool parameter" in response.json()["detail"]
 
 
 def test_import_agent_from_repository_api_with_skill_resolutions(
@@ -760,10 +1115,10 @@ def test_import_agent_from_repository_api_with_skill_resolutions(
 ):
     """Test import API passes skill_resolutions to service when provided."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_import = mocker.patch(
-        "apps.agent_repository_app.import_agent_from_repository_impl",
+        "management.api.agent.agent_repository.import_agent_from_repository_impl",
         new_callable=AsyncMock,
     )
 
@@ -796,10 +1151,10 @@ def test_check_repository_import_precheck_api_passes_tenant_id(
 ):
     """Test import precheck API forwards caller tenant_id to service."""
     mock_get_user_id = mocker.patch(
-        "apps.agent_repository_app.get_current_user_id"
+        "management.api.agent.agent_repository.get_current_user_id"
     )
     mock_precheck = mocker.patch(
-        "apps.agent_repository_app.check_repository_import_precheck_impl",
+        "management.api.agent.agent_repository.check_repository_import_precheck_impl",
     )
 
     mock_get_user_id.return_value = ("test_user_id", "test_tenant_id")
@@ -823,3 +1178,165 @@ def test_check_repository_import_precheck_api_passes_tenant_id(
         agent_repository_id=42,
         tenant_id="test_tenant_id",
     )
+
+
+# ---------------------------------------------------------------------------
+# Security audit entries
+# ---------------------------------------------------------------------------
+
+
+def test_update_agent_repository_status_api_emits_audit_entry(
+    mocker, mock_auth_header, caplog
+):
+    """Successful status update records ids and status, not reviewer text."""
+    import logging
+
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("test_user", "test_tenant"),
+    )
+    mocker.patch(
+        "management.api.agent.agent_repository.update_agent_repository_status_impl",
+        return_value={"status": "shared"},
+    )
+
+    with caplog.at_level(logging.INFO, logger="audit.security"):
+        response = client.patch(
+            "/repository/agent/5/status",
+            json={"status": "shared", "content": "secret review note"},
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    messages = [record.getMessage() for record in caplog.records
+                if record.name == "audit.security"]
+    assert len(messages) == 1
+    assert "event=agent_repository_status_update" in messages[0]
+    assert "result=success" in messages[0]
+    assert "user_id=test_user" in messages[0]
+    assert '"repository_id":5' in messages[0]
+    assert '"status":"shared"' in messages[0]
+    assert "secret review note" not in messages[0]
+
+
+def test_create_agent_repository_listing_api_emits_audit_entry(
+    mocker, mock_auth_header, caplog
+):
+    """Successful listing creation records agent_id and version_no."""
+    import logging
+
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("test_user", "test_tenant"),
+    )
+    mocker.patch(
+        "management.api.agent.agent_repository.create_agent_repository_listing_impl",
+        new_callable=AsyncMock,
+        return_value={"agent_repository_id": 42},
+    )
+
+    with caplog.at_level(logging.INFO, logger="audit.security"):
+        response = client.post(
+            "/repository/agent/123/versions/1",
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    messages = [record.getMessage() for record in caplog.records
+                if record.name == "audit.security"]
+    assert len(messages) == 1
+    assert "event=agent_repository_listing_create" in messages[0]
+    assert '"agent_id":123' in messages[0]
+    assert '"version_no":1' in messages[0]
+
+
+def test_import_agent_from_repository_api_emits_audit_entry(
+    mocker, mock_auth_header, caplog
+):
+    """Successful repository import records the source repository id."""
+    import logging
+
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("test_user", "test_tenant"),
+    )
+    mocker.patch(
+        "management.api.agent.agent_repository.import_agent_from_repository_impl",
+        new_callable=AsyncMock,
+        return_value={"agent_id": 9},
+    )
+
+    with caplog.at_level(logging.INFO, logger="audit.security"):
+        response = client.post(
+            "/repository/agent/42/import",
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    messages = [record.getMessage() for record in caplog.records
+                if record.name == "audit.security"]
+    assert len(messages) == 1
+    assert "event=agent_repository_import" in messages[0]
+    assert '"repository_id":42' in messages[0]
+
+
+def test_delete_official_agent_api_emits_audit_entry(mocker, mock_auth_header, caplog):
+    """Successful official agent deletion records operator and repository id."""
+    import logging
+
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_context",
+        return_value=("su_user", "tenant-1", "SU"),
+    )
+    mocker.patch(
+        "management.api.agent.agent_repository.delete_official_agent_impl",
+        return_value={"deleted": True},
+    )
+
+    with caplog.at_level(logging.INFO, logger="audit.security"):
+        response = client.delete(
+            "/repository/agent/official/management/5",
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    messages = [record.getMessage() for record in caplog.records
+                if record.name == "audit.security"]
+    assert len(messages) == 1
+    assert "event=agent_repository_official_delete" in messages[0]
+    assert "user_id=su_user" in messages[0]
+    assert '"repository_id":5' in messages[0]
+
+
+def test_upload_agent_repository_icon_api_emits_audit_entry(
+    mocker, mock_auth_header, caplog
+):
+    """Successful repository icon upload records filename, never the bytes."""
+    import logging
+
+    mocker.patch(
+        "management.api.agent.agent_repository.get_current_user_id",
+        return_value=("test_user", "test_tenant"),
+    )
+    mocker.patch(
+        "management.api.agent.agent_repository.upload_agent_repository_icon_impl",
+        new_callable=AsyncMock,
+        return_value={"icon_url": "/icon/x"},
+    )
+
+    with caplog.at_level(logging.INFO, logger="audit.security"):
+        response = client.post(
+            "/repository/agent/7/versions/2/icon",
+            files={"file": ("icon.png", b"image", "image/png")},
+            headers=mock_auth_header,
+        )
+
+    assert response.status_code == 200
+    messages = [record.getMessage() for record in caplog.records
+                if record.name == "audit.security"]
+    assert len(messages) == 1
+    assert "event=agent_repository_icon_upload" in messages[0]
+    assert '"agent_id":7' in messages[0]
+    assert '"version_no":2' in messages[0]
+    assert '"filename":"icon.png"' in messages[0]
+    assert "image" not in messages[0]

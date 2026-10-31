@@ -1,21 +1,29 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import sys
 import types
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
 
 
-client_mod = types.ModuleType("database.client")
+client_mod = types.ModuleType("management.db.client")
 client_mod.get_db_session = MagicMock(name="get_db_session")
 client_mod.as_dict = MagicMock(name="as_dict")
 client_mod.filter_property = MagicMock(name="filter_property")
-sys.modules["database.client"] = client_mod
-sys.modules["backend.database.client"] = client_mod
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.client"] = client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 
-db_models_mod = types.ModuleType("database.db_models")
+db_models_mod = types.ModuleType("management.db.models")
 
 
 class _ComparableColumn:
@@ -51,11 +59,11 @@ class ConversationShareAsset:
 
 db_models_mod.ConversationShare = ConversationShare
 db_models_mod.ConversationShareAsset = ConversationShareAsset
-sys.modules["database.db_models"] = db_models_mod
-sys.modules["backend.database.db_models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
+sys.modules["management.db.models"] = db_models_mod
 
 
-from backend.database import conversation_share_db as db
+from management.db.conversation import share as db
 
 
 @pytest.fixture
@@ -133,6 +141,17 @@ def test_create_conversation_share_filters_and_sets_audit_fields(monkeypatch, pa
     patch_session.refresh.assert_called_once()
 
 
+def test_create_conversation_share_normalizes_aware_expiry_to_utc(monkeypatch, patch_session):
+    monkeypatch.setattr(db, "filter_property", lambda data, model_class: dict(data))
+    monkeypatch.setattr(db, "as_dict", _as_dict)
+    supplied = datetime(2030, 1, 1, 8, 30, tzinfo=timezone(timedelta(hours=8)))
+
+    result = db.create_conversation_share({"share_token": "token-1", "expire_time": supplied}, "user-1")
+
+    assert result["expire_time"] == datetime(2030, 1, 1, 0, 30)
+    assert result["expire_time"].tzinfo is None
+
+
 def test_create_conversation_share_assets_returns_empty_without_session(monkeypatch):
     get_session = MagicMock()
     monkeypatch.setattr(db, "get_db_session", get_session)
@@ -191,7 +210,7 @@ def test_get_active_conversation_share_returns_record_when_not_expired(monkeypat
     record = ConversationShare(
         share_token="token-1",
         status="active",
-        expire_time=(datetime.now() + timedelta(hours=1)).isoformat(),
+        expire_time=(datetime.now(timezone.utc) + timedelta(hours=1)).replace(tzinfo=None).isoformat(),
     )
     patch_session.scalars.return_value.first.return_value = record
     monkeypatch.setattr(db, "as_dict", _as_dict)
@@ -201,6 +220,28 @@ def test_get_active_conversation_share_returns_record_when_not_expired(monkeypat
     assert result["share_token"] == "token-1"
     assert result["status"] == "active"
     patch_session.scalars.assert_called_once()
+
+
+@pytest.mark.parametrize("as_string", [False, True])
+def test_get_active_conversation_share_accepts_aware_expiry(monkeypatch, patch_session, as_string):
+    expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+    record = ConversationShare(
+        share_token="token-1", status="active",
+        expire_time=expiry.isoformat() if as_string else expiry,
+    )
+    patch_session.scalars.return_value.first.return_value = record
+    monkeypatch.setattr(db, "as_dict", _as_dict)
+
+    assert db.get_active_conversation_share("token-1")["share_token"] == "token-1"
+
+
+def test_get_active_conversation_share_expires_offset_timestamp(monkeypatch, patch_session):
+    expiry = (datetime.now(timezone.utc) - timedelta(hours=1)).astimezone(timezone(timedelta(hours=8)))
+    record = ConversationShare(share_token="token-1", status="active", expire_time=expiry.isoformat())
+    patch_session.scalars.return_value.first.return_value = record
+    monkeypatch.setattr(db, "as_dict", _as_dict)
+
+    assert db.get_active_conversation_share("token-1") is None
 
 
 def test_get_active_conversation_share_returns_none_when_missing(patch_session):
@@ -213,7 +254,7 @@ def test_get_active_conversation_share_returns_none_when_expired(monkeypatch, pa
     record = ConversationShare(
         share_token="token-1",
         status="active",
-        expire_time=datetime.now() - timedelta(seconds=1),
+        expire_time=(datetime.now(timezone.utc) - timedelta(seconds=1)).replace(tzinfo=None),
     )
     patch_session.scalars.return_value.first.return_value = record
     monkeypatch.setattr(db, "as_dict", _as_dict)

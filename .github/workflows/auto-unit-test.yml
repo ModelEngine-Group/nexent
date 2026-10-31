@@ -1,5 +1,8 @@
 name: Run Automated Unit Tests
 
+permissions:
+  contents: read
+
 concurrency:
   group: automated-unit-test-${{ github.ref }}
   cancel-in-progress: true
@@ -7,22 +10,14 @@ concurrency:
 on:
   workflow_dispatch:
     inputs:
-      runner_label_json:
-        description: 'runner array in json format (e.g. ["ubuntu-latest"] or ["self-hosted"])'
-        required: false
-        default: '["ubuntu-24.04-arm"]'
-      pytest_workers:
-        description: 'parallel test workers (auto=CPU count, 0=serial, N=fixed count)'
-        required: false
-        default: 'auto'
       pytest_file_timeout:
         description: 'per-file timeout in seconds (0=disabled)'
         required: false
         default: '300'
       codecov_os:
-        description: 'Codecov uploader OS override (e.g. linux-arm64, linux, macos, windows)'
+        description: 'Optional Codecov OS override; blank detects the executing runner architecture'
         required: false
-        default: 'linux-arm64'
+        default: ''
   pull_request:
     branches: [develop, 'release/**', 'hotfix/**']
     paths:
@@ -50,36 +45,40 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ fromJson(github.event.inputs.runner_label_json || '["ubuntu-24.04-arm"]') }}
+    runs-on: ut
+    env:
+      UV_PYTHON: "3.11.15"
+      CODECOV_CLI_VERSION: "11.3.2"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run deployment script tests
-        run: |
-          bash deploy/tests/test_common.sh
-          bash deploy/tests/test_sql_migrations.sh
-          bash deploy/tests/test_super_admin_init.sh
-          bash deploy/tests/test_build_offline_package.sh
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-
       - name: Install uv
-        run: pip install --upgrade uv
+        # astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
+        with:
+          version: "latest"
+
+      - name: Set up managed Python
+        run: |
+          uv python install 3.11.15 --no-bin
+          managed_python_bin="$(dirname "$(uv python find --managed-python 3.11.15)")"
+          echo "$managed_python_bin" >> "$GITHUB_PATH"
+
+      - name: Install Helm test dependency
+        uses: azure/setup-helm@v4
+        with:
+          version: "v3.21.3"
 
       - name: Install dependencies
         run: |
           cd backend
-          uv sync --extra data-process --extra test
-          uv pip install -e "../sdk[dev]"
+          uv sync --managed-python --extra data-process --extra test --index pytorch-cpu --upgrade-package torch --upgrade-package torchvision
           cd ..
 
       - name: Run all tests and collect coverage
+        # Configure NEXENT_PYTEST_WORKERS in the runner environment; the default is the CPU count.
         env:
-          NEXENT_PYTEST_WORKERS: ${{ github.event.inputs.pytest_workers || 'auto' }}
           NEXENT_PYTEST_FILE_TIMEOUT: ${{ github.event.inputs.pytest_file_timeout || '300' }}
         run: |
           source backend/.venv/bin/activate && python test/run_all_test.py
@@ -99,14 +98,62 @@ jobs:
             echo "All tests passed successfully."
           fi
 
+      - name: Set up cached Codecov CLI
+        id: codecov-cli
+        env:
+          CODECOV_OS: ${{ inputs.codecov_os || (runner.arch == 'ARM64' && 'linux-arm64' || 'linux') }}
+        run: |
+          set -euo pipefail
+          # Pin release digests so cache hits are verified without network requests.
+          case "$CODECOV_OS" in
+            linux)
+              asset=codecovcli_linux
+              checksum=8e1bfb71661378530f6ea21e82b414095899e565cbb4cf555c613064be17b973
+              ;;
+            linux-arm64)
+              asset=codecovcli_linux_arm64
+              checksum=a4b71cac685742e272e7cfd4a390cafc3736f57ebc3cf7ba2e24010f19c7f23f
+              ;;
+            *) echo "Unsupported Codecov OS: $CODECOV_OS" >&2; exit 1 ;;
+          esac
+          # Prefer runner configuration, then the standard Unix cache location.
+          cache_dir="${CODECOV_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/codecov}"
+          mkdir -p "$cache_dir"
+          cache_dir="$(cd "$cache_dir" && pwd)"
+          binary="$cache_dir/codecov"
+          verify_binary() {
+            printf '%s  %s\n' "$checksum" "$1" | sha256sum --check --status
+          }
+          if [ -f "$binary" ] && verify_binary "$binary"; then
+            echo "Using cached Codecov CLI $CODECOV_CLI_VERSION ($CODECOV_OS)"
+          else
+            temporary_binary="$(mktemp "$cache_dir/codecov.XXXXXX")"
+            trap 'rm -f "$temporary_binary"' EXIT
+            curl --fail --silent --show-error --location --retry 3 \
+              --connect-timeout 15 --max-time 180 \
+              "https://github.com/codecov/codecov-cli/releases/download/v$CODECOV_CLI_VERSION/$asset" \
+              --output "$temporary_binary"
+            if ! verify_binary "$temporary_binary"; then
+              echo "Codecov CLI checksum verification failed" >&2
+              exit 1
+            fi
+            chmod +x "$temporary_binary"
+            mv -f "$temporary_binary" "$binary"
+          fi
+          if [ ! -x "$binary" ]; then chmod +x "$binary"; fi
+          echo "binary=$binary" >> "$GITHUB_OUTPUT"
+
       - name: Upload coverage to Codecov
         # codecov/codecov-action@v7
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f
         with:
+          binary: ${{ steps.codecov-cli.outputs.binary }}
+          version: ${{ env.CODECOV_CLI_VERSION }}
           files: test/coverage.xml
+          disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: unittests
           name: codecov-umbrella
           fail_ci_if_error: true
-          os: ${{ github.event.inputs.codecov_os || 'linux-arm64' }}
-          verbose: true
+          os: ${{ inputs.codecov_os || (runner.arch == 'ARM64' && 'linux-arm64' || 'linux') }}
+          verbose: false

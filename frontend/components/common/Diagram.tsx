@@ -128,7 +128,7 @@ function DiagramComponent({
   showToggle = true,
 }: DiagramProps) {
   const { t } = useTranslation("common");
-  const idRef = useRef<string>();
+  const idRef = useRef<string | undefined>(undefined);
   const resultRef = useRef<{ dataUrl: string } | { error: string } | null>(
     null
   );

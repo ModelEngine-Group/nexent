@@ -1,0 +1,35 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-045
+  name: 变量名自动生成与校验、需求澄清对话、意图驱动最小流程（字段修改/资源管理/对话优化）、资源搜索与绑定、Prompt生成
+  status: active
+  description: '智能体配置 / NL2Agent 2.0: 变量名自动生成与校验、需求澄清对话、意图驱动最小流程（字段修改/资源管理/对话优化）、资源搜索与绑定、Prompt生成'
+  business_rules:
+  - rule_id: F-045-RULE-01
+    description: 变量名自动生成与校验、需求澄清对话、意图驱动最小流程（字段修改/资源管理/对话优化）、资源搜索与绑定、Prompt生成；name
+      字段遵循后端导入和运行时的 Python 标识符规则，排除 Python 关键字，长度为 1–100 字符；支持 Unicode 标识符，不要求 _assistant 后缀，草稿权限、首次命名和重名规则保持不变。
+  - rule_id: F-045-RULE-02
+    description: One pending/bound card uses Local/MCP/Skill source tags plus Knowledge;
+      recommendations start selected without recommendation tags; knowledge requires
+      concrete selection. Concrete knowledge suggestions match names/descriptions/summaries
+      within visible catalogs minus direct draft bindings; pending rows show recommended
+      names or empty, bound rows show actual associations. Generic knowledge search
+      prefers the deployment-selected managed tool through scoring; DataMate remains
+      eligible and explicit resource names take precedence.
+  - rule_id: F-045-RULE-03
+    description: NL2Agent exposes the unified instruction field as prompt in model
+      tools, context and results; uses prompt throughout backend, SDK and frontend
+      including the physical database prompt column after a one-time column rename.
+      The complete prompt includes responsibilities, constraints, real tool-use rules
+      and necessary examples; local edits preserve unrelated content. Legacy prompt
+      sections are accepted only at external JSON import; internal requests/tools/events
+      use prompt only. Stored marketplace snapshots are migrated once without replacing
+      published content from current drafts.
+  required_test_stages:
+  - D1
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

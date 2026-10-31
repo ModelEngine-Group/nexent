@@ -1,0 +1,24 @@
+schema_version: '1.0'
+change:
+  change_id: D1-CITATION-CASE-REMOVAL-20261010
+  change_type: test-fix
+  title: Remove the citation highlighting component case at user request
+  description: >-
+    Delete UT-FE-AUTO-F34799011F9FBC82 and its case-local Vitest script and
+    execution binding at explicit user request. The removed script contained
+    fifteen subtests, four of which reproduced version-token punctuation and
+    English sentence-boundary issues. Removal does not fix those product issues
+    or convert historical failures into passes. Preserve the other F-115 cases,
+    the product feature definition, historical reports and migration receipts.
+    Regenerate Feature navigation, execution registry and Excel views.
+  affected_features:
+    existing: [F-115]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: The named Case is deleted, not retired; no surviving Case is modified or referenced by this removal record.

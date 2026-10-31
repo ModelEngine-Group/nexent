@@ -1,0 +1,20 @@
+schema_version = 1
+rule_id = "kimi_k3_sampling_preference_v1"
+version = 1
+target_kind = "model"
+target_key = "moonshotai/kimi-k3"
+reason = "Prefer Top P 0.95 for Kimi K3; provider and explicit user values may override"
+evidence = "Nexent dev gateway acceptance 2026-10-22: top_p=1 rejected with HTTP 400, top_p=0.95 completed"
+
+[[parameters]]
+key = "top_p"
+visible = true
+editable = true
+required = true
+allowed_scopes = ["outlet", "conversation"]
+ui_group = "sampling"
+owner = "model"
+schema = {type = ["number", "null"], minimum = 0, maximum = 1}
+default_value = 0.95
+source = {ref = "kimi_k3_sampling_preference_v1", version = 1}
+api_binding = {path = "/top_p", transform_ref = "identity_v1", transform_version = 1}

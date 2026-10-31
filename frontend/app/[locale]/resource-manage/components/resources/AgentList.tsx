@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -34,14 +36,15 @@ import { Agent } from "@/types/agentConfig";
 import ExpandEditModal from "@/components/common/ExpandEditModal";
 import type { AgentVersion } from "@/services/agentVersionService";
 import { getUnavailableReasonLabels } from "@/lib/agentLabelMapper";
+import ManageOfficialAgentsModal from "@/components/agent/ManageOfficialAgentsModal";
+import { USER_ROLES } from "@/const/auth";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 
 const { Text } = Typography;
 const { TextArea } = Input;
 
 interface AgentDetail extends Agent {
-  duty_prompt?: string;
-  constraint_prompt?: string;
-  few_shots_prompt?: string;
+  prompt?: string;
   group_ids?: number[];
 }
 
@@ -66,6 +69,8 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const { message } = App.useApp();
+  const { user } = useAuthorizationContext();
+  const canManageOfficialAgents = user?.role === USER_ROLES.SU;
   const [form] = Form.useForm();
   const queryClient = useQueryClient();
 
@@ -79,9 +84,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
     visible: boolean;
     field:
       | "description"
-      | "duty_prompt"
-      | "constraint_prompt"
-      | "few_shots_prompt"
+      | "prompt"
       | null;
     title: string;
     value: string;
@@ -108,6 +111,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   const [keyword, setKeyword] = useState("");
   const [statusFilters, setStatusFilters] = useState<string[]>([]);
   const [groupFilters, setGroupFilters] = useState<number[]>([]);
+  const [officialModalOpen, setOfficialModalOpen] = useState(false);
 
   // Incremented on every component mount so version fetching always runs
   const [mountKey, setMountKey] = useState(0);
@@ -230,9 +234,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
         form.setFieldsValue({
           display_name: detail.display_name,
           description: detail.description,
-          duty_prompt: detail.duty_prompt,
-          constraint_prompt: detail.constraint_prompt,
-          few_shots_prompt: detail.few_shots_prompt,
+          prompt: detail.prompt,
           group_ids: detail.group_ids || [],
         });
       } else {
@@ -256,7 +258,7 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
   // Fullscreen view handlers
   const openFullscreenEdit = (
     field:
-      "description" | "duty_prompt" | "constraint_prompt" | "few_shots_prompt",
+      "description" | "prompt",
     title: string
   ) => {
     const value = form.getFieldValue(field) || "";
@@ -513,13 +515,17 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
               danger
               icon={<Trash2 className="h-4 w-4" />}
               size="small"
-              onClick={() => confirm({
-                title: t("businessLogic.config.modal.deleteTitle"),
-                content: t("businessLogic.config.modal.deleteContent", { name: record.display_name }),
-                okText: t("common.confirm"),
-                cancelText: t("common.cancel"),
-                onOk: () => handleDelete(record),
-              })}
+              onClick={() =>
+                confirm({
+                  title: t("businessLogic.config.modal.deleteTitle"),
+                  content: t("businessLogic.config.modal.deleteContent", {
+                    name: record.display_name,
+                  }),
+                  okText: t("common.confirm"),
+                  cancelText: t("common.cancel"),
+                  onOk: () => handleDelete(record),
+                })
+              }
             />
           </Tooltip>
         </div>
@@ -573,6 +579,14 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
           placeholder={t("tenantResources.agents.filterGroup")}
           className="w-48"
         />
+        {canManageOfficialAgents && (
+          <Button
+            className="ml-auto"
+            onClick={() => setOfficialModalOpen(true)}
+          >
+            {t("ui.localization.manageOfficialAgents")}
+          </Button>
+        )}
       </div>
       <div className="flex-1 overflow-hidden">
         <Table
@@ -643,13 +657,13 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
             <Form.Item noStyle shouldUpdate>
               {() => (
                 <Form.Item
-                  name="duty_prompt"
-                  label={t("systemPrompt.card.duty.title")}
+                  name="prompt"
+                  label={t("systemPrompt.card.prompt.title")}
                 >
                   <div style={{ position: "relative" }}>
                     <TextArea
-                      value={form.getFieldValue("duty_prompt")}
-                      placeholder={t("systemPrompt.card.duty.title")}
+                      value={form.getFieldValue("prompt")}
+                      placeholder={t("systemPrompt.card.prompt.title")}
                       autoSize={{ minRows: 5, maxRows: 8 }}
                       style={{ resize: "none", paddingRight: 32 }}
                       readOnly
@@ -660,82 +674,8 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
                         icon={<Maximize2 className="h-4 w-4" />}
                         onClick={() =>
                           openFullscreenEdit(
-                            "duty_prompt",
-                            t("systemPrompt.card.duty.title")
-                          )
-                        }
-                        style={{
-                          position: "absolute",
-                          right: 4,
-                          top: 4,
-                          padding: 4,
-                        }}
-                      />
-                    </Tooltip>
-                  </div>
-                </Form.Item>
-              )}
-            </Form.Item>
-
-            <Form.Item noStyle shouldUpdate>
-              {() => (
-                <Form.Item
-                  name="constraint_prompt"
-                  label={t("systemPrompt.card.constraint.title")}
-                >
-                  <div style={{ position: "relative" }}>
-                    <TextArea
-                      value={form.getFieldValue("constraint_prompt")}
-                      placeholder={t("systemPrompt.card.constraint.title")}
-                      autoSize={{ minRows: 5, maxRows: 8 }}
-                      style={{ resize: "none", paddingRight: 32 }}
-                      readOnly
-                    />
-                    <Tooltip title={t("common.fullscreen")}>
-                      <Button
-                        type="text"
-                        icon={<Maximize2 className="h-4 w-4" />}
-                        onClick={() =>
-                          openFullscreenEdit(
-                            "constraint_prompt",
-                            t("systemPrompt.card.constraint.title")
-                          )
-                        }
-                        style={{
-                          position: "absolute",
-                          right: 4,
-                          top: 4,
-                          padding: 4,
-                        }}
-                      />
-                    </Tooltip>
-                  </div>
-                </Form.Item>
-              )}
-            </Form.Item>
-
-            <Form.Item noStyle shouldUpdate>
-              {() => (
-                <Form.Item
-                  name="few_shots_prompt"
-                  label={t("systemPrompt.card.fewShots.title")}
-                >
-                  <div style={{ position: "relative" }}>
-                    <TextArea
-                      value={form.getFieldValue("few_shots_prompt")}
-                      placeholder={t("systemPrompt.card.fewShots.title")}
-                      autoSize={{ minRows: 5, maxRows: 8 }}
-                      style={{ resize: "none", paddingRight: 32 }}
-                      readOnly
-                    />
-                    <Tooltip title={t("common.fullscreen")}>
-                      <Button
-                        type="text"
-                        icon={<Maximize2 className="h-4 w-4" />}
-                        onClick={() =>
-                          openFullscreenEdit(
-                            "few_shots_prompt",
-                            t("systemPrompt.card.fewShots.title")
+                            "prompt",
+                            t("systemPrompt.card.prompt.title")
                           )
                         }
                         style={{
@@ -781,6 +721,10 @@ export default function AgentList({ tenantId }: { tenantId: string | null }) {
           </Form>
         </Spin>
       </Modal>
+      <ManageOfficialAgentsModal
+        open={officialModalOpen}
+        onClose={() => setOfficialModalOpen(false)}
+      />
 
       {/* Fullscreen View Modal */}
       <ExpandEditModal

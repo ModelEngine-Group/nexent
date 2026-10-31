@@ -1,6 +1,14 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import { createContext, useContext, type FC, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useMemo,
+  type FC,
+  type ReactNode,
+} from "react";
 import type { PanelSourceItem } from "./sources-panel";
 
 /**
@@ -20,7 +28,10 @@ export interface SourcesPanelSelection {
   groupId: string;
   sources: PanelSourceItem[];
   images: PanelSourceItem[];
-  selectedCiteIndex?: number;
+  /** Stable key built from tool_sign + cite_index, for example "a1". */
+  selectedCitationKey?: string;
+  /** The cited answer section used to identify the relevant text in a Chunk. */
+  citationContext?: string;
 }
 
 export interface SourcesPanelContextValue {
@@ -31,7 +42,16 @@ export interface SourcesPanelContextValue {
   close: () => void;
 }
 
-const SourcesPanelContext = createContext<SourcesPanelContextValue | null>(null);
+const SourcesPanelContext = createContext<SourcesPanelContextValue | null>(
+  null
+);
+type SourcesPanelActions = Pick<
+  SourcesPanelContextValue,
+  "open" | "toggle" | "close"
+>;
+const SourcesPanelActionsContext = createContext<SourcesPanelActions | null>(
+  null
+);
 
 export interface SourcesPanelProviderProps {
   value: SourcesPanelContextValue;
@@ -41,11 +61,29 @@ export interface SourcesPanelProviderProps {
 export const SourcesPanelProvider: FC<SourcesPanelProviderProps> = ({
   value,
   children,
-}) => (
-  <SourcesPanelContext.Provider value={value}>
-    {children}
-  </SourcesPanelContext.Provider>
-);
+}) => {
+  const { open, toggle, close } = value;
+  const actions = useMemo(
+    () => ({ open, toggle, close }),
+    [open, toggle, close]
+  );
+  return (
+    <SourcesPanelActionsContext.Provider value={actions}>
+      <SourcesPanelContext.Provider value={value}>
+        {children}
+      </SourcesPanelContext.Provider>
+    </SourcesPanelActionsContext.Provider>
+  );
+};
+
+export function useSourcesPanelActions(): SourcesPanelActions {
+  const actions = useContext(SourcesPanelActionsContext);
+  if (!actions)
+    throw new Error(
+      "useSourcesPanelActions must be used inside <SourcesPanelProvider>."
+    );
+  return actions;
+}
 
 /**
  * Hook used by child components (currently the `group-source` block) to read
@@ -55,7 +93,7 @@ export const useSourcesPanel = (): SourcesPanelContextValue => {
   const ctx = useContext(SourcesPanelContext);
   if (!ctx) {
     throw new Error(
-      "useSourcesPanel must be used inside <SourcesPanelProvider>.",
+      "useSourcesPanel must be used inside <SourcesPanelProvider>."
     );
   }
   return ctx;

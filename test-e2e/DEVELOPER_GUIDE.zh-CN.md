@@ -1,0 +1,218 @@
+# 开发者本地测试与失败用例修复指南
+
+本文适用于仓库内 `test-e2e/` 的正式 D1–D5 测试。开发者在自己的分支修改用例和固定脚本，使用本机配置执行验证，再将正式测试资产随产品代码提交。现有 `test/backend`、`test/sdk` 等 Legacy UT 仍独立维护。
+
+所有命令均从 Nexent 仓库根目录执行。文中的 Case、Feature、Change ID 需要替换成实际 ID。
+
+## 1. 代码、配置和结果放在哪里
+
+| 内容 | 位置 | 是否提交 Git |
+| --- | --- | --- |
+| 功能定义、业务规则 | `test-e2e/features/<Feature-ID>/feature.yaml` | 是 |
+| 用例前置条件、步骤、预期 | `test-e2e/cases/<Case-ID>/case.yaml` | 是 |
+| 固定测试脚本 | 同一 Case 目录内的 `test.*` | 是 |
+| 脚本选择器、框架、准备声明 | 同一 Case 目录内的 `execution.yaml` | 是 |
+| 需求、缺陷、测试修复记录 | `test-e2e/changes/<type>/<Change-ID>.yaml` | 是 |
+| registry、Excel | `test-e2e/infra/generated/` | 否；工具生成的本地只读视图 |
+| Feature 用例导航 | 各 Feature 的 `cases.md` | 工具生成后检查差异并提交，不手工编辑 |
+| 机器配置、账号和密钥 | `<test-home>/config/` | 否 |
+| 虚拟环境、浏览器、运行时资产 | `<test-home>/runtime/` 等本地目录 | 否 |
+| 执行日志、报告、截图和 Trace | `<test-home>/runs/` | 否 |
+
+`test-home` 是每位开发者自选的绝对路径，必须位于 Git 仓库之外，也不能包含仓库。它不需要与同事或 Ubuntu 的路径相同。正式脚本通过配置 helper 和逻辑资产名称访问资源，不能写入个人绝对路径、固定数据库资源 ID 或明文密钥。
+
+## 2. 首次准备本机环境
+
+### 2.1 基础软件和被测产品
+
+准备 Python 3.11、uv、Node.js 22 或更高版本及 npm。部署容器和 Docker 相关测试还需要 Docker。Windows 示例使用 `py -3.11`；没有 Python Launcher 时，替换为已安装的 Python 3.11 可执行文件。
+
+D1 中的进程内测试通常不需要部署产品；在线 D2、D3、D4、D5 需要对应服务。修改了产品代码后，按项目部署方式更新本地服务，再进行在线测试。运行器不会因为执行 `run` 自动构建镜像或更新容器；正在运行的旧容器不能证明工作区内的产品修复有效。
+
+为会写入数据的测试准备独立测试部署和数据目录。`test-home` 仅隔离测试配置和产物，不能自动隔离已经运行的产品数据库。共用一台机器时，还要检查 Compose 项目、容器名称、网络、端口和实际持久化挂载。D5 故障注入、恢复等测试必须满足用例声明的隔离条件。
+
+### 2.2 创建配置和安装依赖
+
+Windows PowerShell：
+
+```powershell
+$TestHome = "D:\nexent-test-suite"
+
+py -3.11 test-e2e/infra/scripts/run-suite.py onboard --test-home $TestHome
+py -3.11 test-e2e/infra/scripts/run-suite.py onboard --test-home $TestHome --execute
+py -3.11 test-e2e/infra/scripts/run-suite.py bootstrap --test-home $TestHome --execute
+
+$TestPython = Join-Path $TestHome "runtime/test-venv/Scripts/python.exe"
+```
+
+希望交互式选择 test-home 和服务地址时，用下面的命令替代上面的两条 `onboard` 命令，并将后续 `$TestHome` 设为实际选择的路径：
+
+```powershell
+py -3.11 test-e2e/infra/scripts/run-suite.py onboard --interactive --execute
+```
+
+引导只创建缺失文件；已有文件会显示 `KEPT`，不会重新询问或覆盖其中的配置。需要调整已有地址时，直接编辑本机配置。
+
+bootstrap 将 Python 依赖安装到 `<test-home>/runtime/test-venv`，安装 SDK 及其依赖。产品前端使用 `npm ci --legacy-peer-deps`；D1 前端测试包和 D4 包仍使用各自已入库的锁文件执行普通 `npm ci`。产品前端的 `package-lock.json` 继续由 Git 忽略，不新增项目级 `.npmrc`；仅当本地锁文件缺失时，bootstrap 先按 `package.json` 生成它。已有锁文件不自动刷新，与声明不一致时安装会报错，需先确认版本变化再处理。不同机器首次生成的产品锁文件可能不同，不能据此声称产品依赖已跨机器完全锁定。前端 `node_modules` 位于对应仓库包目录，浏览器位于 test-home。已有可用环境不需要每次重复安装。
+
+产品前端和 D4 各自锁定 Playwright 版本，所需 Chromium/headless-shell 修订号可能不同。bootstrap 会分别通过 `frontend/node_modules/playwright/cli.js` 和 `test-e2e/infra/automation/d4/node_modules/playwright/cli.js` 准备浏览器，不能仅安装 D4 的浏览器就认为产品前端引用的浏览器测试也已就绪。两套浏览器使用同一 test-home 下的缓存，但各自所需的版本必须存在。
+
+Linux 的对应入口示例：
+
+```bash
+TEST_HOME=/absolute/path/to/nexent-test-suite
+python3.11 test-e2e/infra/scripts/run-suite.py onboard --test-home "$TEST_HOME" --execute
+python3.11 test-e2e/infra/scripts/run-suite.py bootstrap --test-home "$TEST_HOME" --execute
+TEST_PYTHON="$TEST_HOME/runtime/test-venv/bin/python"
+```
+
+Linux 的 Chromium 系统库需要另外由主机环境提供。依赖安装和测试执行必须使用同一个非 root 账号；专用 Ubuntu 测试机使用 `jason`，其他开发者使用自己的执行账号。不要用 `sudo npm`、`sudo pip` 安装项目依赖，不要复制旧仓库的 `node_modules`，也不要用 `chmod 777` 修复权限。检查权限时必须包含嵌套 `node_modules`；顶层可读不代表实际导入的依赖可读。
+
+### 2.3 配置环境变量和测试资产
+
+编辑本机 `<test-home>/config/`，保留模板的字段名称和结构：
+
+| 文件 | 开发者需要配置的内容 |
+| --- | --- |
+| `environment.yaml` | 前端地址及 Config、Runtime、Northbound、Data Process 等服务地址 |
+| `users.yaml` | 本机测试租户、账号和角色；`password_env_key` 引用密钥文件中的变量名 |
+| `models.yaml` | 模型能力、Provider、地址和模型名称；`secret_env_key` 引用密钥变量名 |
+| `secrets.env` | 上述引用实际使用的密码、API Key 等；使用 `KEY=value` 格式 |
+| `daily.env` | 非敏感运行参数，以及产品容器访问测试 HTTP/MCP 服务所需的主机地址 |
+| `test-assets.yaml`、`anchor-assets.yaml` | 用例所需的逻辑资产配置，按现有 helper 和用例声明填写 |
+| `asset-policy.yaml` | 测试资源保留和清理策略 |
+| `pipeline.yaml` | 完整 Daily 的构建、部署等钩子；普通 `run` 验证不要求配置这些部署钩子 |
+
+模板中的 `replace-me` 必须替换。账号必须存在于当前测试部署且具有对应角色；密钥引用已填写不代表登录或模型调用一定成功，实际用例还会验证这些能力。只有对应功能确实未启用的可选配置才可留空。
+
+使用 GitHub Daily 时，若本机 `daily.env` 显式设置了 `NEXENT_REPO`，它必须与 `.github/workflows/nexent-daily-full-test.yml` 中的 `REPO_ROOT` 指向同一个产品 Git 仓库。迁移仓库路径时不能只改其中一个，还需核对启动入口和 SDK 引用，避免从一个仓库启动、却加载另一个仓库的代码。工作流修改只有提交并在实际运行的分支生效后才算完成入口切换；此前不要恢复可能混用新旧入口的 Runner。普通本地命令仍应从实际产品仓库根目录执行，不能仅靠修改该环境变量替代切换工作目录。
+
+专用 Ubuntu 测试机迁移后的目录分工：产品 Git 仓库是 `/home/jason/projects/nexent`，test-home 仍为 `/home/jason/nexent-test-suite`。旧 `/root/project/nexent` 保留用于回退，不再作为新入口；`/home/jason/nexent` 是容器工作目录，不是新的产品 Git 仓库，不能覆盖或删除。配置、历史结果、浏览器缓存及持久化数据均保留在原 test-home。专用机的本地命令应先执行 `cd /home/jason/projects/nexent`；其他开发者使用自己的仓库位置，不把上述机器路径写进通用 Case。
+
+Windows Docker Desktop 的容器访问宿主机通常使用 `host.docker.internal`。容器内的 `127.0.0.1` 指向容器自身。按实际网络设置 `NEXENT_TEST_ASSETS_CONTAINER_HOST` 和 `NEXENT_TEST_MCP_CONTAINER_HOST`。
+
+不要自行发明环境变量。新增配置需要同步维护读取 helper、适用的 Schema 和示例。不要通过共享 test-home 把机器密钥和地址覆盖到其他开发者或 Ubuntu。
+
+复制并检查仓库提供的静态测试文件：
+
+```powershell
+& $TestPython test-e2e/infra/tools/static_assets.py plan --test-home $TestHome --source-assets test-e2e/infra/assets
+& $TestPython test-e2e/infra/tools/static_assets.py apply --test-home $TestHome --source-assets test-e2e/infra/assets
+& $TestPython test-e2e/infra/tools/static_assets.py verify --test-home $TestHome
+& $TestPython test-e2e/infra/scripts/run-suite.py doctor --test-home $TestHome --live
+uv pip check --python $TestPython
+```
+
+遇到缺失资产或校验冲突时，按命令结果处理；不要拿空文件代替。`doctor` 按所选用例检查实际 jsdom/CSS 依赖导入及对应工具链的无头浏览器启动，`--live` 另外检查服务可达性；这些检查不代表所有账号、模型、业务流程已经通过。离线用例可省略 `--live`，并用 `--case <Case-ID>` 缩小检查范围。
+
+## 3. 收到失败结果后如何修改
+
+先定位失败 Case ID，阅读原批次的报告、用例日志、失败步骤和清理记录，再查看对应 Feature、`case.yaml`、`execution.yaml` 和脚本。记录复现时的产品版本、测试分支和环境差异。
+
+| 判断结果 | 修改方法 |
+| --- | --- |
+| 脚本定位、断言实现、选择器或准备流程错误 | 修复 `test.*`，必要时改 `execution.yaml`；在 `changes/test-fixes/` 新建记录，列出受影响 Case ID |
+| 产品违反了正确的验收标准 | 修产品代码；保留可复现的用例，按需补强；在 `changes/bugs/` 记录原因和覆盖缺口 |
+| 已确认的需求发生变化或契约存在遗漏 | 更新所属 Feature、Case、脚本和执行绑定，并建立相应需求或缺陷记录 |
+| 账号、模型、服务或资产未准备好 | 修本机配置或部署，保持与需求一致的断言 |
+
+用例验收标准正确时，纯脚本修复不必改 `case.yaml`；文件名、选择器和准备声明没变时，也不必改 `execution.yaml`。保留原 Case ID。新增用例使用新 ID，历史契约需要退出时标记 `retired`。
+
+### 设计时确定责任田
+
+在设计 Feature 和用例时确认一个主要责任模块，在 `infra/config/report-ownership.yaml` 的 `feature_overrides` 中登记，关联用例自动继承。人名只在 `domains` 中统一维护，不逐条写入 `case.yaml`。例如 `AGENT-EDITOR-WORKFLOWS: agent_config` 表示智能体开发配置，当前联系人由该模块配置解析。
+
+只有实际证明边界不同的用例才用 `case_overrides`，并在变更记录中说明依据。不要按 Git 作者、报错关键词或厂商名称分配责任。所有 active/planned Feature（包括尚未生成用例的 Feature）和非 retired 用例必须唯一匹配；设计和实现校验都检查这一点。可先运行 `python test-e2e/infra/tools/ownership_catalog.py --root .`。
+
+人员调整只更新中心配置并走正常 PR，不直接改 Ubuntu 或历史结果。看板统一显示一个“负责人”，按版本化责任田映射更新；历史批次原件保留，不等于缺陷归因。未提交的本地配置导出必须明确标为未提交，不能宣称已经在 develop/Daily 生效。
+
+Daily 对配置有效但未匹配或匹配歧义的责任田记录警告，保留未分配状态并继续执行用例；覆盖完整性仍为 INCOMPLETE，不能报告整批通过。开发者默认的设计、实现校验仍拒绝责任田缺失。中心配置损坏、未知模块引用等全局问题继续阻断；新增 Feature 合入前应基于最新 develop 补齐映射并运行严格校验。
+
+### 实现时确认准备和清理
+
+每个 active 自动化 D2-D5 用例的 `execution.yaml` 都要显式声明 `preparation`，默认实现校验会检查，无需逐条添加检查参数。确实不需要公共工厂的自包含用例可写 `families: []`，但必须在绑定说明或变更记录中解释它如何创建、清理自己的资源；不能用空声明绕过真实依赖。资源类型、逻辑依赖、进程/数据归属、清理和恢复应在 SPEC 设计与任务记录中明确。
+
+准备声明变更后，通过 suite worker 定向验证准备、用例执行、清理和资源释放，保留回执。提交或合入前先按团队流程同步目标分支，再在合并后的代码树运行严格校验，记录目标版本、测试版本和未提交状态。仅更新 skill 或本分支 UT 通过不能保证最新 develop 的全量能够启动。Daily 缺失声明时只阻塞对应用例并保留覆盖缺口，不猜测准备资源；配置格式损坏仍阻断。
+
+### 新增用例的命名规则
+
+新增 Case ID 统一使用 `<模块>-<场景>-<阶段>-<三位序号>`，例如 `AGENT-LIST-D1-003`、`MODEL-PERMISSION-D2-001`。模块和场景使用大写英文字母、数字及连字符，可由多个词组成；不要把负责人、日期、哈希或测试工具名称当作业务命名。序号为 `001`～`999`，在相同模块、场景和阶段前缀内选用未占用编号，历史和非活跃用例也不能重复占号。
+
+ID 中的阶段必须与 `case.yaml` 的 `stage` 一致，目录名、用例定义和执行绑定里的 ID 也必须一致。保留存量 `API-001`、`PW-SKILL-02`、`UT-…-AUTO-…` 等历史 ID，不因格式统一改名。仓库的 `case-naming-legacy.json` 是冻结的历史兼容清单，不是新用例登记表，不能追加豁免或按当前目录重新生成；固定内容摘要在无 Git 历史时也会检查清单未被修改，两种校验阶段都会拒绝不合规的新 ID。
+
+用例标题写清“场景／条件＋预期行为”，例如“模型不可用时禁止选择且不触发切换回调”，中英文均可。标题是否准确需结合断言审查，不能仅靠格式校验。主脚本仍使用对应框架的文件名，如 `test.py`、`test.spec.ts`，通过 `execution.yaml` 绑定，不必把完整 ID 重复放进文件名。
+
+Bugfix 有相关 SPEC 时，沿用其中 Feature、业务规则和 Case 的关联，并结合实际调用路径确认影响。没有可用 SPEC 时，在文档仓库创建轻量 `design.md`，按 [Bugfix design 模板](../.agents/skills/nexent-spec-coding/references/bugfix-design-template.md) 描述完整、内聚的功能边界与最终预期，保留与新需求相同的 `D1-D5 Test Design` 矩阵。它列出功能范围内的已知覆盖，Notes 标注复用、补强、新增、仅回归或不受影响；本次修复与验证范围单独写明。无需强制补齐 proposal/task 或整模块需求文档。
+
+优先复用能复现的用例，缺一个边界时补强原用例，只有缺少必要证明才新增。允许新增 0 条，也不要求每层一条。区分“没有 SPEC”“当前分支没有迁入基线”和“已确认覆盖缺口”：找不到基线时记录未知及检索范围，不自动补全整个功能。矩阵中的 N/A 表示不适用，GAP 表示已知缺口，UNKNOWN 表示覆盖不可确认；这些标注不是 Case ID，也不代表通过。
+
+Bug Change 的 `affected_cases.existing` 放入只需复用或回归的已有用例，`modified` 放入实际修改的 Case 或脚本，`added` 放入新用例。不受影响的 Case 可以保留在 design 的功能覆盖矩阵中，不列入本次执行选择。已有用例能准确检出时 `coverage_gap.type` 可为 `no_gap`；基线不可见时可为 `unknown_baseline`。关联原因和 design 路径记录在 `notes`，不必新增独立 manifest。
+
+Change 文件位于 `changes/{requirements,bugs,refactors,test-fixes}/`，每个文件一条记录。它记录关联关系，正式 Feature 和 Case 仍保留在各自目录。测试修复记录也要列出受影响 Case，方便通过 `--change` 选择验证范围。具体字段按现有 Schema 校验，不要仅创建一篇自由格式说明代替记录。
+
+固定脚本必须验证正式用例的前置条件、操作和预期；不能用常量断言、吞掉异常、随意 skip/xfail 或删除失败断言来获得通过。脚本使用现有资产 helper，并登记测试创建的资源，供清理过程追踪。创建本身属于被测行为时，应在测试步骤内创建并断言，不能靠前置准备绕过。
+
+使用 AI 助手修改时，指定仓库的 [nexent-test-assets](../.agents/skills/nexent-test-assets/SKILL.md) 规范，并提供 Case ID、失败证据、当前产品契约和本机 test-home。涉及产品缺陷或需求文档时，同时遵循仓库的需求/缺陷生命周期规范。
+
+## 4. 校验资产并执行受影响用例
+
+修改了 Feature 或用例设计时先运行设计校验；纯脚本修复可跳过第一条：
+
+```powershell
+& $TestPython test-e2e/infra/tools/validate_test_assets.py --phase design --generate
+& $TestPython test-e2e/infra/tools/validate_test_assets.py --phase implementation --generate
+& $TestPython test-e2e/infra/tools/validate_test_assets.py --phase implementation
+```
+
+生成器统一更新本地 registry、Feature 导航和 Excel。`test-e2e/infra/generated/` 已由 Git 忽略，其中的 registry 与 Excel 不入 Git；各 Feature 的 `cases.md` 则检查生成差异后随变更提交，不手工编辑。最后一条只读检查会发现已有生成视图过期，干净检出但尚未生成 registry 和 Excel 时也可通过。只修改受影响的源文件，但执行全局一致性检查。静态校验通过还需要实际运行。
+
+先复测单条失败用例，再扩大到本次变更影响的范围：
+
+```powershell
+$CaseId = "UT-SDK-001"
+& $TestPython test-e2e/infra/scripts/run-suite.py plan --test-home $TestHome --case $CaseId
+& $TestPython test-e2e/infra/scripts/run-suite.py run --test-home $TestHome --case $CaseId --execute
+
+# Replace with the actual Change ID.
+$ChangeId = "TEST-FIX-001"
+& $TestPython test-e2e/infra/scripts/run-suite.py plan --test-home $TestHome --change $ChangeId
+& $TestPython test-e2e/infra/scripts/run-suite.py run --test-home $TestHome --change $ChangeId --execute
+```
+
+也可以重复 `--case` 选择多条，或使用 `--feature <Feature-ID>`、`--stage D2`。省略 `--execute` 只生成计划。Linux 使用同样参数，将 PowerShell 的 `& $TestPython` 替换为 `"$TEST_PYTHON"`，变量名称改为对应 Bash 变量。
+
+优先使用 `run-suite.py run`。它按每条 `execution.yaml` 的声明执行受控服务启动、前置资产准备、测试和资源清理。准备失败会阻止该条业务测试执行。`infra/tools/run_cases.py` 是低层直跑入口，不负责这套资产准备和最终清理，通常不适合开发者首次复现在线用例。
+
+修改了测试或产品代码后创建新批次复测。`resume` 仅适用于代码和配置保持一致、能够确认清理状态的干净中断；不用于把修改后的脚本与原有通过记录拼接。
+
+## 5. 查看结果和排查阻断
+
+运行命令会打印本地批次目录，通常位于 `<test-home>/runs/repository-daily/<batch>/`；目录名中的 daily 不表示本次执行了完整 Daily。
+
+| 产物 | 用途 |
+| --- | --- |
+| `report.md`、`summary.json` | 汇总通过、失败、阻断及批次是否完整 |
+| `plan.json`、`provenance.json` | 核对选择范围和执行时的代码、配置指纹 |
+| `cases/<Case-ID>/receipt.json` | 核对用例终态、测试结果和清理结果 |
+| 用例目录内的日志和框架产物 | 定位前置准备、测试步骤或框架异常 |
+| `runtime/resolved-assets.yaml`、`runtime/asset-journal.jsonl`（产生资产时） | 追踪该用例实际使用、创建的资源 |
+| D4 失败产物目录 | 查看截图、Trace；成功用例不保留截图和 Trace |
+
+`BLOCKED`、`TIMEOUT`、`AUTOMATION_ERROR`、`CLEANUP_FAILED` 都不能按通过处理。清理策略可能保留失败现场；检查 receipt 和资源日志后再复跑。某些早期准备失败尚未启动浏览器，因此不会有截图。
+
+常见处理方式：虚拟环境缺失或依赖变化时重跑 bootstrap；配置出现 placeholder 时填写本机配置；服务不可达时检查部署和端口；缺少 preparation 声明时修 `execution.yaml`；生成视图过期时重跑实现阶段生成命令。不要修改全局忽略策略来绕过单条失败。
+
+## 6. 提交前检查和 Daily 衔接
+
+Ubuntu Daily 可通过显式 `--publish-latest` 发布最新完整批次到 `<test-home>/runs-ubuntu/`，Windows 和普通本地入口默认不发布。同步后阅读 `latest-report.md`，解压 `latest-batch.zip` 查看所有用例的脱敏文本日志；核对批次 ID，包内路径相对于解压目录。未经隐私确认的截图和原始 Trace 仍在 Ubuntu，报告与包内排除清单会注明。参见[共享结果发布说明](infra/environment/shared-daily-results.md)。
+
+1. 受影响 Case 已实际执行，核对计划数量、所有终态和清理结果。没有运行的范围明确标记未验证。
+2. 实现阶段只读校验通过，检查 `git diff` 中正式资产及生成的 Feature 导航变化；registry 与 Excel 只用于本地核对，不加入 Git。
+3. 提交必要的产品修复、Case、脚本、绑定、Feature 和 Change 记录；本机配置、密码、运行结果和截图留在本地。
+4. PR 中说明修复原因、执行的 Case ID、结果和未验证范围。保留本机证据供排查，不把测试产物混入代码提交。
+
+截至 2026-10-26，Ubuntu 已使用仓库内正式测试资产执行过完整 D0–D6 批次。本次产品仓库迁移、依赖和权限修复已完成本地验证，受影响用例及 Local → ModelEngine → AIDP → Local 的定向部署切换、恢复验证已执行；这不表示全部产品用例通过，也不替代迁移后的正式全量验证。普通 `run` 不能当成 Daily 构建、部署和完整发布链路的验证。
+
+本次迁移验证时 Runner 保持暂停，正式自动全量尚未恢复。本地提交或创建 PR 不代表工作流路径已在 develop 生效。后续需在工作流修改合入实际运行的目标分支、且入口与机器配置一致后，再恢复 Runner 并执行新的完整 Daily，核对 D1–D5、D6、Local 恢复、通知及共享发布回执。不能把本地迁移成功、定向补跑通过或旧批次发布结果当作新正式入口已验证。失败修复仍在开发分支完成，配置、密钥和运行结果留在机器本地。
+
+更多说明：[测试目录总览](README.md)、[环境准备](infra/environment/README.md)、[逐用例准备和清理](infra/environment/preparation.md)、[尚未完成的迁移验证](infra/migration/runtime-migration-status.md)。

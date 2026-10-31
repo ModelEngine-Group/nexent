@@ -1,0 +1,9 @@
+schema_version: '1.0'
+case_id: OPS-BOOTSTRAP-D1-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_ops_deployment_component
+acceptance_bindings:
+  AC-01: [test_ops_deployment_component]
+  AC-02: [test_ops_deployment_component]

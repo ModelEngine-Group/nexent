@@ -1,10 +1,16 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
+from copy import deepcopy
+from dataclasses import fields, is_dataclass
 from threading import Event
 from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
+from ..models.capacity_budget import ContextBudgetSnapshot
+from ..models.sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P, resolve_sampling
 from ..utils.observer import MessageObserver
 from .context.models import ContextItemInput
 
@@ -12,23 +18,80 @@ from .context.models import ContextItemInput
 if TYPE_CHECKING:
     from .a2a_agent_proxy import A2AAgentInfo
 
-# Protocol type constants (must match backend/database/a2a_agent_db.py definitions)
+def copy_invocation_config(config: "AgentConfig") -> "AgentConfig":
+    """Copy configuration data while retaining injected runtime objects."""
+    memo = {}
+    visited = set()
+
+    def preserve_services(value):
+        identity = id(value)
+        if identity in visited:
+            return
+        visited.add(identity)
+        if isinstance(value, BaseModel):
+            children = [vars(value), value.__pydantic_extra__, value.__pydantic_private__]
+        elif isinstance(value, dict):
+            children = [*value.keys(), *value.values()]
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            children = value
+        elif is_dataclass(value) and not isinstance(value, type):
+            children = [getattr(value, field.name) for field in fields(value)]
+        else:
+            memo[identity] = value
+            return
+        for child in children:
+            preserve_services(child)
+
+    preserve_services(config)
+    return deepcopy(config, memo)
+
+
+# Protocol type constants (must match backend/management/db/a2a/repository.py definitions)
 PROTOCOL_JSONRPC = "JSONRPC"
 PROTOCOL_HTTP_JSON = "HTTP+JSON"
 PROTOCOL_GRPC = "GRPC"
 
 
 class ModelConfig(BaseModel):
+    diagnostic_chunks_enabled: bool = Field(
+        default=False, description="Capture bounded content-free response chunk structure"
+    )
     cite_name: str = Field(description="Model alias")
     api_key: str = Field(description="API key", default="")
     model_name: str = Field(description="Model call name")
     url: str = Field(description="Model endpoint URL")
-    temperature: Optional[float] = Field(description="Temperature", default=0.1)
-    top_p: Optional[float] = Field(description="Top P", default=0.95)
+    temperature: Optional[float] = Field(description="Temperature", default=DEFAULT_TEMPERATURE)
+    top_p: Optional[float] = Field(description="Top P", default=DEFAULT_TOP_P)
+
+    @field_validator("temperature", "top_p", mode="before")
+    @classmethod
+    def inherit_sampling_default(cls, value: Any, info: ValidationInfo) -> Any:
+        """Database nulls inherit the same SDK defaults as omitted fields."""
+        return resolve_sampling()[info.field_name] if value is None else value
+
+    explicit_sampling: List[Literal["temperature", "top_p"]] = Field(
+        default_factory=list,
+        description="Request-scoped sampling intent that must not be dropped on provider retry",
+    )
+    enable_thinking: bool = Field(
+        description="Whether provider thinking is enabled",
+        default=False,
+    )
+    reasoning_effort: Optional[Literal["auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"]] = Field(
+        description="Canonical per-request reasoning effort, when supported",
+        default=None,
+    )
+    reasoning_budget_tokens: Optional[int] = Field(
+        description="Canonical numeric reasoning budget, when supported",
+        default=None,
+    )
+    reasoning_capability: Optional[Dict[str, Any]] = Field(
+        description="Resolved model reasoning capability metadata",
+        default=None,
+    )
     ssl_verify: Optional[bool] = Field(description="Whether to verify SSL certificates", default=True)
     model_factory: Optional[str] = Field(
-        description="Model provider identifier (e.g., openai, modelengine)",
-        default=None
+        description="Model provider identifier (e.g., openai, modelengine)", default=None
     )
     extra_body: Optional[Dict[str, Any]] = Field(
         description=(
@@ -83,8 +146,7 @@ class ModelConfig(BaseModel):
         default=None,
     )
     timeout_seconds: Optional[float] = Field(
-        description="Request timeout in seconds. If None, uses provider default.",
-        default=None
+        description="Request timeout in seconds. If None, uses provider default.", default=None
     )
     concurrency_limit: Optional[int] = Field(
         description="Maximum concurrent requests for this model. If None, no limit.",
@@ -109,10 +171,7 @@ class ModelConfig(BaseModel):
                 self.max_output_tokens = 4096
             else:
                 fallback = self.max_tokens
-                if (
-                    self.context_window_tokens is not None
-                    and fallback > self.context_window_tokens
-                ):
+                if self.context_window_tokens is not None and fallback > self.context_window_tokens:
                     fallback = self.context_window_tokens - 1
                 self.max_output_tokens = max(fallback, 1)
         return self
@@ -122,6 +181,7 @@ class ToolConfig(BaseModel):
     class_name: str = Field(description="Tool class name")
     name: Optional[str] = Field(description="Tool name")
     description: Optional[str] = Field(description="Tool description", default=None)
+    description_zh: Optional[str] = Field(description="Chinese tool description", default=None)
     inputs: Optional[str] = Field(description="Tool inputs", default=None)
     output_type: Optional[str] = Field(description="Tool output type", default=None)
     params: Dict[str, Any] = Field(description="Initialization parameters", default=None)
@@ -247,42 +307,64 @@ class AgentVerificationConfig(BaseModel):
         default=None,
     )
 
+
 class AgentConfig(BaseModel):
+    runtime_ref: Optional[str] = None
+    origin: Literal["SYSTEM", "PERSISTED", "BUILTIN_RUNTIME"] = "PERSISTED"
+    agent_id: Optional[Union[int, str]] = Field(
+        description="Stable persisted Agent identity used for runtime events",
+        default=None,
+    )
+    version_no: Optional[int] = Field(
+        description="Resolved immutable Agent version used by this run",
+        default=None,
+    )
+    invocation_name: Optional[str] = Field(
+        description="Stable, unique callable name within the resolved Agent tree",
+        default=None,
+    )
     name: str = Field(description="Agent name")
+    display_name: Optional[str] = Field(description="User-facing Agent name", default=None)
     description: str = Field(description="Agent description")
     prompt_templates: Optional[Dict[str, Any]] = Field(description="Prompt templates", default=None)
     tools: List[ToolConfig] = Field(description="List of tool information")
     max_steps: int = Field(description="Maximum number of steps for current Agent", default=15, ge=1)
     requested_output_tokens: Optional[int] = Field(
-        description=(
-            "Per-agent W2 output reserve override. None means inherit the "
-            "resolved model-level default."
-        ),
+        description=("Per-agent W2 output reserve override. None means inherit the resolved model-level default."),
         default=None,
         ge=1,
     )
     model_name: str = Field(description="Model alias from ModelConfig")
-    provide_run_summary: Optional[bool] = Field(description="Whether to provide run summary to upper-level Agent", default=False)
+    output_protocol: Literal["code_action", "final_envelope"] = Field(
+        description="Closed model-output protocol used by the Agent runtime",
+        default="code_action",
+    )
+    enable_protocol_repair_retry: bool = Field(
+        description="Whether the Agent uses strict output validation and silent protocol repair",
+        default=False,
+    )
+    provide_run_summary: Optional[bool] = Field(
+        description="Whether to provide run summary to upper-level Agent", default=False
+    )
     allow_chat_metadata: bool = Field(
         description="Whether Native Chat and Debug users may submit runtime metadata",
         default=False,
     )
-    instructions: Optional[str] = Field(description="Additional instructions to prepend to system prompt", default=None)
-    managed_agents: List["AgentConfig"] = Field(
-        description="Internal managed sub-agents created locally",
-        default=[]
+    instructions: Optional[str] = Field(
+        description="Additional instructions to prepend to system prompt", default=None
     )
+    worker_agents: List["AgentConfig"] = Field(description="Internal worker sub-agents created locally", default=[])
     external_a2a_agents: List["ExternalA2AAgentConfig"] = Field(
-        description="External A2A agents called via HTTP requests",
-        default=[]
+        description="External A2A agents called via HTTP requests", default=[]
     )
     context_manager_config: Optional[Any] = Field(
-        description="Context manager configuration for conversation-level memory compression",
-        default=None
+        description="Context manager configuration for conversation-level memory compression", default=None
     )
     context_items: Optional[List[ContextItemInput]] = Field(
-        description="Authorized fine-grained context item inputs for SDK assembly",
-        default=None
+        description="Authorized fine-grained context item inputs for SDK assembly", default=None
+    )
+    prompt_tool_policy_snapshot: Optional[Dict[str, Any]] = Field(
+        description="Immutable versioned tool policy values injected for this Agent run", default=None
     )
     pre_run_tool_events: List[Dict[str, Any]] = Field(
         description=(
@@ -295,8 +377,8 @@ class AgentConfig(BaseModel):
         description="Resolved model capacity snapshot fields for request monitoring",
         default=None,
     )
-    safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
-        description="Resolved W2 safe input budget snapshot for request execution",
+    context_budget_snapshot: Optional[ContextBudgetSnapshot] = Field(
+        description="Resolved canonical W2 context budget snapshot for request execution",
         default=None,
     )
     verification_config: AgentVerificationConfig = Field(
@@ -324,32 +406,31 @@ class AgentConfig(BaseModel):
 
 class AgentHistory(BaseModel):
     role: str = Field(description="Role, can be user or assistant")
-    content : str = Field(description="Conversation content")
+    content: str = Field(description="Conversation content")
 
 
 class PlanStep(BaseModel):
     """Single step within an agent plan."""
+
     id: str = Field(description="Unique step identifier, e.g. 'step-1'")
     title: str = Field(description="Short step title")
     description: str = Field(description="Detailed step description")
     status: Literal["pending", "in_progress", "completed", "skipped"] = Field(
-        description="Current execution status of the step",
-        default="pending"
+        description="Current execution status of the step", default="pending"
     )
 
 
 class AgentPlan(BaseModel):
     """Structured task plan generated before agent execution."""
+
     plan_id: str = Field(description="Unique plan identifier")
     title: str = Field(description="Plan title extracted from the task")
     steps: List[PlanStep] = Field(description="Ordered list of plan steps")
-    current_step_index: int = Field(
-        description="Index of the currently executing step",
-        default=0
-    )
+    current_step_index: int = Field(description="Index of the currently executing step", default=0)
 
 
 class AgentRunInfo(BaseModel):
+    attempt_outcome: Optional[str] = Field(default=None, description="Typed worker outcome for the application host")
     query: str = Field(description="User query")
     model_config_list: List[ModelConfig] = Field(description="List of model configurations")
     observer: MessageObserver = Field(description="Return data")
@@ -360,12 +441,56 @@ class AgentRunInfo(BaseModel):
         "Transport can be 'sse' or 'streamable-http'. If string, transport is auto-detected based on URL ending: "
         "URLs ending with '/sse' use 'sse' transport, URLs ending with '/mcp' use 'streamable-http' transport. "
         "Authorization can be provided as 'authorization' (e.g., 'Bearer token') or as 'headers' dict.",
-        default=None
+        default=None,
+    )
+    mcp_request_timeout_seconds: Optional[float] = Field(
+        description=(
+            "Maximum seconds allowed to establish an MCP connection and complete "
+            "the initialization handshake. It does not limit tool execution."
+        ),
+        default=None,
     )
     history: Optional[List[AgentHistory]] = Field(description="Historical conversation information", default=None)
     stop_event: Event = Field(description="Stop event control")
+    cancellation_scope: Optional[Any] = Field(
+        description="Run-scoped cancellation and active resource registry",
+        default=None,
+        exclude=True,
+    )
+    mcp_tool_timeout_seconds: float = Field(
+        description="Hard timeout for one MCP tool invocation",
+        default=60.0,
+        gt=0,
+    )
+    mcp_close_timeout_seconds: float = Field(
+        description="Maximum wait for an MCP context to close",
+        default=5.0,
+        gt=0,
+    )
+    thread_manager: Optional[Any] = Field(
+        description="Injected process-local thread manager",
+        default=None,
+        exclude=True,
+    )
+    thread_execution_id: Optional[str] = Field(
+        description="Process-local managed execution identifier",
+        default=None,
+        exclude=True,
+    )
+    thread_future: Optional[Any] = Field(
+        description="Process-local managed execution completion handle",
+        default=None,
+        exclude=True,
+    )
     conversation_id: Optional[int] = Field(description="Conversation id for run-scoped persistence", default=None)
     user_id: Optional[str] = Field(description="User id for run-scoped persistence", default=None)
+    user_context: Optional[Dict[str, Any]] = Field(
+        description="Caller user context (tenant/user/groups) passed through to tools for "
+        "tool-side authorization. Hidden from the model; values come only from the "
+        "authenticated session, never from model output.",
+        default=None,
+        exclude=True,
+    )
     runtime_metadata: Dict[str, Any] = Field(
         description="Immutable application-resolved runtime metadata snapshot",
         default_factory=dict,
@@ -382,18 +507,15 @@ class AgentRunInfo(BaseModel):
         description="Resolved model capacity snapshot fields for request monitoring",
         default=None,
     )
-    safe_input_budget_snapshot: Optional[Dict[str, Any]] = Field(
-        description="Resolved W2 safe input budget snapshot for request execution",
+    context_budget_snapshot: Optional[ContextBudgetSnapshot] = Field(
+        description="Resolved canonical W2 context budget snapshot for request execution",
         default=None,
     )
-    enable_planning: bool = Field(
-        description="Whether to enable the planning phase before execution",
-        default=False
-    )
+    enable_planning: bool = Field(description="Whether to enable the planning phase before execution", default=False)
     redis_client: Optional[Any] = Field(
         description="Redis client for plan persistence. "
-                    "If provided, plan_repo will use Redis as primary storage with local fallback.",
-        default=None
+        "If provided, plan_repo will use Redis as primary storage with local fallback.",
+        default=None,
     )
     sandbox_config: Optional[Any] = Field(
         description=(
@@ -402,6 +524,14 @@ class AgentRunInfo(BaseModel):
             "and NEXENT_SANDBOX_* environment variables.  "
             "When None the SDK uses LocalPythonExecutor (backwards-compatible)."
         ),
+        default=None,
+    )
+    tool_fastpath_enabled: bool = Field(
+        description="Enable restricted official-tool actions before ordinary Docker initialization.",
+        default=True,
+    )
+    tool_fastpath_allowed_tools: Optional[List[str]] = Field(
+        description="Deployment-approved official implementation IDs for local fast-path actions.",
         default=None,
     )
     minio_client: Optional[Any] = Field(
@@ -431,6 +561,7 @@ class AgentRunInfo(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
+
 class MemoryContext(BaseModel):
     user_config: MemoryUserConfig = Field(description="Memory user configuration")
     tenant_id: str = Field(description="Tenant id")
@@ -446,6 +577,7 @@ class MemoryUserConfig(BaseModel):
     agent_share_option: str = Field(description="Agent share option")
     disable_agent_ids: List[str] = Field(description="Disable agent ids")
     disable_user_agent_ids: List[str] = Field(description="Disable user agent ids")
+    external_provider_top_k: int = Field(default=20, description="Max results per external provider")
 
     def __str__(self) -> str:  # pragma: no cover
         return self.model_dump_json(indent=2, ensure_ascii=False)
@@ -453,28 +585,23 @@ class MemoryUserConfig(BaseModel):
 
 class ExternalA2AAgentConfig(BaseModel):
     """Configuration for an external A2A agent that can be called as sub-agent."""
+
     agent_id: str = Field(description="External agent ID")
     name: str = Field(description="Agent display name")
+    invocation_name: Optional[str] = Field(default=None, description="Resolved runtime callable; original name is preserved")
     description: str = Field(description="Agent description for prompt", default="")
     url: str = Field(description="A2A endpoint URL")
     api_key: Optional[str] = Field(description="API key for authentication", default=None)
-    transport_type: str = Field(
-        description="Transport type: http-streaming or http-polling",
-        default="http-streaming"
-    )
+    transport_type: str = Field(description="Transport type: http-streaming or http-polling", default="http-streaming")
     protocol_version: str = Field(description="A2A protocol version", default="1.0")
-    protocol_type: str = Field(
-        description="Protocol type: JSONRPC, HTTP+JSON, or GRPC",
-        default=PROTOCOL_JSONRPC
-    )
-    timeout: float = Field(description="Request timeout in seconds", default=300.0)
+    protocol_type: str = Field(description="Protocol type: JSONRPC, HTTP+JSON, or GRPC", default=PROTOCOL_JSONRPC)
+    timeout: float = Field(description="Request timeout in seconds", default=900.0)
+    ssl_verify: bool = Field(description="Verify the peer TLS certificate", default=True)
     raw_card: Optional[Dict[str, Any]] = Field(
-        description="Raw Agent Card containing skills and capabilities",
-        default=None
+        description="Raw Agent Card containing skills and capabilities", default=None
     )
     custom_headers: Optional[Dict[str, str]] = Field(
-        description="Pre-built auth headers from securitySchemes + credentials",
-        default=None
+        description="Pre-built auth headers from securitySchemes + credentials", default=None
     )
 
     def model_post_init(self, __context) -> None:
@@ -507,7 +634,7 @@ class ExternalA2AAgentConfig(BaseModel):
         examples_section = ""
         if examples_lines:
             # Shuffle and pick some examples
-            examples_str = ', '.join(f'"{ex}"' for ex in examples_lines[:8])
+            examples_str = ", ".join(f'"{ex}"' for ex in examples_lines[:8])
             examples_section = f"\n  调用示例: {examples_str}"
 
         # Build capability description (without explicit skill IDs)
@@ -519,17 +646,20 @@ class ExternalA2AAgentConfig(BaseModel):
     def to_a2a_agent_info(self) -> "A2AAgentInfo":
         """Convert to A2AAgentInfo for SDK usage."""
         from .a2a_agent_proxy import A2AAgentInfo
+
         return A2AAgentInfo(
             agent_id=self.agent_id,
             name=self.name,
+            invocation_name=self.invocation_name,
             url=self.url,
             api_key=self.api_key,
             transport_type=self.transport_type,
             protocol_version=self.protocol_version,
             protocol_type=self.protocol_type,
             timeout=self.timeout,
+            ssl_verify=self.ssl_verify,
             raw_card=self.raw_card,
-            custom_headers=self.custom_headers
+            custom_headers=self.custom_headers,
         )
 
 

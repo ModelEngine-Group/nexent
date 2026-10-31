@@ -1,0 +1,43 @@
+schema_version: '1.0'
+change:
+  change_id: SKUR-REFACTOR-001
+  change_type: refactor
+  title: Consolidate Skill and Knowledge Base utilities
+  description: Move domain helpers to their owning services and split large modules while preserving public APIs and behavior.
+  affected_features:
+    existing:
+      - F-185
+      - V5-REL-AUTO-80AA755E2436D269
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+      - UT-BE-AUTO-BDBC2EA00EAF645E
+      - UT-BE-AUTO-14FDB4C07EB17A6F
+      - UT-BE-AUTO-CE8011DE9D3EAB17
+      - REL-AUTO-80AA755E2436D269
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Existing contracts and assertions cover unchanged behavior; only imports and mock lookup sites follow the new canonical owners. No duplicate formal Cases are needed.
+  notes: Monitoring, font utilities, shared ingestion error classification, storage keys and generic file conversion helpers remain unchanged. The unused task status utility is removed.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Preserve Skill archives, installation, permissions and parameter serialization.
+      - Preserve Knowledge Base summaries, lifecycle status, source deletion and ingestion.
+      - Assert canonical ownership, database dependency direction and a 1500-line module limit.
+    reason: Existing unit assertions remain intact; architecture assertions verify the new ownership and module boundaries.
+    test_selectors:
+      - test/backend/management/test_service_directory_architecture.py
+      - test/backend/services/test_skill_service.py
+      - test/backend/services/test_vectordatabase_service.py
+      - test/backend/utils/test_skill_params_utils.py
+      - test/backend/utils/test_file_management_utils.py
+      - test/backend/test_document_vector_utils.py
+      - test/backend/test_document_vector_utils_coverage.py
+      - test/backend/database/test_skill_db.py
+      - test/backend/app/test_skill_app.py
+      - test/backend/app/test_northbound_knowledge_app.py

@@ -1,44 +1,50 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 AIDP Search Tool
 Performs multimodal knowledge base retrieval via the AIDP FusionSearch API.
-Supports hybrid, vector, and full-text search with optional reranking.
+Supports vector, full-text, graph and combined retrieval with optional reranking.
 """
 import json
 import logging
 import re
-import time
 from typing import Any, Dict, List, Optional
 from urllib.parse import urljoin
 
-import httpx
 from pydantic import Field
 from pydantic.fields import FieldInfo
 from smolagents.tools import Tool
 
+from .constants import AIDP_SEARCH_TOOL_NAME
+
 from ...utils.observer import MessageObserver, ProcessType
-from ...utils.tools_common_message import SearchResultTextMessage, ToolCategory, ToolSign
+from ...utils.pydantic_utils import unwrap_field_info
+from ...utils.tools_common_message import (
+    SearchResultTextMessage,
+    ToolCategory,
+    ToolSign,
+    build_knowledge_search_response,
+    resolve_knowledge_search_scope,
+)
 from ....utils.http_client_manager import http_client_manager
+from .retrieval_client import AidpRetrievalError, post_retrieval
+from .retrieval_config import (
+    ALL_CHANNELS,
+    CONFIG_KEYS,
+    DEFAULTS,
+    build_payload,
+    resolve_config,
+)
+
 
 logger = logging.getLogger("aidp_search_tool")
 
-_VALID_SEARCH_METHODS = {"hybrid_search", "vector_search", "full_text_search"}
-_VALID_RERANK_MODES = {"performance", "high_accuracy"}
+AidpSearchError = AidpRetrievalError
+
 _MAX_KDS = 10
 
-# Transient HTTP status codes that merit automatic retry. 502/503/504 per
-# HTTP spec indicate the upstream server was temporarily unavailable; a
-# short backoff and retry is the standard client-side mitigation. AIDP's
-# FusionSearch endpoint is observed to return 503 intermittently (e.g. cold
-# start or gateway-level instability), so this is the main consumer.
-_AIDP_SEARCH_RETRY_STATUSES = {502, 503, 504}
-_AIDP_SEARCH_MAX_ATTEMPTS = 3
-_AIDP_SEARCH_RETRY_BACKOFF = (0.5, 1.5)  # seconds between retry 1 and 2
 _HTML_IMAGE_TAG_PATTERN = re.compile(r"<img\b[^>]*>", re.IGNORECASE)
 _IMAGE_MARKER_PATH = "/__aidp_image__/"
-
-
-class AidpSearchError(RuntimeError):
-    """Raised when the AIDP search tool cannot complete a request."""
 
 
 def _resolve_field_default(value: Any, fallback: Any) -> Any:
@@ -58,20 +64,11 @@ def _parse_kds_list(kds_list: str) -> List[str]:
     return [str(k) for k in parsed_kds]
 
 
-def _coerce_choice(raw: str, valid: set, default: str, label: str) -> str:
-    """Coerce ``raw`` to one of ``valid`` or fall back to ``default``."""
-    value = raw or default
-    if value not in valid:
-        logger.warning("Invalid %s '%s', defaulting to %s", label, value, default)
-        return default
-    return value
-
-
 class AidpSearchTool(Tool):
-    name = "aidp_search"
+    name = AIDP_SEARCH_TOOL_NAME
     is_user_selectable: bool = False
     description = (
-        "Performs a multimodal search on AIDP knowledge bases using FusionSearch. "
+        "Searches AIDP knowledge bases using configured vector, full-text, graph or combined retrieval. "
         "Returns text, table, and image chunks with title and text content. "
         "Image chunks include a safe Markdown image marker. When an image is relevant, "
         "copy that marker unchanged into the answer near the paragraph it illustrates; "
@@ -79,9 +76,7 @@ class AidpSearchTool(Tool):
         "Use when users ask about domain-specific knowledge stored in AIDP knowledge bases."
     )
     description_zh = (
-        "通过 AIDP FusionSearch 对知识库进行多模态检索，返回文本、表格和图片块。"
-        "每个块包含标题和文本内容。"
-        "适用于询问 AIDP 知识库中存储的领域专业知识。"
+        "按已配置的向量、全文、图谱或组合方式检索 AIDP 知识库，返回可引用的文本、表格和图片结果。"
     )
 
     inputs = {
@@ -116,20 +111,14 @@ class AidpSearchTool(Tool):
             "description_zh": "要检索的知识库 ID 列表",
         },
         "search_method": {
-            "description": "Search method: hybrid_search, vector_search, full_text_search",
-            "description_zh": (
-                "搜索方法：hybrid_search（融合检索）/"
-                "vector_search（向量检索）/"
-                "full_text_search（全文检索）"
-            ),
+            "description_zh": "检索方式：向量、全文、图谱或使用竖线分隔的组合",
         },
         "reranking_enable": {
             "description": "Whether to enable reranking",
             "description_zh": "是否启用重排序",
         },
         "reranking_mode": {
-            "description": "Reranking mode: performance or high_accuracy",
-            "description_zh": "重排序模式：performance/high_accuracy",
+            "description_zh": "重排策略：性能优先、精度优先或术语覆盖",
         },
         "rewrite_enable": {
             "description": "Whether to enable query rewrite",
@@ -151,6 +140,15 @@ class AidpSearchTool(Tool):
             "description": "Whether to return multimodal chunks (image/table)",
             "description_zh": "是否返回多模态块（图片/表格）",
         },
+        "vector_candidates": {"description_zh": "向量初步检索条数；固定整数，1–500"},
+        "full_text_candidates": {"description_zh": "全文初步检索条数；固定整数，1–500"},
+        "hybrid_top_k": {"description_zh": "向量／全文部分返回上限；0 表示不单独限制，最终仍受总返回上限约束"},
+        "graph_top_k": {"description_zh": "图谱返回上限；0 表示不单独限制，最终仍受总返回上限约束"},
+        "vector_score_threshold": {"description_zh": "向量检索分数阈值，范围 0–1"},
+        "full_text_score_threshold": {"description_zh": "全文检索分数阈值，范围 0–1"},
+        "graph_score_threshold": {"description_zh": "图谱检索分数阈值，范围 0–1"},
+        "graph_reranking_enable": {"description_zh": "图谱是否参与统一重排；固定布尔值"},
+        "query_expansion_enable": {"description_zh": "是否启用查询扩展"},
     }
 
     output_type = "string"
@@ -168,14 +166,23 @@ class AidpSearchTool(Tool):
             description="Mapping from kds_name to kds_id for LLM parameter conversion",
         ),
         kds_list: str = Field(description="JSON string array of knowledge base IDs"),
-        search_method: str = Field(default="hybrid_search", description="Search method"),
+        search_method: str = Field(default=ALL_CHANNELS, description="Retrieval channels: vector_search, full_text_search, graph_search or a pipe-separated combination"),
         reranking_enable: bool = Field(default=True, description="Enable reranking"),
-        reranking_mode: str = Field(default="performance", description="Reranking mode"),
+        reranking_mode: str = Field(default="performance", description="Reranking strategy: performance, high_accuracy or jargon_coverage"),
         rewrite_enable: bool = Field(default=False, description="Enable query rewrite"),
         related_search_enable: bool = Field(default=False, description="Enable related search"),
         score_threshold: float = Field(default=0.0, description="Score threshold 0-1", ge=0.0, le=1.0),
         top_k: int = Field(default=10, description="Top K results", ge=1, le=100),
         multi_modal: bool = Field(default=True, description="Return multimodal chunks"),
+        vector_candidates: int = Field(default=10, ge=1, le=500, description="Vector candidates"),
+        full_text_candidates: int = Field(default=10, ge=1, le=500, description="Full-text candidates"),
+        hybrid_top_k: int = Field(default=0, ge=0, le=100, description="Vector/full-text cap; zero means no separate cap, still bounded by top_k"),
+        graph_top_k: int = Field(default=0, ge=0, le=100, description="Graph cap; zero means no separate cap, still bounded by top_k"),
+        vector_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Vector threshold"),
+        full_text_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Full-text threshold"),
+        graph_score_threshold: float = Field(default=0.0, ge=0.0, le=1.0, description="Graph threshold"),
+        graph_reranking_enable: bool = Field(default=True, description="Include graph results in unified reranking"),
+        query_expansion_enable: bool = Field(default=False, description="Enable query expansion"),
         observer: MessageObserver = Field(default=None, exclude=True),
     ):
         super().__init__()
@@ -192,22 +199,30 @@ class AidpSearchTool(Tool):
             raise ValueError("api_key is required and must be a non-empty string")
         if not self.tenant_id:
             raise ValueError("tenant_id is required and must be a non-empty string")
-        self.search_method = _coerce_choice(
-            search_method, _VALID_SEARCH_METHODS, "hybrid_search", "search_method"
-        )
-        self.reranking_mode = _coerce_choice(
-            reranking_mode, _VALID_RERANK_MODES, "performance", "reranking_mode"
-        )
-        self.reranking_enable = bool(_resolve_field_default(reranking_enable, True))
-        self.rewrite_enable = bool(_resolve_field_default(rewrite_enable, False))
-        self.related_search_enable = bool(_resolve_field_default(related_search_enable, False))
-        resolved_score_threshold = _resolve_field_default(score_threshold, 0.0)
-        resolved_top_k = _resolve_field_default(top_k, 10)
-        resolved_multi_modal = _resolve_field_default(multi_modal, True)
-        self.score_threshold = max(0.0, min(float(resolved_score_threshold), 1.0))
-        self.top_k = max(1, min(int(resolved_top_k), 100))
-        self.multi_modal = bool(resolved_multi_modal)
-        self.observer = observer
+        config = {
+            "search_method": search_method,
+            "reranking_mode": reranking_mode,
+            "reranking_enable": reranking_enable,
+            "rewrite_enable": rewrite_enable,
+            "related_search_enable": related_search_enable,
+            "score_threshold": score_threshold,
+            "top_k": top_k,
+            "multi_modal": multi_modal,
+            "vector_candidates": vector_candidates,
+            "full_text_candidates": full_text_candidates,
+            "hybrid_top_k": hybrid_top_k,
+            "graph_top_k": graph_top_k,
+            "vector_score_threshold": vector_score_threshold,
+            "full_text_score_threshold": full_text_score_threshold,
+            "graph_score_threshold": graph_score_threshold,
+            "graph_reranking_enable": graph_reranking_enable,
+            "query_expansion_enable": query_expansion_enable,
+        }
+        config = {key: _resolve_field_default(value, DEFAULTS[key]) for key, value in config.items()}
+        resolved = resolve_config(config)
+        for key, value in resolved.items():
+            setattr(self, key, value)
+        self.observer = _resolve_field_default(observer, None)
         # Runtime whitelist populated by the backend (create_agent_info).
         # When the whitelist has been explicitly installed (even as an empty
         # set), both the configured ``kds_list`` and any LLM-supplied
@@ -242,27 +257,7 @@ class AidpSearchTool(Tool):
         return urljoin(self.base_url, path)
 
     def _build_retrieve_payload(self, query: str, kds_list: List[str]) -> Dict[str, Any]:
-        payload = {
-            "query": query,
-            "kds_list": kds_list,
-            "search_method": self.search_method,
-            "reranking_enable": self.reranking_enable,
-            "rewrite_enable": self.rewrite_enable,
-            "related_search_enable": self.related_search_enable,
-            "score_threshold": self.score_threshold,
-            "top_k": self.top_k,
-            "multi_modal": self.multi_modal,
-        }
-        if self.reranking_enable:
-            payload["reranking_mode"] = self.reranking_mode
-        return payload
-
-    def _parse_response(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
-        records = data.get("result", [])
-        if not isinstance(records, list):
-            logger.error("Unexpected response format: result is not a list")
-            raise ValueError("Invalid AIDP response: result field missing or not a list")
-        return records
+        return build_payload({key: getattr(self, key) for key in CONFIG_KEYS}, query, kds_list)
 
     def _emit_running_prompt(self, query: str) -> None:
         """Push the running prompt + query card to the observer if any."""
@@ -273,13 +268,13 @@ class AidpSearchTool(Tool):
             "", ProcessType.CARD, json.dumps(card_content, ensure_ascii=False)
         )
 
-    def _build_chunk_message(self, chunk: Dict[str, Any], idx: int):
+    def _build_chunk_message(self, chunk: Dict[str, Any], idx: int, citation_start: Optional[int] = None):
         """Build a SearchResultTextMessage for a single record chunk."""
         chunk_type = str(chunk.get("chunk_type", "text") or "text")
         title = str(chunk.get("title") or "")
         text = str(chunk.get("text") or "")
         file_url = str(chunk.get("file_url") or "")
-        chunk_id = chunk.get("id")
+        chunk_id = chunk.get("id") if chunk.get("id") is not None else chunk.get("text_id")
         score = chunk.get("score")
         pages = chunk.get("pages", [])
         metadata = chunk.get("metadata", {})
@@ -297,8 +292,9 @@ class AidpSearchTool(Tool):
                 "pages": pages,
                 "file_url": file_url,
                 "metadata": metadata,
+                "retrieval_source": chunk.get("retrieval_source"),
             },
-            cite_index=self.record_ops + idx,
+            cite_index=(self.record_ops if citation_start is None else citation_start) + idx,
             search_type=self.name,
             tool_sign=self.tool_sign,
         )
@@ -310,8 +306,13 @@ class AidpSearchTool(Tool):
         search_results_return: List[Dict[str, Any]] = []
         images_url: List[str] = []
 
-        for idx, chunk in enumerate(records[: self.top_k]):
-            msg = self._build_chunk_message(chunk, idx)
+        chunks = records[: self.top_k]
+        citation_start = (
+            self.observer.reserve_citations(self.tool_sign, len(chunks))
+            if self.observer else self.record_ops
+        )
+        for idx, chunk in enumerate(chunks):
+            msg = self._build_chunk_message(chunk, idx, citation_start)
             ui_result = msg.to_dict()
             ui_result["text"] = _HTML_IMAGE_TAG_PATTERN.sub("", ui_result["text"])
             search_results_json.append(ui_result)
@@ -328,6 +329,7 @@ class AidpSearchTool(Tool):
             # value because they aren't rendered as <img> tags.
             if chunk_type == "image" and file_url:
                 full_url = self._build_image_url(file_url)
+                ui_result["url"] = full_url
                 # Do NOT expose the image URL to the LLM: the URL is an
                 # AIDP endpoint that requires a Bearer token, so if the
                 # model embeds it in markdown the browser will GET it
@@ -376,77 +378,11 @@ class AidpSearchTool(Tool):
             )
 
     def _execute_request(self, query: str, kds_list: List[str]):
-        """POST to the AIDP FusionSearch endpoint and return parsed records.
-
-        Retries automatically on transient HTTP statuses (502 / 503 / 504)
-        with a short exponential backoff. These are the only retryable
-        failures we handle — 4xx errors and other 5xx responses are raised
-        immediately. Retrying 503 is the most valuable case in practice:
-        AIDP's FusionSearch endpoint has been observed to return 503 on the
-        first invocation after a period of inactivity and succeed on a
-        quick retry.
-
-        On a final 503 error (all retries exhausted) we surface a
-        user-friendly message that explains the likely cause (AIDP
-        retrieval service temporarily unavailable / KB still warming up)
-        rather than the raw httpx exception string.
-        """
-        url = self._build_retrieve_url()
-        payload = self._build_retrieve_payload(query.strip(), kds_list)
-
-        last_status_error: Optional[httpx.HTTPStatusError] = None
-        for attempt in range(1, _AIDP_SEARCH_MAX_ATTEMPTS + 1):
-            resp = self._http_client.post(
-                url,
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.api_key}",
-                },
-                json=payload,
-            )
-            if resp.status_code not in _AIDP_SEARCH_RETRY_STATUSES:
-                # Non-retryable: raise_for_status will either succeed (2xx)
-                # or throw immediately for 4xx / other 5xx.
-                break
-
-            last_status_error = httpx.HTTPStatusError(
-                message=f"{resp.status_code} {resp.reason_phrase}",
-                request=resp.request,
-                response=resp,
-            )
-            if attempt >= _AIDP_SEARCH_MAX_ATTEMPTS:
-                break
-            wait = _AIDP_SEARCH_RETRY_BACKOFF[0] * (2 ** (attempt - 1))
-            logger.warning(
-                "AIDP FusionSearch returned %d on attempt %d/%d for query=%r, "
-                "retrying in %.1fs",
-                resp.status_code, attempt, _AIDP_SEARCH_MAX_ATTEMPTS,
-                query[:50], wait,
-            )
-            time.sleep(wait)
-
-        # If we exhausted all retries on a transient status, surface it as
-        # a domain-level AidpSearchError with a clearer message.
-        if last_status_error is not None and resp.status_code in _AIDP_SEARCH_RETRY_STATUSES:
-            if resp.status_code == 503:
-                # AIDP 503 is almost always caused by the retrieval service
-                # being temporarily down, which in turn is almost always
-                # caused by the selected KB(s) having no indexed content
-                # yet (empty or still processing).
-                raise AidpSearchError(
-                    "AIDP retrieval service is temporarily unavailable (HTTP 503). "
-                    "This usually means the selected knowledge base(s) have no "
-                    "searchable content yet — upload at least one document to "
-                    "each KB and wait for indexing to finish, then retry. "
-                    "If the problem persists, contact the AIDP operator."
-                )
-            raise AidpSearchError(
-                f"AIDP retrieval service returned HTTP {resp.status_code} "
-                f"after {_AIDP_SEARCH_MAX_ATTEMPTS} attempts. Please retry later."
-            )
-
-        resp.raise_for_status()
-        return self._parse_response(resp.json())
+        """Retrieve records through the shared transport and response boundary."""
+        return post_retrieval(
+            self._http_client, self._build_retrieve_url(), self.api_key,
+            self._build_retrieve_payload(query.strip(), kds_list),
+        )
 
     def _build_image_url(self, file_url: str) -> str:
         """Build a fully-qualified image URL from the relative ``file_url``
@@ -510,6 +446,26 @@ class AidpSearchTool(Tool):
             return list(kds)
         return [k for k in kds if k in self._allowed_kds_set]
 
+    def _resolve_search_scope(
+        self, kds_list: Optional[List[str]]
+    ):
+        configured_scope = self._convert_to_kds_ids(list(self.kds_list))
+        requested_scope = (
+            None
+            if kds_list is None or len(kds_list) == 0
+            else self._convert_to_kds_ids(list(kds_list))
+        )
+        return resolve_knowledge_search_scope(
+            configured_scope=configured_scope,
+            available_scope=self._filter_by_whitelist(configured_scope),
+            requested_scope=requested_scope,
+            permission_tracking_enabled=self._whitelist_installed,
+        )
+
+    def _get_kds_name_to_id_map(self) -> Dict[str, str]:
+        kds_map = unwrap_field_info(self.kds_name_to_id_map)
+        return kds_map if isinstance(kds_map, dict) else {}
+
     def _convert_to_kds_ids(self, names: List[str]) -> List[str]:
         """Convert kds_name (display name) to kds_id if a mapping exists.
 
@@ -523,12 +479,7 @@ class AidpSearchTool(Tool):
         Returns:
             List of resolved kds_id values. Unknown names pass through unchanged.
         """
-        kds_map = self.kds_name_to_id_map
-        if isinstance(kds_map, FieldInfo):
-            if kds_map.default_factory is not None:
-                kds_map = kds_map.default_factory()
-            else:
-                kds_map = kds_map.default
+        kds_map = self._get_kds_name_to_id_map()
         if not kds_map:
             return names
 
@@ -540,6 +491,34 @@ class AidpSearchTool(Tool):
                 converted_names.append(name)
         return converted_names
 
+    def _convert_to_kds_names(self, kds_ids: List[str]) -> List[str]:
+        """Convert internal KDS IDs to display names for model-facing metadata."""
+        kds_map = self._get_kds_name_to_id_map()
+        if not kds_map:
+            return list(kds_ids)
+
+        id_to_name = {str(kds_id): str(name) for name, kds_id in kds_map.items()}
+        return [id_to_name.get(str(kds_id), str(kds_id)) for kds_id in kds_ids]
+
+    def _build_scope_response(
+        self,
+        results: List[Dict[str, Any]],
+        used_scope: List[str],
+        permission_denied_scope: List[str],
+        unavailable_scope: List[str],
+        fallback_to_all: bool,
+        scope_was_specified: bool,
+    ) -> str:
+        """Serialize search results with display names in the model-facing notice."""
+        return build_knowledge_search_response(
+            results,
+            self._convert_to_kds_names(used_scope),
+            self._convert_to_kds_names(permission_denied_scope),
+            self._convert_to_kds_names(unavailable_scope),
+            fallback_to_all,
+            scope_was_specified,
+        )
+
     def forward(
         self,
         query: str,
@@ -548,20 +527,8 @@ class AidpSearchTool(Tool):
         if not query or not query.strip():
             raise ValueError("query is required and must be a non-empty string")
 
-        # Always intersect with the runtime whitelist, regardless of whether
-        # the LLM passed a fresh ``kds_list`` or we fall back to the
-        # configured value. ``_filter_by_whitelist`` is a no-op when no
-        # whitelist has been installed (e.g. SDK unit tests), so it stays
-        # safe to call from anywhere.
-        base_kds = (
-            kds_list
-            if kds_list is not None and len(kds_list) > 0
-            else self.kds_list
-        )
-        # Resolve kds_name (display name) to kds_id before permission
-        # filtering so the whitelist operates on the real ID namespace.
-        base_kds = self._convert_to_kds_ids(list(base_kds))
-        search_kds_list = self._filter_by_whitelist(list(base_kds))
+        scope = self._resolve_search_scope(kds_list)
+        search_kds_list = scope.used_scope
 
         self._emit_running_prompt(query)
 
@@ -577,21 +544,16 @@ class AidpSearchTool(Tool):
             # Permission denial is a valid tool observation, not a transport
             # failure. Returning it lets the agent produce a complete answer
             # while still preventing any request to the AIDP endpoint.
-            return json.dumps(
-                "No AIDP knowledge base is accessible within the selected "
-                "conversation scope. The configured knowledge bases may have "
-                "been removed or your access may have been revoked.",
-                ensure_ascii=False,
+            return self._build_scope_response(
+                [],
+                search_kds_list,
+                scope.permission_denied_scope,
+                scope.unavailable_scope,
+                scope.fallback_to_all,
+                scope.scope_was_specified,
             )
 
-        try:
-            records = self._execute_request(query, search_kds_list)
-        except httpx.HTTPError as e:
-            logger.exception("AIDP HTTP error: %s", e)
-            raise AidpSearchError(f"AIDP HTTP error: {e}") from e
-        except ValueError as e:
-            logger.exception("AIDP search error: %s", e)
-            raise AidpSearchError(f"AIDP search error: {e}") from e
+        records = self._execute_request(query, search_kds_list)
 
         if not records:
             logger.info(
@@ -599,14 +561,23 @@ class AidpSearchTool(Tool):
                 query,
                 search_kds_list,
             )
-            return json.dumps(
-                "No relevant information was found in the selected AIDP knowledge "
-                "bases. Try a broader or shorter query, or explain that the selected "
-                "scope does not contain enough evidence.",
-                ensure_ascii=False,
+            return self._build_scope_response(
+                [],
+                search_kds_list,
+                scope.permission_denied_scope,
+                scope.unavailable_scope,
+                scope.fallback_to_all,
+                scope.scope_was_specified,
             )
 
         search_results_json, search_results_return, images_url = self._process_records(records)
         self.record_ops += len(search_results_return)
         self._emit_results(search_results_json, images_url)
-        return json.dumps(search_results_return, ensure_ascii=False)
+        return self._build_scope_response(
+            search_results_return,
+            search_kds_list,
+            scope.permission_denied_scope,
+            scope.unavailable_scope,
+            scope.fallback_to_all,
+            scope.scope_was_specified,
+        )

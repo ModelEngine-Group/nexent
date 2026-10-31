@@ -20,6 +20,11 @@ on:
         required: true
         default: 'latest'
         type: string
+      build_full_sandbox:
+        description: 'Also build the optional full sandbox image'
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   build-main:
@@ -80,6 +85,9 @@ jobs:
         uses: actions/checkout@v4
       - name: Build sandbox image
         run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent-sandbox:${{ github.event.inputs.app_version }} -t nexent/nexent-sandbox -f deploy/images/dockerfiles/sandbox/Dockerfile .
+      - name: Build optional full sandbox image
+        if: ${{ inputs.build_full_sandbox }}
+        run: docker build --build-arg MIRROR=https://pypi.tuna.tsinghua.edu.cn/simple --build-arg APT_MIRROR=tsinghua -t nexent/nexent-sandbox-full:${{ github.event.inputs.app_version }} -t nexent/nexent-sandbox-full -f deploy/images/dockerfiles/sandbox-full/Dockerfile .
 
   build-mcp:
     runs-on: ${{ fromJson(inputs.runner_label_json) }}

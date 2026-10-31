@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -12,21 +14,13 @@ import {
 } from "@assistant-ui/react";
 
 import { conversationService } from "@/services/conversationService";
-import type {
-  ApiConversationDetail as LegacyApiConversationDetail,
-  ChatMessageType,
-} from "@/types/chat";
 import type { ApiConversationDetail as NewChatApiConversationDetail } from "@/types/conversation";
-import { formatConversationMessagesFromResponse } from "@/lib/chatMessageExtractor";
-import { ChatStreamMain } from "@/app/chat/streaming/chatStreamMain";
-import { ChatRightPanel } from "@/app/chat/components/chatRightPanel";
 import { createShareThreadListAdapter } from "@/app/newchat/adapter/conversation-thread-list-adapter";
 import { remoteChatModelAdapter } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import { ReadOnlyConversation } from "@/app/newchat/assistant-ui/thread";
 import { compositeAttachmentAdapter } from "@/app/newchat/adapter/attachment-adapter";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { Agent } from "@/types/agentConfig";
-import "@/styles/chat.css";
 
 type SharePayload = {
   share_id: string;
@@ -50,10 +44,16 @@ const useReadOnlyShareRuntime = (): AssistantRuntime =>
     },
   });
 
-function NewChatShareView({ payload, title }: { payload: SharePayload; title: string }) {
+function NewChatShareView({
+  payload,
+  title,
+}: {
+  payload: SharePayload;
+  title: string;
+}) {
   const adapter = useMemo(
     () => createShareThreadListAdapter(payload.snapshot),
-    [payload.snapshot],
+    [payload.snapshot]
   );
   const runtime = useRemoteThreadListRuntime({
     runtimeHook: useReadOnlyShareRuntime,
@@ -77,10 +77,6 @@ export default function ShareConversationPage() {
   const [payload, setPayload] = useState<SharePayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedMessageId, setSelectedMessageId] = useState<
-    string | undefined
-  >();
-  const [showRightPanel, setShowRightPanel] = useState(false);
 
   useEffect(() => {
     if (!shareId) return;
@@ -93,24 +89,14 @@ export default function ShareConversationPage() {
       .then((data) => setPayload(data))
       .catch((err) => {
         if (controller.signal.aborted) return;
-        setError(err?.message || "Failed to load share");
+        setError(err?.message || t("chatInterface.shareLoadFailed"));
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
 
     return () => controller.abort();
-  }, [shareId]);
-
-  const messages = useMemo<ChatMessageType[]>(() => {
-    const snapshot = payload?.snapshot;
-    if (!snapshot?.message) return [];
-
-    return formatConversationMessagesFromResponse(
-      snapshot as unknown as LegacyApiConversationDetail,
-      t,
-    );
-  }, [payload, t]);
+  }, [shareId, t]);
 
   const title =
     payload?.snapshot?.conversation_title ||
@@ -131,7 +117,7 @@ export default function ShareConversationPage() {
         <Alert
           type="error"
           showIcon
-          message={t(
+          title={t(
             "chatInterface.shareLoadFailed",
             "Unable to open this shared conversation"
           )}
@@ -141,51 +127,5 @@ export default function ShareConversationPage() {
     );
   }
 
-  if (payload.render_version === "newchat") {
-    return <NewChatShareView payload={payload} title={title} />;
-  }
-
-  return (
-    <div className="h-full w-full bg-white overflow-hidden flex">
-      <main className="flex-1 flex flex-col overflow-hidden">
-        <div className="mx-auto w-full max-w-3xl px-4 pt-8 pb-4">
-          <div className="border-b border-slate-200 pb-4">
-            <h1 className="text-2xl font-semibold text-slate-950">{title}</h1>
-            <div className="mt-2 text-xs text-slate-500">
-              {t(
-                "chatInterface.shareReadOnly",
-                "Shared from Nexent. Read-only view."
-              )}
-            </div>
-          </div>
-        </div>
-
-        <ChatStreamMain
-          messages={messages}
-          input=""
-          isLoading={false}
-          isStreaming={false}
-          readOnly
-          onInputChange={() => {}}
-          onSend={() => {}}
-          onStop={() => {}}
-          onKeyDown={() => {}}
-          selectedMessageId={selectedMessageId}
-          onSelectMessage={(messageId) => {
-            setSelectedMessageId(messageId);
-            setShowRightPanel(true);
-          }}
-        />
-      </main>
-
-      <ChatRightPanel
-        messages={messages}
-        onImageError={() => {}}
-        maxInitialImages={14}
-        isVisible={showRightPanel}
-        toggleRightPanel={() => setShowRightPanel((value) => !value)}
-        selectedMessageId={selectedMessageId}
-      />
-    </div>
-  );
+  return <NewChatShareView payload={payload} title={title} />;
 }

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // Knowledge base related type definitions
 
 import {
@@ -6,9 +8,11 @@ import {
   UI_ACTION_TYPES,
   NOTIFICATION_TYPES,
 } from "@/const/knowledgeBase";
+import type { TagAssignmentValue } from "@/types/tagManagement";
 
 // Knowledge base basic type
 export interface KnowledgeBase {
+  tags?: string[];
   id: string; // Internal index_name
   knowledge_id?: number | string; // Stable local knowledge base business ID
   name: string; // User-facing knowledge_name
@@ -77,6 +81,9 @@ export interface Document {
   // Optional ingestion progress metrics
   processed_chunk_num?: number | null;
   total_chunk_num?: number | null;
+  // Tag assignments projected by the authorized file-list endpoint. An absent
+  // field simply means the backend did not project tags for this document.
+  tags?: TagAssignmentValue[];
 }
 
 // Document state interface
@@ -244,4 +251,8 @@ export interface KnowledgeBaseListQuery {
   keyword?: string;
   sources?: string[];
   models?: string[];
+}
+
+export interface KnowledgeBaseDeletionPreview {
+  agents: { agent_id: number; display_name: string }[];
 }

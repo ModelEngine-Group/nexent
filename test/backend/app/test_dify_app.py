@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for Dify App Layer.
 
@@ -40,23 +41,23 @@ def _mock_create_storage_client_from_config(config):
 # Apply the mock to the SDK module where create_storage_client_from_config is defined
 with patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
            side_effect=_mock_create_storage_client_from_config):
-    # Also mock the MinIO client initialization in database.client
-    with patch('backend.database.client.MinioClient') as MockMinioClient:
+    # Also mock the MinIO client initialization in management.db.client
+    with patch('management.db.client.MinioClient') as MockMinioClient:
         mock_minio_instance = MagicMock()
         MockMinioClient.return_value = mock_minio_instance
 
         # Now it's safe to import backend modules
-        from backend.apps.dify_app import router, fetch_dify_datasets_api
-        from backend.services.dify_service import fetch_dify_datasets_impl
+        from management.api.knowledge_base.dify import router, fetch_dify_datasets_api
+        from management.services.knowledge_base.providers.dify import fetch_dify_datasets_impl
 
 
 # Fixtures to replace setUp and tearDown
 @pytest.fixture
 def dify_mocks():
     """Fixture to provide mocked dependencies for dify app tests."""
-    with patch('backend.apps.dify_app.get_current_user_id') as mock_get_current_user_id, \
-            patch('backend.apps.dify_app.fetch_dify_datasets_impl') as mock_fetch_dify, \
-            patch('backend.apps.dify_app.logger') as mock_logger:
+    with patch('management.api.knowledge_base.dify.get_current_user_id') as mock_get_current_user_id, \
+            patch('management.api.knowledge_base.dify.fetch_dify_datasets_impl') as mock_fetch_dify, \
+            patch('management.api.knowledge_base.dify.logger') as mock_logger:
 
         mock_fetch_dify.return_value = MagicMock()
 
@@ -173,8 +174,8 @@ class TestFetchDifyDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_auth_error(self, dify_mocks):
         """Test endpoint with authentication error."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer invalid-token"
         dify_api_base = "https://dify.example.com"
@@ -199,8 +200,8 @@ class TestFetchDifyDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_service_validation_error(self, dify_mocks):
         """Test endpoint with service layer validation error (ValueError)."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -224,8 +225,8 @@ class TestFetchDifyDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_service_error(self, dify_mocks):
         """Test endpoint with general service layer error."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -252,8 +253,8 @@ class TestFetchDifyDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_http_error_from_service(self, dify_mocks):
         """Test endpoint when service raises HTTP-related exception."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -279,8 +280,8 @@ class TestFetchDifyDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_request_error_from_service(self, dify_mocks):
         """Test endpoint when service raises request error."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -293,8 +294,8 @@ class TestFetchDifyDatasetsApi:
         dify_mocks['fetch_dify'].side_effect = Exception(
             "Dify API request failed: Connection refused")
 
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         with pytest.raises(AppException) as exc_info:
             await fetch_dify_datasets_api(
@@ -481,7 +482,7 @@ class TestFetchDifyDatasetsApi:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_logger_error_call(self, dify_mocks):
         """Test that endpoint logs errors appropriately."""
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -593,8 +594,8 @@ class TestDifyAppExceptionHandlers:
         # dify_app.py doesn't define its own exception handlers,
         # it relies on the global middleware in config_app.py
         # This test verifies the module structure
-        from backend.apps import dify_app
-        from backend.apps.dify_app import router, logger, fetch_dify_datasets_api
+        from management.api.knowledge_base import dify as dify_app
+        from management.api.knowledge_base.dify import router, logger, fetch_dify_datasets_api
 
         # Verify router exists
         assert router is not None
@@ -618,7 +619,7 @@ class TestDifyAppExceptionHandlers:
         dify_mocks['fetch_dify'].side_effect = Exception(
             "URL connection error")
 
-        from consts.exceptions import AppException
+        from contracts.errors.exceptions import AppException
 
         with pytest.raises(AppException) as exc_info:
             await fetch_dify_datasets_api(
@@ -642,16 +643,16 @@ class TestFetchDifyDatasetsApiConfigValidation:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_invalid_dify_api_base_none(self):
         """Test endpoint raises DIFY_CONFIG_INVALID when dify_api_base is None."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = None
         api_key = "test-api-key"
 
-        with patch('backend.apps.dify_app.get_current_user_id') as mock_get_current_user_id, \
-                patch('backend.apps.dify_app.fetch_dify_datasets_impl') as mock_fetch_dify, \
-                patch('backend.apps.dify_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.dify.get_current_user_id') as mock_get_current_user_id, \
+                patch('management.api.knowledge_base.dify.fetch_dify_datasets_impl') as mock_fetch_dify, \
+                patch('management.api.knowledge_base.dify.logger') as mock_logger:
 
             mock_get_current_user_id.return_value = (
                 "test_user_id", "test_tenant_id"
@@ -672,16 +673,16 @@ class TestFetchDifyDatasetsApiConfigValidation:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_invalid_dify_api_base_integer(self):
         """Test endpoint raises DIFY_CONFIG_INVALID when dify_api_base is an integer."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = 12345  # Invalid type - should be string
         api_key = "test-api-key"
 
-        with patch('backend.apps.dify_app.get_current_user_id') as mock_get_current_user_id, \
-                patch('backend.apps.dify_app.fetch_dify_datasets_impl') as mock_fetch_dify, \
-                patch('backend.apps.dify_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.dify.get_current_user_id') as mock_get_current_user_id, \
+                patch('management.api.knowledge_base.dify.fetch_dify_datasets_impl') as mock_fetch_dify, \
+                patch('management.api.knowledge_base.dify.logger') as mock_logger:
 
             mock_get_current_user_id.return_value = (
                 "test_user_id", "test_tenant_id"
@@ -702,17 +703,17 @@ class TestFetchDifyDatasetsApiConfigValidation:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_invalid_dify_api_base_object(self):
         """Test endpoint raises DIFY_CONFIG_INVALID when dify_api_base is an object without rstrip."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         # Invalid type - should be string
         dify_api_base = {"url": "https://dify.example.com"}
         api_key = "test-api-key"
 
-        with patch('backend.apps.dify_app.get_current_user_id') as mock_get_current_user_id, \
-                patch('backend.apps.dify_app.fetch_dify_datasets_impl') as mock_fetch_dify, \
-                patch('backend.apps.dify_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.dify.get_current_user_id') as mock_get_current_user_id, \
+                patch('management.api.knowledge_base.dify.fetch_dify_datasets_impl') as mock_fetch_dify, \
+                patch('management.api.knowledge_base.dify.logger') as mock_logger:
 
             mock_get_current_user_id.return_value = (
                 "test_user_id", "test_tenant_id"
@@ -732,17 +733,17 @@ class TestFetchDifyDatasetsApiConfigValidation:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_invalid_dify_api_base_list(self):
         """Test endpoint raises DIFY_CONFIG_INVALID when dify_api_base is a list."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         # Invalid type - should be string
         dify_api_base = ["https://dify.example.com"]
         api_key = "test-api-key"
 
-        with patch('backend.apps.dify_app.get_current_user_id') as mock_get_current_user_id, \
-                patch('backend.apps.dify_app.fetch_dify_datasets_impl') as mock_fetch_dify, \
-                patch('backend.apps.dify_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.dify.get_current_user_id') as mock_get_current_user_id, \
+                patch('management.api.knowledge_base.dify.fetch_dify_datasets_impl') as mock_fetch_dify, \
+                patch('management.api.knowledge_base.dify.logger') as mock_logger:
 
             mock_get_current_user_id.return_value = (
                 "test_user_id", "test_tenant_id"
@@ -762,17 +763,17 @@ class TestFetchDifyDatasetsApiConfigValidation:
     @pytest.mark.asyncio
     async def test_fetch_dify_datasets_api_dify_config_invalid_logs_error_message(self):
         """Test that DIFY_CONFIG_INVALID error logs the actual exception message."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         # This will cause AttributeError: 'NoneType' object has no attribute 'rstrip'
         dify_api_base = None
         api_key = "test-api-key"
 
-        with patch('backend.apps.dify_app.get_current_user_id') as mock_get_current_user_id, \
-                patch('backend.apps.dify_app.fetch_dify_datasets_impl') as mock_fetch_dify, \
-                patch('backend.apps.dify_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.dify.get_current_user_id') as mock_get_current_user_id, \
+                patch('management.api.knowledge_base.dify.fetch_dify_datasets_impl') as mock_fetch_dify, \
+                patch('management.api.knowledge_base.dify.logger') as mock_logger:
 
             mock_get_current_user_id.return_value = (
                 "test_user_id", "test_tenant_id"
@@ -806,9 +807,9 @@ class TestFetchDifyDatasetsApiConfigValidation:
             "pagination": {"embedding_available": True}
         }
 
-        with patch('backend.apps.dify_app.get_current_user_id') as mock_get_current_user_id, \
-                patch('backend.apps.dify_app.fetch_dify_datasets_impl') as mock_fetch_dify, \
-                patch('backend.apps.dify_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.dify.get_current_user_id') as mock_get_current_user_id, \
+                patch('management.api.knowledge_base.dify.fetch_dify_datasets_impl') as mock_fetch_dify, \
+                patch('management.api.knowledge_base.dify.logger') as mock_logger:
 
             mock_get_current_user_id.return_value = (
                 "test_user_id", "test_tenant_id"
@@ -840,8 +841,8 @@ class TestAppExceptionReRaising:
     @pytest.mark.asyncio
     async def test_service_raises_app_exception_re_raised_to_middleware(self):
         """Test that AppException from service is re-raised for global middleware."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -853,9 +854,9 @@ class TestAppExceptionReRaising:
             "Failed to connect to Dify API"
         )
 
-        with patch('backend.apps.dify_app.get_current_user_id') as mock_get_current_user_id, \
-                patch('backend.apps.dify_app.fetch_dify_datasets_impl') as mock_fetch_dify, \
-                patch('backend.apps.dify_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.dify.get_current_user_id') as mock_get_current_user_id, \
+                patch('management.api.knowledge_base.dify.fetch_dify_datasets_impl') as mock_fetch_dify, \
+                patch('management.api.knowledge_base.dify.logger') as mock_logger:
 
             mock_get_current_user_id.return_value = (
                 "test_user_id", "test_tenant_id"
@@ -878,8 +879,8 @@ class TestAppExceptionReRaising:
     @pytest.mark.asyncio
     async def test_service_raises_dify_config_invalid_app_exception(self):
         """Test that DIFY_CONFIG_INVALID AppException from service is re-raised."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -891,9 +892,9 @@ class TestAppExceptionReRaising:
             "Invalid Dify API key format"
         )
 
-        with patch('backend.apps.dify_app.get_current_user_id') as mock_get_current_user_id, \
-                patch('backend.apps.dify_app.fetch_dify_datasets_impl') as mock_fetch_dify, \
-                patch('backend.apps.dify_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.dify.get_current_user_id') as mock_get_current_user_id, \
+                patch('management.api.knowledge_base.dify.fetch_dify_datasets_impl') as mock_fetch_dify, \
+                patch('management.api.knowledge_base.dify.logger') as mock_logger:
 
             mock_get_current_user_id.return_value = (
                 "test_user_id", "test_tenant_id"
@@ -913,8 +914,8 @@ class TestAppExceptionReRaising:
     @pytest.mark.asyncio
     async def test_service_raises_dify_auth_error_app_exception(self):
         """Test that DIFY_AUTH_ERROR AppException from service is re-raised."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -926,9 +927,9 @@ class TestAppExceptionReRaising:
             "Invalid API key provided"
         )
 
-        with patch('backend.apps.dify_app.get_current_user_id') as mock_get_current_user_id, \
-                patch('backend.apps.dify_app.fetch_dify_datasets_impl') as mock_fetch_dify, \
-                patch('backend.apps.dify_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.dify.get_current_user_id') as mock_get_current_user_id, \
+                patch('management.api.knowledge_base.dify.fetch_dify_datasets_impl') as mock_fetch_dify, \
+                patch('management.api.knowledge_base.dify.logger') as mock_logger:
 
             mock_get_current_user_id.return_value = (
                 "test_user_id", "test_tenant_id"
@@ -948,8 +949,8 @@ class TestAppExceptionReRaising:
     @pytest.mark.asyncio
     async def test_service_raises_app_exception_with_details(self):
         """Test that AppException with details from service is re-raised."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -962,9 +963,9 @@ class TestAppExceptionReRaising:
             details={"host": "dify.example.com", "port": 443}
         )
 
-        with patch('backend.apps.dify_app.get_current_user_id') as mock_get_current_user_id, \
-                patch('backend.apps.dify_app.fetch_dify_datasets_impl') as mock_fetch_dify, \
-                patch('backend.apps.dify_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.dify.get_current_user_id') as mock_get_current_user_id, \
+                patch('management.api.knowledge_base.dify.fetch_dify_datasets_impl') as mock_fetch_dify, \
+                patch('management.api.knowledge_base.dify.logger') as mock_logger:
 
             mock_get_current_user_id.return_value = (
                 "test_user_id", "test_tenant_id"
@@ -986,8 +987,8 @@ class TestAppExceptionReRaising:
     @pytest.mark.asyncio
     async def test_service_raises_dify_rate_limit_app_exception(self):
         """Test that DIFY_RATE_LIMIT AppException from service is re-raised."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -999,9 +1000,9 @@ class TestAppExceptionReRaising:
             "Rate limit exceeded"
         )
 
-        with patch('backend.apps.dify_app.get_current_user_id') as mock_get_current_user_id, \
-                patch('backend.apps.dify_app.fetch_dify_datasets_impl') as mock_fetch_dify, \
-                patch('backend.apps.dify_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.dify.get_current_user_id') as mock_get_current_user_id, \
+                patch('management.api.knowledge_base.dify.fetch_dify_datasets_impl') as mock_fetch_dify, \
+                patch('management.api.knowledge_base.dify.logger') as mock_logger:
 
             mock_get_current_user_id.return_value = (
                 "test_user_id", "test_tenant_id"
@@ -1021,8 +1022,8 @@ class TestAppExceptionReRaising:
     @pytest.mark.asyncio
     async def test_app_exception_not_wrapped_or_converted(self):
         """Test that AppException is not wrapped or converted to another exception."""
-        from consts.exceptions import AppException
-        from consts.error_code import ErrorCode
+        from contracts.errors.exceptions import AppException
+        from contracts.errors.codes import ErrorCode
 
         mock_auth_header = "Bearer test-token"
         dify_api_base = "https://dify.example.com"
@@ -1034,9 +1035,9 @@ class TestAppExceptionReRaising:
             "Unauthorized access"
         )
 
-        with patch('backend.apps.dify_app.get_current_user_id') as mock_get_current_user_id, \
-                patch('backend.apps.dify_app.fetch_dify_datasets_impl') as mock_fetch_dify, \
-                patch('backend.apps.dify_app.logger') as mock_logger:
+        with patch('management.api.knowledge_base.dify.get_current_user_id') as mock_get_current_user_id, \
+                patch('management.api.knowledge_base.dify.fetch_dify_datasets_impl') as mock_fetch_dify, \
+                patch('management.api.knowledge_base.dify.logger') as mock_logger:
 
             mock_get_current_user_id.return_value = (
                 "test_user_id", "test_tenant_id"

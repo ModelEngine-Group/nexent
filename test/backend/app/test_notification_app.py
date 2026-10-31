@@ -1,4 +1,5 @@
-"""Unit tests for apps.notification_app."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Unit tests for management.api.notification.notification."""
 import os
 import sys
 from http import HTTPStatus
@@ -12,11 +13,11 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 backend_dir = os.path.abspath(os.path.join(current_dir, "../../../backend"))
 sys.path.insert(0, backend_dir)
 
-sys.modules.setdefault("services.notification_service", MagicMock())
-sys.modules.setdefault("utils.auth_utils", MagicMock())
+sys.modules.setdefault("management.services.notification.service", MagicMock())
+sys.modules.setdefault("gateway.authentication.auth", MagicMock())
 
-from apps.notification_app import router
-from consts.exceptions import NotFoundException, UnauthorizedError
+from management.api.notification.notification import router
+from contracts.errors.exceptions import NotFoundException, UnauthorizedError
 
 app = FastAPI()
 app.include_router(router)
@@ -29,8 +30,8 @@ class TestListNotifications:
             "items": [{"receiver_id": 1, "event_type": "repository_review_approved"}],
             "pagination": {"page": 1, "page_size": 10, "total": 1, "total_pages": 1},
         }
-        mock_user = mocker.patch("apps.notification_app.get_current_user_id")
-        mock_list = mocker.patch("apps.notification_app.list_notifications")
+        mock_user = mocker.patch("management.api.notification.notification.get_current_user_id")
+        mock_list = mocker.patch("management.api.notification.notification.list_notifications")
         mock_user.return_value = ("user-1", "tenant-a")
         mock_list.return_value = mock_result
 
@@ -46,7 +47,7 @@ class TestListNotifications:
         )
 
     def test_list_notifications_unauthorized(self, mocker):
-        mock_user = mocker.patch("apps.notification_app.get_current_user_id")
+        mock_user = mocker.patch("management.api.notification.notification.get_current_user_id")
         mock_user.side_effect = UnauthorizedError("bad token")
 
         response = client.get("/notifications")
@@ -57,8 +58,8 @@ class TestListNotifications:
 
 class TestMarkNotificationsRead:
     def test_mark_read_success(self, mocker):
-        mock_user = mocker.patch("apps.notification_app.get_current_user_id")
-        mock_mark = mocker.patch("apps.notification_app.mark_notifications_read")
+        mock_user = mocker.patch("management.api.notification.notification.get_current_user_id")
+        mock_mark = mocker.patch("management.api.notification.notification.mark_notifications_read")
         mock_user.return_value = ("user-1", "tenant-a")
         mock_mark.return_value = {"updated_count": 1}
 
@@ -76,7 +77,7 @@ class TestMarkNotificationsRead:
         )
 
     def test_mark_read_unauthorized(self, mocker):
-        mock_user = mocker.patch("apps.notification_app.get_current_user_id")
+        mock_user = mocker.patch("management.api.notification.notification.get_current_user_id")
         mock_user.side_effect = UnauthorizedError("bad token")
 
         response = client.post(
@@ -87,8 +88,8 @@ class TestMarkNotificationsRead:
         assert response.status_code == HTTPStatus.UNAUTHORIZED
 
     def test_mark_read_not_found(self, mocker):
-        mock_user = mocker.patch("apps.notification_app.get_current_user_id")
-        mock_mark = mocker.patch("apps.notification_app.mark_notifications_read")
+        mock_user = mocker.patch("management.api.notification.notification.get_current_user_id")
+        mock_mark = mocker.patch("management.api.notification.notification.mark_notifications_read")
         mock_user.return_value = ("user-1", "tenant-a")
         mock_mark.side_effect = NotFoundException("Notification receiver 99 not found")
 
@@ -101,8 +102,8 @@ class TestMarkNotificationsRead:
         assert "99" in response.json()["detail"]
 
     def test_mark_read_bad_request(self, mocker):
-        mock_user = mocker.patch("apps.notification_app.get_current_user_id")
-        mock_mark = mocker.patch("apps.notification_app.mark_notifications_read")
+        mock_user = mocker.patch("management.api.notification.notification.get_current_user_id")
+        mock_mark = mocker.patch("management.api.notification.notification.mark_notifications_read")
         mock_user.return_value = ("user-1", "tenant-a")
         mock_mark.side_effect = ValueError("receiver_id is required when mark_all is false")
 

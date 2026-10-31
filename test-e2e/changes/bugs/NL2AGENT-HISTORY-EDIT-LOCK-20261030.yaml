@@ -1,0 +1,46 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-HISTORY-EDIT-LOCK-20261030
+  change_type: bugfix
+  bug_id: NL2AGENT-HISTORY-EDIT-LOCK-20261030
+  title: Preserve Agent configuration editing after history restore
+  description: Historical card registration must never acquire the generation edit lock; real run start owns locking and conversation switches clear stale flow locks.
+  observed_behavior: Viewing completed NL2Agent history mounts old cards that register and lock the current Agent configuration form.
+  expected_behavior: All historical cards, including the latest actionable card, leave Agent configuration editable; sending another question starts the existing generation lock lifecycle.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing panel tests substitute Thread and do not mount the real interaction cards with the shared form-lock context.
+  feature_contract_changed: false
+  affected_features:
+    existing: [SYS-AGENT-LIFECYCLE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/workbench/Nl2AgentHistoricalCardLock.test.tsx
+      - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+      - frontend/tests/workbench/Nl2AgentCardBoundary.test.tsx
+      - frontend/tests/workbench/AgentCreationHistoryCard.test.ts
+      - frontend/tests/workbench/WorkbenchPageLifecycle.test.tsx
+    behaviors:
+      - Disabled clarification, installation and binding cards cannot register a live form lock.
+      - Current cards retain interaction behavior and preserve an already acquired live-generation lock.
+      - Registering the latest restored card cannot acquire an edit lock; a real run start locks the same form afterwards.
+      - Valid restore and new conversation clear old flow locks without replacing Agent configuration or permissions.
+      - History ID, target verification, stale-load guards and result-card replay remain intact.
+    reason: Reproduce the defect with real cards and form-lock context at controlled runtime boundaries; retain existing replay and panel regressions.
+  notes: >-
+    SPEC ../nexent-doc/docs/Developing/chat-shared-system-agents/design.md, historical-card edit-lock fix.
+    Three disabled-card regressions failed before the fix while three active-card checks passed.
+    Database execution, migration and persistence contracts are unchanged; SYS-AGENT-D5-001 is unaffected.
+    No duplicate formal D1 for local React flow state and no live browser acceptance claim.
+    Follow-up clarifies that enabled latest historical cards also must not lock editing. Three added regressions fail before removing register_card lock acquisition; run_started remains the owner of the initial generation lock.
+    A new run clears the previous conversation card so an ordinary finished response is not kept locked by a historical pending card.

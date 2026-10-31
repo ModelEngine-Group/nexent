@@ -1,10 +1,11 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // Agent Configuration Types
 import type { Dispatch, SetStateAction } from "react";
+import type { MyAgentRepositoryInfoItem } from "@/types/agentRepository";
 
 import { ChatMessageType } from "./chat";
 import { ModelOption } from "@/types/modelConfig";
-import { GENERATE_PROMPT_STREAM_TYPES } from "../const/agentConfig";
-import type { PromptTemplateFieldKey } from "../const/promptTemplate";
 
 export type AgentConfigUpdate = Partial<
   Pick<
@@ -19,21 +20,19 @@ export type AgentConfigUpdate = Partial<
     | "is_main_agent"
     | "provide_run_summary"
     | "allow_chat_metadata"
+    | "enable_protocol_repair_retry"
     | "description"
-    | "duty_prompt"
-    | "constraint_prompt"
-    | "few_shots_prompt"
+    | "prompt"
     | "business_description"
     | "business_logic_model_id"
     | "business_logic_model_name"
-    | "prompt_template_id"
-    | "prompt_template_name"
     | "verification_config"
     | "group_ids"
     | "ingroup_permission"
     | "is_a2a"
     | "greeting_message"
     | "example_questions"
+    | "model_params_override"
   >
 >;
 
@@ -118,6 +117,7 @@ export interface PublishedAgent {
   display_name?: string;
   description: string;
   author?: string;
+  author_cas_username?: string | null;
   unavailable_reasons?: string[];
   model_ids?: number[];
   model_names?: string[];
@@ -131,7 +131,17 @@ export interface PublishedAgent {
   greeting_message?: string;
   example_questions?: string[];
   allow_chat_metadata?: boolean;
+  /** Agent-owned model inference snapshots used by the chat runtime. */
+  model_params_override?: Record<string, ModelParamsOverrideEntry> | null;
+  enable_protocol_repair_retry?: boolean;
   icon_url?: string;
+  tags?: string[];
+}
+
+export interface ModelParamsOverrideEntry {
+  temperature?: number | null;
+  top_p?: number | null;
+  extra_params?: Record<string, unknown> | null;
 }
 
 export interface Agent {
@@ -139,31 +149,40 @@ export interface Agent {
   name: string;
   display_name?: string;
   description: string;
+  tags?: string[];
   author?: string;
+  author_cas_username?: string | null;
   /** Nexent user_id of the agent creator (owner). */
   created_by?: string | null;
+  create_time?: string;
+  update_time?: string;
+  version_label?: string | null;
+  version_create_time?: string | null;
   unavailable_reasons?: string[];
   model: string;
   model_ids?: number[];
   model_names?: string[]; // Model display names resolved from model_ids for list/detail responses
   max_step: number;
   requested_output_tokens?: number | null;
+  /**
+   * v2.6.0: Per-agent overrides for model inference params.
+   * Shape: { "<model_id>": { temperature?: number|null, top_p?: number|null, extra_params?: Record<string, unknown>|null } }
+   * NULL/undefined means inherit the model's default values.
+   */
+  model_params_override?: Record<string, ModelParamsOverrideEntry> | null;
   is_main_agent?: boolean;
   provide_run_summary: boolean;
   allow_chat_metadata?: boolean;
+  enable_protocol_repair_retry?: boolean;
   enable_context_manager?: boolean;
   is_a2a?: boolean;
   verification_config?: AgentVerificationConfig;
   tools: Tool[];
   skills?: Skill[]; // Skills configured for this agent
-  duty_prompt?: string;
-  constraint_prompt?: string;
-  few_shots_prompt?: string;
+  prompt?: string;
   business_description?: string;
   business_logic_model_name?: string;
   business_logic_model_id?: number;
-  prompt_template_id?: number;
-  prompt_template_name?: string;
   is_available?: boolean;
   is_new?: boolean;
   sub_agent_id_list?: number[];
@@ -189,9 +208,11 @@ export interface Agent {
   greeting_message?: string;
   example_questions?: string[];
   icon_url?: string;
+  repository_info?: MyAgentRepositoryInfoItem[];
 }
 
 export interface Tool {
+  updated_by_cas_username?: string | null;
   id: string;
   name: string;
   origin_name?: string;
@@ -258,11 +279,7 @@ export interface AidpKnowledgeBaseItem {
   created_by?: string;
   /** Lifecycle status; non-ACTIVE rows are still rendered but flagged. */
   resource_status?:
-    | "ACTIVE"
-    | "CREATING"
-    | "DELETE_PENDING"
-    | "ORPHANED"
-    | "UNAVAILABLE";
+    "ACTIVE" | "CREATING" | "DELETE_PENDING" | "ORPHANED" | "UNAVAILABLE";
   /** ISO-8601 creation timestamp from AIDP (normalized from ``create_time``). */
   created_at?: string;
   /** ISO-8601 last-modified timestamp from AIDP (normalized from ``update_time``). */
@@ -346,9 +363,7 @@ export interface SkillGroup {
 
 // Skill with installation status for tenant creation flow
 export type SkillInstallStatus =
-  | "installable"
-  | "installed"
-  | "resource_missing";
+  "installable" | "installed" | "resource_missing";
 
 export interface InstallableSkill {
   skill_id: number;
@@ -400,12 +415,6 @@ export interface AgentSetupOrchestratorProps {
   setEnabledAgentIds: (ids: number[]) => void;
   onEditingStateChange?: (isEditing: boolean, agent: any) => void;
   onToolsRefresh: (showSuccessMessage?: boolean) => void | Promise<any>;
-  dutyContent: string;
-  setDutyContent: (value: string) => void;
-  constraintContent: string;
-  setConstraintContent: (value: string) => void;
-  fewShotsContent: string;
-  setFewShotsContent: (value: string) => void;
   agentName?: string;
   setAgentName?: (value: string) => void;
   agentDescription?: string;
@@ -414,10 +423,8 @@ export interface AgentSetupOrchestratorProps {
   setAgentDisplayName?: (value: string) => void;
   agentAuthor?: string;
   setAgentAuthor?: (value: string) => void;
-  isGeneratingAgent?: boolean;
   onDebug?: () => void;
   getCurrentAgentId?: () => number | undefined;
-  onGenerateAgent?: (selectedModel?: ModelOption) => void;
   onExportAgent?: () => void;
   onDeleteAgent?: () => void;
   editingAgent?: any;
@@ -440,7 +447,6 @@ export interface SubAgentPoolProps {
   subAgentList?: Agent[];
   loadingAgents?: boolean;
   isImporting?: boolean;
-  isGeneratingAgent?: boolean;
   editingAgent?: Agent | null;
   isCreatingNewAgent?: boolean;
   onCopyAgent?: (agent: Agent) => void;
@@ -459,7 +465,6 @@ export interface ToolPoolProps {
   localIsGenerating?: boolean;
   onToolsRefresh?: (showSuccessMessage?: boolean) => void | Promise<any>;
   isEditingMode?: boolean;
-  isGeneratingAgent?: boolean;
   isEmbeddingConfigured?: boolean;
   agentUnavailableReasons?: string[];
   toolConfigDrafts?: Record<string, ToolParam[]>;
@@ -514,6 +519,8 @@ export interface DebugConfigProps {
 export interface McpConfigModalProps {
   visible: boolean;
   onCancel: () => void;
+  onBeforeMcpDelete?: () => void | Promise<void>;
+  onMcpDeleted?: () => void | Promise<void>;
 }
 
 // ========== Agent Call Relationship Interfaces ==========
@@ -584,6 +591,8 @@ export interface AgentRefreshEvent extends CustomEvent {
 // MCP server interface definition
 export interface McpServer {
   service_name: string;
+  description?: string | null;
+  tags?: string[];
   mcp_url: string;
   status: boolean;
   enabled: boolean;
@@ -622,30 +631,6 @@ export interface McpContainer {
 }
 
 // ========== Prompt Service Interfaces ==========
-
-/**
- * Prompt Generation Request Parameters
- */
-export interface GeneratePromptParams {
-  agent_id: number;
-  task_description: string;
-  model_id: number;
-  prompt_template_id?: number;
-  tool_ids?: number[]; // Optional: tool IDs selected in frontend (takes precedence over database query)
-  sub_agent_ids?: number[]; // Optional: sub-agent IDs selected in frontend (takes precedence over database query)
-  /**
-   * Optional: Knowledge base display names for few-shot examples.
-   * If provided, the backend will use these instead of querying the database.
-   * This allows the frontend to pass the latest configured knowledge base names
-   * without waiting for tool config to be saved first.
-   */
-  knowledge_base_display_names?: string[];
-  /**
-   * Whether tools or sub-agents are selected.
-   * When false, the backend skips generating constraint and few_shots sections.
-   */
-  has_selected_resources?: boolean;
-}
 
 export interface OptimizePromptSectionParams {
   agent_id: number;
@@ -694,35 +679,4 @@ export interface OptimizePromptBadCaseResponse {
   section_title: string;
   original_content: string;
   optimized_content: string;
-}
-
-/**
- * Stream Response Data Structure
- */
-export interface StreamResponseData {
-  type: (typeof GENERATE_PROMPT_STREAM_TYPES)[keyof typeof GENERATE_PROMPT_STREAM_TYPES];
-  content: string;
-  is_complete: boolean;
-}
-
-export type PromptTemplateContent = Record<PromptTemplateFieldKey, string>;
-
-export interface PromptTemplate {
-  template_id: number;
-  template_name: string;
-  description?: string | null;
-  template_type: string;
-  template_content_zh: PromptTemplateContent;
-  template_content_en?: PromptTemplateContent | null;
-  is_system_default?: boolean;
-  create_time?: string;
-  update_time?: string;
-}
-
-export interface PromptTemplatePayload {
-  template_name: string;
-  description?: string;
-  template_type?: string;
-  template_content_zh: PromptTemplateContent;
-  template_content_en?: PromptTemplateContent | null;
 }

@@ -1,10 +1,12 @@
-"""Unit tests for backend.services.model_gateway_service.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Unit tests for management.services.model.adapter.
 
 Covers factory normalization, context construction, adapter resolution and
 the VLM config-fetch helpers. Heavy database / utils / consts modules
 are stubbed before import so only the gateway bridge logic is exercised.
 """
 
+from test.common.contract_stubs import install_business_constant_stubs
 import os
 import sys
 from unittest import mock
@@ -25,18 +27,19 @@ class MockModule(mock.MagicMock):
 
 # Mock required heavy modules before any import of the service occurs.
 sys.modules['database'] = MockModule()
-sys.modules['database.model_management_db'] = MockModule()
+sys.modules['management.db.model.repository'] = MockModule()
 sys.modules['utils'] = MockModule()
-sys.modules['utils.config_utils'] = MockModule()
+sys.modules['management.services.configuration.tenant.settings'] = MockModule()
 sys.modules['consts'] = MockModule()
 consts_const_module = MockModule()
 consts_const_module.MODEL_CONFIG_MAPPING = {"vlm": "vlm_config_key", "vlm3": "vlm3_config_key", "llm": "llm_config_key", "embedding": "embedding_config_key"}
-sys.modules['consts.const'] = consts_const_module
+sys.modules['contracts.constants.environment'] = consts_const_module
+install_business_constant_stubs(consts_const_module)
 
 from nexent import MessageObserver
 from nexent.core.gateway import ModelContext, VLMContext
 
-from backend.services import model_gateway_service as mgs
+from management.services.model import adapter as mgs
 
 # _normalize_factory
 
@@ -84,6 +87,18 @@ def test_coalesce_returns_first_non_none():
 def test_coalesce_preserves_falsy_values():
     assert mgs._coalesce(0, 1) == 0
     assert mgs._coalesce(False, True) is False
+
+
+def test_custom_extra_body_preserves_json_value_types():
+    custom = {
+        "top_k": 20,
+        "stop": ["END", "STOP"],
+        "response_format": {"type": "json_object"},
+        "enabled": True,
+        "nullable": None,
+    }
+
+    assert mgs._custom_extra_body({"__custom__": custom}) == custom
 
 
 # _config_to_context
@@ -364,11 +379,28 @@ def test_config_to_context_llm_long_context_branch():
 
 def test_config_to_context_embedding_branch():
     ctx = mgs._config_to_context(
-        _user_cfg(max_tokens=512), "embedding", "embedding", None, model_name="m"
+        _user_cfg(
+            max_tokens=512,
+            extra_params={
+                "__custom__": {
+                    "dimensions": 256,
+                    "metadata": {"tenant": "demo"},
+                }
+            },
+            extra_body={},
+        ),
+        "embedding",
+        "embedding",
+        None,
+        model_name="m",
     )
     assert isinstance(ctx, mgs.EmbeddingContext)
     assert ctx.embedding_dim == 512
     assert ctx.model_type == "llm"
+    assert ctx.extra_body == {
+        "dimensions": 256,
+        "metadata": {"tenant": "demo"},
+    }
 
 
 def test_config_to_context_embedding_default_dim():

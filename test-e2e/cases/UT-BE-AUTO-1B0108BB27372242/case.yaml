@@ -1,0 +1,84 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-AUTO-1B0108BB27372242
+  feature_id: F-069
+  business_rule_ids: [F-069-RULE-01]
+  title: 发布卡片可选标签归一化、数量长度类型边界与可选图标校验
+  type: BE-UT
+  priority: P1
+  status: active
+  automation: automated
+  objective: 按PR4173的可选标签合同验证发布卡片，保留非法类型、数量、长度及图标边界检查。
+  preconditions:
+  - 本地Python组件测试依赖可用，不要求外部模型、数据库或其他在线服务。
+  - NEXENT_TEST_HOME位于Git仓库外，结果记录实际产品提交。
+  test_data:
+    tags: [missing, null, empty, whitespace, duplicate, one, five, six, length_20, length_21, invalid_type]
+    icon_url: [missing, null, valid, blank, invalid_type, length_1024, length_1025]
+  steps:
+  - order: 1
+    action: 导入发布卡片校验及标签归一化函数。
+    expected: 使用当前产品实现，不替换被测校验逻辑。
+  - order: 2
+    action: 传入带空格、重复和空白的合法标签列表。
+    expected: 去空格、去空及去重，保留首次出现顺序。
+  - order: 3
+    action: 验证空列表、全空白列表、1个、5个及6个非空唯一标签。
+    expected: 空列表和全空白归一化为空，1至5个通过，6个抛ValueError。
+  - order: 4
+    action: 验证单标签20与21字符边界。
+    expected: 20字符通过，21字符抛ValueError。
+  - order: 5
+    action: 向归一化函数传入字符串、None和含非字符串成员的列表。
+    expected: 直接函数调用的非列表及非法成员仍抛ValueError；卡片入口另行处理可选值。
+  - order: 6
+    action: 对有效发布卡片执行校验并检查写回标签。
+    expected: 合法标签被归一化写回，其他卡片字段不变。
+  - order: 7
+    action: 验证图标缺失、None、空白、非法类型及1024和1025字符边界。
+    expected: 缺失或None允许默认图标，其他非法输入抛ValueError，1024字符通过。
+  - order: 8
+    action: 验证卡片tags缺失、None、空列表和全空白列表。
+    expected: 均允许发布并写回空标签列表，不恢复已废弃的必填约束。
+  - order: 9
+    action: 检查校验日志，释放临时对象。
+    expected: 不输出密钥，无外部资源创建，可重复执行。
+  expected_results:
+  - 标签去空格、去空及去重并保序。
+  - 空标签允许，最多5个非空唯一标签，各最多20字符。
+  - 非法标签类型及超限输入抛明确ValueError。
+  - 图标可选，提供时为非空字符串且最多1024字符。
+  - 卡片入口的缺失、None、空和全空白tags均写回空列表。
+  - 合法卡片写回归一化标签，其他数据不被改写。
+  - 日志不包含API Key、Token、Password等密钥。
+  forbidden_side_effects:
+  - 不调用模型、数据库或在线服务，不创建持久资源。
+  source:
+    notes: Align optional tags with merged PR4173 c5abd18ca; preserve direct-function type checks and all upper boundaries.
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 389
+  unit_boundary: 仓库卡片校验
+  inputs: [可选标签及图标的有效、空值、类型与长度边界]
+  assertions:
+  - 归一化和卡片入口分别遵守类型合同，不混淆None的入口处理。
+  - 可选空标签通过，数量、长度、类型和图标异常仍被拒绝。
+  - 保序去重、写回归一化结果且不输出密钥。
+  acceptance:
+  - id: AC-01
+    description: Normalize optional empty lists and validate tag order, types, count and length boundaries.
+    steps: [1, 2, 3, 4, 5]
+    expected_results: [1, 2, 3]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Normalize absent/null card tags without weakening icon validation or other card fields.
+    steps: [6, 7, 8]
+    expected_results: [4, 5, 6]
+    forbidden_side_effects: [1]
+  - id: AC-03
+    description: Keep validation logs free of credentials and the test free of online side effects.
+    steps: [9]
+    expected_results: [7]
+    forbidden_side_effects: [1]

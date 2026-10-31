@@ -1,0 +1,86 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-SDK-AUTO-9B9B36B05DA14338
+  feature_id: F-183
+  business_rule_ids:
+  - F-183-RULE-01
+  title: 上下文预算 V2 指纹确定性/快照校验 mismatch/派发边界防跨租户异常｜异常/边界
+  type: SDK-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 上下文预算 V2 指纹确定性/快照校验 mismatch/派发边界防跨租户异常｜异常/边界
+  preconditions:
+  - 本地依赖/组件测试环境可运行；不要求外部模型服务在线。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop；执行时另记录实际被测 commit。
+  - SDK 依赖可导入：sdk/nexent/core/models/capacity_budget.py 及其依赖（pydantic、.capacity_resolver.ModelCapacitySnapshot），无真实模型/凭据。
+  test_data:
+    legacy_asset_declaration: '- 无专用本地资产；使用纯内存构造的固定输入 fixture（ModelCapacitySnapshot、CapacityReservePolicy、ContextBudgetSnapshot
+      及遗留 V1 载荷字典），不读取生产凭据。'
+  steps:
+  - order: 1
+    action: 导入 sdk/nexent/core/models/capacity_budget.py 中的 compute_context_budget_fingerprint、validate_context_budget_snapshot、parse_context_budget_snapshot、ContextBudgetCalculator、ContextBudgetSnapshot
+      及异常类 ContextBudgetFingerprintMismatch、ContextBudgetCapacityMismatch、CallerMaxTokensOverrideForbidden。
+    expected: compute_context_budget_fingerprint 对相同逻辑输入输出确定性 32 位 SHA-256 指纹，warnings 变化不改变指纹（warnings 不进入 canonical payload）。
+  - order: 2
+    action: 用固定参数两次调用 compute_context_budget_fingerprint，两次传入相同的逻辑字段但不同 warnings（如 [] 与 ["uncertainty_reserve_active"]），断言两次返回值相等且均为
+      32 位十六进制字符串。
+    expected: field_sources 键顺序不影响指纹（先 sorted 再序列化）。
+  - order: 3
+    action: 改变 field_sources 的键插入顺序后再次计算，断言指纹与步骤 2 一致（field_sources 在 payload 中先排序再序列化）。
+    expected: calculate_context_budget 生成的快照 schema_version=2、resolver_version="2.0.0"，fingerprint 自洽。
+  - order: 4
+    action: 用 ContextBudgetCalculator.calculate_context_budget 基于最小有效 ModelCapacitySnapshot 与 CapacityReservePolicy 生成 ContextBudgetSnapshot，断言
+      schema_version=2、resolver_version="2.0.0"，且 snapshot.fingerprint 等于用相同字段重算的 compute_context_budget_fingerprint 结果。
+    expected: validate_context_budget_snapshot 对自洽快照幂等返回，对篡改 fingerprint 抛 ContextBudgetFingerprintMismatch 且 expected/actual
+      正确。
+  - order: 5
+    action: 调用 validate_context_budget_snapshot 传入步骤 4 的自洽快照，断言返回原快照且不抛异常。
+    expected: parse_context_budget_snapshot 将遗留 V1 载荷迁移为 V2（target=0.6、trigger_ratio_source=legacy_payload、target_ratio_source=code_default、warnings
+      含 legacy_w2_v1_payload_migrated）。
+  - order: 6
+    action: 将同一快照的 fingerprint 替换为非匹配值后调用 validate_context_budget_snapshot，断言抛出 ContextBudgetFingerprintMismatch，且其 expected/actual
+      分别等于重算指纹与被篡改指纹。
+    expected: 派发边界异常 ContextBudgetCapacityMismatch/CallerMaxTokensOverrideForbidden 可构造，消息与字段符合契约。
+  - order: 7
+    action: 构造遗留 W2 V1 载荷（含 provider_input_limit_tokens/soft_limit_ratio/soft_input_budget_tokens/hard_input_budget_tokens
+      及 V1 fingerprint），调用 parse_context_budget_snapshot，断言返回 schema_version=2 的快照，compaction_target_ratio=0.6、compaction_trigger_ratio_source="legacy_payload"、compaction_target_ratio_source="code_default"，且
+      warnings 含 "legacy_w2_v1_payload_migrated"。
+    expected: 测试过程无未处理异常、无明文凭据泄露。
+  - order: 8
+    action: 实例化 ContextBudgetCapacityMismatch(field="w1_fingerprint", expected="a", actual="b") 与 CallerMaxTokensOverrideForbidden(snapshot_value=2048,
+      caller_value=4096)，断言异常消息分别含 "context_budget_capacity_mismatch" 与 "caller_max_tokens_override_forbidden"，且 field/expected/actual
+      与 snapshot_value/caller_value 字段回填正确。
+    expected: 测试过程无未处理异常、无明文凭据泄露。
+  - order: 9
+    action: 确认日志不输出 API Key/Token/密钥；结束后释放临时对象，确保可重复执行。
+    expected: 测试过程无未处理异常、无明文凭据泄露。
+  expected_results:
+  - compute_context_budget_fingerprint 对相同逻辑输入输出确定性 32 位 SHA-256 指纹，warnings 变化不改变指纹（warnings 不进入 canonical payload）。
+  - field_sources 键顺序不影响指纹（先 sorted 再序列化）。
+  - calculate_context_budget 生成的快照 schema_version=2、resolver_version="2.0.0"，fingerprint 自洽。
+  - validate_context_budget_snapshot 对自洽快照幂等返回，对篡改 fingerprint 抛 ContextBudgetFingerprintMismatch 且 expected/actual 正确。
+  - parse_context_budget_snapshot 将遗留 V1 载荷迁移为 V2（target=0.6、trigger_ratio_source=legacy_payload、target_ratio_source=code_default、warnings
+    含 legacy_w2_v1_payload_migrated）。
+  - 派发边界异常 ContextBudgetCapacityMismatch/CallerMaxTokensOverrideForbidden 可构造，消息与字段符合契约。
+  - 测试过程无未处理异常、无明文凭据泄露。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 475
+  unit_boundary: 上下文预算(Context Budget)
+  inputs:
+  - '- 无专用本地资产；使用纯内存构造的固定输入 fixture（ModelCapacitySnapshot、CapacityReservePolicy、ContextBudgetSnapshot 及遗留 V1 载荷字典），不读取生产凭据。'
+  assertions:
+  - compute_context_budget_fingerprint 对相同逻辑输入输出确定性 32 位 SHA-256 指纹，warnings 变化不改变指纹（warnings 不进入 canonical payload）。
+  - field_sources 键顺序不影响指纹（先 sorted 再序列化）。
+  - calculate_context_budget 生成的快照 schema_version=2、resolver_version="2.0.0"，fingerprint 自洽。
+  - validate_context_budget_snapshot 对自洽快照幂等返回，对篡改 fingerprint 抛 ContextBudgetFingerprintMismatch 且 expected/actual 正确。
+  - parse_context_budget_snapshot 将遗留 V1 载荷迁移为 V2（target=0.6、trigger_ratio_source=legacy_payload、target_ratio_source=code_default、warnings
+    含 legacy_w2_v1_payload_migrated）。
+  - 派发边界异常 ContextBudgetCapacityMismatch/CallerMaxTokensOverrideForbidden 可构造，消息与字段符合契约。
+  - 测试过程无未处理异常、无明文凭据泄露。

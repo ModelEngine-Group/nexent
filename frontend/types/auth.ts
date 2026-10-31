@@ -6,6 +6,7 @@ export type UserRole = USER_ROLES;
 export interface User {
   id: string;
   email: string;
+  username?: string | null;
   role: UserRole;
   avatarUrl?: string;
   tenantId?: string;
@@ -27,6 +28,7 @@ export interface ErrorResponse {
   message: string;
   code: number;
   data?: any;
+  details?: Record<string, unknown> | null;
 }
 
 // Authorization context type

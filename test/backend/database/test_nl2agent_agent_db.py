@@ -1,8 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from database import agent_db
+from management.db.agent import repository as agent_db
 
 
 @contextmanager

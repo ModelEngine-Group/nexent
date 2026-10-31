@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import os
 import sys
 import types
@@ -7,6 +9,9 @@ from unittest.mock import patch, MagicMock
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
+
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, ValidationError
 
 # Dynamically determine the backend path
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -32,22 +37,26 @@ minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
-patch('backend.database.client.minio_client', minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import target endpoints with all external dependencies patched
-from backend.apps.conversation_management_app import (
+from management.api.conversation.conversation_management import (
     create_new_conversation_endpoint,
     list_conversations_endpoint,
     rename_conversation_endpoint,
     delete_conversation_endpoint,
+    delete_conversations_batch_endpoint,
     get_conversation_history_endpoint,
     get_sources_endpoint,
     generate_conversation_title_endpoint,
     update_opinion_endpoint,
     get_message_id_endpoint,
+    list_agent_groups_endpoint,
+    list_agent_group_conversations_endpoint,
+    list_agent_group_conversation_ids_endpoint,
     router,
 )
 
@@ -59,18 +68,22 @@ from backend.apps.conversation_management_app import (
 @pytest.fixture
 def conversation_mocks():
     """Provide fresh mocks for each conversation management test"""
-    with patch('backend.apps.conversation_management_app.get_current_user_id') as mock_get_current_user_id, \
-            patch('backend.apps.conversation_management_app.create_new_conversation') as mock_create_new_conv, \
-            patch('backend.apps.conversation_management_app.get_conversation_list_page') as mock_get_conv_list, \
-            patch('backend.apps.conversation_management_app.rename_conversation_service') as mock_rename_conv, \
-            patch('backend.apps.conversation_management_app.logging') as mock_logging, \
-            patch('backend.apps.conversation_management_app.delete_conversation_service') as mock_delete_conv, \
-            patch('backend.apps.conversation_management_app.get_conversation_history_service') as mock_history_service, \
-            patch('backend.apps.conversation_management_app.get_sources_service') as mock_sources_service, \
-            patch('backend.apps.conversation_management_app.generate_conversation_title_service') as mock_generate_title_service, \
-            patch('backend.apps.conversation_management_app.update_message_opinion_service') as mock_update_opinion_service, \
-            patch('backend.apps.conversation_management_app.get_message_id_by_index_impl') as mock_get_msg_id_impl, \
-            patch('backend.apps.conversation_management_app.get_current_user_info') as mock_get_user_info:
+    with patch('management.api.conversation.conversation_management.get_current_user_id') as mock_get_current_user_id, \
+            patch('management.api.conversation.conversation_management.create_new_conversation') as mock_create_new_conv, \
+            patch('management.api.conversation.conversation_management.get_conversation_list_page') as mock_get_conv_list, \
+            patch('management.api.conversation.conversation_management.rename_conversation_service') as mock_rename_conv, \
+            patch('management.api.conversation.conversation_management.logging') as mock_logging, \
+            patch('management.api.conversation.conversation_management.delete_conversation_service') as mock_delete_conv, \
+            patch('management.api.conversation.conversation_management.delete_conversations_batch_service') as mock_delete_batch, \
+            patch('management.api.conversation.conversation_management.get_conversation_history_service') as mock_history_service, \
+            patch('management.api.conversation.conversation_management.get_sources_service') as mock_sources_service, \
+            patch('management.api.conversation.conversation_management.generate_conversation_title_service') as mock_generate_title_service, \
+            patch('management.api.conversation.conversation_management.update_message_opinion_service') as mock_update_opinion_service, \
+            patch('management.api.conversation.conversation_management.get_message_id_by_index_impl') as mock_get_msg_id_impl, \
+            patch('management.api.conversation.conversation_management.list_agent_groups') as mock_agent_groups, \
+            patch('management.api.conversation.conversation_management.list_agent_group_conversations') as mock_agent_group_conversations, \
+            patch('management.api.conversation.conversation_management.list_agent_group_conversation_ids') as mock_agent_group_ids, \
+            patch('management.api.conversation.conversation_management.get_current_user_info') as mock_get_user_info:
 
         yield {
             'get_current_user_id': mock_get_current_user_id,
@@ -79,11 +92,15 @@ def conversation_mocks():
             'rename_conversation': mock_rename_conv,
             'logging': mock_logging,
             'delete_conversation': mock_delete_conv,
+            'delete_conversations_batch': mock_delete_batch,
             'history_service': mock_history_service,
             'sources_service': mock_sources_service,
             'generate_title_service': mock_generate_title_service,
             'update_opinion_service': mock_update_opinion_service,
             'get_message_id_impl': mock_get_msg_id_impl,
+            'list_agent_groups': mock_agent_groups,
+            'list_agent_group_conversations': mock_agent_group_conversations,
+            'list_agent_group_conversation_ids': mock_agent_group_ids,
             'get_user_info': mock_get_user_info,
         }
 
@@ -150,6 +167,31 @@ async def test_create_new_conversation_failure(conversation_mocks):
 
 
 @pytest.mark.asyncio
+async def test_create_new_conversation_propagates_resource_limit(conversation_mocks):
+    """Conversation quota errors must reach the global AppException handler."""
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks['create_new_convo'].side_effect = AppException(
+        ErrorCode.TENANT_RESOURCE_EXCEEDED,
+        "Conversation history limit reached: maximum 1 conversations per user",
+        details={
+            "resource": "conversations",
+            "scope": "user",
+            "limit": 1,
+            "current_count": 1,
+        },
+    )
+
+    with pytest.raises(AppException) as exc_info:
+        await create_new_conversation_endpoint(
+            MagicMock(title="At limit"), authorization="Bearer test-token"
+        )
+
+    assert exc_info.value.http_status == 429
+    assert exc_info.value.error_code == ErrorCode.TENANT_RESOURCE_EXCEEDED
+
+
+@pytest.mark.asyncio
 async def test_list_conversations_success(conversation_mocks):
     """Verify successful retrieval of conversation list"""
     # Arrange
@@ -211,6 +253,30 @@ async def test_list_conversations_forwards_pagination(conversation_mocks):
         week_start_ms=1000,
         limit=10,
         offset=20,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("conversation_type", ["agent_chat", "workbench"])
+async def test_list_conversations_filters_by_entrypoint(conversation_mocks, conversation_type):
+    """Each page requests only conversations owned by its entrypoint."""
+    conversation_mocks['get_current_user_id'].return_value = ("user_id", "tenant_id")
+    conversation_mocks['get_conversation_list'].return_value = {"items": [], "metadata": {}}
+
+    await list_conversations_endpoint(
+        authorization="Bearer test-token",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        conversation_type=conversation_type,
+    )
+
+    conversation_mocks['get_conversation_list'].assert_called_once_with(
+        user_id="user_id",
+        today_start_ms=2000,
+        week_start_ms=1000,
+        limit=None,
+        offset=0,
+        conversation_type=conversation_type,
     )
 
 
@@ -284,12 +350,13 @@ async def test_rename_conversation_success(conversation_mocks):
     # Setup mocks
     conversation_mocks['get_current_user_id'].return_value = (
         "user_id", "tenant_id")
-    # rename_conversation_service returns None, indicating success
+    conversation_mocks['rename_conversation'].return_value = True
 
     # Create a request-like object with required attributes
     request_obj = MagicMock()
     request_obj.conversation_id = conversation_id
     request_obj.name = new_title
+    request_obj.only_if_default_title = False
 
     # Act
     result = await rename_conversation_endpoint(request_obj, authorization=mock_auth_header)
@@ -301,6 +368,21 @@ async def test_rename_conversation_success(conversation_mocks):
         mock_auth_header)
     conversation_mocks['rename_conversation'].assert_called_once_with(
         conversation_id, new_title, "user_id")
+
+
+@pytest.mark.asyncio
+async def test_automatic_fallback_rename_returns_false_without_claiming_a_write(conversation_mocks):
+    from contracts.conversation import RenameRequest
+
+    conversation_mocks['get_current_user_id'].return_value = ("user", "tenant")
+    conversation_mocks['rename_conversation'].return_value = False
+    request = RenameRequest(conversation_id=42, name="Fallback", only_if_default_title=True)
+    response = await rename_conversation_endpoint(request, authorization="Bearer test-token")
+    assert response.code == 0
+    assert response.data is False
+    conversation_mocks['rename_conversation'].assert_called_once_with(
+        42, "Fallback", "user", only_if_default_title=True,
+    )
 
 
 # -----------------------------
@@ -373,6 +455,70 @@ async def test_delete_conversation_failure(conversation_mocks):
 
     assert exc_info.value.status_code == 500
     conversation_mocks['logging'].error.assert_called_once()
+
+
+# delete_conversations_batch_endpoint
+
+
+@pytest.mark.asyncio
+async def test_delete_conversations_batch_success(conversation_mocks):
+    mock_auth_header = "Bearer test-token"
+
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks['delete_conversations_batch'].return_value = {
+        "deleted_count": 2,
+        "failed_ids": [],
+    }
+
+    request_obj = MagicMock()
+    request_obj.conversation_ids = [1, 2, 3]
+
+    result = await delete_conversations_batch_endpoint(
+        request_obj, authorization=mock_auth_header)
+
+    assert result.code == 0
+    assert result.data["deleted_count"] == 2
+    conversation_mocks['delete_conversations_batch'].assert_called_once_with(
+        [1, 2, 3], "user_id")
+
+
+@pytest.mark.asyncio
+async def test_delete_conversations_batch_failure(conversation_mocks):
+    mock_auth_header = "Bearer test-token"
+
+    conversation_mocks['get_current_user_id'].return_value = (
+        "user_id", "tenant_id")
+    conversation_mocks['delete_conversations_batch'].side_effect = Exception(
+        "batch delete error")
+
+    request_obj = MagicMock()
+    request_obj.conversation_ids = [1, 2]
+
+    with pytest.raises(HTTPException) as exc_info:
+        await delete_conversations_batch_endpoint(
+            request_obj, authorization=mock_auth_header)
+
+    assert exc_info.value.status_code == 500
+    conversation_mocks['logging'].exception.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_delete_conversations_batch_token_expired(conversation_mocks):
+    """Expired token on batch delete maps to 401."""
+    from contracts.errors.exceptions import TokenExpiredError
+
+    conversation_mocks['get_current_user_id'].side_effect = TokenExpiredError(
+        "expired")
+
+    request_obj = MagicMock()
+    request_obj.conversation_ids = [1, 2]
+
+    with pytest.raises(HTTPException) as exc_info:
+        await delete_conversations_batch_endpoint(
+            request_obj, authorization="Bearer x")
+
+    assert exc_info.value.status_code == 401
 
 
 # get_conversation_history_endpoint
@@ -468,6 +614,7 @@ async def test_generate_title_success(conversation_mocks):
     request_obj = MagicMock()
     request_obj.conversation_id = conversation_id
     request_obj.question = question
+    request_obj.model_id = 7
 
     http_request = MagicMock()
 
@@ -475,7 +622,7 @@ async def test_generate_title_success(conversation_mocks):
 
     assert result.code == 0 and result.data == dummy_title
     conversation_mocks['generate_title_service'].assert_called_once_with(
-        conversation_id, question, "user_id", tenant_id="tenant_id", language="en")
+        conversation_id, question, "user_id", tenant_id="tenant_id", language="en", model_id=7)
 
 
 @pytest.mark.asyncio
@@ -484,6 +631,7 @@ async def test_generate_title_failure(conversation_mocks):
     request_obj = MagicMock()
     request_obj.conversation_id = 1
     request_obj.question = "Test question"
+    request_obj.model_id = None
     http_request = MagicMock()
 
     conversation_mocks['get_user_info'].side_effect = Exception("auth fail")
@@ -493,6 +641,20 @@ async def test_generate_title_failure(conversation_mocks):
 
     assert exc_info.value.status_code == 500
     conversation_mocks['logging'].error.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_generate_title_validation_error(conversation_mocks):
+    request_obj = MagicMock(conversation_id=1, question="Question", model_id=7)
+    conversation_mocks['get_user_info'].return_value = ("user_id", "tenant_id", "en")
+    conversation_mocks['generate_title_service'].side_effect = ValidationError(
+        "Selected model is unavailable")
+
+    with pytest.raises(HTTPException) as exc_info:
+        await generate_conversation_title_endpoint(
+            request_obj, MagicMock(), authorization="Bearer test-token")
+
+    assert exc_info.value.status_code == 422
 
 
 # update_opinion_endpoint
@@ -525,6 +687,23 @@ async def test_update_opinion_failure(conversation_mocks):
 
     assert exc_info.value.status_code == 500
     conversation_mocks['logging'].error.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["opinion", "lookup"])
+async def test_missing_message_returns_404(conversation_mocks, route):
+    from contracts.errors.exceptions import ConversationNotFoundError
+
+    request_obj = MagicMock(message_id=123, opinion="Y", conversation_id=1, message_index=0)
+    if route == "opinion":
+        conversation_mocks['update_opinion_service'].side_effect = ConversationNotFoundError("Message not found")
+        endpoint = update_opinion_endpoint
+    else:
+        conversation_mocks['get_message_id_impl'].side_effect = ConversationNotFoundError("Message not found")
+        endpoint = get_message_id_endpoint
+    with pytest.raises(HTTPException) as error:
+        await endpoint(request_obj)
+    assert error.value.status_code == 404
 
 
 # get_message_id_endpoint
@@ -567,7 +746,7 @@ async def test_get_message_id_failure(conversation_mocks):
 @pytest.mark.asyncio
 async def test_conversation_endpoints_token_expired(conversation_mocks):
     """Every conversation management endpoint maps an expired token to 401."""
-    from consts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     request_obj = MagicMock()
     request_obj.title = "t"
@@ -596,7 +775,7 @@ async def test_conversation_endpoints_token_expired(conversation_mocks):
 @pytest.mark.asyncio
 async def test_generate_conversation_title_token_expired(conversation_mocks):
     """Expired token on title generation maps to 401."""
-    from consts.exceptions import TokenExpiredError
+    from contracts.errors.exceptions import TokenExpiredError
 
     request_obj = MagicMock()
     request_obj.conversation_id = 1
@@ -615,8 +794,8 @@ async def test_generate_conversation_title_token_expired(conversation_mocks):
 @pytest.mark.asyncio
 async def test_update_conversation_knowledge_scope_token_expired(conversation_mocks):
     """Expired token on knowledge-scope update maps to 401."""
-    from backend.apps.conversation_management_app import update_conversation_knowledge_scope_endpoint
-    from consts.exceptions import TokenExpiredError
+    from management.api.conversation.conversation_management import update_conversation_knowledge_scope_endpoint
+    from contracts.errors.exceptions import TokenExpiredError
 
     request_obj = MagicMock()
     request_obj.scope = None
@@ -629,3 +808,69 @@ async def test_update_conversation_knowledge_scope_token_expired(conversation_mo
             1, request_obj, authorization="Bearer x")
 
     assert exc_info.value.status_code == 401
+
+
+def test_agent_history_static_routes_forward_scoped_queries(conversation_mocks):
+    """New static history routes must resolve before the integer detail route."""
+    conversation_mocks["get_current_user_id"].return_value = ("owner", "tenant")
+    groups = {
+        "items": [],
+        "pinned_items": [],
+        "included_items": [],
+        "next_cursor": None,
+    }
+    conversations = {"items": [], "pinned_items": [], "next_cursor": None}
+    ids = {"items": [41, 42]}
+    conversation_mocks["list_agent_groups"].return_value = groups
+    conversation_mocks["list_agent_group_conversations"].return_value = conversations
+    conversation_mocks["list_agent_group_conversation_ids"].return_value = ids
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    client = TestClient(app, headers={"Authorization": "Bearer owner"})
+
+    group_response = client.get(
+        "/api/conversation/agent_groups?limit=10&search=budget&include_agent_id=7&include_other=true"
+    )
+    assert group_response.status_code == 200, group_response.text
+    assert group_response.json()["data"] == groups
+    conversation_mocks["list_agent_groups"].assert_called_once_with(
+        "owner", "tenant", 10, None, "budget", [7], True
+    )
+
+    history_response = client.get(
+        "/api/conversation/agent_groups/agent:7/conversations?limit=10&search=budget"
+    )
+    assert history_response.status_code == 200, history_response.text
+    assert history_response.json()["data"] == conversations
+    conversation_mocks["list_agent_group_conversations"].assert_called_once_with(
+        "owner", "agent:7", 10, None, "budget"
+    )
+
+    ids_response = client.get("/api/conversation/agent_groups/7/conversation_ids")
+    assert ids_response.status_code == 200, ids_response.text
+    assert ids_response.json()["data"] == ids
+    conversation_mocks["list_agent_group_conversation_ids"].assert_called_once_with(
+        "owner", 7
+    )
+
+
+def test_agent_history_routes_reject_invalid_scope_and_expired_identity(conversation_mocks):
+    """Invalid history scope and expired auth return explicit client errors."""
+    conversation_mocks["get_current_user_id"].return_value = ("owner", "tenant")
+    app = FastAPI()
+    app.include_router(router, prefix="/api")
+    client = TestClient(app, headers={"Authorization": "Bearer owner"})
+
+    invalid_include = client.get(
+        "/api/conversation/agent_groups?include_agent_id=0"
+    )
+    assert invalid_include.status_code == 400
+    conversation_mocks["list_agent_groups"].assert_not_called()
+
+    from contracts.errors.exceptions import TokenExpiredError
+
+    conversation_mocks["get_current_user_id"].side_effect = TokenExpiredError(
+        "expired"
+    )
+    expired = client.get("/api/conversation/agent_groups")
+    assert expired.status_code == 401

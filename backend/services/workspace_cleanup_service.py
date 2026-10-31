@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import logging
 import re
 import shutil
 from pathlib import Path
 
-from consts.const import AGENT_WORKSPACE_ROOT
+from contracts.constants.environment import AGENT_WORKSPACE_ROOT
 
 
 logger = logging.getLogger("workspace_cleanup_service")

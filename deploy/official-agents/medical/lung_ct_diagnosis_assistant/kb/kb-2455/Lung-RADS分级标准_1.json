@@ -1,0 +1,112 @@
+{
+  "version": "v2022",
+  "description": "Lung-RADS肺结节分级标准知识库",
+  "categories": [
+    {
+      "grade": "0",
+      "name": "不完整",
+      "criteria": "需与既往影像比较",
+      "criteria_details": [
+        "既往影像资料缺失",
+        "技术因素导致图像质量不佳"
+      ],
+      "malignancy_risk": "不适用",
+      "management": "获取既往影像对比后重新评估",
+      "management_timeline": "立即"
+    },
+    {
+      "grade": "1",
+      "name": "阴性",
+      "criteria": "无结节或良性特征",
+      "criteria_details": [
+        "无肺结节",
+        "完全钙化结节",
+        "含脂肪的错构瘤"
+      ],
+      "malignancy_risk": "<1%",
+      "management": "年度LDCT筛查",
+      "management_timeline": "12个月"
+    },
+    {
+      "grade": "2",
+      "name": "良性表现",
+      "criteria": "实性结节<6mm，新发<4mm；部分实性<6mm；磨玻璃<30mm",
+      "criteria_details": [
+        "基线实性结节 < 6mm",
+        "新发实性结节 < 4mm",
+        "部分实性结节总径 < 6mm",
+        "磨玻璃结节 < 30mm（基线或新发）"
+      ],
+      "malignancy_risk": "<1%",
+      "management": "年度LDCT筛查",
+      "management_timeline": "12个月"
+    },
+    {
+      "grade": "3",
+      "name": "可能良性",
+      "criteria": "实性6-8mm，新发4-6mm；部分实性≥6mm实性<6mm；磨玻璃≥30mm",
+      "criteria_details": [
+        "基线实性结节 ≥6mm 且 <8mm",
+        "新发实性结节 ≥4mm 且 <6mm",
+        "部分实性结节总径 ≥6mm，实性成分 <6mm",
+        "磨玻璃结节 ≥30mm（基线或新发）"
+      ],
+      "malignancy_risk": "1-2%",
+      "management": "短期LDCT随访",
+      "management_timeline": "6个月"
+    },
+    {
+      "grade": "4A",
+      "name": "可疑恶性",
+      "criteria": "实性≥8mm<15mm，新发6-8mm；部分实性实性≥6mm<8mm",
+      "criteria_details": [
+        "基线实性结节 ≥8mm 且 <15mm",
+        "新发实性结节 ≥6mm 且 <8mm",
+        "部分实性结节实性成分 ≥6mm 且 <8mm",
+        "气管内结节"
+      ],
+      "malignancy_risk": "5-15%",
+      "management": "短期LDCT或PET/CT",
+      "management_timeline": "3个月",
+      "alternative_management": "PET/CT（可选）"
+    },
+    {
+      "grade": "4B",
+      "name": "可疑恶性",
+      "criteria": "实性≥15mm，新发或增长≥8mm；部分实性实性≥8mm",
+      "criteria_details": [
+        "基线实性结节 ≥15mm",
+        "新发实性结节 ≥8mm",
+        "实性结节增长 ≥8mm",
+        "部分实性结节实性成分 ≥8mm"
+      ],
+      "malignancy_risk": ">15%",
+      "management": "增强CT + PET/CT或组织活检",
+      "management_timeline": "1个月内",
+      "management_options": ["增强CT", "PET/CT", "组织活检"]
+    },
+    {
+      "grade": "4X",
+      "name": "可疑恶性（额外特征）",
+      "criteria": "3级或4级结节伴有额外恶性特征",
+      "criteria_details": [
+        "分叶状边缘",
+        "毛刺征",
+        "淋巴结肿大",
+        "胸膜侵犯",
+        "病灶增长加速"
+      ],
+      "malignancy_risk": ">15%",
+      "management": "同4B级管理建议",
+      "management_timeline": "1个月内",
+      "note": "需额外关注附加特征"
+    }
+  ],
+  "size_thresholds": {
+    "solid_baseline": {"<6": 2, "6-8": 3, "8-15": "4A", "≥15": "4B"},
+    "solid_new": {"<4": 2, "4-6": 3, "6-8": "4A", "≥8": "4B"},
+    "part_solid_total": {"<6": 2, "≥6": "需看实性成分"},
+    "part_solid_solid": {"<6": 3, "6-8": "4A", "≥8": "4B"},
+    "ggo": {"<30": 2, "≥30": 3}
+  }
+}

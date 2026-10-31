@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: API-006
+implementations:
+- framework: pytest
+  file: test.py
+  selector: API-006
+notes: Actual FastAPI router and isolated PostgreSQL; Supabase is not required.
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01:
+  - test_session_endpoints_reject_unsigned_and_retired_refresh

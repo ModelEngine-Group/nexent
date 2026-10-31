@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
@@ -20,6 +22,7 @@ import {
 } from "@/services/agentConfigService";
 import { useQueryClient } from "@tanstack/react-query";
 import log from "@/lib/logger";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 export interface AgentImportWizardProps {
   visible: boolean;
@@ -34,7 +37,7 @@ export interface AgentImportWizardProps {
 interface ConfigField {
   agentKey: string; // key in agent_info, e.g. "1"
   agentDisplayName: string; // display name for grouping / hint
-  fieldPath: string; // e.g., "duty_prompt", "tools[0].params.api_key"
+  fieldPath: string; // e.g., "prompt", "tools[0].params.api_key"
   fieldLabel: string; // User-friendly label
   promptHint?: string; // Hint from <TO_CONFIG:XXXX>
   currentValue: string;
@@ -51,15 +54,15 @@ interface McpServerToInstall {
 
 const needsConfig = (value: any): boolean => {
   if (typeof value === "string") {
-    return value.trim() === "<TO_CONFIG>" || value.trim().startsWith("<TO_CONFIG:");
+    return /<TO_CONFIG(?::[^>]+)?>/.test(value);
   }
   return false;
 };
 
 const extractPromptHint = (value: string): string | undefined => {
   if (typeof value !== "string") return undefined;
-  const match = value.trim().match(/^<TO_CONFIG:(.+)>$/);
-  return match ? match[1] : undefined;
+  const hints = [...value.matchAll(/<TO_CONFIG:([^>]+)>/g)].map((match) => match[1]);
+  return hints.length ? hints.join("; ") : undefined;
 };
 
 // Parse Markdown links in text and convert to React elements
@@ -560,16 +563,8 @@ export default function AgentImportWizard({
           label: t("market.detail.businessDescription", "Business Description"),
         },
         {
-          key: "duty_prompt",
-          label: t("market.detail.dutyPrompt", "Duty Prompt"),
-        },
-        {
-          key: "constraint_prompt",
-          label: t("market.detail.constraintPrompt", "Constraint Prompt"),
-        },
-        {
-          key: "few_shots_prompt",
-          label: t("market.detail.fewShotsPrompt", "Few Shots Prompt"),
+          key: "prompt",
+          label: t("market.detail.prompt", "Prompt"),
         },
       ];
 
@@ -923,7 +918,11 @@ export default function AgentImportWizard({
           )
           : [];
         if (conflicts.length === 0) {
-          message.error(result.message || t("market.install.error.installFailed", "Failed to install agent"));
+          message.error(
+            getTenantResourceLimitMessage(result.error, t) ||
+              result.message ||
+              t("market.install.error.installFailed", "Failed to install agent")
+          );
           return;
         }
         setSkillConflicts(conflicts);
@@ -940,7 +939,11 @@ export default function AgentImportWizard({
           "Skill names have changed. Please confirm the conflict resolutions again."
         ));
       } else {
-        message.error(result.message || t("market.install.error.installFailed", "Failed to install agent"));
+        message.error(
+          getTenantResourceLimitMessage(result.error, t) ||
+            result.message ||
+            t("market.install.error.installFailed", "Failed to install agent")
+        );
       }
     }
   };

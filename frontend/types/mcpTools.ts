@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   FILTER_ALL,
   McpSource,
@@ -14,7 +16,6 @@ export type FilterAll = typeof FILTER_ALL;
 export type McpSourceFilter = McpSource | FilterAll;
 /** Transport-filter for toolbars (all | http | sse | container). */
 export type McpTransportFilter = McpTransportType | FilterAll;
-
 
 export interface RegistryServerPayload {
   name: string;
@@ -144,6 +145,7 @@ export interface CommunityMcpCard {
   tags?: string[];
   authorName?: string;
   authorDisplayName?: string;
+  authorCasUsername?: string | null;
   rating?: number;
   installCount?: number;
   deploymentType?: McpDeploymentType;
@@ -203,7 +205,7 @@ export interface AddMcpServicePayload {
   source: McpSource;
   //transport_type: McpTransportType;
   server_url: string;
-  tags: string[];
+  tags?: string[];
   authorization_token?: string;
   custom_headers?: Record<string, string>;
   container_config?: Record<string, unknown>;
@@ -224,7 +226,7 @@ export interface UpdateMcpServicePayload {
   name: string;
   description: string;
   server_url: string;
-  tags: string[];
+  tags?: string[];
   authorization_token?: string;
   custom_headers?: Record<string, string>;
   config_json?: Record<string, unknown>;

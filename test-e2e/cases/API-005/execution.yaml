@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: API-005
+implementations:
+- framework: pytest
+  file: test.py
+  selector: API-005
+notes: Actual FastAPI router and isolated PostgreSQL; Supabase is not required.
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+acceptance_bindings:
+  AC-01:
+  - test_local_jwt_identity_and_session_without_refresh

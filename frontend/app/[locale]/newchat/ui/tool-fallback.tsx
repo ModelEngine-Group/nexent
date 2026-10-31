@@ -1,7 +1,16 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import type { SourceAttributes } from "@/types/source";
+import {
+  buildCitationDisplayIndexMap,
+  getCitationKey,
+  withCitationDisplayIndices,
+} from "@/lib/citationDisplay";
+
 import { memo } from "react";
-import { useSourcesPanel } from "./sources-panel-context";
+import { useSourcesPanelActions } from "./sources-panel-context";
 import type { PanelSourceItem } from "./sources-panel";
 import {
   AlertCircleIcon,
@@ -10,6 +19,7 @@ import {
   XCircleIcon,
 } from "lucide-react";
 import {
+  useAuiState,
   type ToolCallMessagePartStatus,
   type ToolCallMessagePartProps,
   type ToolCallMessagePartComponent,
@@ -135,7 +145,7 @@ function ToolFallbackResult({
 }: React.ComponentProps<"div"> & {
   result?: unknown;
 }) {
-  if (result === undefined) return null;
+  if (result === undefined || result === "") return null;
 
   return (
     <div className={cn("", className)} {...props}>
@@ -180,7 +190,7 @@ function ToolFallbackError({
   );
 }
 
-type ToolSearchSource = {
+type ToolSearchSource = SourceAttributes & {
   url?: string;
   title?: string;
   text?: string;
@@ -188,6 +198,9 @@ type ToolSearchSource = {
   filename?: string;
   sourceFile?: string;
   objectName?: string;
+  publishedDate?: string;
+  retrievalHighlightTerms?: string[];
+  downloadUrl?: string;
   citeIndex?: number;
   toolSign?: string;
   isImage?: boolean;
@@ -200,7 +213,13 @@ function ToolFallbackSearchContent({
 }: React.ComponentProps<"div"> & {
   searchContent?: ToolSearchSource[];
 }) {
-  const { open } = useSourcesPanel();
+  const { open } = useSourcesPanelActions();
+  const content = useAuiState((s) => s.message.content) as readonly {
+    type?: string;
+    text?: unknown;
+    citeIndex?: number;
+    toolSign?: string;
+  }[];
   const regularSources = (searchContent ?? []).filter((item) => !item.isImage);
   const panelSources: PanelSourceItem[] = regularSources.map((item, index) => ({
     sourceType:
@@ -215,8 +234,22 @@ function ToolFallbackSearchContent({
     text: item.text,
     filename: item.filename || item.sourceFile,
     objectName: item.objectName,
+    publishedDate: item.publishedDate,
+    retrievalHighlightTerms: item.retrievalHighlightTerms,
+    downloadUrl: item.downloadUrl,
     citeIndex: item.citeIndex ?? index,
+    toolSign: item.toolSign,
+    searchType: item.searchType,
+    sourceMetadata: item.sourceMetadata,
+    sourceReference: item.sourceReference,
   }));
+  const numberedSources = withCitationDisplayIndices(
+    panelSources,
+    buildCitationDisplayIndexMap(content, [
+      ...content.filter((part) => part.type === "source"),
+      ...panelSources,
+    ])
+  );
   if (regularSources.length === 0) return null;
 
   return (
@@ -236,9 +269,9 @@ function ToolFallbackSearchContent({
                   open({
                     messageId: "tool-search",
                     groupId: `tool-search-${index}`,
-                    sources: panelSources,
+                    sources: numberedSources,
                     images: [],
-                    selectedCiteIndex: item.citeIndex ?? index,
+                    selectedCitationKey: getCitationKey(panelSources[index]),
                   })
                 }
               >

@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -16,6 +18,7 @@ import {
 } from "antd";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "@tanstack/react-query";
 import {
   User,
   LogOut,
@@ -38,6 +41,7 @@ import { DeleteAccountModal } from "@/components/auth/DeleteAccountModal";
 import { OAuthAccountsSection } from "@/components/settings/OAuthAccountsSection";
 import log from "@/lib/logger";
 import { authService } from "@/services/authService";
+import { oauthService } from "@/services/oauthService";
 import { getPasswordChecks, getStrengthLevel } from "@/lib/utils";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useConfirmModal } from "@/hooks/useConfirmModal";
@@ -47,6 +51,7 @@ import {
   createUserToken,
 } from "@/services/tokenService";
 import { ErrorCode } from "@/const/errorCode";
+import { UserIdentity } from "@/components/auth/UserIdentity";
 
 /**
  * UserProfileComp - User profile and account settings component
@@ -64,6 +69,14 @@ export default function UserProfileComp() {
   const { logout, revoke, isLoading } = useAuthenticationContext();
   const { user, groupIds } = useAuthorizationContext();
   const { confirm } = useConfirmModal();
+  const { data: oauthConfig } = useQuery({
+    queryKey: ["oauth", "config"],
+    queryFn: () => oauthService.getConfig(),
+    enabled: !!user,
+  });
+  const isOAuthLoginEnabled =
+    oauthConfig?.enabled &&
+    (oauthConfig.login_mode === "button" || oauthConfig.login_mode === "force");
 
   // Fetch groups for group name mapping
   const { data: groupData } = useGroupList(user?.tenantId || null);
@@ -98,7 +111,10 @@ export default function UserProfileComp() {
   const [newPasswordValue, setNewPasswordValue] = useState("");
 
   // AK/SK state
+  // akInfo is what the user sees (always masked) and akCopyValue is the secret
+  // written to the clipboard, so display and copy never diverge.
   const [akInfo, setAkInfo] = useState<string | null>(null);
+  const [akCopyValue, setAkCopyValue] = useState<string | null>(null);
   const [canCopyAk, setCanCopyAk] = useState(false);
   const [existingTokenIds, setExistingTokenIds] = useState<number[]>([]);
   const [isLoadingAkSk, setIsLoadingAkSk] = useState(false);
@@ -161,11 +177,13 @@ export default function UserProfileComp() {
       try {
         const tokens = await getUserTokens(user.id);
         if (tokens.length > 0) {
-          setAkInfo(tokens[0].access_key);
+          setAkInfo(tokens[0].masked_access_key ?? tokens[0].access_key);
+          setAkCopyValue(tokens[0].can_copy ? tokens[0].access_key : null);
           setCanCopyAk(tokens[0].can_copy);
           setExistingTokenIds(tokens.map((t) => t.token_id));
         } else {
           setAkInfo(null);
+          setAkCopyValue(null);
           setCanCopyAk(false);
           setExistingTokenIds([]);
         }
@@ -188,7 +206,8 @@ export default function UserProfileComp() {
       }
 
       const newToken = await createUserToken();
-      setAkInfo(newToken.access_key);
+      setAkInfo(newToken.masked_access_key ?? newToken.access_key);
+      setAkCopyValue(newToken.access_key);
       setCanCopyAk(true);
       setExistingTokenIds([newToken.token_id]);
       antdMessage.success(
@@ -205,9 +224,10 @@ export default function UserProfileComp() {
 
   // Handle copy AK to clipboard
   const handleCopyAk = async () => {
-    if (akInfo) {
+    const valueToCopy = akCopyValue ?? akInfo;
+    if (valueToCopy) {
       try {
-        await copyToClipboard(akInfo);
+        await copyToClipboard(valueToCopy);
         antdMessage.success(
           t("profile.copyAkSuccess") || "Access key copied to clipboard"
         );
@@ -287,10 +307,15 @@ export default function UserProfileComp() {
               <div className="divide-y divide-gray-50 dark:divide-gray-700/50">
                 <div className="px-6 py-3 flex items-center justify-between">
                   <span className="text-gray-500 dark:text-gray-400 text-sm">
-                    {t("common.email") || "Email"}
+                    {isCasUser
+                      ? t("profile.username") || "Username"
+                      : t("common.email") || "Email"}
                   </span>
                   <span className="text-gray-900 dark:text-gray-100 text-sm font-medium">
-                    {user?.email || "-"}
+                    <UserIdentity
+                      casUsername={user?.username}
+                      fallback={user?.email?.trim() || "-"}
+                    />
                   </span>
                 </div>
                 <div className="px-6 py-3 flex items-center justify-between">
@@ -724,9 +749,11 @@ export default function UserProfileComp() {
       />
 
       {/* OAuth Linked Accounts */}
-      <div className="w-full mt-4">
-        <OAuthAccountsSection />
-      </div>
+      {user && isOAuthLoginEnabled && (
+        <div className="w-full mt-4">
+          <OAuthAccountsSection providers={oauthConfig?.providers ?? []} />
+        </div>
+      )}
     </Flex>
   );
 }

@@ -1,0 +1,159 @@
+# Legacy Supabase services for explicit migration/recovery only.
+services:
+  kong:
+    container_name: ${SUPABASE_MIGRATION_KONG_CONTAINER:-supabase-kong-mini}
+    image: ${SUPABASE_KONG:-kong:2.8.1}
+    restart: 'no'
+    ports:
+    - ${SUPABASE_MIGRATION_BIND_ADDRESS:-127.0.0.1}:${SUPABASE_KONG_HTTP_PORT:-8000}:8000/tcp
+    - ${SUPABASE_MIGRATION_BIND_ADDRESS:-127.0.0.1}:${SUPABASE_KONG_HTTPS_PORT:-8443}:8443/tcp
+    volumes:
+    - ./kong.yml:/home/kong/temp.yml:ro
+    networks:
+      nexent:
+        aliases:
+        - nexent-supabase-kong
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      KONG_DATABASE: 'off'
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      SUPABASE_ANON_KEY: ${SUPABASE_KEY:-}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY:-}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-supabase}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+    entrypoint: bash -c 'eval "echo \"$$(cat ~/temp.yml)\"" > ~/kong.yml && /docker-entrypoint.sh kong docker-start'
+    healthcheck:
+      test:
+      - CMD
+      - kong
+      - health
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '3'
+    profiles:
+    - legacy-auth
+  auth:
+    container_name: ${SUPABASE_MIGRATION_AUTH_CONTAINER:-supabase-auth-mini}
+    image: ${SUPABASE_GOTRUE:-supabase/gotrue:v2.170.0}
+    restart: 'no'
+    healthcheck:
+      test:
+      - CMD
+      - wget
+      - --no-verbose
+      - --tries=1
+      - --spider
+      - http://localhost:9999/health
+      timeout: 10s
+      interval: 10s
+      retries: 5
+    networks:
+    - nexent
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: '9999'
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL:-http://localhost:8000}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${SUPABASE_POSTGRES_PASSWORD}@nexent-supabase-db:${SUPABASE_POSTGRES_PORT:-5436}/${SUPABASE_POSTGRES_DB:-supabase}
+      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost:3000}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS:-}
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-true}
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-7200}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET:-}
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP:-true}
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS:-false}
+      GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM:-true}
+      GOTRUE_MAILER_URLPATHS_INVITE: ${MAILER_URLPATHS_INVITE:-/auth/v1/verify}
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION:-/auth/v1/verify}
+      GOTRUE_MAILER_URLPATHS_RECOVERY: ${MAILER_URLPATHS_RECOVERY:-/auth/v1/verify}
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE:-/auth/v1/verify}
+      GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP:-false}
+      GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM:-false}
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '3'
+    profiles:
+    - legacy-auth
+  db:
+    container_name: ${SUPABASE_MIGRATION_DB_CONTAINER:-supabase-db-mini}
+    image: ${SUPABASE_DB:-supabase/postgres:15.8.1.060}
+    restart: 'no'
+    ports:
+    - ${SUPABASE_MIGRATION_BIND_ADDRESS:-127.0.0.1}:${SUPABASE_PUBLISHED_PORT:-5436}:${SUPABASE_POSTGRES_PORT:-5436}
+    volumes:
+    - ../../supabase/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:ro
+    - ../../supabase/logs.sql:/docker-entrypoint-initdb.d/migrations/99-logs.sql:ro
+    - ../../supabase/pooler.sql:/docker-entrypoint-initdb.d/migrations/99-pooler.sql:ro
+    - ../../supabase/webhooks.sql:/docker-entrypoint-initdb.d/init-scripts/98-webhooks.sql:ro
+    - ../../supabase/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro
+    - ../../supabase/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:ro
+    - type: bind
+      source: ${SUPABASE_DATA_DIR:?Set SUPABASE_DATA_DIR to the existing PostgreSQL data directory}
+      target: /var/lib/postgresql/data
+      bind:
+        create_host_path: false
+    - ../../supabase/_supabase.sql:/docker-entrypoint-initdb.d/migrations/97-_supabase.sql:ro
+    - ${SUPABASE_LOG_DIR:?Set SUPABASE_LOG_DIR}:/var/log/postgresql
+    - db-config:/etc/postgresql-custom
+    networks:
+      nexent:
+        aliases:
+        - nexent-supabase-db
+    healthcheck:
+      test:
+      - CMD
+      - pg_isready
+      - -U
+      - postgres
+      - -h
+      - localhost
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      PGPORT: ${SUPABASE_POSTGRES_PORT:-5436}
+      POSTGRES_PORT: ${SUPABASE_POSTGRES_PORT:-5436}
+      PGPASSWORD: ${SUPABASE_POSTGRES_PASSWORD:?Set the original Supabase PostgreSQL password}
+      POSTGRES_PASSWORD: ${SUPABASE_POSTGRES_PASSWORD:?Set the original Supabase PostgreSQL password}
+      PGDATABASE: ${SUPABASE_POSTGRES_DB:-supabase}
+      POSTGRES_DB: ${SUPABASE_POSTGRES_DB:-supabase}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_EXP: ${JWT_EXPIRY:-7200}
+    command:
+    - postgres
+    - -c
+    - config_file=/etc/postgresql/postgresql.conf
+    - -c
+    - log_min_messages=fatal
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '3'
+volumes:
+  db-config:
+    name: ${SUPABASE_DB_CONFIG_VOLUME:-nexent_supabase_migration_db_config}
+networks:
+  nexent:
+    name: ${SUPABASE_MIGRATION_NETWORK:-nexent_supabase_migration}
+    driver: bridge

@@ -16,6 +16,10 @@ import {
   getTokenExpiresAt,
 } from "@/lib/session";
 import { getEffectiveRoutePath } from "@/lib/auth";
+import {
+  buildAuthenticationReturnPath,
+  isAnonymousConversationSharePath,
+} from "@/lib/agentUsageGuide";
 import { Session, AuthenticationStateReturn } from "@/types/auth";
 import { STATUS_CODES } from "@/const/auth";
 import { authEventUtils } from "@/lib/authEvents";
@@ -72,9 +76,11 @@ export function useAuthenticationState(): AuthenticationStateReturn {
     const pathname = window.location.pathname;
     const effectivePath = getEffectiveRoutePath(pathname);
     if (effectivePath === "/oauth/complete") return;
-    if (effectivePath.startsWith("/share/")) return;
+    if (isAnonymousConversationSharePath(effectivePath)) return;
 
-    forcedLoginService.redirectIfNeeded();
+    forcedLoginService.redirectIfNeeded(
+      buildAuthenticationReturnPath(pathname, window.location.search)
+    );
   }, [isSpeedMode, isAuthChecking, isAuthenticated]);
 
   useEffect(() => {

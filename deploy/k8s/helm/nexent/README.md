@@ -1,6 +1,11 @@
-# Nexent Helm Chart
+# Nexent Kubernetes Helm Charts
 
-This directory contains a Helm chart for deploying Nexent on Kubernetes.
+Kubernetes deployment uses two independent releases with disjoint resource ownership:
+
+- `nexent-infrastructure`: Elasticsearch, PostgreSQL, Redis, MinIO, infrastructure credentials, and PostgreSQL bootstrap SQL.
+- `nexent`: Config, Runtime, MCP, Northbound, Web, Data Process, Terminal, Monitoring, and application-owned shared resources.
+
+Fresh installations are supported. If the deployment script detects a legacy `nexent` release that still owns infrastructure resources, it stops instead of attempting an in-place migration.
 
 ## Prerequisites
 
@@ -20,8 +25,12 @@ bash deploy.sh k8s
 
 | Command | Description |
 |---------|-------------|
-| `bash deploy.sh k8s` | Deploy all K8s resources from the repository root |
-| `bash uninstall.sh k8s` | Uninstall the Helm release from the repository root; prompts before deleting namespace or local data |
+| `bash deploy.sh k8s` | Deploy infrastructure, initialize Elasticsearch, then deploy Nexent |
+| `bash deploy.sh k8s --release-scope infrastructure` | Install or upgrade infrastructure only |
+| `bash deploy.sh k8s --release-scope nexent` | Verify infrastructure and install or upgrade Nexent only |
+| `bash uninstall.sh k8s` | Uninstall Nexent first, then infrastructure |
+| `bash uninstall.sh k8s --release-scope nexent` | Uninstall the application release only |
+| `bash uninstall.sh k8s --release-scope infrastructure` | Uninstall infrastructure only when Nexent is absent |
 | `bash uninstall.sh k8s clean` | Clean Helm state only (fixes stuck releases) |
 | `bash uninstall.sh k8s delete` | Uninstall the Helm release and delete the namespace |
 | `bash uninstall.sh k8s delete-all` | Uninstall the Helm release, delete the namespace, and delete local PV data |
@@ -32,11 +41,25 @@ bash deploy.sh k8s
 # Interactive deployment (will prompt for all options)
 bash deploy.sh k8s
 
-# Non-interactive deployment with the default component set
-bash deploy.sh k8s --components infrastructure,application,data-process,supabase --port-policy development --image-source general
+# Upgrade infrastructure and application in dependency order
+bash deploy.sh k8s --release-scope all
+
+# Operate either release independently
+bash deploy.sh k8s --release-scope infrastructure
+bash deploy.sh k8s --release-scope nexent
+
+# Non-interactive deployment with dynamic RWX storage
+bash deploy.sh k8s --defaults \
+  --persistence-mode dynamic \
+  --storage-class <rwx-storage-class>
+
+# Non-interactive deployment with pre-created claims
+bash deploy.sh k8s --defaults \
+  --persistence-mode existing \
+  --existing-claim-prefix <claim-prefix>
 
 # Add terminal to the default component set
-bash deploy.sh k8s --components infrastructure,application,data-process,supabase,terminal
+bash deploy.sh k8s --components infrastructure,application,data-process,terminal
 
 # Use mainland China image sources
 bash deploy.sh k8s --image-source mainland
@@ -71,13 +94,26 @@ bash uninstall.sh k8s delete-all --keep-local-data
 
 K8s deployments read runtime configuration from `deploy/env/.env`, the same file used by Docker. Before every deployment, existing values, comments, ordering, and old-only variables are preserved while assignments newly introduced by the current `deploy/env/.env.example` are appended. If `.env` is missing, the deploy script first reuses legacy `docker/.env`, then falls back to the current template. A readable template is required before deployment starts. Do not edit generated Helm values by hand; they are recreated from the merged `deploy/env/.env` and deployment options.
 
-When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; node affinity is not required. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
+Config, Runtime, MCP, Northbound, and Data Process load every variable declared in `.env` through the backend-only `nexent-env` Secret, including newly added variables without a Helm mapping. Config and Runtime additionally load `deploy/env/monitoring.env` through `nexent-monitoring-env`. These scopes match the production Docker Compose configuration. Web and infrastructure do not reference either complete env Secret; they keep their service-specific environment configuration.
+
+Environment precedence, from lowest to highest, is the existing ConfigMap, `.env`, `monitoring.env` where applicable, finalized deployment credentials, and explicit container environment settings. Kubernetes mode, namespace, SQL startup/checksum, selected MCP/sandbox images, and sandbox execution level remain deployment-controlled. Env files use the existing trusted Bash-compatible syntax: empty strings, quoting, JSON, substitutions, and multiline strings are preserved. Only variables assigned in the file are emitted; unrelated exported host variables are excluded.
+
+Application Secret values are rendered after credentials are finalized and written atomically with mode `0600`. The chart exposes `nexent-common.envFiles.rootData` and `monitoringData` as Base64-encoded string mappings; both default to `{}` so direct Helm rendering works without generated env files. Editing `.env` takes effect on the next deployment, when the environment checksum replaces backend Pods. Fresh Secret maps also remove deleted variables. Generated values contain sensitive configuration and must stay outside Git and shared logs.
+
+Ordinary backend configuration is injected through these file Secrets instead of being copied field by field into generated common values. The common ConfigMap and Chart values remain the fallback for omitted keys and direct Helm use. The runtime renderer retains timezone and Web's Northbound URL/upload limit, plus Redis URL and part-processor count because they also supply the runtime-state Redis fallback and derived worker concurrency. Deployment overrides, finalized credentials and infrastructure configuration keep their dedicated rendering paths.
+
+When `--persistence-mode local` is used, Nexent renders static PVs with `hostPath` and `DirectoryOrCreate`; node affinity is not required. Shared workspace data uses `/var/lib/nexent`, shared skills use `/var/lib/nexent-data/skills`, Web project configuration uses `/var/lib/nexent-data/project-config`, and service data uses `/var/lib/nexent-data/nexent-*` by default.
+
+Config, Runtime, and Northbound use `/health/live` startup probes, while Web probes `/`, before their liveness and readiness probes become active. Each service waits 30 seconds before its first startup check; the following probe budget is five minutes (`periodSeconds: 5`, `failureThreshold: 60`) so cold starts and Python imports do not trigger a premature liveness restart. Operators can override each delay independently, for example with `--set nexent-runtime.probes.startup.initialDelaySeconds=60`.
+
+Config, Runtime, Northbound, and Data Process are intentionally single-replica workloads and use the Kubernetes `Recreate` deployment strategy. Their startup paths mark in-process work left by the previous container as failed, so an old and a new Pod must never overlap. Helm rendering fails if any of these services is scaled above one replica or configured with another strategy. Upgrading one of these services therefore causes a short interruption while Kubernetes stops the old Pod and starts its replacement. Web keeps its existing scaling controls, but project-configuration write consistency is supported only for the default single replica.
 
 ## Deploy Options
 
 | Option | Description | Values |
 |--------|-------------|--------|
-| `--components` | Comma-separated deployment components | `infrastructure`, `application`, `data-process`, `supabase`, `terminal`, `monitoring` |
+| `--release-scope` | Helm release scope | `all` (default), `infrastructure`, or `nexent` |
+| `--components` | Comma-separated deployment components | `infrastructure`, `application`, `data-process`, `terminal`, `monitoring` |
 | `--port-policy` | Host exposure policy | `development` or `production` |
 | `--image-source` | Image reference source | `general`, `mainland`, or `local-latest` |
 | `--registry-profile` | Legacy registry profile option | `general` or `mainland`; maps to `--image-source` |
@@ -86,8 +122,8 @@ When `--persistence-mode local` is used, Nexent renders static PVs with `hostPat
 | `--reconfigure` | Run interactive configuration using saved local config as defaults | Flag |
 | `--config` | Open the interactive deployment configuration | Flag |
 | `--is-mainland` | Legacy network location option | `Y` maps to `--image-source mainland`; `N` maps to `general` |
-| `--version` | Application version | Version tag (auto-detected from `backend/consts/const.py` if not set) |
-| `--deployment-version` | Legacy deployment version | `speed` maps to `infrastructure,application`; `full` adds `supabase` |
+| `--version` | Application version | Version tag (auto-detected from `backend/contracts/constants/environment.py` if not set) |
+| `--deployment-version` | Legacy deployment version | Both versions use `infrastructure,application`; `full` enables local authentication |
 | `--persistence-mode` | Persistent volume mode | `local`, `dynamic`, or `existing`; default `local` |
 | `--storage-class` | StorageClass for PV/PVC binding | StorageClass name; aliases `--storageclass`, `--storage-class-name`, `--sc` |
 | `--local-path` | Base host path for local PVs except workspace | Path; default `/var/lib/nexent-data` |
@@ -98,6 +134,7 @@ When `--persistence-mode local` is used, Nexent renders static PVs with `hostPat
 
 | Option | Description | Values |
 |--------|-------------|--------|
+| `--release-scope` | Helm release scope; infrastructure-only removal is dependency protected | `all` (default), `infrastructure`, or `nexent` |
 | `--delete-data` | Compatibility option for Helm-managed PV/PVC cleanup behavior | `true` or `false` |
 | `--delete-volumes` | Alias for `--delete-data` | `true` or `false` |
 | `--remove-volumes` | Alias for `--delete-data true` | Flag |
@@ -109,7 +146,6 @@ When `--persistence-mode local` is used, Nexent renders static PVs with `hostPat
 | `--remove-namespace` | Alias for `--delete-namespace true` | Flag |
 | `--keep-namespace` | Alias for `--delete-namespace false` | Flag |
 | `--namespace` | Kubernetes namespace | Namespace name; default `nexent` |
-| `--release` | Helm release name | Release name; default `nexent` |
 
 ## Offline Image Package
 
@@ -120,7 +156,7 @@ bash deploy/offline/build_offline_package.sh \
   --target k8s \
   --version v2.2.1 \
   --platform amd64 \
-  --components infrastructure,application,data-process,supabase \
+  --components infrastructure,application,data-process \
   --image-source general \
   --compress true \
   --output-dir offline-package/k8s
@@ -134,7 +170,7 @@ On a target host with access to the cluster, load images before deployment:
 cd offline-package/k8s
 bash deploy.sh --load-images k8s \
   --version v2.2.1 \
-  --components infrastructure,application,data-process,supabase \
+  --components infrastructure,application,data-process \
   --image-source general
 ```
 
@@ -142,18 +178,17 @@ For multi-node clusters, run `load-images.sh` on every node that may schedule Ne
 
 ## Deployment Components
 
-The deployment script uses Bash TUI menus when running interactively. It first shows a component multi-select menu, then single-select menus for port policy and image source. Use `b`/Backspace to return to the previous TUI step and `q` to quit. `infrastructure` is required and is added automatically if omitted; `application`, `data-process`, and `supabase` are selected by default and can be disabled for smaller deployments.
+The deployment script uses Bash TUI menus when running interactively. It first shows a component multi-select menu, then single-select menus for port policy and image source. Use `b`/Backspace to return to the previous TUI step and `q` to quit. `infrastructure` is required and is added automatically if omitted; `application` and `data-process` are selected by default and can be disabled for smaller deployments.
 
 | Component | Services |
 |-----------|----------|
 | `infrastructure` | Elasticsearch, PostgreSQL, Redis, MinIO |
 | `application` | config, runtime, mcp, northbound, web |
 | `data-process` | nexent-data-process |
-| `supabase` | Supabase Kong, GoTrue Auth, Supabase PostgreSQL, related initialization |
 | `terminal` | OpenSSH terminal tool |
 | `monitoring` | Optional monitoring chart; selecting it prompts for provider unless `--monitoring-provider` is passed |
 
-`application` does not include `data-process`; it is a separate component even though it is selected by default. User and tenant features are enabled by selecting `supabase`; there is no separate user/tenant switch.
+`application` does not include `data-process`; it is a separate component even though it is selected by default. User and tenant features use the existing PostgreSQL service; full mode enables authentication independently of optional components.
 
 ## Port Policy
 
@@ -168,16 +203,38 @@ The `apply` command performs the following steps:
 
 1. **Select deployment components** - TUI multi-select or `--components`
 2. **Select port policy and image source** - TUI/config/CLI arguments
-3. **Render generated values** - Runtime-only Helm values for components, ports, and images
-4. **Generate MinIO credentials** - Create access key and secret key for object storage
-5. **Generate Supabase secrets** - Only when the `supabase` component is selected
-6. **Configure Terminal tool** - Only when the `terminal` component is selected
-7. **Clean stale PersistentVolumes** - Remove any released PVs before deployment
-8. **Deploy Helm chart** - Install/upgrade the release with all resources
-9. **Initialize Elasticsearch** - Wait for ES pod and create API key
-10. **Restart backend services** - Reload services with new ES configuration
-11. **Create super admin user** - Initialize admin account (full version only)
-12. **Pull MCP image** - Download MCP Docker image to local host
+3. **Render release-specific values** - Images, storage, SQL, and infrastructure Secret values
+4. **Deploy infrastructure** - Install or upgrade `nexent-infrastructure` exactly once
+5. **Wait for infrastructure** - Require Elasticsearch, PostgreSQL, Redis, and MinIO to be Ready
+6. **Initialize Elasticsearch** - Validate or create the API key without patching Kubernetes resources
+7. **Render application Secret values** - Put the API key only in the application-side Secret
+8. **Deploy Nexent** - Install or upgrade `nexent` exactly once
+9. **Wait for selected workloads** - Verify all selected application Deployments
+10. **Synchronize official skills** - Verify and copy the bundled archives to the shared workspace PVC
+11. **Create super admin user** - Initialize the admin account after local account migrations complete
+
+If infrastructure readiness or Elasticsearch initialization fails, the infrastructure release is retained for retry and the Nexent release is not installed or upgraded.
+
+### Independent Helm commands
+
+The deployment script is the recommended entrypoint because it generates credentials and enforces dependency ordering. For operators that manage values externally, the two releases can be upgraded independently:
+
+```bash
+helm dependency update deploy/k8s/helm/nexent-infrastructure
+helm upgrade --install nexent-infrastructure deploy/k8s/helm/nexent-infrastructure \
+  --namespace nexent --create-namespace \
+  -f /path/to/infrastructure-values.yaml
+
+# Wait for all four infrastructure Deployments, then initialize the ES API key
+bash deploy/k8s/init-elasticsearch.sh
+
+helm dependency update deploy/k8s/helm/nexent
+helm upgrade --install nexent deploy/k8s/helm/nexent \
+  --namespace nexent \
+  -f /path/to/application-values-with-es-api-key.yaml
+```
+
+The two values files must contain the same PostgreSQL and MinIO credentials. `ELASTICSEARCH_API_KEY` belongs only in the application values. Do not install both charts under one release name. Official skill archives are synchronized to the workspace PVC only by `deploy/k8s/deploy.sh`; direct Helm installations must initialize `/mnt/nexent/official-skills-zip` separately.
 
 ## Image Sources And Local Config
 
@@ -212,16 +269,16 @@ The following local PersistentVolumes can preserve data:
 
 - `nexent-workspace-pv` - Shared user workspace mounted at `/mnt/nexent`
 - `nexent-skills-pv` - Shared skills data mounted at `/mnt/nexent-data/skills`
+- `nexent-project-config-pv` - Web names, localized customization, and logos mounted at `/mnt/nexent-data/project-config`
 - `nexent-elasticsearch-pv` - Search index data
 - `nexent-postgresql-pv` - Relational database data
 - `nexent-redis-pv` - Cache data
 - `nexent-minio-pv` - Object storage data
-- `nexent-supabase-db-pv` - Supabase database (full version only)
 - Monitoring PVs such as Phoenix, Grafana, Tempo, and Langfuse data when monitoring is enabled
 
 ### Deleted Data
 
-Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent local PV data under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, and `/var/lib/nexent-data/nexent-*`. `delete-all` deletes the namespace and local PV data by default; add `--keep-local-data` to preserve local volume contents.
+Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent local PV data under `/var/lib/nexent`, `/var/lib/nexent-data/skills`, `/var/lib/nexent-data/project-config`, and `/var/lib/nexent-data/nexent-*`. `delete-all` deletes the namespace and local PV data by default; add `--keep-local-data` to preserve local volume contents.
 
 ## Services
 
@@ -244,14 +301,6 @@ Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent l
 | nexent-postgresql | Relational database |
 | nexent-redis | Caching layer |
 | nexent-minio | S3-compatible object storage |
-
-### Supabase Services (Full Version Only)
-
-| Service | Description |
-|---------|-------------|
-| nexent-supabase-kong | API Gateway |
-| nexent-supabase-auth | Authentication service |
-| nexent-supabase-db | Database service |
 
 ### Optional Services
 
@@ -333,6 +382,10 @@ helm upgrade --install nexent nexent \
 | `global.sharedStorage.workspace.localPath` | Host path for shared workspace data | `/var/lib/nexent` |
 | `global.sharedStorage.skills.size` | Shared `/mnt/nexent-data/skills` PVC size | `5Gi` |
 | `global.sharedStorage.skills.localPath` | Host path for shared skills data | `/var/lib/nexent-data/skills` |
+| `global.sharedStorage.projectConfig.size` | Web project configuration PVC size | `1Gi` |
+| `global.sharedStorage.projectConfig.localPath` | Host path for Web project configuration | `/var/lib/nexent-data/project-config` |
+| `global.sharedStorage.projectConfig.existingClaim` | Existing project configuration PVC | `nexent-project-config` |
+| `nexent-web.config.fileUploadSizeLimit` | File upload limit synchronized into persisted locale configuration at Web startup | `10` |
 | `deploymentVersion` | Deployment version | `speed` |
 
 #### Images
@@ -357,10 +410,6 @@ helm upgrade --install nexent nexent \
 |-----------|-------------|
 | `secrets.ssh.username` | SSH username (for Terminal tool) |
 | `secrets.ssh.password` | SSH password (for Terminal tool) |
-| `secrets.supabase.jwtSecret` | Supabase JWT secret |
-| `secrets.supabase.secretKeyBase` | Supabase secret key base |
-| `secrets.supabase.anonKey` | Supabase anonymous key |
-| `secrets.supabase.serviceRoleKey` | Supabase service role key |
 
 #### MinIO
 
@@ -409,5 +458,7 @@ bash deploy/k8s/init-elasticsearch.sh
 Released PVs are automatically cleaned during deployment. To manually clean:
 
 ```bash
-kubectl delete pv nexent-workspace-pv nexent-skills-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv
+kubectl delete pv nexent-workspace-pv nexent-skills-pv nexent-project-config-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv
 ```
+
+Local authentication requires `nexent-common.secrets.jwtSecret`. The deploy script generates or reuses it. [Migration runbook](../../../../docs/local-authentication-migration.md) covers historical credentials and cutover.

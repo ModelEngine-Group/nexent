@@ -1,19 +1,27 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 AIDP Service Layer
 Handles API calls to AIDP for paginated knowledge base listing.
 """
+import json
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List
-from urllib.parse import urljoin
+from typing import Any, Callable, Dict, List, NoReturn
+from urllib.parse import quote, urljoin
 
 import httpx
-
-from consts.const import AIDP_TENANT_ID
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
 from nexent.utils.http_client_manager import http_client_manager
+
+from contracts.constants.environment import AIDP_TENANT_ID
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
+from management.db.agent.repository import query_knowledge_binding_agents
+from management.db.client import get_db_session
+from management.db.conversation.repository import remove_conversation_knowledge_bindings
+from management.db.tool.repository import remove_tool_knowledge_references
+
 
 logger = logging.getLogger("aidp_service")
 
@@ -66,6 +74,39 @@ def _extract_upstream_error(response: httpx.Response) -> str | None:
     return reason[:_MAX_UPSTREAM_ERROR_REASON_LENGTH]
 
 
+def _raise_aidp_http_error(error: httpx.HTTPStatusError, operation: str) -> NoReturn:
+    """Map an AIDP HTTP error to the common application exception format."""
+    response = error.response
+    upstream_reason = _extract_upstream_error(response)
+    logger.exception(
+        "AIDP %s HTTP error: status_code=%s upstream_reason=%s",
+        operation,
+        response.status_code,
+        upstream_reason or "unavailable",
+    )
+    details = {
+        "upstream_status": response.status_code,
+        "upstream_reason": upstream_reason,
+    }
+    error_code = {
+        401: ErrorCode.AIDP_AUTH_ERROR,
+        403: ErrorCode.AIDP_AUTH_ERROR,
+        429: ErrorCode.AIDP_RATE_LIMIT,
+    }.get(response.status_code, ErrorCode.AIDP_SERVICE_ERROR)
+    fallback_message = {
+        ErrorCode.AIDP_AUTH_ERROR: f"AIDP authentication failed: {str(error)}",
+        ErrorCode.AIDP_RATE_LIMIT: f"AIDP rate limit exceeded: {str(error)}",
+    }.get(
+        error_code,
+        f"AIDP API HTTP error {response.status_code}: {str(error)}",
+    )
+    raise AppException(
+        error_code,
+        upstream_reason or fallback_message,
+        details=details,
+    )
+
+
 def _extract_upload_failures(response: httpx.Response) -> List[Dict[str, str]]:
     """Extract per-file upload failures from AIDP's structured error body."""
     try:
@@ -113,6 +154,66 @@ def _get_list_path(tenant_id: str | None = None) -> str:
     return f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}/KnowledgeBases"
 
 
+def _get_channels_path(kds_id: str, tenant_id: str | None = None) -> str:
+    """Build the knowledge-base scoped ingestion-pipeline (channel) API path.
+
+    AIDP exposes the channel catalog per knowledge base
+    (``.../KnowledgeBases/{kds_id}/Channels``), mirroring the knowledge-file
+    endpoints. The channel carries the ``fs_id`` + source directory the history
+    request is addressed with, which is why the KB id is part of the path.
+    """
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        f"/KnowledgeBases/{kds_id}/Channels"
+    )
+
+
+def _get_doc_history_path(kds_id: str, tenant_id: str | None = None) -> str:
+    """Build the knowledge-base scoped knowledge-file history API path.
+
+    Like the channel catalog, the history endpoint belongs to one knowledge base
+    (``.../KnowledgeBases/{kds_id}/KnowledgeFiles/History``); the body addresses
+    the request to a channel directory inside that knowledge base.
+    """
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        f"/KnowledgeBases/{kds_id}/KnowledgeFiles/History"
+    )
+
+
+def _get_ocr_annotate_path(
+    kds_id: str, file_uuid: str, tenant_id: str | None = None
+) -> str:
+    """Build the knowledge-base scoped preview (OCR annotate) API path.
+
+    Unlike the file action endpoints (``Download``/``Remove``/``History``),
+    which address the file in the request body, the preview endpoint carries it
+    in the path (``.../KnowledgeBases/{kds_id}/OcrAnnotate/{file_uuid}``). AIDP
+    serves the original bytes for the formats it can render itself
+    (docx/xlsx/pptx/pdf/txt) and converts every other format to PDF, reporting
+    the served name in the ``X-File-Name`` response header.
+    """
+    return (
+        f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}"
+        f"/KnowledgeBases/{kds_id}/OcrAnnotate/{file_uuid}"
+    )
+
+
+def _build_list_query(page: int, page_size: int, keyword: str | None = None) -> str:
+    """Build the query string for a knowledge-base list request.
+
+    AIDP applies ``keyword`` server-side (matching on the KB name), so the
+    value is forwarded verbatim. The parameter is omitted entirely when no
+    keyword is supplied, which keeps plain listing requests byte-identical to
+    the pre-search behaviour (same URL, so upstream caches still hit).
+    """
+    query = f"?page={page}&page_size={page_size}"
+    normalized_keyword = (keyword or "").strip()
+    if normalized_keyword:
+        query += f"&keyword={quote(normalized_keyword, safe='')}"
+    return query
+
+
 def _timestamp_to_iso(value: Any) -> str | None:
     """Convert a numeric Unix timestamp (seconds or milliseconds) to ISO-8601 UTC.
 
@@ -140,21 +241,180 @@ def _timestamp_to_iso(value: Any) -> str | None:
     return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+# AIDP wraps list payloads in ``value`` (the shape every established endpoint in
+# this adapter returns). The remaining keys cover builds that put the items
+# behind a transport envelope, and a bare array is accepted as-is, so a renamed
+# wrapper cannot silently turn a populated list into "nothing returned".
+_AIDP_LIST_KEYS = ("value", "data", "result", "records", "items", "list")
+
+
+def _extract_list_payload(payload: Any) -> list | None:
+    """Return the item list carried by an AIDP list response, if there is one.
+
+    ``None`` means the response does not carry a list at all, which callers
+    report as an unexpected response format instead of degrading into an empty
+    result that looks like "no data upstream".
+    """
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return None
+    for key in _AIDP_LIST_KEYS:
+        candidate = payload.get(key)
+        if isinstance(candidate, list):
+            return candidate
+    return None
+
+
+def _timestamp_or_iso(value: Any) -> str | None:
+    """Return an ISO-8601 string for a Unix timestamp or an already-ISO value.
+
+    AIDP spells the creation time two ways: the document listing reports
+    ``first_upload_time`` / ``create_time`` as Unix seconds, while the
+    knowledge-file history already sends the canonical ``created_at`` as an ISO
+    string. Both spellings have to survive normalization, otherwise the history
+    rows lose a column the listing rows keep.
+    """
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            float(text)
+        except ValueError:
+            # Already an ISO-8601 string: keep it verbatim.
+            return text
+        value = text
+    return _timestamp_to_iso(value)
+
+
+# Spellings AIDP uses for a document timestamp, in priority order. The history
+# endpoint sends the canonical ``created_at``, the listing reports the upload
+# stamp, and ``update_time`` closes the chain because a file AIDP has not
+# finished registering yet reports no creation time at all — for a freshly
+# uploaded file the update stamp is the moment it was accepted, which beats
+# leaving the column empty.
+_CREATED_AT_KEYS = ("first_upload_time", "create_time", "created_at", "update_time")
+_UPDATED_AT_KEYS = ("update_time", "updated_at")
+
+
+def _first_reported(raw: Dict[str, Any], keys: tuple[str, ...]) -> Any:
+    """Return the first value ``raw`` reports for ``keys``, skipping blanks.
+
+    ``None``, an empty string and ``False`` all mean "not reported": AIDP sends
+    any of them for unset fields. Treating the blank spelling as a value would
+    shadow the next key in the chain, which is how an empty ``create_time`` hid a
+    populated ``created_at`` and left the creation time null.
+    """
+    for key in keys:
+        value = raw.get(key)
+        if value is None or value == "" or value is False:
+            continue
+        return value
+    return None
+
+
 def _normalize_aidp_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Map an AIDP document item to the shape the frontend expects.
 
-    AIDP returns ``first_upload_time`` / ``create_time`` as the creation timestamp
-    and ``update_time`` as the last-modified timestamp. The frontend schema
-    expects ``created_at`` (ISO string). This mapper performs that conversion
-    and carries through all other fields unchanged.
+    AIDP spells the timestamps several ways: the document listing reports
+    ``first_upload_time`` / ``create_time`` as Unix seconds, while the
+    knowledge-file history already sends the canonical ``created_at`` as an ISO
+    string, and either side may send an unset field as ``""``. Both spellings
+    therefore have to be accepted, and blank ones skipped, so a history row keeps
+    the creation time instead of losing it here. All other fields are carried
+    through unchanged.
     """
     out = dict(raw)
-    created_raw = raw.get("first_upload_time") or raw.get("create_time")
-    out["created_at"] = _timestamp_to_iso(created_raw)
-
-    updated_raw = raw.get("update_time")
-    out["updated_at"] = _timestamp_to_iso(updated_raw)
+    out["created_at"] = _timestamp_or_iso(_first_reported(raw, _CREATED_AT_KEYS))
+    out["updated_at"] = _timestamp_or_iso(_first_reported(raw, _UPDATED_AT_KEYS))
     return out
+
+
+def _normalize_doc_status(value: Any) -> str | None:
+    """Normalize an AIDP file status to its canonical upper-case token.
+
+    AIDP reports ``COMPLETED`` / ``PROCESSING`` / ``FAILED`` or the numeric
+    contract ``1``-``5`` (observed both as integers and numeric strings);
+    normalizing here means the frontend can compare against one form regardless
+    of upstream spelling. ``None`` is returned for missing/blank values so
+    callers can tell "no status reported" apart from a real status. Plain
+    integers map to their decimal string so a numeric status is kept instead of
+    being dropped; other non-string values are ignored.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, str) and value.strip():
+        return value.strip().upper()
+    return None
+
+
+# Deployments spell the per-file processing status differently, so it is read
+# through aliases like the channel fields further down (``_CHANNEL_*_KEYS``).
+# Only the forms actually observed are listed; adding one here is enough to
+# support another deployment.
+_HISTORY_STATUS_KEYS = (
+    "status",
+    "file_status",
+    "fileStatus",
+    "file_state",
+    "doc_status",
+)
+
+
+def _extract_doc_status(raw: Dict[str, Any]) -> str | None:
+    """Return the first recognized file status carried by ``raw``.
+
+    The canonical ``status`` wins, then the observed aliases in order, so a
+    deployment that renames the field keeps working without a code change.
+    """
+    for key in _HISTORY_STATUS_KEYS:
+        status = _normalize_doc_status(raw.get(key))
+        if status is not None:
+            return status
+    return None
+
+
+def _normalize_history_doc(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Map an AIDP knowledge-file history item to the frontend document shape.
+
+    The history payload carries the same identity fields as the document list
+    (``file_ino_no`` / ``file_name`` / ``file_size`` / ``file_type`` /
+    ``first_upload_time``) plus a processing status. Whatever field the upstream
+    used, the value is re-emitted under the canonical ``status`` key so the
+    frontend only has to read one field. A blank or missing upstream status is
+    dropped rather than forwarded as whitespace, so callers can treat "no status
+    reported" as a single state.
+    """
+    out = _normalize_aidp_doc(raw)
+    status = _extract_doc_status(raw)
+    if status is None:
+        out.pop("status", None)
+    else:
+        out["status"] = status
+    return out
+
+
+def _warn_when_history_status_unreadable(items: List[Any], fs_id: str) -> None:
+    """Log the payload shape when no history item carries a usable status.
+
+    The processing status is the reason the history endpoint is used at all: a
+    payload whose status field we cannot read renders as a column of dashes, so
+    the keys of a sample item are logged to make the real field name
+    discoverable from the service log instead of leaving the gap invisible.
+    """
+    item_dicts = [item for item in items if isinstance(item, dict)]
+    if not item_dicts or any("status" in item for item in item_dicts):
+        return
+    logger.warning(
+        "AIDP file history for fs_id=%s returned %d item(s) with no readable status; "
+        "sample keys=%s",
+        fs_id,
+        len(item_dicts),
+        sorted(item_dicts[0].keys()),
+    )
 
 
 def _validate_params(server_url: str, api_key: str) -> str:
@@ -183,6 +443,7 @@ _AIDP_RETRY_MAX_ATTEMPTS = 3
 _AIDP_RETRY_BACKOFF_FACTOR = 0.5
 _AIDP_RETRYABLE_STATUS_CODES = {408, 429, 500, 502, 503, 504}
 _AIDP_READ_TIMEOUT_SECONDS = 30.0
+_AIDP_DOWNLOAD_TIMEOUT_SECONDS = 120.0
 
 
 def _request_with_retry(
@@ -260,8 +521,12 @@ def fetch_aidp_knowledge_bases_impl(
     api_key: str,
     page: int = 1,
     page_size: int = 10,
+    keyword: str | None = None,
 ) -> Dict[str, Any]:
-    """Fetch a single page from AIDP API (simple passthrough)."""
+    """Fetch a single page from AIDP API (simple passthrough).
+
+    ``keyword`` is forwarded to AIDP as an optional server-side filter.
+    """
     normalized_url = _validate_params(server_url, api_key)
 
     headers = {
@@ -269,7 +534,7 @@ def fetch_aidp_knowledge_bases_impl(
         "Content-Type": "application/json",
     }
 
-    list_path = f"{_get_list_path()}?page={page}&page_size={page_size}"
+    list_path = f"{_get_list_path()}{_build_list_query(page, page_size, keyword)}"
     list_url = urljoin(f"{normalized_url}/", list_path)
     logger.info("Fetching AIDP knowledge bases from %s", list_url)
 
@@ -343,9 +608,25 @@ def _normalize_response(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _kb_matches_keyword(item: Dict[str, Any], keyword: str) -> bool:
+    """Return whether a KB row carries ``keyword`` in its name or description.
+
+    Only used as the fallback for AIDP builds that ignore the server-side
+    filter, so plain case-insensitive substring semantics are enough — the
+    upstream match set is always trusted when the upstream actually narrowed.
+    """
+    needle = keyword.lower()
+    for field in ("kds_name", "name", "description"):
+        value = item.get(field)
+        if isinstance(value, str) and needle in value.lower():
+            return True
+    return False
+
+
 def fetch_all_aidp_knowledge_bases_impl(
     server_url: str,
     api_key: str,
+    keyword: str | None = None,
 ) -> Dict[str, Any]:
     """Fetch every AIDP knowledge-base page using the dedicated Count API.
 
@@ -354,8 +635,20 @@ def fetch_all_aidp_knowledge_bases_impl(
     the number of pages, and every list request uses the configured tenant.
     Duplicate resources are removed by ``kds_id`` while preserving their
     first-seen order.
+
+    ``keyword`` is forwarded to every list call so AIDP filters server-side.
+    The Count API has no keyword support, so the page count is deliberately
+    derived from the unfiltered total: AIDP returns the matching subset on the
+    earliest pages and empty pages afterwards, which this loop tolerates. The
+    caller therefore still receives every match.
+
+    A build that ignores ``keyword`` answers with the whole catalog instead. That
+    is detected after the loop (the collected set is not narrower than the
+    reported total) and the keyword is then applied locally, so a search cannot
+    silently return the unfiltered list.
     """
     normalized_url = _validate_params(server_url, api_key)
+    normalized_keyword = (keyword or "").strip()
     page_size = 100
     started_at = time.perf_counter()
     count_started_at = time.perf_counter()
@@ -395,7 +688,10 @@ def fetch_all_aidp_knowledge_bases_impl(
         list_started_at = time.perf_counter()
 
         for current_page in range(1, total_pages + 1):
-            page_path = f"{_get_list_path()}?page={current_page}&page_size={page_size}"
+            page_path = (
+                f"{_get_list_path()}"
+                f"{_build_list_query(current_page, page_size, keyword)}"
+            )
             current_url = urljoin(f"{normalized_url}/", page_path)
 
             logger.info(
@@ -446,6 +742,26 @@ def fetch_all_aidp_knowledge_bases_impl(
                 all_items.append(item)
 
         accumulated_count = len(all_items)
+        result_count = accumulated_count
+        if normalized_keyword and accumulated_count >= total_count:
+            # The upstream answered a keyword request with the entire catalog, so
+            # this AIDP build ignores the parameter. Narrow locally instead of
+            # reporting an unfiltered list as a search result: every KB has
+            # already been fetched above, so the match set stays complete.
+            all_items = [
+                item
+                for item in all_items
+                if _kb_matches_keyword(item, normalized_keyword)
+            ]
+            result_count = len(all_items)
+            logger.info(
+                "AIDP returned the full catalog (%d of %d reported KBs) for keyword %r; "
+                "applied the local name/description filter -> %d match(es)",
+                accumulated_count,
+                total_count,
+                normalized_keyword,
+                result_count,
+            )
         list_ms = (time.perf_counter() - list_started_at) * 1000
         logger.info(
             "AIDP KB catalog timing: total_ms=%.1f count_ms=%.1f list_ms=%.1f "
@@ -460,7 +776,7 @@ def fetch_all_aidp_knowledge_bases_impl(
 
         return {
             "value": all_items,
-            "total_count": accumulated_count,
+            "total_count": result_count,
             "next_link": None,
         }
     except httpx.RequestError as e:
@@ -564,67 +880,175 @@ def count_aidp_kbs_impl(server_url: str, api_key: str) -> int:
         )
 
 
-# Default values for AIDP create KB payload, aligned with
-# sdk/nexent/core/knowledge_base/config.py (build_create_payload).
-# Used as defense-in-depth: any client calling create_aidp_kb_impl
-# without these fields will get them filled in automatically.
-_AIDP_CREATE_DEFAULTS: Dict[str, Any] = {
-    "chunk_token_num": 1024,
-    "chunk_overlap_num": 128,
-    "embedding_model": "default",
-    # AIDP expects the VLM model identifier exactly as registered in its system.
-    "vlm_model": "Qwen3-VL-8B-Instruct",
-    "is_personal": 0,
-    "topk": 10,
-    "similarity": 0.0,
-    "smartsplit": 1,
-    # caption_enable: int 0/1, not string or bool.
-    "caption_enable": 0,
-}
+_GRAPH_PROMPT_LANGUAGES = {"中文", "英文"}
+_GRAPH_CONFIG_FIELDS = frozenset(
+    {
+        "domain",
+        "retrieve_subgraph_hop",
+        "no_think_mode",
+        "prompt_language",
+        "prompt_text",
+        "synonym_merge_enable",
+        "disambiguation_enable",
+        "llm_model_name",
+    }
+)
+_GRAPH_PROMPT_MAX_CHARS = 4096
+_GRAPH_EDITABLE_FIELDS = frozenset(
+    {
+        "llm_model_name",
+        "retrieve_subgraph_hop",
+        "no_think_mode",
+        "synonym_merge_enable",
+        "disambiguation_enable",
+    }
+)
 
 
-def _apply_create_defaults(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Fill missing AIDP create-KB fields with reference defaults.
 
-    Defensive layer: if the client omits any of these fields, the backend
-    injects them before forwarding to AIDP. Matches the frontend
-    AIDP_CREATE_DEFAULTS and the SDK build_create_payload defaults exactly.
 
-    Special rules:
-      * if payload.is_multimodal is truthy, caption_enable defaults to ``1``
-        (matching SDK mapper logic).
-      * when caption_enable is disabled (``0`` or ``"0"``), clear ``vlm_model``
-        so AIDP never receives a stale model identifier for a non-multimodal KB.
-      * ``description`` is normalized: AIDP rejects empty strings (the spec
-        declares length 1-255). Any None/empty/whitespace-only description is
-        replaced with the KB name, falling back to ``"Nexent knowledge base"``
-        if name is also empty. This converts an AIDP 500 into a successful
-        create, because the server-side 500 we observed was traced to an
-        empty description in the UI payload.
+
+def _serialize_graph_config(config: Dict[str, Any]) -> str:
+    """Validate a structured graph configuration and serialize it for AIDP.
+
+    Only documented keys are accepted, and out-of-range values are not
+    clamped. Domain validity is deliberately NOT enforced here: the frontend
+    sources domain choices from the live AIDP graph template, so a fixed
+    backend whitelist would reject newly added AIDP domains. AIDP remains
+    the authority on whether a domain is supported. The result is the JSON
+    string AIDP expects in ``graph_config``; the frontend never builds that
+    string itself.
     """
+    unsupported_fields = set(config).difference(_GRAPH_CONFIG_FIELDS)
+    if unsupported_fields:
+        names = ", ".join(sorted(unsupported_fields))
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            f"Unsupported graph configuration fields: {names}",
+        )
+
+    domain = config.get("domain")
+    if not isinstance(domain, str) or not domain.strip():
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            "Graph domain must be a non-empty string",
+        )
+
+    prompt_language = config.get("prompt_language")
+    if not isinstance(prompt_language, str):
+        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Graph prompt language must be a string")
+    if prompt_language not in _GRAPH_PROMPT_LANGUAGES:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            f"Unsupported graph prompt language: {prompt_language}",
+        )
+
+    prompt_text = config.get("prompt_text")
+    if not isinstance(prompt_text, str):
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            "Graph prompt text must be a string",
+        )
+    if not 1 <= len(prompt_text) <= _GRAPH_PROMPT_MAX_CHARS:
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            f"Graph prompt must contain 1 to {_GRAPH_PROMPT_MAX_CHARS} characters",
+        )
+
+    hop = config.get("retrieve_subgraph_hop")
+    if hop not in ("1", "2", "3"):
+        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Graph retrieve_subgraph_hop must be 1, 2 or 3")
+
+    def _yes_no(key: str) -> str:
+        value = config.get(key)
+        if value not in ("是", "否"):
+            raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, f"Graph parameter {key} must be 是 or 否")
+        return value
+
+    payload = {
+        "domain": domain,
+        "retrieve_subgraph_hop": hop,
+        "no_think_mode": _yes_no("no_think_mode"),
+        "prompt_language": prompt_language,
+        "prompt_text": prompt_text,
+        "synonym_merge_enable": _yes_no("synonym_merge_enable"),
+        "disambiguation_enable": _yes_no("disambiguation_enable"),
+    }
+    llm_model_name = config.get("llm_model_name")
+    if not isinstance(llm_model_name, str) or not llm_model_name.strip():
+        raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Graph LLM model name must be a non-empty string")
+    payload["llm_model_name"] = llm_model_name
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def merge_graph_config_update(current: Dict[str, Any], updates: Dict[str, Any]) -> str:
+    """Serialize a partial graph-config edit for the AIDP PATCH endpoint.
+
+    ``updates`` carries native-typed values for the five editable fields
+    (bool toggles, int hop count, str model name). Only the **edited** fields
+    are converted to AIDP string format ("是"/"否" toggles, string hop) and
+    placed in the returned JSON string - AIDP's PATCH performs a partial
+    merge on ``graph_config``, so sending only the changed field(s) is the
+    correct and safe approach. Sending unedited fields (even modifiable ones)
+    can cause AIDP to reject the update with HTTP 500. The ``current``
+    parameter is accepted for signature compatibility but intentionally not
+    merged into the result.
+    """
+    unsupported_fields = set(updates).difference(_GRAPH_EDITABLE_FIELDS)
+    if unsupported_fields:
+        names = ", ".join(sorted(unsupported_fields))
+        raise AppException(
+            ErrorCode.COMMON_PARAMETER_INVALID,
+            f"Unsupported graph configuration fields: {names}",
+        )
+
+    result: Dict[str, str] = {}
+
+    if "llm_model_name" in updates:
+        llm_model_name = updates["llm_model_name"]
+        if not isinstance(llm_model_name, str) or not llm_model_name.strip():
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                "Graph LLM model name must be a non-empty string",
+            )
+        result["llm_model_name"] = llm_model_name.strip()
+
+    if "retrieve_subgraph_hop" in updates:
+        hop = updates["retrieve_subgraph_hop"]
+        # bool is an int subclass; reject it explicitly so True/False never
+        # serialize as "True"/"False" hop strings.
+        if isinstance(hop, bool) or not isinstance(hop, int) or hop not in (1, 2, 3):
+            raise AppException(
+                ErrorCode.COMMON_PARAMETER_INVALID,
+                "Graph retrieve_subgraph_hop must be 1, 2 or 3",
+            )
+        result["retrieve_subgraph_hop"] = str(hop)
+
+    for key in ("no_think_mode", "synonym_merge_enable", "disambiguation_enable"):
+        if key in updates:
+            value = updates[key]
+            if not isinstance(value, bool):
+                raise AppException(
+                    ErrorCode.COMMON_PARAMETER_INVALID,
+                    f"Graph parameter {key} must be a boolean",
+                )
+            result[key] = "是" if value else "否"
+
+    return json.dumps(result, ensure_ascii=False)
+
+
+def _prepare_create_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert validated creation settings into the AIDP request format."""
     result = dict(payload)
-    for key, default in _AIDP_CREATE_DEFAULTS.items():
-        if key not in result:
-            result[key] = default
-
-    # Normalize description: AIDP spec declares length 1-255, but some
-    # backend implementations return HTTP 500 (instead of 400) when a
-    # required string field arrives as an empty string. This defensive
-    # rewrite guarantees the field is never forwarded empty.
-    desc = result.get("description")
-    if not isinstance(desc, str) or not desc.strip():
-        fallback_name = result.get("name")
-        if isinstance(fallback_name, str) and fallback_name.strip():
-            result["description"] = fallback_name.strip()
-        else:
-            result["description"] = "Nexent knowledge base"
-
-    if result.get("is_multimodal") and "caption_enable" not in payload:
-        result["caption_enable"] = 1
-
-    caption = result.get("caption_enable")
-    if caption in (0, "0", False):
+    if not result["caption_enable"]:
         result["vlm_model"] = ""
+    if result["is_exist_graph"]:
+        graph_config = result.get("graph_config")
+        if not isinstance(graph_config, dict):
+            raise AppException(ErrorCode.COMMON_PARAMETER_INVALID, "Graph configuration is required")
+        result["graph_config"] = _serialize_graph_config(graph_config)
+    else:
+        result.pop("graph_config", None)
     return result
 
 
@@ -641,8 +1065,8 @@ def create_aidp_kb_impl(
         "Content-Type": "application/json",
     }
 
-    # Fill missing fields with SDK-aligned defaults before forwarding.
-    full_payload = _apply_create_defaults(payload)
+    # Convert the validated request into the upstream representation.
+    full_payload = _prepare_create_payload(payload)
 
     create_url = urljoin(f"{normalized_url}/", _get_list_path())
     logger.info("Creating AIDP knowledge base at %s with payload=%s", create_url, full_payload)
@@ -859,12 +1283,22 @@ def update_aidp_kb_impl(
         )
 
 
+def get_bound_agents(kds_ids: list[str], *, tenant_id: str) -> dict:
+    """Preview agents affected by deleting the selected knowledge bases."""
+    return {"agents": query_knowledge_binding_agents(kds_ids=kds_ids, tenant_id=tenant_id)}
+
+
 def delete_aidp_kb_impl(
     server_url: str,
     api_key: str,
     kds_id: str,
 ) -> bool:
-    """Delete a knowledge base via AIDP API."""
+    """Delete a knowledge base via AIDP API.
+
+    A 404 response means the KB is already gone upstream (orphan cleanup),
+    which satisfies the delete intent: report success so the caller proceeds
+    with local permission cleanup instead of failing the whole operation.
+    """
     normalized_url = _validate_params(server_url, api_key)
 
     headers = {
@@ -884,7 +1318,6 @@ def delete_aidp_kb_impl(
         )
         response = client.delete(delete_url, headers=headers)
         response.raise_for_status()
-        return True
     except httpx.RequestError as e:
         logger.exception("AIDP request failed: %s", e)
         raise AppException(
@@ -907,10 +1340,25 @@ def delete_aidp_kb_impl(
                 ErrorCode.AIDP_RATE_LIMIT,
                 f"AIDP rate limit exceeded: {str(e)}",
             )
-        raise AppException(
-            ErrorCode.AIDP_SERVICE_ERROR,
-            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
-        )
+        if e.response.status_code == 404:
+            logger.warning(
+                "AIDP knowledge base %s already absent upstream (404); "
+                "treating delete as success",
+                kds_id,
+            )
+        else:
+            raise AppException(
+                ErrorCode.AIDP_SERVICE_ERROR,
+                f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+            )
+
+    try:
+        with get_db_session() as session:
+            remove_tool_knowledge_references(session, kds_ids=[kds_id])
+            remove_conversation_knowledge_bindings(session, kds_ids=[kds_id])
+    except Exception as exc:  # noqa: BLE001 - Binding cleanup must not fail knowledge-base deletion.
+        logger.warning("Failed to clean up bindings for deleted AIDP knowledge base '%s': %s", kds_id, exc)
+    return True
 
 
 def upload_aidp_docs_impl(
@@ -1012,6 +1460,212 @@ def upload_aidp_docs_impl(
         )
 
 
+def remove_aidp_docs_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuids: List[str],
+) -> Dict[str, Any]:
+    """Remove one or more documents from an AIDP knowledge base."""
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    remove_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Remove"
+    remove_url = urljoin(f"{normalized_url}/", remove_path)
+    logger.info("Removing %d AIDP documents from %s", len(file_uuids), remove_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(
+                remove_url,
+                headers=headers,
+                json={"file_uuids": file_uuids},
+            ),
+            context=f"remove-docs:{kds_id}",
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP document removal request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        _raise_aidp_http_error(e, "document removal")
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP document removal response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+def retry_aidp_docs_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuids: List[str],
+) -> Dict[str, Any]:
+    """Retry one or more failed AIDP knowledge files using the documented array body."""
+    normalized_url = _validate_params(server_url, api_key)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    retry_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Retry"
+    retry_url = urljoin(f"{normalized_url}/", retry_path)
+    logger.info("Retrying %d AIDP documents for KB %s", len(file_uuids), kds_id)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(
+                retry_url,
+                headers=headers,
+                json={"retry_file_info": [{"file_uuid": uuid} for uuid in file_uuids]},
+            ),
+            context=f"retry-docs:{kds_id}",
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP document retry response format",
+            )
+        return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP document retry request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        _raise_aidp_http_error(e, "document retry")
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP document retry response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+async def stream_aidp_doc_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuid: str,
+) -> httpx.Response:
+    """Open a streaming response for one AIDP document."""
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    download_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles/Download"
+    download_url = urljoin(f"{normalized_url}/", download_path)
+    logger.info("Downloading AIDP document %s from %s", file_uuid, download_url)
+
+    response: httpx.Response | None = None
+    try:
+        client = http_client_manager.get_async_client(
+            base_url=normalized_url,
+            timeout=_AIDP_DOWNLOAD_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = await client.send(
+            client.build_request(
+                "POST",
+                download_url,
+                headers=headers,
+                json={"file_uuid": file_uuid},
+            ),
+            stream=True,
+        )
+        if response.status_code >= 400:
+            await response.aread()
+        response.raise_for_status()
+        return response
+    except httpx.RequestError as e:
+        if response is not None:
+            await response.aclose()
+        logger.exception("AIDP document download request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        if response is not None:
+            await response.aclose()
+        _raise_aidp_http_error(e, "document download")
+
+
+async def stream_aidp_preview_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    file_uuid: str,
+) -> httpx.Response:
+    """Open the AIDP preview stream for one document.
+
+    AIDP answers this endpoint with the original bytes for the formats it can
+    render itself (docx/xlsx/pptx/pdf/txt) and with a PDF conversion for every
+    other format. The served name therefore does not always match the uploaded
+    one, and the caller reads it from the ``X-File-Name`` response header to
+    pick a renderer.
+    """
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    preview_path = _get_ocr_annotate_path(kds_id, file_uuid)
+    preview_url = urljoin(f"{normalized_url}/", preview_path)
+    logger.info("Previewing AIDP document %s from %s", file_uuid, preview_url)
+
+    response: httpx.Response | None = None
+    try:
+        client = http_client_manager.get_async_client(
+            base_url=normalized_url,
+            timeout=_AIDP_DOWNLOAD_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = await client.send(
+            client.build_request("GET", preview_url, headers=headers),
+            stream=True,
+        )
+        if response.status_code >= 400:
+            await response.aread()
+        response.raise_for_status()
+        return response
+    except httpx.RequestError as e:
+        if response is not None:
+            await response.aclose()
+        # ``logger.exception`` already records the traceback.
+        logger.exception("AIDP document preview request failed")
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {e!s}",
+        )
+    except httpx.HTTPStatusError as e:
+        if response is not None:
+            await response.aclose()
+        _raise_aidp_http_error(e, "document preview")
+
+
 def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
     """Get total document count in a KB via AIDP POST .../Count endpoint.
 
@@ -1054,7 +1708,13 @@ def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
                 ErrorCode.AIDP_RESPONSE_ERROR,
                 "Unexpected AIDP doc count response format",
             )
-        return int(result.get("count") or 0)
+        count = result.get("count")
+        if not isinstance(count, int) or isinstance(count, bool) or count < 0:
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "AIDP doc Count API response must contain a non-negative integer count",
+            )
+        return count
     except httpx.RequestError as e:
         logger.exception("AIDP request failed: %s", e)
         raise AppException(
@@ -1072,10 +1732,6 @@ def count_aidp_docs_impl(server_url: str, api_key: str, kds_id: str) -> int:
                 ErrorCode.AIDP_AUTH_ERROR,
                 f"AIDP authentication failed: {str(e)}",
             )
-        if e.response.status_code == 404:
-            # KB does not exist or Count endpoint is not supported
-            logger.warning("AIDP doc Count API returned 404 for KB %s", kds_id)
-            return 0
         if e.response.status_code == 429:
             raise AppException(
                 ErrorCode.AIDP_RATE_LIMIT,
@@ -1099,6 +1755,7 @@ def list_aidp_docs_impl(
     kds_id: str,
     page: int = 1,
     page_size: int = 10,
+    keyword: str | None = None,
 ) -> Dict[str, Any]:
     """List documents in a knowledge base via AIDP API."""
     normalized_url = _validate_params(server_url, api_key)
@@ -1109,6 +1766,8 @@ def list_aidp_docs_impl(
     }
 
     list_path = f"{_get_list_path()}/{kds_id}/KnowledgeFiles?page={page}&page_size={page_size}"
+    if keyword:
+        list_path += f"&keyword={quote(keyword, safe='')}"
     list_url = urljoin(f"{normalized_url}/", list_path)
     logger.info("Listing AIDP documents from %s", list_url)
 
@@ -1138,6 +1797,348 @@ def list_aidp_docs_impl(
                 for item in value
             ]
         return result
+    except httpx.RequestError as e:
+        logger.exception("AIDP request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                f"AIDP authentication failed: {str(e)}",
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                f"AIDP rate limit exceeded: {str(e)}",
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+        )
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP API response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+# ==================== Knowledge-file history (all-status listing) ====================
+
+# Channel entries are read through alias lists because AIDP deployments spell
+# these fields differently. Only the forms actually observed are listed; adding
+# a new spelling here is enough to support another deployment.
+_CHANNEL_FS_ID_KEYS = (
+    "fs_id",
+    "fsId",
+    "fsid",
+    "file_system_id",
+    "fileSystemId",
+    "file_sys_id",
+    "filesystem_id",
+)
+_CHANNEL_SRC_DIR_KEYS = (
+    "src_dir",
+    "srcDir",
+    "source_dir",
+    "sourceDir",
+    "source_path",
+    "sourcePath",
+    "dir_path",
+    "dirPath",
+    "input_dir",
+    "inputDir",
+)
+_CHANNEL_KB_ID_KEYS = (
+    "kds_id",
+    "kdsId",
+    "knowledge_base_id",
+    "knowledgeBaseId",
+    "kb_id",
+    "kbId",
+    "knowledge_base_ids",
+    "knowledgeBaseIds",
+)
+
+
+def _first_non_empty_string(item: Dict[str, Any], keys: tuple) -> str | None:
+    """Return the first non-empty string among ``keys``, or ``None``."""
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+def _lookup_channel_field(item: Dict[str, Any], keys: tuple) -> str | None:
+    """Return the first non-empty string among ``keys``, nested dicts included.
+
+    Deployments nest the addressing fields differently (for example under a
+    ``config`` or ``file_system`` object next to the channel's own keys), so one
+    level of nested dictionaries is inspected before giving up. Without this a
+    channel holding both values could look unusable purely because of nesting,
+    which silently drops the whole status feature back to the ingested-files
+    listing.
+    """
+    found = _first_non_empty_string(item, keys)
+    if found is not None:
+        return found
+    for value in item.values():
+        if isinstance(value, dict):
+            found = _first_non_empty_string(value, keys)
+            if found is not None:
+                return found
+    return None
+
+
+def _references_kb_id(value: Any, kds_id: str) -> bool:
+    """Return whether a channel field references ``kds_id``.
+
+    Accepts a scalar id, a list of ids, or a directory string such as
+    ``/knowledge/<kds_id>`` — a channel is bound to a knowledge base either by
+    an explicit id field or by pointing its source directory at that KB.
+    """
+    if isinstance(value, str):
+        return value == kds_id or kds_id in value.split("/")
+    if isinstance(value, (list, tuple, set)):
+        return any(_references_kb_id(entry, kds_id) for entry in value)
+    return False
+
+
+def _channel_references_kb_id(item: Dict[str, Any], kds_id: str) -> bool:
+    """Return whether any channel field (nested ones included) references the KB.
+
+    Fields are matched by name first, then every remaining scalar/list value is
+    checked so a build that binds a channel to its knowledge base through an
+    undocumented field (a pipeline name, a path) still resolves.
+    """
+    for key, value in item.items():
+        if key in _CHANNEL_KB_ID_KEYS and _references_kb_id(value, kds_id):
+            return True
+        if isinstance(value, dict) and _channel_references_kb_id(value, kds_id):
+            return True
+        if isinstance(value, (str, list, tuple, set)) and _references_kb_id(
+            value, kds_id
+        ):
+            return True
+    return False
+
+
+def select_aidp_channel(
+    channels: List[Dict[str, Any]],
+    kds_id: str | None = None,
+) -> Dict[str, str] | None:
+    """Pick the ingestion channel whose files feed ``kds_id``.
+
+    Selection order:
+      1. a channel that references ``kds_id`` (id field or source directory),
+      2. otherwise the first channel carrying both ``fs_id`` and a source dir.
+
+    Step 2 covers deployments that keep a single channel per tenant, where the
+    history lookup is intentionally directory-wide. Returns ``None`` when no
+    channel carries the pair the history API needs, so the caller can fall back
+    to the completed-files listing.
+    """
+    usable: List[Dict[str, str]] = []
+    for channel in channels:
+        if not isinstance(channel, dict):
+            continue
+        fs_id = _lookup_channel_field(channel, _CHANNEL_FS_ID_KEYS)
+        src_dir = _lookup_channel_field(channel, _CHANNEL_SRC_DIR_KEYS)
+        if not fs_id or not src_dir:
+            continue
+        usable.append({"fs_id": fs_id, "src_dir": src_dir})
+        if kds_id and _channel_references_kb_id(channel, kds_id):
+            return usable[-1]
+
+    return usable[0] if usable else None
+
+
+def list_aidp_channels_impl(
+    server_url: str,
+    api_key: str,
+    kds_id: str,
+    tenant_id: str | None = None,
+) -> Dict[str, Any]:
+    """List the ingestion pipelines feeding one knowledge base via AIDP API.
+
+    Endpoint: ``GET /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{kds_id}/Channels``
+    Response: ``{"value": [{"fs_id": ..., "src_dir": ...}, ...]}``
+    """
+    normalized_url = _validate_params(server_url, api_key)
+    if not isinstance(kds_id, str) or not kds_id.strip():
+        raise AppException(
+            ErrorCode.AIDP_CONFIG_INVALID,
+            "AIDP channel listing requires a non-empty knowledge base id",
+        )
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    channels_path = _get_channels_path(kds_id, tenant_id)
+    channels_url = urljoin(f"{normalized_url}/", channels_path)
+    logger.info("Listing AIDP channels from %s", channels_url)
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.get(channels_url, headers=headers),
+            context="list-channels",
+        )
+        response.raise_for_status()
+        result = response.json()
+        items = _extract_list_payload(result)
+        if items is None:
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP channel list response format",
+            )
+        # Downstream readers always read ``value``, so the extracted items are
+        # re-emitted under that canonical key whichever envelope this build used.
+        payload = result if isinstance(result, dict) else {}
+        payload["value"] = [item for item in items if isinstance(item, dict)]
+        return payload
+    except httpx.RequestError as e:
+        logger.exception("AIDP request failed: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP API request failed: {str(e)}",
+        )
+    except httpx.HTTPStatusError as e:
+        logger.exception(
+            "AIDP API HTTP error: %s, status_code: %s",
+            e,
+            e.response.status_code,
+        )
+        if e.response.status_code in (401, 403):
+            raise AppException(
+                ErrorCode.AIDP_AUTH_ERROR,
+                f"AIDP authentication failed: {str(e)}",
+            )
+        if e.response.status_code == 429:
+            raise AppException(
+                ErrorCode.AIDP_RATE_LIMIT,
+                f"AIDP rate limit exceeded: {str(e)}",
+            )
+        raise AppException(
+            ErrorCode.AIDP_SERVICE_ERROR,
+            f"AIDP API HTTP error {e.response.status_code}: {str(e)}",
+        )
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP API response: %s", e)
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP API response: {str(e)}",
+        )
+
+
+def list_aidp_doc_history_impl(
+    server_url: str,
+    api_key: str,
+    fs_id: str,
+    dir_path: str,
+    kds_id: str,
+    tenant_id: str | None = None,
+    page: int = 1,
+    page_size: int | None = None,
+    status: int | None = None,
+    keyword: str | None = None,
+) -> Dict[str, Any]:
+    """List a page of a channel directory regardless of processing status.
+
+    Endpoint: ``POST /KnowledgeBase/Tenants/{tenant}/KnowledgeBases/{kds_id}/KnowledgeFiles/History``
+    Body: ``{"fs_id": <str>, "dir_path": <str>, "page": <int>}``
+    Response: ``{"value": [<document with status>, ...]}``
+
+    Unlike ``list_aidp_docs_impl`` this returns files that are still being
+    chunked/embedded (``PROCESSING``) or that failed (``FAILED``), which is what
+    lets the UI show an upload immediately instead of only after ingestion.
+
+    The endpoint is paginated (``page`` is one-based) and supports filtering by
+    status and file-name keyword, allowing callers to request only the page the
+    user is viewing.
+    """
+    normalized_url = _validate_params(server_url, api_key)
+    normalized_page = page if isinstance(page, int) and page > 0 else 1
+
+    if not isinstance(kds_id, str) or not kds_id.strip():
+        raise AppException(
+            ErrorCode.AIDP_CONFIG_INVALID,
+            "AIDP file history requires a non-empty knowledge base id",
+        )
+    normalized_fs_id = fs_id.strip() if isinstance(fs_id, str) else ""
+    normalized_dir_path = dir_path.strip() if isinstance(dir_path, str) else ""
+    if not normalized_fs_id or not normalized_dir_path:
+        raise AppException(
+            ErrorCode.AIDP_CONFIG_INVALID,
+            "AIDP file history requires a non-empty fs_id and dir_path",
+        )
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    history_path = _get_doc_history_path(kds_id, tenant_id)
+    history_url = urljoin(f"{normalized_url}/", history_path)
+    logger.info(
+        "Listing AIDP knowledge-file history from %s (fs_id=%s, dir_path=%s)",
+        history_url,
+        normalized_fs_id,
+        normalized_dir_path,
+    )
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(
+                history_url,
+                headers=headers,
+                json={
+                    "fs_id": normalized_fs_id,
+                    "dir_path": normalized_dir_path,
+                    "page": normalized_page,
+                    **({"page_size": page_size} if isinstance(page_size, int) and page_size > 0 else {}),
+                    **({"status": status} if isinstance(status, int) and not isinstance(status, bool) else {}),
+                    **({"keyword": keyword.strip()} if isinstance(keyword, str) and keyword.strip() else {}),
+                },
+            ),
+            context=f"list-doc-history:{normalized_fs_id}",
+        )
+        response.raise_for_status()
+        result = response.json()
+        items = _extract_list_payload(result)
+        if items is None:
+            raise AppException(
+                ErrorCode.AIDP_RESPONSE_ERROR,
+                "Unexpected AIDP file history response format",
+            )
+        normalized_items = [
+            _normalize_history_doc(item) if isinstance(item, dict) else item
+            for item in items
+        ]
+        _warn_when_history_status_unreadable(normalized_items, normalized_fs_id)
+        payload = result if isinstance(result, dict) else {}
+        payload["value"] = normalized_items
+        return payload
     except httpx.RequestError as e:
         logger.exception("AIDP request failed: %s", e)
         raise AppException(
@@ -1226,7 +2227,9 @@ def list_aidp_models_impl(
         "Content-Type": "application/json",
     }
 
-    models_path = f"{_get_models_path()}?service={service}&app={app}"
+    models_path = f"{_get_models_path()}?app={quote(app, safe='')}"
+    if service:
+        models_path += f"&service={quote(service, safe='')}"
     models_url = urljoin(f"{normalized_url}/", models_path.lstrip("/"))
     logger.info("Fetching AIDP models from %s", models_url)
 
@@ -1247,7 +2250,7 @@ def list_aidp_models_impl(
                 ErrorCode.AIDP_RESPONSE_ERROR,
                 "Unexpected AIDP models response format",
             )
-        raw_models = result.get("models") or []
+        raw_models = result.get("models")
         if not isinstance(raw_models, list):
             raise AppException(
                 ErrorCode.AIDP_RESPONSE_ERROR,
@@ -1295,3 +2298,111 @@ def list_aidp_models_impl(
             ErrorCode.AIDP_RESPONSE_ERROR,
             f"Failed to parse AIDP models response: {str(e)}",
         )
+
+
+def get_aidp_graph_template_impl(
+    server_url: str, api_key: str, language: str = "chinese",
+) -> Dict[str, Any]:
+    """Read the live graph parameter defaults, constraints and domain templates."""
+    normalized_url = _validate_params(server_url, api_key)
+    url = urljoin(f"{normalized_url}/", f"{_get_list_path()}/GraphConfigTemplate?language={language}")
+    logger.info("Fetching AIDP graph template from %s", url)
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url, timeout=_AIDP_READ_TIMEOUT_SECONDS, verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.get(url, headers={"Authorization": f"Bearer {api_key}"}),
+            context="graph-template",
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict) or not isinstance(result.get("value"), list):
+            raise AppException(ErrorCode.AIDP_RESPONSE_ERROR, "Unexpected AIDP graph template response")
+        return result
+    except httpx.RequestError as exc:
+        logger.exception("AIDP graph template request failed")
+        raise AppException(ErrorCode.AIDP_CONNECTION_ERROR, "AIDP graph template request failed") from exc
+    except httpx.HTTPStatusError as exc:
+        _raise_aidp_http_error(exc, "graph template")
+    except ValueError as exc:
+        logger.exception("Failed to parse AIDP graph template response")
+        raise AppException(ErrorCode.AIDP_RESPONSE_ERROR, "Invalid AIDP graph template JSON") from exc
+
+
+def _get_retrieval_path(tenant_id: str | None = None) -> str:
+    """Build the tenant-scoped retrieval (FusionSearch) API path."""
+    return f"/KnowledgeBase/Tenants/{_resolve_tenant_id(tenant_id)}/Retrieval/FusionSearch"
+
+
+def fusion_search_impl(
+    server_url: str,
+    api_key: str,
+    tenant_id: str | None = None,
+    query: str = "",
+    kds_list: list[str] | None = None,
+    search_method: str = "hybrid_search",
+    top_k: int = 3,
+    score_threshold: float = 0.0,
+    reranking_enable: bool = True,
+    rewrite_enable: bool = False,
+    related_search_enable: bool = False,
+    multi_modal: bool = False,
+) -> list[dict[str, Any]]:
+    """Run one FusionSearch retrieval against AIDP and return raw hit records.
+
+    Mirrors the SDK ``AidpSearchTool`` wire contract so server-side callers
+    (evaluation case generation) retrieve through the same channel as agents.
+    Records come back as ``{title, text, score, file_url, chunk_type, ...}``.
+    """
+    normalized_url = _validate_params(server_url, api_key)
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "query": query,
+        "kds_list": [str(kds_id) for kds_id in kds_list],
+        "search_method": search_method,
+        "reranking_enable": reranking_enable,
+        "rewrite_enable": rewrite_enable,
+        "related_search_enable": related_search_enable,
+        "score_threshold": score_threshold,
+        "top_k": top_k,
+        "multi_modal": multi_modal,
+    }
+    retrieval_url = urljoin(f"{normalized_url}/", _get_retrieval_path(tenant_id))
+
+    try:
+        client = http_client_manager.get_sync_client(
+            base_url=normalized_url,
+            timeout=_AIDP_READ_TIMEOUT_SECONDS,
+            verify_ssl=False,
+        )
+        response = _request_with_retry(
+            lambda: client.post(retrieval_url, headers=headers, json=payload),
+            context="fusion-search",
+        )
+        response.raise_for_status()
+        result = response.json()
+    except httpx.RequestError as e:
+        logger.exception("AIDP fusion search request failed")
+        raise AppException(
+            ErrorCode.AIDP_CONNECTION_ERROR,
+            f"AIDP fusion search request failed: {e!s}",
+        )
+    except httpx.HTTPStatusError as e:
+        _raise_aidp_http_error(e, "fusion search")
+    except ValueError as e:
+        logger.exception("Failed to parse AIDP fusion search response")
+        raise AppException(
+            ErrorCode.AIDP_RESPONSE_ERROR,
+            f"Failed to parse AIDP fusion search response: {e!s}",
+        )
+
+    records = result.get("result", []) if isinstance(result, dict) else []
+    if not isinstance(records, list):
+        logger.warning("AIDP fusion search returned non-list result field")
+        return []
+    return records

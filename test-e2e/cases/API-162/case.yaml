@@ -1,0 +1,88 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: API-162
+  feature_id: F-176
+  business_rule_ids:
+  - F-176-RULE-01
+  title: Runtime/Config API lifespan 装配、startup/shutdown 依赖与健康契约｜核心流程
+  type: API-IT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Runtime/Config API lifespan 装配、startup/shutdown 依赖与健康契约｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/environment.yaml（仅本地测试环境参数）'
+  steps:
+  - order: 1
+    action: 启动本地真实 Nexent 全栈，确认 Runtime 与 Config 两个服务进程的 /health/live 均返回 200。
+    expected: Runtime 与 Config 应用均通过 create_app 以 lifespan 启动，且都注册 /health/live、/health/ready、/internal/thread-capacity。
+  - order: 2
+    action: 通过 backend/apps/app_factory.py 的 create_app 校验 Runtime 与 Config 应用均以 lifespan 参数创建，并由 install_health_contract
+      注册 /health/live、/health/ready。
+    expected: /health/live 返回 200 且 body 为 {"status":"alive"}。
+  - order: 3
+    action: 校验 runtime_lifespan 启动顺序：runtime_thread_manager 在 ManagerState.CREATED 时 start → set_default_thread_manager →
+      runtime_state_service.set_thread_manager → start_agent_automation_scheduler（control-io 通道执行 recover_runtime_tasks、cleanup_orphaned_agent_workspaces、agent_automation_scheduler.start）。
+    expected: 启动顺序符合：线程管理器 start 先于恢复任务（recover_runtime_tasks/recover_config_tasks）与调度器 start；runtime_state_service 已注入 runtime_thread_manager。
+  - order: 4
+    action: 校验 config_lifespan 启动顺序：config_thread_manager.start → set_default_thread_manager → recover_config_tasks_on_startup（recover_config_tasks、evaluation_maintenance.start、schedule_interrupted_upload_cleanup）→
+      sync_default_prompt_template_on_startup → start_dreaming_scheduler。
+    expected: /health/ready 在 manager 状态为 running 且 stuck_count=0 时返回 200 与 {"status":"ready"}；manager 非 running 或 stuck_count>0
+      时返回 503 且 body 含 status=not_ready、manager_state、stuck_count。
+  - order: 5
+    action: 请求 Runtime 与 Config 的 /internal/thread-capacity，记录线程管理器快照（state、stuck_count）。
+    expected: /internal/thread-capacity 返回包含 state 与 stuck_count 的快照，Runtime 与 Config 两个服务进程分别返回各自快照。
+  - order: 6
+    action: 请求 /health/ready，校验 manager 运行且 stuck_count=0 时返回 200；构造 manager 非 running 或 stuck_count>0 的场景校验返回 503 与 not_ready。
+    expected: 关闭时调度器、agent 流任务、沙箱池、线程管理器均在 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 内优雅停止，无残留默认线程管理器。
+  - order: 7
+    action: 触发进程关闭，校验 shutdown 顺序：scheduler.stop → shutdown_agent_stream_tasks（RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 内）→ SandboxPoolManager.shutdown
+      → thread_manager.shutdown → clear_default_thread_manager。
+    expected: 日志、Trace 中不出现明文 API Key/Token/Password。
+  - order: 8
+    action: 检查日志不泄露 secret，并清理临时数据。
+    expected: 日志、Trace 中不出现明文 API Key/Token/Password。
+  expected_results:
+  - Runtime 与 Config 应用均通过 create_app 以 lifespan 启动，且都注册 /health/live、/health/ready、/internal/thread-capacity。
+  - /health/live 返回 200 且 body 为 {"status":"alive"}。
+  - 启动顺序符合：线程管理器 start 先于恢复任务（recover_runtime_tasks/recover_config_tasks）与调度器 start；runtime_state_service 已注入 runtime_thread_manager。
+  - /health/ready 在 manager 状态为 running 且 stuck_count=0 时返回 200 与 {"status":"ready"}；manager 非 running 或 stuck_count>0 时返回
+    503 且 body 含 status=not_ready、manager_state、stuck_count。
+  - /internal/thread-capacity 返回包含 state 与 stuck_count 的快照，Runtime 与 Config 两个服务进程分别返回各自快照。
+  - 关闭时调度器、agent 流任务、沙箱池、线程管理器均在 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 内优雅停止，无残留默认线程管理器。
+  - 日志、Trace 中不出现明文 API Key/Token/Password。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 319
+  contract:
+    protocol: HTTP API
+    request_expectations:
+    - 启动本地真实 Nexent 全栈，确认 Runtime 与 Config 两个服务进程的 /health/live 均返回 200。
+    - 通过 backend/apps/app_factory.py 的 create_app 校验 Runtime 与 Config 应用均以 lifespan 参数创建，并由 install_health_contract 注册 /health/live、/health/ready。
+    - 校验 runtime_lifespan 启动顺序：runtime_thread_manager 在 ManagerState.CREATED 时 start → set_default_thread_manager → runtime_state_service.set_thread_manager
+      → start_agent_automation_scheduler（control-io 通道执行 recover_runtime_tasks、cleanup_orphaned_agent_workspaces、agent_automation_scheduler.start）。
+    - 校验 config_lifespan 启动顺序：config_thread_manager.start → set_default_thread_manager → recover_config_tasks_on_startup（recover_config_tasks、evaluation_maintenance.start、schedule_interrupted_upload_cleanup）→
+      sync_default_prompt_template_on_startup → start_dreaming_scheduler。
+    - 请求 Runtime 与 Config 的 /internal/thread-capacity，记录线程管理器快照（state、stuck_count）。
+    - 请求 /health/ready，校验 manager 运行且 stuck_count=0 时返回 200；构造 manager 非 running 或 stuck_count>0 的场景校验返回 503 与 not_ready。
+    - 触发进程关闭，校验 shutdown 顺序：scheduler.stop → shutdown_agent_stream_tasks（RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 内）→ SandboxPoolManager.shutdown
+      → thread_manager.shutdown → clear_default_thread_manager。
+    - 检查日志不泄露 secret，并清理临时数据。
+    response_expectations:
+    - Runtime 与 Config 应用均通过 create_app 以 lifespan 启动，且都注册 /health/live、/health/ready、/internal/thread-capacity。
+    - /health/live 返回 200 且 body 为 {"status":"alive"}。
+    - 启动顺序符合：线程管理器 start 先于恢复任务（recover_runtime_tasks/recover_config_tasks）与调度器 start；runtime_state_service 已注入 runtime_thread_manager。
+    - /health/ready 在 manager 状态为 running 且 stuck_count=0 时返回 200 与 {"status":"ready"}；manager 非 running 或 stuck_count>0 时返回
+      503 且 body 含 status=not_ready、manager_state、stuck_count。
+    - /internal/thread-capacity 返回包含 state 与 stuck_count 的快照，Runtime 与 Config 两个服务进程分别返回各自快照。
+    - 关闭时调度器、agent 流任务、沙箱池、线程管理器均在 RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS 内优雅停止，无残留默认线程管理器。
+    - 日志、Trace 中不出现明文 API Key/Token/Password。

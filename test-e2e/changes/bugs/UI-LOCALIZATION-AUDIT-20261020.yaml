@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: UI-LOCALIZATION-AUDIT-20261020
+  change_type: bugfix
+  bug_id: UI-LOCALIZATION-AUDIT-20261020
+  title: Resolve missing English UI copy in resource dialogs and model help
+  description: Localize resource picker actions, placeholders, validation feedback, model hints and skill source display while preserving values and callbacks.
+  observed_behavior: English pages render Chinese fallbacks and raw keys; fixed action widths compress English labels.
+  expected_behavior: Affected built-in UI copy follows the locale, model hints resolve in both catalogs and action labels fit their content.
+  escaped_stage: D4
+  coverage_gap:
+    type: unknown_baseline
+    description: Existing resource behavior cases do not assert the reported bilingual copy; focused catalog and interaction UT provides regression evidence, not formal browser acceptance.
+  feature_contract_changed: false
+  traditional_ut:
+    decision: strengthen
+    reason: Frontend presentation and translation defects; strengthen existing catalog and resource behavior UT. No Python behavior changed.
+    behaviors:
+    - Resolve affected labels and all ten model hints in Chinese and English without raw keys or Chinese English-route fallback.
+    - Preserve resource selection, cancellation, filtering, defaults and callbacks.
+    test_selectors:
+    - frontend/tests/component/resourcePickerLocalization.test.tsx
+    - frontend/tests/component/agentConfigHeader.test.tsx
+    - frontend/tests/component/agentConfigLayout.test.tsx
+    - frontend/tests/workbench/AgentPicker.test.tsx
+    - frontend/tests/workbench/SkillPicker.test.tsx
+    - frontend/tests/workbench/KnowledgePicker.test.tsx
+    - frontend/tests/workbench/ResourceSelectionActions.test.tsx
+  affected_features:
+    existing: [WB-CONTROLS]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  notes: Lightweight design at nexent-doc/docs/Developing/dev-ui-localization-audit/design.md. Existing WB-CONTROLS-D4-001 inspected for impact but not selected as localization proof. No new D1 duplicates UT; formal bilingual coverage remains unconfirmed. Local browser observations are separate from formal execution. Candidate audit findings are not all confirmed defects.

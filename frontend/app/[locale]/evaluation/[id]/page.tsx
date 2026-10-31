@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -21,7 +23,7 @@ import {
   List,
   type TableProps,
 } from "antd";
-import { Download, Zap, RotateCw, Tags } from "lucide-react";
+import { ArrowLeft, Download, Zap, RotateCw, Tags } from "lucide-react";
 import {
   BarChart,
   Bar,
@@ -111,6 +113,17 @@ function getRunStatusColor(status: string): string {
   return RUN_STATUS_TAG_COLOR[status] || "red";
 }
 
+function getCaseTotalQueryKey(
+  tab: string,
+  filters?: Record<number, string>,
+  sessionId?: string | null
+): string {
+  const normalizedFilters = Object.entries(filters || {}).sort(
+    ([a], [b]) => Number(a) - Number(b)
+  );
+  return JSON.stringify([tab, normalizedFilters, sessionId || null]);
+}
+
 // ── component ────────────────────────────────────────────────
 
 export default function EvaluationDetailPage() {
@@ -133,6 +146,12 @@ export default function EvaluationDetailPage() {
   const [casePageSize, setCasePageSize] = useState(10);
   const [caseSortBy, setCaseSortBy] = useState<string | null>(null);
   const [caseSortOrder, setCaseSortOrder] = useState<"asc" | "desc">("asc");
+  // The total belongs to the query that produced it.  Keep the query key so
+  // a stale total from the previous tab is not rendered while the new tab is
+  // loading.
+  const [caseTotalQueryKey, setCaseTotalQueryKey] = useState<string | null>(
+    null
+  );
   // caseTab: "all" / "pass" / "fail" — becomes the `pass_filter` URL param.
   const [caseTab, setCaseTab] = useState<string>("all");
   const [caseLoading, setCaseLoading] = useState(true);
@@ -189,7 +208,7 @@ export default function EvaluationDetailPage() {
   // { case_id: {schema_id: value} } in local state for O(1) lookups.
   const fetchAnnotations = useCallback(() => {
     if (!id) return;
-    fetch(`/api/evaluation-annotations/${id}/annotations`, {
+    fetch(API_ENDPOINTS.evaluationAnnotations.annotations(id), {
       headers: getAuthHeaders(),
     })
       .then((r) => r.json())
@@ -207,7 +226,9 @@ export default function EvaluationDetailPage() {
   }, [id]);
 
   const fetchSchemas = useCallback(() => {
-    fetch("/api/evaluation-annotations/schemas", { headers: getAuthHeaders() })
+    fetch(API_ENDPOINTS.evaluationAnnotations.schemas, {
+      headers: getAuthHeaders(),
+    })
       .then((r) => r.json())
       .then((d) => setSchemas(d.data || []));
   }, []);
@@ -218,7 +239,7 @@ export default function EvaluationDetailPage() {
   const fetchAnnoStats = useCallback(
     (schemaId: number) => {
       fetch(
-        `/api/evaluation-annotations/${id}/annotation-stats?schema_id=${schemaId}`,
+        `${API_ENDPOINTS.evaluationAnnotations.annotationStats(id)}?schema_id=${schemaId}`,
         { headers: getAuthHeaders() }
       )
         .then((r) => r.json())
@@ -276,7 +297,7 @@ export default function EvaluationDetailPage() {
         [caseId]: { ...(prev[caseId] || {}), [schemaId]: value },
       }));
       try {
-        await fetch(`/api/evaluation-annotations/${id}/annotations`, {
+        await fetch(API_ENDPOINTS.evaluationAnnotations.annotations(id), {
           method: "PUT",
           headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -300,7 +321,7 @@ export default function EvaluationDetailPage() {
 
   const persistSchemaIds = async (ids: number[]) => {
     try {
-      await fetch(`/api/agent-evaluations/${id}/annotation-schemas`, {
+      await fetch(API_ENDPOINTS.agentEvaluations.annotationSchemas(id), {
         method: "PUT",
         headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
         body: JSON.stringify({ schema_ids: ids }),
@@ -325,7 +346,7 @@ export default function EvaluationDetailPage() {
       try {
         // Fresh backend count — do not rely on possibly-stale local state.
         const r = await fetch(
-          `/api/evaluation-annotations/${id}/annotation-stats?schema_id=${schemaId}`,
+          `${API_ENDPOINTS.evaluationAnnotations.annotationStats(id)}?schema_id=${schemaId}`,
           { headers: getAuthHeaders() }
         );
         const d = await r.json();
@@ -351,7 +372,7 @@ export default function EvaluationDetailPage() {
         }
         // Cascade-delete all annotation rows for this schema within this run.
         await fetch(
-          `/api/evaluation-annotations/${id}/annotations?schema_id=${schemaId}`,
+          `${API_ENDPOINTS.evaluationAnnotations.annotations(id)}?schema_id=${schemaId}`,
           { method: "DELETE", headers: getAuthHeaders() }
         );
         // Drop this schema from local annotation + stats caches.
@@ -385,7 +406,9 @@ export default function EvaluationDetailPage() {
 
   const fetchStats = useCallback(() => {
     if (!id) return;
-    fetch(`/api/agent-evaluations/${id}/stats`, { headers: getAuthHeaders() })
+    fetch(API_ENDPOINTS.agentEvaluations.stats(id), {
+      headers: getAuthHeaders(),
+    })
       .then((r) => r.json())
       .then((d) => {
         if (d.data) setStats(d.data);
@@ -421,7 +444,8 @@ export default function EvaluationDetailPage() {
       abortRef.current = controller;
       setCaseLoading(true);
       const offset = (page - 1) * size;
-      let url = `/api/agent-evaluations/${id}/cases?limit=${size}&offset=${offset}`;
+      const queryKey = getCaseTotalQueryKey(tab, filters, sessionId);
+      let url = `${API_ENDPOINTS.agentEvaluations.cases(id)}?limit=${size}&offset=${offset}`;
       if (sortBy)
         url += `&sort_by=${encodeURIComponent(sortBy)}&sort_order=${sortOrder}`;
       if (tab !== "all") url += `&pass_filter=${tab}`;
@@ -468,6 +492,7 @@ export default function EvaluationDetailPage() {
           });
           setCases(items);
           setCaseTotal(data.total || 0);
+          setCaseTotalQueryKey(queryKey);
         })
         .catch((err) => {
           if (err.name !== "AbortError") throw err;
@@ -586,6 +611,12 @@ export default function EvaluationDetailPage() {
   const passCount = stats?.pass_count ?? 0;
   const failCount = stats?.fail_count ?? 0;
   const totalCases = stats?.total || run?.progress_total || caseTotal || 0;
+  const currentCaseTotalQueryKey = getCaseTotalQueryKey(
+    caseTab,
+    annoFilters,
+    sessionIdFilter
+  );
+  const hasCurrentCaseTotal = caseTotalQueryKey === currentCaseTotalQueryKey;
 
   // Evaluator names: from stats or fallback to evaluator_config
   const evaluatorNames = useMemo(() => {
@@ -1032,9 +1063,21 @@ export default function EvaluationDetailPage() {
 
   // ── render ──────────────────────────────────────────────
 
+  const backButton = (
+    <Tooltip title={t("common.back")}>
+      <Button
+        type="text"
+        aria-label={t("common.back")}
+        icon={<ArrowLeft className="size-4" />}
+        onClick={() => router.push(`/${params.locale}/evaluation`)}
+      />
+    </Tooltip>
+  );
+
   if (initialLoading)
     return (
       <div className="p-6">
+        {backButton}
         <Text type="secondary">{t("agentEvaluation.loading")}</Text>
       </div>
     );
@@ -1042,6 +1085,7 @@ export default function EvaluationDetailPage() {
     return (
       <div className="p-6">
         <Flex vertical gap={12}>
+          <div>{backButton}</div>
           <Text type="secondary">{t("agentEvaluation.notFound")}</Text>
           <Button
             size="small"
@@ -1060,26 +1104,30 @@ export default function EvaluationDetailPage() {
     <div className="p-6 max-w-7xl mx-auto">
       {/* ── Breadcrumb header ── */}
       <Flex vertical gap={10} className="mb-6">
-        <Breadcrumb
-          items={[
-            {
-              title: (
-                <button
-                  type="button"
-                  onClick={() =>
-                    router.push(
-                      `/evaluation?agent_id=${run?.agent_id || ""}`
-                    )
-                  }
-                  style={{ cursor: "pointer" }}
-                >
-                  {t("agentEvaluation.breadcrumbEval")}
-                </button>
-              ),
-            },
-            { title: t("agentEvaluation.breadcrumbDetail") },
-          ]}
-        />
+        <Flex align="center" gap={8}>
+          {backButton}
+          <Breadcrumb
+            items={[
+              {
+                title: (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const agentIds = run?.agent_id ? [run.agent_id] : [];
+                      router.push(
+                        `/evaluation?agent_ids=${encodeURIComponent(JSON.stringify(agentIds))}`
+                      );
+                    }}
+                    style={{ cursor: "pointer" }}
+                  >
+                    {t("agentEvaluation.breadcrumbEval")}
+                  </button>
+                ),
+              },
+              { title: t("agentEvaluation.breadcrumbDetail") },
+            ]}
+          />
+        </Flex>
         <Flex
           justify="space-between"
           align="center"
@@ -1120,7 +1168,7 @@ export default function EvaluationDetailPage() {
                     setAnalyzing(true);
                     try {
                       const r = await fetch(
-                        `/api/agent-evaluations/${run.agent_evaluation_id}/analyze?force=true`,
+                        `${API_ENDPOINTS.agentEvaluations.analyze(run.agent_evaluation_id)}?force=true`,
                         { method: "POST", headers: getAuthHeaders() }
                       );
                       const d = await r.json();
@@ -1363,7 +1411,7 @@ export default function EvaluationDetailPage() {
               <Alert
                 type="info"
                 showIcon
-                message={t("agentEvaluation.overallReview")}
+                title={t("agentEvaluation.overallReview")}
                 description={
                   <Text style={{ fontSize: 13, color: "#555" }}>
                     {analysisReport.summary}
@@ -1755,15 +1803,15 @@ export default function EvaluationDetailPage() {
             items={[
               {
                 key: "all",
-                label: `${t("agentEvaluation.tabAll")} (${caseTab === "all" ? caseTotal : totalCases})`,
+                label: `${t("agentEvaluation.tabAll")} (${caseTab === "all" && hasCurrentCaseTotal ? caseTotal : totalCases})`,
               },
               {
                 key: "pass",
-                label: `${t("agentEvaluation.tabPass")} (${caseTab === "pass" ? caseTotal : passCount})`,
+                label: `${t("agentEvaluation.tabPass")} (${caseTab === "pass" && hasCurrentCaseTotal ? caseTotal : passCount})`,
               },
               {
                 key: "fail",
-                label: `${t("agentEvaluation.tabFail")} (${caseTab === "fail" ? caseTotal : failCount})`,
+                label: `${t("agentEvaluation.tabFail")} (${caseTab === "fail" && hasCurrentCaseTotal ? caseTotal : failCount})`,
               },
             ]}
           />

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ``backend.adapters.jiuwen_sdk_adapter``.
 
 The adapter module has heavy module-level side effects (installing a
@@ -456,27 +458,27 @@ class TestBuildJiuwenModelConfigs:
             sys.modules["database"] = _db_pkg
         _db_pkg.__path__ = [str(_BACKEND_DIR / "database")]
 
-        stub = types.ModuleType("database.model_management_db")
+        stub = types.ModuleType("management.db.model.repository")
         stub.__path__ = [str(_BACKEND_DIR / "database")]
-        sys.modules["database.model_management_db"] = stub
+        sys.modules["management.db.model.repository"] = stub
         stub.get_model_by_model_id = lambda *a, **kw: None
 
-        # ``from utils.config_utils import get_model_name_from_config`` is
+        # ``from management.services.model.names import get_model_name_from_config`` is
         # imported inside ``build_jiuwen_model_configs``.  Pre-register it so
         # the real module (and its database chain) is never touched.
-        utils_stub = types.ModuleType("utils.config_utils")
+        utils_stub = types.ModuleType("management.services.model.names")
         utils_stub.get_model_name_from_config = lambda cfg: "m"
-        sys.modules["utils.config_utils"] = utils_stub
+        sys.modules["management.services.model.names"] = utils_stub
 
         with pytest.raises(JiuwenSDKError, match="not found"):
             adapter_module.build_jiuwen_model_configs(1, "t1")
 
     def test_default_api_base_and_timeout_when_missing(self, adapter_module, fake_jiuwen_module):
         sys.modules.setdefault(
-            "database.model_management_db",
-            types.ModuleType("database.model_management_db"),
+            "management.db.model.repository",
+            types.ModuleType("management.db.model.repository"),
         )
-        sys.modules["database.model_management_db"].get_model_by_model_id = lambda *a, **kw: {
+        sys.modules["management.db.model.repository"].get_model_by_model_id = lambda *a, **kw: {
             "api_key": "k",
             "base_url": "  ",  # blank -> default
             "model_name": "m",
@@ -487,10 +489,10 @@ class TestBuildJiuwenModelConfigs:
             # has nothing to verify against.
         }
         sys.modules.setdefault(
-            "utils.config_utils",
-            types.ModuleType("utils.config_utils"),
+            "management.services.model.names",
+            types.ModuleType("management.services.model.names"),
         )
-        sys.modules["utils.config_utils"].get_model_name_from_config = lambda cfg: "m"
+        sys.modules["management.services.model.names"].get_model_name_from_config = lambda cfg: "m"
 
         request, client = adapter_module.build_jiuwen_model_configs(1, "t1")
         # Default OpenAI base URL when base_url is blank.
@@ -503,10 +505,10 @@ class TestBuildJiuwenModelConfigs:
 
     def test_ssl_verify_disabled_when_cert_missing(self, adapter_module, fake_jiuwen_module):
         sys.modules.setdefault(
-            "database.model_management_db",
-            types.ModuleType("database.model_management_db"),
+            "management.db.model.repository",
+            types.ModuleType("management.db.model.repository"),
         )
-        sys.modules["database.model_management_db"].get_model_by_model_id = lambda *a, **kw: {
+        sys.modules["management.db.model.repository"].get_model_by_model_id = lambda *a, **kw: {
             "api_key": "k",
             "base_url": "https://x",
             "model_name": "m",
@@ -516,10 +518,10 @@ class TestBuildJiuwenModelConfigs:
             "ssl_cert": None,
         }
         sys.modules.setdefault(
-            "utils.config_utils",
-            types.ModuleType("utils.config_utils"),
+            "management.services.model.names",
+            types.ModuleType("management.services.model.names"),
         )
-        sys.modules["utils.config_utils"].get_model_name_from_config = lambda cfg: "m"
+        sys.modules["management.services.model.names"].get_model_name_from_config = lambda cfg: "m"
 
         _, client = adapter_module.build_jiuwen_model_configs(1, "t1")
         # No cert -> verify_ssl gets turned off, even though the user asked
@@ -528,10 +530,10 @@ class TestBuildJiuwenModelConfigs:
 
     def test_custom_timeout_and_ssl_cert_propagate(self, adapter_module, fake_jiuwen_module):
         sys.modules.setdefault(
-            "database.model_management_db",
-            types.ModuleType("database.model_management_db"),
+            "management.db.model.repository",
+            types.ModuleType("management.db.model.repository"),
         )
-        sys.modules["database.model_management_db"].get_model_by_model_id = lambda *a, **kw: {
+        sys.modules["management.db.model.repository"].get_model_by_model_id = lambda *a, **kw: {
             "api_key": "k",
             "base_url": "https://x",
             "model_name": "m",
@@ -541,10 +543,10 @@ class TestBuildJiuwenModelConfigs:
             "ssl_cert": "/etc/ssl/cert.pem",
         }
         sys.modules.setdefault(
-            "utils.config_utils",
-            types.ModuleType("utils.config_utils"),
+            "management.services.model.names",
+            types.ModuleType("management.services.model.names"),
         )
-        sys.modules["utils.config_utils"].get_model_name_from_config = lambda cfg: "m"
+        sys.modules["management.services.model.names"].get_model_name_from_config = lambda cfg: "m"
 
         request, client = adapter_module.build_jiuwen_model_configs(1, "t1")
         assert client.timeout == 15.0

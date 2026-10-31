@@ -1,0 +1,34 @@
+name: AIDP_Memorybank
+version: "1.0.0"
+description: "UnifiedMemory external memory provider"
+entry_point: "provider.py"
+class_name: "UnifiedMemoryProvider"
+implements:
+  - searchable
+  - ingestible
+config_schema:
+  - key: base_url
+    label: "MemoryBank Base URL"
+    type: string
+    required: true
+    default: "https://localhost:30080"
+  - key: api_key
+    label: "API Key (Bearer)"
+    type: secret
+    required: true
+    default: "ak_*"
+  - key: tenant_id
+    label: "Tenant ID"
+    type: string
+    required: true
+    default: "aidp"
+  - key: instance_name
+    label: "Instance Name"
+    type: string
+    required: false
+    default: "nexent_instance"
+  - key: verify_ssl
+    label: "Verify SSL Certificate (true/false)"
+    type: string
+    required: false
+    default: "false"

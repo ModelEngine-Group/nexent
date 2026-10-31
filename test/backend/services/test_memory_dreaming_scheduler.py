@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for memory_dreaming_scheduler (DreamingLeaseStore, execute_dreaming, DreamingScheduler)."""
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -10,16 +11,16 @@ pytestmark = pytest.mark.anyio
 @pytest.fixture
 def mock_consts(monkeypatch):
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_ENABLED", True
+        "management.services.memory.dreaming.scheduler.DREAMING_SCHEDULER_ENABLED", True
     )
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_LEASE_SECONDS", 120.0
+        "management.services.memory.dreaming.scheduler.DREAMING_SCHEDULER_LEASE_SECONDS", 120.0
     )
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_MAX_CONCURRENCY", 2
+        "management.services.memory.dreaming.scheduler.DREAMING_SCHEDULER_MAX_CONCURRENCY", 2
     )
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_POLL_SECONDS", 30.0
+        "management.services.memory.dreaming.scheduler.DREAMING_SCHEDULER_POLL_SECONDS", 30.0
     )
 
 
@@ -27,11 +28,13 @@ def mock_consts(monkeypatch):
 def inline_to_thread(monkeypatch):
     """Keep adapter unit tests deterministic and free of executor threads."""
 
-    async def run_inline(func, *args, **kwargs):
+    async def run_inline(_task_name, func, *args, **kwargs):
+        kwargs.pop("lane", None)
+        kwargs.pop("owner", None)
         return func(*args, **kwargs)
 
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.asyncio.to_thread",
+        "management.services.memory.dreaming.scheduler.run_blocking",
         run_inline,
     )
 
@@ -43,23 +46,23 @@ def inline_to_thread(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_lease_store_recover(monkeypatch, inline_to_thread):
-    from services.memory_dreaming_scheduler import DreamingLeaseStore
+    from management.services.memory.dreaming.scheduler import DreamingLeaseStore
 
     mock_recover = MagicMock(return_value=3)
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.memory_dreaming_db.recover_stale",
+        "management.services.memory.dreaming.scheduler.memory_dreaming_db.recover_stale",
         mock_recover,
     )
 
     store = DreamingLeaseStore()
     await store.recover()
 
-    mock_recover.assert_called_once()
+    mock_recover.assert_called_once_with(True)
 
 
 @pytest.mark.asyncio
 async def test_lease_store_claim_due_returns_job(monkeypatch, inline_to_thread):
-    from services.memory_dreaming_scheduler import DreamingLeaseStore
+    from management.services.memory.dreaming.scheduler import DreamingLeaseStore
 
     row = {
         "run_id": 42,
@@ -69,12 +72,12 @@ async def test_lease_store_claim_due_returns_job(monkeypatch, inline_to_thread):
         "trigger_source": "manual",
     }
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.memory_dreaming_db.claim_queued",
+        "management.services.memory.dreaming.scheduler.memory_dreaming_db.claim_queued",
         lambda owner_id, lease_seconds: row,
     )
     materialize = MagicMock(return_value=1)
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.memory_dreaming_db.materialize_due_schedules",
+        "management.services.memory.dreaming.scheduler.memory_dreaming_db.materialize_due_schedules",
         materialize,
     )
 
@@ -89,14 +92,14 @@ async def test_lease_store_claim_due_returns_job(monkeypatch, inline_to_thread):
 
 @pytest.mark.asyncio
 async def test_lease_store_claim_due_returns_empty(monkeypatch, inline_to_thread):
-    from services.memory_dreaming_scheduler import DreamingLeaseStore
+    from management.services.memory.dreaming.scheduler import DreamingLeaseStore
 
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.memory_dreaming_db.claim_queued",
+        "management.services.memory.dreaming.scheduler.memory_dreaming_db.claim_queued",
         lambda owner_id, lease_seconds: None,
     )
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.memory_dreaming_db.materialize_due_schedules",
+        "management.services.memory.dreaming.scheduler.memory_dreaming_db.materialize_due_schedules",
         lambda limit: 0,
     )
 
@@ -108,11 +111,11 @@ async def test_lease_store_claim_due_returns_empty(monkeypatch, inline_to_thread
 
 @pytest.mark.asyncio
 async def test_lease_store_renew(monkeypatch, inline_to_thread):
-    from services.memory_dreaming_scheduler import DreamingLeaseStore
+    from management.services.memory.dreaming.scheduler import DreamingLeaseStore
 
     mock_renew = MagicMock(return_value=True)
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.memory_dreaming_db.renew_lease",
+        "management.services.memory.dreaming.scheduler.memory_dreaming_db.renew_lease",
         mock_renew,
     )
 
@@ -125,11 +128,11 @@ async def test_lease_store_renew(monkeypatch, inline_to_thread):
 
 @pytest.mark.asyncio
 async def test_lease_store_release(monkeypatch, inline_to_thread):
-    from services.memory_dreaming_scheduler import DreamingLeaseStore
+    from management.services.memory.dreaming.scheduler import DreamingLeaseStore
 
     mock_release = MagicMock(return_value=True)
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.memory_dreaming_db.release_lease",
+        "management.services.memory.dreaming.scheduler.memory_dreaming_db.release_lease",
         mock_release,
     )
 
@@ -148,13 +151,13 @@ async def test_lease_store_release(monkeypatch, inline_to_thread):
 @pytest.mark.asyncio
 async def test_execute_dreaming_success(monkeypatch, inline_to_thread):
     from nexent.scheduler import ClaimedJob
-    from services.memory_dreaming_scheduler import execute_dreaming
+    from management.services.memory.dreaming.scheduler import execute_dreaming
 
     mock_run = MagicMock()
     mock_service = MagicMock()
     mock_service.run = mock_run
     monkeypatch.setattr(
-        "services.memory_dreaming_service.get_memory_dreaming_service",
+        "management.services.memory.dreaming.service.get_memory_dreaming_service",
         lambda: mock_service,
     )
 
@@ -183,13 +186,13 @@ async def test_execute_dreaming_success(monkeypatch, inline_to_thread):
 @pytest.mark.asyncio
 async def test_execute_dreaming_default_trigger_source(monkeypatch, inline_to_thread):
     from nexent.scheduler import ClaimedJob
-    from services.memory_dreaming_scheduler import execute_dreaming
+    from management.services.memory.dreaming.scheduler import execute_dreaming
 
     mock_run = MagicMock()
     mock_service = MagicMock()
     mock_service.run = mock_run
     monkeypatch.setattr(
-        "services.memory_dreaming_service.get_memory_dreaming_service",
+        "management.services.memory.dreaming.service.get_memory_dreaming_service",
         lambda: mock_service,
     )
 
@@ -217,12 +220,12 @@ async def test_execute_dreaming_default_trigger_source(monkeypatch, inline_to_th
 @pytest.mark.asyncio
 async def test_execute_dreaming_failure_raises(monkeypatch, inline_to_thread):
     from nexent.scheduler import ClaimedJob
-    from services.memory_dreaming_scheduler import execute_dreaming
+    from management.services.memory.dreaming.scheduler import execute_dreaming
 
     mock_service = MagicMock()
     mock_service.run = MagicMock(side_effect=RuntimeError("model down"))
     monkeypatch.setattr(
-        "services.memory_dreaming_service.get_memory_dreaming_service",
+        "management.services.memory.dreaming.service.get_memory_dreaming_service",
         lambda: mock_service,
     )
 
@@ -247,13 +250,13 @@ async def test_execute_dreaming_failure_raises(monkeypatch, inline_to_thread):
 
 
 def test_dreaming_scheduler_properties(monkeypatch, mock_consts):
-    with patch("services.memory_dreaming_scheduler.LeaseScheduler") as MockScheduler:
+    with patch("management.services.memory.dreaming.scheduler.LeaseScheduler") as MockScheduler:
         mock_instance = MagicMock()
         mock_instance.owner_id = "worker-abc"
         mock_instance.is_running = True
         MockScheduler.return_value = mock_instance
 
-        from services.memory_dreaming_scheduler import DreamingScheduler
+        from management.services.memory.dreaming.scheduler import DreamingScheduler
 
         scheduler = DreamingScheduler()
 
@@ -264,23 +267,23 @@ def test_dreaming_scheduler_properties(monkeypatch, mock_consts):
 @pytest.mark.asyncio
 async def test_dreaming_scheduler_start_disabled(monkeypatch):
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_ENABLED", False
+        "management.services.memory.dreaming.scheduler.DREAMING_SCHEDULER_ENABLED", False
     )
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_LEASE_SECONDS", 120.0
+        "management.services.memory.dreaming.scheduler.DREAMING_SCHEDULER_LEASE_SECONDS", 120.0
     )
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_MAX_CONCURRENCY", 2
+        "management.services.memory.dreaming.scheduler.DREAMING_SCHEDULER_MAX_CONCURRENCY", 2
     )
     monkeypatch.setattr(
-        "services.memory_dreaming_scheduler.DREAMING_SCHEDULER_POLL_SECONDS", 30.0
+        "management.services.memory.dreaming.scheduler.DREAMING_SCHEDULER_POLL_SECONDS", 30.0
     )
 
-    with patch("services.memory_dreaming_scheduler.LeaseScheduler") as MockScheduler:
+    with patch("management.services.memory.dreaming.scheduler.LeaseScheduler") as MockScheduler:
         mock_instance = AsyncMock()
         MockScheduler.return_value = mock_instance
 
-        from services.memory_dreaming_scheduler import DreamingScheduler
+        from management.services.memory.dreaming.scheduler import DreamingScheduler
 
         scheduler = DreamingScheduler()
         await scheduler.start()
@@ -290,11 +293,11 @@ async def test_dreaming_scheduler_start_disabled(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_dreaming_scheduler_start_enabled(monkeypatch, mock_consts):
-    with patch("services.memory_dreaming_scheduler.LeaseScheduler") as MockScheduler:
+    with patch("management.services.memory.dreaming.scheduler.LeaseScheduler") as MockScheduler:
         mock_instance = AsyncMock()
         MockScheduler.return_value = mock_instance
 
-        from services.memory_dreaming_scheduler import DreamingScheduler
+        from management.services.memory.dreaming.scheduler import DreamingScheduler
 
         scheduler = DreamingScheduler()
         await scheduler.start()
@@ -304,11 +307,11 @@ async def test_dreaming_scheduler_start_enabled(monkeypatch, mock_consts):
 
 @pytest.mark.asyncio
 async def test_dreaming_scheduler_stop(monkeypatch, mock_consts):
-    with patch("services.memory_dreaming_scheduler.LeaseScheduler") as MockScheduler:
+    with patch("management.services.memory.dreaming.scheduler.LeaseScheduler") as MockScheduler:
         mock_instance = AsyncMock()
         MockScheduler.return_value = mock_instance
 
-        from services.memory_dreaming_scheduler import DreamingScheduler
+        from management.services.memory.dreaming.scheduler import DreamingScheduler
 
         scheduler = DreamingScheduler()
         await scheduler.stop()

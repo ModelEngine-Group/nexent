@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for QuotaService.
 
@@ -5,9 +6,11 @@ Covers: config methods, per-KB quota, usage tracking, warning levels,
 quota enforcement, summary, and platform quota.
 """
 
+from test.backend.management.import_patching import patch_import_context
+
 import pytest
 from unittest.mock import MagicMock, patch
-from services.quota_service import (
+from management.services.knowledge_base.quota import (
     QuotaService,
     QuotaExceededError,
     _bytes_to_readable,
@@ -16,18 +19,18 @@ from services.quota_service import (
     DEFAULT_CRITICAL_THRESHOLD,
     _usage_cache,
 )
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException, PlatformQuotaConflictError
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException, PlatformQuotaConflictError
 
 
 @pytest.fixture
 def mock_tenant_config_db():
     """Mock tenant configuration persistence used by QuotaService."""
-    with patch("services.quota_service.get_single_config_info") as mock_get, \
-         patch("services.quota_service.get_configs_by_tenant_id_and_keys") as mock_get_many, \
-         patch("services.quota_service.insert_config") as mock_insert, \
-         patch("services.quota_service.update_config_by_tenant_config_id") as mock_update, \
-         patch("services.quota_service.delete_config_by_tenant_config_id") as mock_delete:
+    with patch_import_context("management.services.knowledge_base.quota.get_single_config_info") as mock_get, \
+         patch_import_context("management.services.knowledge_base.quota.get_configs_by_tenant_id_and_keys") as mock_get_many, \
+         patch_import_context("management.services.knowledge_base.quota.insert_config") as mock_insert, \
+         patch_import_context("management.services.knowledge_base.quota.update_config_by_tenant_config_id") as mock_update, \
+         patch_import_context("management.services.knowledge_base.quota.delete_config_by_tenant_config_id") as mock_delete:
         mock_get_many.return_value = {}
         yield {
             "get_single_config_info": mock_get,
@@ -41,13 +44,13 @@ def mock_tenant_config_db():
 @pytest.fixture
 def mock_knowledge_db():
     """Mock knowledge base persistence used by QuotaService."""
-    with patch("services.quota_service.get_knowledge_info_by_tenant_id") as mock_list, \
-         patch("services.quota_service.update_knowledge_record") as mock_update, \
-         patch("services.quota_service.get_committed_bytes_by_kb", return_value={}) as mock_kb_bytes, \
-         patch("services.quota_service.get_tenant_committed_source_bytes", return_value=0) as mock_tenant_bytes, \
-         patch("services.quota_service.get_private_knowledge_info_by_tenant_id") as mock_private_list, \
-         patch("services.quota_service.get_private_knowledge_info_by_creator") as mock_creator_list, \
-         patch("services.quota_service.get_user_email_map") as mock_email_map:
+    with patch_import_context("management.services.knowledge_base.quota.get_knowledge_info_by_tenant_id") as mock_list, \
+         patch_import_context("management.services.knowledge_base.quota.update_knowledge_record") as mock_update, \
+         patch_import_context("management.services.knowledge_base.quota.get_committed_bytes_by_kb", return_value={}) as mock_kb_bytes, \
+         patch_import_context("management.services.knowledge_base.quota.get_tenant_committed_source_bytes", return_value=0) as mock_tenant_bytes, \
+         patch_import_context("management.services.knowledge_base.quota.get_private_knowledge_info_by_tenant_id") as mock_private_list, \
+         patch_import_context("management.services.knowledge_base.quota.get_private_knowledge_info_by_creator") as mock_creator_list, \
+         patch_import_context("management.services.knowledge_base.quota.get_user_email_map") as mock_email_map:
         mock_creator_list.return_value = []
         yield {
             "get_knowledge_info_by_tenant_id": mock_list,
@@ -490,14 +493,14 @@ class TestPlatformQuota:
 
     def test_get_platform_capacity_returns_none_when_not_set(self):
         # get_platform_capacity imports get_single_config_info inside the method
-        with patch("database.tenant_config_db.get_single_config_info") as mock_get:
+        with patch("management.db.configuration.tenant.get_single_config_info") as mock_get:
             mock_get.return_value = {}
             result = QuotaService.get_platform_capacity()
             assert result["capacity_bytes"] is None
             assert result["capacity_readable"] is None
 
     def test_get_platform_capacity_reads_stored(self):
-        with patch("database.tenant_config_db.get_single_config_info") as mock_get:
+        with patch("management.db.configuration.tenant.get_single_config_info") as mock_get:
             mock_get.return_value = {"config_value": str(500 * GB), "tenant_config_id": 1}
             result = QuotaService.get_platform_capacity()
             assert result["capacity_bytes"] == 500 * GB
@@ -505,7 +508,7 @@ class TestPlatformQuota:
 
     def test_get_platform_capacity_ignores_invalid_stored_value(self):
         with patch(
-            "database.tenant_config_db.get_single_config_info",
+            "management.db.configuration.tenant.get_single_config_info",
             return_value={"config_value": "invalid"},
         ):
             result = QuotaService.get_platform_capacity()
@@ -605,13 +608,13 @@ class TestPlatformQuota:
         assert raised.value.error == "PlatformCapacityBelowAllocation"
 
     def test_allocation_state_excludes_virtual_tenants(self):
-        from consts.const import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
+        from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
         with patch(
-            "database.tenant_config_db.get_all_tenant_ids",
+            "management.db.configuration.tenant.get_all_tenant_ids",
             return_value=["tenant-1", DEFAULT_TENANT_ID, "", ASSET_OWNER_TENANT_ID],
         ), patch(
-            "database.tenant_config_db.get_single_config_info",
+            "management.db.configuration.tenant.get_single_config_info",
             return_value={"config_value": str(20 * GB)},
         ) as mock_get_config:
             result = QuotaService._get_allocation_state(ASSET_OWNER_TENANT_ID)
@@ -642,7 +645,7 @@ class TestPlatformQuota:
                 "warning_enabled": True,
                 "tenant_warning_level": "normal",
             },
-        ), patch("database.tenant_config_db.get_single_config_info", return_value={}):
+        ), patch("management.db.configuration.tenant.get_single_config_info", return_value={}):
             result = QuotaService.get_platform_overview()
 
         assert result["remaining_allocatable_bytes"] == 60 * GB
@@ -662,10 +665,10 @@ class TestPlatformQuota:
             "get_platform_capacity",
             return_value={"capacity_bytes": None, "capacity_readable": None},
         ), patch(
-            "database.tenant_config_db.get_all_tenant_ids",
+            "management.db.configuration.tenant.get_all_tenant_ids",
             return_value=["tenant-1"],
         ), patch(
-            "database.tenant_config_db.get_single_config_info",
+            "management.db.configuration.tenant.get_single_config_info",
             side_effect=[
                 {"config_value": str(100 * GB)},
                 {"config_value": "Tenant 1"},
@@ -702,13 +705,52 @@ class TestPlatformQuota:
         ), patch.object(
             QuotaService, "get_usage", side_effect=RuntimeError("usage failed")
         ), patch(
-            "database.tenant_config_db.get_single_config_info", return_value={}
+            "management.db.configuration.tenant.get_single_config_info", return_value={}
         ):
             result = QuotaService.get_platform_overview()
 
         assert result["tenants"][0]["actual_bytes"] == 0
         assert result["tenants"][0]["warning_enabled"] is False
         assert result["tenants"][0]["warning_level"] == "normal"
+
+    def test_platform_overview_aggregates_available_es_physical_usage(self):
+        with patch.object(
+            QuotaService,
+            "get_platform_capacity",
+            return_value={"capacity_bytes": 100 * GB, "capacity_readable": "100.0 GB"},
+        ), patch.object(
+            QuotaService,
+            "_get_allocation_state",
+            return_value={
+                "tenant_ids": ["tenant-1", "tenant-2"],
+                "hard_limits": {"tenant-1": 40 * GB, "tenant-2": 40 * GB},
+                "total_allocated_bytes": 80 * GB,
+                "unmanaged_tenant_count": 0,
+            },
+        ), patch.object(
+            QuotaService,
+            "get_usage",
+            side_effect=[
+                {
+                    "total_bytes": 10 * GB,
+                    "es_physical_bytes": 2 * GB,
+                    "warning_enabled": True,
+                    "tenant_warning_level": "normal",
+                },
+                {
+                    "total_bytes": 5 * GB,
+                    "es_physical_bytes": 3 * GB,
+                    "warning_enabled": True,
+                    "tenant_warning_level": "normal",
+                },
+            ],
+        ), patch(
+            "management.db.configuration.tenant.get_single_config_info", return_value={}
+        ):
+            result = QuotaService.get_platform_overview()
+
+        assert result["total_es_physical_bytes"] == 5 * GB
+        assert [tenant["es_physical_bytes"] for tenant in result["tenants"]] == [2 * GB, 3 * GB]
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -795,7 +837,7 @@ class TestUsageTracking:
         with patch.object(quota_service, "get_hard_limit") as mock_limit, \
              patch.object(quota_service, "get_warning_config") as mock_warning, \
              patch.object(quota_service, "get_quota_summary") as mock_summary, \
-             patch("services.vectordatabase_service.get_vector_db_core") as mock_vdb:
+             patch_import_context("management.services.knowledge_base.service.get_vector_db_core") as mock_vdb:
             mock_limit.return_value = {"hard_limit_bytes": None, "hard_limit_readable": None}
             mock_warning.return_value = {"warning_enabled": True, "warning_threshold_pct": 80, "critical_threshold_pct": 95}
             mock_summary.return_value = {
@@ -840,7 +882,7 @@ class TestUsageTracking:
         with patch.object(quota_service, "get_hard_limit") as mock_limit, \
              patch.object(quota_service, "get_warning_config") as mock_warning, \
              patch.object(quota_service, "get_quota_summary") as mock_summary, \
-             patch("services.vectordatabase_service.get_vector_db_core", return_value=mock_vdb):
+             patch_import_context("management.services.knowledge_base.service.get_vector_db_core", return_value=mock_vdb):
             mock_limit.return_value = {
                 "hard_limit_bytes": 10 * GB,
                 "hard_limit_readable": "10 GB",
@@ -860,7 +902,7 @@ class TestUsageTracking:
 
             result = quota_service._compute_usage()
 
-        assert result["total_bytes"] == 5 * GB
+        assert result["total_bytes"] == 0
         assert result["file_count"] == 3
         assert {item["index_name"] for item in result["breakdown"]} == {
             "visible-kb",
@@ -870,12 +912,12 @@ class TestUsageTracking:
     @pytest.mark.parametrize(
         ("es_size", "kb_source_bytes", "expected_bytes"),
         [
-            ("200 MB", 300 * 1024 * 1024, 500 * 1024 * 1024),
+            ("200 MB", 300 * 1024 * 1024, 300 * 1024 * 1024),
             ("0 B", 300 * 1024 * 1024, 300 * 1024 * 1024),
-            ("200 MB", 0, 200 * 1024 * 1024),
+            ("200 MB", 0, 0),
         ],
     )
-    def test_compute_usage_combines_es_and_source_bytes(
+    def test_compute_usage_uses_source_bytes_and_reports_es_separately(
         self,
         quota_service,
         mock_knowledge_db,
@@ -925,14 +967,16 @@ class TestUsageTracking:
                 "kb_count": 1,
                 "kbs_with_quota": 1,
             },
-        ), patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        ), patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             return_value=mock_vdb,
         ):
             result = quota_service._compute_usage()
 
         assert result["total_bytes"] == expected_bytes
         assert result["breakdown"][0]["actual_bytes"] == expected_bytes
+        assert result["es_physical_bytes"] == quota_service._parse_store_size(es_size)
+        assert result["breakdown"][0]["es_physical_bytes"] == quota_service._parse_store_size(es_size)
         assert result["file_count"] == 4
         assert result["breakdown"][0]["file_count"] == 4
 
@@ -976,14 +1020,14 @@ class TestUsageTracking:
                 "kb_count": 1,
                 "kbs_with_quota": 0,
             },
-        ), patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        ), patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             return_value=mock_vdb,
         ):
             result = quota_service._compute_usage()
 
-        assert result["total_bytes"] == 550
-        assert result["breakdown"][0]["actual_bytes"] == 500
+        assert result["total_bytes"] == 350
+        assert result["breakdown"][0]["actual_bytes"] == 300
         assert result["breakdown"][0]["usage_pct"] is None
         assert result["breakdown"][0]["kb_warning_level"] == "normal"
 
@@ -1056,7 +1100,7 @@ class TestPersonalKbCapacity:
                 "user-1", quota_limit_bytes=2 * GB
             )
 
-        get_usage.assert_called_once_with(user_id="user-1")
+        get_usage.assert_called_once_with(user_id="user-1", include_es=False)
 
     def test_set_personal_user_quota_unlimited_deletes_config(
         self, quota_service, mock_tenant_config_db
@@ -1216,6 +1260,11 @@ class TestPersonalKbCapacity:
         mock_knowledge_db[
             "get_private_knowledge_info_by_tenant_id"
         ].return_value = kb_list
+        mock_knowledge_db["get_committed_bytes_by_kb"].return_value = {
+            1: 1 * GB,
+            2: 2 * GB,
+            3: 4 * GB,
+        }
         mock_knowledge_db["get_user_email_map"].return_value = {
             "user-a": "beta@example.com",
             "user-b": "alpha@example.com",
@@ -1248,8 +1297,8 @@ class TestPersonalKbCapacity:
             "PERSONAL_KB_QUOTA_user-b": str(4 * GB),
         }
 
-        with patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        with patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             return_value=mock_vdb,
         ):
             by_total = quota_service.list_personal_capacity_users(
@@ -1352,6 +1401,12 @@ class TestPersonalKbCapacity:
         mock_knowledge_db[
             "get_private_knowledge_info_by_tenant_id"
         ].return_value = kb_list
+        mock_knowledge_db["get_committed_bytes_by_kb"].return_value = {
+            1: 1 * GB,
+            2: 2 * GB,
+            3: 4 * GB,
+            4: 8 * GB,
+        }
         mock_vdb = MagicMock()
         mock_vdb.get_indices_detail.return_value = {
             "kb-a": {"base_info": {"store_size": "1 GB"}},
@@ -1378,8 +1433,8 @@ class TestPersonalKbCapacity:
             "PERSONAL_KB_QUOTA_DEFAULT": str(5 * GB),
         }
 
-        with patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        with patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             return_value=mock_vdb,
         ):
             result = quota_service.get_personal_capacity_summary()
@@ -1404,8 +1459,8 @@ class TestPersonalKbCapacity:
             {"other": 1},
         ]
 
-        with patch(
-            "services.quota_service.get_committed_source_bytes_by_paths",
+        with patch_import_context(
+            "management.services.knowledge_base.quota.get_committed_source_bytes_by_paths",
             return_value={"knowledge_base/b.txt": 50},
         ) as get_committed:
             result = quota_service.get_pending_personal_upload_bytes(
@@ -1448,19 +1503,20 @@ class TestPersonalKbCapacity:
             "kb-a": {"base_info": {"store_size": "4 GB"}}
         }
 
-        with patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        with patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             return_value=mock_vdb,
         ):
             result = quota_service._get_personal_usage_data(strict=True)
 
-        assert result["stats"]["kb-a"] == 5 * GB
+        assert result["stats"]["kb-a"] == 1 * GB
         assert result["details"]["kb-a"]["store_size_bytes"] == 4 * GB
         assert result["details"]["kb-a"]["source_size_bytes"] == 1 * GB
-        assert result["details"]["kb-a"]["total_size_bytes"] == 5 * GB
+        assert result["details"]["kb-a"]["total_size_bytes"] == 1 * GB
+        assert result["total_es_bytes"] == 4 * GB
 
-    def test_personal_usage_strict_rejects_missing_es_index(
-        self, quota_service, mock_knowledge_db
+    def test_personal_usage_strict_allows_missing_es_index(
+        self, quota_service, mock_knowledge_db, mock_tenant_config_db
     ):
         mock_knowledge_db[
             "get_private_knowledge_info_by_tenant_id"
@@ -1475,16 +1531,14 @@ class TestPersonalKbCapacity:
         mock_vdb = MagicMock()
         mock_vdb.get_indices_detail.return_value = {}
 
-        with patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        with patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             return_value=mock_vdb,
-        ), pytest.raises(AppException) as raised:
+        ):
             quota_service.check_personal_user_quota("user-1", 1)
 
-        assert raised.value.error_code == ErrorCode.TENANT_PERSONAL_KB_QUOTA_UNAVAILABLE
-
     def test_set_personal_user_quota_below_usage_rejected(
-        self, quota_service, mock_knowledge_db
+        self, quota_service, mock_knowledge_db, mock_tenant_config_db
     ):
         mock_knowledge_db[
             "get_private_knowledge_info_by_tenant_id"
@@ -1500,13 +1554,15 @@ class TestPersonalKbCapacity:
         ].return_value = mock_knowledge_db[
             "get_private_knowledge_info_by_tenant_id"
         ].return_value
+        mock_knowledge_db["get_committed_bytes_by_kb"].return_value = {1: 10 * GB}
+        mock_tenant_config_db["get_single_config_info"].return_value = None
         mock_vdb = MagicMock()
         mock_vdb.get_indices_detail.return_value = {
             "kb-a": {"base_info": {"store_size": "10 GB"}}
         }
 
-        with patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        with patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             return_value=mock_vdb,
         ):
             with pytest.raises(AppException, match="below current usage") as raised:
@@ -1528,6 +1584,14 @@ class TestPersonalKbCapacity:
             index_name: {"base_info": {"store_size": store_size}}
             for index_name, store_size in stats.items()
         }
+        source_bytes_by_kb = {
+            kb["knowledge_id"]: QuotaService._parse_store_size(store_size)
+            for kb, store_size in zip(kbs, stats.values())
+        }
+        mock_knowledge_db["get_committed_bytes_by_kb"].return_value = source_bytes_by_kb
+        mock_knowledge_db["get_tenant_committed_source_bytes"].return_value = sum(
+            source_bytes_by_kb.values()
+        )
         return mock_vdb
 
     def test_check_quota_tenant_hard_limit_exceeded(
@@ -1544,8 +1608,8 @@ class TestPersonalKbCapacity:
             mock_knowledge_db, kbs, {"kb-a": "4 GB"}
         )
 
-        with patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        with patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             return_value=mock_vdb,
         ), patch.object(
             quota_service,
@@ -1578,8 +1642,8 @@ class TestPersonalKbCapacity:
             mock_knowledge_db, kbs, {"kb-a": "4 GB"}
         )
 
-        with patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        with patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             return_value=mock_vdb,
         ), patch.object(
             quota_service,
@@ -1611,8 +1675,8 @@ class TestPersonalKbCapacity:
             mock_knowledge_db, kbs, {"kb-a": "4 GB"}
         )
 
-        with patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        with patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             return_value=mock_vdb,
         ), patch.object(
             quota_service,
@@ -1643,8 +1707,8 @@ class TestPersonalKbCapacity:
             mock_knowledge_db, kbs, {"kb-a": "4 GB", "kb-b": "2 GB"}
         )
 
-        with patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        with patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             return_value=mock_vdb,
         ), patch.object(
             quota_service,
@@ -1684,8 +1748,8 @@ class TestPersonalKbCapacity:
             "quota_limit_bytes": 5 * GB,
         }
 
-        with patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        with patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             return_value=mock_vdb,
         ), patch.object(
             quota_service,
@@ -1720,8 +1784,8 @@ class TestPersonalKbCapacity:
             mock_knowledge_db, kbs, {"kb-a": "0 B"}
         )
 
-        with patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        with patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             return_value=mock_vdb,
         ), patch.object(
             quota_service,
@@ -1739,8 +1803,8 @@ class TestPersonalKbCapacity:
                     "user-1", 1
                 )
 
-    def test_check_quota_strict_es_failure_fails_closed(
-        self, quota_service, mock_knowledge_db
+    def test_check_quota_strict_es_failure_does_not_block_source_quota(
+        self, quota_service, mock_knowledge_db, mock_tenant_config_db
     ):
         kbs = [
             {
@@ -1752,18 +1816,13 @@ class TestPersonalKbCapacity:
         mock_knowledge_db[
             "get_private_knowledge_info_by_tenant_id"
         ].return_value = kbs
+        mock_tenant_config_db["get_single_config_info"].return_value = None
 
-        with patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        with patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             side_effect=RuntimeError("es down"),
         ):
-            with pytest.raises(
-                AppException,
-                match="Failed to query ES index stats",
-            ):
-                quota_service.check_personal_kb_quota(
-                    "user-1", 1
-                )
+            quota_service.check_personal_kb_quota("user-1", 1)
 
     def test_get_personal_usage_data_non_strict_es_failure_degrades(
         self, quota_service, mock_knowledge_db
@@ -1779,8 +1838,8 @@ class TestPersonalKbCapacity:
             "get_private_knowledge_info_by_tenant_id"
         ].return_value = kbs
 
-        with patch(
-            "services.vectordatabase_service.get_vector_db_core",
+        with patch_import_context(
+            "management.services.knowledge_base.service.get_vector_db_core",
             side_effect=RuntimeError("es down"),
         ):
             result = quota_service._get_personal_usage_data(
@@ -1816,51 +1875,43 @@ def test_personal_storage_stats_skips_datamate_and_missing_index(
         {"knowledge_id": 2, "index_name": "datamate-a", "knowledge_sources": "datamate"},
         {"knowledge_id": 3, "index_name": "", "knowledge_sources": "elasticsearch"},
     ]
-    with patch(
-        "services.vectordatabase_service.get_vector_db_core",
+    with patch_import_context(
+        "management.services.knowledge_base.service.get_vector_db_core",
         return_value=MagicMock(
             get_indices_detail=MagicMock(
                 return_value={"kb-a": {"base_info": {"store_size": "1 MB"}}}
             )
         ),
-    ), patch(
-        "services.quota_service.get_committed_bytes_by_kb",
+    ), patch_import_context(
+        "management.services.knowledge_base.quota.get_committed_bytes_by_kb",
         return_value={1: 10, 2: 20, 3: 30},
     ):
         result = quota_service._get_kb_storage_stats(
             kb_list, exclude_datamate=True
         )
 
-    assert result["stats"] == {
-        "kb-a": 1024 * 1024 + 10,
-        "datamate-a": 20,
-    }
+    assert result["stats"] == {"kb-a": 10, "datamate-a": 20}
     assert result["details"]["datamate-a"]["store_size_bytes"] == 0
     assert result["details"]["kb-a"]["source_size_bytes"] == 10
 
 
 @pytest.mark.parametrize(
-    ("detail", "message"),
-    [
-        (None, "stats unavailable"),
-        ({"error": "ES error"}, "stats unavailable"),
-        ({"base_info": {}}, "store_size unavailable"),
-        ({"base_info": {"store_size": "bad"}}, "store_size unavailable"),
-    ],
+    "detail",
+    [None, {"error": "ES error"}, {"base_info": {}}, {"base_info": {"store_size": "bad"}}],
 )
-def test_personal_storage_stats_strict_rejects_invalid_es_detail(
-    quota_service, detail, message
-):
+def test_personal_storage_stats_strict_allows_invalid_es_detail(quota_service, detail):
     vdb = MagicMock()
     vdb.get_indices_detail.return_value = {"kb-a": detail}
-    with patch(
-        "services.vectordatabase_service.get_vector_db_core", return_value=vdb
-    ), patch(
-        "services.quota_service.get_committed_bytes_by_kb", return_value={}
-    ), pytest.raises(AppException, match=message):
-        quota_service._get_kb_storage_stats(
+    with patch_import_context(
+        "management.services.knowledge_base.service.get_vector_db_core", return_value=vdb
+    ), patch_import_context(
+        "management.services.knowledge_base.quota.get_committed_bytes_by_kb", return_value={}
+    ):
+        result = quota_service._get_kb_storage_stats(
             [{"knowledge_id": 1, "index_name": "kb-a"}], strict=True
         )
+    assert result["stats"] == {"kb-a": 0}
+    assert result["details"]["kb-a"]["store_size_bytes"] == 0
 
 
 def test_personal_storage_stats_strict_source_query_failure_is_unavailable(quota_service):
@@ -1868,10 +1919,10 @@ def test_personal_storage_stats_strict_source_query_failure_is_unavailable(quota
     vdb.get_indices_detail.return_value = {
         "kb-a": {"base_info": {"store_size": "1 MB"}}
     }
-    with patch(
-        "services.vectordatabase_service.get_vector_db_core", return_value=vdb
-    ), patch(
-        "services.quota_service.get_committed_bytes_by_kb",
+    with patch_import_context(
+        "management.services.knowledge_base.service.get_vector_db_core", return_value=vdb
+    ), patch_import_context(
+        "management.services.knowledge_base.quota.get_committed_bytes_by_kb",
         side_effect=RuntimeError("ledger down"),
     ), pytest.raises(AppException, match="source storage stats"):
         quota_service._get_kb_storage_stats(
@@ -1966,8 +2017,8 @@ def test_get_personal_kb_details_returns_sorted_paged_storage_details(quota_serv
 
 
 def test_pending_personal_upload_bytes_handles_invalid_knowledge_id(quota_service):
-    with patch(
-        "services.quota_service.get_committed_source_bytes_by_paths"
+    with patch_import_context(
+        "management.services.knowledge_base.quota.get_committed_source_bytes_by_paths"
     ) as get_committed:
         result = quota_service.get_pending_personal_upload_bytes(
             [{"filename": "a.txt", "file_size": "12"}],

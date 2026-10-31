@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useId, useMemo, useReducer, useState } from "react";
@@ -18,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { MCP_TOOLS_QUERY_KEYS, McpSource } from "@/const/mcpTools";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
+import { nl2AgentCardRunConfig } from "./nl2agent-card-run-config";
 import { MCP_SERVERS_QUERY_KEY } from "@/hooks/mcp/useMcpServerList";
 import { refreshToolListWithToast } from "@/hooks/mcpTools/useRefreshToolListWithToast";
 import {
@@ -235,8 +238,8 @@ export function SuggestedResourceInstallationCard({
   const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
-    registerCard(cardKey, payload.subtype);
-  }, [cardKey, payload.subtype, registerCard]);
+    if (!disabled) registerCard(cardKey, payload.subtype);
+  }, [cardKey, disabled, payload.subtype, registerCard]);
 
   const interactive = !disabled && !submitted && isCardInteractive(cardKey);
   const dialogItem = items.find((item) => candidateRef(item) === dialogRef);
@@ -512,6 +515,10 @@ export function SuggestedResourceInstallationCard({
     setSubmitted(true);
     submitCard(cardKey);
     aui.thread().append({
+      runConfig: nl2AgentCardRunConfig(
+        aui.thread().composer().getState().runConfig,
+        payload.agent_id
+      ),
       role: "user",
       content: [
         {

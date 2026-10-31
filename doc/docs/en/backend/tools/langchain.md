@@ -1,6 +1,6 @@
 # Custom Tools in LangChain (Python Guide)
 
-> Example code can be found in `backend/mcp_service/langchain/compute_tool.py`
+> Example code can be found in `backend/tool_collection/langchain/compute_tool.py`
 >
 > Reference: <https://python.langchain.ac.cn/docs/how_to/custom_tools/>
 
@@ -9,7 +9,7 @@
 ## 1. Environment Setup
 
 ```bash
-pip install langchain
+uv pip install langchain
 ```
 
 ---

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ``aidp_permission_service``.
 
 Exercises the v7.1 permission matrix by stubbing the local DB helpers
@@ -56,7 +58,7 @@ from ext_components.aidp.consts.aidp_exceptions import (  # noqa: E402
     AidpKbPermissionDeniedError,
     AidpGroupValidationError,
 )
-from consts.const import CAN_EDIT_ALL_USER_ROLES  # noqa: E402
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
 
 
 # --- Helpers --------------------------------------------------------------
@@ -413,6 +415,34 @@ class TestGetAccessibleKbs:
 
 
 class TestIntersectAccessibleKbs:
+    def test_name_map_reuses_permission_rows_and_covers_inaccessible_kbs(self, monkeypatch):
+        rows = [
+            _record(
+                kb_id="allowed",
+                kds_name="Allowed KB",
+                owner_user_id="u",
+                ingroup_permission="EDIT",
+            ),
+            _record(
+                kb_id="denied",
+                kds_name="Denied KB",
+                owner_user_id="another-user",
+                ingroup_permission="PRIVATE",
+            ),
+        ]
+        monkeypatch.setattr(
+            svc.aidp_permission_db,
+            "list_all_permissions_by_tenant",
+            lambda tenant_id: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        accessible, name_map = svc._compute_accessible_rows_with_name_map("u", "t")
+
+        assert [row["kb_id"] for row in accessible] == ["allowed"]
+        assert name_map == {"Allowed KB": "allowed", "Denied KB": "denied"}
+
     def test_intersects_remote_catalog_and_preserves_remote_order(self, monkeypatch):
         rows = [
             _record(kb_id="kb-1", owner_user_id="u"),
@@ -769,6 +799,7 @@ class TestIntersectAccessibleKbs:
             {
                 "kb_id": "k1", "kds_name": "Local KB 1", "tenant_id": "t",
                 "owner_user_id": "owner", "ingroup_permission": "READ_ONLY",
+                "creator_name": None,
                 "group_ids": [1], "permission": "READ",
             },
             {
@@ -777,7 +808,11 @@ class TestIntersectAccessibleKbs:
                 "group_ids": [], "permission": "EDIT",
             },
         ]
-        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+        with patch.object(
+            svc,
+            "_compute_accessible_rows_with_name_map",
+            return_value=(local_rows, {}),
+        ):
             remote = [
                 {"kds_id": "k1", "kds_name": "Remote KB 1"},
                 {"kds_id": "k2", "kds_name": "Remote KB 2"},
@@ -788,11 +823,16 @@ class TestIntersectAccessibleKbs:
         assert result[0]["kds_name"] == "Remote KB 1"
         assert result[0]["tenant_id"] == "t"
         assert result[0]["owner_user_id"] == "owner"
+        assert result[0]["creator_name"] is None
         assert result[0]["kb_id"] == "k1"
         assert result[0]["kds_id"] == "k1"
 
     def test_skips_missing_ids_and_permissionless(self, patched):
-        with patch.object(svc, "_compute_accessible_rows", return_value=[]):
+        with patch.object(
+            svc,
+            "_compute_accessible_rows_with_name_map",
+            return_value=([], {}),
+        ):
             remote = [
                 None,
                 {"kds_name": "no id"},
@@ -808,7 +848,11 @@ class TestIntersectAccessibleKbs:
                 "group_ids": [], "permission": "READ",
             }
         ]
-        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+        with patch.object(
+            svc,
+            "_compute_accessible_rows_with_name_map",
+            return_value=(local_rows, {}),
+        ):
             remote = [
                 {"kds_id": "k1"},
                 {"id": "k1"},
@@ -826,14 +870,22 @@ class TestIntersectAccessibleKbs:
                 "group_ids": [], "permission": "READ",
             }
         ]
-        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+        with patch.object(
+            svc,
+            "_compute_accessible_rows_with_name_map",
+            return_value=(local_rows, {}),
+        ):
             result = svc.intersect_accessible_kbs([{"kds_id": 7}], "u", "t")
 
         assert result[0]["kds_id"] == "7"
 
     def test_tolerates_missing_optional_protected_local_fields(self, patched):
         local_rows = [{"kb_id": "k1", "permission": "EDIT"}]
-        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+        with patch.object(
+            svc,
+            "_compute_accessible_rows_with_name_map",
+            return_value=(local_rows, {}),
+        ):
             result = svc.intersect_accessible_kbs(
                 [{"kds_id": "k1", "kds_name": "Remote KB"}],
                 "u",

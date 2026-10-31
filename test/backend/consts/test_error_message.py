@@ -1,11 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for Error Message definitions.
 
 Tests the ErrorMessage class and its methods for getting error messages.
 """
 import pytest
-from backend.consts.error_code import ErrorCode
-from backend.consts.error_message import ErrorMessage
+from contracts.errors.codes import ErrorCode
+from contracts.errors.messages import ErrorMessage
 
 
 @pytest.mark.parametrize(
@@ -96,6 +98,11 @@ class TestErrorMessageGetMessage:
         """Test getting message for KNOWLEDGE_NOT_FOUND."""
         msg = ErrorMessage.get_message(ErrorCode.KNOWLEDGE_NOT_FOUND)
         assert "Knowledge" in msg
+
+    def test_get_message_knowledge_resource_exceeded(self):
+        """Test getting the default message for knowledge resource limits."""
+        msg = ErrorMessage.get_message(ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED)
+        assert "limit" in msg.lower()
 
     def test_get_message_memory_not_found(self):
         """Test getting message for MEMORY_NOT_FOUND."""
