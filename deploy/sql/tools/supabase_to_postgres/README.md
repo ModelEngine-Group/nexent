@@ -2,8 +2,8 @@
 
 ## Automatic deployment
 
-Run the normal `deploy.sh`. Docker and Kubernetes application deployments invoke
-this single `migrate.py` automatically; users do not run a separate migration
+Run the normal `deploy.sh`. Docker invokes `migrate.py`; Kubernetes invokes the
+dedicated `migrate_k8s.py`, sharing account import logic. Users do not run a separate migration
 command or install host database packages. The deployment host requires Python
 3.8+, Docker or kubectl, and access to the original source data.
 
