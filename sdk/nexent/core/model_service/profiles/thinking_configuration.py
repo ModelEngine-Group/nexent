@@ -19,14 +19,24 @@ def configure_thinking(profile, preset):
     """Apply a declared operator format while retaining the frozen original for reset."""
     if preset is None:
         return profile
+    if preset == "profile_default" and profile.provenance.provider_metadata.get("operator_thinking") is None:
+        return profile
+    return ResolvedModelProfile.model_validate(
+        _configure_thinking_data(profile.model_dump(mode="json"), preset)
+    )
+
+
+def _configure_thinking_data(data, preset):
+    """Update a private draft; the owning operation validates the complete change."""
+    if preset is None:
+        return data
     if preset != "profile_default" and preset not in THINKING_FORMATS:
         raise ParameterValidationError("THINKING_FORMAT_UNKNOWN", "/thinking_control")
-    data = profile.model_dump(mode="json")
     metadata = data["provenance"]["provider_metadata"]
     reasoning = data["capabilities"]["reasoning"]
     saved = metadata.get("operator_thinking")
     if saved is None and preset == "profile_default":
-        return profile
+        return data
     if saved is None:
         saved = {"original_rule_index": next((index for index, rule in enumerate(data["parameter_rules"]) if rule["key"] == "enable_thinking"), len(data["parameter_rules"])),
                  "original_rule": next((deepcopy(rule) for rule in data["parameter_rules"]
@@ -41,6 +51,11 @@ def configure_thinking(profile, preset):
         else:
             data["parameter_values"].pop("enable_thinking", None)
         reasoning.update(status=saved["original_status"], controls=saved["original_controls"])
+        degree = metadata.get("operator_thinking_degree")
+        if degree is not None and degree.get("mode") == "default":
+            # Keep the inactive child cache aligned with the restored parent,
+            # including historical snapshots, so repeating reset is idempotent.
+            degree["status"] = saved["original_status"]
         metadata.pop("operator_thinking", None)
     else:
         path, transform = THINKING_FORMATS[preset]
@@ -59,16 +74,24 @@ def configure_thinking(profile, preset):
         data["provenance"]["overrides"].append({"path": "/reasoning/controls", "source": "operator_thinking_v1",
             "original_value": saved["original_controls"], "reason": "User explicitly selected a registered thinking field format",
             "evidence": "operator_thinking_v1:" + preset})
-    return ResolvedModelProfile.model_validate(data)
+    return data
 
 
 def configure_thinking_degree(profile, mode):
     """Register an operator-selected degree preset, preserving declared wire mappings."""
     if mode is None:
         return profile
+    return ResolvedModelProfile.model_validate(
+        _configure_thinking_degree_data(profile.model_dump(mode="json"), mode)
+    )
+
+
+def _configure_thinking_degree_data(data, mode):
+    """Update degree rules on the same private draft as the toggle operation."""
+    if mode is None:
+        return data
     if mode not in {"default", "effort", "budget_tokens"}:
         raise ParameterValidationError("THINKING_MODE_UNKNOWN", "/thinking_mode")
-    data = profile.model_dump(mode="json")
     metadata = data["provenance"]["provider_metadata"]
     reasoning = data["capabilities"]["reasoning"]
     keys = {"reasoning_effort", "reasoning_budget_tokens"}
@@ -100,7 +123,7 @@ def configure_thinking_degree(profile, mode):
         if "operator_thinking" not in metadata:
             reasoning["status"] = saved["status"]
         metadata["operator_thinking_degree"] = {**saved, "mode": "default", "version": 1}
-        return ResolvedModelProfile.model_validate(data)
+        return data
 
     key = "reasoning_effort" if mode == "effort" else "reasoning_budget_tokens"
     opposite = "reasoning_budget_tokens" if mode == "effort" else "reasoning_effort"
@@ -143,19 +166,25 @@ def configure_thinking_degree(profile, mode):
         "path": "/reasoning/controls", "source": "operator_thinking_degree_v1",
         "original_value": saved["controls"], "reason": "User selected a registered thinking degree preset",
         "evidence": "operator_thinking_degree_v1:" + mode})
-    return ResolvedModelProfile.model_validate(data)
+    return data
 
 
 def configure_outlet_policy(profile, *, thinking_control=None, thinking_mode=None, has_credential=None):
     """Apply the same finite allowed policy changes in services and persistence guards."""
     from nexent.core.model_service.profiles.protocol_parameters import ensure_outlet_sampling_rules
 
-    result = configure_thinking_degree(configure_thinking(ensure_outlet_sampling_rules(profile), thinking_control), thinking_mode)
+    data = ensure_outlet_sampling_rules(profile).model_dump(mode="json")
+    if thinking_mode == "default":
+        # Restore the child degree before its parent toggle so the frozen parent
+        # status/controls win over an operator-generated intermediate snapshot.
+        _configure_thinking_degree_data(data, thinking_mode)
+        _configure_thinking_data(data, thinking_control)
+    else:
+        _configure_thinking_data(data, thinking_control)
+        _configure_thinking_degree_data(data, thinking_mode)
     if has_credential is not None:
-        data = result.model_dump(mode="json")
         data["bindings"]["auth"] = {"ref": "bearer_token_v1" if has_credential else "no_auth_v1", "version": 1}
         kind = "model_record" if has_credential else "none"
         data["connection"]["credential_ref"]["kind"] = kind
         data["connection_rules"]["credential_kind"] = kind
-        result = ResolvedModelProfile.model_validate(data)
-    return result
+    return ResolvedModelProfile.model_validate(data)

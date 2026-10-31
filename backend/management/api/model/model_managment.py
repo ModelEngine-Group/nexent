@@ -121,7 +121,7 @@ _LOG_UNSAFE_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def _sanitize_model_credentials(payload: Any) -> Any:
-    """Remove model API keys before returning model data to HTTP clients.
+    """Remove model API keys and custom Headers before returning HTTP data.
 
     Model records are also consumed by internal services, so credential
     removal belongs at the HTTP response boundary rather than in the database
@@ -133,7 +133,8 @@ def _sanitize_model_credentials(payload: Any) -> Any:
         return [_sanitize_model_credentials(item) for item in payload]
 
     if isinstance(payload, dict):
-        return {key: _sanitize_model_credentials(value) for key, value in payload.items() if key != "api_key"}
+        return {key: _sanitize_model_credentials(value) for key, value in payload.items()
+                if key not in {"api_key", "http_headers"}}
 
     return payload
 

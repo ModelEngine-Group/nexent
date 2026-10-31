@@ -7,6 +7,7 @@ import pytest
 from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
 from nexent.core.model_service.profiles.thinking_configuration import (
+    configure_outlet_policy,
     configure_thinking,
     configure_thinking_degree,
 )
@@ -106,3 +107,73 @@ def test_switching_degree_does_not_silently_discard_fixed_budget(openai_profile)
     with pytest.raises(ParameterValidationError, match="FIXED_PARAMETER"):
         configure_thinking_degree(fixed, "effort")
     assert fixed.parameter_values["reasoning_budget_tokens"] == 4096
+
+
+@pytest.mark.parametrize("preset", ["enable_thinking", "thinking_type", "chat_template"])
+@pytest.mark.parametrize("mode,key,value", [("effort", "reasoning_effort", "high"),
+                                          ("budget_tokens", "reasoning_budget_tokens", 512)])
+def test_combined_reset_restores_unknown_profile_atomically(openai_profile, preset, mode, key, value):
+    from nexent.core.model_service.profiles.protocol_parameters import ensure_outlet_sampling_rules
+
+    original = ensure_outlet_sampling_rules(without_reasoning(openai_profile))
+    enabled = configure_outlet_policy(original, thinking_control=preset, thinking_mode=mode)
+    data = enabled.model_dump(mode="json")
+    data["parameter_values"].update(enable_thinking=True, **{key: value})
+    enabled = ResolvedModelProfile.model_validate(data)
+    before = enabled.model_dump()
+    restored = configure_outlet_policy(enabled, thinking_control="profile_default", thinking_mode="default")
+    assert restored.capabilities.reasoning.status == "unknown"
+    assert restored.capabilities.reasoning.controls is None
+    assert restored.parameter_rules == original.parameter_rules
+    assert restored.parameter_values == original.parameter_values
+    assert restored.provenance.overrides == original.provenance.overrides
+    assert "operator_thinking" not in restored.provenance.provider_metadata
+    repeated = configure_outlet_policy(restored, thinking_control="profile_default", thinking_mode="default")
+    assert repeated.model_dump() == restored.model_dump()
+    assert enabled.model_dump() == before
+
+
+@pytest.mark.parametrize("mode", ["effort", "budget_tokens"])
+def test_combined_reset_preserves_original_declared_bindings(openai_profile, mode):
+    from nexent.core.model_service.profiles.protocol_parameters import ensure_outlet_sampling_rules
+
+    original = ensure_outlet_sampling_rules(openai_profile)
+    selected = configure_outlet_policy(original, thinking_control="thinking_type", thinking_mode=mode)
+    restored = configure_outlet_policy(selected, thinking_control="profile_default", thinking_mode="default")
+    assert restored.parameter_rules == original.parameter_rules
+    assert restored.parameter_values == original.parameter_values
+    assert restored.capabilities.reasoning == original.capabilities.reasoning
+
+
+def test_combined_policy_still_rejects_a_dangling_degree_condition(openai_profile):
+    original = configure_outlet_policy(without_reasoning(openai_profile),
+                                      thinking_control="enable_thinking", thinking_mode="effort")
+    before = original.model_dump()
+    with pytest.raises(ValueError, match="PARAMETER_CONDITION_INVALID"):
+        configure_outlet_policy(original, thinking_control="profile_default")
+    assert original.model_dump() == before
+
+
+@pytest.mark.parametrize("has_credential", [True, False])
+def test_combined_reset_preserves_explicit_auth_selection(openai_profile, has_credential):
+    original = configure_outlet_policy(without_reasoning(openai_profile),
+                                      thinking_control="enable_thinking", thinking_mode="effort")
+    before = original.model_dump()
+    restored = configure_outlet_policy(original, thinking_control="profile_default", thinking_mode="default",
+                                       has_credential=has_credential)
+    assert restored.bindings.auth.ref == ("bearer_token_v1" if has_credential else "no_auth_v1")
+    assert restored.connection.credential_ref.kind == ("model_record" if has_credential else "none")
+    assert restored.connection_rules.credential_kind == restored.connection.credential_ref.kind
+    assert restored.capabilities.reasoning.status == "unknown"
+    assert original.model_dump() == before
+
+
+def test_combined_policy_keeps_fixed_degree_rejection_and_input_immutable(openai_profile):
+    data = openai_profile.model_dump(mode="json")
+    data["parameter_values"].update(enable_thinking=True, reasoning_budget_tokens=4096)
+    next(rule for rule in data["parameter_rules"] if rule["key"] == "reasoning_budget_tokens")["editable"] = False
+    original = ResolvedModelProfile.model_validate(data)
+    before = original.model_dump()
+    with pytest.raises(ParameterValidationError, match="FIXED_PARAMETER"):
+        configure_outlet_policy(original, thinking_control="thinking_type", thinking_mode="effort")
+    assert original.model_dump() == before
