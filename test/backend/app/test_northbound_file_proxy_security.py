@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 with pytest.MonkeyPatch.context() as import_mocks:
     import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
-    from gateway.api import northbound
+    from management.api import northbound
 
 
 @pytest.fixture

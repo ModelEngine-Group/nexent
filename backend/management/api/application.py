@@ -1,7 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from management.utils.app_factory import create_app
-from contracts.constants.constants import CONFIG_SERVICE_NAME
-import asyncio
+from management.api.northbound_application import northbound_lifespan
+from management.api.northbound import router as northbound_router, a2a_router
 import logging
 from contextlib import asynccontextmanager
 
@@ -52,14 +51,10 @@ from management.api.memory.memory_dreaming import router as memory_dreaming_rout
 from management.api.memory.memory_provider import router as memory_provider_router
 from management.api.tag.tag_management import router as tag_management_router
 from management.api.knowledge_base.quota import tenant_quota_router, platform_quota_router, personal_quota_router
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, ENABLE_AIDP_KNOWLEDGE, ENABLE_AGENT_WORKBENCH, IS_SPEED_MODE, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, ENABLE_AIDP_KNOWLEDGE, ENABLE_AGENT_WORKBENCH, IS_SPEED_MODE
 from nexent.core.concurrency import (
     ManagedTaskSpec,
-    ManagerState,
-    clear_default_thread_manager,
-    set_default_thread_manager,
 )
-from contracts.constants.constants import CONFIG_SERVICE_NAME
 from infrastructure.concurrency import config_thread_manager
 
 logger = logging.getLogger("base_app")
@@ -69,7 +64,6 @@ async def recover_config_tasks_on_startup():
     from management.services.evaluation.maintenance import start as start_eval_maintenance
     from management.recovery import (
         recover_config_tasks,
-        schedule_interrupted_upload_cleanup,
         schedule_workbench_main_backfill,
     )
 
@@ -82,7 +76,6 @@ async def recover_config_tasks_on_startup():
         recover_config_tasks,
     )
     start_eval_maintenance(config_thread_manager)
-    await schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)
     if ENABLE_AGENT_WORKBENCH:
         schedule_workbench_main_backfill()
 
@@ -108,25 +101,26 @@ async def stop_dreaming_scheduler():
 
 @asynccontextmanager
 async def config_lifespan(_app):
-    if config_thread_manager.state is ManagerState.CREATED:
-        config_thread_manager.start()
-    set_default_thread_manager(config_thread_manager)
-    await recover_config_tasks_on_startup()
-    await validate_external_service_configuration()
-    await start_dreaming_scheduler()
-    try:
-        yield
-    finally:
-        # Preserve the scheduler's existing graceful shutdown behavior. Task
-        # state recovery remains exclusively in the startup path above.
-        await stop_dreaming_scheduler()
-        from management.services.evaluation.maintenance import stop as stop_eval_maintenance
-
-        stop_eval_maintenance()
+    # One Management manager owns ordinary and Northbound requests and recovery.
+    async with northbound_lifespan(_app):
+        maintenance_started = False
+        dreaming_started = False
         try:
-            await config_thread_manager.shutdown(timeout=RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
+            await recover_config_tasks_on_startup()
+            maintenance_started = True
+            await validate_external_service_configuration()
+            dreaming_started = True
+            await start_dreaming_scheduler()
+            yield
         finally:
-            clear_default_thread_manager(config_thread_manager)
+            try:
+                if dreaming_started:
+                    await stop_dreaming_scheduler()
+            finally:
+                if maintenance_started:
+                    from management.services.evaluation.maintenance import stop as stop_eval_maintenance
+
+                    stop_eval_maintenance()
 
 
 app = create_app(
@@ -205,3 +199,7 @@ app.include_router(personal_quota_router)
 app.include_router(memory_dreaming_router)
 app.include_router(memory_provider_router)
 app.include_router(tag_management_router)
+
+# Northbound and A2A business routes share Management lifecycle and ownership.
+app.include_router(northbound_router)
+app.include_router(a2a_router)

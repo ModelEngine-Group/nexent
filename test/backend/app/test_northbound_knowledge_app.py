@@ -38,7 +38,7 @@ class NorthboundContext:
     token_id: int = 0
 
 
-northbound_service_module = types.ModuleType("services.northbound_service")
+northbound_service_module = types.ModuleType("management.services.northbound")
 northbound_service_module.NorthboundContext = NorthboundContext
 northbound_service_module.get_conversation_history = MagicMock()
 northbound_service_module.list_conversations = MagicMock()
@@ -51,7 +51,7 @@ northbound_service_module.generate_conversation_title = MagicMock()
 northbound_service_module.list_configured_models = MagicMock()
 northbound_service_module.update_conversation_title = MagicMock()
 northbound_service_module.upload_files_for_northbound = MagicMock()
-sys.modules["services.northbound_service"] = northbound_service_module
+sys.modules["management.services.northbound"] = northbound_service_module
 
 file_mgmt_module = types.ModuleType("management.services.file.service")
 file_mgmt_module.upload_files_impl = AsyncMock()
@@ -205,7 +205,7 @@ utils_fm_module = types.ModuleType("management.services.knowledge_base.ingestion
 utils_fm_module.trigger_data_process = AsyncMock(return_value={"status": "ok"})
 sys.modules["management.services.knowledge_base.ingestion"] = utils_fm_module
 
-northbound_app_module = types.ModuleType("gateway.api.northbound")
+northbound_app_module = types.ModuleType("management.api.northbound")
 northbound_app_module._get_northbound_context = AsyncMock()
 sys.modules["gateway.authentication.northbound_auth"] = northbound_app_module
 northbound_app_module.get_northbound_context = northbound_app_module._get_northbound_context
@@ -224,7 +224,7 @@ sys.modules["management.services.monitor.audit"] = MagicMock()
 sys.modules["management.services.agent.a2a.service"] = MagicMock()
 sys.modules["management.db.a2a.repository"] = MagicMock()
 
-from gateway.api.northbound import router
+from management.api.northbound import router
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.errors.exceptions import AppException, LimitExceededError, UnauthorizedError
 
@@ -252,7 +252,7 @@ def client():
 @pytest.fixture
 def mock_northbound_context():
     with patch(
-        "gateway.api.northbound._get_northbound_context",
+        "management.api.northbound._get_northbound_context",
         new_callable=AsyncMock,
     ) as mock_ctx:
         yield mock_ctx
@@ -276,7 +276,7 @@ class TestGetListIndices:
     def test_rate_limit_returns_429(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.list_indices",
+            "management.api.northbound.ElasticSearchService.list_indices",
             side_effect=LimitExceededError("too many"),
         ):
             response = client.get("/nb/v1/knowledge/indices")
@@ -285,7 +285,7 @@ class TestGetListIndices:
     def test_generic_error_returns_500(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.get_vector_db_core",
+            "management.api.northbound.get_vector_db_core",
             side_effect=RuntimeError("db down"),
         ):
             response = client.get("/nb/v1/knowledge/indices")
@@ -297,16 +297,16 @@ class TestCreateIndex:
     @pytest.mark.asyncio
     async def test_app_exception_is_propagated(self, mock_northbound_context):
         """Structured knowledge-limit errors must not be converted to generic errors."""
-        from gateway.api.northbound import create_new_index
+        from management.api.northbound import create_new_index
 
         mock_northbound_context.return_value = ASSET_CTX
         app_exception = AppException("knowledge base limit reached")
         with patch(
-            "gateway.api.northbound._require_asset_owner_context",
+            "management.api.northbound._require_asset_owner_context",
             new_callable=AsyncMock,
             return_value=ASSET_CTX,
         ), patch(
-            "gateway.api.northbound.ElasticSearchService.create_knowledge_base",
+            "management.api.northbound.ElasticSearchService.create_knowledge_base",
             side_effect=app_exception,
         ):
             with pytest.raises(AppException) as exc_info:
@@ -333,12 +333,12 @@ class TestUploadFiles:
 
     @pytest.mark.asyncio
     async def test_empty_file_list_returns_400(self, mock_northbound_context):
-        from gateway.api.northbound import upload_files
+        from management.api.northbound import upload_files
 
         mock_northbound_context.return_value = ASSET_CTX
         request = MagicMock()
         with patch(
-            "gateway.api.northbound._require_asset_owner_context",
+            "management.api.northbound._require_asset_owner_context",
             new_callable=AsyncMock,
             return_value=ASSET_CTX,
         ):
@@ -349,7 +349,7 @@ class TestUploadFiles:
     @pytest.mark.asyncio
     async def test_app_exception_is_propagated(self, mock_northbound_context):
         """Structured upload errors must reach the global AppException handler unchanged."""
-        from gateway.api.northbound import upload_files
+        from management.api.northbound import upload_files
 
         mock_northbound_context.return_value = ASSET_CTX
         app_exception = AppException("knowledge file limit reached")
@@ -357,7 +357,7 @@ class TestUploadFiles:
         upload = MagicMock()
 
         with patch(
-            "gateway.api.northbound._require_asset_owner_context",
+            "management.api.northbound._require_asset_owner_context",
             new_callable=AsyncMock,
             return_value=ASSET_CTX,
         ):
@@ -444,7 +444,7 @@ class TestGetIndexChunks:
     def test_rate_limit_returns_429(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.get_index_chunks",
+            "management.api.northbound.ElasticSearchService.get_index_chunks",
             side_effect=LimitExceededError("too many"),
         ):
             response = client.post("/nb/v1/knowledge/indices/kb1/chunks")
@@ -453,7 +453,7 @@ class TestGetIndexChunks:
     def test_value_error_returns_404(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.get_index_chunks",
+            "management.api.northbound.ElasticSearchService.get_index_chunks",
             side_effect=ValueError("index not found"),
         ):
             response = client.post("/nb/v1/knowledge/indices/kb1/chunks")
@@ -463,7 +463,7 @@ class TestGetIndexChunks:
     def test_unauthorized_returns_401(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.get_index_chunks",
+            "management.api.northbound.ElasticSearchService.get_index_chunks",
             side_effect=UnauthorizedError("bad token"),
         ):
             response = client.post("/nb/v1/knowledge/indices/kb1/chunks")
@@ -473,7 +473,7 @@ class TestGetIndexChunks:
     def test_generic_error_returns_500(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.get_index_chunks",
+            "management.api.northbound.ElasticSearchService.get_index_chunks",
             side_effect=RuntimeError("es down"),
         ):
             response = client.post("/nb/v1/knowledge/indices/kb1/chunks")
@@ -497,7 +497,7 @@ class TestHybridSearch:
     def test_success_for_asset_owner(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.search_hybrid",
+            "management.api.northbound.ElasticSearchService.search_hybrid",
         ) as mock_search:
             mock_search.return_value = {
                 "results": [{"title": "Doc1", "score": 0.9}],
@@ -525,7 +525,7 @@ class TestHybridSearch:
     def test_model_config_conflict_returns_409(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.search_hybrid",
+            "management.api.northbound.ElasticSearchService.search_hybrid",
             side_effect=KnowledgeBaseNeedsModelConfigError("kb1", "needs model"),
         ):
             response = client.post(
@@ -543,7 +543,7 @@ class TestHybridSearch:
     def test_rate_limit_returns_429(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.search_hybrid",
+            "management.api.northbound.ElasticSearchService.search_hybrid",
             side_effect=LimitExceededError("too many"),
         ):
             response = client.post(
@@ -558,10 +558,10 @@ class TestHybridSearch:
     def test_unresolved_index_name_falls_back_to_requested(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.get_index_name_by_knowledge_name",
+            "management.api.northbound.get_index_name_by_knowledge_name",
             side_effect=RuntimeError("not mapped"),
         ), patch(
-            "gateway.api.northbound.ElasticSearchService.search_hybrid",
+            "management.api.northbound.ElasticSearchService.search_hybrid",
         ) as mock_search:
             mock_search.return_value = {"results": [], "total": 0}
             response = client.post(
@@ -577,7 +577,7 @@ class TestHybridSearch:
     def test_value_error_returns_400(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.search_hybrid",
+            "management.api.northbound.ElasticSearchService.search_hybrid",
             side_effect=ValueError("invalid query"),
         ):
             response = client.post(
@@ -593,7 +593,7 @@ class TestHybridSearch:
     def test_unauthorized_returns_401(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.search_hybrid",
+            "management.api.northbound.ElasticSearchService.search_hybrid",
             side_effect=UnauthorizedError("bad token"),
         ):
             response = client.post(
@@ -609,7 +609,7 @@ class TestHybridSearch:
     def test_generic_error_returns_500(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.search_hybrid",
+            "management.api.northbound.ElasticSearchService.search_hybrid",
             side_effect=RuntimeError("search failed"),
         ):
             response = client.post(
@@ -627,7 +627,7 @@ class TestIndexManagement:
     def test_create_index_forwards_optional_settings(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.create_knowledge_base",
+            "management.api.northbound.ElasticSearchService.create_knowledge_base",
             return_value={"index_name": "kb1"},
         ) as mock_create:
             response = client.post(
@@ -673,7 +673,7 @@ class TestIndexManagement:
     ):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.create_knowledge_base",
+            "management.api.northbound.ElasticSearchService.create_knowledge_base",
             side_effect=exception,
         ):
             response = client.post(
@@ -685,7 +685,7 @@ class TestIndexManagement:
     def test_delete_index_success(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.full_delete_knowledge_base",
+            "management.api.northbound.ElasticSearchService.full_delete_knowledge_base",
             new_callable=AsyncMock,
             return_value={"status": "success"},
         ) as mock_delete:
@@ -703,7 +703,7 @@ class TestIndexManagement:
             details={"index_name": "kb1", "blocking_files": []},
         )
         with patch(
-            "gateway.api.northbound.ElasticSearchService.full_delete_knowledge_base",
+            "management.api.northbound.ElasticSearchService.full_delete_knowledge_base",
             new_callable=AsyncMock,
             side_effect=expected,
         ):
@@ -725,7 +725,7 @@ class TestIndexManagement:
     ):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.full_delete_knowledge_base",
+            "management.api.northbound.ElasticSearchService.full_delete_knowledge_base",
             new_callable=AsyncMock,
             side_effect=exception,
         ):
@@ -736,7 +736,7 @@ class TestIndexManagement:
     def test_get_index_files_returns_service_files(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX
         with patch(
-            "gateway.api.northbound.ElasticSearchService.list_files",
+            "management.api.northbound.ElasticSearchService.list_files",
             new_callable=AsyncMock,
             return_value={"files": [{"name": "guide.pdf"}]},
         ):
@@ -765,7 +765,7 @@ class TestUploadAndDownload:
         assert response.json()["process_tasks"] == {"status": "queued"}
         assert file_mgmt_module.upload_files_impl.await_args.kwargs[
             "upload_owner_service"
-        ] == "nexent-northbound"
+        ] == "nexent-config"
 
     def test_upload_processing_error_returns_detail(self, client, mock_northbound_context):
         mock_northbound_context.return_value = ASSET_CTX

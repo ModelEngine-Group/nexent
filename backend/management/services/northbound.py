@@ -26,7 +26,7 @@ from management.services.agent.service import (
     get_agent_by_name_impl,
 )
 from management.services.agent.runtime_client import forward_agent_run, forward_agent_stop
-from infrastructure.concurrency import northbound_thread_manager
+from infrastructure.concurrency import config_thread_manager
 from management.services.agent.run_state import runtime_state_service
 from management.services.agent.versions import list_published_agents_impl
 from management.services.knowledge_base.scope import (
@@ -438,11 +438,11 @@ async def start_streaming_chat(
         # Persist before starting the stream. External callers may not reconnect,
         # so the managed control-I/O task preserves synchronous commit semantics.
         try:
-            await northbound_thread_manager.run(
+            await config_thread_manager.run(
                 "control-io",
                 ManagedTaskSpec(
                     task_name="northbound-save-user-message",
-                    owner="services.northbound_service",
+                    owner="management.services.northbound",
                 ),
                 save_conversation_user,
                 agent_request,
@@ -741,11 +741,11 @@ async def get_agent_knowledge_bases_for_northbound(
             get_aidp_kb_impl,
         )
 
-        snapshot = await northbound_thread_manager.run(
+        snapshot = await config_thread_manager.run(
             "control-io",
             ManagedTaskSpec(
                 task_name="northbound-resolve-aidp-access",
-                owner="services.northbound_service",
+                owner="management.services.northbound",
             ),
             resolve_current_aidp_access,
             server_url=AIDP_SERVER_URL,
@@ -760,11 +760,11 @@ async def get_agent_knowledge_bases_for_northbound(
             detail: Dict[str, Any] = {}
             resource_status = str(row.get("resource_status") or "ACTIVE")
             try:
-                detail = await northbound_thread_manager.run(
+                detail = await config_thread_manager.run(
                     "control-io",
                     ManagedTaskSpec(
                         task_name="northbound-get-aidp-knowledge-base",
-                        owner="services.northbound_service",
+                        owner="management.services.northbound",
                     ),
                     get_aidp_kb_impl,
                     AIDP_SERVER_URL,

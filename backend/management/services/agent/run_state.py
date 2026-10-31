@@ -25,7 +25,7 @@ class RuntimeStateService:
         self._pod_name = socket.gethostname()
         self._thread_manager: Optional[ThreadManager] = None
 
-    def set_thread_manager(self, thread_manager: ThreadManager) -> None:
+    def set_thread_manager(self, thread_manager: Optional[ThreadManager]) -> None:
         """Inject the process-local manager used for blocking Redis calls."""
         self._thread_manager = thread_manager
 

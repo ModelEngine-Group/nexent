@@ -11,6 +11,6 @@ services:
     environment:
       GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
       GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
-      GATEWAY_NORTHBOUND_URL: "http://nexent-northbound:5013"
+      GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"
     networks:
       - nexent

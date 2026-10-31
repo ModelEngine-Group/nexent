@@ -1,0 +1,63 @@
+schema_version: '1.0'
+change:
+  change_id: MGWI-NORTHBOUND-MIGRATION-20261031
+  change_type: refactor
+  title: Move Northbound business and lifecycle into Management
+  description: Preserve Northbound/A2A public contracts while Management owns business
+    execution, recovery, upload ownership and process thread lifecycle. Gateway becomes
+    a pure proxy.
+  affected_features:
+    existing:
+    - AUTH-LOCAL
+    - MSRF-001
+    - V5-REL-AUTO-BCE0AAF43667C67B
+    - V5-REL-AUTO-ECAC7A02C22B21FF
+    - V5-UT-BE-006
+    - V5-UT-BE-021
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - REL-AUTO-BCE0AAF43667C67B
+    - REL-AUTO-ECAC7A02C22B21FF
+    - UT-BE-021
+    - UT-BE-006
+    - AUTH-LOCAL-D2-001
+    - MSRF-D1-002
+    added: []
+    modified:
+    - REL-AUTO-BCE0AAF43667C67B
+    - REL-AUTO-ECAC7A02C22B21FF
+    - UT-BE-021
+    - UT-BE-006
+    - AUTH-LOCAL-D2-001
+    retired: []
+  feature_contract_changed: false
+  notes: Lifecycle case ownership follows Management/config_thread_manager, retaining
+    HTTP snapshot and shutdown expectations. UT-BE-006 now controls the account persistence
+    boundary introduced by remove-supabase; credential assertions are retained. AUTH-LOCAL-D2-001
+    changes imports only; database-backed acceptance is not claimed. Existing full-validator
+    missing frontend UT selector is recorded in the SPEC. No new formal Case duplicates
+    traditional UT.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve original Northbound/A2A paths, responses, permission and runtime forwarding
+    - Management cleans current and historical upload owners and cancels delayed cleanup
+      before shutdown
+    - Startup failure releases the Management manager and identity bindings
+    - Gateway-to-Management HTTP/A2A forwarding and proxy-only Gateway import
+    reason: Reuse existing route/service/security tests; add isolated lifecycle failure
+      assertions, managed upload recovery and real local proxy contract checks.
+    test_selectors:
+    - test/backend/app/test_config_app.py
+    - test/backend/app/test_northbound_base_app.py
+    - test/backend/app/test_northbound_app.py
+    - test/backend/app/test_northbound_knowledge_app.py
+    - test/backend/app/test_northbound_file_proxy_security.py
+    - test/backend/app/test_management_northbound_proxy.py
+    - test/backend/services/test_northbound_service.py
+    - test/backend/services/test_startup_recovery_service.py
+    - test/backend/management/test_northbound_lifecycle.py
+    - test/backend/management/test_gateway_layout.py

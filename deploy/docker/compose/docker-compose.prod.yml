@@ -182,9 +182,12 @@ services:
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for sandbox container management
     environment:
+      GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
+      GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
+      GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
-      NEXENT_SQL_STARTUP_MODE: wait
+      NEXENT_SQL_STARTUP_MODE: "off"
       NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
       skip_proxy: "true"
       UMASK: "0022"

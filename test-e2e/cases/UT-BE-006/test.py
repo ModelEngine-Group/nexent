@@ -44,6 +44,8 @@ def test_auth_helpers_trust_only_validated_credentials(monkeypatch: pytest.Monke
     import gateway.authentication.auth as auth_utils
     import gateway.authentication.northbound_auth as northbound_auth
 
+    # Account persistence is an external boundary of this credential-helper case.
+    monkeypatch.setattr(northbound_auth, "require_active_account", lambda user_id: {"user_id": user_id})
     monkeypatch.setattr(northbound_auth, "get_token_by_access_key", lambda key: None)
     assert northbound_auth.validate_bearer_token("Bearer unsigned.payload.claims") == (False, None)
     monkeypatch.setattr(

@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from gateway import application as nba
+from management.api import northbound_application as nba
 
 
 @pytest.mark.stage('D5')
@@ -15,7 +15,7 @@ async def test_northbound_startup_recovery_and_shutdown_contract():
     manager.run = AsyncMock(return_value=None)
 
     with (
-        patch.object(nba, 'northbound_thread_manager', manager),
+        patch.object(nba, 'config_thread_manager', manager),
         patch(
             'management.recovery.recover_northbound_tasks',
             recover,
@@ -32,9 +32,10 @@ async def test_northbound_startup_recovery_and_shutdown_contract():
     assert profile == 'control-io'
     assert isinstance(spec, nba.ManagedTaskSpec)
     assert spec.task_name == 'recover-northbound-tasks'
-    assert spec.owner == 'gateway.application'
+    assert spec.owner == 'management.api.northbound_application'
     assert fn is recover
-    cleanup.assert_awaited_once_with(nba.NORTHBOUND_SERVICE_NAME)
+    assert [call.args[0] for call in cleanup.await_args_list] == [nba.CONFIG_SERVICE_NAME, nba.NORTHBOUND_SERVICE_NAME]
+    assert all(call.kwargs["thread_manager"] is manager for call in cleanup.await_args_list)
 
     manager = MagicMock()
     manager.state = nba.ManagerState.CREATED
@@ -45,7 +46,7 @@ async def test_northbound_startup_recovery_and_shutdown_contract():
     cleanup = AsyncMock(return_value=None)
 
     with (
-        patch.object(nba, 'northbound_thread_manager', manager),
+        patch.object(nba, 'config_thread_manager', manager),
         patch(
             'management.recovery.recover_northbound_tasks',
             recover,
@@ -66,7 +67,7 @@ async def test_northbound_startup_recovery_and_shutdown_contract():
 
     clear_default.assert_called_once_with(manager)
     manager.shutdown.assert_awaited_once_with(
-        timeout=nba.NORTHBOUND_THREAD_SHUTDOWN_GRACE_SECONDS
+        timeout=nba.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
     )
 
     async def _run_impl(profile, spec, fn, *args, **kwargs):
@@ -82,7 +83,7 @@ async def test_northbound_startup_recovery_and_shutdown_contract():
     manager.shutdown = AsyncMock(return_value=None)
 
     with (
-        patch.object(nba, 'northbound_thread_manager', manager),
+        patch.object(nba, 'config_thread_manager', manager),
         patch(
             'management.recovery.recover_northbound_tasks',
             _failing_recover,
@@ -99,10 +100,12 @@ async def test_northbound_startup_recovery_and_shutdown_contract():
             async with nba.northbound_lifespan(None):
                 pytest.fail('lifespan yielded after a failed recovery')
 
-    snapshot = {'service_name': 'northbound', 'lanes': {}}
+    manager.shutdown.assert_awaited_once_with(timeout=nba.RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS)
+
+    snapshot = {'service_name': 'config', 'lanes': {}}
     manager = MagicMock()
     manager.snapshot = MagicMock(return_value=snapshot)
-    with patch.object(nba, 'northbound_thread_manager', manager):
+    with patch.object(nba, 'config_thread_manager', manager):
         result = await nba.thread_capacity()
     assert result == snapshot
     manager.snapshot.assert_called_once_with()

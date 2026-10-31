@@ -19,7 +19,7 @@ from contracts.authentication import NorthboundContext
 from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from contracts.constants.constants import RATE_LIMIT_EXCEEDED_DETAIL
 from contracts.knowledge import VectorDatabaseType
-from contracts.constants.constants import NORTHBOUND_SERVICE_NAME
+from contracts.constants.constants import CONFIG_SERVICE_NAME
 from contracts.conversation import GenerateTitleRequest
 from contracts.errors.exceptions import (
     AppException,
@@ -90,7 +90,7 @@ from management.services.permission.api_keys import (
 )
 from management.utils.file_http import build_content_disposition_header, build_storage_proxy_url
 from pydantic import ValidationError as PydanticValidationError
-from services.northbound_service import (
+from management.services.northbound import (
     generate_conversation_title,
     get_agent_info_by_name_for_northbound,
     get_agent_info_list,
@@ -1083,7 +1083,7 @@ async def upload_files(
             index_name,
             ctx.user_id,
             uploader_tenant_id=ctx.tenant_id,
-            upload_owner_service=NORTHBOUND_SERVICE_NAME,
+            upload_owner_service=CONFIG_SERVICE_NAME,
         )
 
         if uploaded_file_paths:

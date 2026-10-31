@@ -56,8 +56,14 @@ spec:
                 name: nexent-secrets
           env:
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
+            - name: GATEWAY_MANAGEMENT_URL
+              value: "http://nexent-config:5010"
+            - name: GATEWAY_RUNTIME_URL
+              value: "http://nexent-runtime:5014"
+            - name: GATEWAY_NORTHBOUND_URL
+              value: "http://nexent-config:5010"
             - name: NEXENT_SQL_STARTUP_MODE
-              value: "wait"
+              value: "off"
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
             - name: skip_proxy

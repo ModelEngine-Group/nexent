@@ -4,12 +4,12 @@
 import pytest
 
 from nexent.core.concurrency import ManagedTaskSpec
-from infrastructure.concurrency import northbound_thread_manager
+from infrastructure.concurrency import config_thread_manager
 
 
 @pytest.mark.asyncio
 async def test_northbound_model_lane_executes_and_releases_work():
-    manager = northbound_thread_manager
+    manager = config_thread_manager
     manager.start()
     try:
         result = await manager.run(

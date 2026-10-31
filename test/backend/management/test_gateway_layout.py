@@ -16,7 +16,7 @@ BACKEND = Path(__file__).resolve().parents[3] / "backend"
 def test_gateway_routes_keep_all_original_paths_methods_and_handlers():
     expected = json.loads(Path(__file__).with_name("gateway_route_baseline.json").read_text(encoding="utf-8"))
     actual = []
-    for file in ("gateway/api/northbound.py", "gateway/application.py"):
+    for file in ("management/api/northbound.py", "management/api/northbound_application.py"):
         tree = ast.parse((BACKEND / file).read_text(encoding="utf-8"))
         for node in tree.body:
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -32,14 +32,15 @@ def test_gateway_routes_keep_all_original_paths_methods_and_handlers():
     assert sorted(actual) == expected
 
 
-def test_gateway_owns_two_authentication_implementations_and_one_route_file():
+def test_gateway_authentication_and_management_route_ownership():
     assert {p.name for p in (BACKEND / "gateway/authentication").glob("*.py")} == {
         "__init__.py", "auth.py", "northbound_auth.py"
     }
-    assert {p.name for p in (BACKEND / "gateway/api").glob("*.py")} == {"__init__.py", "northbound.py"}
+    assert {p.name for p in (BACKEND / "gateway/api").glob("*.py")} == {"__init__.py"}
     assert not (BACKEND / "gateway/api/northbound").exists()
     assert not (BACKEND / "gateway/api/knowledge_base").exists()
-    assembly = (BACKEND / "gateway/application.py").read_text(encoding="utf-8")
+    assert (BACKEND / "management/api/northbound.py").is_file()
+    assembly = (BACKEND / "management/api/northbound_application.py").read_text(encoding="utf-8")
     assert assembly.count("northbound_app.include_router(") == 2
 
 

@@ -22,7 +22,7 @@ def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
     from management.db.identity.token import create_token
     from management.db.identity.user_tenant import update_user_tenant_role
     from management.services.permission import api_keys
-    from gateway.api import northbound as routes
+    from management.api import northbound as routes
     from gateway.authentication import northbound_auth
 
     client, auth, helpers, models = runtime

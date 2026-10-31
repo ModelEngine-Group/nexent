@@ -155,27 +155,33 @@ def fail_interrupted_uploads(cutoff: datetime, upload_owner_service: str) -> int
     return failed
 
 
-async def schedule_interrupted_upload_cleanup(upload_owner_service: str) -> None:
+async def schedule_interrupted_upload_cleanup(upload_owner_service: str, *, thread_manager=None) -> asyncio.Task:
     """Clean this service's old uploads now and again after the grace period."""
     startup_time = datetime.utcnow()
     immediate_cutoff = startup_time - timedelta(seconds=UPLOAD_RECOVERY_GRACE_SECONDS)
-    await asyncio.to_thread(
-        fail_interrupted_uploads,
-        immediate_cutoff,
-        upload_owner_service,
-    )
+
+    async def cleanup(cutoff):
+        if thread_manager is None:
+            await asyncio.to_thread(fail_interrupted_uploads, cutoff, upload_owner_service)
+        else:
+            from nexent.core.concurrency import ManagedTaskSpec
+
+            await thread_manager.run(
+                "control-io",
+                ManagedTaskSpec(task_name="recover-interrupted-uploads", owner="management.recovery"),
+                fail_interrupted_uploads, cutoff, upload_owner_service,
+            )
+
+    await cleanup(immediate_cutoff)
 
     async def _delayed_cleanup() -> None:
         await asyncio.sleep(UPLOAD_RECOVERY_GRACE_SECONDS)
-        await asyncio.to_thread(
-            fail_interrupted_uploads,
-            startup_time,
-            upload_owner_service,
-        )
+        await cleanup(startup_time)
 
     task = asyncio.create_task(_delayed_cleanup())
     _upload_cleanup_tasks.add(task)
     task.add_done_callback(_upload_cleanup_tasks.discard)
+    return task
 
 
 def schedule_workbench_main_backfill() -> None:
