@@ -22,6 +22,10 @@ ELASTICSEARCH_SERVICE = os.getenv('ELASTICSEARCH_SERVICE')
 # Data Processing Service Configuration
 DATA_PROCESS_SERVICE = os.getenv('DATA_PROCESS_SERVICE')
 RUNTIME_SERVICE_URL = os.getenv('RUNTIME_SERVICE_URL', 'http://localhost:5014').rstrip('/')
+# Independent edge upstreams; existing business services retain authentication.
+GATEWAY_MANAGEMENT_URL = os.getenv('GATEWAY_MANAGEMENT_URL', 'http://localhost:5010').rstrip('/')
+GATEWAY_RUNTIME_URL = os.getenv('GATEWAY_RUNTIME_URL', 'http://localhost:5014').rstrip('/')
+GATEWAY_NORTHBOUND_URL = os.getenv('GATEWAY_NORTHBOUND_URL', 'http://localhost:5013').rstrip('/')
 CLIP_MODEL_PATH = os.getenv('CLIP_MODEL_PATH')
 TABLE_TRANSFORMER_MODEL_PATH = os.getenv('TABLE_TRANSFORMER_MODEL_PATH')
 UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv('UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH')
