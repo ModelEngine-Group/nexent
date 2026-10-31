@@ -89,6 +89,7 @@ from management.services.mcp.addressing import get_tenant_local_mcp_server
 from infrastructure.redis import get_redis_client
 from consts.const import (
     AGENT_WORKSPACE_ROOT,
+    A2A_AGENT_INVOCATION_TIMEOUT_SECONDS,
     NEXENT_SANDBOX_WORKSPACE_MODE,
     NEXENT_SANDBOX_CONTAINER_WORKSPACE_ROOT,
     NEXENT_SANDBOX_FAILURE_POLICY,
@@ -986,7 +987,7 @@ def _build_external_agent_config(agent: dict, agent_url: str) -> ExternalA2AAgen
         transport_type=agent.get("transport_type", "http-streaming"),
         protocol_version=agent.get("protocol_version", "1.0"),
         protocol_type=agent.get("protocol_type", PROTOCOL_JSONRPC),
-        timeout=300.0,
+        timeout=A2A_AGENT_INVOCATION_TIMEOUT_SECONDS,
         ssl_verify=agent.get("ssl_verify", True),
         raw_card=agent.get("raw_card"),
         custom_headers=_build_security_headers(agent) or None,

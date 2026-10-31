@@ -60,9 +60,9 @@ async def lifecycle(monkeypatch):
         execution=execution, deferred=deferred, cancel=cancel, channel=channel, request=request,
     )
 
-    async def start(source):
+    async def start(source, **options):
         monkeypatch.setattr(service, "generate_stream", source)
-        return await service.run_agent_stream(request, Request({"type": "http", "headers": []}), "token")
+        return await service.run_agent_stream(request, Request({"type": "http", "headers": []}), "token", **options)
 
     env.start = start
     yield env

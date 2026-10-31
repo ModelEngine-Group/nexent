@@ -1,0 +1,67 @@
+schema_version: '1.0'
+stage: D2
+module: V5-BASELINE
+case:
+  case_id: NB-CHAT-FINAL-ANSWER-001
+  feature_id: F-146
+  business_rule_ids: [F-146-RULE-02]
+  title: Northbound complete and delta final-answer wire compatibility
+  type: API-IT
+  priority: P0
+  status: active
+  automation: automated
+  objective: Verify the deployed northbound API preserves first-final-answer clients and provides explicit incremental opt-in.
+  preconditions:
+  - The changed Northbound and runtime services plus their configuration/database dependencies are healthy at the recorded product version.
+  - NEXENT_TEST_HOME is outside Git with environment, users, secrets, northbound and model configuration.
+  - The published basic_agent is visible to the northbound key and a configured streaming LLM is reachable.
+  test_data:
+    modes: [omitted, complete, delta]
+    query: A unique per-request marker and a deterministic multi-sentence answer instruction.
+    invalid_modes: [unknown, '', true]
+  steps:
+  - order: 1
+    action: Submit fresh chat requests with mode omitted and explicit complete; capture SSE and the first final_answer while recording conversation_id.
+    expected: Each response is HTTP 200 text/event-stream with exactly one root final_answer containing the entire requested marker-bearing answer; no delta answer is exposed.
+  - order: 2
+    action: Submit a fresh request with final_answer_mode=delta and collect answer phases through completion.
+    expected: The response retains delta events followed by a complete event; the canonical body agrees with finalized history without blindly appending a replacement body.
+  - order: 3
+    action: Submit invalid mode values and compare the conversation list before and after.
+    expected: Each response is HTTP 422 and no conversation is created by a rejected request.
+  - order: 4
+    action: Verify request/conversation headers and clean up conversations created by successful requests.
+    expected: Existing headers remain present and all owned conversations are cleaned up.
+  expected_results:
+  - Omitted and explicit complete modes return the full answer in the first and only root final_answer, matching finalized conversation history.
+  - Explicit delta preserves incremental answer phases and canonical final content.
+  - Invalid modes return 422 before conversation creation.
+  - Successful SSE responses retain conversation_id and X-Request-Id headers; owned test conversations are cleaned up.
+  forbidden_side_effects:
+  - Do not accept partial, child or duplicate answer events as a successful complete-mode result.
+  - Do not start or persist a chat for invalid mode requests.
+  acceptance:
+  - id: AC-COMPLETE
+    description: Legacy first-answer consumption receives the complete root result.
+    steps: [1]
+    expected_results: [1]
+    forbidden_side_effects: [1]
+  - id: AC-DELTA
+    description: Explicit delta preserves the current incremental wire protocol.
+    steps: [2]
+    expected_results: [2]
+  - id: AC-VALIDATE
+    description: Invalid modes are rejected before any chat side effect.
+    steps: [3]
+    expected_results: [3]
+    forbidden_side_effects: [2]
+  - id: AC-HEADERS
+    description: Headers and owned-resource cleanup remain intact.
+    steps: [4]
+    expected_results: [4]
+  contract:
+    protocol: HTTP SSE
+    request_expectations:
+    - POST /nb/v1/chat/run accepts omitted, complete and delta final_answer_mode values with existing authentication and agent/query fields.
+    response_expectations:
+    - Omitted/complete produces one complete root final_answer; explicit delta retains current phases; other mode values return 422.

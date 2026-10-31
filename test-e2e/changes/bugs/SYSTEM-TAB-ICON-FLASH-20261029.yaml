@@ -1,0 +1,50 @@
+schema_version: '1.0'
+change:
+  change_id: SYSTEM-TAB-ICON-FLASH-20261029
+  change_type: bugfix
+  bug_id: SYSTEM-TAB-ICON-FLASH-20261029
+  title: Hide default browser icons while the system logo is loading
+  description: Render an immediate transparent favicon and replace it only after the system logo loads; failed loads stay transparent.
+  observed_behavior: A default or previous browser tab icon is briefly visible during slow page/image loading.
+  expected_behavior: Initial HTML and loading states use a transparent favicon, successful image loading displays the system logo, failed loading stays blank, and navigation cannot reintroduce competing icon metadata.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Existing branding UT and browser journey checked only final system icon URLs, without delaying or failing image loads or verifying initial SSR icon placeholders.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-184]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [SYSTEM-BRANDING-D4-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Initial SSR and slow image loading render only transparent icon links.
+    - Successful logo preload switches all browser icons to the system asset, independent of homepage overrides.
+    - Image errors retain transparency and unmounted image callbacks cannot restore icons.
+    - Route metadata does not compete with configuration-owned icon links.
+    test_selectors:
+    - frontend/tests/component/browserTabBranding.test.tsx
+    reason: Extend existing branding UT and its D4 slow-load step. This is frontend-only; no Python or API behavior changes, and no new D1 Case adds necessary evidence.
+  notes: |
+    Continue the F-184 branding capability and retain the existing Case and title-race
+    regression obligations. The sibling SPEC repository is absent, as confirmed by the
+    user; no replacement SPEC root is created here. Initial HTML currently contains
+    direct system-image favicon links, and the client effect writes the same URL before
+    the image completes. Remove competing metadata icon declarations, render transparent
+    React-owned links during SSR, and preload the system image before switching hrefs.
+    Failed loads remain transparent; route transitions retain the mounted icon state.
+    Strengthen AC-04 with an actual delayed/failed image request in the existing browser
+    journey. Prior final-URL assertions remain regression proof after successful loading.
+    Implementation and targeted unit/static checks are complete. The running development
+    server's initial HTML was independently checked for three transparent icon links.
+    Detailed execution evidence stays in machine-local notes outside Git. Formal
+    runtime execution still needs an isolated test-home; full implementation validation
+    is blocked by the existing ConversationResumeBranch UT reference. No screenshot,
+    image asset, deployment setting or operational container was changed for this fix.

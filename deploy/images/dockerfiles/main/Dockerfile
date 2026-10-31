@@ -57,14 +57,15 @@ RUN --mount=type=cache,id=nexent-main-pip-${TARGETARCH},target=/root/.cache/pip,
     pip install uv $(test -n "$MIRROR" && echo "-i $MIRROR")
 WORKDIR /opt/backend
 
-# Layer 0: install base dependencies
+# Layer 0: install base dependencies. backend extras reference the local sdk
+# via [tool.uv.sources], so the sdk must exist before uv sync resolves.
 COPY backend/pyproject.toml /opt/backend/pyproject.toml
+COPY sdk /opt/sdk
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     uv sync --link-mode copy $(test -n "$MIRROR" && echo "-i $MIRROR")
 RUN mkdir -p "$TIKTOKEN_CACHE_DIR" && \
     /opt/backend/.venv/bin/python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
-# Layer 1: install sdk in link mode
-COPY sdk /opt/sdk
+# Layer 1: reinstall the sdk with its performance extra (non-editable)
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     uv pip install --link-mode copy "/opt/sdk[performance]" $(test -n "$MIRROR" && echo "-i $MIRROR")
 

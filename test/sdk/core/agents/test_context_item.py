@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import pytest
 from pydantic import ValidationError
 
@@ -71,11 +73,11 @@ def test_current_action_compact_keeps_tool_result_and_removes_reasoning():
 def test_compact_failure_is_not_cached(monkeypatch):
     item = ContextItem.from_input(ContextItemInput(id="kb", type="knowledge_base", content={"text": "x"}))
     calls = 0
-    def fail():
+    def fail(_self):
         nonlocal calls
         calls += 1
         raise RuntimeError("failed")
-    monkeypatch.setattr(item, "_build_compact_result", fail)
+    monkeypatch.setattr(type(item), "_build_compact_result", fail)
     for _ in range(2):
         with pytest.raises(RuntimeError):
             item.compact()

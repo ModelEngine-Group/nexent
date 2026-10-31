@@ -303,7 +303,7 @@ class TestA2AAgentInfo:
         assert info.transport_type == "http-streaming"
         assert info.protocol_version == "1.0"
         assert info.protocol_type == PROTOCOL_JSONRPC
-        assert info.timeout == 300.0
+        assert info.timeout == 900.0
         assert info.raw_card is None
 
     def test_custom_values(self):

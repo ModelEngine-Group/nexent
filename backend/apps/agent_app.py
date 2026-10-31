@@ -4,7 +4,7 @@ import json
 import logging
 from http import HTTPStatus
 from urllib.parse import quote
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Body, Depends, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
@@ -299,6 +299,7 @@ async def agent_run_api(
 async def northbound_agent_run_api(
     agent_request: AgentRequest,
     authorization: Optional[str] = Header(None),
+    final_answer_mode: Literal["complete", "delta"] = Query("complete"),
 ):
     """Run a northbound-prepared agent request inside the runtime service."""
     try:
@@ -310,6 +311,7 @@ async def northbound_agent_run_api(
             user_id=user_id,
             tenant_id=tenant_id,
             skip_user_save=True,
+            final_answer_mode=final_answer_mode,
         )
     except UnauthorizedError as exc:
         raise HTTPException(
