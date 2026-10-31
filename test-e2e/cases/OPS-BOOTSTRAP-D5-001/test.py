@@ -37,6 +37,7 @@ def test_ops_isolated_start_and_restart(tmp_path):
     bootstrap = '''
 import importlib.abc
 import runpy
+import socket
 import sys
 
 class BusinessImportGuard(importlib.abc.MetaPathFinder):
@@ -53,8 +54,11 @@ def audit(event, args):
     if event == 'socket.connect':
         caller = sys._getframe(1)
         if not (
-            caller.f_globals.get('__name__') == 'socket'
-            and caller.f_code.co_name == '_fallback_socketpair'
+            caller.f_globals is vars(socket)
+            and caller.f_code in {
+                getattr(getattr(socket, name, None), '__code__', None)
+                for name in ('socketpair', '_fallback_socketpair')
+            }
         ):
             raise RuntimeError('Forbidden outbound connection')
     if event in {'subprocess.Popen', 'os.system'}:

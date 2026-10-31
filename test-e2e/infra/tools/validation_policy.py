@@ -3,8 +3,9 @@
 """Classify only explicitly typed, safely scoped Daily asset problems."""
 from __future__ import annotations
 
-CASE_CODES = {"CASE_EXECUTION_MISSING", "CASE_SCRIPT_MISSING", "CASE_SELECTOR_MISSING"}
-WARNING_CODES = {"UT_REFERENCE_MISSING", "DERIVED_VIEW_STALE"}
+CASE_CODES = {"CASE_EXECUTION_MISSING", "CASE_SCRIPT_MISSING", "CASE_SELECTOR_MISSING", "CASE_PREPARATION_MISSING"}
+WARNING_CODES = {"UT_REFERENCE_MISSING", "DERIVED_VIEW_STALE", "FEATURE_RESPONSIBILITY_UNRESOLVED"}
+CASE_WARNING_CODES = {"CASE_RESPONSIBILITY_UNRESOLVED"}
 
 
 def report(root, issues, records):
@@ -13,6 +14,8 @@ def report(root, issues, records):
     for issue in issues:
         severity = "FATAL"
         if issue.code in WARNING_CODES and issue.case_id is None:
+            severity = "WARNING"
+        elif issue.code in CASE_WARNING_CODES and issue.case_id in known:
             severity = "WARNING"
         elif issue.code in CASE_CODES and issue.case_id in known:
             severity = "CASE_BLOCKED"

@@ -24,7 +24,8 @@ def records():
             for case_id in ("CASE-A", "CASE-B")]
 
 
-@pytest.mark.parametrize("code", ["CASE_EXECUTION_MISSING", "CASE_SCRIPT_MISSING", "CASE_SELECTOR_MISSING"])
+@pytest.mark.parametrize("code", ["CASE_EXECUTION_MISSING", "CASE_SCRIPT_MISSING", "CASE_SELECTOR_MISSING",
+                                  "CASE_PREPARATION_MISSING"])
 def test_known_case_failures_block_only_the_owner_without_changing_contract(tmp_path, code):
     original = records()
     result = report(tmp_path, [ValidationIssue(tmp_path, "", "missing", code, "CASE-A")], original)

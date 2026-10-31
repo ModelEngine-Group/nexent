@@ -79,11 +79,12 @@ def inspect(root: Path, phase: str = "implementation", *, require_preparation_ca
             issues.append(ValidationIssue(execution_path, "timeout_seconds", "Case timeout must be an integer from 1 to 7200 seconds"))
         if case.get("status") in {"retired", "skipped_by_policy", "manual"}:
             issues.append(ValidationIssue(execution_path, "", "Inactive or manual case must not have executable metadata"))
-        if (phase == "implementation" and case_id in require_preparation_cases
+        if (phase == "implementation"
                 and stage != "D1" and case.get("status") == "active"
                 and "preparation" not in raw):
             issues.append(ValidationIssue(execution_path, "preparation",
-                                          "Active online case requires an explicit preparation declaration"))
+                                          "Active online case requires an explicit preparation declaration",
+                                          "CASE_PREPARATION_MISSING", case_id))
         implementations = raw.get("implementations")
         if not isinstance(implementations, list) or not implementations:
             issues.append(ValidationIssue(execution_path, "implementations", "At least one implementation is required"))
