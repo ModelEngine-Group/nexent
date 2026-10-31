@@ -2,7 +2,7 @@
 
 ## Choose the document mode
 
-Read this guide before selecting document paths or writing a SPEC. Search the resolved document repository by capability, entry points, API names and related code/tests. Read candidate documents and follow their references before concluding that a baseline is missing. Record the search scope and selected baseline in proposal.md, or in the lightweight bugfix design.md.
+Read this guide before selecting document paths or writing a SPEC. Classify Simple fix first using the definition below. For other work, search the resolved document repository by capability, entry points, API names and related code/tests. Read candidate documents and follow their references before concluding that a baseline is missing. Record the search scope and selected baseline in proposal.md, or in the lightweight bugfix design.md.
 
 Here, a full Nexent SPEC is the feature's proposal.md, design.md and task.md document set. A baseline describes the established feature; a change records proposed work. A delta records requirement changes against a named baseline. Preserve an existing repository's spec.md files and naming conventions; do not force a format migration.
 
@@ -10,10 +10,25 @@ Here, a full Nexent SPEC is the feature's proposal.md, design.md and task.md doc
 | --- | --- |
 | New feature | Create a requirement-scoped SPEC document set. Reference related existing capabilities; create a new baseline only for genuinely new capability scope. |
 | Refactor | Create a requirement-scoped change SPEC with design, preserved behavior and regression ACs. Reuse existing baseline requirements. If external behavior is unchanged, do not invent behavioral deltas. |
+| Simple fix | No SPEC creation or update is required, even when no baseline exists. Report the correction and verification in the PR description or delivery response. |
 | Bug fix with usable baseline | Follow the existing SPEC's Feature/business-rule/Case relationships, confirm code impact, and update relevant sections only. Preserve unaffected contracts and historical evidence. Add a delta only when a requirement actually changes and that mode is useful. |
 | Bug fix without usable baseline | Create a lightweight design.md using [the bugfix template](bugfix-design-template.md). Define the coherent capability's final behavior and Feature/Case coverage, then identify this fix's changes and verification. A proposal/task document set is not required. |
 
 If existing documents cover part of the owning feature, reuse relevant sections and add only the context needed to understand this fix; missing peripheral documentation is separate maintenance work. If a fix restores an already specified contract, retain that contract and add/update its regression scenario and design evidence as needed; a behavioral MODIFIED block is unnecessary unless the documented requirement actually changes.
+
+## Simple fix
+
+Simple fix is a straightforward, bounded modification with clear intent that does not involve or change business rules, interfaces, data contracts or handling, permissions, state transitions, or runtime/deployment behavior. It needs no new requirement or design decision. Classify the actual scope by this definition, rather than by change size or labels; a mixed change qualifies only if its entire scope meets the definition.
+
+Examples, provided they meet the definition:
+
+- Frontend styling or presentation-only adjustments that preserve functional interactions.
+- Corrections to copy, translations or explanatory text that preserve their meaning and existing rules.
+- Mechanical source maintenance, such as formatting or comment corrections, that preserves executable behavior.
+
+Simple fix does not require proposal.md, design.md, task.md, a bug Change YAML, a formal coverage matrix or generated views. Do not create formal Cases merely to document it. Inspect affected code and consumers, make the correction, perform proportionate verification under the repository's UT/regression rules, and report the scope and actual results or blockers in the PR description or delivery response. No standalone report or additional classification justification is required.
+
+Maintain affected tests and accurate existing records as needed. Changes to existing formal scripts/bindings still follow the formal-asset validation and traceability rules, without forcing a new SPEC. If investigation reveals a requirement/design decision or a change outside this definition, select the normal requirement, bugfix or refactor route before continuing the affected implementation. Historical records are not automatically redundant under this classification; assess their references and evidence before any cleanup.
 
 ## Paths and sources of truth
 

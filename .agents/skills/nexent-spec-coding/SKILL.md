@@ -20,7 +20,8 @@ Develop Nexent from an evidence-backed SPEC while keeping product behavior, form
 | Work | Required reference |
 | --- | --- |
 | Choose the SPEC maintenance mode | [spec-maintenance-guide.md](references/spec-maintenance-guide.md) |
-| Fix a bug with or without an existing SPEC | [spec-maintenance-guide.md](references/spec-maintenance-guide.md), [bugfix-design-template.md](references/bugfix-design-template.md), and `nexent-test-assets`'s bugfix reference |
+| Simple fix | [spec-maintenance-guide.md](references/spec-maintenance-guide.md#simple-fix) |
+| Fix a bug outside Simple fix, with or without an existing SPEC | [spec-maintenance-guide.md](references/spec-maintenance-guide.md), [bugfix-design-template.md](references/bugfix-design-template.md), and `nexent-test-assets`'s bugfix reference |
 | Create or revise `proposal.md` | [proposal-template.md](references/proposal-template.md) |
 | Create or revise `design.md`; design formal D1-D5 cases | [design-template.md](references/design-template.md) and [test-design-guide.md](references/test-design-guide.md) |
 | Create or revise `task.md` | [task-template.md](references/task-template.md) |
@@ -30,6 +31,8 @@ Develop Nexent from an evidence-backed SPEC while keeping product behavior, form
 Use `nexent-test-assets` for the concrete Feature, Case, execution binding, schema, and Excel formats. `proposal.md` owns the current-change acceptance criteria, `design.md` owns design rationale and test strategy, and `task.md` owns the change-level traceability and evidence record.
 
 ## Bugfix route
+
+First classify [Simple fix](references/spec-maintenance-guide.md#simple-fix): a straightforward, bounded modification with clear intent that preserves business rules, interfaces, data handling and functional behavior. Follow its lightweight implementation and verification route without creating SPEC documents or a bug Change record solely for process compliance. Maintain any actually affected formal assets under their own validation/traceability rules. The gated workflow below applies to other bugs.
 
 For a bug, search the existing SPEC and formal assets before selecting the document scope. With a usable SPEC, follow its Feature/business-rule/Case links and check actual callers and scripts to determine affected behavior; update only relevant sections. Without a usable SPEC, create a lightweight `design.md` using the bugfix template. Define the complete coherent capability that owns the bug, its final expected behavior and existing Feature/Case coverage. Keep the current fix and verification scope explicit. A missing SPEC does not require creating `proposal.md` or `task.md`, reconstructing unrelated capabilities, or completing historical test coverage.
 
