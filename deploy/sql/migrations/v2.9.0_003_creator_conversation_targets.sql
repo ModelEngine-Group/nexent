@@ -37,7 +37,7 @@ BEGIN
         WHERE tenant_id = owner_id AND agent_origin = 'SYSTEM'
             AND system_key = 'nl2' || kind || '_main' AND version_no = 0 AND delete_flag = 'N';
         IF executor_id IS NULL THEN
-            RAISE EXCEPTION 'Missing public nl2%_main identity; apply v2.8.1_002_shared_creator_identities.sql first', kind;
+            RAISE EXCEPTION 'Missing public nl2%_main identity; apply v2.9.0_002_shared_creator_identities.sql first', kind;
         END IF;
         UPDATE nexent.conversation_record_t SET
             target = CASE WHEN target IS NOT NULL THEN target
@@ -54,6 +54,6 @@ BEGIN
             trigger_row.tgname);
     END LOOP;
     INSERT INTO nexent.schema_migrations (migration_id, checksum, status, source_file)
-    VALUES (marker_id, 'one-shot-v1', 'applied', 'v2.8.1_003_creator_conversation_targets.sql');
+    VALUES (marker_id, 'one-shot-v1', 'applied', 'v2.9.0_003_creator_conversation_targets.sql');
 END;
 $migration$;

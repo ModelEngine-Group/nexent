@@ -37,6 +37,6 @@ BEGIN
         END IF;
     END LOOP;
     INSERT INTO nexent.schema_migrations (migration_id, checksum, status, source_file)
-    VALUES (marker_id, 'one-shot-v1', 'applied', 'v2.8.1_002_shared_creator_identities.sql');
+    VALUES (marker_id, 'one-shot-v1', 'applied', 'v2.9.0_002_shared_creator_identities.sql');
 END;
 $migration$;

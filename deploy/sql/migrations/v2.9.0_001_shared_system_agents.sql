@@ -183,6 +183,6 @@ BEGIN
     INSERT INTO nexent.ag_agent_relation_t SELECT * FROM _sa_relations;
 
     INSERT INTO nexent.schema_migrations (migration_id, checksum, status, source_file)
-    VALUES (marker_id, 'one-shot-v1', 'applied', 'v2.8.1_001_shared_system_agents.sql');
+    VALUES (marker_id, 'one-shot-v1', 'applied', 'v2.9.0_001_shared_system_agents.sql');
 END;
 $migration$;

@@ -122,15 +122,15 @@ def run_migration_sql(engine, filename):
 
 
 def run_legacy_sql(engine):
-    run_migration_sql(engine, "v2.8.1_001_shared_system_agents.sql")
+    run_migration_sql(engine, "v2.9.0_001_shared_system_agents.sql")
 
 
 def run_creator_sql(engine):
-    run_migration_sql(engine, "v2.8.1_002_shared_creator_identities.sql")
+    run_migration_sql(engine, "v2.9.0_002_shared_creator_identities.sql")
 
 
 def run_history_sql(engine):
-    run_migration_sql(engine, "v2.8.1_003_creator_conversation_targets.sql")
+    run_migration_sql(engine, "v2.9.0_003_creator_conversation_targets.sql")
 
 
 def initialize_installation(engine):
@@ -438,7 +438,7 @@ def test_private_resources_abort_sql_migration_atomically(release_database, priv
 def test_creator_history_migration_preserves_targets(release_database):
     engine = release_database
     schema = engine.get_execution_options()["schema_translate_map"]["nexent"]
-    migration = Path(__file__).resolve().parents[3] / "deploy/sql/migrations/v2.8.1_003_creator_conversation_targets.sql"
+    migration = Path(__file__).resolve().parents[3] / "deploy/sql/migrations/v2.9.0_003_creator_conversation_targets.sql"
     sql = migration.read_text(encoding="utf-8").replace("nexent.", schema + ".")
     with engine.begin() as connection:
         connection.execute(insert(AgentInfo).values(agent_id=201, version_no=0, tenant_id="tenant-a", name="draft", agent_origin="USER"))
@@ -625,7 +625,7 @@ def test_history_sql_requires_seeded_creator_ids(release_database, missing_key):
         connection.execute(insert(ConversationRecord).values(conversation_id=9, agent_id=201,
             created_by="user-a", workbench_config={"mode": "agent_create"}))
     before = database_state(engine)
-    with pytest.raises(Exception, match="apply v2.8.1_002_shared_creator_identities.sql first"):
+    with pytest.raises(Exception, match="apply v2.9.0_002_shared_creator_identities.sql first"):
         run_history_sql(engine)
     assert database_state(engine) == before
     assert migration_marker(engine) == ["__once_shared_creator_identities_v1"]
