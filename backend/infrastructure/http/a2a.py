@@ -7,10 +7,13 @@ import logging
 from typing import Any, AsyncIterator, Dict, Optional
 import aiohttp
 
+from consts.const import A2A_AGENT_INVOCATION_TIMEOUT_SECONDS
+
 logger = logging.getLogger(__name__)
 
-# Default timeout for A2A requests (5 minutes)
-DEFAULT_TIMEOUT = 300.0
+# Default timeout for A2A requests, driven by A2A_AGENT_INVOCATION_TIMEOUT_SECONDS
+# (defaults to 15 minutes)
+DEFAULT_TIMEOUT = A2A_AGENT_INVOCATION_TIMEOUT_SECONDS
 # Shorter timeout for lightweight requests like agent-card (10 seconds)
 AGENT_CARD_TIMEOUT = 10.0
 # Retry settings

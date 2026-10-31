@@ -595,7 +595,7 @@ class ExternalA2AAgentConfig(BaseModel):
     transport_type: str = Field(description="Transport type: http-streaming or http-polling", default="http-streaming")
     protocol_version: str = Field(description="A2A protocol version", default="1.0")
     protocol_type: str = Field(description="Protocol type: JSONRPC, HTTP+JSON, or GRPC", default=PROTOCOL_JSONRPC)
-    timeout: float = Field(description="Request timeout in seconds", default=300.0)
+    timeout: float = Field(description="Request timeout in seconds", default=900.0)
     ssl_verify: bool = Field(description="Verify the peer TLS certificate", default=True)
     raw_card: Optional[Dict[str, Any]] = Field(
         description="Raw Agent Card containing skills and capabilities", default=None
