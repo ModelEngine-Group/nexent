@@ -1,10 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
 
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { casService } from "@/services/casService";
-import { sessionService } from "@/services/sessionService";
 import {
   getTokenExpiresAt,
   hasAuthCookies,
@@ -39,25 +39,8 @@ export const isSessionExpiringSoon = (): boolean => {
   return msUntilExpiry > 0 && msUntilExpiry <= TOKEN_REFRESH_BEFORE_EXPIRY_MS;
 };
 
-/**
- * Refresh session via server.js BFF layer.
- * refresh_token is sent automatically via HttpOnly cookie.
- * server.js updates the cookies on success.
- */
-export const refreshSession = async (): Promise<boolean> => {
-  if (!hasAuthCookies()) {
-    return false;
-  }
-
-  const newSession = await sessionService.refreshToken();
-  if (newSession) {
-    log.info("Session refreshed successfully");
-    return true;
-  }
-
-  log.warn("Session refresh failed");
-  return false;
-};
+/** Retained for callers that used the old refresh hook; local JWTs require login on expiry. */
+export const refreshSession = async (): Promise<boolean> => false;
 
 // ============================================================================
 // Hook implementation
@@ -172,8 +155,7 @@ export function useSessionManager(user?: User | null) {
   }, [isSpeedMode, isDeploymentReady]);
 
   /**
-   * Setup automatic token refresh on user activity
-   * Refreshes token before expiry to implement sliding expiration
+   * Reconcile expiry and send CAS heartbeats on user activity
    */
   const setupTokenAutoRefresh = useCallback(() => {
     if (isSpeedMode) return () => {};
@@ -274,16 +256,8 @@ export function useSessionManager(user?: User | null) {
           return;
         }
 
-        if (now - lastActivityCheckAt < MIN_ACTIVITY_CHECK_INTERVAL_MS) return;
-        lastActivityCheckAt = now;
-
-        if (isSessionExpiringSoon()) {
-          const success = await refreshSession();
-
-          if (!success) {
-            log.debug("Token refresh failed, waiting for 401 from backend");
-          }
-        }
+        // Ordinary JWT credentials expire at the configured deadline.
+        // CAS heartbeat remains independent of local password authentication.
       } catch (error) {
         log.error("Activity-based refresh check failed:", error);
       }

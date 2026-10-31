@@ -90,12 +90,6 @@ volumes:
         - key: {{ printf "migrations-%s" $name | quote }}
           path: {{ printf "migrations/%s" $name | quote }}
 {{ end }}
-        - key: supabase-.keep
-          path: supabase/.keep
-{{ range $name := default (list) $sqlFileNames.supabase }}
-        - key: {{ printf "supabase-%s" $name | quote }}
-          path: {{ printf "supabase/%s" $name | quote }}
-{{ end }}
   - name: nexent-workspace
     persistentVolumeClaim:
       claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}

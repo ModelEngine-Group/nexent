@@ -94,6 +94,7 @@ POST /nb/v1/chat/run
 | `conversation_id` | integer | 否 | 已有对话 ID，不填则创建新对话 |
 | `attachments` | array | 否 | 附件列表（S3 URL 或附件元数据对象） |
 | `model_id` | integer | 否 | 模型 ID（覆盖 Agent 默认模型） |
+| `final_answer_mode` | string | 否 | 默认 `complete`：最终只返回一次完整的主 Agent `final_answer`；传 `delta` 保留增量答案协议 |
 | `metadata` | object | 否 | 运行时元数据（对 Agent 可见） |
 | `meta_data` | object | 否 | 审计元数据（仅记录，不暴露给 Agent） |
 | `tool_params` | object | 否 | 工具参数覆盖 |
@@ -203,6 +204,20 @@ data: {"type":"model_output_thinking","content":"，请稍候...","unit_index":1
 
 data: {"type":"final_answer","content":"分析完成","unit_index":2}
 ```
+
+默认或显式传入 `"final_answer_mode":"complete"` 时，过程事件仍实时发送，最终答案在执行成功并完成持久化后一次性返回。旧客户端收到第一个 `final_answer` 即可读取全文。子 Agent 的答案不会作为最终结果提前返回；失败或停止不会把部分答案当作成功结果返回。
+
+需要增量答案的客户端须在请求体中传入 `"final_answer_mode":"delta"`。事件类型仍为 `final_answer`，通过 `answer_phase` 区分阶段：
+
+```text
+data: {"type":"final_answer","answer_phase":"delta","content":"分析"}
+
+data: {"type":"final_answer","answer_phase":"delta","content":"完成"}
+
+data: {"type":"final_answer","answer_phase":"complete","content":""}
+```
+
+`delta` 片段应追加；`complete` 的非空正文是最终修订全文，应替换已有正文；空正文表示使用已累积的片段。保留现有重试回滚和 `reclassify_step` 处理，不要把每个 `final_answer` 都直接拼接。其他模式值返回 `422`。此前依赖增量答案的北向客户端升级时应显式传 `delta`。
 
 ## 结构化反问与停止后补充
 

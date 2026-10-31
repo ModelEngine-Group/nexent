@@ -101,6 +101,7 @@ _doc/
 .claude/skills/python-import-triage
 /deploy/env/.env
 /deploy/env/.env.bak
+/deploy/env/.migration-state/
 
 agent_repository_frontend
 .omo/
@@ -115,3 +116,14 @@ agent_repository_frontend
 
 # CI-managed Python stays inside the checkout.
 .ci-python/
+
+# Local agent workspace and runtime data (never commit)
+.workbuddy/
+.wbapp_*.genie
+elasticsearch/
+redis/
+deliverables/
+_merge_commit_msg*.txt
+_release_commit_msg*.txt
+release-notes-*.md
+deploy/docker/compose/docker-compose-es-volume.yml

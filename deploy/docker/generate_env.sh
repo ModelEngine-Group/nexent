@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 # Exit immediately if a command exits with a non-zero status
 set -e
@@ -102,20 +103,6 @@ update_env_file() {
   update_env_var "POSTGRES_HOST" "localhost"
   update_env_var "POSTGRES_PORT" "5434"
 
-  # Supabase Configuration (Only for full version)
-  if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-    if [ -n "$SUPABASE_KEY" ]; then
-      update_env_var "SUPABASE_KEY" "$SUPABASE_KEY"
-    fi
-
-    if [ -n "$SERVICE_ROLE_KEY" ]; then
-      update_env_var "SERVICE_ROLE_KEY" "$SERVICE_ROLE_KEY"
-    fi
-
-    update_env_var "SUPABASE_URL" "http://localhost:8000"
-    update_env_var "API_EXTERNAL_URL" "http://localhost:8000"
-    update_env_var "SITE_URL" "http://localhost:3011"
-  fi
 
   echo "   ✅ deploy/env/.env updated successfully with localhost development URLs"
 }
@@ -135,12 +122,6 @@ show_summary() {
     echo "  🔑 ELASTICSEARCH_API_KEY: $ELASTICSEARCH_API_KEY"
   else
     echo "  ⚠️  ELASTICSEARCH_API_KEY: Not generated (Elasticsearch not available)"
-  fi
-  if [ -n "$SUPABASE_KEY" ]; then
-    echo "  🔑 SUPABASE_KEY: $SUPABASE_KEY"
-  fi
-  if [ -n "$SERVICE_ROLE_KEY" ]; then
-    echo "  🔑 SERVICE_ROLE_KEY: $SERVICE_ROLE_KEY"
   fi
   if [ -n "$SSH_USERNAME" ]; then
     echo "  👤 SSH_USERNAME: $SSH_USERNAME"

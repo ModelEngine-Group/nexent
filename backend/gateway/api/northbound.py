@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from http import HTTPStatus
-from typing import Annotated, Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional, Literal
 from urllib.parse import unquote, urlparse
 
 import httpx
@@ -405,6 +405,12 @@ async def run_chat(
         ],
     ),
     idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    final_answer_mode: Literal["complete", "delta"] = Body(
+        "complete",
+        embed=True,
+        description="Final answer delivery: complete returns one full root answer (default); "
+                    "delta preserves incremental final_answer events and their completion phase.",
+    ),
 ):
     try:
         reject_legacy_agent_fields(await request.json())
@@ -420,6 +426,7 @@ async def run_chat(
             tool_params=tool_params,
             model_id=model_id,
             idempotency_key=idempotency_key,
+            final_answer_mode=final_answer_mode,
         )
     except LimitExceededError as e:
         logging.error(f"Too Many Requests: rate limit exceeded: {str(e)}", exc_info=e)

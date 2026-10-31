@@ -15,7 +15,7 @@ dependencies = [
     "PyJWT>=2.8.0",
     "sqlalchemy~=2.0.37",
     "greenlet<3.5.0",
-    "supabase>=2.18.1",
+    "bcrypt>=4.2,<6",
     "websocket-client>=1.8.0",
     "pyyaml>=6.0.2",
     "rapidfuzz>=3.0.0",

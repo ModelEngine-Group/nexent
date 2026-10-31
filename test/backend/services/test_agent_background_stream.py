@@ -20,6 +20,9 @@ def stream_runtime(monkeypatch):
     info = SimpleNamespace(
         stop_event=asyncio.Event(), cancellation_scope=None,
         agent_config=SimpleNamespace(pre_run_tool_events=()),
+        # The real AgentRunInfo always carries an observer; the execution
+        # stream attaches its run-local execution history to it.
+        observer=Mock(),
         attempt_outcome="completed", thread_future=None,
     )
     persist = Mock()
