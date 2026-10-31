@@ -72,9 +72,9 @@ def main(argv=None):
                     raise RuntimeError("Pending deployment recovery must be resolved before synchronization")
                 state["head"] = sync_checkout(repo, args.branch, log_dir=directory / "git")
                 env = os.environ.copy()
-                # Derived output must never silently change tracked Feature navigation.
+                # Daily reports local asset problems without rewriting tracked views.
                 command = [str(runtime), str(repo / "test-e2e/infra/tools/validate_test_assets.py"),
-                           "--phase", "implementation", "--generate"]
+                           "--phase", "implementation", "--daily-report", str(directory / "asset-validation.json")]
                 if logged(command, repo, env, directory / "validate.log", 180):
                     raise RuntimeError("Formal asset validation failed; inspect local launcher log")
                 if git(repo, "status", "--porcelain", "--untracked-files=normal", log_dir=directory / "git"):
@@ -83,7 +83,7 @@ def main(argv=None):
                 import static_assets
                 import suite
                 static_assets.apply(home, repo / "test-e2e/infra/assets")
-                records = suite.selection(repo, argparse.Namespace(case=None, stage=None, feature=None, change=None))
+                records = suite.selection(repo, argparse.Namespace(case=None, stage=None, feature=None, change=None), daily=True)
                 problems = suite.doctor(repo, home, records)
                 if problems:
                     save(directory / "doctor.json", {"ready": False, "problems": problems})

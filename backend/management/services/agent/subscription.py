@@ -781,9 +781,15 @@ async def run_agent_stream(
     run_identifier = _agent_run_identifier(agent_request)
     execution = None
     agent_capacity_token = None
+    # Workbench shares its definition across tenants, but not its admission budget.
+    capacity_key = (
+        f"{resolved_tenant_id}:workbench_main"
+        if agent_request.entrypoint == "workbench"
+        else agent_request.agent_id
+    )
     try:
         agent_capacity_token = agent_run_manager.reserve_agent_capacity(
-            agent_request.agent_id,
+            capacity_key,
             RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
         )
         execution = runtime_thread_manager.submit(

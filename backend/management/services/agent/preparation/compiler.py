@@ -250,6 +250,10 @@ async def create_agent_config(
 
     # Build the system prompt from the single stored Agent instruction field
     prompt = agent_info.get("prompt", "")
+    if agent_info.get("agent_origin") == "SYSTEM":
+        from management.services.agent.system import localized_system_prompt
+
+        prompt = localized_system_prompt(agent_info, language)
 
     is_manager = len(worker_agents) > 0 or len(external_a2a_agents) > 0
 

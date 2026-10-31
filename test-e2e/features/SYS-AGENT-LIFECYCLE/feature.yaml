@@ -1,0 +1,42 @@
+schema_version: '1.0'
+module:
+  id: CHAT-WORKBENCH
+  name: Workbench interaction
+feature:
+  feature_id: SYS-AGENT-LIFECYCLE
+  name: Shared platform system Agent lifecycle
+  status: active
+  description: Shared versioned Workbench and code-backed identity-only NL2Agent/NL2Skill.
+  business_rules:
+  - rule_id: SYS-AGENT-LIFECYCLE-RULE-001
+    description: Workbench publishes one shared definition and persisted resource
+      bindings per product release; NL2Agent/NL2Skill each store one shared identity
+      only, loading prompts and custom tools from product files/code. Runtime never
+      initializes definitions. Creator identities are initialized only by ordered
+      SQL; Python initializes and publishes Workbench only.
+  - rule_id: SYS-AGENT-LIFECYCLE-RULE-002
+    description: One-shot versioned SQL migration merges identical legacy Workbench
+      versions and bindings by version number, preserves tenant-owned histories and
+      physically removes redundant system definitions atomically and idempotently.
+  - rule_id: SYS-AGENT-LIFECYCLE-RULE-003
+    description: Workbench concurrency is isolated by authenticated tenant and stable
+      workbench_main identity, with the existing default 50 admitted runs per tenant.
+      Users and versions in the same tenant share this budget. Native Agent limits,
+      worker limits and memory behavior are unchanged.
+  - rule_id: SYS-AGENT-LIFECYCLE-RULE-004
+    description: Workbench, NL2Agent and NL2Skill each have one shared identity. Creator
+      conversations use the executor Agent ID and a separately authorized typed resource
+      target. Every entrypoint reuses one creator persistence path; migration preserves
+      existing conversation/message identity without duplicates. Standalone creators
+      leave Workbench configuration unset; history and target restore from verified
+      executor identity without persisting inferred UI state.
+  - rule_id: SYS-AGENT-LIFECYCLE-RULE-005
+    description: Configuration-page creator histories and counts are scoped to authenticated
+      owner, current-tenant target and public executor; opening history resumes its
+      ID and new conversation keeps the target without pre-creating or copying messages.
+  required_test_stages:
+  - D5
+  source:
+    spec_path: ../nexent-doc/docs/Developing/chat-shared-system-agents/proposal.md
+    notes: Traditional UT proves isolated rules; SYS-AGENT-D5-001 proves real PostgreSQL
+      concurrency and rollback separately.

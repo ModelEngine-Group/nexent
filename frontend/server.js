@@ -2,6 +2,7 @@
 
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:http";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import https from "node:https";
@@ -86,6 +87,26 @@ const PROJECT_CONFIG_ASSETS = {
   "/modelengine-logo2.png": {
     relativePath: "modelengine-logo2.png",
     contentType: "image/png",
+  },
+  "/browser-tab-logo.png": {
+    relativePath: "browser-tab-logo.png",
+    fallbackRelativePath: "modelengine-logo.png",
+    contentType: "image/png",
+  },
+  "/browser-tab-logo.jpg": {
+    relativePath: "browser-tab-logo.jpg",
+    fallbackRelativePath: "modelengine-logo.png",
+    contentType: "image/jpeg",
+  },
+  "/home-logo.png": {
+    relativePath: "home-logo.png",
+    fallbackRelativePath: "modelengine-logo.png",
+    contentType: "image/png",
+  },
+  "/home-logo.jpg": {
+    relativePath: "home-logo.jpg",
+    fallbackRelativePath: "modelengine-logo.png",
+    contentType: "image/jpeg",
   },
   "/locales/zh/custom.json": {
     relativePath: path.join("locales", "zh", "custom.json"),
@@ -298,10 +319,21 @@ function updateLocalConfig(oldData, newData) {
   if (!oldData || !newData) {
     return oldData;
   }
-  return Object.keys(oldData).reduce((acc, key) => {
-    acc[key] = newData[key] ? newData[key] : oldData[key];
-    return acc;
-  }, {});
+  const result = { ...oldData };
+  for (const key of Object.keys(oldData)) {
+    if (key === "homeLogo" || key === "tabLogo") continue;
+    if (
+      (key === "productName" || key === "homeTitle" || key === "tabTitle") &&
+      typeof newData[key] === "string"
+    ) {
+      result[key] = newData[key].trim();
+    } else if (newData[key]) {
+      result[key] = newData[key];
+    }
+  }
+  const homeTitle = newData.homeTitle ?? newData.tabTitle;
+  if (typeof homeTitle === "string") result.homeTitle = homeTitle.trim();
+  return result;
 }
 
 // ============================================================================
@@ -680,13 +712,23 @@ function handleProjectConfigAsset(pathname, req, res) {
 
   const persistedPath = path.join(PROJECT_CONFIG_DIR, asset.relativePath);
   const builtInPath = path.join(BUILT_IN_PUBLIC_DIR, asset.relativePath);
+  const fallbackPath = asset.fallbackRelativePath
+    ? path.join(PROJECT_CONFIG_DIR, asset.fallbackRelativePath)
+    : builtInPath;
   const selectedPath = fs.existsSync(persistedPath)
     ? persistedPath
-    : builtInPath;
+    : fs.existsSync(fallbackPath)
+      ? fallbackPath
+      : asset.fallbackRelativePath
+        ? path.join(BUILT_IN_PUBLIC_DIR, asset.fallbackRelativePath)
+        : builtInPath;
   if (!fs.existsSync(selectedPath)) return false;
 
   res.writeHead(200, {
-    "Content-Type": asset.contentType,
+    "Content-Type":
+      asset.fallbackRelativePath && selectedPath !== persistedPath
+        ? "image/png"
+        : asset.contentType,
     "Cache-Control": "no-store",
   });
   if (req.method === "HEAD") {
@@ -712,16 +754,22 @@ async function handleProjectConfigApi(pathname, req, res) {
   // 文件上传处理
   ensureDir(ICON_UPLOAD_DIR);
   const form = new multiparty.Form({ uploadDir: ICON_UPLOAD_DIR });
+  let uploadedFiles = {};
   try {
     const { fields, files } = await parseMultipartForm(form, req);
-    handleLogoUpload(files);
-    updateAndSaveLocaleConfig(fields);
+    uploadedFiles = files;
+    updateAndSaveLocaleConfig(fields, files);
     sendJsonResponse(res, 200, { message: "success update" });
   } catch (err) {
     console.error(err);
     const status = err.httpCode || 400;
     res.writeHead(status, { "Content-Type": "text/plain" });
     res.end("Request failed");
+  } finally {
+    // Remove only multipart temporary files that were not moved into place.
+    for (const file of Object.values(uploadedFiles).flat()) {
+      if (file.path && fs.existsSync(file.path)) fs.unlinkSync(file.path);
+    }
   }
 
   return true;
@@ -828,25 +876,98 @@ function parseMultipartForm(form, req) {
 }
 
 /**
- * 处理Logo重命名上传
+ * Persist homepage branding and accept the previous upload field as an alias.
  */
-function handleLogoUpload(files) {
+function handleLogoUpload(files, fields = {}) {
+  const homeFile = files.homeLogo?.[0] ?? files.tabLogo?.[0];
+  let homeImage;
+  let homeFilename;
+  if (homeFile) {
+    if (fs.statSync(homeFile.path).size > 200 * 1024) {
+      throw Object.assign(new Error("Homepage logo exceeds 200KB"), {
+        httpCode: 400,
+      });
+    }
+    homeImage = fs.readFileSync(homeFile.path);
+    const isPng = homeImage
+      .subarray(0, 8)
+      .equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+    const isJpeg = homeImage
+      .subarray(0, 3)
+      .equals(Buffer.from([255, 216, 255]));
+    if (!isPng && !isJpeg) {
+      throw Object.assign(new Error("Homepage logo must be PNG or JPEG"), {
+        httpCode: 400,
+      });
+    }
+    homeFilename = isPng ? "home-logo.png" : "home-logo.jpg";
+  }
   if (files.logo) renameFile(files.logo[0].path, "modelengine-logo2.png");
   if (files.logo2) renameFile(files.logo2[0].path, "modelengine-logo.png");
+  if (homeFile) {
+    renameFile(homeFile.path, homeFilename);
+    return `${homeFilename}?v=${createHash("sha256").update(homeImage).digest("hex").slice(0, 12)}`;
+  }
+  if (
+    fields.removeHomeLogo?.[0] === "true" ||
+    fields.removeTabLogo?.[0] === "true"
+  ) {
+    for (const name of ["home-logo.png", "home-logo.jpg"]) {
+      const filename = path.join(ICON_UPLOAD_DIR, name);
+      if (fs.existsSync(filename)) fs.unlinkSync(filename);
+    }
+    return "";
+  }
+  return undefined;
 }
 
 /**
- * 读取、更新、保存多语言配置
+ * Preserve legacy keys while storing localized homepage titles and a shared logo.
  */
-function updateAndSaveLocaleConfig(fields) {
+function updateAndSaveLocaleConfig(fields, files = {}) {
   const configZh = readLocaleConfig("zh");
   const configEn = readLocaleConfig("en");
 
   const fieldsZh = JSON.parse(fields.configZh[0]);
   const fieldsEn = JSON.parse(fields.configEn[0]);
+  if (
+    !fieldsZh ||
+    typeof fieldsZh !== "object" ||
+    Array.isArray(fieldsZh) ||
+    !fieldsEn ||
+    typeof fieldsEn !== "object" ||
+    Array.isArray(fieldsEn)
+  ) {
+    throw new Error("Locale configuration must be an object");
+  }
+  for (const [values, nameLimit, titleLimit] of [
+    [fieldsZh, 20, 50],
+    [fieldsEn, 50, 100],
+  ]) {
+    for (const [key, limit] of [
+      ["productName", nameLimit],
+      ["homeTitle", titleLimit],
+      ["tabTitle", titleLimit],
+    ]) {
+      const value = values[key];
+      if (
+        value !== undefined &&
+        (typeof value !== "string" || value.trim().length > limit)
+      ) {
+        throw Object.assign(new Error("Invalid branding title"), {
+          httpCode: 400,
+        });
+      }
+    }
+  }
+  const homeLogo = handleLogoUpload(files, fields);
 
   const newConfigZh = updateLocalConfig(configZh, fieldsZh);
   const newConfigEn = updateLocalConfig(configEn, fieldsEn);
+  if (homeLogo !== undefined) {
+    newConfigZh.homeLogo = homeLogo;
+    newConfigEn.homeLogo = homeLogo;
+  }
 
   saveLocaleConfig(JSON.stringify(newConfigZh, null, 2), "zh");
   saveLocaleConfig(JSON.stringify(newConfigEn, null, 2), "en");

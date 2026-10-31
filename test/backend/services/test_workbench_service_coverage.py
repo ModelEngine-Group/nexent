@@ -4,7 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 from contracts.errors.exceptions import ValidationError, WorkbenchError
-from contracts.agent import WorkbenchSessionConfig
+from contracts.agent import SystemAgentRef, WorkbenchSessionConfig
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.services.agent import workbench as workbench_service
 
 
@@ -22,7 +23,7 @@ def _resolve_dependencies(monkeypatch, snapshot=None):
     monkeypatch.setattr(
         workbench_service.system_agent_provider,
         "get_workbench_main_ref",
-        lambda _tenant: SimpleNamespace(agent_id=99, version_no=4),
+        lambda _tenant: SystemAgentRef(ASSET_OWNER_TENANT_ID, "workbench_main", 99, 4),
     )
     monkeypatch.setattr(
         workbench_service,

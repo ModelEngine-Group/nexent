@@ -373,6 +373,11 @@ services:
     profiles:
       - terminal
 
+  nexent-ops:
+    extends:
+      file: docker-compose-ops.yml
+      service: nexent-ops
+
 networks:
   nexent:
     name: nexent_network

@@ -666,15 +666,119 @@ ensure_namespace() {
 }
 
 helm_upgrade_application_release() {
+    local paused="${1:-false}"
     helm upgrade --install "$APPLICATION_RELEASE_NAME" "$APPLICATION_CHART_DIR" \
         --namespace "$NAMESPACE" \
         -f "$GENERATED_VALUES" \
         -f "$GENERATED_RUNTIME_VALUES" \
         -f "$GENERATED_PERSISTENCE_VALUES" \
         -f "$GENERATED_SECRETS_VALUES" \
+        --set global.businessPaused="$paused" \
+        --set global.systemBootstrapTimeoutSeconds="$((K8S_WAIT_TIMEOUT_SECONDS * 3))" \
         --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
         --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
         --set nexent-common.secrets.ssh.password="$SSH_PASSWORD"
+}
+
+validate_application_release() {
+    local paused
+    for paused in true false; do
+        helm template "$APPLICATION_RELEASE_NAME" "$APPLICATION_CHART_DIR" \
+            --namespace "$NAMESPACE" \
+            -f "$GENERATED_VALUES" -f "$GENERATED_RUNTIME_VALUES" \
+            -f "$GENERATED_PERSISTENCE_VALUES" -f "$GENERATED_SECRETS_VALUES" \
+            --set global.businessPaused="$paused" \
+            --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
+            --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
+            --set nexent-common.secrets.ssh.password="$SSH_PASSWORD" >/dev/null || return 1
+    done
+}
+
+stop_old_business_workloads() {
+    local deployment found pods elapsed
+    local existing=()
+    for deployment in nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-data-process; do
+        found=$(kubectl get deployment "$deployment" -n "$NAMESPACE" --ignore-not-found -o name) || return 1
+        [ -z "$found" ] || existing+=("$deployment")
+    done
+    for deployment in "${existing[@]}"; do
+        kubectl scale "deployment/$deployment" -n "$NAMESPACE" --replicas=0 || return 1
+    done
+    for deployment in "${existing[@]}"; do
+        elapsed=0
+        while true; do
+            pods=$(kubectl get pods -n "$NAMESPACE" -l "app=$deployment" -o name) || return 1
+            [ -n "$pods" ] || break
+            if [ "$elapsed" -ge "$K8S_WAIT_TIMEOUT_SECONDS" ]; then
+                echo "Error: old $deployment Pods did not stop; migration will not run." >&2
+                return 1
+            fi
+            sleep 2
+            elapsed=$((elapsed + 2))
+        done
+    done
+}
+
+bootstrap_job_failed() {
+    local job="$1"
+    kubectl logs -n "$NAMESPACE" "job/$job" --all-containers=true --tail=200 >&2 || true
+    kubectl delete job "$job" -n "$NAMESPACE" --wait=true --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s" >/dev/null || true
+    echo "Error: system Agent bootstrap failed; business workloads remain paused." >&2
+    return 1
+}
+
+run_system_agent_bootstrap() {
+    local jobs job pod status elapsed
+    jobs=$(kubectl get jobs -n "$NAMESPACE" \
+        -l "app=nexent-system-bootstrap,app.kubernetes.io/instance=$APPLICATION_RELEASE_NAME" \
+        --sort-by=.metadata.creationTimestamp \
+        -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}') || return 1
+    job=$(printf '%s\n' "$jobs" | sed -n '$p')
+    if [ -z "$job" ]; then
+        echo "Error: no system Agent bootstrap Job was created." >&2
+        return 1
+    fi
+    elapsed=0
+    while true; do
+        status=$(kubectl get job "$job" -n "$NAMESPACE" -o 'jsonpath={.status.failed}') || { bootstrap_job_failed "$job"; return 1; }
+        if [ "${status:-0}" -gt 0 ] || [ "$elapsed" -ge "$K8S_WAIT_TIMEOUT_SECONDS" ]; then
+            bootstrap_job_failed "$job"
+            return 1
+        fi
+        pod=$(kubectl get pods -n "$NAMESPACE" -l "job-name=$job" \
+            -o 'jsonpath={range .items[?(@.status.containerStatuses[0].ready==true)]}{.metadata.name}{"\n"}{end}') || { bootstrap_job_failed "$job"; return 1; }
+        pod=$(printf '%s\n' "$pod" | sed -n '$p')
+        [ -z "$pod" ] || break
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    sync_official_skills_to_workspace "$pod" || { bootstrap_job_failed "$job"; return 1; }
+    kubectl exec -n "$NAMESPACE" "$pod" -c nexent-config -- sh -c ': > /tmp/nexent-bootstrap-start' || { bootstrap_job_failed "$job"; return 1; }
+    elapsed=0
+    while true; do
+        status=$(kubectl get job "$job" -n "$NAMESPACE" -o 'jsonpath={.status.succeeded}:{.status.failed}') || { bootstrap_job_failed "$job"; return 1; }
+        case "$status" in
+            1:*) return 0 ;;
+            *:[1-9]*) bootstrap_job_failed "$job"; return 1 ;;
+        esac
+        if [ "$elapsed" -ge "$K8S_WAIT_TIMEOUT_SECONDS" ]; then
+            bootstrap_job_failed "$job"
+            return 1
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+}
+
+deploy_application_release() {
+    validate_application_release || return 1
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+        stop_old_business_workloads || return 1
+        helm_upgrade_application_release true || return 1
+        run_system_agent_bootstrap || return 1
+    fi
+    helm_upgrade_application_release false || return 1
+    wait_for_nexent_ready || return 1
 }
 
 helm_upgrade_infrastructure_release() {
@@ -742,6 +846,24 @@ find_ready_config_pod() {
     printf '%s\n' "$ready_pods" | sed -n '$p'
 }
 
+publish_shared_workbench() {
+    # Explicit/manual publication helper; normal deployment uses the bootstrap Job.
+    local config_pod
+    config_pod=$(find_ready_config_pod) || return 1
+    if [ -z "$config_pod" ]; then
+        echo "Error: no Ready nexent-config pod is available for Workbench publication." >&2
+        return 1
+    fi
+
+    # A Ready config pod has completed SQL migrations; use its release environment.
+    echo "Initializing and publishing shared Workbench..."
+    if ! kubectl exec -n "$NAMESPACE" "$config_pod" -c nexent-config -- sh -c \
+        'cd /opt/backend && python -m management.services.agent.system_initialize && python -m management.services.agent.system_release'; then
+        echo "Error: shared Workbench initialization or publication failed." >&2
+        return 1
+    fi
+}
+
 sync_official_skills_to_workspace() {
     local config_pod
     local expected_manifest
@@ -749,7 +871,10 @@ sync_official_skills_to_workspace() {
     local staging_dir="/mnt/nexent/.official-skills-zip.staging"
     local backup_dir="/mnt/nexent/.official-skills-zip.backup"
 
-    config_pod=$(find_ready_config_pod)
+    config_pod="${1:-}"
+    if [ -z "$config_pod" ]; then
+        config_pod=$(find_ready_config_pod) || return 1
+    fi
     if [ -z "$config_pod" ]; then
         echo "Error: no Ready nexent-config pod is available for official skills synchronization."
         return 1
@@ -884,7 +1009,7 @@ wait_for_nexent_ready() {
     local deployment
 
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-        deployments="nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web"
+        deployments="nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-ops"
     fi
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
         deployments="$deployments nexent-data-process"
@@ -1443,26 +1568,15 @@ apply() {
     render_runtime_secret_values
     recreate_legacy_nexent_secret_for_helm_management
 
-    # Step 8: Install or upgrade the application release exactly once.
+    # Step 8: Pause business Pods, run the bootstrap Job, then activate the release.
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         echo "正在部署应用 Helm release '$APPLICATION_RELEASE_NAME'..."
     else
         echo "Deploying application Helm release '$APPLICATION_RELEASE_NAME'..."
     fi
-    helm_upgrade_application_release
-
-    echo "Waiting for selected Nexent workloads..."
-    if ! wait_for_nexent_ready; then
-        echo "Error: one or more Nexent workloads failed to become ready."
+    if ! deploy_application_release; then
+        echo "Error: application deployment failed; no automatic old-service restart was attempted."
         exit 1
-    fi
-
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-        echo "Synchronizing official skills to the workspace PVC..."
-        if ! sync_official_skills_to_workspace; then
-            echo "Error: official skills synchronization failed."
-            exit 1
-        fi
     fi
 
     # Step 9: Create the super admin user when Supabase is selected.

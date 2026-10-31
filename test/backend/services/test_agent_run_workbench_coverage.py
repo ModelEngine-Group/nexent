@@ -15,6 +15,13 @@ agent_subscription = legacy.agent_subscription
 AgentRequest = legacy.AgentRequest
 
 
+@pytest.fixture(autouse=True)
+def isolated_run_manager(monkeypatch):
+    # Legacy module mocks otherwise retain deleted attributes between tests.
+    monkeypatch.setattr(agent_subscription, "agent_run_manager", MagicMock())
+    monkeypatch.setattr(agent_run, "agent_run_manager", MagicMock())
+
+
 def _request(**overrides):
     values = {
         "agent_id": 1,

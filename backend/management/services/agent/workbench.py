@@ -14,7 +14,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 from nexent.core.agents.agent_model import AgentConfig
 
 from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict, WorkbenchError
-from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, CAN_EDIT_ALL_USER_ROLES, PERMISSION_PRIVATE
 from contracts.agent import WorkbenchSessionConfig
 from management.db.skill import repository as skill_db
 from management.db.tool.repository import query_tools_by_ids
@@ -157,6 +157,7 @@ def _resolve_skill_mounts(
     tenant_id: str,
     published_instances: Tuple[Mapping[str, Any], ...] = (),
     user_id: Optional[str] = None,
+    published_tenant_id: Optional[str] = None,
 ) -> Tuple[ResolvedSkillMount, ...]:
     if not mounts and not published_instances:
         return ()
@@ -181,10 +182,11 @@ def _resolve_skill_mounts(
     groups = set(query_group_ids_by_user(user_id) or []) if user_id else set()
     for mount in effective_mounts:
         skill_id = int(mount["skill_id"])
-        skill = skill_db.get_skill_by_id(skill_id, tenant_id)
+        resource_owner = published_tenant_id if skill_id in seen_skill_ids and published_tenant_id else tenant_id
+        skill = skill_db.get_skill_by_id(skill_id, resource_owner)
         if skill is None:
             raise WorkbenchError("RUNTIME_SKILL_FORBIDDEN", status_code=403)
-        if user_id and not can_view_skill(skill=skill, user_id=user_id, user_role=role, user_group_ids=groups):
+        if resource_owner != ASSET_OWNER_TENANT_ID and user_id and not can_view_skill(skill=skill, user_id=user_id, user_role=role, user_group_ids=groups):
             raise WorkbenchError("RUNTIME_SKILL_FORBIDDEN", status_code=403)
         instance = next((item for item in published_instances if item.get("skill_id") == skill_id), {})
         config_values = resolve_skill_config(
@@ -202,7 +204,7 @@ def _resolve_skill_mounts(
                 config_values=config_values,
                 files=_capture_skill_file_snapshot(
                     str(skill.get("name") or skill_id),
-                    tenant_id,
+                    resource_owner,
                 ),
             )
         )
@@ -210,7 +212,7 @@ def _resolve_skill_mounts(
     definitions = {int(tool["tool_id"]): deepcopy(tool) for tool in query_tools_by_ids(tool_ids)} if tool_ids else {}
     for tool_id in tool_ids:
         tool = definitions.get(tool_id)
-        if not tool or tool.get("is_available") is not True or str(tool.get("author")) != tenant_id:
+        if not tool or tool.get("is_available") is not True or str(tool.get("author")) not in (tenant_id, ASSET_OWNER_TENANT_ID):
             raise WorkbenchError("RUNTIME_SKILL_DEPENDENCY_UNAVAILABLE")
         values: Dict[str, Any] = {}
         parameter_names = {param.get("name") for param in tool.get("params") or []}
@@ -229,10 +231,8 @@ def _resolve_skill_mounts(
 def build_workbench_main_profile(tenant_id: str) -> Dict[str, Any]:
     """Return public presentation metadata for the tenant system root."""
     ref = system_agent_provider.get_workbench_main_ref(tenant_id)
-    skills = SkillService(tenant_id=tenant_id).get_enabled_skills_for_agent(
-        agent_id=ref.agent_id,
-        tenant_id=tenant_id,
-        version_no=ref.version_no,
+    skills = SkillService(tenant_id=ref.tenant_id).get_enabled_skills_for_agent(
+        agent_id=ref.agent_id, tenant_id=ref.tenant_id, version_no=ref.version_no,
     )
     return {
         "agent_id": ref.agent_id,
@@ -453,8 +453,7 @@ def resolve_workbench_config(
             raise WorkbenchError("WORKBENCH_MODEL_NOT_ALLOWED")
 
     snapshot["skill_instances"] = skill_db.search_skills_for_agent(
-        agent_id=int(root_identity.agent_id),
-        tenant_id=tenant_id,
+        agent_id=int(root_identity.agent_id), tenant_id=system_ref.tenant_id,
         version_no=int(root_identity.version_no),
     )
     generation = canonical.generation_config
@@ -481,6 +480,7 @@ def resolve_workbench_config(
             overlay.skill_mounts, tenant_id,
             tuple(root.published_snapshot.get("skill_instances") or []),
             user_id=user_id,
+            published_tenant_id=system_ref.tenant_id,
         ),
         child_mounts=child_mounts,
     )

@@ -10,10 +10,6 @@ concurrency:
 on:
   workflow_dispatch:
     inputs:
-      runner_label_json:
-        description: 'JSON runner labels; blank uses self-hosted, or use ["ubuntu-24.04"] for GitHub-hosted'
-        required: false
-        default: ''
       pytest_file_timeout:
         description: 'per-file timeout in seconds (0=disabled)'
         required: false
@@ -49,18 +45,19 @@ on:
 
 jobs:
   test:
-    runs-on: ${{ fromJson(inputs.runner_label_json || '["self-hosted", "linux", "x64"]') }}
+    runs-on: ut
     env:
-      UV_PYTHON_INSTALL_DIR: ${{ github.workspace }}/.ci-python
       UV_PYTHON: "3.11.15"
+      CODECOV_CLI_VERSION: "11.3.2"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        # astral-sh/setup-uv@v10.3.3
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2
         with:
-          version: "0.13.6"
+          version: "latest"
 
       - name: Set up managed Python
         run: |
@@ -101,10 +98,57 @@ jobs:
             echo "All tests passed successfully."
           fi
 
+      - name: Set up cached Codecov CLI
+        id: codecov-cli
+        env:
+          CODECOV_OS: ${{ inputs.codecov_os || (runner.arch == 'ARM64' && 'linux-arm64' || 'linux') }}
+        run: |
+          set -euo pipefail
+          # Pin release digests so cache hits are verified without network requests.
+          case "$CODECOV_OS" in
+            linux)
+              asset=codecovcli_linux
+              checksum=8e1bfb71661378530f6ea21e82b414095899e565cbb4cf555c613064be17b973
+              ;;
+            linux-arm64)
+              asset=codecovcli_linux_arm64
+              checksum=a4b71cac685742e272e7cfd4a390cafc3736f57ebc3cf7ba2e24010f19c7f23f
+              ;;
+            *) echo "Unsupported Codecov OS: $CODECOV_OS" >&2; exit 1 ;;
+          esac
+          # Prefer runner configuration, then the standard Unix cache location.
+          cache_dir="${CODECOV_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/codecov}"
+          mkdir -p "$cache_dir"
+          cache_dir="$(cd "$cache_dir" && pwd)"
+          binary="$cache_dir/codecov"
+          verify_binary() {
+            printf '%s  %s\n' "$checksum" "$1" | sha256sum --check --status
+          }
+          if [ -f "$binary" ] && verify_binary "$binary"; then
+            echo "Using cached Codecov CLI $CODECOV_CLI_VERSION ($CODECOV_OS)"
+          else
+            temporary_binary="$(mktemp "$cache_dir/codecov.XXXXXX")"
+            trap 'rm -f "$temporary_binary"' EXIT
+            curl --fail --silent --show-error --location --retry 3 \
+              --connect-timeout 15 --max-time 180 \
+              "https://github.com/codecov/codecov-cli/releases/download/v$CODECOV_CLI_VERSION/$asset" \
+              --output "$temporary_binary"
+            if ! verify_binary "$temporary_binary"; then
+              echo "Codecov CLI checksum verification failed" >&2
+              exit 1
+            fi
+            chmod +x "$temporary_binary"
+            mv -f "$temporary_binary" "$binary"
+          fi
+          if [ ! -x "$binary" ]; then chmod +x "$binary"; fi
+          echo "binary=$binary" >> "$GITHUB_OUTPUT"
+
       - name: Upload coverage to Codecov
         # codecov/codecov-action@v7
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f
         with:
+          binary: ${{ steps.codecov-cli.outputs.binary }}
+          version: ${{ env.CODECOV_CLI_VERSION }}
           files: test/coverage.xml
           disable_search: true
           token: ${{ secrets.CODECOV_TOKEN }}

@@ -13,6 +13,12 @@ agent_run = base.agent_subscription
 _request = base._request
 
 
+@pytest.fixture(autouse=True)
+def isolated_run_manager(monkeypatch):
+    # Legacy module mocks otherwise retain deleted attributes between tests.
+    monkeypatch.setattr(agent_run, "agent_run_manager", MagicMock())
+
+
 def _configure_early_workbench_run(monkeypatch, canonical, conversation):
     plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99, version_no=5)))
     workbench_module = ModuleType("management.services.agent.workbench")

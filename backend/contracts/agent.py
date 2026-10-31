@@ -21,7 +21,7 @@ from pydantic import (
 
 from contracts.clarification import ClarificationResponse
 from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
-from contracts.conversation import HistoryItem
+from contracts.conversation import ConversationTarget, HistoryItem
 from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
 from contracts.skill import SkillResolution, SkillZipEntry
 from contracts.tool import ToolParamsRequest
@@ -395,29 +395,31 @@ class NL2ModelControlsRequest(BaseModel):
 
 
 class NL2AgentRunRequest(NL2ModelControlsRequest):
-    """Request payload for an NL2Agent turn, optionally persisted by Workbench."""
+    """Request payload for an NL2Agent turn, persisted through the common creator history path."""
 
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
-    agent_id: int = Field(gt=0)
+    agent_id: Optional[int] = Field(default=None, gt=0)
+    target: Optional[ConversationTarget] = None
     conversation_id: Optional[int] = Field(default=None, gt=0)
     retry_user_message_id: Optional[int] = Field(default=None, gt=0)
     retry_message_index: Optional[int] = Field(default=None, ge=0)
-    persist_history: bool = False
+    persist_history: bool = True
     workbench_config: Optional[Dict[str, Any]] = None
 
 
 class NL2SkillRunRequest(NL2ModelControlsRequest):
-    """Request payload for an NL2Skill turn, optionally persisted by Workbench."""
+    """Request payload for an NL2Skill turn, persisted through the common creator history path."""
 
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
+    target: Optional[ConversationTarget] = None
     conversation_id: Optional[int] = Field(default=None, gt=0)
     retry_user_message_id: Optional[int] = Field(default=None, gt=0)
     retry_message_index: Optional[int] = Field(default=None, ge=0)
-    persist_history: bool = False
+    persist_history: bool = True
     workbench_config: Optional[Dict[str, Any]] = None
     draft_snapshot: Optional[Dict[str, Any]] = None
     language: Optional[Literal["zh", "en"]] = None
