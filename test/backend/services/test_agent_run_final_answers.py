@@ -24,27 +24,32 @@ def stream_capture(monkeypatch):
     monkeypatch.setattr(service.streaming_channel_manager, "complete_channel", AsyncMock())
     monkeypatch.setattr(service, "_cleanup_channel_later", AsyncMock())
 
-    async def capture(source_events):
+    async def capture(source_events, *, outcome="completed", stopped=False, **stream_kwargs):
         async def source(*_args, **_kwargs):
             for event in source_events:
+                if isinstance(event, BaseException):
+                    raise event
                 yield json.dumps(event)
 
         monkeypatch.setattr(service, "agent_run", source)
         info = SimpleNamespace(
             agent_config=SimpleNamespace(pre_run_tool_events=()), cancellation_scope=None,
             stop_event=asyncio.Event(), human_interaction=None,
-            attempt_outcome="completed", thread_future=None,
+            attempt_outcome=outcome, thread_future=None,
         )
+        if stopped:
+            info.stop_event.set()
         channel = SimpleNamespace(publish=AsyncMock())
+        capture.channel = channel
         request = service_tests.AgentRequest(
             agent_id=1, conversation_id=999, query="test", history=[], minio_files=[], is_debug=False)
         raw = [chunk async for chunk in service._stream_agent_chunks(
-            request, "user", "tenant", info, MagicMock(), channel=channel)]
+            request, "user", "tenant", info, None, channel=channel, **stream_kwargs)]
         published = [json.loads(chunk.removeprefix("data: ").strip())
                      for chunk in raw if chunk.startswith("data: {" )]
         assert channel.publish.await_count == len(raw)
-        assert len(batches) == 1
-        return published, batches[0]
+        assert len(batches) <= 1
+        return published, batches[0] if batches else None
 
     return capture
 
