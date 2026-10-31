@@ -17,7 +17,7 @@ Nexent is a zero-code agent platform built on **Harness Engineering** principles
 
 > *If you want to go fast, go alone; if you want to go far, go together.*
 
-This documentation corresponds to **Nexent v2.5.0**. This release enhances natural-language agent generation (NL2Agent), tool and Skill recommendations, isolated sandbox execution, generated file handling, layered memory, personal knowledge-base capacity, and northbound APIs. The platform also supports A2A agent collaboration, MCP tools, knowledge-base retrieval, multimodal interaction, version management, and multi-tenant access control.
+This documentation corresponds to **Nexent v2.8.1**. This release enhances natural-language agent generation (NL2Agent), tool and Skill recommendations, isolated sandbox execution, generated file handling, layered memory, personal knowledge-base capacity, and northbound APIs. The platform also supports A2A agent collaboration, MCP tools, knowledge-base retrieval, multimodal interaction, version management, and multi-tenant access control.
 
 - **🗺️ Check our [Feature Map](https://github.com/orgs/ModelEngine-Group/projects/6)** to explore current and upcoming features.
 - **🔍 Try the current build** and leave ideas or bugs in the [Issues](https://github.com/ModelEngine-Group/nexent/issues) tab.
@@ -32,7 +32,7 @@ Most of all, we need visibility. Star ⭐ and watch the [GitHub repository](http
 
 ## ✨ Key Features
 
-Nexent v2.5.0 provides the following core capabilities:
+Nexent v2.8.1 provides the following core capabilities:
 
 - **⚙️ Multi-Model Integration** — Centrally manage LLM, Embedding, Rerank, image, video, audio, STT, and TTS models
 - **🤖 Zero-Code Agent Generation** — Clarify requirements through multi-turn natural-language conversations, recommend resources, and generate a debuggable agent configuration
