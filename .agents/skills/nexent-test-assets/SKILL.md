@@ -50,7 +50,9 @@ Read only the references needed for the selected mode.
 3. Preserve stable Feature and Case IDs. Retire instead of deleting historical contracts.
 4. During requirement design, run `python test-e2e/infra/tools/validate_test_assets.py --phase design --generate`.
 5. After fixed scripts and case-local bindings exist, run `python test-e2e/infra/tools/validate_test_assets.py --phase implementation --generate`; omit `--generate` for a read-only drift check.
+   Every active automated D2-D5 binding needs explicit `preparation`, including self-contained Cases. Assess resources, cleanup and recovery with the script; `families: []` means no shared factories, not an exemption from that assessment. Follow [test-implementation.md](references/test-implementation.md#preparation-and-delivery-gate).
 6. Run affected selectors through `python test-e2e/infra/tools/run_cases.py <Case-ID> --test-home <machine-local-directory>` and report exact results. Static validation is not execution evidence.
+7. Before delivery/merge, reconcile the current target branch and repeat strict validation on the combined tree, checking responsibility routing and preparation together. Record the validated revision and preparation-test-cleanup evidence; a prior branch-only or traditional UT pass does not establish Daily readiness.
 
 For new or acceptance-modified Cases, read [acceptance-integrity.md](references/acceptance-integrity.md). Give each acceptance obligation a stable ID, map every obligation to actual collected tests, and check the assertions against the requirement. Mapping or hashes alone do not certify completeness. Existing unmapped Cases remain executable but acceptance completeness is unreviewed; confirmed gaps must not be described as full acceptance passes.
 

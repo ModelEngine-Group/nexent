@@ -43,11 +43,13 @@ def validate(root):
     for fid, feature in features.items():
         if feature.get('status') in {'active', 'planned'} and feature_routes[fid]['status'] != 'ASSIGNED':
             issues.append(ValidationIssue(root / f'test-e2e/features/{fid}/feature.yaml', 'responsibility',
-                          'Feature requires one responsibility domain; maintain report-ownership.yaml'))
+                          'Feature requires one responsibility domain; maintain report-ownership.yaml',
+                          'FEATURE_RESPONSIBILITY_UNRESOLVED'))
     for cid, (_, case, path) in cases.items():
         if case.get('status') != 'retired' and case_routes[cid]['status'] != 'ASSIGNED':
             issues.append(ValidationIssue(path, 'responsibility',
-                          'Non-retired Case requires one responsibility domain; use a Feature mapping or Case override'))
+                          'Non-retired Case requires one responsibility domain; use a Feature mapping or Case override',
+                          'CASE_RESPONSIBILITY_UNRESOLVED', cid))
     return issues
 
 

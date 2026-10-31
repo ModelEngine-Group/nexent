@@ -86,6 +86,7 @@ feature_overrides:
   MSRF-001: model
   NAV-MENU-VISIBILITY: system
   NL2AGENT-PROTOCOL: agent_config
+  OPS-BOOTSTRAP: system
   PR-QUALITY-FRONTEND: model
   RESOURCE-TAG-MANAGEMENT: system
   SAI-001: runtime

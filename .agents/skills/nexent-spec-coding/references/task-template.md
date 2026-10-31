@@ -25,6 +25,7 @@ This template applies to full requirement/change sets and existing task document
 
 - [ ] 3.1 Implement new/strengthened D1-D5 scripts after stable interfaces exist; reuse correct existing scripts for regression. [AC-001]
 - [ ] 3.2 Add or update `execution.yaml` for only affected Case directories; regenerate derived hashes. [AC-001]
+- [ ] 3.2a Confirm primary responsibility routing and explicit preparation for each active automated D2-D5 binding. Record logical dependencies, owned resources, cleanup/recovery and the rationale for self-contained empty-family declarations. [AC-001]
 - [ ] 3.3 For a bug fix, retain a focused regression reproduction; an earlier reproduction script is allowed when it helps prove the defect. [AC-001]
 - [ ] 3.4 Check affected formal acceptance obligations against actual collected tests and assertions, not just script presence or hashes; record completeness gaps. [AC-001]
 
@@ -34,6 +35,7 @@ This template applies to full requirement/change sets and existing task document
 - [ ] 4.1a Run relevant traditional UT locally before a product-code PR; record commands/results/blockers separately. CI reruns its configured set. [AC-001]
 - [ ] 4.2 Run selected regression Cases and required profiles; broaden only for evidenced caller or risk boundaries. [AC-001]
 - [ ] 4.3 Regenerate Excel and run the implementation validator with the same strict current-change flags; confirm actual UT selectors and formal test bindings. [AC-001]
+- [ ] 4.4 Reconcile the current target branch and repeat strict validation on the combined tree; record target/tested revisions and preparation-test-cleanup evidence, including resource release. Do not substitute earlier branch-only UT results or claim remote required checks from local evidence. [AC-001]
 
 ## 5. Acceptance Traceability
 
