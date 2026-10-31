@@ -1121,8 +1121,15 @@ def test_nl2_agent_skill_requests():
     assert nl2_agent.query == "Create a chatbot"
     assert nl2_agent.agent_id == 42
 
+    standalone_agent = model_consts.NL2AgentRunRequest(query="Create a chatbot")
+    assert standalone_agent.agent_id is None
+    assert standalone_agent.target is None
+
+    for invalid_agent_id in (0, -1):
+        with pytest.raises(ValidationError):
+            model_consts.NL2AgentRunRequest(query="Create a chatbot", agent_id=invalid_agent_id)
     with pytest.raises(ValidationError):
-        model_consts.NL2AgentRunRequest(query="Create a chatbot")
+        model_consts.NL2AgentRunRequest(query="")
 
     nl2_skill = model_consts.NL2SkillRunRequest(
         query="Build an automation",

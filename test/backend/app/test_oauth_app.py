@@ -115,7 +115,7 @@ oauth_service_mock.parse_state = MagicMock(
     return_value={"provider": "github", "token": "tok", "link_user_id": ""}
 )
 oauth_service_mock.generate_pending_oauth_token = MagicMock(return_value="pending.jwt")
-oauth_service_mock.find_supabase_user_id_by_email = MagicMock(return_value=None)
+oauth_service_mock.find_account_user_id_by_email = MagicMock(return_value=None)
 oauth_service_mock.complete_pending_oauth_account = AsyncMock()
 oauth_service_mock.get_oauth_config = MagicMock(
     return_value={
@@ -307,7 +307,7 @@ class TestLink(unittest.TestCase):
 
 class TestCallback(unittest.TestCase):
     def setUp(self):
-        oauth_service_mock.find_supabase_user_id_by_email.return_value = None
+        oauth_service_mock.find_account_user_id_by_email.return_value = None
         oauth_service_mock.ensure_user_tenant_exists.side_effect = None
 
     def test_returns_error_when_provider_error(self):
@@ -399,6 +399,7 @@ class TestCallback(unittest.TestCase):
 
     def test_new_unbound_oauth_requires_account_completion(self):
         oauth_service_mock.reset_mock()
+        oauth_service_mock.find_account_user_id_by_email.return_value = None
         oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
         database_oauth_mock.get_oauth_account_by_provider.return_value = None
         database_oauth_mock.get_soft_deleted_oauth_account.return_value = None
@@ -435,8 +436,7 @@ class TestCallback(unittest.TestCase):
         self.assertTrue(data["data"]["requires_account_completion"])
         self.assertEqual(data["data"]["pending_token"], "pending.jwt")
         self.assertEqual(data["data"]["provider_email"], "newuser@github.com")
-        oauth_service_mock.find_supabase_user_id_by_email.assert_called_once_with(
-            mock_admin_client,
+        oauth_service_mock.find_account_user_id_by_email.assert_called_once_with(
             "newuser@github.com",
         )
         mock_admin_client.auth.admin.create_user.assert_not_called()
@@ -456,7 +456,7 @@ class TestCallback(unittest.TestCase):
             "email": "existing@example.com",
             "username": "existing-user",
         }
-        oauth_service_mock.find_supabase_user_id_by_email.return_value = "existing-user-id"
+        oauth_service_mock.find_account_user_id_by_email.return_value = "existing-user-id"
         oauth_service_mock.ensure_user_tenant_exists.return_value = {
             "user_id": "existing-user-id",
             "tenant_id": "t-1",
@@ -482,8 +482,7 @@ class TestCallback(unittest.TestCase):
         self.assertEqual(data["data"]["session"]["access_token"], "eyJ.existing.jwt")
 
         oauth_service_mock.generate_pending_oauth_token.assert_not_called()
-        oauth_service_mock.find_supabase_user_id_by_email.assert_called_once_with(
-            mock_admin_client,
+        oauth_service_mock.find_account_user_id_by_email.assert_called_once_with(
             "existing@example.com",
         )
         oauth_service_mock.create_or_update_oauth_account.assert_called_once_with(
@@ -738,7 +737,7 @@ class TestDeleteAccount(unittest.TestCase):
 
 class TestCallbackPagination(unittest.TestCase):
     def setUp(self):
-        oauth_service_mock.find_supabase_user_id_by_email.return_value = None
+        oauth_service_mock.find_account_user_id_by_email.return_value = None
 
     def test_finds_user_on_second_page(self):
         oauth_service_mock.reset_mock()
@@ -763,7 +762,7 @@ class TestCallbackPagination(unittest.TestCase):
             "provider_user_id": "12345",
             "user_id": "page2-uuid",
         }
-        oauth_service_mock.find_supabase_user_id_by_email.return_value = "page2-uuid"
+        oauth_service_mock.find_account_user_id_by_email.return_value = "page2-uuid"
 
         mock_admin_client = MagicMock()
         auth_utils_mock.get_supabase_admin_client.return_value = mock_admin_client
@@ -774,8 +773,7 @@ class TestCallbackPagination(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["data"]["user"]["id"], "page2-uuid")
         self.assertEqual(data["data"]["user"]["email"], "page2user@github.com")
-        oauth_service_mock.find_supabase_user_id_by_email.assert_called_once_with(
-            mock_admin_client,
+        oauth_service_mock.find_account_user_id_by_email.assert_called_once_with(
             "page2user@github.com",
         )
 
@@ -783,6 +781,7 @@ class TestCallbackPagination(unittest.TestCase):
 
     def test_stops_pagination_when_less_than_100_users(self):
         oauth_service_mock.reset_mock()
+        oauth_service_mock.find_account_user_id_by_email.return_value = None
         database_oauth_mock.reset_mock()
         auth_utils_mock.reset_mock()
         auth_utils_mock.get_current_user_id.return_value = ("user-1", "t-1")
@@ -822,8 +821,7 @@ class TestCallbackPagination(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.OK)
         data = response.json()
         self.assertTrue(data["data"]["requires_account_completion"])
-        oauth_service_mock.find_supabase_user_id_by_email.assert_called_once_with(
-            mock_admin_client,
+        oauth_service_mock.find_account_user_id_by_email.assert_called_once_with(
             "newuser@github.com",
         )
         mock_admin_client.auth.admin.create_user.assert_not_called()
@@ -875,7 +873,7 @@ class TestCallbackEmailFallback(unittest.TestCase):
         self.assertTrue(data["data"]["requires_account_completion"])
         self.assertTrue(data["data"]["email_required"])
         self.assertEqual(data["data"]["provider_email"], "")
-        oauth_service_mock.find_supabase_user_id_by_email.assert_not_called()
+        oauth_service_mock.find_account_user_id_by_email.assert_not_called()
 
         auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
 

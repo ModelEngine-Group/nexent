@@ -16,6 +16,7 @@ from contracts.tool import ToolSourceEnum
 from contracts.constants.constants import BUILTIN_LABEL_MAP
 from management.utils.orm import as_dict, filter_property
 from management.db.client import get_db_session
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.db.models import ToolInfo, ToolInstance
 from management.services.tool.catalog import get_local_tools_description_zh
 
@@ -495,7 +496,7 @@ def search_tools_for_sub_agent(agent_id, tenant_id, version_no: int = 0):
         # query if there is an existing ToolInstance
         query = session.query(ToolInstance).filter(
             ToolInstance.agent_id == agent_id,
-            ToolInstance.tenant_id == tenant_id,
+            ToolInstance.tenant_id.in_((tenant_id, ASSET_OWNER_TENANT_ID)),
             ToolInstance.version_no == version_no,
             ToolInstance.delete_flag != "Y",
             ToolInstance.enabled,

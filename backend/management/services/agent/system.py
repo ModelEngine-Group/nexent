@@ -1,46 +1,54 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Provision and resolve platform-owned system Agents."""
+"""Release platform-owned definitions independently of tenant runtime resources."""
 
+import json
 import logging
+from copy import deepcopy
 from typing import Any
 
-from contracts.constants.environment import APP_VERSION, ENABLE_AIDP_KNOWLEDGE
-from contracts.constants.constants import LANGUAGE
-from contracts.errors.exceptions import WorkbenchAgentError
-from contracts.agent import AgentInfoRequest
-from contracts.tool import ToolInstanceInfoRequest
+from packaging.version import InvalidVersion, Version
+
 from contracts.agent import SystemAgentRef, WorkbenchReleaseManifest
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID, LANGUAGE
+from contracts.constants.environment import APP_VERSION, ENABLE_AIDP_KNOWLEDGE
+from contracts.errors.exceptions import WorkbenchAgentError
+from management.db.agent.repository import search_system_agent
 from management.db.skill import repository as skill_db
-from management.db.agent.repository import clear_agent_new_mark, create_agent, search_system_agent, update_agent, update_system_agent_revision
-from management.db.skill.repository import delete_skills_by_agent_id
-from management.db.tool.repository import create_or_update_tool_by_tool_info, delete_tools_by_agent_id, query_all_tools, query_tool_instances_by_agent_id
+from management.db.tool.repository import query_all_tools
 from management.services.skill.transfer import install_skills_from_zip_for_tenant
 from nexent.core.prompts import load_prompt
-from packaging.version import InvalidVersion, Version
-from management.services.agent.versions import publish_version_impl
-from sqlalchemy.exc import IntegrityError
 
 logger = logging.getLogger(__name__)
-
 WORKBENCH_MAIN_SYSTEM_KEY = "workbench_main"
 WORKBENCH_MAIN_NAME = "workbench_main"
 WORKBENCH_MAIN_DISPLAY_NAME = "Nexent Workbench"
+NL2AGENT_MAIN_SYSTEM_KEY = "nl2agent_main"
 SYSTEM_AGENT_USER_ID = "system"
 
 
+def localized_system_prompt(snapshot: dict, language: str) -> str:
+    """Select a frozen platform prompt; legacy plain-text snapshots remain readable."""
+    prompt = str(snapshot.get("prompt") or "")
+    if snapshot.get("agent_origin") == "SYSTEM":
+        try:
+            variants = json.loads(prompt)
+        except (TypeError, ValueError):
+            return prompt
+        if isinstance(variants, dict) and set(variants) == {"zh", "en"}:
+            return str(variants["en" if language == LANGUAGE["EN"] else "zh"])
+    return prompt
+
+
 class SystemAgentProvider:
-    """Provide the protected tenant-scoped workbench root Agent."""
+    """Read shared definitions and prepare release capability catalogs."""
 
     system_key = WORKBENCH_MAIN_SYSTEM_KEY
 
     def __init__(
-        self,
-        *,
-        app_version: str | None = None,
-        aidp_enabled: bool | None = None,
+        self, *, app_version: str | None = None, aidp_enabled: bool | None = None
     ):
-        revision = str(app_version if app_version is not None else APP_VERSION).strip()
+        revision = str(APP_VERSION if app_version is None else app_version).strip()
         if not revision:
             raise ValueError("app_version is required")
         use_aidp = ENABLE_AIDP_KNOWLEDGE if aidp_enabled is None else aidp_enabled
@@ -53,7 +61,6 @@ class SystemAgentProvider:
 
     @staticmethod
     def get_system_prompt(language: str) -> str:
-        """Return the localized runtime prompt for the workbench root."""
         template_language = (
             LANGUAGE["EN"] if language == LANGUAGE["EN"] else LANGUAGE["ZH"]
         )
@@ -63,382 +70,119 @@ class SystemAgentProvider:
             )
         )
 
+    def _get_ref(self, tenant_id: str, system_key: str) -> SystemAgentRef:
+        self._validate_tenant_id(tenant_id)
+        draft = search_system_agent(ASSET_OWNER_TENANT_ID, system_key)
+        if draft is None or draft.get("enabled") is False:
+            raise WorkbenchAgentError("system_agent_not_ready", retryable=True)
+        version_no = int(draft.get("current_version_no") or 0)
+        snapshot = search_system_agent(
+            ASSET_OWNER_TENANT_ID, system_key, version_no=version_no
+        )
+        if (
+            version_no < 1
+            or snapshot is None
+            or snapshot.get("enabled") is False
+            or snapshot.get("agent_id") != draft["agent_id"]
+        ):
+            raise WorkbenchAgentError("system_agent_not_ready", retryable=True)
+        return SystemAgentRef(
+            ASSET_OWNER_TENANT_ID, system_key, int(draft["agent_id"]), version_no
+        )
+
     def get_workbench_main_ref(self, tenant_id: str) -> SystemAgentRef:
-        """Resolve the current published system Agent without mutating state."""
+        return self._get_ref(tenant_id, self.system_key)
+
+    def get_creator_ref(self, tenant_id: str, system_key: str) -> SystemAgentRef:
         self._validate_tenant_id(tenant_id)
-        draft = search_system_agent(tenant_id, self.system_key)
-        if draft is None:
+        if system_key not in ("nl2agent_main", "nl2skill_main"):
+            raise ValueError("Unknown creator identity")
+        identity = search_system_agent(ASSET_OWNER_TENANT_ID, system_key)
+        if identity is None or identity.get("enabled") is False:
             raise WorkbenchAgentError("system_agent_not_ready", retryable=True)
-        return self._resolve_published_ref(tenant_id, draft)
+        return SystemAgentRef(ASSET_OWNER_TENANT_ID, system_key, int(identity["agent_id"]), 0)
 
-    def ensure_workbench_main(
-        self,
-        tenant_id: str,
-        user_id: str | None = None,
-        locale: str | None = None,
-    ) -> SystemAgentRef:
-        """Initialize or release-upgrade the tenant workbench root Agent."""
-        self._validate_tenant_id(tenant_id)
-        actor = user_id or SYSTEM_AGENT_USER_ID
-        existing = search_system_agent(tenant_id, self.system_key, version_no=0)
-        if existing is None:
-            self._create_draft(tenant_id, actor, locale=locale)
-            existing = search_system_agent(tenant_id, self.system_key, version_no=0)
-            if existing is None:
-                raise WorkbenchAgentError(
-                    "system_agent_not_ready",
-                    retryable=True,
-                    message="workbench_main draft was not created",
-                )
+    def get_nl2agent_main_ref(self, tenant_id: str) -> SystemAgentRef:
+        return self.get_creator_ref(tenant_id, "nl2agent_main")
 
-        current_version = existing.get("current_version_no")
-        current_revision = existing.get("system_revision")
-        if (
-            current_version
-            and current_revision == self.release_manifest.system_revision
-        ):
-            if not self._release_state_matches(existing, tenant_id, locale=locale):
-                logger.error(
-                    "Detected same-revision workbench Agent drift for tenant %s",
-                    tenant_id,
-                )
-                raise WorkbenchAgentError("system_agent_drift_detected")
-            return self._resolve_published_ref(tenant_id, existing)
-        if (
-            current_version
-            and current_revision
-            and not self._is_newer_release(str(current_revision))
-        ):
-            raise WorkbenchAgentError(
-                "system_agent_revision_ahead",
-                message=(
-                    "Stored system revision is not older than the running "
-                    "Nexent release"
-                ),
-            )
-
-        try:
-            official_skills = self._prepare_official_skills(tenant_id, actor)
-            self._replace_release_capabilities(
-                agent_id=int(existing["agent_id"]),
-                tenant_id=tenant_id,
-                actor=actor,
-                official_skills=official_skills,
-            )
-            update_agent(
-                existing["agent_id"],
-                AgentInfoRequest(**self._editable_fields(locale)),
-                actor,
-                version_no=0,
-                allow_system=True,
-            )
-            published = publish_version_impl(
-                agent_id=existing["agent_id"],
-                tenant_id=tenant_id,
-                user_id=actor,
-                version_name="System",
-                release_note=(
-                    "Apply Nexent workbench system revision "
-                    f"{self.release_manifest.system_revision}"
-                ),
-                allow_system=True,
-            )
-            update_system_agent_revision(
-                agent_id=int(existing["agent_id"]),
-                tenant_id=tenant_id,
-                system_revision=self.release_manifest.system_revision,
-                user_id=actor,
-            )
-        except WorkbenchAgentError:
-            raise
-        except Exception as exc:  # noqa: BLE001 - optional capability import is best effort
-            raise WorkbenchAgentError(
-                "system_agent_not_ready",
-                retryable=True,
-                message=str(exc),
-            ) from exc
-
-        resolved = search_system_agent(tenant_id, self.system_key, version_no=0)
-        if resolved is None:
-            raise WorkbenchAgentError("system_agent_not_ready", retryable=True)
-        if not resolved.get("current_version_no") and isinstance(published, dict):
-            resolved["current_version_no"] = published.get("version_no")
-        return self._resolve_published_ref(tenant_id, resolved)
-
-    def _create_draft(
-        self,
-        tenant_id: str,
-        actor: str,
-        *,
-        locale: str | None = None,
-    ) -> dict[str, Any]:
-        payload = {
-            **self._editable_fields(locale),
-            "system_key": self.system_key,
-            "agent_origin": "SYSTEM",
-            "system_revision": None,
-            "model_ids": [],
-            "group_ids": "",
-            "ingroup_permission": "PRIVATE",
-            "is_new": False,
-        }
-        try:
-            created = create_agent(payload, tenant_id=tenant_id, user_id=actor)
-            clear_agent_new_mark(created["agent_id"], tenant_id, actor)
-            return created
-        except IntegrityError:
-            concurrent = search_system_agent(tenant_id, self.system_key, version_no=0)
-            if concurrent is not None:
-                logger.info(
-                    "Reused concurrently provisioned workbench Agent for tenant %s",
-                    tenant_id,
-                )
-                return concurrent
-            raise
+    def get_nl2skill_main_ref(self, tenant_id: str) -> SystemAgentRef:
+        return self.get_creator_ref(tenant_id, "nl2skill_main")
 
     def _prepare_official_skills(
-        self,
-        tenant_id: str,
-        actor: str,
+        self, tenant_id: str, actor: str
     ) -> list[dict[str, Any]]:
-        required_names = self.release_manifest.official_skill_names
+        available = self.get_workbench_default_skills(tenant_id)
+        installed = {
+            self._official_skill_base_name(str(skill.get("name") or ""))
+            for skill in available
+        }
+        missing = [
+            name
+            for name in self.release_manifest.official_skill_names
+            if name not in installed
+        ]
+        if not missing:
+            return available
         try:
-            installed_names = list(
-                install_skills_from_zip_for_tenant(
-                    skill_names=list(required_names),
-                    tenant_id=tenant_id,
-                    user_id=actor,
-                )
+            install_skills_from_zip_for_tenant(
+                skill_names=missing,
+                tenant_id=tenant_id,
+                user_id=actor,
             )
         except Exception as exc:
-            installed_names = []
             logger.warning(
-                "Official Skill import failed for workbench Agent in tenant %s; "
-                "continuing with already available official Skills: %s",
-                tenant_id,
-                exc,
+                "Official Skill import unavailable for tenant %s: %s", tenant_id, exc
             )
-
-        resolved: list[dict[str, Any]] = []
-        for skill_name in required_names:
-            prefix = f"{skill_name}_"
-            aliases = sorted(
-                (
-                    name
-                    for name in installed_names
-                    if name.startswith(prefix) and name[len(prefix) :].isdigit()
-                ),
-                key=lambda name: int(name[len(prefix) :]),
-            )
-            candidates = [skill_name, *aliases]
-            skill = None
-            for candidate in candidates:
-                candidate_skill = skill_db.get_skill_by_name(candidate, tenant_id)
-                if not candidate_skill:
-                    continue
-                if str(candidate_skill.get("source") or "").casefold() == "official":
-                    skill = candidate_skill
-                    break
-                logger.warning(
-                    "Preserving non-official Skill '%s' in tenant %s while "
-                    "resolving official workbench capability '%s'",
-                    candidate,
-                    tenant_id,
-                    skill_name,
-                )
-            if skill is None:
-                logger.warning(
-                    "Official Skill '%s' is unavailable for workbench Agent in "
-                    "tenant %s; bootstrap will continue without it (imported=%s)",
-                    skill_name,
-                    tenant_id,
-                    skill_name in installed_names,
-                )
-                continue
-            resolved.append(skill)
-        return resolved
-
-    def _replace_release_capabilities(
-        self,
-        *,
-        agent_id: int,
-        tenant_id: str,
-        actor: str,
-        official_skills: list[dict[str, Any]],
-    ) -> None:
-        """Replace the protected draft capability set for a release upgrade."""
-        selected_name = self.release_manifest.persistent_tool_names[0]
-        selected_tool = self._find_available_tool(
-            selected_name,
-            tenant_id,
-            required=False,
-        )
-
-        delete_tools_by_agent_id(
-            agent_id,
-            tenant_id,
-            actor,
-            version_no=0,
-            allow_system=True,
-        )
-        if selected_tool is not None:
-            params = (
-                {"index_names": []} if selected_name == "knowledge_base_search" else {}
-            )
-            create_or_update_tool_by_tool_info(
-                ToolInstanceInfoRequest(
-                    tool_id=int(selected_tool["tool_id"]),
-                    agent_id=agent_id,
-                    params=params,
-                    enabled=True,
-                ),
-                tenant_id=tenant_id,
-                user_id=actor,
-                version_no=0,
-                allow_system=True,
-            )
-        else:
-            logger.warning(
-                "Tool '%s' is unavailable for workbench Agent in tenant %s; "
-                "bootstrap will continue without it",
-                selected_name,
-                tenant_id,
-            )
-
-        delete_skills_by_agent_id(
-            agent_id,
-            tenant_id,
-            actor,
-            version_no=0,
-            allow_system=True,
-        )
-        for skill in official_skills:
-            skill_db.create_or_update_skill_by_skill_info(
-                {
-                    "skill_id": int(skill["skill_id"]),
-                    "agent_id": agent_id,
-                    "enabled": True,
-                    "config_values": {},
-                },
-                tenant_id=tenant_id,
-                user_id=actor,
-                version_no=0,
-                allow_system=True,
-            )
-
-    def _release_state_matches(
-        self,
-        existing: dict[str, Any],
-        tenant_id: str,
-        *,
-        locale: str | None = None,
-    ) -> bool:
-        if any(
-            existing.get(key) != value
-            for key, value in self._editable_fields(locale).items()
-        ):
-            return False
-
-        expected_tool = self._find_available_tool(
-            self.release_manifest.persistent_tool_names[0],
-            tenant_id,
-            required=False,
-        )
-        enabled_tool_ids = {
-            int(item["tool_id"])
-            for item in query_tool_instances_by_agent_id(
-                int(existing["agent_id"]), tenant_id, version_no=0
-            )
-            if item.get("enabled") is True and item.get("tool_id") is not None
-        }
-        allowed_tool_ids = (
-            {int(expected_tool["tool_id"])} if expected_tool is not None else set()
-        )
-        if not enabled_tool_ids.issubset(allowed_tool_ids):
-            return False
-
-        enabled_skill_ids = [
-            int(item["skill_id"])
-            for item in skill_db.query_skill_instances_by_agent_id(
-                int(existing["agent_id"]), tenant_id, version_no=0
-            )
-            if item.get("enabled") is True and item.get("skill_id") is not None
-        ]
-        resolved_bases: set[str] = set()
-        for skill_id in enabled_skill_ids:
-            skill = skill_db.get_skill_by_id(skill_id, tenant_id)
-            if not skill or str(skill.get("source") or "").casefold() != "official":
-                return False
-            skill_name = str(skill.get("name") or skill.get("skill_name") or "")
-            base_name = self._official_skill_base_name(skill_name)
-            if base_name is None or base_name in resolved_bases:
-                return False
-            resolved_bases.add(base_name)
-        return True
+        return self.get_workbench_default_skills(tenant_id)
 
     def _official_skill_base_name(self, skill_name: str) -> str | None:
-        for base_name in self.release_manifest.official_skill_names:
-            if skill_name == base_name:
-                return base_name
-            prefix = f"{base_name}_"
-            if skill_name.startswith(prefix) and skill_name[len(prefix) :].isdigit():
-                return base_name
+        for name in self.release_manifest.official_skill_names:
+            if skill_name == name or (
+                skill_name.startswith(f"{name}_")
+                and skill_name[len(name) + 1 :].isdigit()
+            ):
+                return name
         return None
+
+    def get_workbench_default_skills(self, tenant_id: str) -> list[dict[str, Any]]:
+        """Resolve official names in the caller's tenant without persisting Agent bindings."""
+        self._validate_tenant_id(tenant_id)
+        selected = {}
+        for skill in skill_db.list_skills(tenant_id):
+            if str(skill.get("source") or "").casefold() != "official":
+                continue
+            name = str(skill.get("name") or "")
+            base = self._official_skill_base_name(name)
+            if base and (base not in selected or name == base):
+                selected[base] = skill
+        return [
+            selected[name]
+            for name in self.release_manifest.official_skill_names
+            if name in selected
+        ]
 
     @staticmethod
     def _stable_tool_names(tool: dict[str, Any]) -> set[str]:
         return {
-            str(tool.get("name") or ""),
-            str(tool.get("origin_name") or ""),
-            str(tool.get("class_name") or ""),
+            str(tool.get(key) or "") for key in ("name", "origin_name", "class_name")
         }
 
-    def _find_available_tool(
-        self,
-        tool_name: str,
-        tenant_id: str,
-        *,
-        required: bool = True,
-    ) -> dict[str, Any] | None:
+    def get_workbench_default_tools(self, tenant_id: str) -> list[dict[str, Any]]:
+        """Resolve the managed knowledge capability without writing shared Tool instances."""
+        selected_name = self.release_manifest.persistent_tool_names[0]
         for tool in query_all_tools(tenant_id):
             if (
-                tool_name in self._stable_tool_names(tool)
+                selected_name in self._stable_tool_names(tool)
                 and tool.get("is_available") is not False
             ):
-                return tool
-        if required:
-            raise WorkbenchAgentError(
-                "system_agent_not_ready",
-                retryable=True,
-                message=f"Required Tool is unavailable: {tool_name}",
-            )
-        return None
-
-    def _resolve_published_ref(
-        self,
-        tenant_id: str,
-        draft: dict[str, Any],
-    ) -> SystemAgentRef:
-        version_no = int(draft.get("current_version_no") or 0)
-        if version_no < 1:
-            raise WorkbenchAgentError("system_agent_not_ready", retryable=True)
-        snapshot = search_system_agent(
-            tenant_id,
-            self.system_key,
-            version_no=version_no,
-        )
-        if (
-            snapshot is None
-            or int(snapshot.get("agent_id") or 0) != int(draft["agent_id"])
-            or snapshot.get("enabled") is False
-        ):
-            raise WorkbenchAgentError("system_agent_not_ready", retryable=True)
-        return SystemAgentRef(
-            tenant_id=tenant_id,
-            system_key=self.system_key,
-            agent_id=int(draft["agent_id"]),
-            version_no=version_no,
-        )
+                configured = deepcopy(tool)
+                if selected_name == "knowledge_base_search":
+                    for param in configured.get("params") or []:
+                        if param.get("name") == "index_names":
+                            param["default"] = []
+                configured["enabled"] = True
+                return [configured]
+        return []
 
     @staticmethod
     def _validate_tenant_id(tenant_id: str) -> None:
@@ -446,7 +190,6 @@ class SystemAgentProvider:
             raise ValueError("tenant_id is required")
 
     def _is_newer_release(self, current_revision: str) -> bool:
-        """Return whether this provider represents a strictly newer release."""
         try:
             return Version(self.release_manifest.system_revision) > Version(
                 current_revision
@@ -456,38 +199,26 @@ class SystemAgentProvider:
 
     @staticmethod
     def _editable_fields(locale: str | None = None) -> dict[str, Any]:
-        canonical_prompt = SystemAgentProvider.get_system_prompt(locale or "")
         return {
             "name": WORKBENCH_MAIN_NAME,
             "display_name": WORKBENCH_MAIN_DISPLAY_NAME,
-            "description": (
-                "Protected general-purpose Agent for the intelligent workbench"
-            ),
-            "business_description": (
-                "General conversation and runtime capability orchestration"
-            ),
+            "description": "Protected general-purpose Agent for the intelligent workbench",
+            "business_description": "General conversation and runtime capability orchestration",
             "author": "Nexent",
             "max_steps": 15,
             "is_main_agent": True,
             "provide_run_summary": False,
             "allow_chat_metadata": False,
             "is_a2a": False,
-            "prompt": canonical_prompt,
+            "prompt": json.dumps(
+                {
+                    lang: SystemAgentProvider.get_system_prompt(lang)
+                    for lang in ("zh", "en")
+                },
+                ensure_ascii=False,
+            ),
             "enabled": True,
         }
 
 
 system_agent_provider = SystemAgentProvider()
-
-
-def ensure_workbench_main_agent(
-    tenant_id: str,
-    user_id: str | None = None,
-    locale: str | None = None,
-) -> SystemAgentRef:
-    """Convenience entrypoint for tenant bootstrap and Workbench runtime."""
-    return system_agent_provider.ensure_workbench_main(
-        tenant_id,
-        user_id,
-        locale=locale,
-    )

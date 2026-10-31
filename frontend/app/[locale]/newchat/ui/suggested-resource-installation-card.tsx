@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useId, useMemo, useReducer, useState } from "react";
@@ -236,8 +238,8 @@ export function SuggestedResourceInstallationCard({
   const [submitted, setSubmitted] = useState(false);
 
   useEffect(() => {
-    registerCard(cardKey, payload.subtype);
-  }, [cardKey, payload.subtype, registerCard]);
+    if (!disabled) registerCard(cardKey, payload.subtype);
+  }, [cardKey, disabled, payload.subtype, registerCard]);
 
   const interactive = !disabled && !submitted && isCardInteractive(cardKey);
   const dialogItem = items.find((item) => candidateRef(item) === dialogRef);

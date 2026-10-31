@@ -194,6 +194,7 @@ async def run_agent_stream(
     tenant_id: str = None,
     skip_user_save: bool = False,
     resume: bool = False,
+    final_answer_mode: str = "delta",
 ):
     """
     Start an agent run and stream responses.
@@ -771,9 +772,15 @@ async def run_agent_stream(
     run_identifier = _agent_run_identifier(agent_request)
     execution = None
     agent_capacity_token = None
+    # Workbench shares its definition across tenants, but not its admission budget.
+    capacity_key = (
+        f"{resolved_tenant_id}:workbench_main"
+        if agent_request.entrypoint == "workbench"
+        else agent_request.agent_id
+    )
     try:
         agent_capacity_token = agent_run_manager.reserve_agent_capacity(
-            agent_request.agent_id,
+            capacity_key,
             RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
         )
         execution = runtime_thread_manager.submit(
@@ -915,6 +922,8 @@ async def run_agent_stream(
         "execution": execution,
         "deferred_run": deferred_run,
     }
+    if final_answer_mode != "delta":
+        stream_kwargs["final_answer_mode"] = final_answer_mode
     if channel is not None:
         stream_kwargs["channel"] = channel
     stream_gen = generate_stream(agent_request, **stream_kwargs)

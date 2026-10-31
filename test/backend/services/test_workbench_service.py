@@ -7,7 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from contracts.errors.exceptions import ValidationError, WorkbenchConfigVersionConflict
-from contracts.agent import WorkbenchSessionConfig
+from contracts.agent import SystemAgentRef, WorkbenchSessionConfig
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
 from management.services.agent import workbench as workbench_service
 from nexent.core.agents.agent_model import AgentConfig
 from nexent.core.agents.agent_model import ToolConfig
@@ -35,7 +36,7 @@ def published_instances(mocker):
     mocker.patch.object(
         workbench_service.system_agent_provider,
         "get_workbench_main_ref",
-        return_value=SimpleNamespace(agent_id=99, version_no=4),
+        return_value=SystemAgentRef(ASSET_OWNER_TENANT_ID, "workbench_main", 99, 4),
     )
     mocker.patch.object(
         workbench_service,
@@ -132,7 +133,7 @@ def test_workbench_main_profile_exposes_published_default_skills(mocker):
     mocker.patch.object(
         workbench_service.system_agent_provider,
         "get_workbench_main_ref",
-        return_value=SimpleNamespace(agent_id=99, version_no=4),
+        return_value=SystemAgentRef(ASSET_OWNER_TENANT_ID, "workbench_main", 99, 4),
     )
     skill_service = mocker.patch.object(
         workbench_service.SkillService,
@@ -162,7 +163,7 @@ def test_workbench_main_profile_exposes_published_default_skills(mocker):
     }
     skill_service.assert_called_once_with(
         agent_id=99,
-        tenant_id="tenant",
+        tenant_id=ASSET_OWNER_TENANT_ID,
         version_no=4,
     )
 
@@ -419,7 +420,7 @@ def test_generic_chat_resolves_tenant_system_agent_as_root(mocker):
     mocker.patch.object(
         workbench_service.system_agent_provider,
         "get_workbench_main_ref",
-        return_value=SimpleNamespace(agent_id=99, version_no=4),
+        return_value=SystemAgentRef(ASSET_OWNER_TENANT_ID, "workbench_main", 99, 4),
     )
     lookup = mocker.patch.object(
         workbench_service,
@@ -443,7 +444,7 @@ def test_multi_agent_chat_mounts_locked_agents_under_system_root(mocker):
     mocker.patch.object(
         workbench_service.system_agent_provider,
         "get_workbench_main_ref",
-        return_value=SimpleNamespace(agent_id=99, version_no=4),
+        return_value=SystemAgentRef(ASSET_OWNER_TENANT_ID, "workbench_main", 99, 4),
     )
     mocker.patch.object(
         workbench_service,

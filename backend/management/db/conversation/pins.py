@@ -11,6 +11,7 @@ from contracts.errors.exceptions import ConversationNotFoundError
 from contracts.conversation import conversation_time_as_utc
 from management.db.client import get_db_session
 from management.db.models import ConversationRecord
+from management.db.conversation.classification import is_workbench_history
 
 
 def _owned_conversations(user_id: str):
@@ -27,8 +28,8 @@ def _list_pins(session, user_id: str) -> list[dict[str, Any]]:
             func.extract("epoch", ConversationRecord.create_time) * 1000,
             func.extract("epoch", ConversationRecord.update_time) * 1000,
             case(
-                (ConversationRecord.workbench_config.is_(None), "agent_chat"),
-                else_="workbench",
+                (is_workbench_history(), "workbench"),
+                else_="agent_chat",
             ),
         )
         .where(*_owned_conversations(user_id), ConversationRecord.workbench_pinned_at.is_not(None))

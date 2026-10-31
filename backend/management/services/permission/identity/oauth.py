@@ -15,7 +15,7 @@ import jwt
 from pydantic import EmailStr, TypeAdapter, ValidationError as PydanticValidationError
 
 from contracts.constants.constants import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
-from contracts.constants.environment import OAUTH_CALLBACK_BASE_URL, OAUTH_LOGIN_MODE, OAUTH_SSL_VERIFY, OAUTH_CA_BUNDLE, SUPABASE_JWT_SECRET, JWT_EXPIRY_SECONDS
+from contracts.constants.environment import OAUTH_CALLBACK_BASE_URL, OAUTH_LOGIN_MODE, OAUTH_SSL_VERIFY, OAUTH_CA_BUNDLE, JWT_SECRET, JWT_EXPIRY_SECONDS
 from contracts.constants.environment import GET_OAUTH_SETTING as get_oauth_setting
 from contracts.errors.exceptions import OAuthLinkError, OAuthProviderError, TenantResourceLimitError
 from management.services.permission.asset_owner import require_asset_owner_enabled
@@ -272,7 +272,7 @@ def generate_pending_oauth_token(
     provider_username: Optional[str] = None,
     expires_in: int = OAUTH_PENDING_EXPIRE_SECONDS,
 ) -> str:
-    if not SUPABASE_JWT_SECRET:
+    if not JWT_SECRET:
         raise OAuthProviderError("JWT verification is not configured")
 
     now = int(time.time())
@@ -285,7 +285,7 @@ def generate_pending_oauth_token(
         "iat": now,
         "exp": now + expires_in,
     }
-    return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm="HS256")
+    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
 
@@ -309,27 +309,13 @@ def _validate_email(email: Optional[str]) -> str:
         raise OAuthLinkError("Invalid email address") from exc
 
 
-def find_supabase_user_id_by_email(
-    admin_client: Any, email: Optional[str]
-) -> Optional[str]:
+def find_account_user_id_by_email(email: Optional[str]) -> Optional[str]:
     if not email:
         return None
+    from management.db.identity.account import get_account_by_email
 
-    page = 1
-    while True:
-        users_resp = admin_client.auth.admin.list_users(page=page, per_page=100)
-        users = getattr(users_resp, "users", users_resp)
-        if users is None:
-            users = []
-        if not users:
-            return None
-        for user in users:
-            user_email = getattr(user, "email", "")
-            if user_email and user_email.lower() == email.lower():
-                return user.id
-        if len(users) < 100:
-            return None
-        page += 1
+    account = get_account_by_email(email) if email else None
+    return account["user_id"] if account else None
 
 
 def _role_from_invitation_type(code_type: str) -> str:
@@ -380,35 +366,15 @@ async def complete_pending_oauth_account(
     if not invitation_info:
         raise OAuthLinkError("Invitation code is invalid or unavailable")
 
-    admin_client = None
-    try:
-        from gateway.authentication.auth import get_supabase_admin_client
+    from management.db.identity.account import create_account
+    from infrastructure.security.passwords import hash_password
+    from management.db.client import get_db_session
+    from management.services.permission.identity.authentication import validate_password_strength
 
-        admin_client = get_supabase_admin_client()
-    except Exception:
-        admin_client = None
-    if not admin_client:
-        raise RuntimeError("Supabase admin client not available")
-
-    existing_user_id = find_supabase_user_id_by_email(admin_client, final_email)
-    if existing_user_id:
-        raise OAuthLinkError(
-            "Email already exists. Please log in with email and password, "
-            "then link this OAuth account in settings."
-        )
-
-    create_resp = admin_client.auth.admin.create_user(
-        {
-            "email": final_email,
-            "password": password,
-            "email_confirm": True,
-            "user_metadata": {
-                "full_name": provider_username,
-                "provider": provider,
-            },
-        }
-    )
-    supabase_user_id = create_resp.user.id
+    if not validate_password_strength(password):
+        raise OAuthLinkError("Password must be at least 8 characters with uppercase, lowercase, and digit")
+    if find_account_user_id_by_email(final_email):
+        raise OAuthLinkError("Email already exists. Please log in first, then link this OAuth account in settings.")
 
     tenant_id = invitation_info["tenant_id"]
     if invitation_info.get("code_type") == ASSET_OWNER_INVITE_CODE_TYPE:
@@ -416,34 +382,26 @@ async def complete_pending_oauth_account(
     user_role = _role_from_invitation_type(invitation_info.get("code_type", "USER_INVITE"))
     is_asset_owner_registration = user_role == ASSET_OWNER_ROLE
 
-    try:
-        insert_user_tenant(
-            user_id=supabase_user_id,
-            tenant_id=tenant_id,
-            user_role=user_role,
-            user_email=final_email,
-        )
-    except TenantResourceLimitError:
-        # The Supabase identity was created before the local tenant-limit check.
-        from gateway.authentication.auth import delete_supabase_user
+    with get_db_session() as session:
+        account = create_account(final_email, hash_password(password), db_session=session)
+        user_id = account["user_id"]
+        insert_user_tenant(user_id=user_id, tenant_id=tenant_id, user_role=user_role,
+                           user_email=final_email, db_session=session)
 
-        delete_supabase_user(supabase_user_id)
-        raise
-
-    invitation_result = use_invitation_code(normalized_invite_code, supabase_user_id)
+    invitation_result = use_invitation_code(normalized_invite_code, user_id)
     group_ids = invitation_result.get("group_ids", [])
     if isinstance(group_ids, str):
         from management.utils.serialization import convert_string_to_list
 
         group_ids = convert_string_to_list(group_ids)
     if group_ids and not is_asset_owner_registration:
-        add_user_to_groups(supabase_user_id, group_ids, supabase_user_id)
+        add_user_to_groups(user_id, group_ids, user_id)
 
     if not is_asset_owner_registration:
-        await init_tool_list_for_tenant(tenant_id, supabase_user_id)
+        await init_tool_list_for_tenant(tenant_id, user_id)
 
     create_or_update_oauth_account(
-        user_id=supabase_user_id,
+        user_id=user_id,
         provider=provider,
         provider_user_id=provider_user_id,
         email=final_email,
@@ -452,14 +410,14 @@ async def complete_pending_oauth_account(
     )
 
     jwt_token = generate_session_jwt(
-        supabase_user_id, expires_in=JWT_EXPIRY_SECONDS
+        user_id, expires_in=JWT_EXPIRY_SECONDS
     )
     expiry_seconds = JWT_EXPIRY_SECONDS
     expires_at = calculate_expires_at(jwt_token)
 
     return {
         "user": {
-            "id": str(supabase_user_id),
+            "id": str(user_id),
             "email": final_email,
             "role": user_role,
         },

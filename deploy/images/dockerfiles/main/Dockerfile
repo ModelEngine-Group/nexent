@@ -56,15 +56,15 @@ ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
 COPY --from=ghcr.io/astral-sh/uv:0.13.6 /uv /uvx /usr/local/bin/
 WORKDIR /opt/backend
 
-# Layer 0: install base dependencies
+# Layer 0: install base dependencies. backend extras reference the local sdk
+# via [tool.uv.sources], so the sdk must exist before uv sync resolves.
 COPY backend/pyproject.toml /opt/backend/pyproject.toml
 COPY sdk/pyproject.toml /opt/sdk/pyproject.toml
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     uv sync --link-mode copy $(test -n "$MIRROR" && echo "-i $MIRROR")
 RUN mkdir -p "$TIKTOKEN_CACHE_DIR" && \
     /opt/backend/.venv/bin/python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
-# Layer 1: install sdk in link mode
-COPY sdk /opt/sdk
+# Layer 1: reinstall the sdk with its performance extra (non-editable)
 RUN --mount=type=cache,id=nexent-main-uv-${TARGETARCH},target=/root/.cache/uv,sharing=locked \
     uv pip install --link-mode copy "/opt/sdk[performance]" $(test -n "$MIRROR" && echo "-i $MIRROR")
 
@@ -82,6 +82,7 @@ COPY --from=litellm-models /litellm_models.json /opt/nexent/litellm_models.json
 
 # Layer 2: copy backend code
 COPY backend /opt/backend
+COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres
 COPY --from=litellm-models /models_dev_catalog.json /opt/backend/configs/models_dev_catalog.json
 COPY VERSION /opt/nexent/VERSION
 COPY deploy/common/run-sql-migrations.sh deploy/common/start-backend.sh /opt/nexent/scripts/

@@ -6401,5 +6401,16 @@
   "nl2agent.resourceBinding.recommendedKnowledge": "推荐知识库：",
   "nl2agent.resourceBinding.knowledgeNone": "空",
   "nl2agent.resourceBinding.knowledgeDescription": "根据用户问题检索所选知识库中的相关资料，为回答提供依据和引用。",
-  "nl2agent.resourceBinding.selectedKnowledge": "已选知识库："
+  "nl2agent.resourceBinding.selectedKnowledge": "已选知识库：",
+  "nl2agent.history.label": "历史",
+  "nl2agent.history.new": "新会话",
+  "nl2agent.history.title": "此智能体的生成记录",
+  "nl2skill.history.title": "此技能的生成记录",
+  "nl2agent.history.empty": "暂无历史对话",
+  "nl2agent.history.loadFailed": "历史记录加载失败",
+  "nl2agent.history.retry": "重试",
+  "nl2agent.history.more": "加载更多",
+  "nl2agent.history.untitled": "新对话",
+  "nl2agent.history.restoreFailed": "恢复对话失败，请重试",
+  "nl2agent.history.newFailed": "新会话创建失败，请重试"
 }

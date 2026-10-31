@@ -269,7 +269,8 @@ async def test_forward_agent_evaluation_trial_run_rejects_invalid_success_payloa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("metadata", [None, {}, {"source": "a2a-regression"}])
-async def test_forward_agent_run_streams_body_and_closes_resources(monkeypatch, metadata):
+@pytest.mark.parametrize("mode", [None, "complete", "delta"])
+async def test_forward_agent_run_streams_body_and_closes_resources(monkeypatch, metadata, mode):
     stream = TrackingStream([b"data: one\n\n", b"data: two\n\n"])
     captured = {}
 
@@ -311,12 +312,13 @@ async def test_forward_agent_run_streams_body_and_closes_resources(monkeypatch, 
         ),
         user_id="user-a",
         tenant_id="tenant-a",
+        **({} if mode is None else {"final_answer_mode": mode}),
     )
     chunks = [chunk async for chunk in response.body_iterator]
 
     request = captured["request"]
     assert str(request.url) == (
-        "http://runtime:5014/api/agent/internal/northbound/run"
+        f"http://runtime:5014/api/agent/internal/northbound/run?final_answer_mode={mode or 'delta'}"
     )
     assert request.headers["authorization"] == "Bearer jwt"
     request_payload = json.loads(request.content)

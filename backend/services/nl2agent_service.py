@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Business logic for the ephemeral NL2Agent runtime."""
+"""Business logic for request-scoped NL2Agent runs."""
 
 import ast
 import asyncio
@@ -31,6 +31,8 @@ from management.services.model.run_budget import _resolve_context_budget
 from management.services.model.run_bindings import create_model_config_list
 from management.services.agent.preparation.inputs import join_minio_file_description_to_query
 from management.services.agent.creation import create_nl2agent_agent_config
+from management.services.agent.system import system_agent_provider
+from management.db.agent.repository import search_agent_info_by_agent_id
 from contracts.constants.environment import TOKEN, ENABLE_AIDP_KNOWLEDGE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS
 from contracts.constants.constants import MODEL_CONFIG_MAPPING
 from management.services.mcp.addressing import get_tenant_local_mcp_server
@@ -1442,6 +1444,7 @@ async def build_nl2agent_run_info(
     authorization: str | None = None,
     *,
     identity: AuthenticatedIdentity,
+    system_ref=None,
 ) -> AgentRunInfo:
     """Build all request-scoped NL2Agent runtime objects in memory."""
 
@@ -1466,7 +1469,12 @@ async def build_nl2agent_run_info(
         language=language,
     )
     model_config_list = await create_model_config_list(tenant_id)
-    agent_config = create_nl2agent_agent_config(language)
+    system_ref = system_ref or await run_blocking("load-nl2agent-identity", system_agent_provider.get_nl2agent_main_ref, tenant_id)
+    snapshot = await run_blocking(
+        "load-nl2agent-definition", search_agent_info_by_agent_id,
+        system_ref.agent_id, system_ref.tenant_id, system_ref.version_no,
+    )
+    agent_config = create_nl2agent_agent_config(language, snapshot=snapshot)
     agent_config.context_items = [
         *(agent_config.context_items or []),
         binding_context,
@@ -1566,20 +1574,32 @@ async def create_nl2agent_stream(
     authorization: str | None = None,
     *,
     identity: AuthenticatedIdentity,
+    system_ref=None,
 ) -> AsyncIterator[str]:
-    """Create an SSE-compatible stream for one ephemeral NL2Agent run."""
+    """Create an SSE-compatible stream for one isolated NL2Agent run."""
 
     run_info = await build_nl2agent_run_info(
         request=request,
         tenant_id=tenant_id,
         language=language,
         identity=identity,
+        system_ref=system_ref,
         authorization=authorization,
     )
 
     async def generate() -> AsyncIterator[str]:
         boundary_delivered = False
         try:
+            if isinstance(run_info.agent_config.agent_id, int):
+                yield "data: " + json.dumps({
+                    "type": "other",
+                    "content": json.dumps({
+                        "event": "system_agent_run",
+                        "agent_id": run_info.agent_config.agent_id,
+                        "version_no": run_info.agent_config.version_no,
+                        "system_key": "nl2agent_main",
+                    }),
+                }) + "\n\n"
             async for chunk in agent_run(
                 run_info,
                 thread_manager=runtime_thread_manager,

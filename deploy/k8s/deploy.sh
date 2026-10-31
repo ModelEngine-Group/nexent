@@ -37,7 +37,6 @@ INFRASTRUCTURE_GENERATED_SECRETS_VALUES="$INFRASTRUCTURE_CHART_DIR/generated-sec
 INFRASTRUCTURE_GENERATED_PERSISTENCE_VALUES="$INFRASTRUCTURE_CHART_DIR/generated-persistence-values.yaml"
 ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
 SQL_INIT_FILE="$DEPLOY_ROOT/sql/init.sql"
-SUPABASE_SQL_DIR="$DEPLOY_ROOT/sql/supabase"
 OFFICIAL_SKILLS_SOURCE_DIR="$DEPLOY_ROOT/docker/assets/official-skills-zip"
 OFFICIAL_SKILLS_TARGET_DIR="/mnt/nexent/official-skills-zip"
 
@@ -200,11 +199,7 @@ apply_deployment_common_config() {
 
     deployment_prepare_config "${ORIGINAL_ARGS[@]}" || return 1
 
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
-        DEPLOYMENT_VERSION="full"
-    else
-        DEPLOYMENT_VERSION="speed"
-    fi
+    DEPLOYMENT_VERSION="${DEPLOYMENT_VERSION:-full}"
 
     APP_VERSION="$DEPLOYMENT_APP_VERSION"
     VERSION_CHOICE_SAVED="$DEPLOYMENT_VERSION"
@@ -328,7 +323,6 @@ render_persistence_values() {
 
   echo "# Generated application persistence overrides" > "$GENERATED_PERSISTENCE_VALUES"
   render_shared_storage_persistence_values "$GENERATED_PERSISTENCE_VALUES"
-  render_one_persistence_values "$GENERATED_PERSISTENCE_VALUES" "nexent-supabase-db" "nexent-supabase-db" "10Gi"
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "monitoring"; then
     render_monitoring_persistence_values "$GENERATED_PERSISTENCE_VALUES"
   fi
@@ -388,14 +382,6 @@ sql_files_checksum() {
       payload="${payload}${rel}:${checksum}"$'\n'
     done < <(find "$DEPLOY_ROOT/sql/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
   fi
-  if [ -d "$SUPABASE_SQL_DIR" ]; then
-    while IFS= read -r file; do
-      [ -n "$file" ] || continue
-      rel="${file#"$DEPLOY_ROOT/sql/"}"
-      checksum="$(deployment_sha256_file "$file")"
-      payload="${payload}${rel}:${checksum}"$'\n'
-    done < <(find "$SUPABASE_SQL_DIR" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
-  fi
   deployment_sha256_string "$payload"
 }
 
@@ -427,10 +413,6 @@ render_k8s_runtime_config_values() {
     echo "Error: SQL migrations directory not found: $DEPLOY_ROOT/sql/migrations"
     exit 1
   fi
-  if [ ! -d "$SUPABASE_SQL_DIR" ]; then
-    echo "Error: Supabase SQL directory not found: $SUPABASE_SQL_DIR"
-    exit 1
-  fi
   {
     echo "global:"
     echo "  sqlFileNames:"
@@ -439,11 +421,6 @@ render_k8s_runtime_config_values() {
       [ -n "$file" ] || continue
       printf '      - %s\n' "$(yaml_quote "$(basename "$file")")"
     done < <(find "$DEPLOY_ROOT/sql/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
-    echo "    supabase:"
-    while IFS= read -r file; do
-      [ -n "$file" ] || continue
-      printf '      - %s\n' "$(yaml_quote "$(basename "$file")")"
-    done < <(find "$SUPABASE_SQL_DIR" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
     echo "nexent-common:"
     echo "  sqlFiles:"
     echo "    migrations:"
@@ -451,11 +428,6 @@ render_k8s_runtime_config_values() {
       [ -n "$file" ] || continue
       render_yaml_literal_file "$(basename "$file")" "$file" 6 8
     done < <(find "$DEPLOY_ROOT/sql/migrations" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
-    echo "    supabase:"
-    while IFS= read -r file; do
-      [ -n "$file" ] || continue
-      render_yaml_literal_file "$(basename "$file")" "$file" 6 8
-    done < <(find "$SUPABASE_SQL_DIR" -maxdepth 1 -type f -name '*.sql' -print | sort -V)
     echo "  config:"
     printf '    timezone: %s\n' "$(yaml_quote "${TZ:-Asia/Shanghai}")"
     # Web does not load the backend env Secret; keep its Northbound proxy URL.
@@ -666,15 +638,119 @@ ensure_namespace() {
 }
 
 helm_upgrade_application_release() {
+    local paused="${1:-false}"
     helm upgrade --install "$APPLICATION_RELEASE_NAME" "$APPLICATION_CHART_DIR" \
         --namespace "$NAMESPACE" \
         -f "$GENERATED_VALUES" \
         -f "$GENERATED_RUNTIME_VALUES" \
         -f "$GENERATED_PERSISTENCE_VALUES" \
         -f "$GENERATED_SECRETS_VALUES" \
+        --set global.businessPaused="$paused" \
+        --set global.systemBootstrapTimeoutSeconds="$((K8S_WAIT_TIMEOUT_SECONDS * 3))" \
         --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
         --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
         --set nexent-common.secrets.ssh.password="$SSH_PASSWORD"
+}
+
+validate_application_release() {
+    local paused
+    for paused in true false; do
+        helm template "$APPLICATION_RELEASE_NAME" "$APPLICATION_CHART_DIR" \
+            --namespace "$NAMESPACE" \
+            -f "$GENERATED_VALUES" -f "$GENERATED_RUNTIME_VALUES" \
+            -f "$GENERATED_PERSISTENCE_VALUES" -f "$GENERATED_SECRETS_VALUES" \
+            --set global.businessPaused="$paused" \
+            --set nexent-openssh.enabled="$ENABLE_OPENSSH" \
+            --set nexent-common.secrets.ssh.username="$SSH_USERNAME" \
+            --set nexent-common.secrets.ssh.password="$SSH_PASSWORD" >/dev/null || return 1
+    done
+}
+
+stop_old_business_workloads() {
+    local deployment found pods elapsed
+    local existing=()
+    for deployment in nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-data-process; do
+        found=$(kubectl get deployment "$deployment" -n "$NAMESPACE" --ignore-not-found -o name) || return 1
+        [ -z "$found" ] || existing+=("$deployment")
+    done
+    for deployment in "${existing[@]}"; do
+        kubectl scale "deployment/$deployment" -n "$NAMESPACE" --replicas=0 || return 1
+    done
+    for deployment in "${existing[@]}"; do
+        elapsed=0
+        while true; do
+            pods=$(kubectl get pods -n "$NAMESPACE" -l "app=$deployment" -o name) || return 1
+            [ -n "$pods" ] || break
+            if [ "$elapsed" -ge "$K8S_WAIT_TIMEOUT_SECONDS" ]; then
+                echo "Error: old $deployment Pods did not stop; migration will not run." >&2
+                return 1
+            fi
+            sleep 2
+            elapsed=$((elapsed + 2))
+        done
+    done
+}
+
+bootstrap_job_failed() {
+    local job="$1"
+    kubectl logs -n "$NAMESPACE" "job/$job" --all-containers=true --tail=200 >&2 || true
+    kubectl delete job "$job" -n "$NAMESPACE" --wait=true --timeout="${K8S_WAIT_TIMEOUT_SECONDS}s" >/dev/null || true
+    echo "Error: system Agent bootstrap failed; business workloads remain paused." >&2
+    return 1
+}
+
+run_system_agent_bootstrap() {
+    local jobs job pod status elapsed
+    jobs=$(kubectl get jobs -n "$NAMESPACE" \
+        -l "app=nexent-system-bootstrap,app.kubernetes.io/instance=$APPLICATION_RELEASE_NAME" \
+        --sort-by=.metadata.creationTimestamp \
+        -o 'jsonpath={range .items[*]}{.metadata.name}{"\n"}{end}') || return 1
+    job=$(printf '%s\n' "$jobs" | sed -n '$p')
+    if [ -z "$job" ]; then
+        echo "Error: no system Agent bootstrap Job was created." >&2
+        return 1
+    fi
+    elapsed=0
+    while true; do
+        status=$(kubectl get job "$job" -n "$NAMESPACE" -o 'jsonpath={.status.failed}') || { bootstrap_job_failed "$job"; return 1; }
+        if [ "${status:-0}" -gt 0 ] || [ "$elapsed" -ge "$K8S_WAIT_TIMEOUT_SECONDS" ]; then
+            bootstrap_job_failed "$job"
+            return 1
+        fi
+        pod=$(kubectl get pods -n "$NAMESPACE" -l "job-name=$job" \
+            -o 'jsonpath={range .items[?(@.status.containerStatuses[0].ready==true)]}{.metadata.name}{"\n"}{end}') || { bootstrap_job_failed "$job"; return 1; }
+        pod=$(printf '%s\n' "$pod" | sed -n '$p')
+        [ -z "$pod" ] || break
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+    sync_official_skills_to_workspace "$pod" || { bootstrap_job_failed "$job"; return 1; }
+    kubectl exec -n "$NAMESPACE" "$pod" -c nexent-config -- sh -c ': > /tmp/nexent-bootstrap-start' || { bootstrap_job_failed "$job"; return 1; }
+    elapsed=0
+    while true; do
+        status=$(kubectl get job "$job" -n "$NAMESPACE" -o 'jsonpath={.status.succeeded}:{.status.failed}') || { bootstrap_job_failed "$job"; return 1; }
+        case "$status" in
+            1:*) return 0 ;;
+            *:[1-9]*) bootstrap_job_failed "$job"; return 1 ;;
+        esac
+        if [ "$elapsed" -ge "$K8S_WAIT_TIMEOUT_SECONDS" ]; then
+            bootstrap_job_failed "$job"
+            return 1
+        fi
+        sleep 2
+        elapsed=$((elapsed + 2))
+    done
+}
+
+deploy_application_release() {
+    validate_application_release || return 1
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
+        stop_old_business_workloads || return 1
+        helm_upgrade_application_release true || return 1
+        run_system_agent_bootstrap || return 1
+    fi
+    helm_upgrade_application_release false || return 1
+    wait_for_nexent_ready || return 1
 }
 
 helm_upgrade_infrastructure_release() {
@@ -742,6 +818,24 @@ find_ready_config_pod() {
     printf '%s\n' "$ready_pods" | sed -n '$p'
 }
 
+publish_shared_workbench() {
+    # Explicit/manual publication helper; normal deployment uses the bootstrap Job.
+    local config_pod
+    config_pod=$(find_ready_config_pod) || return 1
+    if [ -z "$config_pod" ]; then
+        echo "Error: no Ready nexent-config pod is available for Workbench publication." >&2
+        return 1
+    fi
+
+    # A Ready config pod has completed SQL migrations; use its release environment.
+    echo "Initializing and publishing shared Workbench..."
+    if ! kubectl exec -n "$NAMESPACE" "$config_pod" -c nexent-config -- sh -c \
+        'cd /opt/backend && python -m management.services.agent.system_initialize && python -m management.services.agent.system_release'; then
+        echo "Error: shared Workbench initialization or publication failed." >&2
+        return 1
+    fi
+}
+
 sync_official_skills_to_workspace() {
     local config_pod
     local expected_manifest
@@ -749,7 +843,10 @@ sync_official_skills_to_workspace() {
     local staging_dir="/mnt/nexent/.official-skills-zip.staging"
     local backup_dir="/mnt/nexent/.official-skills-zip.backup"
 
-    config_pod=$(find_ready_config_pod)
+    config_pod="${1:-}"
+    if [ -z "$config_pod" ]; then
+        config_pod=$(find_ready_config_pod) || return 1
+    fi
     if [ -z "$config_pod" ]; then
         echo "Error: no Ready nexent-config pod is available for official skills synchronization."
         return 1
@@ -889,9 +986,6 @@ wait_for_nexent_ready() {
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "data-process"; then
         deployments="$deployments nexent-data-process"
     fi
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
-        deployments="$deployments nexent-supabase-kong nexent-supabase-auth nexent-supabase-db"
-    fi
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "terminal"; then
         deployments="$deployments nexent-openssh"
     fi
@@ -934,8 +1028,8 @@ select_deployment_version() {
     echo "  Deployment Version Selection"
     echo "=========================================="
     echo "Please select deployment version:"
-    echo "   1) Speed version - Lightweight deployment with essential features (no Supabase)"
-    echo "   2) Full version - Full-featured deployment with all capabilities (includes Supabase)"
+    echo "   1) Speed version - Explicit unauthenticated demo mode"
+    echo "   2) Full version - Local account authentication enabled"
 
     if [ -n "$DEPLOYMENT_VERSION" ]; then
         version_choice="$DEPLOYMENT_VERSION"
@@ -971,23 +1065,7 @@ select_deployment_version() {
     echo ""
 }
 
-# Generate JWT token for Supabase
-generate_jwt() {
-    local role=$1
-    local secret=$JWT_SECRET
-    local now=$(date +%s)
-    local exp=$((now + 157680000))
-
-    local header='{"alg":"HS256","typ":"JWT"}'
-    local header_base64=$(echo -n "$header" | base64 | tr -d '\n=' | tr '/+' '_-')
-
-    local payload="{\"role\":\"$role\",\"iss\":\"supabase\",\"iat\":$now,\"exp\":$exp}"
-    local payload_base64=$(echo -n "$payload" | base64 | tr -d '\n=' | tr '/+' '_-')
-
-    local signature=$(echo -n "$header_base64.$payload_base64" | openssl dgst -sha256 -hmac "$secret" -binary | base64 | tr -d '\n=' | tr '/+' '_-')
-
-    echo "$header_base64.$payload_base64.$signature"
-}
+# Local JWT authentication helpers
 
 decode_base64() {
     if base64 --help 2>&1 | grep -q -- '--decode'; then
@@ -1009,26 +1087,6 @@ get_existing_secret_value() {
     printf '%s' "$encoded_value" | decode_base64
 }
 
-load_existing_supabase_secrets() {
-    local existing_jwt_secret
-    local existing_secret_key_base
-    local existing_vault_enc_key
-    local existing_anon_key
-    local existing_service_role_key
-
-    existing_jwt_secret="$(get_existing_secret_value "JWT_SECRET")" || return 1
-    existing_secret_key_base="$(get_existing_secret_value "SECRET_KEY_BASE")" || return 1
-    existing_vault_enc_key="$(get_existing_secret_value "VAULT_ENC_KEY")" || return 1
-    existing_anon_key="$(get_existing_secret_value "SUPABASE_KEY")" || return 1
-    existing_service_role_key="$(get_existing_secret_value "SERVICE_ROLE_KEY")" || return 1
-
-    JWT_SECRET="$existing_jwt_secret"
-    SECRET_KEY_BASE="$existing_secret_key_base"
-    VAULT_ENC_KEY="$existing_vault_enc_key"
-    SUPABASE_ANON_KEY="$existing_anon_key"
-    SUPABASE_SERVICE_ROLE_KEY="$existing_service_role_key"
-    return 0
-}
 
 load_existing_minio_secrets() {
     local existing_access_key
@@ -1054,50 +1112,18 @@ load_existing_elasticsearch_api_key() {
     return 0
 }
 
-# Generate Supabase secrets (only for full version)
-generate_supabase_secrets() {
-    if [ "$DEPLOYMENT_VERSION" != "full" ]; then
-        echo "Skipping Supabase secrets generation (deployment version is speed)"
-        return 0
+# Generate or reuse the independent application JWT signing key
+generate_auth_secret() {
+    if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ]; then
+        JWT_SECRET="$(openssl rand -base64 32 | tr -d '[:space:]')"
     fi
-
-    echo "=========================================="
-    echo "  Supabase Secrets Generation"
-    echo "=========================================="
-
-    if [ -n "${JWT_SECRET:-}" ] && [ -n "${SECRET_KEY_BASE:-}" ] && [ -n "${VAULT_ENC_KEY:-}" ] && [ -n "${SUPABASE_KEY:-}" ] && [ -n "${SERVICE_ROLE_KEY:-}" ]; then
-        SUPABASE_ANON_KEY="$SUPABASE_KEY"
-        SUPABASE_SERVICE_ROLE_KEY="$SERVICE_ROLE_KEY"
-        echo "Using Supabase secrets from deploy/env/.env."
-        echo ""
-        echo "--------------------------------"
-        echo ""
-        return 0
+    if [ -z "${JWT_SECRET:-}" ]; then
+        JWT_SECRET="$(get_existing_secret_value JWT_SECRET)" || true
     fi
-
-    if load_existing_supabase_secrets; then
-        echo "Reusing existing Supabase secrets from Kubernetes secret."
-        echo ""
-        echo "--------------------------------"
-        echo ""
-        return 0
+    if [ -z "${JWT_SECRET:-}" ]; then
+        JWT_SECRET="$(openssl rand -base64 32 | tr -d '[:space:]')"
     fi
-
-    # Generate fresh keys for security
-    JWT_SECRET=$(openssl rand -base64 32 | tr -d '[:space:]')
-    SECRET_KEY_BASE=$(openssl rand -base64 64 | tr -d '[:space:]')
-    VAULT_ENC_KEY=$(openssl rand -base64 32 | tr -d '[:space:]')
-
-    # Generate JWT-dependent keys
-    local anon_key=$(generate_jwt "anon")
-    local service_role_key=$(generate_jwt "service_role")
-
-    SUPABASE_ANON_KEY="$anon_key"
-    SUPABASE_SERVICE_ROLE_KEY="$service_role_key"
-    echo "Supabase secrets generated for generated Helm values"
-    echo ""
-    echo "--------------------------------"
-    echo ""
+    export JWT_SECRET
 }
 
 # Pull MCP Docker image to local host (best-effort)
@@ -1187,11 +1213,8 @@ pull_sandbox_image() {
 }
 
 render_runtime_secret_values() {
-    local gotrue_db_url
     local env_checksum
     local sql_checksum
-    local supabase_postgres_password
-    local supabase_secret_checksum
     local root_env_data
     local monitoring_env_data="      {}"
     local monitoring_env_file
@@ -1202,19 +1225,16 @@ render_runtime_secret_values() {
         monitoring_env_data="$(k8s_env_file_data "$monitoring_env_file" 6)" || return 1
     fi
 
-    supabase_postgres_password="$(env_or_default SUPABASE_POSTGRES_PASSWORD "Huawei123")"
-    gotrue_db_url="$(env_or_default GOTRUE_DB_DATABASE_URL "postgres://supabase_auth_admin:${supabase_postgres_password}@$(env_or_default SUPABASE_POSTGRES_HOST "nexent-supabase-db"):$(env_or_default SUPABASE_POSTGRES_PORT "5436")/$(env_or_default SUPABASE_POSTGRES_DB "supabase")?search_path=auth&sslmode=disable")"
     env_checksum="$(deployment_env_values_checksum)"
     env_checksum="$(deployment_sha256_string "${env_checksum}|root=${root_env_data}|monitoring=${monitoring_env_data}|sandboxMode=${DEPLOYMENT_SANDBOX_MODE:-lightweight}|mcp=${NEXENT_MCP_DOCKER_IMAGE:-}|sandbox=${NEXENT_SANDBOX_IMAGE:-}")"
     sql_checksum="$(sql_files_checksum)"
-    supabase_secret_checksum="$(deployment_sha256_string "jwt=${JWT_SECRET:-}|secretKeyBase=${SECRET_KEY_BASE:-}|vault=${VAULT_ENC_KEY:-}|anon=${SUPABASE_ANON_KEY:-}|service=${SUPABASE_SERVICE_ROLE_KEY:-}|postgres=${supabase_postgres_password}|gotrue=${gotrue_db_url}")"
 
     {
         echo "global:"
         echo "  rolloutChecksums:"
         printf '    env: %s\n' "$(yaml_quote "$env_checksum")"
         printf '    sql: %s\n' "$(yaml_quote "$sql_checksum")"
-        printf '    supabaseSecret: %s\n' "$(yaml_quote "$supabase_secret_checksum")"
+        printf '    authSecret: %s\n' "$(yaml_quote "$(deployment_sha256_string "$JWT_SECRET")")"
         deployment_render_image_rollout_checksums
         echo "nexent-common:"
         echo "  envFiles:"
@@ -1233,16 +1253,7 @@ render_runtime_secret_values() {
         echo "    ssh:"
         printf '      username: %s\n' "$(yaml_quote "$(env_or_default SSH_USERNAME "nexent")")"
         printf '      password: %s\n' "$(yaml_quote "$(env_or_default SSH_PASSWORD "nexent@2025")")"
-        if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
-            echo "    supabase:"
-            printf '      jwtSecret: %s\n' "$(yaml_quote "$JWT_SECRET")"
-            printf '      secretKeyBase: %s\n' "$(yaml_quote "$SECRET_KEY_BASE")"
-            printf '      vaultEncKey: %s\n' "$(yaml_quote "$VAULT_ENC_KEY")"
-            printf '      anonKey: %s\n' "$(yaml_quote "$SUPABASE_ANON_KEY")"
-            printf '      serviceRoleKey: %s\n' "$(yaml_quote "$SUPABASE_SERVICE_ROLE_KEY")"
-            printf '      postgresPassword: %s\n' "$(yaml_quote "$supabase_postgres_password")"
-            printf '      gotrueDbUrl: %s\n' "$(yaml_quote "$gotrue_db_url")"
-        fi
+        printf '    jwtSecret: %s\n' "$(yaml_quote "$JWT_SECRET")"
     } | k8s_write_private_values "$GENERATED_SECRETS_VALUES"
 }
 
@@ -1336,9 +1347,6 @@ apply() {
     fi
     if release_scope_includes_nexent; then
         stale_pvs="$stale_pvs nexent-workspace-pv nexent-skills-pv nexent-project-config-pv"
-        if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
-            stale_pvs="$stale_pvs nexent-supabase-db-pv"
-        fi
     fi
     for pv in $stale_pvs; do
         pv_status=$(kubectl get pv "$pv" -o jsonpath='{.status.phase}' 2>/dev/null || echo "NotFound")
@@ -1382,7 +1390,7 @@ apply() {
     fi
 
     # Step 6: Prepare application-only secrets after infrastructure is healthy.
-    generate_supabase_secrets
+    generate_auth_secret
     if [ "${DEPLOYMENT_REFRESH_ES_KEY:-false}" != "true" ] && [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ]; then
         if [ -n "${ELASTICSEARCH_API_KEY:-}" ]; then
             echo "Using ELASTICSEARCH_API_KEY from deploy/env/.env."
@@ -1440,34 +1448,32 @@ apply() {
         SSH_PASSWORD="${SSH_PASSWORD:-nexent@2025}"
     fi
 
+    # Capture the source before replacing Secrets needed by a stopped old DB.
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
+        deployment_upgrade_local_accounts prepare kubernetes "$NAMESPACE" || exit 1
+    fi
+
     render_runtime_secret_values
     recreate_legacy_nexent_secret_for_helm_management
 
-    # Step 8: Install or upgrade the application release exactly once.
+    # Step 8: Pause business Pods, run the bootstrap Job, then activate the release.
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         echo "正在部署应用 Helm release '$APPLICATION_RELEASE_NAME'..."
     else
         echo "Deploying application Helm release '$APPLICATION_RELEASE_NAME'..."
     fi
-    helm_upgrade_application_release
-
-    echo "Waiting for selected Nexent workloads..."
-    if ! wait_for_nexent_ready; then
-        echo "Error: one or more Nexent workloads failed to become ready."
+    if ! deploy_application_release; then
+        echo "Error: application deployment failed; no automatic old-service restart was attempted."
         exit 1
     fi
 
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
-        echo "Synchronizing official skills to the workspace PVC..."
-        if ! sync_official_skills_to_workspace; then
-            echo "Error: official skills synchronization failed."
-            exit 1
-        fi
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
+        deployment_upgrade_local_accounts apply kubernetes "$NAMESPACE" || exit 1
     fi
 
-    # Step 9: Create the super admin user when Supabase is selected.
+    # Step 9: Create the super admin user after local account migrations.
     CREATE_SUADMIN_SCRIPT="$SCRIPT_DIR/create-suadmin.sh"
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "application"; then
         if [ -f "$CREATE_SUADMIN_SCRIPT" ]; then
             echo ""
             echo "=========================================="

@@ -3,7 +3,7 @@
 from contracts.authentication import AuthenticatedIdentity
 import logging
 from http import HTTPStatus
-from typing import Optional
+from typing import Optional, Literal
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from starlette.responses import JSONResponse, StreamingResponse
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
@@ -15,7 +15,7 @@ from management.services.agent.service import run_agent_stream, stop_agent_tasks
 from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from contracts.errors.exceptions import RunModelControlsError
-from management.services.conversation.creation_history import prepare_creation_history, persist_creation_stream
+from management.services.conversation.creator_execution import start_creation_turn
 from gateway.authentication.auth import get_current_user_info, get_current_user_id
 from gateway.authentication.auth import verify_internal_runtime_jwt
 
@@ -103,6 +103,7 @@ async def agent_run_api(
 async def northbound_agent_run_api(
     agent_request: AgentRequest,
     authorization: Optional[str] = Header(None),
+    final_answer_mode: Literal["complete", "delta"] = Query("complete"),
 ):
     """Run a northbound-prepared agent request inside the runtime service."""
     try:
@@ -113,6 +114,7 @@ async def northbound_agent_run_api(
             user_id=user_id,
             tenant_id=tenant_id,
             skip_user_save=True,
+            final_answer_mode=final_answer_mode,
         )
     except UnauthorizedError as exc:
         raise HTTPException(
@@ -151,47 +153,25 @@ async def nl2agent_run_api(
     authorization: Optional[str] = Header(None),
     _current_user: CurrentUser = Depends(require_agent_create_permission),
 ):
-    """Run NL2Agent; Workbench turns opt into conversation persistence."""
-    if (
-        nl2agent_request.persist_history or nl2agent_request.workbench_config is not None
-    ) and not ENABLE_AGENT_WORKBENCH:
+    """Run the shared NL2Agent with the same history path in every UI entrypoint."""
+    if nl2agent_request.workbench_config is not None and not ENABLE_AGENT_WORKBENCH:
         raise HTTPException(status_code=HTTPStatus.NOT_FOUND, detail={"code": "WORKBENCH_DISABLED"})
-
     try:
         user_id, tenant_id, language = get_current_user_info(authorization, http_request)
-        stream = await create_nl2agent_stream(
-            request=nl2agent_request,
-            tenant_id=tenant_id,
-            language=language,
-            identity=AuthenticatedIdentity(user_id, tenant_id),
-            authorization=authorization,
+        stream, conversation_id = await start_creation_turn(
+            nl2agent_request, kind="agent", user_id=user_id, tenant_id=tenant_id,
+            stream_factory=lambda effective, ref: create_nl2agent_stream(
+                request=effective, tenant_id=tenant_id, language=language,
+                identity=AuthenticatedIdentity(user_id, tenant_id), authorization=authorization,
+                system_ref=ref,
+            ),
         )
-        if nl2agent_request.persist_history:
-            conversation_id, assistant_index = prepare_creation_history(
-                conversation_id=nl2agent_request.conversation_id,
-                mode="agent_create",
-                query=nl2agent_request.query,
-                minio_files=nl2agent_request.minio_files,
-                workbench_config=nl2agent_request.workbench_config,
-                agent_id=nl2agent_request.agent_id,
-                user_id=user_id,
-                tenant_id=tenant_id,
-                retry_user_message_id=nl2agent_request.retry_user_message_id,
-                retry_message_index=nl2agent_request.retry_message_index,
-            )
-            stream = persist_creation_stream(
-                stream,
-                conversation_id=conversation_id,
-                assistant_index=assistant_index,
-                user_id=user_id,
-                tenant_id=tenant_id,
-            )
-            return StreamingResponse(
-                stream,
-                media_type="text/event-stream",
-                headers={"conversation_id": str(conversation_id)},
-            )
-        return StreamingResponse(stream, media_type="text/event-stream")
+        return StreamingResponse(stream, media_type="text/event-stream",
+                                 headers={"conversation_id": str(conversation_id)})
+    except PermissionError as exc:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=str(exc)) from exc
+    except WorkbenchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
     except UnauthorizedError as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNAUTHORIZED,
@@ -221,11 +201,6 @@ async def nl2agent_run_api(
         raise HTTPException(
             status_code=HTTPStatus.BAD_REQUEST,
             detail="Invalid Workbench creation session.",
-        ) from exc
-    except PermissionError as exc:
-        raise HTTPException(
-            status_code=HTTPStatus.FORBIDDEN,
-            detail="Agent draft cannot be reused.",
         ) from exc
     except Exception as exc:
         logger.exception("NL2Agent run error")

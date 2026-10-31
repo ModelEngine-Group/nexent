@@ -9,7 +9,7 @@ from contracts.authentication import AuthenticatedIdentity
 import logging
 from http import HTTPStatus
 from urllib.parse import quote
-from typing import Optional
+from typing import Literal, Optional
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking
@@ -49,9 +49,6 @@ from management.services.agent.workbench import (
     build_workbench_capability_preview,
     build_workbench_main_profile,
 )
-from management.services.agent.system import (
-    ensure_workbench_main_agent,
-)
 from contracts.errors.exceptions import AgentDraftEditError
 from services.nl2agent_service import Nl2AgentDraftSaveError, create_nl2agent_stream
 from contracts.errors.exceptions import RunModelControlsError
@@ -90,26 +87,11 @@ async def get_workbench_bootstrap_api(
     _, tenant_id = get_current_user_id(authorization)
     try:
         generic_agent = build_workbench_main_profile(tenant_id)
-    except Exception:
-        # The feature may be enabled after this tenant was created. Initialize
-        # lazily if the startup backfill has not reached it yet.
-        try:
-            await run_blocking(
-                "workbench-bootstrap",
-                ensure_workbench_main_agent,
-                tenant_id,
-                "system",
-            )
-            generic_agent = build_workbench_main_profile(tenant_id)
-        except Exception:
-            logger.exception(
-                "Failed to load workbench_main presentation profile for tenant %s",
-                tenant_id,
-            )
-            generic_agent = {
-                "display_name": "Nexent Workbench",
-                "default_skill_resources": [],
-            }
+    except Exception as exc:
+        raise HTTPException(
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+            detail={"code": "WORKBENCH_SYSTEM_AGENT_UNAVAILABLE"},
+        ) from exc
     return {
         "code": 0,
         "message": "success",

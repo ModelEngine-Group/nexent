@@ -87,8 +87,8 @@ from management.db import models
 from management.db.base import SimpleTableBase, TableBase
 classes = {value for value in vars(models).values()
            if isinstance(value, type) and hasattr(value, '__tablename__')}
-assert len(classes) == 73
-assert len(TableBase.metadata.tables) == 68
+assert len(classes) == 74
+assert len(TableBase.metadata.tables) == 69
 assert len(SimpleTableBase.metadata.tables) == 5
 assert models.OuterApiTool is models.OuterApiService
 assert models.AgentEvaluation.__module__ == 'management.db.evaluation.models'
@@ -110,4 +110,4 @@ print(json.dumps({'tables': len(classes), 'client_loaded': False}))
         timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout) == {"tables": 73, "client_loaded": False}
+    assert json.loads(result.stdout) == {"tables": 74, "client_loaded": False}
