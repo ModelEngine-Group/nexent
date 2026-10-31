@@ -65,9 +65,11 @@ class TestA2AHttpClientInit:
     def test_default_initialization(self):
         """Test default initialization values."""
         from infrastructure.http.a2a import A2AHttpClient, DEFAULT_TIMEOUT, DEFAULT_MAX_RETRIES
+        from contracts.constants.environment import A2A_AGENT_INVOCATION_TIMEOUT_SECONDS
 
         client = A2AHttpClient()
         assert client.timeout.total == DEFAULT_TIMEOUT
+        assert DEFAULT_TIMEOUT == A2A_AGENT_INVOCATION_TIMEOUT_SECONDS
         assert client.max_retries == DEFAULT_MAX_RETRIES
         assert client._session is None
 
@@ -783,9 +785,10 @@ class TestConstants:
     """Test class for module constants."""
 
     def test_default_timeout_value(self):
-        """Test DEFAULT_TIMEOUT constant."""
+        """Test DEFAULT_TIMEOUT tracks the A2A invocation timeout (default 15 minutes)."""
         from infrastructure.http.a2a import DEFAULT_TIMEOUT
-        assert DEFAULT_TIMEOUT == 300.0
+        from contracts.constants.environment import A2A_AGENT_INVOCATION_TIMEOUT_SECONDS
+        assert DEFAULT_TIMEOUT == A2A_AGENT_INVOCATION_TIMEOUT_SECONDS == 900.0
 
     def test_agent_card_timeout_value(self):
         """Test AGENT_CARD_TIMEOUT constant."""
