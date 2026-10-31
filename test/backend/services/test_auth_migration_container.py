@@ -7,8 +7,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from deploy.sql.tools.supabase_to_postgres import source_container as runtime
-from deploy.sql.tools.supabase_to_postgres.settings import MigrationSetupError
+from deploy.sql.tools.supabase_to_postgres import migrate as runtime
+from deploy.sql.tools.supabase_to_postgres.migrate import MigrationSetupError
 
 
 @pytest.mark.parametrize("running", [True, False])

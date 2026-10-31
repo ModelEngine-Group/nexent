@@ -43,6 +43,9 @@ case:
   - order: 6
     action: Apply an import using an isolated stopped Supabase source DB and owned Auth/Kong containers; exercise failure and preview before a successful apply.
     expected: Preview/failure preserve the stack; successful committed apply removes its DB/Auth/Kong containers without deleting data volumes, backups or unrelated containers.
+  - order: 7
+    action: Run deployment prepare and apply hooks around the normal versioned SQL runner, repeat deployment and retry a failed import using its retained private snapshot.
+    expected: One standalone Python script automatically imports only when the account SQL/data checkpoint requires it; fresh installs and completed upgrades skip source access, failures remain retryable, and SQL success alone never marks credential migration complete.
   expected_results:
   - Successful identity behavior matches the preserved HTTP/data contract.
   - Negative paths reject access or writes deterministically.
@@ -52,6 +55,7 @@ case:
     are removed atomically and credential-pending rows are hydrated safely.
   - API-only account upgrades preserve existing keys, keep password login disabled and never reactivate explicitly disabled or deleted accounts on replay.
   - Source containers are reclaimed only after a successful local apply and all persistent data is retained.
+  - Deployment requires no manual Python invocation or host database packages; private snapshots survive incomplete upgrades and are removed only after committed import and successful cleanup.
   forbidden_side_effects:
   - No plaintext password/hash/token/DSN in returned errors or logs; no writes to
     unrelated users.
@@ -65,6 +69,7 @@ case:
     - 4
     - 5
     - 6
+    - 7
     expected_results:
     - 1
     - 2
@@ -72,6 +77,7 @@ case:
     - 4
     - 5
     - 6
+    - 7
     forbidden_side_effects:
     - 1
   risk_type: DEPLOYMENT

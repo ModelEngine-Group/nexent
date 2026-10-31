@@ -5,8 +5,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from deploy.sql.tools.supabase_to_postgres import migrate, migration, source_container
-from deploy.sql.tools.supabase_to_postgres.settings import MigrationSetupError
+from deploy.sql.tools.supabase_to_postgres import migrate
+
+migration = source_container = migrate
+from deploy.sql.tools.supabase_to_postgres.migrate import MigrationSetupError
 
 
 @pytest.fixture
@@ -66,7 +68,7 @@ def test_cleanup_error_reports_committed_data_without_leaking_driver_values(mock
 
 
 def test_source_stack_cleanup_uses_exact_selected_db_and_retains_volumes(mocker):
-    from deploy.sql.tools.supabase_to_postgres import legacy_stack
+    from deploy.sql.tools.supabase_to_postgres import migrate as legacy_stack
 
     values = source_container.source_stack_configuration({}, "supabase-original-db")
     assert values["SUPABASE_MIGRATION_DB_CONTAINER"] == "supabase-original-db"

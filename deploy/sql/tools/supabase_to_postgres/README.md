@@ -1,4 +1,43 @@
-# Supabase authentication migration on the host
+# Supabase authentication upgrade
+
+## Automatic deployment
+
+Run the normal `deploy.sh`. Docker and Kubernetes application deployments invoke
+this single `migrate.py` automatically; users do not run a separate migration
+command or install host database packages. The deployment host requires Python
+3.8+, Docker or kubectl, and access to the original source data.
+
+Before replacing the application, deployment checks the account SQL version and
+SHA-256 in `nexent.schema_migrations`, together with data-import and cleanup
+checkpoints. An incomplete upgrade snapshots only `auth.users` and
+`auth.identities` into a private file under `deploy/env/.migration-state/`.
+Stopped existing Docker source databases are started automatically. Exported
+`SUPABASE_POSTGRES_PASSWORD` takes precedence; otherwise the original source
+container's password is reused without prompting. Source reads are read-only.
+
+Config then runs the normal versioned SQL migration runner. After it records
+`v2.9.0_001_local_user_accounts.sql` at the expected checksum, deployment runs
+`migrate.py` with `--apply` using Config's existing Python/database dependencies.
+Account import and its data checkpoint commit in one transaction. Deployment
+then removes the selected source DB/Auth/Kong containers and records cleanup,
+before creating/checking the super admin. Data volumes and backups remain.
+Kubernetes snapshots the source PVC/PV definitions and sets the PV reclaim
+policy to `Retain` before Helm replaces the legacy resources.
+
+A fresh installation with no historical identities needs no source. A completed
+upgrade skips source access. An import failure leaves the source and private
+snapshot available; a cleanup failure retains the snapshot and committed data
+checkpoint. Fix the reported prerequisite and rerun `deploy.sh`. SQL completion
+alone never skips an unfinished credential import. The snapshot is deleted only
+after both import and cleanup succeed; protect retained files as credentials.
+Infrastructure-only and data-process-only deployments do not invoke this flow.
+
+Back up both databases and freeze account/password/provider-binding writes
+during cutover. If the original source containers were deleted, recover them
+from their existing data using the manual recovery commands below; automatic
+deployment refuses to create an empty source for historical login identities.
+
+## Manual recovery and preview
 
 Run this tool on the deployment host with Python 3.11. Activate the backend
 virtual environment, or install the standalone dependencies:
@@ -11,7 +50,7 @@ The tool loads `deploy/env/.env` by default. Exported environment variables take
 precedence. `--env-file PATH` selects another deployment file. No configuration
 file is rewritten. Normal backend/SDK environment configuration is unaffected.
 
-## Default flow
+### Manual flow
 
 1. Back up both databases and freeze account/password/provider-binding writes.
 2. Apply `deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql` to the existing
@@ -55,7 +94,7 @@ uses exact names, never application-wide Compose down, and does not delete data
 volumes or backups. A remote source selected only by HOST/PORT does not cause
 local container removal. If cleanup fails after commit, the command reports
 `Account migration committed; source cleanup failed`; the accounts remain
-migrated. Correct Docker access/configuration and use `legacy_stack.py down` with
+migrated. Correct Docker access/configuration and use `migrate.py down` with
 the original source names to finish cleanup; repeating the importer is safe.
 
 ## Historical API-only identities
@@ -94,7 +133,7 @@ PostgreSQL cluster's credentials.
 # Environment may instead come from --env-file /private/path/legacy.env.
 export ROOT_DIR=/absolute/path/to/original/nexent-data
 # If already exported, SUPABASE_POSTGRES_PASSWORD is reused; otherwise up prompts.
-python deploy/sql/tools/supabase_to_postgres/legacy_stack.py up
+python deploy/sql/tools/supabase_to_postgres/migrate.py up
 ```
 
 Default `up` selects only the legacy database, publishing PostgreSQL on loopback
@@ -108,9 +147,9 @@ To restore old GoTrue and Kong as well, provide the original `JWT_SECRET`,
 `SUPABASE_KEY`, `SERVICE_ROLE_KEY`, and Kong `DASHBOARD_PASSWORD` through the environment/file:
 
 ```sh
-python deploy/sql/tools/supabase_to_postgres/legacy_stack.py up --with-auth
+python deploy/sql/tools/supabase_to_postgres/migrate.py up --with-auth
 # Optional relocated production compatibility overlay:
-python deploy/sql/tools/supabase_to_postgres/legacy_stack.py up --with-auth --production
+python deploy/sql/tools/supabase_to_postgres/migrate.py up --with-auth --production
 ```
 
 GoTrue/Kong are explicit `legacy-auth` profile services. The production overlay
@@ -129,7 +168,7 @@ python deploy/sql/tools/supabase_to_postgres/migrate.py --apply
 After verification, manually remove legacy containers:
 
 ```sh
-python deploy/sql/tools/supabase_to_postgres/legacy_stack.py down
+python deploy/sql/tools/supabase_to_postgres/migrate.py down
 ```
 
 `down` stops/removes only the three configured Supabase container names. It
@@ -168,16 +207,15 @@ than command-line arguments or committed configuration.
 
 ## Data contract and layout
 
-`migrate.py` owns CLI orchestration, `settings.py` owns host-side configuration,
-`source_container.py` handles the existing local source, and `migration.py` owns
-validation and transactional import. Runtime login code does not import these
-operator tools.
+`migrate.py` contains deployment orchestration, manual CLI, configuration, source
+container handling, validation and transactional import. Runtime login code does
+not import this operator tool.
 
 `--apply` imports accounts in one target transaction. Repeating
 the import skips matching accounts and preserves their newer passwords/status.
 Source reads use a read-only repeatable-read transaction. Provider metadata never
 grants application roles; live refresh credentials are never imported. The SQL
-startup runner does not execute these Python tools.
+startup runner owns SQL order; `deploy.sh` invokes this tool around that runner.
 
 See the [cutover and verification runbook](../../../../docs/local-authentication-migration.md)
 for excluded source fields and acceptance checks. Keep source backups until

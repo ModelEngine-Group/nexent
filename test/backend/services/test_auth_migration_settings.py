@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from deploy.sql.tools.supabase_to_postgres import settings
+from deploy.sql.tools.supabase_to_postgres import migrate as settings
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def test_host_defaults(values, mocker):
 
 def test_environment_overrides_deployment_file(mocker):
     mocker.patch.object(Path, "is_file", return_value=True)
-    mocker.patch.object(settings, "dotenv_values", return_value={"SUPABASE_POSTGRES_PASSWORD": "file", "POSTGRES_USER": "root"})
+    mocker.patch("dotenv.dotenv_values", return_value={"SUPABASE_POSTGRES_PASSWORD": "file", "POSTGRES_USER": "root"})
     result = settings.load_settings(Path("config.env"), {"SUPABASE_POSTGRES_PASSWORD": "exported"})
     assert result == {"SUPABASE_POSTGRES_PASSWORD": "exported", "POSTGRES_USER": "root"}
 

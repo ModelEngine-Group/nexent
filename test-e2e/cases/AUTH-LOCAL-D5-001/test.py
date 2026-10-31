@@ -19,12 +19,21 @@ pytestmark = [pytest.mark.case_id("AUTH-LOCAL-D5-001"), pytest.mark.stage("D5")]
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "test-e2e/infra/automation"))
 from local_auth import disposable_database, initialize_target
-from deploy.sql.tools.supabase_to_postgres.migration import (
+from deploy.sql.tools.supabase_to_postgres.migrate import (
     MigrationConflict,
     import_users,
     read_source_users,
 )
 from infrastructure.security.passwords import verify_password
+
+
+def test_deployment_automatic_upgrade_retries_after_sql_success(tmp_path):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("automatic_upgrade_proof", Path(__file__).with_name("automatic_upgrade.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.assert_automatic_upgrade(ROOT, tmp_path)
 
 
 def test_legacy_api_only_keys_survive_upgrade_and_replay(monkeypatch):

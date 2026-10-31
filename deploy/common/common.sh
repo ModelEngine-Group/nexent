@@ -541,6 +541,32 @@ deployment_source_root_env() {
   set +a
 }
 
+deployment_upgrade_local_accounts() {
+  local phase="$1"
+  local mode="$2"
+  local namespace="${3:-nexent}"
+  local interpreter=""
+  local common_dir script candidate
+  common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  script="$common_dir/../sql/tools/supabase_to_postgres/migrate.py"
+  for candidate in python3 python; do
+    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+      interpreter="$candidate"
+      break
+    fi
+  done
+  if [ -z "$interpreter" ]; then
+    echo "ERROR: Python 3.8+ is required on the deployment host for automatic account upgrade." >&2
+    return 1
+  fi
+  local -a arguments=(--deploy-phase "$phase" --deployment "$mode" --namespace "$namespace"
+    --env-file "${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}" --wait-timeout 300)
+  if [ "$phase" = apply ]; then
+    arguments+=(--apply)
+  fi
+  MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$interpreter" "$script" "${arguments[@]}"
+}
+
 deployment_env_dir() {
   if [ -n "${DEPLOYMENT_ROOT_ENV:-}" ]; then
     dirname "$DEPLOYMENT_ROOT_ENV"

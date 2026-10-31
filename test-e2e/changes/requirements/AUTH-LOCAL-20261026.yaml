@@ -25,6 +25,7 @@ change:
   traditional_ut:
     decision: strengthen
     test_selectors:
+    - test/backend/services/test_auth_migration_automatic.py
     - test/backend/services/test_api_key_service.py
     - test/backend/services/test_auth_migration_cleanup.py
     - test/backend/database/test_group_shared_session.py
@@ -53,6 +54,7 @@ change:
     - test/backend/app/test_oauth_app.py
     - test/backend/app/test_cas_app.py
     behaviors:
+    - Deploy prepare/apply resumes private snapshots and records import/cleanup separately from versioned SQL; host mode needs no database packages.
     - API-only null-email accounts remain passwordless; account/membership/group/key writes share a transaction.
     - Only committed local applies reclaim source DB/Auth/Kong; preview, failure and remote sources retain containers/data.
     - Password success/invalid/boundary and legacy hash compatibility.

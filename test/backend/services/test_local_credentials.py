@@ -12,7 +12,7 @@ from infrastructure.security.passwords import (
     password_scheme,
     verify_password,
 )
-from deploy.sql.tools.supabase_to_postgres.migration import MigrationConflict, map_source_user
+from deploy.sql.tools.supabase_to_postgres.migrate import MigrationConflict, map_source_user
 
 
 def source_user(**overrides):

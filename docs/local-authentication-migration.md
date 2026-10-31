@@ -33,6 +33,26 @@ metadata are never returned by identity APIs.
 
 ## Upgrade sequence
 
+Normal Docker/Kubernetes `deploy.sh` now completes this upgrade automatically.
+The host needs Python 3.8+ but no database Python packages. Before application
+replacement it checks the versioned account SQL and data/cleanup checkpoints,
+captures a private read-only source snapshot, then lets Config execute SQL in
+normal migration order. Deployment applies credentials after the expected SQL
+checksum is recorded and before SU bootstrap, then removes the source DB/Auth/Kong
+containers while retaining persistent data and backups. Fresh installations need
+no source; completed upgrades skip source access.
+
+The snapshot remains under `deploy/env/.migration-state/` on failure. Rerun
+`deploy.sh` after fixing the prerequisite; a committed SQL migration never hides
+an unfinished data import. Import and its checkpoint commit atomically. A failed
+cleanup retries without overwriting newer account credentials. Source passwords
+come from the exported deployment environment first, then the original container
+environment; automatic deployment never prompts. Kubernetes preserves source
+storage through a `Retain` PV policy and private PVC/PV definition backup.
+
+Backups and a freeze on account/password/provider-binding writes remain required
+during cutover. The following sequence is the optional manual recovery path.
+
 1. Back up both the original Supabase database and business PostgreSQL. Retain
    those backups until account, provider-binding and ownership checks finish.
    Freeze registration, password changes and provider binding during cutover.
@@ -57,7 +77,7 @@ metadata are never returned by identity APIs.
    its existing data directory first:
 
    ```sh
-   python deploy/sql/tools/supabase_to_postgres/legacy_stack.py up
+   python deploy/sql/tools/supabase_to_postgres/migrate.py up
    ```
 
    Set ROOT_DIR to the original deployment storage root or SUPABASE_DATA_DIR to
@@ -93,7 +113,7 @@ metadata are never returned by identity APIs.
 9. Verify old-user password login, original user IDs and business ownership,
    password change, API keys, provider binding and CAS single logout. Retire the
    old auth services only after these checks. Normal application processes do not need source database access.
-   Remove legacy containers after verification with `legacy_stack.py down`, using
+   Remove legacy containers after verification with `migrate.py down`, using
    the same environment file. The teardown retains original bind data and volumes.
 
 The import copies `auth.users`, retains `auth.identities` snapshots within the

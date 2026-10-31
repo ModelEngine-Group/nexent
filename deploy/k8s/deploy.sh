@@ -1326,6 +1326,10 @@ apply() {
     render_runtime_secret_values
     recreate_legacy_nexent_secret_for_helm_management
 
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
+        deployment_upgrade_local_accounts prepare kubernetes "$NAMESPACE" || exit 1
+    fi
+
     # Step 8: Install or upgrade the application release exactly once.
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
         echo "正在部署应用 Helm release '$APPLICATION_RELEASE_NAME'..."
@@ -1346,6 +1350,10 @@ apply() {
             echo "Error: official skills synchronization failed."
             exit 1
         fi
+    fi
+
+    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
+        deployment_upgrade_local_accounts apply kubernetes "$NAMESPACE" || exit 1
     fi
 
     # Step 9: Create the super admin user after local account migrations.

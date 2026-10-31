@@ -1340,4 +1340,23 @@ deployment_prepare_config --components infrastructure,supabase --port-policy dev
 assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "legacy authentication component must use application local accounts"
 assert_eq "full" "$DEPLOYMENT_VERSION" "legacy authentication selection must keep auth enabled"
 assert_not_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "kong" "legacy input must not start GoTrue/Kong"
+# Exercise the host migration hook with a controlled Python executable.
+mkdir -p "$TMP_DIR/auto-auth-bin"
+cat > "$TMP_DIR/auto-auth-bin/python3" <<'PYTHON'
+#!/usr/bin/env bash
+if [ "${1:-}" = -c ]; then exit 0; fi
+printf '%s\n' "$@" > "$AUTH_HOOK_ARGUMENTS"
+printf '%s\n' "$MSYS_NO_PATHCONV/$MSYS2_ARG_CONV_EXCL" >> "$AUTH_HOOK_ARGUMENTS"
+PYTHON
+chmod +x "$TMP_DIR/auto-auth-bin/python3"
+export AUTH_HOOK_ARGUMENTS="$TMP_DIR/auth-hook-arguments"
+PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts prepare docker
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate.py" "deployment must use the consolidated migration script"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "$DEPLOYMENT_ROOT_ENV" "deployment must pass its actual root environment path"
+assert_not_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "prepare must not import accounts"
+PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts apply kubernetes custom-namespace
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "apply hook must commit the import"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "custom-namespace" "Kubernetes hook must preserve the namespace"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "1/*" "Git Bash must not rewrite container paths"
+
 echo "All deployment common tests passed."

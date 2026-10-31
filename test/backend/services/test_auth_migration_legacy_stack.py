@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from deploy.sql.tools.supabase_to_postgres import legacy_stack as stack
-from deploy.sql.tools.supabase_to_postgres.settings import MigrationSetupError
+from deploy.sql.tools.supabase_to_postgres import migrate as stack
+from deploy.sql.tools.supabase_to_postgres.migrate import MigrationSetupError
 
 
 @pytest.fixture
