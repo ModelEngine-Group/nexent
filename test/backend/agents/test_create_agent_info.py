@@ -4818,7 +4818,8 @@ class TestCreateAgentRunInfo:
                 agent_config="agent_config",
                 mcp_host=[{
                     "url": "http://test.server",
-                    "transport": "streamable-http"
+                    "transport": "streamable-http",
+                    "httpx_client_factory": create_agent_info_module.create_httpx_client,
                 }],
                 mcp_request_timeout_seconds=10,
                 history=[],
@@ -4971,6 +4972,7 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://test.server",
                 "transport": "streamable-http",
+                "httpx_client_factory": create_agent_info_module.create_httpx_client,
                 "headers": {"Authorization": "bearer_token_123"}
             }
 
@@ -5022,6 +5024,7 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://custom-header.server",
                 "transport": "streamable-http",
+                "httpx_client_factory": create_agent_info_module.create_httpx_client,
                 "headers": {"X-Custom-Header": "custom-value", "X-Another-Header": "another-value"}
             }
 
@@ -5124,7 +5127,8 @@ class TestCreateAgentRunInfo:
             assert len(mcp_host) == 1
             assert mcp_host[0] == {
                 "url": "http://null-headers.server",
-                "transport": "streamable-http"
+                "transport": "streamable-http",
+                "httpx_client_factory": create_agent_info_module.create_httpx_client,
             }
             assert "headers" not in mcp_host[0]
 
@@ -5176,6 +5180,7 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://string-headers.server",
                 "transport": "streamable-http",
+                "httpx_client_factory": create_agent_info_module.create_httpx_client,
                 "headers": {"Authorization": "bearer_token_789"}
             }
             assert mcp_host[0]["headers"]["Authorization"] == "bearer_token_789"
@@ -5229,8 +5234,13 @@ class TestCreateAgentRunInfo:
             }
 
     @pytest.mark.asyncio
-    async def test_create_agent_run_info_fallback_to_string_format(self):
-        """Test case for fallback to string format when MCP record not found"""
+    async def test_create_agent_run_info_fallback_keeps_dict_format(self):
+        """Test case for fallback when MCP record not found.
+
+        Regression (v2.8.3 hotfix): the fallback entry stays a dict carrying
+        the shared httpx_client_factory so TLS verification stays disabled
+        for this external server at runtime.
+        """
         mock_agent_run_info.reset_mock()
         with patch('backend.agents.create_agent_info.join_minio_file_description_to_query') as mock_join_query, \
                 patch('backend.agents.create_agent_info.create_model_config_list') as mock_create_models, \
@@ -5262,12 +5272,16 @@ class TestCreateAgentRunInfo:
                 language="zh"
             )
 
-            # Verify mcp_host falls back to string format
+            # Verify mcp_host falls back to dict format with the factory
             assert mock_agent_run_info.call_count == 1
             call_args = mock_agent_run_info.call_args
             mcp_host = call_args[1]["mcp_host"]
             assert len(mcp_host) == 1
-            assert mcp_host[0] == "http://unknown.server"
+            assert mcp_host[0] == {
+                "url": "http://unknown.server",
+                "transport": "streamable-http",
+                "httpx_client_factory": create_agent_info_module.create_httpx_client,
+            }
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_mixed_scenarios(self):
@@ -5334,15 +5348,21 @@ class TestCreateAgentRunInfo:
             assert mcp_host[0] == {
                 "url": "http://server1.com",
                 "transport": "streamable-http",
+                "httpx_client_factory": create_agent_info_module.create_httpx_client,
                 "headers": {"Authorization": "token1"}
             }
             # Second: dict with SSE transport, no authorization
             assert mcp_host[1] == {
                 "url": "http://server2.com/sse",
-                "transport": "sse"
+                "transport": "sse",
+                "httpx_client_factory": create_agent_info_module.create_httpx_client,
             }
-            # Third: string format (fallback for unknown server)
-            assert mcp_host[2] == "http://unknown.server"
+            # Third: dict format fallback (unknown server keeps the factory)
+            assert mcp_host[2] == {
+                "url": "http://unknown.server",
+                "transport": "streamable-http",
+                "httpx_client_factory": create_agent_info_module.create_httpx_client,
+            }
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_with_status_false(self):
@@ -5384,12 +5404,16 @@ class TestCreateAgentRunInfo:
                 language="zh"
             )
 
-            # Verify mcp_host falls back to string format because status=False
+            # Verify mcp_host falls back to dict format because status=False
             assert mock_agent_run_info.call_count == 1
             call_args = mock_agent_run_info.call_args
             mcp_host = call_args[1]["mcp_host"]
             assert len(mcp_host) == 1
-            assert mcp_host[0] == "http://disabled.server"
+            assert mcp_host[0] == {
+                "url": "http://disabled.server",
+                "transport": "streamable-http",
+                "httpx_client_factory": create_agent_info_module.create_httpx_client,
+            }
 
     @pytest.mark.asyncio
     async def test_create_agent_run_info_forwards_allow_memory_false(self):

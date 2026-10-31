@@ -2851,8 +2851,13 @@ async def create_agent_run_info(
                 "url": url,
                 "transport": "sse" if url.endswith("/sse") else "streamable-http"
             }
+            # Hotfix (v2.8.3): inject the shared factory for every MCP server, not just
+            # the built-in container. It disables TLS certificate verification
+            # (verify=False) so self-signed external MCP endpoints work at runtime.
+            # This intentionally diverges from develop, where only the built-in
+            # container gets this factory; keep or re-land this when merging develop.
+            mcp_config["httpx_client_factory"] = create_httpx_client
             if url == default_mcp_url:
-                mcp_config["httpx_client_factory"] = create_httpx_client
                 mcp_config["headers"] = {
                     "X-Tenant-ID": str(tenant_id),
                     "X-Nexent-Internal-Token": TOKEN,
@@ -2868,8 +2873,13 @@ async def create_agent_run_info(
                 mcp_config["headers"] = headers
             mcp_host.append(mcp_config)
         else:
-            # Fallback to string format if record not found
-            mcp_host.append(url)
+            # Record not found: keep dict format so the factory (TLS verification
+            # disabled) still applies to this external server at runtime.
+            mcp_host.append({
+                "url": url,
+                "transport": "sse" if url.endswith("/sse") else "streamable-http",
+                "httpx_client_factory": create_httpx_client,
+            })
 
     # Convert HistoryItem (from API) to AgentHistory (expected by SDK)
     converted_history = _convert_history_with_minio_files(history, language=language)

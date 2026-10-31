@@ -153,8 +153,12 @@ class ExternalA2AAgentProxy:
         # - HTTP/2 disabled to use HTTP/1.1 like curl
         # - trust_env=False to ignore proxy env vars
         # - limits configured for connection pool
+        # Hotfix (v2.8.3): verification is hardcoded off so self-signed external
+        # agents work at runtime; the stored ssl_verify preference is kept for
+        # schema compatibility but no longer affects the transport. This
+        # intentionally diverges from develop; keep or re-land when merging.
         self._client = httpx.AsyncClient(
-            verify=self.agent_info.ssl_verify,
+            verify=False,
             timeout=httpx.Timeout(self.agent_info.timeout),
             http2=False,  # Force HTTP/1.1 like curl
             limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),

@@ -257,12 +257,17 @@ a2a_agent_proxy = _load_a2a_agent_proxy_module()
 @pytest.mark.asyncio
 @pytest.mark.parametrize("preference", [{}, {"ssl_verify": True}, {"ssl_verify": False}])
 async def test_proxy_configures_certificate_verification(preference):
+    """Regression (v2.8.3 hotfix): the runtime client hardcodes verification off.
+
+    The stored ssl_verify preference must no longer influence the transport,
+    so self-signed external agents work regardless of the saved preference.
+    """
     info = a2a_agent_proxy.A2AAgentInfo("id", "Peer", "https://peer", **preference)
     client = MagicMock()
     client.aclose = AsyncMock()
     with patch.object(a2a_agent_proxy.httpx, "AsyncClient", return_value=client) as constructor:
         async with a2a_agent_proxy.ExternalA2AAgentProxy(info):
-            assert constructor.call_args.kwargs["verify"] is preference.get("ssl_verify", True)
+            assert constructor.call_args.kwargs["verify"] is False
 
 # ---------------------------------------------------------------------------
 # Import symbols for convenience
