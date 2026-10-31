@@ -169,6 +169,12 @@ command. Do not execute the live D5 against the current machine's existing clust
 
 ## Acceptance traceability
 
+The rendering suite described below was removed at user request on 2026-10-29.
+It exercised Bash and Helm through subprocesses and supplied deployment functional
+assertions, without contributing backend/sdk Python coverage. The table and dated
+delivery results are historical evidence, not active test selectors or current
+coverage claims.
+
 | AC | Code areas | Traditional UT | Formal case | Evidence | Result |
 | --- | --- | --- | --- | --- | --- |
 | AC-001 | `deploy/k8s/env.sh`; `render_runtime_secret_values` | `test/backend/deploy/test_k8s_env_injection.py`: value preservation, empty files, unknown keys, host exclusion, loading/encoding errors | K8S-ENV-D5-001 / AC-001 | Local UT PASS; live runtime not executed | LOCAL PASS; RUNTIME BLOCKED |
@@ -183,11 +189,8 @@ must remain distinct. A passing render is not a passing Kubernetes runtime accep
 
 ## Delivery evidence — 2026-10-14
 
-Traditional UT command:
-
-```bash
-backend/.venv/bin/python -m pytest test/backend/deploy/test_k8s_env_injection.py -q
-```
+The historical pytest selector was `test/backend/deploy/test_k8s_env_injection.py`;
+the file was deleted on 2026-10-29 and is no longer runnable.
 
 Initial result: **20 passed**. The tests use synthetic files and exercise the production renderer and
 Helm templates. As a regression sensitivity check, removing the `nexent-env` references in a

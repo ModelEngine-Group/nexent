@@ -32,6 +32,7 @@ spec:
         app: nexent-northbound
       annotations:
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
+        checksum/nexent-auth: {{ dig "rolloutChecksums" "authSecret" "" .Values.global | quote }}
         checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" .Values.global | quote }}
         checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
@@ -113,12 +114,7 @@ spec:
               - key: {{ printf "migrations-%s" $name | quote }}
                 path: {{ printf "migrations/%s" $name | quote }}
 {{ end }}
-              - key: supabase-.keep
-                path: supabase/.keep
-{{ range $name := default (list) $sqlFileNames.supabase }}
-              - key: {{ printf "supabase-%s" $name | quote }}
-                path: {{ printf "supabase/%s" $name | quote }}
-{{ end }}
+
         - name: nexent-workspace
           persistentVolumeClaim:
             claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}

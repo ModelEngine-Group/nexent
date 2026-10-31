@@ -75,18 +75,13 @@ OFFICIAL_AGENT_PROFILES = os.getenv('OFFICIAL_AGENT_PROFILES', '')
 # LibreOffice profile directory
 LIBREOFFICE_PROFILE_DIR = os.getenv('LIBREOFFICE_PROFILE_DIR', str(Path.home() / '.cache' / 'nexent' / 'libreoffice-profile'))
 
-# Supabase Configuration
-SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-SERVICE_ROLE_KEY = os.getenv('SERVICE_ROLE_KEY', SUPABASE_KEY)
-
-# JWT secret for verifying Supabase-signed access tokens.
-# GoTrue uses GOTRUE_JWT_SECRET (= JWT_SECRET in docker setup) to sign tokens.
-SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET') or os.getenv('JWT_SECRET', '')
+# Native account authentication
+JWT_SECRET = os.getenv("JWT_SECRET", "")
+JWT_ISSUER = os.getenv("JWT_ISSUER", "nexent")
 
 # Dedicated signing key for opaque independent-AIDP image references. The JWT
 # fallback keeps existing deployments functional while allowing key separation.
-IND_AIDP_IMAGE_SIGNING_KEY = os.getenv('IND_AIDP_IMAGE_SIGNING_KEY') or SUPABASE_JWT_SECRET
+IND_AIDP_IMAGE_SIGNING_KEY = os.getenv('IND_AIDP_IMAGE_SIGNING_KEY') or JWT_SECRET
 
 # OAuth Configuration
 OAUTH_CALLBACK_BASE_URL = os.getenv('OAUTH_CALLBACK_BASE_URL', '').rstrip('/')
@@ -177,7 +172,7 @@ CAPACITY_SUGGESTION_ENABLED = os.getenv('CAPACITY_SUGGESTION_ENABLED', 'true').l
 CAPACITY_VISIBILITY_ENABLED = os.getenv('CAPACITY_VISIBILITY_ENABLED', 'true').lower() in ('true', '1', 'yes', 'on')
 
 # Deployment Version Configuration
-DEPLOYMENT_VERSION = os.getenv('DEPLOYMENT_VERSION', 'speed')
+DEPLOYMENT_VERSION = os.getenv('DEPLOYMENT_VERSION', 'full')
 IS_SPEED_MODE = DEPLOYMENT_VERSION == 'speed'
 
 # AIDP Knowledge Base configuration
@@ -351,15 +346,14 @@ MCP_REQUEST_TIMEOUT_SECONDS = parse_positive_float(os.getenv('MCP_REQUEST_TIMEOU
 # Invite code
 INVITE_CODE = os.getenv('INVITE_CODE')
 
-# Access-token lifetime in seconds. This must match GoTrue's GOTRUE_JWT_EXP.
+# Access-token lifetime in seconds.
 JWT_EXPIRY_SECONDS = int(os.getenv('JWT_EXPIRY', '7200') or 7200)
 _VALIDATED_JWT_EXPIRY_SECONDS = _require_positive(JWT_EXPIRY_SECONDS, 'JWT_EXPIRY must be a positive number of seconds')
 
 # Debug JWT expiration time (seconds), not set or 0 means not effective
 DEBUG_JWT_EXPIRE_SECONDS = int(os.getenv('DEBUG_JWT_EXPIRE_SECONDS', '0') or 0)
 
-# User info query source control: "supabase" or "pg" (default: "supabase" for backward compatibility)
-USER_INFO_QUERY_SOURCE = os.getenv('USER_INFO_QUERY_SOURCE', 'supabase').lower()
+
 
 # Telemetry and Monitoring Configuration (OTLP Protocol)
 MONITORING_PROVIDER = os.getenv('MONITORING_PROVIDER', '')

@@ -101,6 +101,7 @@ _doc/
 .claude/skills/python-import-triage
 /deploy/env/.env
 /deploy/env/.env.bak
+/deploy/env/.migration-state/
 
 agent_repository_frontend
 .omo/
