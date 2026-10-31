@@ -95,7 +95,7 @@ def test_group_page_orders_by_activity_and_keeps_pins_outside_ordinary_quota(ses
     assert session.execute.call_count == 2
     sql = str(session.execute.call_args_list[1].args[0].compile(dialect=postgresql.dialect()))
     assert "GROUP BY nexent.conversation_record_t.agent_id" in sql
-    assert "workbench_config IS NULL" in sql
+    assert "NOT (nexent.conversation_record_t.workbench_config IS NOT NULL OR" in sql
     assert "ORDER BY anon_1.activity_time DESC, group_id DESC" in sql
     assert "created_by" in sql and "delete_flag" in sql
 
@@ -132,7 +132,7 @@ def test_group_conversation_page_returns_cursor_and_full_pin_snapshot(session):
     )
     assert "conversation_title ILIKE" in ordinary_sql
     assert "ORDER BY activity_time DESC, nexent.conversation_record_t.conversation_id DESC" in ordinary_sql
-    assert "created_by" in ordinary_sql and "workbench_config IS NULL" in ordinary_sql
+    assert "created_by" in ordinary_sql and "NOT (nexent.conversation_record_t.workbench_config IS NOT NULL OR" in ordinary_sql
 
 
 @pytest.mark.parametrize("group_key", ["", "agent:0", "agent:-1", "agent:01", "agent:nope"])
@@ -148,7 +148,7 @@ def test_agent_conversation_ids_are_scoped_to_owner_and_one_agent(session):
     assert db.list_agent_conversation_ids("owner", 7) == [11, 12]
     query = session.scalars.call_args.args[0]
     sql = str(query.compile(dialect=postgresql.dialect()))
-    assert "created_by" in sql and "agent_id" in sql and "workbench_config IS NULL" in sql
+    assert "created_by" in sql and "agent_id" in sql and "NOT (nexent.conversation_record_t.workbench_config IS NOT NULL OR" in sql
     assert "delete_flag" in sql
     assert query.compile(dialect=postgresql.dialect()).params["created_by_1"] == "owner"
     assert query.compile(dialect=postgresql.dialect()).params["agent_id_1"] == 7

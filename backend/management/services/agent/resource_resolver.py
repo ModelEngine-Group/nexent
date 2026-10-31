@@ -84,7 +84,7 @@ def _resolve_runtime_tool_records(
     )
     for skill_instance in enabled_skill_instances:
         skill = (
-            skill_db.get_skill_by_id(skill_instance.get("skill_id"), tenant_id)
+            skill_db.get_skill_by_id(skill_instance.get("skill_id"), skill_instance.get("tenant_id") or tenant_id)
             if runtime_skill_snapshot is None
             else skill_instance
         )

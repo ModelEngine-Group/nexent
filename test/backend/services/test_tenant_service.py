@@ -29,7 +29,6 @@ patch('management.db.client.MinioClient',
 
 from contracts.errors.exceptions import ForbiddenError, NotFoundException, TenantResourceLimitError, ValidationError
 from management.services.permission.identity.tenants import (
-    backfill_workbench_main_agents,
     get_tenant_info,
     get_tenant_info_for_user,
     get_tenants_paginated,
@@ -397,27 +396,22 @@ class TestCreateTenant:
     """Test cases for create_tenant function"""
 
     def test_create_tenant_success(self, service_mocks):
-        """UT-BE-SAL-004: tenant creation provisions the localized system Agent."""
+        """Tenant creation does not provision shared system Agents."""
         # Setup
         tenant_name = "New Tenant"
         user_id = "creator_user"
         group_id = 123
 
         service_mocks['create_tenant_with_default_group'].return_value = group_id
-        with patch('management.services.permission.identity.tenants.ENABLE_AGENT_WORKBENCH', True), \
-                patch('management.services.permission.identity.tenants.check_tenant_name_exists', return_value=False), \
-                patch('management.services.permission.identity.tenants.ensure_workbench_main_agent') as ensure:
+        with patch('management.services.permission.identity.tenants.check_tenant_name_exists', return_value=False), \
+                patch('management.services.agent.system_release.release_system_agents') as release:
             result = create_tenant(tenant_name, user_id, locale="zh")
 
         assert result["tenant_name"] == tenant_name
         assert result["default_group_id"] == str(group_id)
         assert "tenant_id" in result
         service_mocks['create_tenant_with_default_group'].assert_called_once()
-        ensure.assert_called_once_with(
-            tenant_id=result["tenant_id"],
-            user_id=user_id,
-            locale="zh",
-        )
+        release.assert_not_called()
 
     def test_create_tenant_name_already_exists(self, service_mocks):
         """Test creating tenant with a name that already exists"""
@@ -510,45 +504,10 @@ class TestCreateTenant:
         pass
 
 
-class TestWorkbenchMainBackfill:
-    """Test historical tenant bootstrap for the workbench system Agent."""
-
-    def test_backfill_filters_virtual_tenants_and_isolates_failures(self):
-        """UT-BE-SAL-006: one tenant failure does not block the batch."""
-        from contracts.constants.constants import ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
-
-        tenant_ids = [
-            "tenant-a",
-            DEFAULT_TENANT_ID,
-            "",
-            ASSET_OWNER_TENANT_ID,
-            "tenant-b",
-        ]
-
-        with patch('management.services.permission.identity.tenants.ENABLE_AGENT_WORKBENCH', True), patch(
-            "management.services.permission.identity.tenants.get_all_tenant_ids",
-            return_value=tenant_ids,
-        ), patch(
-            "management.services.permission.identity.tenants.ensure_workbench_main_agent",
-            side_effect=[MagicMock(), RuntimeError("tenant bootstrap failed")],
-        ) as ensure:
-            result = backfill_workbench_main_agents()
-
-        assert result == {"total": 2, "succeeded": 1, "failed": 1}
-        assert [call.kwargs["tenant_id"] for call in ensure.call_args_list] == [
-            "tenant-a",
-            "tenant-b",
-        ]
-        assert all(call.kwargs["user_id"] == "system" for call in ensure.call_args_list)
-
-    def test_workbench_backfill_skipped_when_disabled(self):
-        with patch('management.services.permission.identity.tenants.ENABLE_AGENT_WORKBENCH', False), patch(
-            'management.services.permission.identity.tenants.get_all_tenant_ids'
-        ) as tenants:
-            result = backfill_workbench_main_agents()
-
-        assert result == {"total": 0, "succeeded": 0, "failed": 0}
-        tenants.assert_not_called()
+def test_tenant_module_has_no_system_agent_backfill():
+    from management.services.permission.identity import tenants
+    assert not hasattr(tenants, "backfill_workbench_main_agents")
+    assert not hasattr(tenants, "ensure_workbench_main_agent")
 
 
 class TestUpdateTenantInfo:

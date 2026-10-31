@@ -38,13 +38,35 @@ def test_prepare_rejects_unsupported_mode():
     "updates",
     [
         {"retry_user_message_id": 10},
-        {"workbench_config": None},
+        {"workbench_config": {}},
         {"mode": "agent_create", "workbench_config": _config("skill_create")},
     ],
 )
-def test_prepare_rejects_invalid_new_conversation(updates):
+def test_prepare_rejects_invalid_new_conversation(mocker, updates):
+    create = mocker.patch.object(service, "create_new_conversation")
+    save = mocker.patch.object(service, "save_message")
     with pytest.raises(ValueError):
         _prepare(**updates)
+    create.assert_not_called()
+    save.assert_not_called()
+
+
+def test_prepare_accepts_standalone_creation_without_workbench_config(mocker):
+    create = mocker.patch.object(
+        service, "create_new_conversation", return_value={"conversation_id": 42},
+    )
+    save = mocker.patch.object(service, "save_message")
+
+    assert _prepare(workbench_config=None, agent_id=77) == (42, 1)
+
+    create.assert_called_once_with(
+        title="Create a skill", user_id="user-a", agent_id=77,
+        target=None, workbench_config=None,
+    )
+    save.assert_called_once()
+    assert save.call_args.args[0].conversation_id == 42
+    assert save.call_args.args[0].message_idx == 0
+    assert save.call_args.args[0].message[0].content == "Create a skill"
 
 
 def test_prepare_rejects_inaccessible_existing_conversation(monkeypatch):

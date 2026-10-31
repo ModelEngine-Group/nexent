@@ -1,0 +1,36 @@
+schema_version: '1.0'
+case_id: SYS-AGENT-D5-001
+implementations:
+- framework: pytest
+  file: test_releases.py
+  selector: SYS-AGENT-D5-001
+timeout_seconds: 180
+acceptance_bindings:
+  AC-01:
+  - test_fresh_install_initialization_and_publication_are_separate
+  - test_shared_tool_scan_has_no_tenant_tag_library_dependency
+  - test_concurrent_explicit_releases
+  AC-02:
+  - test_publication_failure_rolls_back
+  AC-03:
+  - test_workbench_rollback_uses_saved_bindings
+  AC-04:
+  - test_private_resources_abort_sql_migration_atomically
+  - test_sql_completion_marker_prevents_forced_replay
+  - test_legacy_merge_preserves_history_and_deletes_duplicates
+  - test_legacy_merge_failure_rolls_back
+  AC-05:
+  - test_creator_history_migration_preserves_targets
+  AC-06:
+  - test_standalone_creator_history_does_not_persist_workbench_config
+  AC-07:
+  - test_creator_sql_reuses_existing_public_ids
+  - test_creator_sql_concurrent_replay_and_rollback
+  - test_history_sql_requires_seeded_creator_ids
+  AC-08:
+  - test_creator_history_page_filters_executor_target_and_owner
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

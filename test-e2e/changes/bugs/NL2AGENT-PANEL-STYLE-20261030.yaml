@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: NL2AGENT-PANEL-STYLE-20261030
+  change_type: bugfix
+  bug_id: NL2AGENT-PANEL-STYLE-20261030
+  title: Restore NL2Agent panel background and toolbar spacing
+  description: Apply the existing transparent Thread override at its new wrapper and give history controls top and side spacing.
+  observed_behavior: The added history wrapper hides the gradient behind the opaque Thread background; toolbar controls sit too close to the top edge.
+  expected_behavior: Preserve the existing panel gradient and separate the right-aligned controls from the top edge without changing history behavior.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing panel interaction tests substitute Thread and do not prove browser CSS painting or spacing.
+  feature_contract_changed: false
+  affected_features:
+    existing: [SYS-AGENT-LIFECYCLE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: reuse
+    test_selectors:
+      - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+    behaviors:
+      - Preserve existing history selection, new conversation, disabled controls and error behavior after the cosmetic changes.
+    reason: Reuse interaction regression tests; do not add tests that merely mirror Tailwind classes for this reversible cosmetic change.
+  notes: >-
+    SPEC ../nexent-doc/docs/Developing/chat-shared-system-agents/design.md, panel style follow-up.
+    Two scoped class changes only. No API, persistence, execution or formal acceptance contract changes.
+    Formal database/runtime Cases are unaffected and are not rerun for CSS layout.
+    Source inspection confirms the opaque Thread root moved one level below the former direct-child override.
+    Component tests do not establish browser visual acceptance; no screenshot or live deployment pass is claimed.

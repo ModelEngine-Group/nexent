@@ -1,0 +1,75 @@
+schema_version: '1.0'
+change:
+  change_id: SYS-AGENT-SHARED-20261028
+  change_type: requirement
+  requirement_id: SYS-AGENT-SHARED-20261028
+  title: Shared persistent Workbench and NL2Agent system definitions
+  description: Explicit shared Workbench releases with persisted bindings; identity-only
+    file/code-backed NL2Agent; physical legacy consolidation preserving history.
+  affected_features:
+    existing:
+    - F-045
+    - WB-CONTROLS
+    added:
+    - SYS-AGENT-LIFECYCLE
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - SYS-AGENT-D5-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+    - test/backend/services/test_creator_histories.py
+    - test/backend/app/test_creator_histories_api.py
+    - frontend/tests/workbench/Nl2AgentPanelControls.test.tsx
+    - frontend/tests/workbench/CreatorHistoryQuery.test.tsx
+    - test/backend/services/test_workbench_capacity.py
+    - test/backend/services/test_agent_subscription_lifecycle.py
+    - test/backend/app/test_config_app.py
+    - test/backend/app/test_agent_app_workbench_coverage.py
+    - test/backend/services/test_startup_recovery_service.py
+    - test/backend/management/test_system_agent_provider.py
+    - test/backend/management/test_system_agent_provider_coverage.py
+    - test/backend/management/test_workbench_migration.py
+    - test/backend/database/test_conversation_db.py
+    - test/backend/services/test_tenant_service.py
+    - test/backend/app/test_creator_target_api.py
+    - test/backend/app/test_agent_app.py
+    - test/backend/app/test_skill_app.py
+    - test/backend/database/test_conversation_agent_history_db.py
+    - test/backend/database/test_workbench_pin_db.py
+    - test/backend/services/test_conversation_management_service.py
+    - frontend/tests/workbench/ConversationRestore.test.ts
+    - frontend/tests/workbench/WorkbenchPageLifecycle.test.tsx
+    - frontend/tests/workbench/SkillCreationReasoning.test.ts
+    - frontend/tests/workbench/AgentCreationHistoryCard.test.ts
+    - frontend/tests/workbench/Nl2AgentProtocolRepair.test.ts
+    - frontend/tests/workbench/SkillCreationReasoningStream.test.ts
+    - test/backend/services/test_creator_execution.py
+    - test/backend/services/test_nl2skill_service.py
+    - test/backend/services/test_shared_creator_runtime.py
+    - test/backend/services/test_shared_workbench_runtime.py
+    - test/backend/services/test_nl2agent_service.py
+    - test/backend/services/test_workbench_service.py
+    - test/backend/services/test_workbench_creation_history_service.py
+    behaviors:
+    - NL2Agent configuration history controls count/list only owned conversations for the current target and public executor, resume the saved ID, and start fresh local turns without duplicate persistence.
+    - Ordered SQL owns both creator identities on fresh install and upgrade; Python initializes/releases only Workbench and history migration requires seeded public IDs.
+    - Standalone creator history leaves workbench_config null and restores identity/target without changing configuration or duplicating history lists.
+    - Three shared identities and one creator history path use executor agent_id plus typed target, preserving retry/owner isolation and frontend restore.
+    - Workbench admission is tenant scoped at the configured default 50, shared across users/versions; token cleanup and native Agent limits remain unchanged.
+    - Read-only shared runtime lookups and current Workbench pointer, including rollback.
+    - NL2Agent prompt/tools load from code with identity-only persistence and isolated
+      tenant runtime.
+    - Ordered SQL initializes creators and migrates histories; Workbench-only Python initialization/publication and one-shot legacy merge preserve histories
+      and versioned bindings.
+    - Tenant creation/startup/bootstrap never provision system Agents.
+    reason: Existing UT covers isolated lifecycle and history contracts; strengthen
+      changed ownership assertions and add request isolation/backfill protection.
+      SYS-AGENT-D5-001 separately proves real PostgreSQL concurrency and rollback.
+  notes: SPEC docs/Developing/chat-shared-system-agents. No new D1 quota; D5 tests
+    real database release behavior and does not claim live-model/browser acceptance.

@@ -172,8 +172,21 @@ exit 0
 printf 'kubectl %s\\n' "$*" >> "$MOCK_LOG"
 if [ "$1" = "get" ] && [ "$2" = "namespace" ]; then exit 1; fi
 if [ "$1" = "get" ] && [ "$2" = "pv" ]; then exit 1; fi
+if [ "$1" = "get" ] && [ "$2" = "deployment" ]; then
+  if [ "${MOCK_APP_EXISTS:-false}" = "true" ]; then printf 'deployment/%s\\n' "$3"; fi
+  exit 0
+fi
+if [ "$1" = "scale" ] && [ "${MOCK_FAIL_SCALE:-false}" = "true" ]; then exit 1; fi
+if [ "$1" = "get" ] && [ "$2" = "jobs" ]; then printf 'nexent-system-bootstrap-test\\n'; exit 0; fi
+if [ "$1" = "get" ] && [ "$2" = "job" ]; then
+  if [ "${MOCK_FAIL_BOOTSTRAP:-false}" = "true" ]; then printf '1';
+  elif [[ "$*" == *succeeded* ]]; then printf '1:'; fi
+  exit 0
+fi
 if [ "$1" = "get" ] && [ "$2" = "pods" ]; then
   case "$*" in
+    *job-name=nexent-system-bootstrap-test*) printf 'nexent-bootstrap-pod\\n'; exit 0 ;;
+    *'-o name'*) exit 0 ;;
     *app=nexent-config*) printf 'nexent-config-test\n'; exit 0 ;;
   esac
 fi
@@ -626,6 +639,9 @@ def test_deploy_and_uninstall_scripts_have_valid_shell_syntax() -> None:
 def test_backend_charts_declare_delayed_process_health_probes(component: str, port: int) -> None:
     chart = APPLICATION_CHART_SOURCE / "charts" / component
     deployment = (chart / "templates" / "deployment.yaml").read_text(encoding="utf-8")
+    if component == "nexent-config":
+        assert 'include "nexent-config.podSpec"' in deployment
+        deployment = (chart / "templates" / "_pod-spec.tpl").read_text(encoding="utf-8")
     values = yaml.safe_load((chart / "values.yaml").read_text(encoding="utf-8"))
 
     assert deployment.count("path: /health/live") == 2
@@ -811,7 +827,7 @@ def test_render_failure_does_not_persist_deploy_options_or_call_helm(
     assert not mock_log.exists() or "helm " not in mock_log.read_text(encoding="utf-8")
 
 
-def test_default_deploy_orders_releases_without_second_application_upgrade(
+def test_default_deploy_bootstraps_while_paused_then_activates_application(
     isolated_k8s_project: tuple[Path, dict[str, str], Path],
 ) -> None:
     project, env, mock_log = isolated_k8s_project
@@ -865,15 +881,18 @@ def test_default_deploy_orders_releases_without_second_application_upgrade(
     config_pod_lookup = next(
         line
         for line in commands
-        if line.startswith("kubectl get pods ") and "app=nexent-config" in line
+        if line.startswith("kubectl get pods ") and "job-name=nexent-system-bootstrap-test" in line
     )
     assert infrastructure_helm < min(readiness) <= max(readiness) < es_initialization
     assert es_initialization < application_helm
-    assert application_helm < min(application_readiness) <= max(application_readiness)
-    assert max(application_readiness) < official_skills_copy
-    assert "--field-selector=status.phase=Running" in config_pod_lookup
-    assert "--sort-by=.metadata.creationTimestamp" in config_pod_lookup
-    assert sum(line.startswith("helm upgrade --install nexent ") for line in commands) == 1
+    upgrades = [index for index, line in enumerate(commands) if line.startswith("helm upgrade --install nexent ")]
+    assert len(upgrades) == 2
+    assert "global.businessPaused=true" in commands[upgrades[0]]
+    assert "global.businessPaused=false" in commands[upgrades[1]]
+    start_job = next(index for index, line in enumerate(commands) if "nexent-bootstrap-start" in line)
+    assert application_helm < official_skills_copy < start_job < upgrades[1]
+    assert upgrades[1] < min(application_readiness) <= max(application_readiness)
+    assert "containerStatuses" in config_pod_lookup
     assert sum(line.startswith("kubectl cp ") for line in commands) == 1
 
 
@@ -898,7 +917,7 @@ def test_missing_official_skills_fails_before_helm(
         ("MOCK_FAIL_OFFICIAL_PROMOTE", "previous version was preserved"),
     ),
 )
-def test_official_skills_sync_failure_is_retryable_without_second_helm(
+def test_official_skills_sync_failure_retains_pause_and_retry_activates_after_bootstrap(
     isolated_k8s_project: tuple[Path, dict[str, str], Path],
     failure_env: str,
     expected_error: str,
@@ -932,7 +951,7 @@ def test_official_skills_sync_failure_is_retryable_without_second_helm(
         "Super Admin User Creation"
     )
     retry_commands = mock_log.read_text(encoding="utf-8").splitlines()
-    assert sum(line.startswith("helm upgrade --install nexent ") for line in retry_commands) == 1
+    assert sum(line.startswith("helm upgrade --install nexent ") for line in retry_commands) == 2
     assert sum(line.startswith("kubectl cp ") for line in retry_commands) == 1
     assert retry_commands.count("suadmin") == 1
     official_skills_copy = next(
@@ -1026,8 +1045,8 @@ def test_legacy_single_release_is_rejected_before_helm_upgrade(
     ("scope", "infra_exists", "expected_infra_upgrades", "expected_app_upgrades"),
     [
         ("infrastructure", "false", 1, 0),
-        ("nexent", "true", 0, 1),
-        ("all", "false", 1, 1),
+        ("nexent", "true", 0, 2),
+        ("all", "false", 1, 2),
     ],
 )
 def test_deploy_release_scopes(
@@ -1046,7 +1065,7 @@ def test_deploy_release_scopes(
         line.startswith("helm upgrade --install nexent-infrastructure ") for line in commands
     ) == expected_infra_upgrades
     assert sum(line.startswith("helm upgrade --install nexent ") for line in commands) == expected_app_upgrades
-    assert sum(line.startswith("kubectl cp ") for line in commands) == expected_app_upgrades
+    assert sum(line.startswith("kubectl cp ") for line in commands) == (1 if expected_app_upgrades else 0)
 
 
 def test_uninstall_default_order_and_scopes(
