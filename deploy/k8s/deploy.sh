@@ -1323,12 +1323,13 @@ apply() {
         SSH_PASSWORD="${SSH_PASSWORD:-nexent@2025}"
     fi
 
-    render_runtime_secret_values
-    recreate_legacy_nexent_secret_for_helm_management
-
+    # Capture the source before replacing Secrets needed by a stopped old DB.
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
         deployment_upgrade_local_accounts prepare kubernetes "$NAMESPACE" || exit 1
     fi
+
+    render_runtime_secret_values
+    recreate_legacy_nexent_secret_for_helm_management
 
     # Step 8: Install or upgrade the application release exactly once.
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then

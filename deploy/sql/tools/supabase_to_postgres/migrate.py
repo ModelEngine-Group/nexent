@@ -653,7 +653,7 @@ except (n["MigrationSetupError"], n["MigrationConflict"]) as error:
     return result
 
 
-def automatic_upgrade(args):
+def automatic_upgrade(args, *, source_resolver=None, storage_preserver=None):
     # deploy.sh has already exported its complete root environment. This path
     # deliberately imports no database/dotenv libraries on the deployment host.
     values = dict(os.environ)
@@ -662,23 +662,25 @@ def automatic_upgrade(args):
     path = (args.state_dir or args.env_file.parent / ".migration-state") / (args.deployment + "-" + args.namespace + "-" + AUTH_SQL + ".json")
     status = deployment_status(args, values)
     complete = not status["pending"] and all(status["history"].get(marker, {}).get("checksum") == checksum for marker in [AUTH_SQL, DATA_MARKER, CLEANUP_MARKER])
+    target = {"deployment": args.deployment, "namespace": args.namespace, "database": args.database_target,
+              "dbname": values.get("POSTGRES_DB") or "nexent"}
+    if getattr(args, "cluster_identity", None):
+        target["cluster"] = args.cluster_identity
+    snapshot = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
+    if snapshot and snapshot["target"] != target:
+        raise MigrationSetupError("Retained account snapshot belongs to a different deployment target")
     if complete:
         if path.exists():
             path.unlink()
         return {"automatic": True, "skipped": True}
-    target = {"deployment": args.deployment, "namespace": args.namespace, "database": args.database_target,
-              "dbname": values.get("POSTGRES_DB") or "nexent"}
-    snapshot = json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
-    if snapshot and snapshot["target"] != target:
-        raise MigrationSetupError("Retained account snapshot belongs to a different deployment target")
     if args.deploy_phase == "prepare":
         if snapshot:
             return {"automatic": True, "prepared": True, "retained": True}
-        source = _source_target(args, values)
+        source = (source_resolver or _source_target)(args, values)
         if not source and (status["pending"] or status["legacy_logins"]):
             raise MigrationSetupError("Historical login accounts need the original Supabase source; old application rollout was preserved")
         if source and not source.get("remote"):
-            _preserve_source_storage(args, source, path)
+            (storage_preserver or _preserve_source_storage)(args, source, path)
         rows = source_snapshot(args, values, source) if source else []
         # Validate the complete snapshot before application replacement.
         for row in rows:
@@ -706,7 +708,7 @@ def automatic_upgrade(args):
     return result
 
 
-def main():
+def main(*, upgrade=automatic_upgrade):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", nargs="?", choices=["up", "down"], help="Manual legacy stack recovery/removal")
     parser.add_argument("--with-auth", action="store_true")
@@ -730,7 +732,7 @@ def main():
     if args.deploy_phase or args.action:
         try:
             if args.deploy_phase:
-                print(json.dumps(automatic_upgrade(args)))
+                print(json.dumps(upgrade(args)))
             else:
                 execute(args.action, load_settings(args.env_file), with_auth=args.with_auth, production=args.production)
                 print("Legacy Supabase operation completed; data volumes are retained.")

@@ -39,6 +39,32 @@ deployment refuses to create an empty source for historical login identities.
 
 ## Manual recovery and preview
 
+### Kubernetes entry point
+
+Kubernetes `deploy.sh` automatically uses `migrate_k8s.py`. It shares account
+mapping/import and checkpoints with `migrate.py`, while handling Kubernetes
+source startup and actual PVC/PV bindings separately. A source Deployment scaled
+to zero is scaled to one and awaited. Custom existing claims are discovered from
+the pod template; every bound PV is archived and protected with `Retain` before
+Helm removes legacy resources. Missing/unbound persistent storage blocks rollout.
+Retry snapshots are checked against the namespace, target database and API server.
+
+For recovery, use the same kubeconfig context, namespace and state directory:
+
+```sh
+python deploy/sql/tools/supabase_to_postgres/migrate_k8s.py --deploy-phase prepare --namespace nexent
+# Deploy the application so Config executes the versioned SQL migrations.
+python deploy/sql/tools/supabase_to_postgres/migrate_k8s.py --deploy-phase apply --apply --namespace nexent
+```
+
+Optional `--source-container`, `--database-target` and `--config-target` select
+Deployment names in this namespace. `up/down` commands are Docker-only. Keep
+private state files and source storage for recovery. Helm may remove old source
+workloads during rollout; the read-only account snapshot remains available even
+when a later import fails. Recovery of the complete old authentication stack
+also requires the original Helm values, Secrets and ConfigMaps and a business
+database backup; a retained PV alone does not restore that stack.
+
 Run this tool on the deployment host with Python 3.11. Activate the backend
 virtual environment, or install the standalone dependencies:
 

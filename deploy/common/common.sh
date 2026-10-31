@@ -549,6 +549,9 @@ deployment_upgrade_local_accounts() {
   local common_dir script candidate
   common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   script="$common_dir/../sql/tools/supabase_to_postgres/migrate.py"
+  if [ "$mode" = kubernetes ]; then
+    script="$common_dir/../sql/tools/supabase_to_postgres/migrate_k8s.py"
+  fi
   for candidate in python3 python; do
     if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
       interpreter="$candidate"
