@@ -5,15 +5,16 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable
+from html import escape
 from typing import Any
 
 from nexent.core.prompts import load_prompt
 
 from .formatting import (
     _format_external_agents_description,
-    _format_worker_agents_description,
     _format_skills_inventory,
     _format_tools_description,
+    _format_worker_agents_description,
 )
 from .models import ContextItem, ContextItemType
 
@@ -90,17 +91,21 @@ def _render_turn(item: ContextItem) -> list[dict[str, Any]]:
     ]
 
 
-def _render_tool_arguments(arguments: Any) -> str:
-    """Render tool arguments without dropping string-typed interpreter source."""
-    if isinstance(arguments, str):
-        return arguments
-    return json.dumps(arguments, ensure_ascii=False, default=str)
+def _render_legacy_tool_call(call: Any) -> str:
+    """Keep ordinary calls as evidence; only interpreter source is code."""
+    if isinstance(call, dict) and call.get("name") == "python_interpreter":
+        source = call.get("arguments")
+        if isinstance(source, dict) and set(source) == {"code"}:
+            source = source["code"]
+        if isinstance(source, str):
+            return f"<code>\n{source}\n</code>"
+    record = escape(json.dumps(call, ensure_ascii=False, default=str))
+    return f"<TOOL_RECORD>{record}</TOOL_RECORD>"
 
 
 def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     if "messages" in item.content:
         return list(item.content["messages"])
-    from html import escape
     from .execution_history import result_text
 
     c = item.content
@@ -122,11 +127,7 @@ def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     if not original and c.get("tool_calls"):
         calls = c["tool_calls"]
         calls = calls if isinstance(calls, list) else [calls]
-        code = "\n\n".join(_render_tool_arguments(call.get("arguments", "")) for call in calls if isinstance(call, dict))
-        if not code:
-            fields["TOOL_RECORD"] = json.dumps(calls, ensure_ascii=False, default=str)
-        if code:
-            messages.append(_text_message("assistant", f"<code>\n{code}\n</code>"))
+        messages.extend(_text_message("assistant", _render_legacy_tool_call(call)) for call in calls)
     if not fields:
         fields = {"STDOUT": ""}
     if c.get("summary"):

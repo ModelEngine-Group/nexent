@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from dataclasses import dataclass
 from enum import Enum
+from html import unescape
 from types import SimpleNamespace
 
 import pytest
@@ -341,8 +342,8 @@ def test_renderer_current_action_compact_with_tool_calls():
     message = ContextItemRenderer().render([action])[0]
     text = "\n".join(m["content"][0]["text"] for m in ContextItemRenderer().render([action]))
     assert "index: 3" not in text
-    assert "<code>" in text
-    assert '"q": "foo"' in text
+    assert "<TOOL_RECORD>" in text and "<code>" not in text
+    assert '"name": "search"' in unescape(text) and '"q": "foo"' in unescape(text)
     assert "<OUTPUT>found 5 results</OUTPUT>" in text
     assert "<RETURN_VALUE>answer is 42</RETURN_VALUE>" in text
     assert "Called tool" not in text
@@ -361,8 +362,8 @@ def test_renderer_current_action_compact_with_single_tool_call_dict():
     )
     message = ContextItemRenderer().render([action])[0]
     text = message["content"][0]["text"]
-    assert "<code>" in text
-    assert '"code": "print(1)"' in text
+    assert "<TOOL_RECORD>" in text and "<code>" not in text
+    assert '"name": "execute"' in unescape(text) and '"code": "print(1)"' in unescape(text)
 
 
 def test_renderer_current_action_preserves_string_tool_arguments():
@@ -401,7 +402,8 @@ def test_renderer_current_action_without_step_number():
     text = "\n".join(m["content"][0]["text"] for m in ContextItemRenderer().render([action]))
 
     assert "index:" not in text
-    assert "<code>" in text
+    assert "<TOOL_RECORD>" in text and '"name": "search"' in unescape(text)
+    assert "<code>" not in text
     assert "<RETURN_VALUE>done</RETURN_VALUE>" in text
 
 
