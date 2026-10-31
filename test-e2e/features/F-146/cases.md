@@ -2,6 +2,7 @@
 
 此页由结构化用例生成，不手工编辑。
 
+- D2 [NB-CHAT-FINAL-ANSWER-001](../../cases/NB-CHAT-FINAL-ANSWER-001/case.yaml) · active
 - D3 [AGT-064](../../cases/AGT-064/case.yaml) · active
 - D3 [AGT-065](../../cases/AGT-065/case.yaml) · active
 - D3 [AGT-066](../../cases/AGT-066/case.yaml) · active

@@ -6,7 +6,7 @@ import json
 import logging
 import time
 from os.path import basename
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import UploadFile
 from fastapi.responses import StreamingResponse
@@ -365,6 +365,7 @@ async def start_streaming_chat(
     tool_params: Optional[ToolParamsRequest] = None,
     model_id: Optional[int] = None,
     idempotency_key: Optional[str] = None,
+    final_answer_mode: Literal["complete", "delta"] = "complete",
 ) -> StreamingResponse:
     new_conversation_data: Optional[Dict[str, Any]] = None
     try:
@@ -468,6 +469,7 @@ async def start_streaming_chat(
             agent_request=agent_request,
             user_id=ctx.user_id,
             tenant_id=ctx.tenant_id,
+            final_answer_mode=final_answer_mode,
         )
     finally:
         if composed_key:

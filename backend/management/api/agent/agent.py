@@ -9,7 +9,7 @@ from contracts.authentication import AuthenticatedIdentity
 import logging
 from http import HTTPStatus
 from urllib.parse import quote
-from typing import Optional
+from typing import Literal, Optional
 from fastapi import APIRouter, Body, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from nexent.core.concurrency import run_blocking

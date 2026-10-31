@@ -194,6 +194,7 @@ async def run_agent_stream(
     tenant_id: str = None,
     skip_user_save: bool = False,
     resume: bool = False,
+    final_answer_mode: str = "delta",
 ):
     """
     Start an agent run and stream responses.
@@ -921,6 +922,8 @@ async def run_agent_stream(
         "execution": execution,
         "deferred_run": deferred_run,
     }
+    if final_answer_mode != "delta":
+        stream_kwargs["final_answer_mode"] = final_answer_mode
     if channel is not None:
         stream_kwargs["channel"] = channel
     stream_gen = generate_stream(agent_request, **stream_kwargs)

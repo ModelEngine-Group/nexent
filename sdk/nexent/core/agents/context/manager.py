@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Managed context assembly for fine-grained items and adaptive compaction."""
 
 from __future__ import annotations
@@ -164,7 +165,6 @@ class ContextManager:
 
         if (
             policy.processing_mode == ContextProcessingMode.ADAPTIVE_COMPACT
-            and self._run_compaction_attempts < 3
             and (
                 force_compaction
                 or (
@@ -175,7 +175,7 @@ class ContextManager:
         ):
             summary = next((item for item in final_items if item.type == ContextItemType.HISTORY_SUMMARY), None)
             turns = [item for item in final_items if item.type == ContextItemType.CONVERSATION_TURN]
-            if turns or summary:
+            if (turns or summary) and self._run_compaction_attempts < 3:
                 original_history_tokens = sum(
                     item.token_estimate for item in final_items
                     if item.type in {ContextItemType.HISTORY_SUMMARY, ContextItemType.CONVERSATION_TURN}
@@ -420,20 +420,84 @@ class ContextManager:
         for candidates in (old_actions, other_items, recent_actions):
             savings = []
             for item in candidates:
-                compact = item.compact()
-                saving = max(0, item.token_estimate - compact.token_estimate)
+                if item.type == ContextItemType.CURRENT_ACTION:
+                    if actions and item is actions[-1] and item.content.get("loaded_result"):
+                        continue
+                    saving = item.token_estimate
+                    compact = None
+                else:
+                    compact = item.compact()
+                    saving = max(0, item.token_estimate - compact.token_estimate)
                 savings.append((saving, item.priority, item.layout_key, item, compact))
             for _, _, _, original, compact in sorted(savings, key=lambda row: (-row[0], row[1], row[2])):
-                index = result.index(original)
-                result[index] = compact
-                if (
-                    self._estimate_items(result, purpose_stable, purpose_dynamic, tools)
-                    <= self._compaction_target_tokens()
-                ):
+                if compact is None:
+                    compact = self._compact_execution(original, model)
+                if compact is None or self._estimate_items([compact], [], [], []) >= self._estimate_items([original], [], [], []):
+                    continue
+                result[result.index(original)] = compact
+                if self._estimate_items(result, purpose_stable, purpose_dynamic, tools) <= self._compaction_target_tokens():
                     return result
         if self.config.enable_long_term_memory_selection and long_term_items:
             return self._select_long_term_memories(result, long_term_items, model=model)
         return result
+
+    def _compact_execution(self, item, model):
+        from .execution_history import summarize_record
+
+        history = self.config.execution_history
+        key = item.content.get("execution_key")
+        record = history.get(key) if history is not None and key else None
+        if record is None:
+            if "execution_fields" not in item.content:
+                return item.compact()
+            # Debug and standalone SDK runs have no persisted result reference.
+            # Keep their original steps intact, but retain the legacy bounded
+            # view once adaptive compaction is triggered. Never invent a ref.
+            from .execution_history import result_text
+
+            content = deepcopy(item.content)
+            text = result_text(content.get("execution_fields", {}))
+            if len(text) <= 4000:
+                return None
+            content.pop("summary", None)
+            content.pop("output_ref", None)
+            content["preview"] = (
+                text[:2000] + "\n[Execution output truncated; no original-output reference available]\n" + text[-2000:]
+            )
+            data = item.model_dump(exclude={"content", "token_estimate", "metadata"})
+            return item.__class__(
+                **data, content=content,
+                metadata={**item.metadata, "representation": "compact"},
+                token_estimate=max(1, len(content["preview"]) // 2),
+            )
+        # Backend consumes observer events independently of the model worker.
+        # An unbound record must never publish a guessed unit reference.
+        if not record.ready.wait(timeout=0.5):
+            return None
+        already_called = record.called
+        summary = summarize_record(record, model, self.config.effective_input_limit_tokens or self.config.token_threshold)
+        if record.called and not already_called:
+            self._record_compression([CompressionCallRecord(
+                call_type="execution_result_summary", input_chars=len(record.text),
+                output_chars=len(summary or ""),
+                details={"reference": record.reference, "outcome": "accepted" if summary else "fallback"},
+            )])
+        content = deepcopy(item.content)
+        content["output_ref"] = record.reference
+        if summary:
+            content["summary"] = summary
+        else:
+            text = record.text
+            lines = text.splitlines(keepends=True)
+            head = "".join(lines[:20])[:2000]
+            tail = "".join(lines[-20:])[-2000:]
+            if len(lines) <= 40 and len(text) <= 4000:
+                return None
+            content["preview"] = head + "\n[Middle content unloaded; use OUTPUT_REF]\n" + tail
+        data = item.model_dump(exclude={"content", "token_estimate", "metadata"})
+        return item.__class__(**data, content=content,
+                              metadata={**item.metadata, "representation": "compact"},
+                              token_estimate=max(1, len(str(content.get("summary") or content.get("preview"))) // 2))
 
     def _select_long_term_memories(self, result, memory_items, *, model):
         task_item = next((item for item in result if item.type == ContextItemType.CURRENT_TASK), None)
@@ -490,12 +554,25 @@ class ContextManager:
 
     def _neutral_action_content(self, step: ActionStep, action_index: int) -> dict[str, Any]:
         """Preserve completed-action evidence without upstream protocol labels."""
+        fields = getattr(step, "execution_fields", None)
+        if not isinstance(fields, dict):
+            fields = {}
+            observation = getattr(step, "observations", None)
+            output = getattr(step, "action_output", None)
+            if observation is not None:
+                fields["OUTPUT"] = str(observation)
+            if output is not None and str(output) != str(observation or ""):
+                fields["RETURN_VALUE"] = str(output)
+            if getattr(step, "error", None):
+                fields["ERROR"] = str(step.error)
+            if not fields:
+                fields["STDOUT"] = ""
         return {
-            "step_number": getattr(step, "step_number", action_index + 1),
+            "assistant_output": getattr(step, "model_output", None) or "",
             "tool_calls": self._to_json_value(getattr(step, "tool_calls", None)),
-            "observations": self._to_json_value(getattr(step, "observations", None)),
-            "error": str(getattr(step, "error", "")) if getattr(step, "error", None) else None,
-            "result": self._to_json_value(getattr(step, "action_output", None)),
+            "execution_fields": dict(fields),
+            "execution_key": getattr(step, "execution_key", None),
+            "loaded_result": getattr(step, "execution_loaded", False),
         }
 
     def _project_current_run(self, memory: AgentMemory, start: int) -> list[ContextItem]:

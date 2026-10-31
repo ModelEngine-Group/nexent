@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """HTTP forwarding from northbound APIs to the runtime service."""
 
-from typing import AsyncIterator
+from typing import AsyncIterator, Literal
 
 import httpx
 from fastapi.responses import StreamingResponse
@@ -155,11 +155,13 @@ async def forward_agent_run(
     agent_request: AgentRequest,
     user_id: str,
     tenant_id: str,
+    final_answer_mode: Literal["complete", "delta"] = "delta",
 ) -> StreamingResponse:
     """Start a runtime agent run and proxy its response without buffering."""
     return await _forward_runtime_stream(
         "POST", "/agent/internal/northbound/run", user_id, tenant_id,
         payload=agent_request.model_dump(mode="json"),
+        params={"final_answer_mode": final_answer_mode},
     )
 
 
