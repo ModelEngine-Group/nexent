@@ -310,7 +310,8 @@ def get_db_session(db_session=None):
     except Exception as e:
         if db_session is None:
             session.rollback()
-        logger.error(f"Database operation failed: {str(e)}")
+        # SQL exception text may contain credential parameters from identity lookup.
+        logger.error("Database operation failed (%s)", type(e).__name__)
         raise e
     finally:
         if db_session is None:

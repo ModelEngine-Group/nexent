@@ -91,6 +91,7 @@ app = create_app(
     title="Nexent Runtime API",
     description="Runtime APIs",
     lifespan=runtime_lifespan,
+    gateway_identity_audience="runtime",
 )
 if hasattr(app, "state"):
     app.state.thread_manager = runtime_thread_manager

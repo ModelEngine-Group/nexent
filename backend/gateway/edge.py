@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Standalone edge proxy; business authentication remains enforced upstream."""
+"""Gateway credential verification and signed downstream HTTP/WS proxy."""
 
 import asyncio
 from contextlib import asynccontextmanager, suppress
@@ -10,6 +10,7 @@ import httpx
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
+from starlette.middleware.cors import CORSMiddleware
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
@@ -17,6 +18,10 @@ from contracts.constants.environment import (
     GATEWAY_MANAGEMENT_URL, GATEWAY_NORTHBOUND_URL, GATEWAY_RUNTIME_URL,
 )
 from gateway.routing import filtered_headers, select_upstream
+from gateway.authentication.credentials import IdentityUnavailable, authorization_for, resolve_identity
+from infrastructure.security.gateway_identity import (
+    IDENTITY_HEADER, IdentityError, enabled, sign_identity, signing_key,
+)
 
 
 class _NoCookies(DefaultCookiePolicy):
@@ -26,13 +31,14 @@ class _NoCookies(DefaultCookiePolicy):
         return False
 
 
-def create_edge_app(*, transport=None, upstreams=None):
+def create_edge_app(*, transport=None, upstreams=None, authentication=None):
     """Build an independent app with injectable transport for isolated verification."""
     targets = dict(upstreams or {
         "management": GATEWAY_MANAGEMENT_URL,
         "runtime": GATEWAY_RUNTIME_URL,
         "northbound": GATEWAY_NORTHBOUND_URL,
     })
+    authenticate = enabled() if authentication is None else authentication
     for target in targets.values():
         parsed = urlsplit(target)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username or parsed.password:
@@ -42,6 +48,8 @@ def create_edge_app(*, transport=None, upstreams=None):
 
     @asynccontextmanager
     async def lifespan(app):
+        if authenticate:
+            signing_key()
         async with httpx.AsyncClient(
             transport=transport, trust_env=False, follow_redirects=False,
             cookies=CookieJar(policy=_NoCookies()),
@@ -51,6 +59,8 @@ def create_edge_app(*, transport=None, upstreams=None):
             yield
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
+                       allow_methods=["*"], allow_headers=["*"])
 
     @app.get("/health/live")
     @app.get("/health/ready")
@@ -58,7 +68,7 @@ def create_edge_app(*, transport=None, upstreams=None):
         return {"status": "ready"}
 
     def target_url(method, path, query):
-        if not (path.startswith("/api/") or path.startswith("/nb/")):
+        if not (path.startswith("/api/") or path.startswith("/nb/") or path.startswith("/user/")):
             return None
         selected = select_upstream(method, path)
         if selected is None:
@@ -77,6 +87,18 @@ def create_edge_app(*, transport=None, upstreams=None):
         url = origin.scheme + "://" + origin.netloc + raw_path + ("?" + origin.query if origin.query else "")
         headers = filtered_headers(request.headers.items(), request=True)
         client = request.app.state.client
+        if authenticate:
+            try:
+                principal = await resolve_identity(request, client, targets["management"])
+                selected = select_upstream(request.method, request.url.path)
+                headers.append((IDENTITY_HEADER, sign_identity(principal, "runtime" if selected == "runtime" else "management",
+                                                              request.method, request.url.path, request.scope["query_string"])))
+                if not request.headers.get("authorization") and authorization_for(request):
+                    headers.append(("authorization", authorization_for(request)))
+            except IdentityError:
+                return JSONResponse({"message": "Invalid or missing credentials"}, status_code=401)
+            except IdentityUnavailable:
+                return JSONResponse({"message": "Identity service unavailable"}, status_code=503)
         try:
             outgoing = client.build_request(request.method, url, headers=headers, content=request.stream())
             upstream = await client.send(outgoing, stream=True)
@@ -108,6 +130,15 @@ def create_edge_app(*, transport=None, upstreams=None):
         protocols = websocket.scope.get("subprotocols", [])
         headers = [(k, v) for k, v in filtered_headers(websocket.headers.items(), request=True)
                    if k.lower() not in {"host", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions", "sec-websocket-protocol"}]
+        if authenticate:
+            try:
+                principal = await resolve_identity(websocket, websocket.app.state.client, targets["management"])
+                selected = select_upstream("GET", websocket.url.path)
+                headers.append((IDENTITY_HEADER, sign_identity(principal, "runtime" if selected == "runtime" else "management",
+                                                              "GET", websocket.url.path, websocket.scope["query_string"])))
+            except (IdentityError, IdentityUnavailable):
+                await websocket.close(code=1008)
+                return
         accepted = False
         try:
             async with connect(url, additional_headers=headers, subprotocols=protocols or None,

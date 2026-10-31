@@ -1,0 +1,47 @@
+schema_version: '1.0'
+change:
+  change_id: MGWI-CENTRAL-AUTH-20261031
+  change_type: requirement
+  title: Centralize authentication at Gateway and verify signed service identities
+  description: Add authoritative Management identity lookup, request-bound signatures,
+    downstream HTTP/WS validation and coordinated client routing.
+  affected_features:
+    existing:
+    - AUTH-LOCAL
+    added:
+    - GW-AUTH
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - UT-BE-006
+    - AUTH-LOCAL-D2-001
+    added:
+    - GW-AUTH-D3-001
+    modified: []
+    retired: []
+  feature_contract_changed: true
+  notes: 'No new D1 quota: isolated assertions stay in UT; D3 adds actual service/protocol
+    collaboration beyond existing auth helper and local account HTTP tests. Existing
+    live database scenarios remain separate.'
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Cryptographic audience/scope/lifetime/request/body binding and missing key rejection
+    - Account/version/CAS/membership/API-key state and request-local identity isolation
+    - Preserved session syntax and public login/CAS/OAuth/WS behavior
+    - Identity lookup failures return sanitized 503 responses and database error logs
+      omit credential parameters.
+    reason: Reuse existing credential/login/Northbound tests and add signature/lookup
+      tests. New formal D3 proves network collaboration rather than duplicating unit
+      proof.
+    test_selectors:
+    - test/backend/gateway/test_identity_signatures.py
+    - test/backend/gateway/test_central_authentication.py
+    - test/backend/management/test_gateway_identity_lookup.py
+    - test/backend/utils/test_auth_utils.py
+    - test/backend/management/test_gateway_authentication.py
+    - test/backend/management/test_gateway_app_boundary.py
+    - test/backend/management/test_gateway_identity_endpoint.py
+    - test/backend/database/test_client.py
+  requirement_id: GW-AUTH

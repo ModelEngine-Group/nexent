@@ -303,7 +303,7 @@ sys.modules['management.utils.app_factory'] = app_factory_module
 # Provide a real create_app function that returns a FastAPI app
 def _create_app_impl(title, description="", version="1.0.0", root_path="/api",
                      cors_origins=None, cors_methods=None, enable_monitoring=True,
-                     lifespan=None):
+                     lifespan=None, gateway_identity_audience=None):
     """Minimal implementation of create_app for testing."""
     from fastapi import FastAPI
     from fastapi.middleware.cors import CORSMiddleware

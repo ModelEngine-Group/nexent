@@ -555,7 +555,7 @@ class TestGetDbSession:
         mock_session.commit.assert_not_called()
         mock_session.close.assert_not_called()
 
-    def test_get_db_session_rollback_on_exception(self):
+    def test_get_db_session_rollback_on_exception(self, caplog):
         """Test get_db_session rolls back on exception"""
         mock_session = MagicMock()
         mock_session_maker = MagicMock(return_value=mock_session)
@@ -565,11 +565,13 @@ class TestGetDbSession:
 
             with pytest.raises(ValueError):
                 with get_db_session() as session:
-                    raise ValueError("Test error")
+                    raise ValueError("credential=raw-key-secret-fixture")
 
             mock_session.rollback.assert_called_once()
             mock_session.close.assert_called_once()
             mock_session.commit.assert_not_called()
+            assert "raw-key-secret-fixture" not in caplog.text
+            assert "ValueError" in caplog.text
 
     def test_get_db_session_no_rollback_on_provided_session_exception(self):
         """Test get_db_session doesn't rollback provided session on exception"""

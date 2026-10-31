@@ -1,4 +1,4 @@
-# Opt-in transitional edge. Existing downstream services still enforce authentication.
+# Independent authenticated edge; downstream services verify signed identities.
 services:
   nexent-gateway:
     image: ${NEXENT_GATEWAY_IMAGE:-nexent/nexent-gateway:dev}
@@ -9,6 +9,9 @@ services:
     ports:
       - "${NEXENT_GATEWAY_PORT:-5016}:5016"
     environment:
+      GATEWAY_AUTH_ENABLED: "true"
+      JWT_SECRET: "${JWT_SECRET:?Gateway requires the configured JWT_SECRET}"
+      GATEWAY_SIGNING_SECRET: "${GATEWAY_SIGNING_SECRET:-}"
       GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
       GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
       GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"

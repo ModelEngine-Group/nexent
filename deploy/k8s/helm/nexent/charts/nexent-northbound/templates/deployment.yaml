@@ -55,6 +55,8 @@ spec:
             - secretRef:
                 name: nexent-secrets
           env:
+            - name: GATEWAY_AUTH_ENABLED
+              value: "true"
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: GATEWAY_MANAGEMENT_URL
               value: "http://nexent-config:5010"

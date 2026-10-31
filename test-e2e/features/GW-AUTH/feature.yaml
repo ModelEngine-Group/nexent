@@ -1,0 +1,23 @@
+schema_version: '1.0'
+module:
+  id: AUTH-IDENTITY
+  name: Authentication
+feature:
+  feature_id: GW-AUTH
+  name: Gateway authoritative identity and signed service boundary
+  status: active
+  description: Gateway verifies external sessions and opaque API keys with Management
+    state; business services require request-bound signed identities.
+  business_rules:
+  - rule_id: GW-AUTH-RULE-01
+    description: Only Gateway verifies ordinary external credentials; every request
+      resolves current account, version, membership and revocation state.
+  - rule_id: GW-AUTH-RULE-02
+    description: Downstream accepts audience/request-bound Gateway identity for HTTP
+      and WebSocket, rejects unsigned/spoofed requests, and isolates request context.
+  required_test_stages:
+  - D3
+  source:
+    requirement_ids:
+    - GW-AUTH
+    spec_path: nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/management-gateway-independent-image/proposal.md

@@ -80,6 +80,7 @@ services:
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for MCP container management
     environment:
+      GATEWAY_AUTH_ENABLED: "true"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: migrate
@@ -116,6 +117,7 @@ services:
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for sandbox container management
     environment:
+      GATEWAY_AUTH_ENABLED: "true"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: wait
@@ -182,6 +184,7 @@ services:
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro # Docker socket for sandbox container management
     environment:
+      GATEWAY_AUTH_ENABLED: "true"
       GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
       GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
       GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"
@@ -220,9 +223,9 @@ services:
       - ${ROOT_DIR}/project-config:/mnt/nexent-data/project-config
     environment:
       - TZ=${TZ:-Asia/Shanghai}
-      - HTTP_BACKEND=http://nexent-config:5010
-      - WS_BACKEND=ws://nexent-runtime:5014
-      - RUNTIME_HTTP_BACKEND=http://nexent-runtime:5014
+      - HTTP_BACKEND=http://nexent-northbound:5013
+      - WS_BACKEND=ws://nexent-northbound:5013
+      - RUNTIME_HTTP_BACKEND=http://nexent-northbound:5013
       - MINIO_ENDPOINT=http://nexent-minio:9000
       - PROJECT_CONFIG_DIR=/mnt/nexent-data/project-config
       - FILE_UPLOAD_SIZE_LIMIT=${FILE_UPLOAD_SIZE_LIMIT:-10}
@@ -262,6 +265,7 @@ services:
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
     environment:
+      ELASTICSEARCH_SERVICE: "http://nexent-northbound:5013/api"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*proxy-vars, *es-vars, *minio-vars]
       NEXENT_SQL_STARTUP_MODE: "off"

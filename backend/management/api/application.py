@@ -1,6 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from management.api.northbound_application import northbound_lifespan
 from management.api.northbound import router as northbound_router, a2a_router
+from management.api.identity.gateway_identity import router as gateway_identity_router
 import logging
 from contextlib import asynccontextmanager
 
@@ -127,6 +128,7 @@ app = create_app(
     title="Nexent Config API",
     description="Configuration APIs",
     lifespan=config_lifespan,
+    gateway_identity_audience="management",
 )
 if hasattr(app, "state"):
     app.state.thread_manager = config_thread_manager
@@ -203,3 +205,4 @@ app.include_router(tag_management_router)
 # Northbound and A2A business routes share Management lifecycle and ownership.
 app.include_router(northbound_router)
 app.include_router(a2a_router)
+app.include_router(gateway_identity_router)

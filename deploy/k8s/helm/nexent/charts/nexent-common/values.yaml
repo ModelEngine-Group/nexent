@@ -30,8 +30,8 @@ config:
   timezone: "Asia/Shanghai"
   # Service URLs (internal)
   services:
-    configUrl: "http://nexent-config:5010"
-    elasticsearchService: "http://nexent-config:5010/api"
+    configUrl: "http://nexent-northbound:5013"
+    elasticsearchService: "http://nexent-northbound:5013/api"
     runtimeUrl: "http://nexent-runtime:5014"
     mcpServer: "http://nexent-mcp:5011"
     mcpManagementServer: "http://nexent-mcp:5015"
@@ -224,6 +224,7 @@ secrets:
     username: "nexent"
     password: "nexent@2025"
   jwtSecret: ""
+  gatewaySigningSecret: ""
 
 # Storage configuration (can be referenced by other charts)
 storage:

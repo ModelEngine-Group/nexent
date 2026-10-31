@@ -19,7 +19,7 @@ _UNTRUSTED_HEADERS = {
 
 def select_upstream(method: str, path: str) -> str | None:
     """Route public API paths; internal service endpoints are never exposed."""
-    if not (path.startswith("/api/") or path.startswith("/nb/")):
+    if not (path.startswith("/api/") or path.startswith("/nb/") or path.startswith("/user/")):
         return None
     if "internal" in path.split("/"):
         return None
@@ -46,4 +46,4 @@ def filtered_headers(headers, *, request=False):
     if request:
         blocked.update(_UNTRUSTED_HEADERS)
     return [(name, value) for name, value in headers if name.lower() not in blocked
-            and not (request and name.lower().startswith("x-internal-"))]
+            and not (request and (name.lower().startswith("x-internal-") or name.lower().startswith("x-nexent-")))]

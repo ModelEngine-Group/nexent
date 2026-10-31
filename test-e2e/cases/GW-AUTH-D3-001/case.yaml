@@ -1,0 +1,102 @@
+schema_version: '1.0'
+stage: D3
+module: AUTH-IDENTITY
+case:
+  case_id: GW-AUTH-D3-001
+  feature_id: GW-AUTH
+  requirement_ids:
+  - GW-AUTH
+  business_rule_ids:
+  - GW-AUTH-RULE-01
+  - GW-AUTH-RULE-02
+  title: Gateway identity lookup and downstream HTTP/WS authentication across actual
+    local services
+  type: INTEGRATION
+  priority: P0
+  status: active
+  automation: automated
+  objective: Prove real network hops use authoritative state and cryptographic identities
+    without executing a live database or model.
+  preconditions:
+  - Local loopback sockets available; Python backend dependencies installed; no real
+    credentials required.
+  test_data:
+    profile: mock
+    accounts: Two synthetic active accounts, a revoked CAS session and an opaque revocable
+      API key.
+    persistence: Database functions use synthetic adapters; downstream business/voice
+      execution uses recording sinks. Product credential parsing, identity endpoint/policy,
+      signing, middleware and proxy execute unchanged.
+  steps:
+  - order: 1
+    action: Send two session users and an API key through actual Gateway HTTP, signed
+      Management lookup and downstream handlers. Exercise the existing signed Management-to-Runtime
+      dispatch credential separately from user sessions.
+    expected: Each handler sees its own signed identity and membership lookup occurs
+      once per session request.
+  - order: 2
+    action: Submit missing/forged identities, direct unsigned calls, wrong service
+      signatures, changed account version, revoked CAS session and revoked API key.
+      Tamper lookup body and attempt public access to lookup.
+    expected: 401/404 reject paths and no rejected call reaches a business handler.
+      External session JWTs cannot substitute for internal execution credentials.
+  - order: 3
+    action: Reach anonymous login, reject unsigned WS, then authenticate WS through
+      cookie, negotiate voice protocol and exchange binary audio. Shut down all servers
+      and manager.
+    expected: Login remains reachable; WS sees the correct user; normal close and
+      complete resource cleanup occur.
+  expected_results:
+  - Authoritative account and API-key identities cross real HTTP network hops without
+    cross-user contamination.
+  - Forged, unsigned, wrong-audience and revoked identities never invoke business
+    handlers; service lookup body and private route are protected.
+  - Anonymous bootstrap and authenticated WebSocket subprotocol/binary/close behavior
+    work, with no residual identity or managed work.
+  forbidden_side_effects:
+  - Rejected credentials must never reach Runtime or Northbound business handlers.
+  - Fixture verification must not use production storage, model credentials or leave
+    server/worker threads running.
+  integration_boundary:
+  - Actual Gateway -> actual Management identity endpoint and policy with synthetic
+    persistence -> actual signed middleware in downstream HTTP/WS recording apps.
+    Full Agent/model execution is excluded.
+  observations:
+  - HTTP status, signed principal, membership call count, business invocation list,
+    WS user/subprotocol/binary payload/close code.
+  - The outer server-task observer verifies identity context is restored after each
+    HTTP/WS scope.
+  cleanup:
+  - Cancel and await relays; stop all loopback Uvicorn servers and shut down the real
+    management ThreadManager.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+    timeout_seconds: 90
+  acceptance:
+  - id: AC-01
+    description: Authoritative state and distinct identities are propagated over real
+      HTTP.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects: []
+  - id: AC-02
+    description: Invalid and revoked identities are rejected before business execution.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: Bootstrap and authenticated WS work and verification leaves no resources
+      or identity.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 2

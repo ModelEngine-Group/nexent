@@ -76,6 +76,7 @@ northbound_app = create_app(
     cors_methods=["GET", "POST", "PUT", "DELETE"],
     enable_monitoring=False,  # Disable monitoring if not needed
     lifespan=northbound_lifespan,
+    gateway_identity_audience="management",
 )
 if hasattr(northbound_app, "state"):
     northbound_app.state.thread_manager = config_thread_manager

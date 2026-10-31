@@ -127,6 +127,7 @@ class TestConfigAppRouterConfiguration:
             return {}
 
         router_modules = {
+            "management.api.identity.gateway_identity": {"router": APIRouter()},
             "management.api.northbound": {"router": APIRouter(), "a2a_router": APIRouter()},
             "management.api.agent.agent": {"agent_config_router": APIRouter()},
             "management.api.agent.agent_repository": {"agent_repository_router": APIRouter()},

@@ -23,6 +23,7 @@ def create_app(
     cors_methods: list = None,
     enable_monitoring: bool = True,
     lifespan=None,
+    gateway_identity_audience=None,
 ) -> FastAPI:
     """
     Create a FastAPI application with common configurations.
@@ -56,6 +57,10 @@ def create_app(
         allow_methods=cors_methods or ["*"],
         allow_headers=["*"],
     )
+    if gateway_identity_audience:
+        from infrastructure.security.identity_middleware import GatewayIdentityMiddleware
+
+        app.add_middleware(GatewayIdentityMiddleware, audience=gateway_identity_audience)
 
     # Register exception handlers
     register_exception_handlers(app)

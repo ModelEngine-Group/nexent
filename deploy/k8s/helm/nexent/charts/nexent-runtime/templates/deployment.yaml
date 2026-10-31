@@ -58,6 +58,8 @@ spec:
             - secretRef:
                 name: nexent-secrets
           env:
+            - name: GATEWAY_AUTH_ENABLED
+              value: "true"
 {{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "wait"

@@ -26,6 +26,12 @@ RUNTIME_SERVICE_URL = os.getenv('RUNTIME_SERVICE_URL', 'http://localhost:5014').
 GATEWAY_MANAGEMENT_URL = os.getenv('GATEWAY_MANAGEMENT_URL', 'http://localhost:5010').rstrip('/')
 GATEWAY_RUNTIME_URL = os.getenv('GATEWAY_RUNTIME_URL', 'http://localhost:5014').rstrip('/')
 GATEWAY_NORTHBOUND_URL = os.getenv('GATEWAY_NORTHBOUND_URL', GATEWAY_MANAGEMENT_URL).rstrip('/')
+# Staged compatibility flag; shipped deployment and the standalone image enable it.
+_GATEWAY_AUTH_FLAG = os.getenv('GATEWAY_AUTH_ENABLED', 'false').lower()
+if _GATEWAY_AUTH_FLAG not in {'true', 'false'}:
+    raise ValueError('GATEWAY_AUTH_ENABLED must be true or false')
+GATEWAY_AUTH_ENABLED = _GATEWAY_AUTH_FLAG == 'true'
+GATEWAY_SIGNING_SECRET = os.getenv('GATEWAY_SIGNING_SECRET', '')
 CLIP_MODEL_PATH = os.getenv('CLIP_MODEL_PATH')
 TABLE_TRANSFORMER_MODEL_PATH = os.getenv('TABLE_TRANSFORMER_MODEL_PATH')
 UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH = os.getenv('UNSTRUCTURED_DEFAULT_MODEL_INITIALIZE_PARAMS_JSON_PATH')

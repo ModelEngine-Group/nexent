@@ -41,3 +41,43 @@ def generate_internal_runtime_jwt(
         "exp": now + expires_in,
     }
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+
+def verify_internal_runtime_jwt(authorization: Optional[str], *, secret=None) -> tuple[str, str]:
+    """Verify a northbound runtime token and return its user and tenant."""
+    key = JWT_SECRET if secret is None else secret
+    if not key:
+        raise TokenExpiredError("JWT verification is not configured")
+    if not authorization or not authorization.strip():
+        raise TokenExpiredError("No authorization header provided")
+
+    from infrastructure.security.gateway_identity import bearer_token, IdentityError
+
+    try:
+        token = bearer_token(authorization)
+    except IdentityError as exc:
+        raise TokenExpiredError("Invalid authorization header") from exc
+    try:
+        claims = jwt.decode(
+            token,
+            key,
+            algorithms=["HS256"],
+            audience=INTERNAL_RUNTIME_JWT_AUDIENCE,
+            issuer=INTERNAL_RUNTIME_JWT_ISSUER,
+            options={"verify_exp": True, "require": ["exp", "iat", "iss", "aud", "scope"]},
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise TokenExpiredError("Internal runtime token has expired") from exc
+    except jwt.InvalidTokenError as exc:
+        raise TokenExpiredError("Invalid internal runtime token") from exc
+
+    if claims.get("scope") != INTERNAL_RUNTIME_JWT_SCOPE:
+        raise TokenExpiredError("Invalid internal runtime token scope")
+
+    user_id = claims.get("sub")
+    tenant_id = claims.get("tenant_id")
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise TokenExpiredError("Internal runtime token is missing user identity")
+    if not isinstance(tenant_id, str) or not tenant_id.strip():
+        raise TokenExpiredError("Internal runtime token is missing tenant identity")
+    return user_id, tenant_id

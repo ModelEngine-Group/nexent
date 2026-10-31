@@ -198,6 +198,13 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
 
 
 def authenticate_api_key(authorization: Optional[str], request=None) -> AuthenticatedIdentity:
+        from gateway.authentication.auth import _gateway_identity
+
+        identity = _gateway_identity("api_key")
+        if identity is not None:
+            return AuthenticatedIdentity(identity["user_id"], identity["tenant_id"],
+                                         role=identity.get("role", ""), language=identity.get("language", "zh"),
+                                         token_id=identity.get("token_id"), kind=CredentialKind.API_KEY)
         valid, record = validate_bearer_token(authorization)
         if not valid or not record:
             raise TokenExpiredError("Invalid or missing bearer token")

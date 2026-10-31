@@ -57,6 +57,15 @@ logger = logging.getLogger(__name__)
 from contracts.constants.constants import MOCK_JWT_SECRET_KEY
 
 
+def _gateway_identity(kind="session"):
+    from infrastructure.security.gateway_identity import IdentityError, trusted_identity
+
+    try:
+        return trusted_identity(kind)
+    except IdentityError as exc:
+        raise TokenExpiredError("Invalid identity credential policy") from exc
+
+
 def resolve_tenant_id_from_user_tenant_record(user_tenant: Dict[str, Any]) -> str:
     """
     Resolve the effective tenant_id from a user_tenant_t record.
@@ -260,6 +269,9 @@ def _resolve_session_user(authorization: Optional[str] = None) -> tuple[str, str
     Returns:
         tuple[str, str]: (user_id, tenant_id)
     """
+    identity = _gateway_identity()
+    if identity is not None:
+        return identity["user_id"], identity["tenant_id"]
     # In speed mode, allow unauthenticated access with default user for demo/dev
     if IS_SPEED_MODE:
         logging.debug("Speed mode detected - returning default user ID and tenant ID")
@@ -301,6 +313,9 @@ def get_current_user_context(
     authorization: Optional[str] = None,
 ) -> tuple[str, str, str]:
     """Return the authenticated user ID, tenant ID, and normalized role."""
+    identity = _gateway_identity()
+    if identity is not None:
+        return identity["user_id"], identity["tenant_id"], identity.get("role", "")
     user_id, tenant_id = get_current_user_id(authorization)
 
     if IS_SPEED_MODE:
@@ -384,7 +399,8 @@ def get_current_user_info(
         tuple[str, str, str]: (User ID, Tenant ID, Language code)
     """
     user_id, tenant_id = get_current_user_id(authorization)
-    language = get_user_language(request)
+    identity = _gateway_identity()
+    language = identity.get("language", "zh") if identity else get_user_language(request)
     return user_id, tenant_id, language
 
 
@@ -393,6 +409,10 @@ def validate_token(token: str) -> Tuple[bool, Optional[Any]]:
     from types import SimpleNamespace
 
     try:
+        identity = _gateway_identity()
+        if identity is not None:
+            return True, SimpleNamespace(id=identity["user_id"], email=identity.get("email", ""),
+                                         user_metadata={"role": identity.get("role", "")})
         user_id, _ = get_current_user_id(token)
         account = require_active_account(user_id)
         membership = get_user_tenant_by_user_id(user_id)
@@ -442,37 +462,10 @@ def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
 
 
 def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]:
-    """Verify a northbound runtime token and return its user and tenant."""
-    if not JWT_SECRET:
-        raise TokenExpiredError("JWT verification is not configured")
-    if not authorization or not authorization.strip():
-        raise TokenExpiredError("No authorization header provided")
+    """Compatibility export of the common service-token verifier."""
+    from infrastructure.security.internal_tokens import verify_internal_runtime_jwt as verify
 
-    token = extract_bearer_token(authorization)
-    try:
-        claims = jwt.decode(
-            token,
-            JWT_SECRET,
-            algorithms=["HS256"],
-            audience=INTERNAL_RUNTIME_JWT_AUDIENCE,
-            issuer=INTERNAL_RUNTIME_JWT_ISSUER,
-            options={"verify_exp": True},
-        )
-    except jwt.ExpiredSignatureError as exc:
-        raise TokenExpiredError("Internal runtime token has expired") from exc
-    except jwt.InvalidTokenError as exc:
-        raise TokenExpiredError("Invalid internal runtime token") from exc
-
-    if claims.get("scope") != INTERNAL_RUNTIME_JWT_SCOPE:
-        raise TokenExpiredError("Invalid internal runtime token scope")
-
-    user_id = claims.get("sub")
-    tenant_id = claims.get("tenant_id")
-    if not isinstance(user_id, str) or not user_id.strip():
-        raise TokenExpiredError("Internal runtime token is missing user identity")
-    if not isinstance(tenant_id, str) or not tenant_id.strip():
-        raise TokenExpiredError("Internal runtime token is missing tenant identity")
-    return user_id, tenant_id
+    return verify(authorization, secret=JWT_SECRET)
 
 
 def parse_pending_oauth_token(pending_token: str) -> PendingOAuthIdentity:
@@ -526,6 +519,13 @@ def authenticate_identity(
 ) -> AuthenticatedIdentity:
     """Use the route's policy; never infer a policy from unverified claims."""
 
+    kind = CredentialKind(kind)
+    identity = _gateway_identity(kind.value)
+    if identity is not None:
+        return AuthenticatedIdentity(identity["user_id"], identity["tenant_id"],
+                                     role=identity.get("role", ""), language=identity.get("language", "zh"),
+                                     token_id=identity.get("token_id"), kind=kind)
+
     if kind == CredentialKind.SESSION:
         if require_role:
             user_id, tenant_id, role = get_current_user_context(authorization)
@@ -559,7 +559,7 @@ def authenticate(
     header_token = authorization
     if not header_token and _credentials:
         header_token = _credentials.credentials
-    if not header_token and not IS_SPEED_MODE:
+    if not header_token and not IS_SPEED_MODE and _gateway_identity() is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     principal = authenticate_identity(header_token, require_role=True)
     return CurrentUser(

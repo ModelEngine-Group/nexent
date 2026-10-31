@@ -34,7 +34,7 @@ def test_gateway_routes_keep_all_original_paths_methods_and_handlers():
 
 def test_gateway_authentication_and_management_route_ownership():
     assert {p.name for p in (BACKEND / "gateway/authentication").glob("*.py")} == {
-        "__init__.py", "auth.py", "northbound_auth.py"
+        "__init__.py", "auth.py", "northbound_auth.py", "credentials.py"
     }
     assert {p.name for p in (BACKEND / "gateway/api").glob("*.py")} == {"__init__.py"}
     assert not (BACKEND / "gateway/api/northbound").exists()
