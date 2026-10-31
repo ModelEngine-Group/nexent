@@ -1140,7 +1140,9 @@ def _infer_visual_model_type(name: str, final_segment: str) -> Optional[str]:
       because develop's classifier gives generation keywords priority.
     - Image understanding (vlm) — keywords aligned with develop's TokenPony
       provider (TOKENPONY_IMAGE_UNDERSTANDING_KEYWORDS) plus the legacy
-      prefix rules: qwen-vl-*, glm-v*, internvl-*, llava-*, gpt-4o-*.
+      prefix rules: qwen-vl-*, internvl-*, llava-*, gpt-4o-* and GLM
+      visual suffixes such as glm-4.6v. A version prefix (GLM-V5.2) alone
+      is not a visual capability marker.
       "vl" as a standalone dash-segment covers Qwen/Qwen3-VL-* naming.
     """
     if _name_contains_any(name, final_segment, "omni", "video"):
@@ -1186,7 +1188,7 @@ def _infer_model_type_from_name(model_name: str) -> str:
     Mapping rules (see design doc Phase 2.6):
     - gpt-* / o1-* / o3-* / o4-* / claude-* / glm-* / qwen-* (non-vl) /
       deepseek-* / llama-* / mistral-* / yi-* / moonshot-* / gemini-* → llm
-    - qwen-vl-* / glm-v* / internvl-* / llava-* → vlm
+    - qwen-vl-* / glm-<version>v / internvl-* / llava-* → vlm
     - text-embedding-* / embedding-* / bge-* (non-reranker) → embedding
     - rerank-* / bge-reranker-* / jina-reranker-* → rerank
     - whisper-* / paraformer-* / sensevoice-* → stt
