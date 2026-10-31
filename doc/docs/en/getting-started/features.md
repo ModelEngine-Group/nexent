@@ -1,6 +1,6 @@
 # Key Features
 
-Nexent v2.5.0 covers agent generation, configuration, debugging, publishing, and execution, and provides model, tool, knowledge, memory, and permission management.
+Nexent covers agent generation, configuration, debugging, publishing, and execution, and provides model, tool, knowledge, memory, and permission management. For version-specific changes and fixes, see [GitHub Releases](https://github.com/ModelEngine-Group/nexent/releases).
 
 ## ⚙️ Multi-Model Integration
 
