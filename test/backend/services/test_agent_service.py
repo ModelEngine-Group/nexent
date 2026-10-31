@@ -206,6 +206,7 @@ knowledge_scope_service_module.resolve_knowledge_scope = MagicMock
 sys.modules["management.services.knowledge_base.scope"] = knowledge_scope_service_module
 fa_memory_extractor_module = types.ModuleType("management.services.memory.extraction")
 fa_memory_extractor_module.FaMemoryExtractor = MagicMock
+fa_memory_extractor_module.MemoryExtractionModelClient = MagicMock
 sys.modules["management.services.memory.extraction"] = fa_memory_extractor_module
 memory_backend_adapter_module = types.ModuleType("management.services.memory.provider")
 memory_backend_adapter_module._build_ingestion_event_service = MagicMock
@@ -15446,7 +15447,11 @@ def test_agent_run_registration_is_retained_until_worker_future_finishes(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_shutdown_agent_stream_tasks_cancels_request_owned_tasks():
+async def test_shutdown_agent_stream_tasks_cancels_request_owned_tasks(monkeypatch):
+    # Each test owns a different loop; ignore registries left by other cases.
+    for name in ('_agent_stream_producer_tasks', '_external_memory_ingest_tasks',
+                 '_fa_extraction_tasks', '_channel_cleanup_tasks'):
+        monkeypatch.setattr(agent_execution, name, set())
     started = asyncio.Event()
 
     async def wait_forever():

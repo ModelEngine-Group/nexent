@@ -4,3 +4,4 @@
 
 - D3 [AGT-049](../../cases/AGT-049/case.yaml) · active
 - D3 [AGT-050](../../cases/AGT-050/case.yaml) · active
+- D3 [AGT-DREAMING-SEMANTIC-01](../../cases/AGT-DREAMING-SEMANTIC-01/case.yaml) · active

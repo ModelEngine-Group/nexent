@@ -10,6 +10,8 @@ feature:
   business_rules:
   - rule_id: F-122-RULE-01
     description: dreaming job/history/status/delete 与配置联动
+  - rule_id: F-122-RULE-02
+    description: Eligible short-term evidence must produce a real-model semantic summary with source provenance; completed status or mechanical fallback alone does not satisfy semantic-summary acceptance.
   required_test_stages:
   - D3
   source:

@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: AGT-DREAMING-SEMANTIC-01
+implementations:
+  - framework: pytest
+    file: test.py
+    selector: AGT-DREAMING-SEMANTIC-01
+acceptance_bindings:
+  AC-DREAMING-SEMANTIC:
+    - test_real_dreaming_semantic_summary[AGT-DREAMING-SEMANTIC-01]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

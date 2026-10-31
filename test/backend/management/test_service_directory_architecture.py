@@ -140,6 +140,7 @@ MIGRATED_MODULES = {
     'memory/dreaming/service.py',
     'memory/dreaming/summarizer.py',
     'memory/extraction.py',
+    'memory/extraction_scope.py',
     'memory/index.py',
     'memory/ingestion.py',
     'memory/long_term.py',

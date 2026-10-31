@@ -12,6 +12,7 @@ TDD tests written BEFORE the implementation exists.  Covers:
 
 from __future__ import annotations
 
+import json
 import logging
 from unittest.mock import AsyncMock, MagicMock
 
@@ -73,76 +74,30 @@ def _mock_model_client(response_text: str) -> MagicMock:
 # ===================================================================
 
 
+def _grounded(evidence, category="user_fact", source="user", scope="durable"):
+    return json.dumps({"items": [{"category": category, "source": source,
+                                 "scope": scope, "evidence": evidence}]})
+
+
 class TestParseItems:
-    """Tests for ``FaMemoryExtractor._parse_items``."""
+    """The internal extractor protocol requires source and scope evidence."""
 
-    def test_parse_items_valid_multiple(self):
-        raw = (
-            "<memory-item>User prefers dark mode</memory-item>\n"
-            "<memory-item>Project uses PostgreSQL 15</memory-item>\n"
-            "<memory-item>Deployment target is Kubernetes</memory-item>"
-        )
-        items = FaMemoryExtractor._parse_items(raw)
-        assert items == [
-            "User prefers dark mode",
-            "Project uses PostgreSQL 15",
-            "Deployment target is Kubernetes",
-        ]
+    def test_grounded_preference(self):
+        query = "I always prefer Python."
+        assert FaMemoryExtractor._parse_items(
+            _grounded(query, "user_preference"), query, "Python is suitable."
+        ) == [query]
 
-    def test_parse_items_empty_no_memory(self):
-        raw = "<no-memory/>"
-        items = FaMemoryExtractor._parse_items(raw)
-        assert items == []
+    @pytest.mark.parametrize("raw", ["", "not JSON", "<no-memory/>",
+                                    "<memory-item>User prefers Python</memory-item>",
+                                    "[]", '{"items": []}', '{"items": "invalid"}'])
+    def test_untyped_or_empty_output_cannot_write(self, raw):
+        assert FaMemoryExtractor._parse_items(raw, "I prefer Python.", "Answer") == []
 
-    def test_parse_items_no_memory_with_surrounding_text(self):
-        raw = "Some preamble <no-memory/> and trailing text"
-        items = FaMemoryExtractor._parse_items(raw)
-        assert items == []
-
-    def test_parse_items_malformed_partial_tags(self):
-        raw = (
-            "<memory-item>Valid item</memory-item>"
-            "<memory-item>Unclosed item"
-        )
-        items = FaMemoryExtractor._parse_items(raw)
-        assert items == ["Valid item"]
-
-    def test_parse_items_malformed_nested_tags(self):
-        raw = (
-            "<memory-item>Outer <memory-item>Inner</memory-item></memory-item>"
-        )
-        items = FaMemoryExtractor._parse_items(raw)
-        assert len(items) >= 1
-        assert "Inner" in items[0]
-
-    def test_parse_items_whitespace_stripped(self):
-        raw = (
-            "<memory-item>  leading spaces  </memory-item>\n"
-            "<memory-item>\n  newlines around  \n</memory-item>"
-        )
-        items = FaMemoryExtractor._parse_items(raw)
-        assert items == ["leading spaces", "newlines around"]
-
-    def test_parse_items_empty_string(self):
-        items = FaMemoryExtractor._parse_items("")
-        assert items == []
-
-    def test_parse_items_no_tags(self):
-        raw = "This is just plain text without any memory-item tags."
-        items = FaMemoryExtractor._parse_items(raw)
-        assert items == []
-
-    def test_parse_items_multiline_content(self):
-        raw = (
-            "<memory-item>User's project stack:\n"
-            "- Python 3.11\n"
-            "- FastAPI\n"
-            "- PostgreSQL</memory-item>"
-        )
-        items = FaMemoryExtractor._parse_items(raw)
-        assert len(items) == 1
-        assert "Python 3.11" in items[0]
-        assert "FastAPI" in items[0]
+    def test_missing_source_does_not_invent_preference(self):
+        assert FaMemoryExtractor._parse_items(
+            _grounded("I prefer Python.", "user_preference"), "", "I prefer Python."
+        ) == []
 
 
 # ===================================================================
@@ -262,10 +217,12 @@ class TestExtractAndStore:
 
     @pytest.mark.asyncio
     async def test_extract_and_store_happy_path(self):
-        llm_response = (
-            "<memory-item>User prefers Python</memory-item>\n"
-            "<memory-item>Uses VS Code</memory-item>"
-        )
+        llm_response = json.dumps({"items": [
+            {"category": "user_preference", "source": "user", "scope": "durable",
+             "evidence": "I prefer Python."},
+            {"category": "user_fact", "source": "user", "scope": "durable",
+             "evidence": "I use VS Code."},
+        ]})
         model_client = _mock_model_client(llm_response)
         service = _mock_memory_service()
         service.store_memory.side_effect = [
@@ -278,14 +235,15 @@ class TestExtractAndStore:
         )
 
         result = await extractor.extract_and_store(
-            "Python is great for backend development and VS Code is a solid IDE."
+            "Python is great for backend development and VS Code is a solid IDE.",
+            user_query="I prefer Python. I use VS Code."
         )
 
         assert isinstance(result, ExtractionResult)
         assert result.reason == "ok"
         assert len(result.items) == 2
-        assert result.items[0]["content"] == "User prefers Python"
-        assert result.items[1]["content"] == "Uses VS Code"
+        assert result.items[0]["content"] == "I prefer Python."
+        assert result.items[1]["content"] == "I use VS Code."
         model_client.chat.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -434,7 +392,7 @@ class TestExtractAndStore:
     @pytest.mark.asyncio
     async def test_extract_and_store_passes_conversation_id(self):
         """Ensure conversation_id flows through to store_memory calls."""
-        llm_response = "<memory-item>Fact</memory-item>"
+        llm_response = _grounded("I use PostgreSQL.")
         model_client = _mock_model_client(llm_response)
         service = _mock_memory_service()
         service.store_memory.return_value = MagicMock(
@@ -445,7 +403,7 @@ class TestExtractAndStore:
             model_client=model_client,
         )
 
-        await extractor.extract_and_store("Some answer.")
+        await extractor.extract_and_store("Some answer.", user_query="I use PostgreSQL.")
 
         call_kwargs = service.store_memory.call_args.kwargs
         assert call_kwargs["conversation_id"] == CONVERSATION_ID
@@ -453,7 +411,7 @@ class TestExtractAndStore:
     @pytest.mark.asyncio
     async def test_extract_and_store_uses_agent_layer_and_short_term(self):
         """Verify layer=AGENT and memory_type=SHORT_TERM on store calls."""
-        llm_response = "<memory-item>Preference noted</memory-item>"
+        llm_response = _grounded("I use PostgreSQL.")
         model_client = _mock_model_client(llm_response)
         service = _mock_memory_service()
         service.store_memory.return_value = MagicMock(
@@ -464,7 +422,7 @@ class TestExtractAndStore:
             model_client=model_client,
         )
 
-        await extractor.extract_and_store("Some answer.")
+        await extractor.extract_and_store("Some answer.", user_query="I use PostgreSQL.")
 
         call_kwargs = service.store_memory.call_args.kwargs
         assert call_kwargs["layer"] == MemoryLayer.AGENT
