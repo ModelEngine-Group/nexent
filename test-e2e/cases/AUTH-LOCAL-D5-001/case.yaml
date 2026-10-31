@@ -46,6 +46,9 @@ case:
   - order: 7
     action: Run deployment prepare and apply hooks around the normal versioned SQL runner, repeat deployment and retry a failed import using its retained private snapshot.
     expected: One standalone Python script automatically imports only when the account SQL/data checkpoint requires it; fresh installs and completed upgrades skip source access, failures remain retryable, and SQL success alone never marks credential migration complete.
+  - order: 8
+    action: Execute the actual historical SPEED seed statement, migrate and replay against a prior pending placeholder and an operator-modified account.
+    expected: The fixed demo identity retains its original ID/tenant and remains disabled for normal login, has system provenance without pending credentials, and replay preserves operator changes. Mixed-user deployment still imports human credentials.
   expected_results:
   - Successful identity behavior matches the preserved HTTP/data contract.
   - Negative paths reject access or writes deterministically.
@@ -56,6 +59,7 @@ case:
   - API-only account upgrades preserve existing keys, keep password login disabled and never reactivate explicitly disabled or deleted accounts on replay.
   - Source containers are reclaimed only after a successful local apply and all persistent data is retained.
   - Deployment requires no manual Python invocation or host database packages; private snapshots survive incomplete upgrades and are removed only after committed import and successful cleanup.
+  - Default SPEED system identity is never pending for Supabase import and receives no normal login access; operator changes are preserved.
   forbidden_side_effects:
   - No plaintext password/hash/token/DSN in returned errors or logs; no writes to
     unrelated users.
@@ -70,6 +74,7 @@ case:
     - 5
     - 6
     - 7
+    - 8
     expected_results:
     - 1
     - 2
@@ -78,6 +83,7 @@ case:
     - 5
     - 6
     - 7
+    - 8
     forbidden_side_effects:
     - 1
   risk_type: DEPLOYMENT

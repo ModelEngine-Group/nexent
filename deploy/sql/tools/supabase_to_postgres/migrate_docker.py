@@ -470,10 +470,16 @@ WHERE migration_id IN ('{AUTH_SQL}','{DATA_MARKER}','{CLEANUP_MARKER}');
 \else
 SELECT '[]';
 \endif
-SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name='source_metadata') AS has_accounts \gset
+SELECT count(*)=2 AS has_accounts FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name IN ('source_metadata','user_role') \gset
 \if :has_accounts
-SELECT json_build_object('pending',count(*)) FROM nexent.user_account_t
-WHERE delete_flag='N' AND source_metadata->>'credential_migration_pending'='true';
+SELECT json_build_object('pending',count(*)) FROM nexent.user_account_t a
+WHERE delete_flag='N' AND source_metadata->>'credential_migration_pending'='true'
+AND NOT (a.user_id='user_id' AND coalesce(upper(a.user_role),'')='SPEED'
+    AND a.account_status='disabled' AND nullif(trim(a.user_email),'') IS NULL
+    AND a.password_hash IS NULL AND a.token_version=0 AND NOT a.password_login_enabled
+    AND coalesce(a.updated_by,'')='account-schema-migration'
+    AND EXISTS (SELECT 1 FROM nexent.user_tenant_t u WHERE u.user_id=a.user_id AND u.tenant_id='tenant_id' AND u.delete_flag='N')
+    AND NOT EXISTS (SELECT 1 FROM nexent.user_tenant_t u WHERE u.user_id=a.user_id AND u.delete_flag='N' AND u.tenant_id IS DISTINCT FROM 'tenant_id'));
 \else
 SELECT '{{"pending":0}}';
 \endif
