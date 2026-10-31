@@ -339,6 +339,7 @@ async def _stream_agent_chunks(
     channel: Optional[Any] = None,
     execution: Optional[ManagedExecution] = None,
     deferred_run: Optional[DeferredAgentRun] = None,
+    final_answer_mode: str = "delta",
 ):
     """
     Yield SSE chunks from agent_run while buffering assistant persistence.
@@ -349,6 +350,7 @@ async def _stream_agent_chunks(
         resume_message_id: The existing message_id to use in resume mode
                           (instead of creating a new one).
         channel: Optional StreamingChannel for multi-subscriber support.
+        final_answer_mode: Complete suppresses answer fragments until successful finalization.
     """
 
     # Types whose chunks should be merged into the previous unit boundary,
@@ -378,6 +380,8 @@ async def _stream_agent_chunks(
     buffered_image_url_set: set[str] = set()
     buffered_automation_proposals: list[dict[str, Any]] = []
     final_answer_content = ""
+    complete_answer_event: Optional[dict[str, Any]] = None
+    complete_answer_content = ""
 
     # Determine if we're in resume mode
     is_resume_mode = resume_from_unit_index > 0
@@ -478,11 +482,16 @@ async def _stream_agent_chunks(
                 chunk_content = data.get("content", "") or ""
                 if chunk_type == "final_answer":
                     has_body = resolve_answer_completion(buffered_units, data)
+                    if not data.get("invocation_id"):
+                        complete_answer_event = (
+                            dict(data) if data.get("answer_phase") != "delta" else None
+                        )
                     if data.get("answer_phase") == "complete":
                         current_unit = None
                     if not has_body:
-                        await channel.publish(f"data: {chunk}\n\n")
-                        yield f"data: {chunk}\n\n"
+                        if final_answer_mode == "delta":
+                            await channel.publish(f"data: {chunk}\n\n")
+                            yield f"data: {chunk}\n\n"
                         continue
 
                 # Use the current unit index for continuations and the next index
@@ -526,6 +535,8 @@ async def _stream_agent_chunks(
                 current_unit = None
                 if phase == "rollback" and isinstance(attempt_id, str):
                     _rollback_model_attempt_units(buffered_units, attempt_id)
+                    if complete_answer_event and complete_answer_event.get("attempt_id") == attempt_id:
+                        complete_answer_event = None
                 await channel.publish(f"data: {chunk}\n\n")
                 yield f"data: {chunk}\n\n"
                 continue
@@ -619,9 +630,9 @@ async def _stream_agent_chunks(
                     )
 
             # Buffer assistant persistence in memory. Redis/channel publication
-            # below remains per chunk; PostgreSQL is touched only once after the
-            # stream reaches a terminal state.
-            if streaming_message_id is not None and chunk_type:
+            # below remains per chunk except complete-mode answers; PostgreSQL
+            # is touched only once after the stream reaches a terminal state.
+            if (streaming_message_id is not None or final_answer_mode == "complete") and chunk_type:
                 mergeable = chunk_type in _MERGEABLE_TYPES
                 is_continuation = _is_continuation(
                     current_unit, mergeable, chunk_type, data
@@ -747,9 +758,9 @@ async def _stream_agent_chunks(
                     # the currently-running assistant message.
                     if chunk_type == "history_summary":
                         current_unit = None
-                    elif streaming_message_id is not None and chunk_type not in (
-                        "search_content_placeholder",
-                    ):
+                    elif (
+                        streaming_message_id is not None or final_answer_mode == "complete"
+                    ) and chunk_type != "search_content_placeholder":
                         persisted_content = _serialize_stream_unit_content(
                             data, chunk_content
                         )
@@ -792,8 +803,9 @@ async def _stream_agent_chunks(
                                 )
                         next_unit_index += 1
 
-            await channel.publish(f"data: {chunk}\n\n")
-            yield f"data: {chunk}\n\n"
+            if chunk_type != "final_answer" or final_answer_mode == "delta":
+                await channel.publish(f"data: {chunk}\n\n")
+                yield f"data: {chunk}\n\n"
         stream_completed_normally = True
     except Exception as run_exc:
         logger.error("Agent run error: %r", run_exc, exc_info=True)
@@ -900,7 +912,34 @@ async def _stream_agent_chunks(
                 _transform_skill_files_to_standard_format(uploaded_files)
             )
 
-        persistence_failed = False
+        persistence_failed = (
+            final_answer_mode == "complete"
+            and streaming_message_id is None
+            and not agent_request.is_debug
+        )
+        if persistence_failed:
+            terminal_status = "failed"
+            agent_run_info.attempt_outcome = "failed"
+        if final_answer_mode == "complete":
+            # Reuse the canonical projection after retries and reclassification,
+            # including root fragments separated by parallel child output.
+            complete_answer_units = [
+                unit
+                for unit in buffered_units
+                if unit["type"] == "final_answer"
+                and not unit.get("invocation_id")
+                and (
+                    not complete_answer_event
+                    or not complete_answer_event.get("step_id")
+                    or unit.get("_step_id") == complete_answer_event["step_id"]
+                )
+            ]
+            complete_answer_content = "".join(
+                "".join(unit.get("_content_fragments", [unit.get("content", "")]))
+                for unit in complete_answer_units
+            )
+            if complete_answer_event is not None and complete_answer_units:
+                complete_answer_event["unit_index"] = complete_answer_units[-1]["unit_index"]
         if streaming_message_id is not None:
             try:
                 finalize_execution_result_units(execution_history, buffered_units)
@@ -915,6 +954,8 @@ async def _stream_agent_chunks(
                     ),
                     "",
                 )
+                if final_answer_mode == "complete":
+                    final_answer_content = complete_answer_content
                 logger.info(
                     "Finalizing assistant persistence conversation=%s units=%s bytes=%s",
                     agent_request.conversation_id,
@@ -984,6 +1025,19 @@ async def _stream_agent_chunks(
             status=terminal_status,
             agent_run_info=agent_run_info,
         )
+
+        if (
+            final_answer_mode == "complete"
+            and terminal_status == "completed"
+            and complete_answer_event is not None
+            and complete_answer_content.strip()
+        ):
+            final_chunk = "data: " + json.dumps(
+                {**complete_answer_event, "content": complete_answer_content, "answer_phase": "complete"},
+                ensure_ascii=False,
+            ) + "\n\n"
+            await channel.publish(final_chunk)
+            yield final_chunk
 
         if channel is not None:
             await streaming_channel_manager.complete_channel(

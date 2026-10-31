@@ -10,7 +10,10 @@ feature:
   business_rules:
   - rule_id: F-146-RULE-01
     description: new/existing conversation、agent_name/query/model override、SSE
+  - rule_id: F-146-RULE-02
+    description: Northbound chat defaults to one complete root final_answer; explicit final_answer_mode=delta retains incremental answer phases. Invalid modes return 422 before execution.
   required_test_stages:
+  - D2
   - D3
   source:
     notes: Migrated from V5 01_代码功能清单 without changing the functional description.
