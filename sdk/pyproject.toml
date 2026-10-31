@@ -63,23 +63,18 @@ dependencies = [
 ]
 
 [tool.uv]
-override-dependencies = [
-    "pymongo==999.0.0",
-    "psycopg2-binary==999.0.0",
-    "redis==999.0.0",
-    "neo4j==999.0.0",
-    "chromadb==999.0.0",
-    "pinecone-client==999.0.0",
-    "weaviate-client==999.0.0",
-]
+required-version = ">=0.13.6"
+preview-features = ["index-by-name"]
+# PyTorch also hosts older shared dependencies; fall through when incompatible.
+index-strategy = "unsafe-first-match"
 
 [project.optional-dependencies]
 quality = [
     "ruff>=0.9.0",
-    "pytest>=8.1.0"
+    "pytest==9.1.1"
 ]
 data_process = [
-    "unstructured[all-docs]",
+    "unstructured[all-docs]==0.18.14",
     "unstructured-inference==1.2.0",
 ]
 performance = [
@@ -103,6 +98,7 @@ exclude = ["tests*", "examples*"]
 namespaces = true
 
 [tool.setuptools.package-data]
+"nexent.core.model_service.profiles" = ["**/*.toml", "README.md", "LICENSE"]
 "nexent.core.prompts" = ["zh/*/*.yaml", "en/*/*.yaml"]
 "nexent.assets" = ["*.png", "*.jpg", "*.gif", "*.webp"]
 
@@ -117,3 +113,13 @@ lint.select = ["E", "F", "I", "W"]
 [tool.ruff.lint.isort]
 known-first-party = ["nexent"]
 lines-after-imports = 2
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+
+[[tool.uv.index]]
+name = "pytorch-nvidia"
+url = "https://download.pytorch.org/whl/cu130"
+# Opt in with --index pytorch-nvidia; never use this as a default fallback.
+explicit = true
