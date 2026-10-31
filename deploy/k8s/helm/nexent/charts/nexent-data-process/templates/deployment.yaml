@@ -1,7 +1,14 @@
+{{- if ne (int .Values.replicaCount) 1 -}}
+{{- fail "nexent-data-process must remain single-replica for startup task recovery" -}}
+{{- end -}}
+{{- if ne .Values.strategy.type "Recreate" -}}
+{{- fail "nexent-data-process strategy.type must be Recreate for startup task recovery" -}}
+{{- end -}}
 {{- $global := default dict .Values.global -}}
 {{- $sqlFileNames := default dict $global.sqlFileNames -}}
 {{- $sharedStorage := default dict $global.sharedStorage -}}
 {{- $workspaceStorage := default dict $sharedStorage.workspace -}}
+{{- $logsStorage := default dict $sharedStorage.logs -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -12,7 +19,9 @@ metadata:
   annotations:
     "helm.sh/hook-weight": "20"
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ ternary 0 .Values.replicaCount (default false .Values.global.businessPaused) }}
+  strategy:
+{{ toYaml .Values.strategy | indent 4 }}
   selector:
     matchLabels:
       app: nexent-data-process
@@ -22,6 +31,7 @@ spec:
         app: nexent-data-process
       annotations:
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
+        checksum/nexent-auth: {{ dig "rolloutChecksums" "authSecret" "" .Values.global | quote }}
         checksum/nexent-data-process-image: {{ dig "rolloutChecksums" "dataProcessImage" "" .Values.global | quote }}
         checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
     spec:
@@ -34,19 +44,20 @@ spec:
               name: http
             - containerPort: 5555
               name: flower
-            - containerPort: 8265
-              name: ray-dashboard
           command:
             - /opt/nexent/scripts/start-backend.sh
             - /bin/sh
             - -c
-            - python /opt/backend/data_process_service.py || (cd /opt/backend && OPENBLAS_NUM_THREADS=1 UVICORN_LOOP=asyncio uvicorn data_process_service:app --host 0.0.0.0 --port 5012)
+            - python /opt/backend/data_process_service.py
           envFrom:
             - configMapRef:
                 name: nexent-config
             - secretRef:
+                name: nexent-env
+            - secretRef:
                 name: nexent-secrets
           env:
+{{ include "nexent.backendPlatformEnv" . | indent 12 }}
             - name: NEXENT_SQL_STARTUP_MODE
               value: "off"
             - name: DEPLOYMENT_VERSION
@@ -63,6 +74,8 @@ spec:
               readOnly: true
             - name: nexent-workspace
               mountPath: /mnt/nexent
+            - name: nexent-logs
+              mountPath: /mnt/nexent-data/logs
           resources:
             requests:
               memory: {{ .Values.resources.dataProcess.requests.memory }}
@@ -83,12 +96,10 @@ spec:
               - key: {{ printf "migrations-%s" $name | quote }}
                 path: {{ printf "migrations/%s" $name | quote }}
 {{ end }}
-              - key: supabase-.keep
-                path: supabase/.keep
-{{ range $name := default (list) $sqlFileNames.supabase }}
-              - key: {{ printf "supabase-%s" $name | quote }}
-                path: {{ printf "supabase/%s" $name | quote }}
-{{ end }}
+
         - name: nexent-workspace
           persistentVolumeClaim:
             claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}
+        - name: nexent-logs
+          persistentVolumeClaim:
+            claimName: {{ default "nexent-logs" $logsStorage.existingClaim }}

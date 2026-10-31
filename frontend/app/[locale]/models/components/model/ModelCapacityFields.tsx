@@ -368,6 +368,7 @@ export const ModelCapacityFields = ({
       </AutoComplete>
     ) : (
       <Input
+        className="w-full"
         type="number"
         min="1"
         value={value[field]}
@@ -414,7 +415,7 @@ export const ModelCapacityFields = ({
         <Alert
           type="warning"
           showIcon
-          message={t("model.dialog.capacity.legacyMaxTokensHint", {
+          title={t("model.dialog.capacity.legacyMaxTokensHint", {
             maxTokens: legacyMaxTokensCandidate,
           })}
           description={
@@ -460,7 +461,7 @@ export const ModelCapacityFields = ({
         <Alert
           type={hasSuggestion ? "success" : "info"}
           showIcon
-          message={
+          title={
             hasSuggestion
               ? t("model.dialog.capacity.suggestion.found")
               : t("model.dialog.capacity.suggestion.notFound")
@@ -555,7 +556,7 @@ export const ModelCapacityFields = ({
           adapters registered yet, so all families resolve to estimated). */}
 
       {validationError && (
-        <Alert type="error" showIcon message={t(validationError)} />
+        <Alert type="error" showIcon title={t(validationError)} />
       )}
     </div>
   );

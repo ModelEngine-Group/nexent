@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: BENCHMARK-CI-ROOT-20261026
+  change_type: bugfix
+  bug_id: BENCHMARK-CI-ROOT-20261026
+  title: Resolve benchmark source roots without requiring Git metadata
+  description: Recognize complete source layouts while preserving Git checkout and worktree behavior.
+  observed_behavior: Benchmark entrypoint imports fail in the CI source tree when .git metadata is absent.
+  expected_behavior: Resolve complete SDK/backend/VERSION layouts and reject incomplete roots; preserve Git directory and pointer roots.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing benchmark tests import from a local Git checkout and do not exercise a complete exported source layout.
+  feature_contract_changed: false
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+      - Locate roots with Git directory or pointer metadata.
+      - Locate a complete exported SDK/backend/VERSION tree and initialize entrypoint paths there.
+      - Reject incomplete layouts without silently choosing arbitrary directories.
+    reason: The decision is a local filesystem-layout contract. Dedicated UT is sufficient; benchmark Feature/Case search found no matching formal owner, and no runtime protocol is changed.
+    test_selectors:
+      - test/sdk/benchmark/test_paths.py
+      - test/sdk/benchmark/test_agent_runner_tracking.py
+      - test/sdk/benchmark/test_single_prompt_entrypoints.py
+      - test/sdk/benchmark/test_run_benchmark_execution.py
+      - test/sdk/benchmark/test_webhook_server_security.py
+      - test/sdk/benchmark/test_task_adapter_rendering.py
+  notes: >-
+    Existing refactor evidence owner is nexent-doc/docs/Developing/four-service-runtime-decoupling/changes/contracts-business-layout/ci-20261026.md.
+    Evaluation doubles, fidelity-copy inventory, manifest payload isolation and source-scan scope are test-only repairs within the same CI follow-up.
+    No workflow, deployment, online model or formal acceptance contract changes.

@@ -1,3 +1,6 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import json
 import os
 import sys
@@ -22,7 +25,8 @@ consts_mock.const.SUPABASE_URL = "http://supabase.test"
 consts_mock.const.DEFAULT_TENANT_ID = "default"
 consts_mock.const.JWT_EXPIRY_SECONDS = 7200
 sys.modules["consts"] = consts_mock
-sys.modules["consts.const"] = consts_mock.const
+sys.modules["contracts.constants.environment"] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 consts_model_mock = MagicMock()
 
@@ -35,14 +39,16 @@ class _OAuthCompleteRequest:
 
 
 consts_model_mock.OAuthCompleteRequest = _OAuthCompleteRequest
-sys.modules["consts.model"] = consts_model_mock
+install_business_contract_stubs(consts_model_mock)
 
 oauth_providers_mock = MagicMock()
 oauth_providers_mock.get_all_provider_definitions.return_value = {
     "github": MagicMock(),
     "wechat": MagicMock(),
 }
-sys.modules["consts.oauth_providers"] = oauth_providers_mock
+sys.modules["management.utils.oauth_providers"] = oauth_providers_mock
+for _provider_export in ("get_provider_definition", "is_provider_enabled", "get_all_provider_definitions"):
+    setattr(consts_mock.const, _provider_export, getattr(oauth_providers_mock, _provider_export))
 
 
 class _OAuthProviderError(Exception):
@@ -58,7 +64,9 @@ class _UnauthorizedError(Exception):
 
 
 class _TenantResourceLimitError(Exception):
-    pass
+    def __init__(self, message, **kwargs):
+        super().__init__(message)
+        self.details = kwargs
 
 
 exceptions_mock = MagicMock()
@@ -66,22 +74,33 @@ exceptions_mock.OAuthProviderError = _OAuthProviderError
 exceptions_mock.OAuthLinkError = _OAuthLinkError
 exceptions_mock.UnauthorizedError = _UnauthorizedError
 exceptions_mock.TenantResourceLimitError = _TenantResourceLimitError
-sys.modules["consts.exceptions"] = exceptions_mock
+exceptions_mock.tenant_resource_limit_error_payload = lambda error: {
+    "code": "120104",
+    "message": str(error),
+    "details": error.details,
+}
+install_shared_contract_stub(exceptions_mock, 'exceptions')
 
 sys.modules["database"] = MagicMock()
 database_oauth_mock = MagicMock()
 database_oauth_mock.get_oauth_account_by_provider = MagicMock(return_value=None)
 database_oauth_mock.get_soft_deleted_oauth_account = MagicMock(return_value=None)
-sys.modules["database.oauth_account_db"] = database_oauth_mock
-sys.modules["database.user_tenant_db"] = MagicMock()
-sys.modules["database.client"] = MagicMock()
-sys.modules["database.db_models"] = MagicMock()
+sys.modules["management.db.identity.oauth_account"] = database_oauth_mock
+sys.modules["management.db.identity.user_tenant"] = MagicMock()
+sys.modules["management.db.client"] = MagicMock()
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.models"] = MagicMock()
 sys.modules["backend.database"] = MagicMock()
-sys.modules["backend.database.client"] = MagicMock()
-sys.modules["backend.database.db_models"] = MagicMock()
+sys.modules["management.db.client"] = MagicMock()
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.models"] = MagicMock()
 sys.modules["utils"] = MagicMock()
 sys.modules["utils.token_encryption"] = MagicMock()
-sys.modules["utils.config_utils"] = MagicMock()
+sys.modules["management.services.configuration.tenant.settings"] = MagicMock()
 
 auth_utils_mock = MagicMock()
 auth_utils_mock.get_current_user_id = MagicMock(return_value=("user-1", "t-1"))
@@ -89,14 +108,14 @@ auth_utils_mock.get_jwt_expiry_seconds = MagicMock(return_value=3600)
 auth_utils_mock.calculate_expires_at = MagicMock(return_value=1735689600)
 auth_utils_mock.get_supabase_admin_client = MagicMock()
 auth_utils_mock.generate_session_jwt = MagicMock(return_value="eyJ.mock.jwt.token")
-sys.modules["utils.auth_utils"] = auth_utils_mock
+sys.modules["gateway.authentication.auth"] = auth_utils_mock
 
 oauth_service_mock = MagicMock()
 oauth_service_mock.parse_state = MagicMock(
     return_value={"provider": "github", "token": "tok", "link_user_id": ""}
 )
 oauth_service_mock.generate_pending_oauth_token = MagicMock(return_value="pending.jwt")
-oauth_service_mock.find_supabase_user_id_by_email = MagicMock(return_value=None)
+oauth_service_mock.find_account_user_id_by_email = MagicMock(return_value=None)
 oauth_service_mock.complete_pending_oauth_account = AsyncMock()
 oauth_service_mock.get_oauth_config = MagicMock(
     return_value={
@@ -114,7 +133,11 @@ oauth_service_mock.get_oauth_config = MagicMock(
     }
 )
 sys.modules["services"] = MagicMock()
-sys.modules["services.oauth_service"] = oauth_service_mock
+auth_utils_mock.parse_state = oauth_service_mock.parse_state
+sys.modules["management.services.permission.identity.oauth"] = oauth_service_mock
+# management.api.identity.oauth imports management.services.monitor.audit; the blanket `services` MagicMock
+# above is not a package, so the audit submodule must be pre-registered.
+sys.modules["management.services.monitor.audit"] = MagicMock()
 
 nexent_mock = MagicMock()
 sys.modules["nexent"] = nexent_mock
@@ -133,15 +156,15 @@ patch(
 patch(
     "nexent.storage.minio_config.MinIOStorageConfig.validate", lambda self: None
 ).start()
-patch("database.client.MinioClient", return_value=minio_mock).start()
-patch("database.client.MinioClient", return_value=minio_mock).start()
-patch("database.client.minio_client", minio_mock).start()
+patch("management.db.client.MinioClient", return_value=minio_mock).start()
+patch("management.db.client.MinioClient", return_value=minio_mock).start()
+patch("management.db.client.minio_client", minio_mock).start()
 
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 from http import HTTPStatus
 
-from apps.oauth_app import router
+from management.api.identity.oauth import router
 
 app = FastAPI()
 app.include_router(router)
@@ -245,7 +268,7 @@ class TestLink(unittest.TestCase):
 
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
 
-    @patch("apps.oauth_app.get_current_user_id")
+    @patch("management.api.identity.oauth.get_current_user_id")
     def test_returns_401_for_invalid_token(self, mock_get_user):
         mock_get_user.side_effect = _UnauthorizedError("Invalid token")
 
@@ -284,7 +307,7 @@ class TestLink(unittest.TestCase):
 
 class TestCallback(unittest.TestCase):
     def setUp(self):
-        oauth_service_mock.find_supabase_user_id_by_email.return_value = None
+        oauth_service_mock.find_account_user_id_by_email.return_value = None
         oauth_service_mock.ensure_user_tenant_exists.side_effect = None
 
     def test_returns_error_when_provider_error(self):
@@ -331,7 +354,7 @@ class TestCallback(unittest.TestCase):
 
         auth_utils_mock.generate_session_jwt.return_value = "eyJ.mock.jwt.token"
 
-        with patch("apps.oauth_app.JWT_EXPIRY_SECONDS", 5432):
+        with patch("management.api.identity.oauth.JWT_EXPIRY_SECONDS", 5432):
             response = client.get("/user/oauth/callback?provider=github&code=valid_code")
 
         if response.status_code != HTTPStatus.OK:
@@ -369,13 +392,14 @@ class TestCallback(unittest.TestCase):
 
         response = client.get("/user/oauth/callback?provider=github&code=limit_code")
 
-        self.assertEqual(response.status_code, HTTPStatus.BAD_REQUEST)
+        self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
         data = response.json()
-        self.assertEqual(data["data"]["oauth_error"], "tenant_resource_limit_exceeded")
+        self.assertEqual(data["code"], "120104")
         self.assertIn("maximum 10000", data["message"])
 
     def test_new_unbound_oauth_requires_account_completion(self):
         oauth_service_mock.reset_mock()
+        oauth_service_mock.find_account_user_id_by_email.return_value = None
         oauth_service_mock.parse_state.return_value = {"provider": "github", "token": "tok", "link_user_id": ""}
         database_oauth_mock.get_oauth_account_by_provider.return_value = None
         database_oauth_mock.get_soft_deleted_oauth_account.return_value = None
@@ -412,8 +436,7 @@ class TestCallback(unittest.TestCase):
         self.assertTrue(data["data"]["requires_account_completion"])
         self.assertEqual(data["data"]["pending_token"], "pending.jwt")
         self.assertEqual(data["data"]["provider_email"], "newuser@github.com")
-        oauth_service_mock.find_supabase_user_id_by_email.assert_called_once_with(
-            mock_admin_client,
+        oauth_service_mock.find_account_user_id_by_email.assert_called_once_with(
             "newuser@github.com",
         )
         mock_admin_client.auth.admin.create_user.assert_not_called()
@@ -433,7 +456,7 @@ class TestCallback(unittest.TestCase):
             "email": "existing@example.com",
             "username": "existing-user",
         }
-        oauth_service_mock.find_supabase_user_id_by_email.return_value = "existing-user-id"
+        oauth_service_mock.find_account_user_id_by_email.return_value = "existing-user-id"
         oauth_service_mock.ensure_user_tenant_exists.return_value = {
             "user_id": "existing-user-id",
             "tenant_id": "t-1",
@@ -459,8 +482,7 @@ class TestCallback(unittest.TestCase):
         self.assertEqual(data["data"]["session"]["access_token"], "eyJ.existing.jwt")
 
         oauth_service_mock.generate_pending_oauth_token.assert_not_called()
-        oauth_service_mock.find_supabase_user_id_by_email.assert_called_once_with(
-            mock_admin_client,
+        oauth_service_mock.find_account_user_id_by_email.assert_called_once_with(
             "existing@example.com",
         )
         oauth_service_mock.create_or_update_oauth_account.assert_called_once_with(
@@ -659,7 +681,7 @@ class TestGetAccounts(unittest.TestCase):
 
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
 
-    @patch("apps.oauth_app.get_current_user_id")
+    @patch("management.api.identity.oauth.get_current_user_id")
     def test_returns_401_for_invalid_token(self, mock_get_user):
         mock_get_user.side_effect = _UnauthorizedError("Invalid token")
 
@@ -696,7 +718,7 @@ class TestDeleteAccount(unittest.TestCase):
 
         self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
 
-    @patch("apps.oauth_app.get_current_user_id")
+    @patch("management.api.identity.oauth.get_current_user_id")
     def test_returns_400_when_account_not_found(self, mock_get_user):
         mock_get_user.return_value = ("user-1", "t-1")
         oauth_service_mock.unlink_account.side_effect = _OAuthLinkError(
@@ -715,7 +737,7 @@ class TestDeleteAccount(unittest.TestCase):
 
 class TestCallbackPagination(unittest.TestCase):
     def setUp(self):
-        oauth_service_mock.find_supabase_user_id_by_email.return_value = None
+        oauth_service_mock.find_account_user_id_by_email.return_value = None
 
     def test_finds_user_on_second_page(self):
         oauth_service_mock.reset_mock()
@@ -740,7 +762,7 @@ class TestCallbackPagination(unittest.TestCase):
             "provider_user_id": "12345",
             "user_id": "page2-uuid",
         }
-        oauth_service_mock.find_supabase_user_id_by_email.return_value = "page2-uuid"
+        oauth_service_mock.find_account_user_id_by_email.return_value = "page2-uuid"
 
         mock_admin_client = MagicMock()
         auth_utils_mock.get_supabase_admin_client.return_value = mock_admin_client
@@ -751,8 +773,7 @@ class TestCallbackPagination(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["data"]["user"]["id"], "page2-uuid")
         self.assertEqual(data["data"]["user"]["email"], "page2user@github.com")
-        oauth_service_mock.find_supabase_user_id_by_email.assert_called_once_with(
-            mock_admin_client,
+        oauth_service_mock.find_account_user_id_by_email.assert_called_once_with(
             "page2user@github.com",
         )
 
@@ -760,6 +781,7 @@ class TestCallbackPagination(unittest.TestCase):
 
     def test_stops_pagination_when_less_than_100_users(self):
         oauth_service_mock.reset_mock()
+        oauth_service_mock.find_account_user_id_by_email.return_value = None
         database_oauth_mock.reset_mock()
         auth_utils_mock.reset_mock()
         auth_utils_mock.get_current_user_id.return_value = ("user-1", "t-1")
@@ -799,8 +821,7 @@ class TestCallbackPagination(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.OK)
         data = response.json()
         self.assertTrue(data["data"]["requires_account_completion"])
-        oauth_service_mock.find_supabase_user_id_by_email.assert_called_once_with(
-            mock_admin_client,
+        oauth_service_mock.find_account_user_id_by_email.assert_called_once_with(
             "newuser@github.com",
         )
         mock_admin_client.auth.admin.create_user.assert_not_called()
@@ -852,12 +873,24 @@ class TestCallbackEmailFallback(unittest.TestCase):
         self.assertTrue(data["data"]["requires_account_completion"])
         self.assertTrue(data["data"]["email_required"])
         self.assertEqual(data["data"]["provider_email"], "")
-        oauth_service_mock.find_supabase_user_id_by_email.assert_not_called()
+        oauth_service_mock.find_account_user_id_by_email.assert_not_called()
 
         auth_utils_mock.get_supabase_admin_client.return_value = MagicMock()
 
 
 class TestCompleteOAuth(unittest.TestCase):
+    def setUp(self):
+        self.pending_identity = {"provider": "github", "provider_user_id": "provider-user", "provider_email": "", "provider_username": "octocat"}
+
+        def verify(token):
+            if token != "pending.jwt":
+                raise _OAuthLinkError("expired")
+            return self.pending_identity
+
+        parser = patch("management.api.identity.oauth.parse_pending_oauth_token", side_effect=verify)
+        parser.start()
+        self.addCleanup(parser.stop)
+
     def test_pending_returns_provider_info(self):
         pending_info = {
             "provider": "github",
@@ -866,7 +899,7 @@ class TestCompleteOAuth(unittest.TestCase):
             "email_required": True,
         }
 
-        with patch("apps.oauth_app.get_pending_oauth_info", return_value=pending_info):
+        with patch("management.api.identity.oauth.get_pending_oauth_info", return_value=pending_info):
             response = client.get(
                 "/user/oauth/pending",
                 headers={"X-OAuth-Pending-Token": "pending.jwt"},
@@ -877,7 +910,7 @@ class TestCompleteOAuth(unittest.TestCase):
 
     def test_pending_returns_401_when_missing_or_invalid(self):
         with patch(
-            "apps.oauth_app.get_pending_oauth_info",
+            "management.api.identity.oauth.get_pending_oauth_info",
             side_effect=_OAuthLinkError("expired"),
         ):
             response = client.get("/user/oauth/pending")
@@ -897,7 +930,7 @@ class TestCompleteOAuth(unittest.TestCase):
             }
         )
 
-        with patch("apps.oauth_app.complete_pending_oauth_account", new=complete_mock):
+        with patch("management.api.identity.oauth.complete_pending_oauth_account", new=complete_mock):
             response = client.post(
                 "/user/oauth/complete",
                 headers={"X-OAuth-Pending-Token": "pending.jwt"},
@@ -913,7 +946,7 @@ class TestCompleteOAuth(unittest.TestCase):
         self.assertEqual(data["data"]["user"]["id"], "new-user")
         self.assertEqual(data["data"]["session"]["expires_in_seconds"], 3600)
         complete_mock.assert_awaited_once_with(
-            pending_token="pending.jwt",
+            pending_identity=self.pending_identity,
             email="new@example.com",
             password="secret1",
             invite_code="ABC123",
@@ -926,7 +959,7 @@ class TestCompleteOAuth(unittest.TestCase):
             )
         )
 
-        with patch("apps.oauth_app.complete_pending_oauth_account", new=complete_mock):
+        with patch("management.api.identity.oauth.complete_pending_oauth_account", new=complete_mock):
             response = client.post(
                 "/user/oauth/complete",
                 headers={"X-OAuth-Pending-Token": "pending.jwt"},
@@ -938,6 +971,31 @@ class TestCompleteOAuth(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, HTTPStatus.CONFLICT)
+
+    def test_complete_returns_429_for_tenant_resource_limit(self):
+        complete_mock = AsyncMock(
+            side_effect=_TenantResourceLimitError(
+                "Tenant user limit reached: maximum 10000 users per tenant",
+                resource="users",
+                scope="tenant",
+                limit=10000,
+                current_count=10000,
+            )
+        )
+
+        with patch("management.api.identity.oauth.complete_pending_oauth_account", new=complete_mock):
+            response = client.post(
+                "/user/oauth/complete",
+                headers={"X-OAuth-Pending-Token": "pending.jwt"},
+                json={
+                    "email": "limit@example.com",
+                    "password": "secret1",
+                    "invite_code": "ABC123",
+                },
+            )
+
+        self.assertEqual(response.status_code, HTTPStatus.TOO_MANY_REQUESTS)
+        self.assertEqual(response.json()["details"]["limit"], 10000)
 
 
 class TestGetAccounts(unittest.TestCase):

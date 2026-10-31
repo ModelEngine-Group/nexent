@@ -1,77 +1,112 @@
-"""Business logic for the ephemeral NL2Agent runtime."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Business logic for request-scoped NL2Agent runs."""
 
 import ast
 import asyncio
 import json
+from contracts.authentication import AuthenticatedIdentity
 import logging
 import re
 import threading
 import unicodedata
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
+from nexent.core.agent_names import validate_agent_name
 from nexent.core.agents.context import (
     ContextItemInput,
     ContextItemType,
     ContextManagerConfig,
 )
-from nexent.core.agents.run_agent import agent_run
+from runtime.adapters.nexent.runner import agent_run
+from nexent.core.concurrency import run_blocking
 from nexent.core.utils.observer import MessageObserver, ProcessType
 from rapidfuzz import fuzz
 
-from agents.create_agent_info import (
-    _resolve_input_budget,
-    _resolve_safe_input_budget,
-    create_model_config_list,
-    join_minio_file_description_to_query,
-)
-from agents.nl2agent_agent import create_nl2agent_agent_config
-from consts.const import LOCAL_MCP_SERVER, MODEL_CONFIG_MAPPING
-from consts.model import HistoryItem, NL2AgentRunRequest, ToolSourceEnum
-from database.agent_db import update_agent_draft_fields
-from database.skill_db import query_enabled_skill_instances
-from database.tool_db import query_all_enabled_tool_instances, query_all_tools
-from services.agent_draft_permission_service import (
-    AgentDraftEditError,
-    require_agent_draft_edit,
-)
+from management.services.model.run_budget import _resolve_input_budget
+from management.services.model.run_budget import _resolve_context_budget
+from management.services.model.run_bindings import create_model_config_list
+from management.services.agent.preparation.inputs import join_minio_file_description_to_query
+from management.services.agent.creation import create_nl2agent_agent_config
+from management.services.agent.system import system_agent_provider
+from management.db.agent.repository import search_agent_info_by_agent_id
+from contracts.constants.environment import TOKEN, ENABLE_AIDP_KNOWLEDGE, LOCAL_MCP_SERVER, MCP_REQUEST_TIMEOUT_SECONDS
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
+from management.services.mcp.addressing import get_tenant_local_mcp_server
+from contracts.conversation import HistoryItem
+from contracts.agent import NL2AgentRunRequest
+from contracts.tool import ToolSourceEnum
+from management.db.agent.repository import query_all_agent_info_by_tenant_id, update_agent_draft_fields
+from management.db.skill.repository import query_enabled_skill_instances
+from management.db.tool.repository import query_all_enabled_tool_instances, query_all_tools
+from contracts.errors.exceptions import AgentDraftEditError
+from management.services.agent.authorization import require_agent_draft_edit
+from infrastructure.concurrency import runtime_thread_manager
+from management.services.model.run_controls import resolve_creator_model, preflight_turn_controls
 from tool_collection.mcp.nl2agent_mcp_tools import (
     AgentDraftFields,
+    INSTALLED_RESOURCE_SOURCES,
     InstalledMcpToolRecommendation,
+    KnowledgeBaseRecommendation,
     NL2AGENT_AGENT_ID_HEADER,
+    NL2AGENT_POLICY_CLARIFICATION_HEADER,
     NL2A_MCP_LEGACY_TOOL_NAMES,
     NL2A_MCP_TOOL_NAMES,
     RecommendResourcesOutput,
     RecommendedResource,
     ResourceCandidate,
+    ResourceInstallationOption,
     ResourceRequirement,
     ResourceSearchOutput,
     SEARCH_UNINSTALLED_RESOURCES_NAME,
+    UNINSTALLED_RESOURCE_SOURCES,
 )
-from utils.auth_utils import get_current_user_id
-from utils.config_utils import tenant_config_manager
-from utils.context_utils import build_authorized_context_input
-from utils.http_client_utils import create_httpx_client
+from management.services.configuration.tenant.settings import tenant_config_manager
+from management.services.agent.context import (
+    build_authorized_context_input,
+)
+from infrastructure.http.client import create_httpx_client
+
+from management.services.knowledge_base.recommendation import (
+    MANAGED_KNOWLEDGE_NAMES, load_visible_knowledge, merge_selection, rank_knowledge, selection_values,
+)
 
 logger = logging.getLogger(__name__)
 
 MINIMUM_RECOMMENDATION_SCORE = 0.45
 MAX_RECOMMENDATIONS = 5
 MAX_BINDING_CANDIDATES = 12
+
+_LOCAL_KNOWLEDGE_TOOL_NAMES = frozenset({
+    "knowledge_base_search",
+})
+_AIDP_KNOWLEDGE_TOOL_NAME = "aidp_search"
+
+
+def _is_nl2agent_recommendable_tool(name: str) -> bool:
+    """Return whether a deployment permits NL2Agent to recommend a tool."""
+    if ENABLE_AIDP_KNOWLEDGE:
+        return name not in _LOCAL_KNOWLEDGE_TOOL_NAMES
+    return name != _AIDP_KNOWLEDGE_TOOL_NAME
+
+
 STRONG_RESOURCE_SCORE = 0.65
 MINIMUM_RESOURCE_SCORE = 0.50
+UNINSTALLED_SOURCE_PAGE_SIZE = 100
+MAX_INTERNAL_SOURCE_ITEMS = 300
 AGENT_DRAFT_FIELD_ORDER = (
     "name",
     "display_name",
     "description",
-    "duty_prompt",
-    "constraint_prompt",
-    "few_shots_prompt",
+    "enable_protocol_repair_retry",
+    "prompt",
     "greeting_message",
     "example_questions",
 )
+_WORKBENCH_DRAFT_NAME = re.compile(r"Workbench Draft [a-z0-9]+-[a-z0-9]{6}\Z")
 
 
 class _Nl2AgentBoundaryObserver(MessageObserver):
@@ -94,7 +129,7 @@ class _Nl2AgentBoundaryObserver(MessageObserver):
     def add_message(self, agent_name, process_type, content, **kwargs):
         if self.boundary_reached and (
             (process_type == ProcessType.FINAL_ANSWER and content == self._STOP_FINAL_ANSWER)
-            or (process_type == ProcessType.ERROR and content == self._STOP_ERROR)
+            or (process_type == ProcessType.WARNING and content == self._STOP_ERROR)
         ):
             return
 
@@ -141,7 +176,7 @@ def _update_agent_draft_from_fields(
     user_id: str,
 ) -> dict[str, Any]:
     try:
-        require_agent_draft_edit(
+        draft = require_agent_draft_edit(
             agent_id=agent_id,
             tenant_id=tenant_id,
             user_id=user_id,
@@ -150,6 +185,23 @@ def _update_agent_draft_from_fields(
         raise Nl2AgentDraftSaveError(exc.code) from exc
 
     patch = fields.model_dump(mode="python", exclude_unset=True)
+    generated_name = patch.get("name")
+    if "display_name" in patch and not (
+        generated_name is not None
+        and not str(draft.get("name") or "").strip()
+        and not str(draft.get("description") or "").strip()
+        and _WORKBENCH_DRAFT_NAME.fullmatch(str(draft.get("display_name") or ""))
+    ):
+        raise Nl2AgentDraftSaveError("agent_display_name_immutable")
+    if generated_name is not None:
+        if str(draft.get("name") or "").strip():
+            raise Nl2AgentDraftSaveError("agent_name_already_set")
+        if any(
+            agent.get("agent_id") != agent_id
+            and agent.get("name") == generated_name
+            for agent in query_all_agent_info_by_tenant_id(tenant_id)
+        ):
+            raise Nl2AgentDraftSaveError("agent_name_duplicate", retryable=True)
     try:
         rowcount = update_agent_draft_fields(
             agent_id=agent_id,
@@ -418,8 +470,8 @@ async def _load_installed_resource_catalog(
     tenant_id: str,
     user_id: str,
 ) -> list[dict[str, Any]]:
-    from services.skill_service import SkillService
-    from services.tool_configuration_service import list_all_tools
+    from management.services.skill.service import SkillService
+    from management.services.tool.configuration import list_all_tools
 
     tools = await list_all_tools(tenant_id=tenant_id)
     skills = SkillService(tenant_id=tenant_id).list_visible_skills(
@@ -438,8 +490,8 @@ async def _load_installed_resource_catalog(
         if (
             source not in {ToolSourceEnum.LOCAL.value, ToolSourceEnum.MCP.value}
             or tool.get("is_available") is not True
-            or tool.get("is_user_selectable") is False
             or name in internal_names
+            or not _is_nl2agent_recommendable_tool(name)
         ):
             continue
         tool_id = tool.get("tool_id")
@@ -464,7 +516,10 @@ async def _load_installed_resource_catalog(
                 "inputs": inputs,
             }),
             "config": _normalize_tool_config(tool.get("params")),
+            "form_kind": "TOOL_CONFIG",
             "inputs": inputs,
+            "installed": True,
+            "quality": 1.0,
         })
 
     for skill in skills:
@@ -489,7 +544,10 @@ async def _load_installed_resource_catalog(
                 "tool_ids": skill.get("tool_ids"),
             }),
             "config": _normalize_skill_config(skill),
+            "form_kind": "SKILL_CONFIG",
             "inputs": {},
+            "installed": True,
+            "quality": 1.0,
         })
     return catalog
 
@@ -532,36 +590,51 @@ def _score_resource_requirement(
         ),
         default=0,
     )
+    installed_bonus = 0.03 if resource.get("installed") else 0.0
+    quality_bonus = 0.02 * max(
+        0.0, min(1.0, float(resource.get("quality") or 0.0))
+    )
     if requirement.resource_name_hint:
-        score = 0.65 * capability_score + 0.30 * name_score + 0.05
+        score = (
+            0.65 * capability_score
+            + 0.30 * name_score
+            + installed_bonus
+            + quality_bonus
+        )
     else:
-        score = 0.82 * capability_score + 0.13 * name_score + 0.05
+        score = (
+            0.82 * capability_score
+            + 0.13 * name_score
+            + installed_bonus
+            + quality_bonus
+        )
+    # Explicit resource hints retain the existing name-matching precedence.
+    if not requirement.resource_name_hint and MANAGED_KNOWLEDGE_NAMES.intersection(resource["names"]):
+        score += 0.02
     return min(1.0, score)
 
 
-async def search_installed_resources_impl(
+def _rank_resource_catalog(
     *,
     requirements: list[ResourceRequirement],
-    tenant_id: str,
-    user_id: str,
+    catalog: list[dict[str, Any]],
 ) -> ResourceSearchOutput:
-    """Search and rank installed resources visible to the current user."""
+    """Rank one normalized catalog and return a compact coverage set."""
 
-    catalog = await _load_installed_resource_catalog(
-        tenant_id=tenant_id,
-        user_id=user_id,
-    )
     scored: list[dict[str, Any]] = []
     strong_requirement_ids: set[str] = set()
     for resource in catalog:
         relationships = {
-            requirement.requirement_id: _score_resource_requirement(requirement, resource)
+            requirement.requirement_id: _score_resource_requirement(
+                requirement, resource
+            )
             for requirement in requirements
         }
         matched_ids = [
             requirement.requirement_id
             for requirement in requirements
-            if relationships[requirement.requirement_id] >= MINIMUM_RESOURCE_SCORE
+            if relationships[requirement.requirement_id]
+            >= MINIMUM_RESOURCE_SCORE
         ]
         if not matched_ids:
             continue
@@ -584,6 +657,10 @@ async def search_installed_resources_impl(
             description=resource["description"],
             requirement_ids=matched_ids,
             score=round(candidate_score, 4),
+            knowledge_queries=list(dict.fromkeys(
+                text for requirement in requirements if requirement.requirement_id in matched_ids
+                for text in [requirement.query, requirement.resource_name_hint, *requirement.search_terms] if text
+            ))[:32] if MANAGED_KNOWLEDGE_NAMES.intersection(resource.get("names", [])) else [],
         )
         scored.append({
             "candidate": candidate,
@@ -613,7 +690,8 @@ async def search_installed_resources_impl(
             item
             for item in scored
             if item["candidate"].candidate_ref not in selected_refs
-            and item["relationships"][requirement.requirement_id] >= MINIMUM_RESOURCE_SCORE
+            and item["relationships"][requirement.requirement_id]
+            >= MINIMUM_RESOURCE_SCORE
         ]
         alternatives.sort(key=lambda item: (
             -item["relationships"][requirement.requirement_id],
@@ -632,13 +710,392 @@ async def search_installed_resources_impl(
         if requirement.requirement_id not in strong_requirement_ids
     ]
     return ResourceSearchOutput(
-        candidates=[item["candidate"] for item in selected[:MAX_BINDING_CANDIDATES]],
+        candidates=[
+            item["candidate"]
+            for item in selected[:MAX_BINDING_CANDIDATES]
+        ],
         uncovered_requirement_ids=uncovered,
     )
 
 
+async def search_installed_resources_impl(
+    *,
+    requirements: list[ResourceRequirement],
+    tenant_id: str,
+    user_id: str,
+) -> ResourceSearchOutput:
+    """Search and rank installed resources visible to the current user."""
+
+    catalog = await _load_installed_resource_catalog(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    return _rank_resource_catalog(
+        requirements=requirements,
+        catalog=catalog,
+    )
+
+
+def _redact_installation_snapshot(value: Any, *, parent_key: str = "") -> Any:
+    """Remove persisted credentials while preserving a serializable form shape."""
+
+    normalized_parent = parent_key.casefold().replace("_", "")
+    if isinstance(value, dict):
+        secret_object = value.get("isSecret") is True
+        is_env_context = normalized_parent in {
+            "env",
+            "environment",
+            "environmentvariables",
+        }
+        is_header_context = normalized_parent in {
+            "headers",
+            "customheaders",
+        }
+        is_field_descriptor = any(
+            key in value
+            for key in (
+                "name",
+                "key",
+                "value",
+                "default",
+                "isRequired",
+                "isSecret",
+            )
+        )
+        redacted: dict[str, Any] = {}
+        for key, item in value.items():
+            normalized_key = str(key).casefold().replace("_", "")
+            is_secret_key = (
+                normalized_key != "issecret"
+                and any(
+                    marker in normalized_key
+                    for marker in ("password", "secret", "token", "apikey")
+                )
+            ) or normalized_key == "authorization"
+            if (
+                (is_env_context or is_header_context)
+                and not is_field_descriptor
+                and not isinstance(item, (dict, list))
+            ):
+                redacted[str(key)] = ""
+            elif (
+                (
+                    is_secret_key
+                    or is_env_context
+                    or is_header_context
+                    or secret_object
+                )
+                and normalized_key
+                in {"value", "default", "authorization"}
+            ):
+                redacted[str(key)] = ""
+            elif is_secret_key and not isinstance(item, (dict, list)):
+                redacted[str(key)] = ""
+            else:
+                redacted[str(key)] = _redact_installation_snapshot(
+                    item, parent_key=str(key)
+                )
+        return redacted
+    if isinstance(value, list):
+        return [
+            _redact_installation_snapshot(item, parent_key=parent_key)
+            for item in value
+        ]
+    if normalized_parent in {"env", "environment", "environmentvariables"}:
+        return ""
+    return value
+
+
+async def _load_internal_uninstalled_resource_catalog(
+    *,
+    tenant_id: str,
+    user_id: str,
+) -> list[dict[str, Any]]:
+    from management.services.repository.mcp.service import list_community_mcp_services
+    from services.skill_repository_service import (
+        list_skill_repository_listings_impl,
+    )
+    from management.services.skill.transfer import get_official_skills_with_status
+
+    catalog: list[dict[str, Any]] = []
+    for skill in get_official_skills_with_status(tenant_id=tenant_id):
+        name = str(skill.get("name") or "").strip()
+        if skill.get("status") != "installable" or not name:
+            continue
+        option = ResourceInstallationOption(
+            option_id="official",
+            label="Install",
+            form_kind="SKILL_CONFIG",
+            config=[],
+        )
+        catalog.append({
+            "candidate_ref": f"nexent_official_skill:{quote(name, safe='')}",
+            "resource_type": "skill",
+            "source": "NEXENT_OFFICIAL_SKILL",
+            "name": name,
+            "description": _collapse_whitespace(
+                str(skill.get("description") or "")
+            ),
+            "names": [name],
+            "labels": [],
+            "descriptions": [str(skill.get("description") or "")],
+            "interfaces": [],
+            "installed": False,
+            "quality": 1.0,
+            "form_kind": option.form_kind,
+            "config": option.config,
+            "installation_options": [option],
+            "default_option_id": option.option_id,
+        })
+
+    repository_items: list[dict[str, Any]] = []
+    page = 1
+    while len(repository_items) < MAX_INTERNAL_SOURCE_ITEMS:
+        result = list_skill_repository_listings_impl(
+            tenant_id,
+            user_id=user_id,
+            status="shared",
+            page=page,
+            page_size=UNINSTALLED_SOURCE_PAGE_SIZE,
+        )
+        items = result.get("items") if isinstance(result, dict) else []
+        if not isinstance(items, list) or not items:
+            break
+        repository_items.extend(
+            item for item in items if isinstance(item, dict)
+        )
+        pagination = result.get("pagination") or {}
+        if page >= int(pagination.get("total_pages") or page):
+            break
+        page += 1
+    for item in repository_items[:MAX_INTERNAL_SOURCE_ITEMS]:
+        repository_id = item.get("skill_repository_id") or item.get("id")
+        name = str(item.get("name") or "").strip()
+        if not isinstance(repository_id, int) or repository_id <= 0 or not name:
+            continue
+        config = [{
+            "name": "target_name",
+            "type": "string",
+            "required": False,
+            "value": "",
+            "description": "Optional installed Skill name",
+        }]
+        option = ResourceInstallationOption(
+            option_id="repository",
+            label="Install a copy",
+            form_kind="SKILL_CONFIG",
+            config=config,
+        )
+        catalog.append({
+            "candidate_ref": f"tenant_skill_repository:{repository_id}",
+            "resource_type": "skill",
+            "source": "TENANT_SKILL_REPOSITORY",
+            "name": name,
+            "description": _collapse_whitespace(
+                str(item.get("description") or "")
+            ),
+            "names": [name],
+            "labels": _normalize_labels(item.get("tags")),
+            "descriptions": [
+                str(item.get("description") or ""),
+                str(item.get("content") or "")[:4000],
+            ],
+            "interfaces": [],
+            "installed": False,
+            "quality": 1.0,
+            "form_kind": option.form_kind,
+            "config": option.config,
+            "installation_options": [option],
+            "default_option_id": option.option_id,
+        })
+
+    community_items: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while len(community_items) < MAX_INTERNAL_SOURCE_ITEMS:
+        result = await list_community_mcp_services(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            cursor=cursor,
+            limit=UNINSTALLED_SOURCE_PAGE_SIZE,
+        )
+        items = result.get("items") if isinstance(result, dict) else []
+        if not isinstance(items, list) or not items:
+            break
+        community_items.extend(item for item in items if isinstance(item, dict))
+        next_cursor = result.get("nextCursor")
+        if not isinstance(next_cursor, str) or not next_cursor:
+            break
+        cursor = next_cursor
+    for item in community_items[:MAX_INTERNAL_SOURCE_ITEMS]:
+        market_id = item.get("marketId") or item.get("communityId")
+        name = str(item.get("name") or "").strip()
+        transport_type = str(item.get("transportType") or "").casefold()
+        if not isinstance(market_id, int) or market_id <= 0 or not name:
+            continue
+        if transport_type == "container":
+            if not isinstance(item.get("configJson"), dict):
+                continue
+            form_kind = "MCP_CONTAINER"
+        else:
+            server_url = str(item.get("serverUrl") or "").strip()
+            if not server_url.lower().startswith(("http://", "https://")):
+                continue
+            form_kind = "MCP_REMOTE"
+        draft = {
+            "name": name,
+            "description": str(item.get("description") or ""),
+            "transportType": transport_type or "url",
+            "serverUrl": str(item.get("serverUrl") or ""),
+            "authorizationToken": "",
+            "customHeaders": "",
+            "containerConfigJson": json.dumps(
+                _redact_installation_snapshot(item.get("configJson") or {}),
+                ensure_ascii=False,
+                indent=2,
+            ),
+            "containerPort": item.get("containerPort"),
+            "tags": _normalize_labels(item.get("tags")),
+            "version": item.get("version"),
+            "registryJson": _redact_installation_snapshot(
+                item.get("registryJson") or {}
+            ),
+            "marketId": market_id,
+        }
+        option = ResourceInstallationOption(
+            option_id="repository",
+            label="Install",
+            form_kind=form_kind,
+            config=draft,
+        )
+        catalog.append({
+            "candidate_ref": f"tenant_mcp_repository:{market_id}",
+            "resource_type": "mcp_server",
+            "source": "TENANT_MCP_REPOSITORY",
+            "name": name,
+            "description": _collapse_whitespace(
+                str(item.get("description") or "")
+            ),
+            "names": [name],
+            "labels": _normalize_labels(item.get("tags")),
+            "descriptions": [
+                str(item.get("description") or ""),
+                str(item.get("content") or "")[:4000],
+            ],
+            "interfaces": _flatten_resource_text({
+                "server": item.get("serverUrl"),
+                "config": item.get("configJson"),
+                "registry": item.get("registryJson"),
+            }),
+            "installed": False,
+            "quality": 1.0,
+            "form_kind": option.form_kind,
+            "config": option.config,
+            "installation_options": [option],
+            "default_option_id": option.option_id,
+        })
+    return catalog
+
+
+async def search_uninstalled_resources_impl(
+    *,
+    requirements: list[ResourceRequirement],
+    exclude_refs: list[str],
+    tenant_id: str,
+    user_id: str,
+) -> ResourceSearchOutput:
+    """Search and rank tenant-visible installable resources."""
+
+    catalog = await _load_internal_uninstalled_resource_catalog(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    excluded = set(exclude_refs)
+    return _rank_resource_catalog(
+        requirements=requirements,
+        catalog=[
+            item for item in catalog if item["candidate_ref"] not in excluded
+        ],
+    )
+
+
+def _verified_resource_candidate(
+    actual: dict[str, Any],
+    supplied: ResourceCandidate,
+) -> ResourceCandidate:
+    if (
+        supplied.resource_type != actual["resource_type"]
+        or supplied.source != actual["source"]
+    ):
+        raise Nl2AgentResourceError("invalid_candidates")
+    return ResourceCandidate(
+        candidate_ref=actual["candidate_ref"],
+        resource_type=actual["resource_type"],
+        source=actual["source"],
+        name=actual["name"],
+        description=actual["description"],
+        requirement_ids=supplied.requirement_ids,
+        score=supplied.score,
+        knowledge_queries=supplied.knowledge_queries,
+    )
+
+
+def _recommended_resource(
+    *,
+    actual: dict[str, Any],
+    supplied: ResourceCandidate,
+    recommended_refs: set[str],
+    is_bound: bool = False,
+) -> RecommendedResource:
+    return RecommendedResource(
+        candidate=_verified_resource_candidate(actual, supplied),
+        recommendation=(
+            "recommended"
+            if supplied.candidate_ref in recommended_refs
+            else "optional"
+        ),
+        is_bound=is_bound,
+        form_kind=actual.get("form_kind") or (
+            "TOOL_CONFIG"
+            if actual["resource_type"] == "tool"
+            else "SKILL_CONFIG"
+        ),
+        config=actual["config"],
+        installation_options=actual.get("installation_options") or [],
+        default_option_id=actual.get("default_option_id"),
+    )
+
+
+async def recommend_uninstalled_resources_impl(
+    *,
+    candidates: list[ResourceCandidate],
+    recommended_refs: list[str],
+    tenant_id: str,
+    user_id: str,
+) -> RecommendResourcesOutput:
+    """Resolve installable candidates against their current source records."""
+
+    internal_catalog = await _load_internal_uninstalled_resource_catalog(
+        tenant_id=tenant_id,
+        user_id=user_id,
+    )
+    by_ref = {item["candidate_ref"]: item for item in internal_catalog}
+    recommended = set(recommended_refs)
+    resources: list[RecommendedResource] = []
+    for supplied in candidates:
+        actual = by_ref.get(supplied.candidate_ref)
+        if actual is None:
+            raise Nl2AgentResourceError("resource_not_visible")
+        resources.append(_recommended_resource(
+            actual=actual,
+            supplied=supplied,
+            recommended_refs=recommended,
+        ))
+    return RecommendResourcesOutput(resources=resources)
+
+
 async def recommend_installed_resources_impl(
     *,
+    agent_id: int,
     candidates: list[ResourceCandidate],
     recommended_refs: list[str],
     tenant_id: str,
@@ -651,41 +1108,144 @@ async def recommend_installed_resources_impl(
         user_id=user_id,
     )
     by_ref = {item["candidate_ref"]: item for item in catalog}
+    bound_instances = query_all_enabled_tool_instances(
+        agent_id=agent_id, tenant_id=tenant_id, version_no=0
+    )
+    bound_tool_refs = {
+        f"tool:{instance['tool_id']}"
+        for instance in bound_instances
+        if isinstance(instance.get("tool_id"), int)
+    }
+    knowledge_catalogs: dict[str, list[dict]] = {}
     recommended = set(recommended_refs)
     resources: list[RecommendedResource] = []
     for supplied in candidates:
         actual = by_ref.get(supplied.candidate_ref)
         if actual is None:
             raise Nl2AgentResourceError("resource_not_visible")
-        if (
-            supplied.resource_type != actual["resource_type"]
-            or supplied.source != actual["source"]
-        ):
-            raise Nl2AgentResourceError("invalid_candidates")
-        verified_candidate = ResourceCandidate(
-            candidate_ref=actual["candidate_ref"],
-            resource_type=actual["resource_type"],
-            source=actual["source"],
-            name=actual["name"],
-            description=actual["description"],
-            requirement_ids=supplied.requirement_ids,
-            score=supplied.score,
+        resource = _recommended_resource(
+            actual=actual,
+            supplied=supplied,
+            recommended_refs=recommended,
+            is_bound=supplied.candidate_ref in bound_tool_refs,
         )
-        resources.append(RecommendedResource(
-            candidate=verified_candidate,
-            recommendation=(
-                "recommended"
-                if supplied.candidate_ref in recommended
-                else "optional"
+        tool_name = next(
+            (
+                name
+                for name in actual.get("names", [actual["name"]])
+                if name in MANAGED_KNOWLEDGE_NAMES
             ),
-            form_kind=(
-                "TOOL_CONFIG"
-                if actual["resource_type"] == "tool"
-                else "SKILL_CONFIG"
-            ),
-            config=actual["config"],
-        ))
+            None,
+        )
+        if actual["resource_type"] == "tool" and tool_name:
+            try:
+                if tool_name not in knowledge_catalogs:
+                    knowledge_catalogs[tool_name] = await run_blocking(
+                        "nl2agent-visible-knowledge",
+                        load_visible_knowledge,
+                        tool_name,
+                        user_id=user_id,
+                        tenant_id=tenant_id,
+                        lane="control-io",
+                        owner="services.nl2agent_service",
+                    )
+                range_name = "kds_list" if tool_name == "aidp_search" else "index_names"
+                current_params = {}
+                bound_values = []
+                for instance in bound_instances:
+                    bound_actual = by_ref.get(f"tool:{instance.get('tool_id')}", {})
+                    if tool_name not in bound_actual.get(
+                        "names", [bound_actual.get("name")]
+                    ):
+                        continue
+                    params = (
+                        instance.get("params")
+                        if isinstance(instance.get("params"), dict)
+                        else {}
+                    )
+                    current_params.update(params)
+                    bound_values.extend(selection_values(params.get(range_name)))
+                bound_values = list(dict.fromkeys(bound_values))
+                resource.knowledge_bound_values = bound_values
+                queries = supplied.knowledge_queries
+                if not queries:
+                    draft = require_agent_draft_edit(
+                        agent_id=agent_id, tenant_id=tenant_id, user_id=user_id
+                    )
+                    queries = [str(draft.get("description") or "")]
+                suggestions = rank_knowledge(
+                    knowledge_catalogs[tool_name],
+                    queries,
+                    bound_values,
+                    tool_name=tool_name,
+                    multimodal=current_params.get("multimodal"),
+                )
+                resource.knowledge_recommendations = [
+                    KnowledgeBaseRecommendation(**item) for item in suggestions
+                ]
+                base_config = [
+                    {
+                        **param,
+                        **(
+                            {"value": current_params[param["name"]]}
+                            if param["name"] in current_params
+                            else {}
+                        ),
+                    }
+                    for param in resource.config
+                ]
+                resource.config = merge_selection(
+                    base_config,
+                    tool_name,
+                    list(
+                        dict.fromkeys(
+                            [
+                                *bound_values,
+                                *(item["binding_value"] for item in suggestions),
+                            ]
+                        )
+                    ),
+                )
+                if suggestions or not bound_values:
+                    resource.is_bound = False
+            except Exception as exc:
+                logger.warning(
+                    "NL2Agent knowledge recommendation failed: %s", type(exc).__name__
+                )
+                raise Nl2AgentResourceError(
+                    "knowledge_search_failed", retryable=True
+                ) from exc
+        resources.append(resource)
     return RecommendResourcesOutput(resources=resources)
+
+
+async def recommend_resources_impl(
+    *,
+    agent_id: int,
+    candidates: list[ResourceCandidate],
+    recommended_refs: list[str],
+    tenant_id: str,
+    user_id: str,
+) -> RecommendResourcesOutput:
+    """Dispatch a homogeneous candidate set to its trusted source resolver."""
+
+    sources = {candidate.source for candidate in candidates}
+    if sources and sources.issubset(INSTALLED_RESOURCE_SOURCES):
+        return await recommend_installed_resources_impl(
+            agent_id=agent_id,
+            candidates=candidates,
+            recommended_refs=recommended_refs,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    if sources and sources.issubset(UNINSTALLED_RESOURCE_SOURCES):
+        return await recommend_uninstalled_resources_impl(
+            candidates=candidates,
+            recommended_refs=recommended_refs,
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+    raise Nl2AgentResourceError("invalid_candidates")
 
 
 def _parse_nl2agent_card_action_agent_id(query: str) -> int | None:
@@ -701,6 +1261,22 @@ def _parse_nl2agent_card_action_agent_id(query: str) -> int | None:
     if not isinstance(agent_id, int) or isinstance(agent_id, bool) or agent_id <= 0:
         raise Nl2AgentDraftSaveError("agent_context_mismatch")
     return agent_id
+
+
+def _requires_policy_clarification(query: str) -> bool:
+    """Prevent an unspecified retry request from authorizing a policy write."""
+    try:
+        action = json.loads(query)
+    except (TypeError, json.JSONDecodeError):
+        action = None
+    if isinstance(action, dict) and action.get("type") == "nl2agent_card_action":
+        return False
+    normalized = unicodedata.normalize("NFKC", query).casefold()
+    mentions_retry = "重试" in normalized or "retry" in normalized or "retries" in normalized
+    names_policy = any(term in normalized for term in (
+        "协议", "protocol", "静默修复", "silent repair", "enable_protocol_repair_retry",
+    ))
+    return mentions_retry and not names_policy
 
 
 async def _load_verified_nl2agent_state(
@@ -782,9 +1358,13 @@ async def _build_verified_bound_resources_context(
         "agent_id": agent_id,
         "draft_fields": (
             {
-                field_name: draft.get(field_name)
+                field_name: (
+                    draft.get(field_name) is True
+                    if field_name == "enable_protocol_repair_retry"
+                    else draft.get(field_name)
+                )
                 for field_name in AGENT_DRAFT_FIELD_ORDER
-                if draft.get(field_name) is not None
+                if field_name == "enable_protocol_repair_retry" or draft.get(field_name) is not None
             }
             if isinstance(draft, dict)
             else {}
@@ -812,18 +1392,21 @@ async def validate_agent_generation_complete_impl(
 ) -> None:
     """Verify the final NL2Agent fields directly from persisted database state."""
 
-    draft, facts = await _load_verified_nl2agent_state(
+    draft, _facts = await _load_verified_nl2agent_state(
         agent_id=agent_id,
         tenant_id=tenant_id,
         user_id=user_id,
     )
+    name = draft.get("name")
+    try:
+        validate_agent_name(name)
+    except ValueError as exc:
+        raise Nl2AgentCompletionError("draft_fields_incomplete", ["name"]) from exc
     description = draft.get("description")
     if not isinstance(description, str) or not description.strip():
         raise Nl2AgentCompletionError("draft_fields_incomplete", ["description"])
 
-    required_prompt_fields = ["duty_prompt", "greeting_message"]
-    if facts:
-        required_prompt_fields.extend(["constraint_prompt", "few_shots_prompt"])
+    required_prompt_fields = ["prompt", "greeting_message"]
     missing_prompts = [
         field_name
         for field_name in required_prompt_fields
@@ -858,16 +1441,22 @@ async def build_nl2agent_run_info(
     request: NL2AgentRunRequest,
     tenant_id: str,
     language: str,
-    authorization: str | None,
+    authorization: str | None = None,
+    *,
+    identity: AuthenticatedIdentity,
+    system_ref=None,
 ) -> AgentRunInfo:
     """Build all request-scoped NL2Agent runtime objects in memory."""
 
     action_agent_id = _parse_nl2agent_card_action_agent_id(request.query)
     if action_agent_id is not None and request.agent_id != action_agent_id:
         raise Nl2AgentDraftSaveError("agent_context_mismatch")
-    user_id, authenticated_tenant_id = get_current_user_id(authorization)
-    if authenticated_tenant_id != tenant_id:
+    if identity.tenant_id != tenant_id:
         raise PermissionError("tenant mismatch")
+    user_id = identity.user_id
+    if not user_id or not tenant_id:
+        raise PermissionError("Authenticated user and tenant are required")
+    preflight_turn_controls(request, tenant_id)
     binding_context = await _build_verified_bound_resources_context(
         agent_id=request.agent_id,
         tenant_id=tenant_id,
@@ -877,9 +1466,15 @@ async def build_nl2agent_run_info(
         minio_files=request.minio_files,
         query=request.query,
         history=request.history,
+        language=language,
     )
     model_config_list = await create_model_config_list(tenant_id)
-    agent_config = create_nl2agent_agent_config(language)
+    system_ref = system_ref or await run_blocking("load-nl2agent-identity", system_agent_provider.get_nl2agent_main_ref, tenant_id)
+    snapshot = await run_blocking(
+        "load-nl2agent-definition", search_agent_info_by_agent_id,
+        system_ref.agent_id, system_ref.tenant_id, system_ref.version_no,
+    )
+    agent_config = create_nl2agent_agent_config(language, snapshot=snapshot)
     agent_config.context_items = [
         *(agent_config.context_items or []),
         binding_context,
@@ -888,26 +1483,32 @@ async def build_nl2agent_run_info(
         key=MODEL_CONFIG_MAPPING["llm"],
         tenant_id=tenant_id,
     )
+    if request.model_id is not None or request.generation_config is not None:
+        default_model = resolve_creator_model(
+            model_config_list, agent_config, tenant_id, request.model_id,
+            request.generation_config.model_dump(exclude_unset=True) if request.generation_config else None,
+            default_model,
+        )
     input_budget, capacity_snapshot, resolved_capacity_snapshot = (
         _resolve_input_budget(default_model)
     )
-    safe_input_budget_snapshot = _resolve_safe_input_budget(
+    context_budget_snapshot = _resolve_context_budget(
         capacity_snapshot=resolved_capacity_snapshot,
         tenant_id=tenant_id,
         agent_requested_output_tokens=None,
         request_requested_output_tokens=None,
     )
-    if safe_input_budget_snapshot is not None:
-        soft_input_budget_tokens = safe_input_budget_snapshot[
-            "soft_input_budget_tokens"
-        ]
-        hard_input_budget_tokens = safe_input_budget_snapshot[
-            "hard_input_budget_tokens"
-        ]
-        token_threshold = soft_input_budget_tokens
+    if context_budget_snapshot is not None:
+        effective_input_limit_tokens = context_budget_snapshot.effective_input_limit_tokens
+        compaction_trigger_threshold_tokens = (
+            context_budget_snapshot.compaction_trigger_threshold_tokens
+        )
+        compaction_target_tokens = context_budget_snapshot.compaction_target_tokens
+        token_threshold = compaction_trigger_threshold_tokens
     else:
-        soft_input_budget_tokens = 0
-        hard_input_budget_tokens = 0
+        effective_input_limit_tokens = 0
+        compaction_trigger_threshold_tokens = 0
+        compaction_target_tokens = 0
         token_threshold = input_budget
 
     context_window_tokens = (
@@ -919,13 +1520,14 @@ async def build_nl2agent_run_info(
     agent_config.context_manager_config = ContextManagerConfig(
         token_threshold=token_threshold,
         context_window_tokens=context_window_tokens,
-        soft_input_budget_tokens=soft_input_budget_tokens,
-        hard_input_budget_tokens=hard_input_budget_tokens,
+        effective_input_limit_tokens=effective_input_limit_tokens,
+        compaction_trigger_threshold_tokens=compaction_trigger_threshold_tokens,
+        compaction_target_tokens=compaction_target_tokens,
     )
     agent_config.capacity_snapshot = capacity_snapshot
-    agent_config.safe_input_budget_snapshot = safe_input_budget_snapshot
+    agent_config.context_budget_snapshot = context_budget_snapshot
     mcp_config: dict[str, Any] = {
-        "url": urljoin(LOCAL_MCP_SERVER, "sse"),
+        "url": get_tenant_local_mcp_server(tenant_id),
         "transport": "sse",
         "httpx_client_factory": create_httpx_client,
         "bypass_proxy": True,
@@ -934,6 +1536,11 @@ async def build_nl2agent_run_info(
     if authorization:
         mcp_headers["Authorization"] = authorization
     mcp_headers[NL2AGENT_AGENT_ID_HEADER] = str(request.agent_id)
+    mcp_headers[NL2AGENT_POLICY_CLARIFICATION_HEADER] = (
+        "true" if _requires_policy_clarification(request.query) else "false"
+    )
+    mcp_headers["X-Tenant-ID"] = str(tenant_id)
+    mcp_headers["X-Nexent-Internal-Token"] = TOKEN
     if mcp_headers:
         mcp_config["headers"] = mcp_headers
 
@@ -947,10 +1554,11 @@ async def build_nl2agent_run_info(
         ),
         agent_config=agent_config,
         mcp_host=[mcp_config],
+        mcp_request_timeout_seconds=MCP_REQUEST_TIMEOUT_SECONDS,
         history=_convert_history(request.history),
         stop_event=stop_event,
         capacity_snapshot=capacity_snapshot,
-        safe_input_budget_snapshot=safe_input_budget_snapshot,
+        context_budget_snapshot=context_budget_snapshot,
         enable_planning=False,
         sandbox_config=None,
         redis_client=None,
@@ -963,21 +1571,39 @@ async def create_nl2agent_stream(
     request: NL2AgentRunRequest,
     tenant_id: str,
     language: str,
-    authorization: str | None,
+    authorization: str | None = None,
+    *,
+    identity: AuthenticatedIdentity,
+    system_ref=None,
 ) -> AsyncIterator[str]:
-    """Create an SSE-compatible stream for one ephemeral NL2Agent run."""
+    """Create an SSE-compatible stream for one isolated NL2Agent run."""
 
     run_info = await build_nl2agent_run_info(
         request=request,
         tenant_id=tenant_id,
         language=language,
+        identity=identity,
+        system_ref=system_ref,
         authorization=authorization,
     )
 
     async def generate() -> AsyncIterator[str]:
         boundary_delivered = False
         try:
-            async for chunk in agent_run(run_info):
+            if isinstance(run_info.agent_config.agent_id, int):
+                yield "data: " + json.dumps({
+                    "type": "other",
+                    "content": json.dumps({
+                        "event": "system_agent_run",
+                        "agent_id": run_info.agent_config.agent_id,
+                        "version_no": run_info.agent_config.version_no,
+                        "system_key": "nl2agent_main",
+                    }),
+                }) + "\n\n"
+            async for chunk in agent_run(
+                run_info,
+                thread_manager=runtime_thread_manager,
+            ):
                 if boundary_delivered:
                     continue
                 yield f"data: {chunk}\n\n"
@@ -989,10 +1615,12 @@ async def create_nl2agent_stream(
                     boundary_delivered = False
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("NL2Agent execution failed")
+            from management.services.agent.stream import sampling_configuration_error_payload
+            sampling_error = sampling_configuration_error_payload(exc)
             error_payload = json.dumps(
-                {
+                sampling_error or {
                     "type": "error",
                     "content": "NL2Agent execution failed.",
                 },

@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for knowledge-base source-object accounting helpers."""
 
 from unittest.mock import patch
 
 import pytest
 
-import backend.services.knowledge_storage_service as storage_service
+from management.services.knowledge_base import storage as storage_service
 
 KnowledgeStorageContext = storage_service.KnowledgeStorageContext
 commit_uploaded_object = storage_service.commit_uploaded_object
@@ -270,7 +271,7 @@ def test_resolve_storage_object_access_uses_kb_dac(permission, expected):
     }
     with patch.object(storage_service, "resolve_storage_object_knowledge", return_value=ownership), \
             patch(
-                "services.vectordatabase_service.ElasticSearchService"
+                "management.services.knowledge_base.service.ElasticSearchService"
                 ".resolve_knowledge_base_permission",
                 return_value="EDIT",
             ) as resolve_permission:
@@ -351,7 +352,7 @@ def test_resolve_storage_object_access_fails_closed_when_dac_raises(permission_e
     with patch.object(
         storage_service, "resolve_storage_object_knowledge", return_value=ownership
     ), patch(
-        "services.vectordatabase_service.ElasticSearchService"
+        "management.services.knowledge_base.service.ElasticSearchService"
         ".resolve_knowledge_base_permission",
         side_effect=permission_error,
     ):
@@ -371,7 +372,7 @@ def test_resolve_storage_object_access_allows_creator_and_editor_only():
     with patch.object(
         storage_service, "resolve_storage_object_knowledge", return_value=ownership
     ), patch(
-        "services.vectordatabase_service.ElasticSearchService"
+        "management.services.knowledge_base.service.ElasticSearchService"
         ".resolve_knowledge_base_permission",
         side_effect=["READ_ONLY", "CREATOR"],
     ):

@@ -6,11 +6,13 @@ import { Agent } from "@/types/agentConfig";
 interface UsePublishedAgentListOptions {
 	page?: number;
 	pageSize?: number;
+	enabled?: boolean;
 }
 
 export function usePublishedAgentList({
 	page = 1,
 	pageSize = Number.MAX_SAFE_INTEGER,
+	enabled = true,
 }: UsePublishedAgentListOptions = {}) {
 	const queryClient = useQueryClient();
 	const [search, setSearch] = useState("");
@@ -26,7 +28,7 @@ export function usePublishedAgentList({
 		},
 		staleTime: 60_000,
 		refetchOnMount: "always",
-		enabled: true,
+		enabled,
 	});
 
 	const agents = query.data ?? [];

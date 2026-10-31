@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 import sys
 from pathlib import Path
@@ -483,7 +485,7 @@ def test_main_builds_runtime_configuration_and_dispatches_experiment(
 ):
     import agent_runner
     import evaluators
-    import runtime.task_adapter as runtime_task_adapter
+    from runtime import task_adapter as runtime_task_adapter
     from runtime import exa_replay
 
     config_path = tmp_path / "agent.yaml"
@@ -497,9 +499,8 @@ agent_info:
 agent_config:
   max_steps: 8
   version_no: 3
-  prompt_template_id: prompt-v1
 prompts:
-  duty_prompt: Solve carefully
+  prompt: Solve carefully
 tools:
   - name: search
 skills: []
@@ -603,8 +604,9 @@ sub_agents: []
 
     cm_config = task_configuration["context_manager_config"]
     assert cm_config.policy_layers.platform["processing_mode"] == "adaptive_compact"
-    assert cm_config.soft_input_budget_tokens == 100
-    assert cm_config.hard_input_budget_tokens == 200
+    assert cm_config.compaction_trigger_threshold_tokens == 100
+    assert cm_config.effective_input_limit_tokens == 125
+    assert cm_config.compaction_target_tokens == 75
     assert task_configuration["tools"] == [configured_tool, injected_tool]
     assert task_configuration["max_steps"] == 5
     assert dispatched["dataset_name"] == "dataset"

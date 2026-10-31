@@ -10,6 +10,7 @@ from smolagents.models import ChatMessage, MessageRole
 from smolagents.utils import truncate_content
 
 from ...monitor import get_monitoring_manager
+from ..prompts import load_prompt
 from ..utils.observer import MessageObserver, ProcessType
 from .agent_model import AgentVerificationConfig, GuardrailConfig, GuardrailRule
 
@@ -188,23 +189,24 @@ class GuardrailEngine:
     def check_input(
         self,
         input_messages: List[Dict[str, Any]],
+        trusted_tail_count: int = 0,
     ) -> GuardrailDecision:
         """Screen the messages about to be sent to the LLM, per message.
 
-        Each message is classified as ``new_input`` (latest user turn) or
-        ``history`` and resolved via SeverityResolver. On ``mask`` all matching
-        messages are redacted in a copy returned as ``masked_messages``; the
-        overall action is the highest-rank across messages.
+        Screen the latest real user turn as ``new_input`` and earlier messages
+        as ``history``. Trusted request-only tail instructions are omitted from
+        screening but retained in the model-bound masked copy. On ``mask`` all
+        matching messages are redacted; the overall action is the highest rank.
 
         Args:
             input_messages: Messages about to be sent to the LLM.
+            trusted_tail_count: Number of trailing runtime-injected messages.
 
         Returns:
             A GuardrailDecision; carries ``masked_messages`` when masking.
             Never raises -- engine failures degrade to a pass.
         """
         try:
-            new_input_idx = self._find_new_input_index(input_messages)
             overall = "pass"
             chosen = None  # (rule, matched_text, source, user_severity)
             any_mask = False
@@ -213,7 +215,10 @@ class GuardrailEngine:
                 (dict(m) if isinstance(m, dict) else m)
                 for m in (input_messages or [])
             ]
-            for i, msg in enumerate(messages_copy):
+            tail_count = trusted_tail_count if 0 <= trusted_tail_count <= len(messages_copy) else 0
+            screened_count = len(messages_copy) - tail_count
+            new_input_idx = self._find_new_input_index(messages_copy[:screened_count])
+            for i, msg in enumerate(messages_copy[:screened_count]):
                 source = "new_input" if i == new_input_idx else "history"
                 screened = self._screen_message(msg, source)
                 if screened is None:
@@ -768,7 +773,7 @@ class VerificationController:
         re.IGNORECASE,
     )
     _EMPTY_RE = re.compile(r"^\s*(execution logs:\s*)?(last output from code snippet:\s*)?\s*$", re.IGNORECASE)
-    _RAW_TAG_RE = re.compile(r"</?(code|RUN)>|<DISPLAY:[^>]+>|</DISPLAY>", re.IGNORECASE)
+    _RAW_TAG_RE = re.compile(r"</?(code|run)>|<display:[^>]+>|</display>")
     _CITATION_RE = re.compile(r"\[\[[a-e]\d+\]\]")
     _LIGHTWEIGHT_CONVERSATION_RE = re.compile(
         r"^\s*(你好|您好|嗨|哈喽|hello|hi|hey|早上好|上午好|中午好|下午好|晚上好|"
@@ -955,7 +960,7 @@ class VerificationController:
             fix_hint="Use the platform-provided tools instead of direct system or network operations.",
         ))
 
-        if "final_answer(" not in code_text and available_tool_names:
+        if available_tool_names:
             used_tools = [name for name in available_tool_names if re.search(rf"\b{re.escape(name)}\s*\(", code_text)]
             checks.append(VerificationCheck(
                 name="tool_relevance_signal",
@@ -1214,18 +1219,7 @@ class VerificationController:
     ) -> List[ChatMessage]:
         policy = policy or self._build_final_verification_policy(task, memory_summary)
         clean_memory_summary = self._strip_internal_verification_feedback(memory_summary or "")
-        system_prompt = (
-            "You are a strict answer verifier for a ReAct agent. "
-            "Check only the evidence shown to you. Do not reveal chain-of-thought. "
-            "Return JSON only with keys: passed, score, status, failed_criteria, checks, "
-            "revision_instruction, user_visible_note. "
-            "Criteria: intent_coverage, evidence_grounding, tool_error_handling, citation_integrity, format_safety. "
-            "Apply criteria conditionally: for lightweight conversational tasks such as greetings or capability chat, "
-            "do not require external observations, citations, tool calls, or retrieval evidence. "
-            "Only fail evidence_grounding when evidence_required is true. "
-            "Only fail tool_error_handling when tool_error_check_required is true and the answer ignores an actual "
-            "tool/code execution error in the evidence summary."
-        )
+        system_prompt = load_prompt("en", "agent/answer_verifier")["system_prompt"]
         user_prompt = json.dumps(
             {
                 "task": truncate_content(str(task), max_length=4000),

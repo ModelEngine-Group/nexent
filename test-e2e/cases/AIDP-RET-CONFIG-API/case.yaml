@@ -1,0 +1,73 @@
+{
+  "schema_version": "1.0",
+  "stage": "D2",
+  "module": "AIDP-KNOWLEDGE",
+  "case": {
+    "case_id": "AIDP-RET-CONFIG-API",
+    "feature_id": "AIDP-RETRIEVAL",
+    "business_rule_ids": [
+      "AIDP-RETRIEVAL-RULE-01"
+    ],
+    "title": "Authenticated AIDP configuration API persistence and rejection",
+    "type": "CONTRACT",
+    "priority": "P1",
+    "status": "blocked",
+    "automation": "manual",
+    "objective": "Authenticated AIDP configuration API persistence and rejection",
+    "preconditions": [
+      "SDK/frontend dependencies available; use isolated run-owned resources.",
+      "Real provider and browser journeys require an authorized matching source environment."
+    ],
+    "test_data": {
+      "methods": "vector, full text, graph, all pairs and hybrid",
+      "legacy": "Migrated fixed tool values, explicit false/zero and inert legacy conversation retrieval_config; no new conversation policy editor."
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Save/read managed and independent Agent tool settings; submit a valid northbound tool_params override and run the Agent.",
+        "expected": "Saved fixed settings and explicit false/zero survive readback; managed northbound overrides apply only to that run; independent instances retain their own configuration."
+      },
+      {
+        "order": 2,
+        "action": "Submit invalid policy values through tool save, import and northbound input. Send legacy retrieval_config alongside a valid conversation/Workbench knowledge selection.",
+        "expected": "Invalid active policy inputs are rejected before persistence/provider calls; legacy conversation policy is ignored, excluded from canonical scope output and does not replace instance values."
+      }
+    ],
+    "expected_results": [
+      "Saved fixed settings and explicit false/zero survive readback; managed northbound overrides apply only to that run; independent instances retain their own configuration.",
+      "Invalid active policy inputs are rejected before persistence/provider calls; legacy conversation policy is ignored, excluded from canonical scope output and does not replace instance values."
+    ],
+    "forbidden_side_effects": [
+      "Do not mutate other configurations, expand managed scope, expose credentials or issue HTTP for invalid settings."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Saved fixed settings and explicit false/zero survive readback; managed northbound overrides apply only to that run; independent instances retain their own configuration.; Invalid active policy inputs are rejected before persistence/provider calls; legacy conversation policy is ignored, excluded from canonical scope output and does not replace instance values.",
+        "steps": [
+          1,
+          2
+        ],
+        "expected_results": [
+          1,
+          2
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      }
+    ],
+    "contract": {
+      "protocol": "Authenticated Nexent HTTP APIs",
+      "request_expectations": [
+        "Save/read managed and independent Agent tool settings; submit a valid northbound tool_params override and run the Agent.",
+        "Submit invalid policy values through tool save, import and northbound input. Send legacy retrieval_config alongside a valid conversation/Workbench knowledge selection."
+      ],
+      "response_expectations": [
+        "Saved fixed settings and explicit false/zero survive readback; managed northbound overrides apply only to that run; independent instances retain their own configuration.",
+        "Invalid active policy inputs are rejected before persistence/provider calls; legacy conversation policy is ignored, excluded from canonical scope output and does not replace instance values."
+      ]
+    }
+  }
+}

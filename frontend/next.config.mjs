@@ -1,4 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { BASE_PATH } from "./base-path.mjs";
+import { preparePdfAssets } from "./scripts/prepare-pdf-assets.mjs";
+
+preparePdfAssets();
 
 let userConfig = undefined
 try {
@@ -11,9 +16,6 @@ try {
 const nextConfig = {
   output: "standalone",
   basePath: BASE_PATH,
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
   typescript: {
     ignoreBuildErrors: true,
   },
@@ -25,13 +27,14 @@ const nextConfig = {
     parallelServerBuildTraces: true,
     parallelServerCompiles: true,
   },
+  turbopack: {
+    resolveAlias: {
+      canvas: "./lib/empty-canvas.js",
+    },
+  },
   compress: true,
   // Fix workspace root detection for multiple lockfiles
   outputFileTracingRoot: process.cwd(),
-  webpack: (config) => {
-    config.resolve.alias.canvas = false;
-    return config;
-  },
 }
 
 mergeConfig(nextConfig, userConfig)

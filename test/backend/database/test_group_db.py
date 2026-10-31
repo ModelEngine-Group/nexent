@@ -1,3 +1,6 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
@@ -8,7 +11,7 @@ from unittest.mock import MagicMock
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
-# Set required constants in consts.const
+# Set required constants in contracts.constants.environment
 consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
 consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
 consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
@@ -23,7 +26,8 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -46,8 +50,8 @@ utils_mock.str_utils = str_utils_mock
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_mock.auth_utils
-sys.modules['utils.str_utils'] = str_utils_mock
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.utils.serialization'] = str_utils_mock
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -64,8 +68,14 @@ client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['database.client'] = client_mock
-sys.modules['backend.database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock db_models module
 db_models_mock = MagicMock()
@@ -97,13 +107,13 @@ class MockTenantGroupUser:
 
 
 # Add the mocked db_models module to sys.modules
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
 # Mock exceptions module
 exceptions_mock = MagicMock()
-sys.modules['consts.exceptions'] = exceptions_mock
-sys.modules['backend.consts.exceptions'] = exceptions_mock
+install_shared_contract_stub(exceptions_mock, 'exceptions')
+install_shared_contract_stub(exceptions_mock, 'exceptions')
 
 # Mock sqlalchemy module
 sqlalchemy_mock = MagicMock()
@@ -119,26 +129,7 @@ sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 
 # Now we can safely import the module under test
-from backend.database.group_db import (
-    query_groups,
-    query_groups_by_tenant,
-    add_group,
-    modify_group,
-    remove_group,
-    remove_group_users,
-    add_user_to_group,
-    remove_user_from_group,
-    remove_user_from_all_groups,
-    query_group_users,
-    query_groups_by_user,
-    query_group_ids_by_user,
-    check_user_in_group,
-    count_group_users,
-    check_group_name_exists,
-    query_groups_by_users,
-    query_group_ids_by_user_in_tenant,
-    filter_tenant_group_ids,
-)
+from management.db.identity.group import query_groups, query_groups_by_tenant, add_group, modify_group, remove_group, remove_group_users, add_user_to_group, remove_user_from_group, remove_user_from_all_groups, query_group_users, query_groups_by_user, query_group_ids_by_user, check_user_in_group, count_group_users, check_group_name_exists, query_groups_by_users, query_group_ids_by_user_in_tenant, filter_tenant_group_ids
 
 
 @pytest.fixture
@@ -165,8 +156,8 @@ def test_get_group_by_id_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.as_dict", lambda obj: obj.__dict__)
 
     result = query_groups(123)
 
@@ -186,7 +177,7 @@ def test_get_group_by_id_not_found(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = query_groups(999)
 
@@ -208,8 +199,8 @@ def test_get_group_by_id_with_string_input(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.group_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.group_db.as_dict",
+        "management.db.identity.group.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.as_dict",
                         lambda obj: obj.__dict__)
 
     result = query_groups("1,2")
@@ -234,8 +225,8 @@ def test_get_group_by_id_with_list_input(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.group_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.group_db.as_dict",
+        "management.db.identity.group.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.as_dict",
                         lambda obj: obj.__dict__)
 
     result = query_groups([1, 3])
@@ -251,7 +242,7 @@ def test_get_group_by_id_empty_string(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = None
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.group_db.get_db_session", lambda: mock_ctx)
+        "management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = query_groups("")
 
@@ -264,7 +255,7 @@ def test_get_group_by_id_empty_list(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = None
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.group_db.get_db_session", lambda: mock_ctx)
+        "management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = query_groups([])
 
@@ -319,8 +310,8 @@ def test_get_groups_by_tenant_success_with_pagination(monkeypatch, mock_session)
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.as_dict", lambda obj: obj.__dict__)
 
     result = query_groups_by_tenant("test_tenant", page=1, page_size=10, sort_by="created_at", sort_order="desc")
 
@@ -331,6 +322,36 @@ def test_get_groups_by_tenant_success_with_pagination(monkeypatch, mock_session)
     # Verify pagination was applied
     mock_paginated_order_by.offset.assert_called_once_with(0)  # (page-1) * page_size = (1-1) * 10 = 0
     mock_paginated_offset.limit.assert_called_once_with(10)
+
+
+def test_query_groups_by_tenant_with_search(monkeypatch, mock_session):
+    """Test applying a group-name search before counting and pagination."""
+    session, _ = mock_session
+    count_query = MagicMock()
+    count_query.filter.return_value.count.return_value = 1
+    result_query = MagicMock()
+    filtered = MagicMock()
+    ordered = MagicMock()
+    offset = MagicMock()
+    limit = MagicMock()
+    limit.all.return_value = [MockTenantGroupInfo(group_id=1, group_name="Engineering")]
+    offset.limit.return_value = limit
+    ordered.offset.return_value = offset
+    filtered.order_by.return_value = ordered
+    result_query.filter.return_value = filtered
+    session.query = MagicMock(side_effect=[count_query, result_query])
+
+    context = MagicMock()
+    context.__enter__.return_value = session
+    context.__exit__.return_value = None
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: context)
+    monkeypatch.setattr("management.db.identity.group.as_dict", lambda obj: obj.__dict__)
+
+    result = query_groups_by_tenant("test_tenant", 1, 10, search="eng")
+
+    assert result["total"] == 1
+    assert result["groups"][0]["group_name"] == "Engineering"
+    assert count_query.filter.call_args.args[-1] is not None
 
 
 def test_get_groups_by_tenant_success_without_pagination(monkeypatch, mock_session):
@@ -370,8 +391,8 @@ def test_get_groups_by_tenant_success_without_pagination(monkeypatch, mock_sessi
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.as_dict", lambda obj: obj.__dict__)
 
     result = query_groups_by_tenant("test_tenant", page=None, page_size=None)
 
@@ -424,8 +445,8 @@ def test_get_groups_by_tenant_with_asc_sort(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.as_dict", lambda obj: obj.__dict__)
 
     result = query_groups_by_tenant("test_tenant", page=1, page_size=10, sort_by="created_at", sort_order="asc")
 
@@ -471,8 +492,8 @@ def test_get_groups_by_tenant_with_only_page_none(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.as_dict", lambda obj: obj.__dict__)
 
     result = query_groups_by_tenant("test_tenant", page=None, page_size=10)
 
@@ -518,8 +539,8 @@ def test_get_groups_by_tenant_with_only_page_size_none(monkeypatch, mock_session
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.as_dict", lambda obj: obj.__dict__)
 
     result = query_groups_by_tenant("test_tenant", page=1, page_size=None)
 
@@ -562,8 +583,8 @@ def test_get_groups_by_tenant_with_empty_result(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.as_dict", lambda obj: obj.__dict__)
 
     result = query_groups_by_tenant("test_tenant", page=1, page_size=10)
 
@@ -582,10 +603,10 @@ def test_create_group_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     from unittest.mock import patch
-    with patch('backend.database.group_db.TenantGroupInfo', return_value=mock_group):
+    with patch('management.db.identity.group.TenantGroupInfo', return_value=mock_group):
         result = add_group(
             tenant_id="test_tenant",
             group_name="test_group",
@@ -612,7 +633,7 @@ def test_update_group_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = modify_group(
         group_id=123,
@@ -637,7 +658,7 @@ def test_soft_delete_group_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = remove_group(group_id=123, updated_by="test_user")
 
@@ -655,10 +676,10 @@ def test_add_user_to_group_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     from unittest.mock import patch
-    with patch('backend.database.group_db.TenantGroupUser', return_value=mock_group_user):
+    with patch('management.db.identity.group.TenantGroupUser', return_value=mock_group_user):
         result = add_user_to_group(
             group_id=123,
             user_id="test_user",
@@ -684,7 +705,7 @@ def test_remove_user_from_group_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = remove_user_from_group(
         group_id=123,
@@ -709,8 +730,8 @@ def test_get_group_users_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.as_dict", lambda obj: obj.__dict__)
 
     result = query_group_users(123)
 
@@ -736,8 +757,8 @@ def test_get_groups_by_user_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.as_dict", lambda obj: obj.__dict__)
 
     result = query_groups_by_user("test_user")
 
@@ -765,7 +786,7 @@ def test_get_group_ids_by_user_success(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.group_db.get_db_session", lambda: mock_ctx)
+        "management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = query_group_ids_by_user("test_user")
 
@@ -785,7 +806,7 @@ def test_is_user_in_group_true(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = check_user_in_group("test_user", 123)
 
@@ -803,7 +824,7 @@ def test_is_user_in_group_false(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = check_user_in_group("test_user", 123)
 
@@ -828,7 +849,7 @@ def test_get_group_user_count_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = count_group_users(123)
 
@@ -875,8 +896,8 @@ def test_query_groups_by_tenant_with_pagination_page_2(monkeypatch, mock_session
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.as_dict", lambda obj: obj.__dict__)
 
     result = query_groups_by_tenant("test_tenant", page=2, page_size=10, sort_by="created_at", sort_order="desc")
 
@@ -903,7 +924,7 @@ def test_modify_group_no_updates_provided(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = modify_group(group_id=123, updates={})
 
@@ -923,7 +944,7 @@ def test_modify_group_no_rows_affected(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = modify_group(group_id=999, updates={"group_name": "new_name"})
 
@@ -959,7 +980,7 @@ def test_remove_group_no_rows_affected(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = remove_group(group_id=999, updated_by="test_user")
 
@@ -996,7 +1017,7 @@ def test_remove_group_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = remove_group(group_id=123, updated_by="admin_user")
 
@@ -1016,7 +1037,7 @@ def test_remove_user_from_group_no_rows_affected(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = remove_user_from_group(group_id=999, user_id="nonexistent_user", updated_by="test_user")
 
@@ -1036,8 +1057,8 @@ def test_query_groups_by_user_no_groups(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.group_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.as_dict", lambda obj: obj.__dict__)
 
     result = query_groups_by_user("user_with_no_groups")
 
@@ -1062,7 +1083,7 @@ def test_query_group_ids_by_user_no_groups(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = query_group_ids_by_user("user_with_no_groups")
 
@@ -1083,7 +1104,7 @@ def test_remove_user_from_all_groups_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = remove_user_from_all_groups(
         user_id="test_user",
@@ -1115,7 +1136,7 @@ def test_remove_user_from_all_groups_no_memberships(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = remove_user_from_all_groups(
         user_id="user_with_no_groups",
@@ -1141,7 +1162,7 @@ def test_remove_user_from_all_groups_database_error(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(MockSQLAlchemyError, match="Database connection failed"):
         remove_user_from_all_groups(
@@ -1158,7 +1179,7 @@ def test_database_error_handling(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         query_groups(123)
@@ -1178,7 +1199,7 @@ def test_check_group_name_exists_found(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = check_group_name_exists("test_tenant", "test_group")
 
@@ -1199,7 +1220,7 @@ def test_check_group_name_exists_not_found(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = check_group_name_exists("test_tenant", "new_group")
 
@@ -1224,7 +1245,7 @@ def test_check_group_name_exists_with_exclusion(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     # When updating group 1 to name "test_group", exclude group 1
     result = check_group_name_exists("test_tenant", "test_group", exclude_group_id=1)
@@ -1245,7 +1266,7 @@ def test_check_group_name_exists_database_error(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         check_group_name_exists("test_tenant", "test_group")
@@ -1264,7 +1285,7 @@ def test_remove_group_users_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = remove_group_users(group_id=123, removed_by="admin_user")
 
@@ -1284,7 +1305,7 @@ def test_remove_group_users_no_rows_affected(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = remove_group_users(group_id=999, removed_by="admin_user")
 
@@ -1311,7 +1332,7 @@ def test_query_groups_by_users_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = query_groups_by_users(["user1", "user2", "user3"])
 
@@ -1343,7 +1364,7 @@ def test_query_groups_by_users_no_memberships(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = query_groups_by_users(["user1", "user2"])
 
@@ -1371,7 +1392,7 @@ def test_query_group_ids_by_user_in_tenant_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = query_group_ids_by_user_in_tenant("user_123", "tenant_abc")
 
@@ -1420,7 +1441,7 @@ def test_query_group_ids_by_user_in_tenant_no_results(monkeypatch, mock_session)
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = query_group_ids_by_user_in_tenant("user_no_groups", "tenant_abc")
 
@@ -1444,7 +1465,7 @@ def test_query_group_ids_by_user_in_tenant_delete_flag_filters_soft_deleted(monk
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = query_group_ids_by_user_in_tenant("user_1", "tenant_1")
 
@@ -1471,7 +1492,7 @@ def test_filter_tenant_group_ids_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = filter_tenant_group_ids([1, 2, 3], "tenant_abc")
 
@@ -1517,7 +1538,7 @@ def test_filter_tenant_group_ids_no_matching_groups(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = filter_tenant_group_ids([998, 999], "nonexistent_tenant")
 
@@ -1538,7 +1559,7 @@ def test_filter_tenant_group_ids_all_match(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     result = filter_tenant_group_ids([5, 6, 7], "tenant_xyz")
 
@@ -1560,7 +1581,7 @@ def test_filter_tenant_group_ids_excludes_soft_deleted(monkeypatch, mock_session
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.group_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.group.get_db_session", lambda: mock_ctx)
 
     # Group 2 is soft-deleted, so only group 1 is returned
     result = filter_tenant_group_ids([1, 2], "tenant_1")
@@ -1571,7 +1592,7 @@ def test_filter_tenant_group_ids_excludes_soft_deleted(monkeypatch, mock_session
 
 def test_create_group_rejects_tenant_group_limit(monkeypatch, mock_session):
     """A tenant cannot create more groups than its hard limit."""
-    import backend.database.group_db as module
+    from management.db.identity import group as module
 
     class ResourceLimitError(Exception):
         pass
@@ -1592,7 +1613,7 @@ def test_create_group_rejects_tenant_group_limit(monkeypatch, mock_session):
 @pytest.mark.parametrize("current_count, should_reject", [(0, False), (1, True), (2, True)])
 def test_group_limit_boundaries(monkeypatch, mock_session, current_count, should_reject):
     """Group creation is allowed below the cap and rejected at or above it."""
-    import backend.database.group_db as module
+    from management.db.identity import group as module
 
     class ResourceLimitError(Exception):
         pass

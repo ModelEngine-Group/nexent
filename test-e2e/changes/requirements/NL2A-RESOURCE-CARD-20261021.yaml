@@ -1,0 +1,41 @@
+schema_version: '1.0'
+change:
+  change_id: NL2A-RESOURCE-CARD-20261021
+  change_type: requirement
+  requirement_id: NL2A-RESOURCE-CARD-20261021
+  title: Unified Knowledge Tool Skill binding card
+  description: Present managed knowledge recommendations as concrete knowledge selection
+    within the existing resource card.
+  affected_features:
+    existing: []
+    added: []
+    modified:
+    - F-045
+    retired: []
+  affected_cases:
+    existing: []
+    added:
+    - NL2A-RESOURCE-D1-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    behaviors:
+    - Keep knowledge recommendation implementation under canonical management knowledge-base ownership.
+    - Classify managed knowledge versus ordinary Tool/Skill.
+    - Parse and serialize local/AIDP selections including empty and invalid input.
+    - Permission-visible minus direct bindings, metadata matching/fallback, local/AIDP
+      identity, bounds and errors.
+    - Prefer deployment-selected managed knowledge through scoring while preserving explicit DataMate matching and alternative eligibility.
+    reason: Backend metadata/ranking/enrichment unit proof remains separate from the
+      real resource-card interaction D1. Existing service regression suite reused.
+    test_selectors:
+    - frontend/tests/component/nl2AgentKnowledgeConfig.test.tsx
+    - test/backend/services/test_nl2agent_knowledge_service.py
+    - test/backend/services/test_nl2agent_service.py
+    - test/backend/services/test_nl2agent_resource_provider_policy.py
+    - test/backend/management/test_management_relocation.py
+    - test/backend/management/test_service_directory_architecture.py
+  notes: SPEC docs/Developing/chat-nl2agent-resource-card. Additive recommendation
+    metadata; existing binding routes reused; no schema migration or runtime/provider
+    invocation changes.

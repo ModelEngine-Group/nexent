@@ -1,0 +1,100 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: AIDP-FE-GRAPH-01
+  feature_id: F-111
+  business_rule_ids:
+  - F-111-RULE-01
+  title: AIDP 知识图谱详情展示、编辑与永久关闭
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: 知识库详细信息页签中知识图谱的未开启展示、五个图谱配置字段的行内编辑与一次性关闭确认
+  preconditions:
+  - 组件测试环境及产品前端依赖可用；不需要 AIDP 服务、数据库或真实模型。
+  - 使用独立 QueryClient、浏览器存储和受控 HTTP；详情端点返回后端归一化后的原生类型图谱配置，更新端点按后端合并契约回写状态。
+  test_data:
+    source_role:
+    - direct_input
+    trace: 2026-10-15 知识图谱详情编辑需求（用户验收：未开启知识图谱提示、开关与两行后果确认文案、LLM模型/子图扩展跳数/大模型思考/同义词检测合并/语义消歧五个可编辑字段；2026-10-15 调整：关闭态恢复旧版"未开启知识图谱"提示，去掉标题旁蓝色"关闭"字样与悬停提示）
+    data: 图谱开启与创建时关闭两种详情、归一化图谱配置（布尔开关、整数跳数）、LLM 模型目录、只读权限详情、业务码错误响应
+  steps:
+  - order: 1
+    action: 打开创建时图谱即关闭的知识库详细信息页签。
+    expected: 图谱区块展示"未开启知识图谱"提示；不渲染开关、图谱字段与任何图谱编辑铅笔。
+  - order: 2
+    action: 打开图谱开启的知识库，依次通过铅笔编辑 LLM 模型、子图扩展跳数、构图过程开启大模型思考、开启同义词检测合并与开启语义消歧并确认。
+    expected: 每次保存仅发送该字段的原生类型 graph_config 部分更新（"开启思考"取反为 no_think_mode）；模型下拉及详情显示目录display_name，提交仍为model_name；保存后弹窗关闭、详情刷新并提示配置已更新。
+  - order: 3
+    action: 点击图谱开关，先取消，再次点击并确认关闭。
+    expected: 确认框展示标题"关闭知识图谱"与完整两行后果文案；取消不发起任何请求；确认仅发送 is_exist_graph=false 并提示知识图谱已关闭，详情变为"未开启知识图谱"提示且字段区隐藏。
+  - order: 4
+    action: 确认关闭时更新接口返回业务码错误，随后再次确认成功。
+    expected: 失败展示对应翻译错误且确认框保留可重试，不提示成功、不刷新为关闭态；重试成功后按关闭后的未开启展示刷新。
+  - order: 5
+    action: 以只读权限打开图谱开启的知识库并点击开关。
+    expected: 开关禁用且点击不弹确认框、不发起更新请求；不渲染任何图谱编辑铅笔；图谱字段照常只读展示。
+  expected_results:
+  - 图谱未开启时展示"未开启知识图谱"提示；不渲染开关、图谱字段与任何图谱编辑铅笔。
+  - 每次保存仅发送该字段的原生类型 graph_config 部分更新（"开启思考"取反为 no_think_mode）；模型显示display_name且提交model_name，保存后弹窗关闭、详情刷新并提示配置已更新。
+  - 确认框展示标题"关闭知识图谱"与完整两行后果文案；取消不发起任何请求；确认仅发送 is_exist_graph=false 并提示知识图谱已关闭，详情变为"未开启知识图谱"提示且字段区隐藏。
+  - 失败展示对应翻译错误且确认框保留可重试，不提示成功、不刷新为关闭态；重试成功后按关闭后的未开启展示刷新。
+  - 开关禁用且点击不弹确认框、不发起更新请求；不渲染任何图谱编辑铅笔；图谱字段照常只读展示。
+  forbidden_side_effects:
+  - 不得请求实际 AIDP、数据库、模型或修改用户的部署数据。
+  - 编辑不得把未编辑字段一并发送或破坏原生类型；关闭失败不得提示成功、关闭确认框或跳过详情刷新。
+  unit_boundary: 真实详情页面/页签、查询 hooks、React Query 缓存与前端服务层协作；仅替换外部身份、路由与 HTTP 边界；后端归一化与 graph_config 合并契约以受控响应模拟。
+  inputs:
+  - case-local 受控详情/模型目录响应与状态化更新端点
+  assertions:
+  - 图谱未开启时展示"未开启知识图谱"提示；不渲染开关、图谱字段与任何图谱编辑铅笔。
+  - 每次保存仅发送该字段的原生类型 graph_config 部分更新（"开启思考"取反为 no_think_mode）；模型显示display_name且提交model_name，保存后弹窗关闭、详情刷新并提示配置已更新。
+  - 确认框展示标题"关闭知识图谱"与完整两行后果文案；取消不发起任何请求；确认仅发送 is_exist_graph=false 并提示知识图谱已关闭，详情变为"未开启知识图谱"提示且字段区隐藏。
+  - 失败展示对应翻译错误且确认框保留可重试，不提示成功、不刷新为关闭态；重试成功后按关闭后的未开启展示刷新。
+  - 开关禁用且点击不弹确认框、不发起更新请求；不渲染任何图谱编辑铅笔；图谱字段照常只读展示。
+  acceptance:
+  - id: AC-01
+    description: 创建时关闭的未开启展示
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: 五个图谱字段的原生类型部分更新
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-03
+    description: 一次性关闭确认与锁定刷新
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-04
+    description: 关闭失败保留确认框并可重试
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+    - 2
+  - id: AC-05
+    description: 只读视图无编辑入口
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1

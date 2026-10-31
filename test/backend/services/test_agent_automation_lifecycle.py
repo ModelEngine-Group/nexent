@@ -1,29 +1,30 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 import sys
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 import pytest
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../backend"))
 
-from services.agent_automation import conversation_adapter as adapter_module
-from services.agent_automation import facade as facade_module
-from services.agent_automation import runner as runner_module
-from services.agent_automation.facade import AgentAutomationFacade
-from services.agent_automation.models import (
-    AutomationProposalConfirmRequest,
-    AutomationProposalCreateRequest,
-    CapabilityResolution,
-    CapabilityBinding,
-    CapabilityType,
-)
-from services.agent_automation.prompt_generator import AutomationTaskContent
+from management.services.automation import conversation as adapter_module
+from management.services.automation import service as facade_module
+# Exercise the real automation runner with Agent execution isolated.
+with pytest.MonkeyPatch.context() as import_mocks:
+    import_mocks.setitem(sys.modules, "management.services.agent.service", MagicMock())
+    from management.services.automation import runner as runner_module
+from management.services.automation.service import AgentAutomationFacade
+from contracts.automation import AutomationProposalConfirmRequest, AutomationProposalCreateRequest, CapabilityResolution, CapabilityBinding, CapabilityType
+from management.services.automation.prompt import AutomationTaskContent
 
 
 @pytest.mark.asyncio
 async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(monkeypatch):
     """Exercise the service lifecycle without sending the schedule command to the Agent."""
+    from test.backend.services.automation_transaction_stub import stub_runner_transactions
+    stub_runner_transactions(monkeypatch, runner_module)
     messages = []
     proposals = {}
     tasks = {}
@@ -177,7 +178,7 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
             },
         }
 
-    async def fake_run_agent_background(agent_request, user_id, tenant_id, skip_user_save=False):
+    async def fake_run_agent_background(agent_request, user_id, tenant_id, skip_user_save=False, **kwargs):
         captured["agent_calls"] += 1
         captured["agent_request"] = agent_request
         messages.append({
@@ -186,10 +187,11 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
             "role": "assistant",
             "message": [{"type": "final_answer", "content": "本周管理周报"}],
         })
-        return {"assistant_message_id": messages[-1]["message_id"]}
+        return {"assistant_message_id": messages[-1]["message_id"], "status": "completed", "persisted": True}
 
-    def fake_append_run_prompt(conversation_id, prompt, user_id, tenant_id):
+    def fake_append_run_prompt(conversation_id, prompt, user_id, tenant_id, *, run_id):
         message_id = len(messages) + 1
+        runs[run_id].update(user_message_id=message_id, generated_prompt=prompt)
         messages.append({
             "message_id": message_id,
             "message_idx": len(messages),
@@ -207,14 +209,14 @@ async def test_chat_proposal_confirm_and_manual_run_appends_same_conversation(mo
         runs[21] = run
         return run
 
-    def fake_update_run(run_id, values, user_id=None, expected_statuses=None):
+    def fake_update_run(run_id, values, user_id=None, expected_statuses=None, **kwargs):
         run = runs[run_id]
         if expected_statuses and run["status"] not in expected_statuses:
             return None
         run.update(values)
         return run
 
-    def fake_update_task(task_id, tenant_id, user_id, values):
+    def fake_update_task(task_id, tenant_id, user_id, values, **kwargs):
         tasks[task_id].update(values)
         return tasks[task_id]
 

@@ -1,10 +1,12 @@
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 ARG MIRROR
 ARG TARGETARCH
 ARG CONFIGURED_BASE_PATH=/
+ARG MAX_KNOWLEDGE_FILE_SIZE_MB=100
 
 ENV NEXT_PUBLIC_BASE_PATH=${CONFIGURED_BASE_PATH}
+ENV NEXT_PUBLIC_KNOWLEDGE_BASE_MAX_FILE_SIZE_MB=${MAX_KNOWLEDGE_FILE_SIZE_MB}
 
 # Build Next.js application
 WORKDIR /opt/frontend
@@ -51,11 +53,12 @@ RUN --mount=type=cache,id=nexent-web-next-${TARGETARCH},target=/opt/frontend/.ne
     rm -rf ../frontend-dist/.next/cache
 
 # Production stage
-FROM node:20-alpine
+FROM node:22-alpine
 ARG APK_MIRROR
 ARG TARGETARCH
 ARG CONFIGURED_BASE_PATH=/
 LABEL authors="nexent"
+ENV TZ=Asia/Shanghai
 
 # Configure Alpine mirrors if specified
 RUN if [ "$APK_MIRROR" = "tsinghua" ]; then \
@@ -63,13 +66,13 @@ RUN if [ "$APK_MIRROR" = "tsinghua" ]; then \
         echo "https://mirrors.tuna.tsinghua.edu.cn/alpine/latest-stable/community" >> /etc/apk/repositories; \
     fi
 
-# Update package index, upgrade busybox first, then install curl
+# Update package index, upgrade busybox first, then install runtime utilities
 # This avoids trigger script issues in cross-platform builds with QEMU emulation
 RUN --mount=type=cache,id=nexent-web-apk-${TARGETARCH},target=/var/cache/apk,sharing=locked \
     mkdir -p /var/cache/apk && \
     apk update && \
     (apk upgrade busybox || true) && \
-    apk add --no-scripts curl
+    apk add --no-scripts curl vim procps-ng wget less tzdata
 
 WORKDIR /opt/frontend-dist
 

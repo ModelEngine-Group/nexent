@@ -1,0 +1,42 @@
+services:
+  nexent-ops:
+    image: ${NEXENT_IMAGE:?Set NEXENT_IMAGE to a backend image containing ops_service.py}
+    container_name: nexent-ops
+    restart: unless-stopped
+    ports:
+      - "${OPS_PORT:-5016}:${OPS_PORT:-5016}"
+    networks:
+      - nexent
+    volumes:
+      - ${ROOT_DIR:?Set ROOT_DIR for persistent ops logs}/logs:/mnt/nexent-data/logs
+    env_file:
+      - ../../env/.env
+    environment:
+      OPS_PORT: "${OPS_PORT:-5016}"
+      LOG_DIR: "/mnt/nexent-data/logs"
+      NEXENT_SQL_STARTUP_MODE: "off"
+      PYTHON_DOTENV_DISABLED: "1"
+    entrypoint:
+      - /opt/nexent/scripts/start-backend.sh
+      - python
+      - backend/ops_service.py
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import os, urllib.request; urllib.request.build_opener(urllib.request.ProxyHandler({})).open('http://127.0.0.1:' + os.environ['OPS_PORT'] + '/health/ready', timeout=2).close()"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  nexent:
+    name: nexent_network
+    external: true

@@ -1,0 +1,22 @@
+schema_version: '1.0'
+change:
+  change_id: TFP-CHANGE-003
+  change_type: requirement
+  requirement_id: TFP-001
+  title: Enable the deferred official-tool executor by default
+  description: Default deployment and SDK flags to true while retaining explicit false as an opt-out and preserving Local
+    and WASM behavior.
+  affected_features:
+    existing:
+    - TFP-001
+    added: []
+    modified:
+    - TFP-001
+    retired: []
+  affected_cases:
+    existing:
+    - TFP-D1-006
+    added: []
+    modified:
+    - TFP-D1-006
+    retired: []

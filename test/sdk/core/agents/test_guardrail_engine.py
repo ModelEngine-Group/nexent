@@ -141,6 +141,29 @@ class TestCheckInput:
         assert KEYWORD not in decision.masked_messages[0]["content"]
         assert "***" in decision.masked_messages[0]["content"]
 
+    def test_request_only_tail_does_not_downgrade_latest_user_block(self):
+        engine = _engine([_rule(severity="block")])
+        messages = [
+            _msg("user", f"分析{KEYWORD}内容"),
+            _msg("user", "Trusted runtime format reminder"),
+        ]
+        decision = engine.check_input(input_messages=messages, trusted_tail_count=1)
+        assert decision.effective_action == "terminate"
+        assert decision.source == "new_input"
+
+    def test_request_only_tail_is_not_screened_or_modified_during_mask(self):
+        engine = _engine([_rule(severity="mask")])
+        messages = [
+            _msg("user", f"分析{KEYWORD}内容"),
+            _msg("user", f"Trusted repair instruction with {KEYWORD}"),
+            _msg("user", f"Trusted reminder with {KEYWORD}"),
+        ]
+        decision = engine.check_input(input_messages=messages, trusted_tail_count=2)
+        assert decision.effective_action == "mask"
+        assert KEYWORD not in decision.masked_messages[0]["content"]
+        assert decision.masked_messages[1] == messages[1]
+        assert decision.masked_messages[2] == messages[2]
+
     def test_mask_redacts_all_occurrences_in_message(self):
         engine = _engine([_rule(severity="mask")])
         messages = [_msg("user", f"{KEYWORD}和{KEYWORD}都在")]

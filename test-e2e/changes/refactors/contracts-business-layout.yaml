@@ -1,0 +1,96 @@
+schema_version: '1.0'
+change:
+  change_id: CONTRACTS-LAYOUT-20261022
+  change_type: refactor
+  title: Group shared contracts and constants by business
+  description: Consolidate API and persistence contract fragments into business files,
+    isolate errors and pure constants, retain environment reads in consts.const, and
+    preserve original comments and validation behavior.
+  affected_features:
+    existing:
+    - F-036
+    - F-045
+    - F-079
+    - F-096
+    - F-126
+    - F-131
+    - F-156
+    - F-177
+    - F-178
+    - F-179
+    - F-180
+    - F-185
+    - MSRF-001
+    - V5-REL-AUTO-4045B602F3B5254D
+    - V5-REL-AUTO-4CBD1BF08020ABF9
+    - V5-REL-AUTO-53457E34A331A3FF
+    - V5-REL-AUTO-80AA755E2436D269
+    - V5-REL-AUTO-BCE0AAF43667C67B
+    - V5-REL-AUTO-CCF3D3CB5D0FC268
+    - V5-REL-AUTO-D78B50240E78970B
+    - V5-REL-AUTO-DAF6A75DB19AEFBC
+    - V5-UT-BE-007
+    - V5-UT-BE-014
+    - V5-UT-BE-021
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - AGT-AUTO-01804EF17A1DF51B
+    - API-AUTO-08A289290B55F524
+    - API-AUTO-6A4110F4BD10BA0F
+    - API-AUTO-7CBDF5C068165594
+    - AUTO-QUOTA-D3-001
+    - MSRF-D1-001
+    - MSRF-D1-002
+    - REL-AUTO-4045B602F3B5254D
+    - REL-AUTO-4CBD1BF08020ABF9
+    - REL-AUTO-53457E34A331A3FF
+    - REL-AUTO-80AA755E2436D269
+    - REL-AUTO-BCE0AAF43667C67B
+    - REL-AUTO-CCF3D3CB5D0FC268
+    - REL-AUTO-D78B50240E78970B
+    - REL-AUTO-DAF6A75DB19AEFBC
+    - UT-BE-007
+    - UT-BE-014
+    - UT-BE-021
+    - UT-BE-026
+    - UT-BE-027
+    - UT-BE-028
+    - UT-BE-AUTO-39A8846CFEA5224E
+    - UT-BE-AUTO-51975A59626F5BE8
+    - UT-BE-AUTO-51D1EA0883A79983
+    - UT-BE-AUTO-92A31CE48AF8724C
+    - UT-BE-AUTO-97496DA0E32E2AD0
+    - UT-BE-AUTO-BCADEBF043C5DE3C
+    - UT-BE-AUTO-BDBC2EA00EAF645E
+    - UT-BE-AUTO-CE8011DE9D3EAB17
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Preserve the existing RBAC contract. This change moves shared
+    definitions and comments without adding a public protocol or business rule.
+  notes: Continues PR 4160. Existing traditional API, database, schema, constant,
+    authentication and service regressions remain separate from formal D1 results.
+    Changed case scripts follow the same canonical imports. Affected D1 cases are
+    selected for execution; D2/D3/D5 import edits preserve their existing contracts
+    and do not establish live acceptance.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Preserve request fields, validation boundaries and exception class identity
+    - Preserve pure constant values and environment configuration defaults
+    - Keep business files, errors and constants in their canonical directories
+    reason: Reuse existing unit and API tests, add business directory and configuration
+      independent constant-import regressions, and audit source declarations/comments.
+    test_selectors:
+    - test/backend/management/test_contracts_directory_architecture.py
+    - test/backend/management/test_gateway_authentication.py
+    - test/backend/test_model_consts.py
+    - test/backend/consts/test_config_import_contexts.py
+    - test/backend/consts/test_app_version.py
+    - test/backend/app/test_a2a_client_app.py
+    - test/backend/app/test_oauth_app.py
+    - test/backend/app/test_skill_app.py

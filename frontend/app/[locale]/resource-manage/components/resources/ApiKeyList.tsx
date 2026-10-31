@@ -1,7 +1,12 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import { UserIdentity } from "@/components/auth/UserIdentity";
+import { UserIdentityLabel } from "@/components/auth/UserIdentityLabel";
+
 import React, { useMemo, useState } from "react";
-import { App, Button, Popconfirm, Table, Tag } from "antd";
+import { App, Button, Table, Tag } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { RefreshCw, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -34,9 +39,7 @@ export default function ApiKeyList({ tenantId }: { tenantId: string | null }) {
       await refetch();
       modal.success({
         title: t("tenantResources.apiKeys.refreshSuccess"),
-        content: (
-          <code className="block break-all mt-3">{result.api_key}</code>
-        ),
+        content: <code className="block break-all mt-3">{result.api_key}</code>,
       });
     } catch (error: any) {
       message.error(
@@ -69,16 +72,31 @@ export default function ApiKeyList({ tenantId }: { tenantId: string | null }) {
         dataIndex: "access_key",
         key: "access_key",
         width: 320,
-        render: (key: string) => <code className="whitespace-nowrap">{key}</code>,
+        render: (key: string) => (
+          <code className="whitespace-nowrap">{key}</code>
+        ),
       },
       {
-        title: t("tenantResources.apiKeys.ownerEmail"),
+        title: (
+          <UserIdentityLabel
+            emailLabelKey="tenantResources.apiKeys.ownerEmail"
+            usernameLabelKey="tenantResources.apiKeys.ownerUsername"
+          />
+        ),
         dataIndex: "owner_email",
         key: "owner_email",
-        render: (value?: string | null) =>
-          value || (
+        render: (value: string | null | undefined, record: TenantApiKey) =>
+          value ? (
+            <UserIdentity
+              casUsername={record.owner_cas_username}
+              fallback={value || t("tenantResources.apiKeys.virtualApiAccount")}
+            />
+          ) : (
             <span className="text-gray-400">
-              {t("tenantResources.apiKeys.virtualApiAccount")}
+              <UserIdentity
+                casUsername={record.owner_cas_username}
+                fallback={t("tenantResources.apiKeys.virtualApiAccount")}
+              />
             </span>
           ),
       },
@@ -113,10 +131,20 @@ export default function ApiKeyList({ tenantId }: { tenantId: string | null }) {
         },
       },
       {
-        title: t("tenantResources.apiKeys.creatorEmail"),
+        title: (
+          <UserIdentityLabel
+            emailLabelKey="tenantResources.apiKeys.creatorEmail"
+            usernameLabelKey="tenantResources.apiKeys.creatorUsername"
+          />
+        ),
         dataIndex: "creator_email",
         key: "creator_email",
-        render: (value?: string | null) => value || "-",
+        render: (value: string | null | undefined, record: TenantApiKey) => (
+          <UserIdentity
+            casUsername={record.creator_cas_username}
+            fallback={value || "-"}
+          />
+        ),
       },
       {
         title: t("tenantResources.apiKeys.createdAt"),
@@ -155,35 +183,40 @@ export default function ApiKeyList({ tenantId }: { tenantId: string | null }) {
         width: 100,
         render: (_, record) => (
           <div className="flex items-center gap-1">
-            <Popconfirm
-              title={t("tenantResources.apiKeys.confirmRefresh")}
-              description={t("tenantResources.apiKeys.affectsAll")}
-              onConfirm={() => refreshKey(record)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Button
-                type="text"
-                size="small"
-                loading={pendingUserId === record.user_id}
-                icon={<RefreshCw className="h-4 w-4" />}
-              />
-            </Popconfirm>
-            <Popconfirm
-              title={t("tenantResources.apiKeys.confirmRevoke")}
-              description={t("tenantResources.apiKeys.affectsAll")}
-              onConfirm={() => revokeKey(record)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Button
-                type="text"
-                danger
-                size="small"
-                disabled={pendingUserId === record.user_id}
-                icon={<Trash2 className="h-4 w-4" />}
-              />
-            </Popconfirm>
+            <Button
+              type="text"
+              size="small"
+              loading={pendingUserId === record.user_id}
+              icon={<RefreshCw className="h-4 w-4" />}
+              onClick={() =>
+                modal.confirm({
+                  title: t("tenantResources.apiKeys.confirmRefresh"),
+                  content: t("tenantResources.apiKeys.affectsAll"),
+                  centered: true,
+                  okText: t("common.confirm"),
+                  cancelText: t("common.cancel"),
+                  onOk: () => refreshKey(record),
+                })
+              }
+            />
+            <Button
+              type="text"
+              danger
+              size="small"
+              disabled={pendingUserId === record.user_id}
+              icon={<Trash2 className="h-4 w-4" />}
+              onClick={() =>
+                modal.confirm({
+                  title: t("tenantResources.apiKeys.confirmRevoke"),
+                  content: t("tenantResources.apiKeys.affectsAll"),
+                  centered: true,
+                  okText: t("common.confirm"),
+                  cancelText: t("common.cancel"),
+                  okButtonProps: { danger: true },
+                  onOk: () => revokeKey(record),
+                })
+              }
+            />
           </div>
         ),
       },

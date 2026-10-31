@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: RESOURCE-TAG-TAB-20261020
+  change_type: requirement
+  requirement_id: RESOURCE-TAG-TAB-20261020
+  title: Centralize tag management in resource management
+  description: Remove management entries from Agent resource pickers, the knowledge catalog toolbar and My MCP toolbar. Add a localized Tags tab with the existing definition/value management table and library selection.
+  affected_features:
+    existing: []
+    added:
+    - RESOURCE-TAG-MANAGEMENT
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/component/tagLibraryManagement.test.tsx
+    - frontend/tests/component/knowledgeCatalog.test.tsx
+    - frontend/tests/component/resourceTagManagement.test.tsx
+    behaviors:
+    - The Tags tab renders definitions inline, switches libraries and retains definition/value mutations and search.
+    - Loading, empty and request failure states are distinguishable and failures can be retried.
+    - Readonly roles cannot mutate tags and a foreign selected tenant never displays the authenticated tenant's labels.
+    - The knowledge catalog toolbar no longer offers tag management and resource assignment remains available.
+    - Tag and value dialogs use common.cancel and tagManagement.action.confirm in both inline and modal management; existing save assertions cover the updated labels without adding cosmetic-only tests.
+    reason: Frontend composition and interactions use component UT; backend API contracts and tenant isolation are unchanged. No new D1 duplicates component UT; D2/D3/D5 have no changed boundary. Browser appearance remains a separate visual check.
+  notes: >-
+    Acceptance is the requested entry relocation plus preservation of existing tag CRUD, search, expanded values and permissions.
+    Existing resourceTagManagement.test.tsx covers assignment saving and readonly targets; the new tagLibraryManagement tests will exercise the real panel against controlled service responses.
+    The sibling nexent-doc and UI source document are absent, so a full external SPEC set cannot be written here. No unrelated historical formal assets are reconstructed.
+    Verification: 20 frontend component tests passed across tagLibraryManagement, knowledgeCatalog and resourceTagManagement; design and implementation asset validation passed with --require-ut-change RESOURCE-TAG-TAB-20261020.
+    Browser checks confirmed the Tags tab, library switching, expanded values and removal of management entries in all three Agent resource pickers, the knowledge catalog toolbar and My MCP. Tag filtering remains available; no live metadata was mutated.
+    Targeted ESLint and Prettier checks passed for the new panel, Tags list, management modal, regression test and Agent/MCP entry-removal files. Copyright and diff whitespace checks passed.
+    Type checking is blocked only by the pre-existing .next/types/validator.ts import of the missing space/evaluators page. The parent UserManageComp still has existing explicit-any and set-state-in-effect lint errors outside the changed import and tab item.
+    Button-copy follow-up: shared management panel uses common.cancel and tagManagement.action.confirm (Chinese 确认; English Confirm) for definition/value forms and delete confirmations. Eight related component tests, targeted lint, format and copyright checks passed; the live create dialog showed the requested labels. Global common.confirm remains unchanged.

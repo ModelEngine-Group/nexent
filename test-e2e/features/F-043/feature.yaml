@@ -1,0 +1,18 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-043
+  name: 创建/更新/删除与名称唯一性/批量check_name
+  status: active
+  description: '智能体配置 / Agent CRUD: 创建/更新/删除与名称唯一性/批量check_name'
+  business_rules:
+  - rule_id: F-043-RULE-01
+    description: 创建/更新/删除与名称唯一性/批量check_name
+  - rule_id: F-043-RULE-02
+    description: Internal Agent variable names use the same 1-100 character Python identifier rule, including Unicode and excluding Python keywords, across API saves, imports, NL2Agent and publication. Omitted names remain valid for partial drafts; display names are independent.
+  required_test_stages:
+  - D3
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

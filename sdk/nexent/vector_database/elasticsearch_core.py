@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -31,6 +32,8 @@ class BulkOperation:
 
 SCROLL_TTL = "2m"
 DEFAULT_SCROLL_SIZE = 1000
+_HIGHLIGHT_PRE_TAG = "__nexent_hit_start__"
+_HIGHLIGHT_POST_TAG = "__nexent_hit_end__"
 
 
 class ElasticSearchCore(VectorDatabaseCore):
@@ -749,8 +752,18 @@ class ElasticSearchCore(VectorDatabaseCore):
                 if cause_reason:
                     reason_text = f"{reason_text}; caused by: {cause_reason}"
 
-                # Derive a precise error code without chaining through es_bulk_failed
-                if "dense_vector" in reason_text and "different number of dimensions" in reason_text:
+                # Keep storage-protection failures distinguishable from generic bulk errors.
+                normalized_reason = reason_text.lower()
+                if any(marker in normalized_reason for marker in (
+                    "cluster_block_exception",
+                    "disk watermark",
+                    "flood-stage watermark",
+                    "flood stage watermark",
+                    "read-only-allow-delete",
+                    "read_only_allow_delete",
+                )):
+                    error_code = "es_disk_watermark"
+                elif "dense_vector" in reason_text and "different number of dimensions" in reason_text:
                     error_code = "es_dim_mismatch"
                 else:
                     error_code = "es_bulk_failed"
@@ -1074,6 +1087,20 @@ class ElasticSearchCore(VectorDatabaseCore):
         search_query = build_weighted_query(query_text, weights) | {
             "size": top_k,
             "_source": {"excludes": ["embedding"]},
+            # Ask Elasticsearch to retain the exact text that satisfied the
+            # lexical branch. This is part of the existing request, not a
+            # second search, and is later used only to explain result cards.
+            "highlight": {
+                "pre_tags": [_HIGHLIGHT_PRE_TAG],
+                "post_tags": [_HIGHLIGHT_POST_TAG],
+                "fields": {
+                    "title": {"number_of_fragments": 0},
+                    "content": {
+                        "fragment_size": 256,
+                        "number_of_fragments": 3,
+                    },
+                },
+            },
         }
 
         # Inject an additional AND-filter (memory index isolation, etc.).
@@ -1097,14 +1124,34 @@ class ElasticSearchCore(VectorDatabaseCore):
         # Process and return results
         results = []
         for hit in response["hits"]["hits"]:
+            highlight_terms = self._extract_highlight_terms(hit.get("highlight", {}))
             results.append(
                 {
                     "score": hit["_score"],
                     "document": hit["_source"],
                     "index": hit["_index"],  # Include source index in results
+                    "highlight_terms": highlight_terms,
                 }
             )
         return results
+
+    @staticmethod
+    def _extract_highlight_terms(highlights: Dict[str, List[str]]) -> List[str]:
+        """Extract plain matched terms from Elasticsearch's trusted markers."""
+        terms: List[str] = []
+        pattern = re.compile(
+            re.escape(_HIGHLIGHT_PRE_TAG)
+            + r"(.*?)"
+            + re.escape(_HIGHLIGHT_POST_TAG),
+            re.DOTALL,
+        )
+        for fragments in highlights.values():
+            for fragment in fragments:
+                for match in pattern.findall(fragment):
+                    term = match.strip()
+                    if term and term not in terms:
+                        terms.append(term)
+        return terms
 
     def semantic_search(
         self,
@@ -1231,6 +1278,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                     "accurate_score": result.get("score", 0),
                     "semantic_score": 0,
                     "index": result["index"],  # Keep track of source index
+                    "highlight_terms": result.get("highlight_terms", []),
                 }
             except KeyError as e:
                 logger.warning(
@@ -1250,6 +1298,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                         "accurate_score": 0,
                         "semantic_score": result.get("score", 0),
                         "index": result["index"],  # Keep track of source index
+                        "highlight_terms": [],
                     }
             except KeyError as e:
                 logger.warning(
@@ -1295,6 +1344,7 @@ class ElasticSearchCore(VectorDatabaseCore):
                         # Include source index in results
                         "index": result["index"],
                         "scores": {"accurate": normalized_accurate, "semantic": normalized_semantic},
+                        "highlight_terms": result.get("highlight_terms", []),
                     }
                 )
             except KeyError as e:

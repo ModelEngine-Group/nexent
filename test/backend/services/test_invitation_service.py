@@ -1,3 +1,4 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import sys
 import types
 import pytest
@@ -48,15 +49,19 @@ setattr(nexent_storage_module, "minio_config", nexent_minio_config_module)
 # imports mem0 at module load time.
 
 # Stub database modules used by invitation_service to avoid loading real SQLAlchemy client
-_db_client_stub = types.ModuleType("database.client")
+_db_client_stub = types.ModuleType("management.db.client")
 _db_client_stub.get_db_session = MagicMock()
 _db_client_stub.as_dict = MagicMock()
 _db_client_stub.MinioClient = MagicMock()
-sys.modules["database.client"] = _db_client_stub
-sys.modules["database.invitation_db"] = MagicMock()
-sys.modules["database.user_tenant_db"] = MagicMock()
-sys.modules["database.group_db"] = MagicMock()
-sys.modules["database.role_permission_db"] = MagicMock()
+sys.modules["management.db.client"] = _db_client_stub
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.identity.invitation"] = MagicMock()
+sys.modules["management.db.identity.user_tenant"] = MagicMock()
+sys.modules["management.db.identity.group"] = MagicMock()
+sys.modules["management.db.identity.role_permission"] = MagicMock()
 
 # Patch storage factory and MinIO config validation to avoid errors during initialization
 # These patches must be started before any imports that use MinioClient
@@ -68,16 +73,16 @@ _db_client_stub.MinioClient.return_value = minio_client_mock
 _services_pkg = types.ModuleType("services")
 _services_pkg.__path__ = []
 sys.modules["services"] = _services_pkg
-sys.modules["services.group_service"] = MagicMock()
-_asset_owner_visibility_stub = types.ModuleType("services.asset_owner_visibility")
+sys.modules["management.services.permission.identity.groups"] = MagicMock()
+_asset_owner_visibility_stub = types.ModuleType("management.services.permission.asset_owner")
 _asset_owner_visibility_stub.require_asset_owner_enabled = lambda: None
-sys.modules["services.asset_owner_visibility"] = _asset_owner_visibility_stub
+sys.modules["management.services.permission.asset_owner"] = _asset_owner_visibility_stub
 setattr(_services_pkg, "asset_owner_visibility", _asset_owner_visibility_stub)
-setattr(_services_pkg, "group_service", sys.modules["services.group_service"])
+setattr(_services_pkg, "group_service", sys.modules["management.services.permission.identity.groups"])
 
-from consts.const import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_TENANT_ID
-from consts.exceptions import NotFoundException, UnauthorizedError, DuplicateError
-from backend.services.invitation_service import (
+from contracts.constants.constants import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_TENANT_ID
+from contracts.errors.exceptions import NotFoundException, UnauthorizedError, DuplicateError
+from management.services.permission.identity.invitations import (
     create_invitation_code,
     update_invitation_code,
     use_invitation_code,
@@ -117,13 +122,13 @@ def mock_invitation_info():
     }
 
 
-@patch('backend.services.invitation_service.get_tenant_default_group_id')
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
-@patch('backend.services.invitation_service._generate_unique_invitation_code')
-@patch('backend.services.invitation_service.add_invitation')
-@patch('backend.services.invitation_service.query_invitation_by_id')
-@patch('backend.services.invitation_service.update_invitation_code_status')
-@patch('backend.services.invitation_service.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.get_tenant_default_group_id')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations._generate_unique_invitation_code')
+@patch('management.services.permission.identity.invitations.add_invitation')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.update_invitation_code_status')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
 def test_create_invitation_code_admin_invite(
     mock_query_invitation_by_code,
     mock_update_status,
@@ -167,13 +172,13 @@ def test_create_invitation_code_admin_invite(
     )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
-@patch('backend.services.invitation_service.query_group_ids_by_user')
-@patch('backend.services.invitation_service._generate_unique_invitation_code')
-@patch('backend.services.invitation_service.add_invitation')
-@patch('backend.services.invitation_service.query_invitation_by_id')
-@patch('backend.services.invitation_service.update_invitation_code_status')
-@patch('backend.services.invitation_service.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.query_group_ids_by_user')
+@patch('management.services.permission.identity.invitations._generate_unique_invitation_code')
+@patch('management.services.permission.identity.invitations.add_invitation')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.update_invitation_code_status')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
 def test_create_invitation_code_dev_invite_admin_role(
     mock_query_invitation_by_code,
     mock_update_status,
@@ -217,7 +222,7 @@ def test_create_invitation_code_dev_invite_admin_role(
     )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
 def test_create_invitation_code_invalid_code_type(mock_get_user_info, mock_user_info):
     """Test creating invitation code with invalid code_type"""
     # Setup mocks
@@ -232,7 +237,7 @@ def test_create_invitation_code_invalid_code_type(mock_get_user_info, mock_user_
             )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
 def test_create_invitation_code_unauthorized_admin_invite(mock_get_user_info, mock_user_info):
     """Test creating ADMIN_INVITE code with insufficient permissions"""
     # Setup mocks
@@ -247,7 +252,7 @@ def test_create_invitation_code_unauthorized_admin_invite(mock_get_user_info, mo
             )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
 def test_create_invitation_code_unauthorized_dev_invite(mock_get_user_info, mock_user_info):
     """Test creating DEV_INVITE code with insufficient permissions"""
     # Setup mocks
@@ -262,7 +267,7 @@ def test_create_invitation_code_unauthorized_dev_invite(mock_get_user_info, mock
             )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
 def test_create_invitation_code_user_not_found(mock_get_user_info):
     """Test creating invitation code when user is not found"""
     # Setup mocks
@@ -276,8 +281,8 @@ def test_create_invitation_code_user_not_found(mock_get_user_info):
         )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
-@patch('backend.services.invitation_service.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
 def test_create_invitation_code_duplicate(mock_query_invitation_by_code, mock_get_user_info, mock_user_info):
     """Test creating invitation code with duplicate code raises DuplicateError"""
     # Setup mocks
@@ -302,13 +307,13 @@ def test_create_invitation_code_duplicate(mock_query_invitation_by_code, mock_ge
     mock_query_invitation_by_code.assert_called_once_with("EXISTING")
 
 
-@patch('backend.services.invitation_service.get_tenant_default_group_id')
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
-@patch('backend.services.invitation_service._generate_unique_invitation_code')
-@patch('backend.services.invitation_service.add_invitation')
-@patch('backend.services.invitation_service.query_invitation_by_id')
-@patch('backend.services.invitation_service.update_invitation_code_status')
-@patch('backend.services.invitation_service.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.get_tenant_default_group_id')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations._generate_unique_invitation_code')
+@patch('management.services.permission.identity.invitations.add_invitation')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.update_invitation_code_status')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
 def test_create_invitation_code_default_empty_group_ids(
     mock_query_invitation_by_code,
     mock_update_status,
@@ -346,12 +351,12 @@ def test_create_invitation_code_default_empty_group_ids(
     assert call_args["group_ids"] == []
 
 
-@patch('backend.services.invitation_service.get_tenant_default_group_id')
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
-@patch('backend.services.invitation_service.add_invitation')
-@patch('backend.services.invitation_service.query_invitation_by_id')
-@patch('backend.services.invitation_service.update_invitation_code_status')
-@patch('backend.services.invitation_service.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.get_tenant_default_group_id')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.add_invitation')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.update_invitation_code_status')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
 def test_create_invitation_code_provided_code_uppercase_conversion(
     mock_query_invitation_by_code,
     mock_update_status,
@@ -392,9 +397,9 @@ def test_create_invitation_code_provided_code_uppercase_conversion(
     )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
-@patch('backend.services.invitation_service.modify_invitation')
-@patch('backend.services.invitation_service.update_invitation_code_status')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.modify_invitation')
+@patch('management.services.permission.identity.invitations.update_invitation_code_status')
 def test_update_invitation_code_success(mock_update_status, mock_modify_invitation, mock_get_user_info, mock_user_info):
     """Test updating invitation code successfully"""
     mock_get_user_info.return_value = mock_user_info
@@ -415,7 +420,7 @@ def test_update_invitation_code_success(mock_update_status, mock_modify_invitati
     )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
 def test_update_invitation_code_user_not_found(mock_get_user_info):
     """Test updating invitation code when user is not found"""
     # Setup mocks
@@ -429,7 +434,7 @@ def test_update_invitation_code_user_not_found(mock_get_user_info):
         )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
 def test_update_invitation_code_unauthorized_user_role(mock_get_user_info, mock_user_info):
     """Test updating invitation code with unauthorized user role"""
     # Setup mocks
@@ -506,8 +511,8 @@ def test_normalize_invitation_data_group_ids_conversion():
     assert result["group_ids"] == [4, 5, 6]
 
 
-@patch('backend.services.invitation_service.count_invitation_usage')
-@patch('backend.services.invitation_service.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
 def test_get_invitation_by_code_success(mock_query_invitation_by_code, mock_count_usage):
     """Test get_invitation_by_code function success case (lines 217-218)"""
     mock_data = {
@@ -532,7 +537,7 @@ def test_get_invitation_by_code_success(mock_query_invitation_by_code, mock_coun
     mock_count_usage.assert_called_once_with(123)
 
 
-@patch('backend.services.invitation_service.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
 def test_get_invitation_by_code_not_found(mock_query_invitation_by_code):
     """Test get_invitation_by_code function when invitation not found"""
     mock_query_invitation_by_code.return_value = None
@@ -543,8 +548,8 @@ def test_get_invitation_by_code_not_found(mock_query_invitation_by_code):
     mock_query_invitation_by_code.assert_called_once_with("NONEXISTENT")
 
 
-@patch('backend.services.invitation_service.query_invitation_by_code')
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_check_invitation_available_not_found(mock_count_usage, mock_query_invitation_by_code):
     """Test check_invitation_available when invitation not found (line 231-233)"""
     mock_query_invitation_by_code.return_value = None
@@ -556,8 +561,8 @@ def test_check_invitation_available_not_found(mock_count_usage, mock_query_invit
     mock_count_usage.assert_not_called()
 
 
-@patch('backend.services.invitation_service.query_invitation_by_code')
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_check_invitation_available_not_in_use(mock_count_usage, mock_query_invitation_by_code):
     """Test check_invitation_available when status is not IN_USE (lines 235-237)"""
     mock_query_invitation_by_code.return_value = {
@@ -573,8 +578,8 @@ def test_check_invitation_available_not_in_use(mock_count_usage, mock_query_invi
     mock_count_usage.assert_not_called()
 
 
-@patch('backend.services.invitation_service.query_invitation_by_code')
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_check_invitation_available_capacity_exceeded(mock_count_usage, mock_query_invitation_by_code):
     """Test check_invitation_available when capacity exceeded (lines 239-241)"""
     mock_query_invitation_by_code.return_value = {
@@ -591,8 +596,8 @@ def test_check_invitation_available_capacity_exceeded(mock_count_usage, mock_que
     mock_count_usage.assert_called_once_with(123)
 
 
-@patch('backend.services.invitation_service.query_invitation_by_code')
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_check_invitation_available_success(mock_count_usage, mock_query_invitation_by_code):
     """Test check_invitation_available success case"""
     mock_query_invitation_by_code.return_value = {
@@ -609,10 +614,10 @@ def test_check_invitation_available_success(mock_count_usage, mock_query_invitat
     mock_count_usage.assert_called_once_with(123)
 
 
-@patch('backend.services.invitation_service.check_invitation_available')
-@patch('backend.services.invitation_service.query_invitation_by_code')
-@patch('backend.services.invitation_service.add_invitation_record')
-@patch('backend.services.invitation_service.update_invitation_code_status')
+@patch('management.services.permission.identity.invitations.check_invitation_available')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.add_invitation_record')
+@patch('management.services.permission.identity.invitations.update_invitation_code_status')
 def test_use_invitation_code_success(
     mock_update_status,
     mock_add_invitation_record,
@@ -642,7 +647,7 @@ def test_use_invitation_code_success(
     mock_update_status.assert_called_once_with(123)
 
 
-@patch('backend.services.invitation_service.check_invitation_available')
+@patch('management.services.permission.identity.invitations.check_invitation_available')
 def test_use_invitation_code_unavailable(mock_check_available):
     """Test using unavailable invitation code"""
     mock_check_available.return_value = False
@@ -654,8 +659,8 @@ def test_use_invitation_code_unavailable(mock_check_available):
         )
 
 
-@patch('backend.services.invitation_service.check_invitation_available')
-@patch('backend.services.invitation_service.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.check_invitation_available')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
 def test_use_invitation_code_double_check_not_found(mock_query_invitation_by_code, mock_check_available):
     """Test use_invitation_code double check logic when invitation not found (lines 267-268)"""
     # First check passes
@@ -674,9 +679,9 @@ def test_use_invitation_code_double_check_not_found(mock_query_invitation_by_cod
     mock_query_invitation_by_code.assert_called_once_with("ABC123")
 
 
-@patch('backend.services.invitation_service.query_invitation_by_id')
-@patch('backend.services.invitation_service.count_invitation_usage')
-@patch('backend.services.invitation_service.modify_invitation')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.modify_invitation')
 def test_update_invitation_code_status_expired(
     mock_modify_invitation,
     mock_count_invitation_usage,
@@ -701,9 +706,9 @@ def test_update_invitation_code_status_expired(
     )
 
 
-@patch('backend.services.invitation_service.query_invitation_by_id')
-@patch('backend.services.invitation_service.count_invitation_usage')
-@patch('backend.services.invitation_service.modify_invitation')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.modify_invitation')
 def test_update_invitation_code_status_run_out(
     mock_modify_invitation,
     mock_count_invitation_usage,
@@ -732,7 +737,7 @@ def test_update_invitation_code_status_run_out(
     )
 
 
-@patch('backend.services.invitation_service.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
 def test_update_invitation_code_status_invitation_not_found(mock_query_invitation_by_id):
     """Test update_invitation_code_status when invitation not found (lines 304-305)"""
     mock_query_invitation_by_id.return_value = None
@@ -743,8 +748,8 @@ def test_update_invitation_code_status_invitation_not_found(mock_query_invitatio
     mock_query_invitation_by_id.assert_called_once_with(999)
 
 
-@patch('backend.services.invitation_service.query_invitation_by_id')
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_update_invitation_code_status_invalid_expiry_date(mock_count_invitation_usage, mock_query_invitation_by_id):
     """Test update_invitation_code_status with invalid expiry date handling (lines 317-327)"""
     # Mock invitation with invalid expiry date
@@ -764,9 +769,9 @@ def test_update_invitation_code_status_invalid_expiry_date(mock_count_invitation
     mock_count_invitation_usage.assert_called_once_with(123)
 
 
-@patch('backend.services.invitation_service.query_invitation_by_id')
-@patch('backend.services.invitation_service.count_invitation_usage')
-@patch('backend.services.invitation_service.modify_invitation')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.modify_invitation')
 def test_update_invitation_code_status_recover_from_run_out(mock_modify_invitation, mock_count_invitation_usage, mock_query_invitation_by_id):
     """Test update_invitation_code_status recovers from RUN_OUT to IN_USE when capacity increases"""
     from datetime import datetime
@@ -792,9 +797,9 @@ def test_update_invitation_code_status_recover_from_run_out(mock_modify_invitati
     )
 
 
-@patch('backend.services.invitation_service.query_invitation_by_id')
-@patch('backend.services.invitation_service.count_invitation_usage')
-@patch('backend.services.invitation_service.modify_invitation')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.modify_invitation')
 def test_update_invitation_code_status_recover_from_expire(mock_modify_invitation, mock_count_invitation_usage, mock_query_invitation_by_id):
     """Test update_invitation_code_status recovers from EXPIRE to IN_USE when expiry date is extended"""
     from datetime import datetime
@@ -820,8 +825,8 @@ def test_update_invitation_code_status_recover_from_expire(mock_modify_invitatio
     )
 
 
-@patch('backend.services.invitation_service.query_invitation_by_id')
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_update_invitation_code_status_no_change(mock_count_invitation_usage, mock_query_invitation_by_id):
     """Test update_invitation_code_status when status doesn't change (line 343)"""
     from datetime import datetime
@@ -846,7 +851,7 @@ def test_update_invitation_code_status_no_change(mock_count_invitation_usage, mo
 
 def test_calculate_current_status_empty_invitation_data():
     """Test _calculate_current_status with empty invitation_data (line 276-277)"""
-    from backend.services.invitation_service import _calculate_current_status
+    from management.services.permission.identity.invitations import _calculate_current_status
 
     # Test with None input
     result = _calculate_current_status(None)
@@ -859,7 +864,7 @@ def test_calculate_current_status_empty_invitation_data():
 
 def test_calculate_current_status_missing_invitation_id():
     """Test _calculate_current_status with missing invitation_id (lines 279-281)"""
-    from backend.services.invitation_service import _calculate_current_status
+    from management.services.permission.identity.invitations import _calculate_current_status
 
     # Test with invitation_data missing invitation_id
     input_data = {
@@ -877,10 +882,10 @@ def test_calculate_current_status_missing_invitation_id():
     assert result["status"] == "IN_USE"
 
 
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_calculate_current_status_datetime_expiry_date(mock_count_usage):
     """Test _calculate_current_status with datetime object expiry_date (lines 296-297)"""
-    from backend.services.invitation_service import _calculate_current_status
+    from management.services.permission.identity.invitations import _calculate_current_status
     from datetime import datetime
 
     # Mock usage count below capacity
@@ -901,10 +906,10 @@ def test_calculate_current_status_datetime_expiry_date(mock_count_usage):
     assert result["status"] == "EXPIRE"
 
 
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_calculate_current_status_string_expiry_date(mock_count_usage):
     """Test _calculate_current_status with string expiry_date conversion (lines 299-300)"""
-    from backend.services.invitation_service import _calculate_current_status
+    from management.services.permission.identity.invitations import _calculate_current_status
     from datetime import datetime
 
     # Mock usage count below capacity
@@ -925,10 +930,10 @@ def test_calculate_current_status_string_expiry_date(mock_count_usage):
     assert result["status"] == "EXPIRE"
 
 
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_calculate_current_status_expired_check_logic(mock_count_usage):
     """Test _calculate_current_status expiry check logic (lines 301-302)"""
-    from backend.services.invitation_service import _calculate_current_status
+    from management.services.permission.identity.invitations import _calculate_current_status
     from datetime import datetime
 
     # Mock usage count below capacity
@@ -949,11 +954,11 @@ def test_calculate_current_status_expired_check_logic(mock_count_usage):
     assert result["status"] == "IN_USE"
 
 
-@patch('backend.services.invitation_service.logger')
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.logger')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_calculate_current_status_invalid_expiry_date_format(mock_count_usage, mock_logger):
     """Test _calculate_current_status with invalid expiry_date format (lines 303-304)"""
-    from backend.services.invitation_service import _calculate_current_status
+    from management.services.permission.identity.invitations import _calculate_current_status
 
     # Mock usage count below capacity
     mock_count_usage.return_value = 1
@@ -973,10 +978,10 @@ def test_calculate_current_status_invalid_expiry_date_format(mock_count_usage, m
     mock_logger.warning.assert_called_once_with("Invalid expiry_date format for invitation 123: invalid-date-format")
 
 
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_calculate_current_status_capacity_check(mock_count_usage):
     """Test _calculate_current_status capacity check logic (lines 307-308)"""
-    from backend.services.invitation_service import _calculate_current_status
+    from management.services.permission.identity.invitations import _calculate_current_status
     from datetime import datetime
 
     # Mock usage count at capacity
@@ -997,7 +1002,7 @@ def test_calculate_current_status_capacity_check(mock_count_usage):
     assert result["status"] == "RUN_OUT"
 
 
-@patch('backend.services.invitation_service.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
 def test_generate_unique_invitation_code(mock_query_invitation_by_code):
     """Test generating unique invitation code"""
     # Mock that first code exists, second doesn't
@@ -1012,7 +1017,7 @@ def test_generate_unique_invitation_code(mock_query_invitation_by_code):
         assert len(result) == 6
 
 
-@patch('backend.services.invitation_service.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
 def test_generate_unique_invitation_code_uniqueness_logic(mock_query_invitation_by_code):
     """Test _generate_unique_invitation_code uniqueness logic (line 359)"""
     # Mock that first two codes exist, third doesn't
@@ -1034,7 +1039,7 @@ def test_generate_unique_invitation_code_uniqueness_logic(mock_query_invitation_
         assert mock_query_invitation_by_code.call_count == 3
 
 
-@patch('backend.services.invitation_service.query_invitation_by_code')
+@patch('management.services.permission.identity.invitations.query_invitation_by_code')
 def test_generate_unique_invitation_code_max_attempts_exception(mock_query_invitation_by_code):
     """Test _generate_unique_invitation_code max attempts exception (line 369)"""
     # Mock that all codes exist (never find a unique one)
@@ -1050,8 +1055,8 @@ def test_generate_unique_invitation_code_max_attempts_exception(mock_query_invit
         assert mock_query_invitation_by_code.call_count == 100
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
-@patch('backend.services.invitation_service.query_invitations_with_pagination')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.query_invitations_with_pagination')
 def test_get_invitations_list_success(mock_query_invitations, mock_get_user, mock_user_info):
     """Test getting invitations list successfully"""
     mock_get_user.return_value = mock_user_info
@@ -1093,8 +1098,8 @@ def test_get_invitations_list_success(mock_query_invitations, mock_get_user, moc
     )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
-@patch('backend.services.invitation_service.query_invitations_with_pagination')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.query_invitations_with_pagination')
 def test_get_invitations_list_with_sorting(mock_query_invitations, mock_get_user, mock_user_info):
     """Test getting invitations list with sorting parameters"""
     mock_get_user.return_value = mock_user_info
@@ -1139,7 +1144,7 @@ def test_get_invitations_list_with_sorting(mock_query_invitations, mock_get_user
     )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
 def test_get_invitations_list_user_not_found(mock_get_user):
     """Test getting invitations list when user doesn't exist"""
     mock_get_user.return_value = None
@@ -1153,8 +1158,8 @@ def test_get_invitations_list_user_not_found(mock_get_user):
         )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
-@patch('backend.services.invitation_service.query_invitations_with_pagination')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.query_invitations_with_pagination')
 def test_get_invitations_list_unauthorized_user_role(mock_query_invitations, mock_get_user, mock_user_info):
     """Test getting invitations list with unauthorized user role"""
     mock_user_info["user_role"] = "USER"
@@ -1169,7 +1174,7 @@ def test_get_invitations_list_unauthorized_user_role(mock_query_invitations, moc
         )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
 def test_get_invitations_list_unauthorized_user_role_all_tenants(mock_get_user, mock_user_info):
     """Test getting invitations list for all tenants with insufficient permissions"""
     mock_user_info["user_role"] = "ADMIN"
@@ -1184,9 +1189,9 @@ def test_get_invitations_list_unauthorized_user_role_all_tenants(mock_get_user, 
         )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
-@patch('backend.services.invitation_service.query_invitation_by_id')
-@patch('backend.services.invitation_service.remove_invitation')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.remove_invitation')
 def test_delete_invitation_code_success(mock_remove_invitation, mock_query_invitation, mock_get_user, mock_user_info):
     """Test deleting invitation code successfully"""
     mock_get_user.return_value = mock_user_info
@@ -1205,10 +1210,10 @@ def test_delete_invitation_code_success(mock_remove_invitation, mock_query_invit
     )
 
 
-@patch('backend.services.invitation_service.logger')
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
-@patch('backend.services.invitation_service.query_invitation_by_id')
-@patch('backend.services.invitation_service.remove_invitation')
+@patch('management.services.permission.identity.invitations.logger')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.remove_invitation')
 def test_delete_invitation_code_success_logging(mock_remove_invitation, mock_query_invitation, mock_get_user, mock_logger, mock_user_info):
     """Test that successful deletion logs the appropriate message (line 205-207)"""
     mock_get_user.return_value = mock_user_info
@@ -1224,7 +1229,7 @@ def test_delete_invitation_code_success_logging(mock_remove_invitation, mock_que
     mock_logger.info.assert_called_once_with("Deleted invitation code 123 by user test_user")
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
 def test_delete_invitation_code_unauthorized_user_role(mock_get_user, mock_user_info):
     """Test deleting invitation code with insufficient permissions"""
     mock_user_info["user_role"] = "USER"
@@ -1237,8 +1242,8 @@ def test_delete_invitation_code_unauthorized_user_role(mock_get_user, mock_user_
         )
 
 
-@patch('backend.services.invitation_service.get_user_tenant_by_user_id')
-@patch('backend.services.invitation_service.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.get_user_tenant_by_user_id')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
 def test_delete_invitation_code_not_found(mock_query_invitation, mock_get_user, mock_user_info):
     """Test deleting non-existent invitation code"""
     mock_get_user.return_value = mock_user_info
@@ -1251,10 +1256,10 @@ def test_delete_invitation_code_not_found(mock_query_invitation, mock_get_user, 
         )
 
 
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_calculate_current_status_same_day_not_expired(mock_count_usage):
     """Test _calculate_current_status with same-day expiry date should NOT be expired (new logic)"""
-    from backend.services.invitation_service import _calculate_current_status
+    from management.services.permission.identity.invitations import _calculate_current_status
     from datetime import datetime
 
     # Mock usage count below capacity
@@ -1276,10 +1281,10 @@ def test_calculate_current_status_same_day_not_expired(mock_count_usage):
     assert result["status"] == "IN_USE"
 
 
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_calculate_current_status_yesterday_expired(mock_count_usage):
     """Test _calculate_current_status with yesterday's date as expiry SHOULD be expired"""
-    from backend.services.invitation_service import _calculate_current_status
+    from management.services.permission.identity.invitations import _calculate_current_status
     from datetime import datetime, timedelta
 
     # Mock usage count below capacity
@@ -1301,10 +1306,10 @@ def test_calculate_current_status_yesterday_expired(mock_count_usage):
     assert result["status"] == "EXPIRE"
 
 
-@patch('backend.services.invitation_service.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
 def test_calculate_current_status_same_day_string_not_expired(mock_count_usage):
     """Test _calculate_current_status with same-day string expiry date should NOT be expired (new logic)"""
-    from backend.services.invitation_service import _calculate_current_status
+    from management.services.permission.identity.invitations import _calculate_current_status
     from datetime import datetime
 
     # Mock usage count below capacity
@@ -1326,9 +1331,9 @@ def test_calculate_current_status_same_day_string_not_expired(mock_count_usage):
     assert result["status"] == "IN_USE"
 
 
-@patch('backend.services.invitation_service.query_invitation_by_id')
-@patch('backend.services.invitation_service.count_invitation_usage')
-@patch('backend.services.invitation_service.modify_invitation')
+@patch('management.services.permission.identity.invitations.query_invitation_by_id')
+@patch('management.services.permission.identity.invitations.count_invitation_usage')
+@patch('management.services.permission.identity.invitations.modify_invitation')
 def test_update_invitation_code_status_same_day_not_expired(
     mock_modify_invitation,
     mock_count_usage,
@@ -1356,13 +1361,13 @@ def test_update_invitation_code_status_same_day_not_expired(
     mock_modify_invitation.assert_not_called()
 
 
-@patch("backend.services.invitation_service.ENABLE_ASSET_OWNER_ROLE", True)
-@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
-@patch("backend.services.invitation_service._generate_unique_invitation_code")
-@patch("backend.services.invitation_service.add_invitation")
-@patch("backend.services.invitation_service.query_invitation_by_id")
-@patch("backend.services.invitation_service.update_invitation_code_status")
-@patch("backend.services.invitation_service.query_invitation_by_code")
+@patch("management.services.permission.identity.invitations.ENABLE_ASSET_OWNER_ROLE", True)
+@patch("management.services.permission.identity.invitations.get_user_tenant_by_user_id")
+@patch("management.services.permission.identity.invitations._generate_unique_invitation_code")
+@patch("management.services.permission.identity.invitations.add_invitation")
+@patch("management.services.permission.identity.invitations.query_invitation_by_id")
+@patch("management.services.permission.identity.invitations.update_invitation_code_status")
+@patch("management.services.permission.identity.invitations.query_invitation_by_code")
 def test_create_asset_owner_invite_success(
     mock_query_invitation_by_code,
     mock_update_status,
@@ -1400,8 +1405,8 @@ def test_create_asset_owner_invite_success(
     )
 
 
-@patch("backend.services.invitation_service.ENABLE_ASSET_OWNER_ROLE", True)
-@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
+@patch("management.services.permission.identity.invitations.ENABLE_ASSET_OWNER_ROLE", True)
+@patch("management.services.permission.identity.invitations.get_user_tenant_by_user_id")
 def test_create_asset_owner_invite_admin_forbidden(mock_get_user_info, mock_user_info):
     """ADMIN cannot create ASSET_OWNER_INVITE codes."""
     mock_user_info["user_role"] = "ADMIN"
@@ -1415,8 +1420,8 @@ def test_create_asset_owner_invite_admin_forbidden(mock_get_user_info, mock_user
         )
 
 
-@patch("backend.services.invitation_service.ENABLE_ASSET_OWNER_ROLE", False)
-@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
+@patch("management.services.permission.identity.invitations.ENABLE_ASSET_OWNER_ROLE", False)
+@patch("management.services.permission.identity.invitations.get_user_tenant_by_user_id")
 def test_create_asset_owner_invite_feature_disabled(mock_get_user_info, mock_user_info):
     """Creating ASSET_OWNER_INVITE when feature is disabled raises UnauthorizedError."""
     mock_user_info["user_role"] = "SU"
@@ -1430,10 +1435,10 @@ def test_create_asset_owner_invite_feature_disabled(mock_get_user_info, mock_use
         )
 
 
-@patch("backend.services.invitation_service.query_invitation_by_id")
-@patch("backend.services.invitation_service.modify_invitation")
-@patch("backend.services.invitation_service.update_invitation_code_status")
-@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
+@patch("management.services.permission.identity.invitations.query_invitation_by_id")
+@patch("management.services.permission.identity.invitations.modify_invitation")
+@patch("management.services.permission.identity.invitations.update_invitation_code_status")
+@patch("management.services.permission.identity.invitations.get_user_tenant_by_user_id")
 def test_update_asset_owner_invite_su_success(
     mock_get_user_info,
     mock_update_status,
@@ -1454,8 +1459,8 @@ def test_update_asset_owner_invite_su_success(
     mock_modify_invitation.assert_called_once()
 
 
-@patch("backend.services.invitation_service.query_invitation_by_id")
-@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
+@patch("management.services.permission.identity.invitations.query_invitation_by_id")
+@patch("management.services.permission.identity.invitations.get_user_tenant_by_user_id")
 def test_update_asset_owner_invite_admin_forbidden(
     mock_get_user_info,
     mock_query_invitation_by_id,
@@ -1473,8 +1478,8 @@ def test_update_asset_owner_invite_admin_forbidden(
         update_invitation_code(10, {"capacity": 2}, "admin_user")
 
 
-@patch("backend.services.invitation_service.query_invitations_with_pagination")
-@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
+@patch("management.services.permission.identity.invitations.query_invitations_with_pagination")
+@patch("management.services.permission.identity.invitations.get_user_tenant_by_user_id")
 def test_get_invitations_list_asset_owner_tenant_su_success(
     mock_get_user_info,
     mock_query_invitations,
@@ -1496,7 +1501,7 @@ def test_get_invitations_list_asset_owner_tenant_su_success(
     mock_query_invitations.assert_called_once()
 
 
-@patch("backend.services.invitation_service.get_user_tenant_by_user_id")
+@patch("management.services.permission.identity.invitations.get_user_tenant_by_user_id")
 def test_get_invitations_list_asset_owner_tenant_admin_forbidden(
     mock_get_user_info,
     mock_user_info,

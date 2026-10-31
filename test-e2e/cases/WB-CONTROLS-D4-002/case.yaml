@@ -1,0 +1,85 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-WORKBENCH
+case:
+  case_id: WB-CONTROLS-D4-002
+  feature_id: WB-CONTROLS
+  requirement_ids:
+  - WB-CONTROLS-20261013
+  - WB-SHARED-PARAMS-20261014
+  - WB-CREATION-TOGGLE-EXIT-20261015
+  - CHAT-SAMPLING-20261016
+  - CHAT-SAMPLING-DISPLAY-20261019
+  - WB-SAMPLING-RESET-REMOUNT-20261019
+  - CHAT-ADVANCED-AUTOFOCUS-20261019
+  business_rule_ids:
+  - WB-CONTROLS-RULE-002
+  - WB-CONTROLS-RULE-003
+  title: Creation recommendations and runtime advanced settings
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify true creation modes and presence-aware parameter editing with real pointer and keyboard input.
+  preconditions:
+  - Local frontend available with authorized mock user, newchat page access, selectable model and memory disabled.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Enter each creation mode using above-composer buttons and fill a mode-specific recommendation.
+    expected: Matching examples fill input without sending; no standalone return-to-chat button is displayed. Clicking the
+      active creation button restores the ordinary draft. Chinese Skill button reads 技能创建; composer and textarea keep their
+      top positions during mode entry, recommendation fill and return.
+  - order: 2
+    action: Open model menus with unsupported reasoning on Workbench and Agent chat; focus Advanced settings, then activate it by hover or keyboard. Drag and type decimal values, test invalid input and restore defaults.
+    expected: Opening the model menu or merely focusing Advanced settings keeps its panel closed, including automatic focus when thinking is disabled. Hover and explicit keyboard activation open it. Advanced settings has no gear and its label aligns with the other setting rows. Controls synchronize within
+      temperature 0-2 and Top P 0-1 with step 0.1, remain open during editing, and new-conversation settings change without
+      automatic generation or global model writes. New Agent chat also exposes shared Advanced settings with presence-aware
+      runtime numeric editing while real model/thinking controls remain available. Configured defaults appear as numeric
+      inputs and matching slider positions before editing and after reset, without generating overrides on focus. Slider rail and numeric input centers remain vertically aligned within one pixel.
+  - order: 3
+    action: Reload with no creation permission, Agent only, Skill only and both permissions while retaining resource page
+      access; enter each allowed mode.
+    expected: Only agent:create and skill:create independently enable their matching creation buttons; allowed buttons enter
+      the matching mode without generation.
+  - order: 4
+    action: Open an existing completed conversation, retain an unsent draft and reset sampling overrides while its versioned configuration PATCH is delayed. After the existing save lock completes, deliberately reopen Advanced settings to inspect the defaults.
+    expected: Inputs/sliders return to inherited defaults; the same document, active history, message DOM and composer draft remain mounted. Only sampling fields are cleared; model, reasoning and mounts remain unchanged. Save remains locked while pending, no history reload or generation occurs, and exactly one configuration PATCH completes.
+  expected_results:
+  - Mode-specific recommendations and runtime parameter controls are usable through the browser.
+  forbidden_side_effects:
+  - No automatic generation or global model configuration API requests.
+  - No document navigation, conversation/message remount, draft loss or unrelated configuration reset during sampling save.
+  actor: Authorized mock tenant user
+  journey:
+  - Open Workbench
+  - Switch creation modes
+  - Fill recommendation
+  - Return
+  - Open advanced settings
+  - Edit sampling overrides
+  final_business_result:
+  - User can prepare creation input and model settings without unintended backend writes.
+  failure_evidence:
+  - Browser trace and assertion screenshot; retain the saved-conversation reset view as acceptance proof.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Creation permissions, mode entry and advanced-settings browser journey including no-write assertions.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Existing-conversation sampling reset preserves mounted UI and unrelated state across asynchronous persistence.
+    steps: [4]
+    expected_results: [1]
+    forbidden_side_effects: [1, 2]

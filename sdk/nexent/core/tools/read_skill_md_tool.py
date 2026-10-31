@@ -2,11 +2,37 @@
 import logging
 import os
 import re
+from pathlib import Path
 from typing import Optional, Tuple
 
 from smolagents.tools import Tool
 
 logger = logging.getLogger(__name__)
+
+_SUPPORTED_ENCODINGS = ("utf-8-sig", "gb18030")
+
+
+def _read_text_file(file_path: str) -> str:
+    """Read text using strict, deterministic encoding fallbacks.
+
+    UTF-8 is preferred for skill files. GB18030 is the fallback because it is a
+    superset of GBK and GB2312. Decoding remains strict so unsupported or
+    corrupted input is reported instead of being replaced silently.
+    """
+    with open(file_path, "rb") as file:
+        data = file.read()
+
+    decode_errors = []
+    for encoding in _SUPPORTED_ENCODINGS:
+        try:
+            return data.decode(encoding, errors="strict")
+        except UnicodeDecodeError as exc:
+            decode_errors.append(exc)
+
+    attempted_encodings = ", ".join(_SUPPORTED_ENCODINGS)
+    raise UnicodeError(
+        f"Unable to decode '{file_path}' using supported encodings: {attempted_encodings}"
+    ) from decode_errors[-1]
 
 
 class ReadSkillMdTool(Tool):
@@ -30,6 +56,8 @@ class ReadSkillMdTool(Tool):
         agent_id: Optional[int] = None,
         tenant_id: Optional[str] = None,
         version_no: int = 0,
+        authorized_skill_names: Optional[list[str]] = None,
+        isolated_skills_root: bool = False,
     ):
         """Initialize the tool with local skills directory and agent context.
 
@@ -45,12 +73,23 @@ class ReadSkillMdTool(Tool):
         self.agent_id = agent_id
         self.tenant_id = tenant_id
         self.version_no = version_no
+        self.isolated_skills_root = isolated_skills_root
+        self.authorized_skill_names = (
+            frozenset(authorized_skill_names) if authorized_skill_names is not None else None
+        )
 
     def _get_skill_manager(self):
         """Lazy load skill manager."""
         if self.skill_manager is None:
-            from nexent.skills import SkillManager
-            self.skill_manager = SkillManager(self.local_skills_dir)
+            if self.isolated_skills_root:
+                from nexent.skills.skill_manager import SkillManager
+                manager = object.__new__(SkillManager)
+                manager.base_skills_dir = os.path.abspath(self.local_skills_dir)
+                manager._initialized = True
+                self.skill_manager = manager
+            else:
+                from nexent.skills import SkillManager
+                self.skill_manager = SkillManager(self.local_skills_dir)
         return self.skill_manager
 
     def _strip_frontmatter(self, content: str) -> str:
@@ -85,17 +124,15 @@ class ReadSkillMdTool(Tool):
 
         for path in possible_paths:
             full_path = os.path.join(skill_dir, path)
+            if self.authorized_skill_names is not None:
+                if not Path(full_path).resolve().is_relative_to(Path(skill_dir).resolve()):
+                    return "File access is not authorized", False
             if os.path.exists(full_path):
-                try:
-                    with open(full_path, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                    # Strip frontmatter if it's a markdown file
-                    if full_path.endswith('.md'):
-                        content = self._strip_frontmatter(content)
-                    return content, True
-                except Exception as e:
-                    logger.warning(f"Failed to read file {path}: {e}")
-                    continue
+                content = _read_text_file(full_path)
+                # Strip frontmatter if it's a markdown file
+                if full_path.endswith('.md'):
+                    content = self._strip_frontmatter(content)
+                return content, True
 
         return f"File not found: {file_path}", False
 
@@ -114,6 +151,8 @@ class ReadSkillMdTool(Tool):
             Combined markdown content
         """
         try:
+            if self.authorized_skill_names is not None and skill_name not in self.authorized_skill_names:
+                return "Skill access is not authorized"
             manager = self._get_skill_manager()
 
             # If skill_name is empty, read directly from local_skills_dir
@@ -188,8 +227,7 @@ class ReadSkillMdTool(Tool):
             return f"File not found: {file_path}"
 
         try:
-            with open(full_path, 'r', encoding='utf-8') as f:
-                content = f.read()
+            content = _read_text_file(full_path)
             # Strip frontmatter if it's a markdown file
             if full_path.endswith('.md'):
                 content = self._strip_frontmatter(content)

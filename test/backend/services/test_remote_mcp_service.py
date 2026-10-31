@@ -1,9 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
-Unit tests for backend/services/remote_mcp_service.py - custom_headers coverage.
+Unit tests for backend/management/services/mcp/service.py - custom_headers coverage.
 
 Tests specifically cover the custom_headers parameter additions across all
 functions in the remote_mcp_service module.
 """
+
+from test.backend.management.import_patching import bind_import_attribute, patch_import_context
 
 import unittest
 from types import SimpleNamespace
@@ -27,7 +30,10 @@ elasticsearch_module.__spec__ = importlib.machinery.ModuleSpec("elasticsearch", 
 sys.modules['elasticsearch'] = elasticsearch_module
 # Pre-mock nexent module hierarchy to prevent deep SDK import chain
 nexent_mod = types.ModuleType("nexent")
-nexent_mod.__path__ = []
+_sdk_nexent_path = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "../../../sdk/nexent")
+)
+nexent_mod.__path__ = [_sdk_nexent_path]
 nexent_mod.__spec__ = importlib.machinery.ModuleSpec("nexent", loader=None)
 sys.modules['nexent'] = nexent_mod
 
@@ -54,7 +60,11 @@ for _mod_name in [
     if _mod_name not in sys.modules:
         _parts = _mod_name.split('.')
         _mod = types.ModuleType(_mod_name)
-        _mod.__path__ = []
+        _mod.__path__ = (
+            [os.path.join(_sdk_nexent_path, "core")]
+            if _mod_name == "nexent.core"
+            else []
+        )
         _mod.__spec__ = importlib.machinery.ModuleSpec(_mod_name, loader=None)
         sys.modules[_mod_name] = _mod
 
@@ -70,27 +80,40 @@ nexent_container.create_container_client_from_config = MagicMock()
 nexent_container.ContainerError = Exception
 nexent_container.ContainerConnectionError = Exception
 
-# Pre-mock services.tool_configuration_service so patches resolve correctly
-tool_config_mod = types.ModuleType("services.tool_configuration_service")
+# Pre-mock management.services.tool.configuration so patches resolve correctly
+tool_config_mod = types.ModuleType("management.services.tool.configuration")
 tool_config_mod.get_tool_from_remote_mcp_server = AsyncMock()
-tool_config_mod.__spec__ = importlib.machinery.ModuleSpec("services.tool_configuration_service", loader=None)
-sys.modules['services.tool_configuration_service'] = tool_config_mod
+tool_config_mod.import_openapi_service = MagicMock()
+tool_config_mod.delete_openapi_service = MagicMock()
+tool_config_mod._refresh_openapi_services_in_mcp = MagicMock()
+tool_config_mod.update_tool_list = AsyncMock()
+tool_config_mod.__spec__ = importlib.machinery.ModuleSpec("management.services.tool.configuration", loader=None)
+sys.modules['management.services.tool.configuration'] = tool_config_mod
+tool_discovery_mod = types.ModuleType("management.services.tool.discovery")
+tool_discovery_mod.get_tool_from_remote_mcp_server = AsyncMock()
+sys.modules[tool_discovery_mod.__name__] = tool_discovery_mod
 
-# Pre-mock database.client module
-db_client_mod = types.ModuleType("database.client")
+# Pre-mock management.db.client module
+db_client_mod = types.ModuleType("management.db.client")
 db_client_mod.MinioClient = MagicMock()
 db_client_mod.minio_client = MagicMock()
 db_client_mod.as_dict = MagicMock()
 db_client_mod.filter_property = MagicMock()
 db_client_mod.get_db_session = MagicMock()
-db_client_mod.__spec__ = importlib.machinery.ModuleSpec("database.client", loader=None)
-sys.modules['database.client'] = db_client_mod
+db_client_mod.__spec__ = importlib.machinery.ModuleSpec("management.db.client", loader=None)
+sys.modules['management.db.client'] = db_client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
-backend_db_client_mod = types.ModuleType("backend.database.client")
+backend_db_client_mod = db_client_mod
 backend_db_client_mod.MinioClient = MagicMock()
 backend_db_client_mod.minio_client = MagicMock()
-backend_db_client_mod.__spec__ = importlib.machinery.ModuleSpec("backend.database.client", loader=None)
-sys.modules['backend.database.client'] = backend_db_client_mod
+backend_db_client_mod.__spec__ = importlib.machinery.ModuleSpec("management.db.client", loader=None)
+sys.modules['management.db.client'] = backend_db_client_mod
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Apply critical patches before importing any modules
 storage_client_mock = MagicMock()
@@ -101,22 +124,18 @@ patch('nexent.storage.storage_client_factory.create_storage_client_from_config',
       return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate',
       lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
-patch('backend.database.client.minio_client', minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes
-from backend.consts.exceptions import (
-    MCPConnectionError, MCPNameIllegal, MCPContainerError,
-    McpNotFoundError, McpValidationError, McpNameConflictError,
-    McpPortConflictError,
-)
-from backend.consts.const import PERMISSION_READ, PERMISSION_EDIT
-from backend.consts.model import MCPConfigRequest
+from contracts.errors.exceptions import MCPConnectionError, MCPNameIllegal, MCPContainerError, McpNotFoundError, McpValidationError, McpNameConflictError, McpPortConflictError
+from contracts.constants.constants import PERMISSION_READ, PERMISSION_EDIT
+from contracts.tool import MCPConfigRequest
 
 # Functions to test
-from backend.services.remote_mcp_service import (
+from management.services.mcp.service import (
     mcp_server_health,
     _is_container_record,
     check_container_port_conflict_records,
@@ -143,13 +162,13 @@ from backend.services.remote_mcp_service import (
     _mcp_protocol_health_check,
 )
 # Patch exception classes to ensure tests use correct exceptions
-import backend.services.remote_mcp_service as remote_service
-remote_service.MCPConnectionError = MCPConnectionError
-remote_service.MCPNameIllegal = MCPNameIllegal
-remote_service.McpNotFoundError = McpNotFoundError
-remote_service.McpValidationError = McpValidationError
-remote_service.McpNameConflictError = McpNameConflictError
-remote_service.McpPortConflictError = McpPortConflictError
+from management.services.mcp import service as remote_service
+bind_import_attribute(remote_service, 'MCPConnectionError', MCPConnectionError)
+bind_import_attribute(remote_service, 'MCPNameIllegal', MCPNameIllegal)
+bind_import_attribute(remote_service, 'McpNotFoundError', McpNotFoundError)
+bind_import_attribute(remote_service, 'McpValidationError', McpValidationError)
+bind_import_attribute(remote_service, 'McpNameConflictError', McpNameConflictError)
+bind_import_attribute(remote_service, 'McpPortConflictError', McpPortConflictError)
 
 
 # ============================================================================
@@ -234,8 +253,8 @@ class TestMcpConnectionErrorFormatting(unittest.IsolatedAsyncioTestCase):
             async def list_tools(self):
                 return []
 
-        with patch("backend.services.remote_mcp_service.Client", return_value=SlowConnectClient()), \
-             patch("backend.services.remote_mcp_service.MCP_HEALTH_CHECK_TIMEOUT_SECONDS", 0.001):
+        with patch_import_context("management.services.mcp.service.Client", return_value=SlowConnectClient()), \
+             patch_import_context("management.services.mcp.service.MCP_REQUEST_TIMEOUT_SECONDS", 0.001):
             with self.assertRaises(MCPConnectionError) as context:
                 await _mcp_protocol_health_check("http://example.com/mcp", {})
 
@@ -249,7 +268,7 @@ class TestMcpConnectionErrorFormatting(unittest.IsolatedAsyncioTestCase):
 class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
     """Test mcp_server_health with custom_headers parameter."""
 
-    @patch('backend.services.remote_mcp_service.Client')
+    @patch_import_context('management.services.mcp.service.Client')
     async def test_health_with_custom_headers_only(self, mock_client_cls):
         """Test health check with custom_headers only (no auth token)."""
         from unittest.mock import AsyncMock, MagicMock
@@ -272,7 +291,7 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(transport, StreamableHttpTransport)
         self.assertEqual(transport.headers, {"X-Custom-Header": "value1", "X-Another": "value2"})
 
-    @patch('backend.services.remote_mcp_service.Client')
+    @patch_import_context('management.services.mcp.service.Client')
     async def test_health_with_auth_token_and_custom_headers(self, mock_client_cls):
         """Test health check with both auth token and custom_headers."""
         from unittest.mock import AsyncMock, MagicMock
@@ -296,7 +315,7 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(transport.headers["Authorization"], "Bearer token123")
         self.assertEqual(transport.headers["X-Custom-Header"], "custom-value")
 
-    @patch('backend.services.remote_mcp_service.Client')
+    @patch_import_context('management.services.mcp.service.Client')
     async def test_health_sse_with_custom_headers(self, mock_client_cls):
         """Test SSE transport with custom_headers."""
         from unittest.mock import AsyncMock, MagicMock
@@ -318,7 +337,7 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(transport, SSETransport)
         self.assertEqual(transport.headers, {"X-Request-ID": "req-123"})
 
-    @patch('backend.services.remote_mcp_service.Client')
+    @patch_import_context('management.services.mcp.service.Client')
     async def test_health_timeout_raises_mcp_connection_error(self, mock_client_cls):
         """Test that asyncio.TimeoutError raises MCPConnectionError."""
         from unittest.mock import AsyncMock
@@ -331,7 +350,7 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(MCPConnectionError):
             await mcp_server_health('https://test-server', custom_headers={"X-Test": "value"})
 
-    @patch('backend.services.remote_mcp_service.Client')
+    @patch_import_context('management.services.mcp.service.Client')
     async def test_health_exception_uses_normalized_error_message(self, mock_client_cls):
         """Raw SDK errors are converted to safe connection categories."""
         from unittest.mock import AsyncMock
@@ -343,7 +362,7 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(MCPConnectionError, "MCP authentication failed"):
             await mcp_server_health('https://test-server', custom_headers={"X-Test": "value"})
 
-    @patch('backend.services.remote_mcp_service.Client')
+    @patch_import_context('management.services.mcp.service.Client')
     async def test_health_timeout_error_raises_mcp_connection_error(self, mock_client_cls):
         """Test that TimeoutError raises MCPConnectionError."""
         from unittest.mock import AsyncMock
@@ -355,7 +374,7 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(MCPConnectionError):
             await mcp_server_health('https://test-server', custom_headers={"X-Test": "value"})
 
-    @patch('backend.services.remote_mcp_service.Client')
+    @patch_import_context('management.services.mcp.service.Client')
     async def test_health_timeout_in_message_raises_mcp_connection_error(self, mock_client_cls):
         """Test that exception message containing 'timeout' raises MCPConnectionError."""
         from unittest.mock import AsyncMock
@@ -375,9 +394,9 @@ class TestMcpServerHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
 class TestAddRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
     """Test add_remote_mcp_server_list with custom_headers parameter."""
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_add_with_custom_headers(self, mock_check_name, mock_health_check, mock_create):
         """Test add_remote_mcp_server_list passes custom_headers to health check and stores it."""
         mock_check_name.return_value = False
@@ -399,9 +418,9 @@ class TestAddRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
         create_call_kwargs = mock_create.call_args[1]
         self.assertEqual(create_call_kwargs['mcp_data']['custom_headers'], custom_headers)
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_add_with_auth_token_and_custom_headers(self, mock_check_name, mock_health_check, mock_create):
         """Test add_remote_mcp_server_list with both auth token and custom_headers."""
         mock_check_name.return_value = False
@@ -418,9 +437,9 @@ class TestAddRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
             {"Authorization": "Bearer token123", "X-Header": "value"},
         )
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_add_without_custom_headers_none_passed(self, mock_check_name, mock_health_check, mock_create):
         """Test add_remote_mcp_server_list when custom_headers is None (default)."""
         mock_check_name.return_value = False
@@ -444,9 +463,9 @@ class TestAddRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
 class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
     """Test add_mcp_service with custom_headers parameter."""
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_add_enabled_with_custom_headers(self, mock_check_name, mock_health_check, mock_create):
         """Test add_mcp_service with enabled=True and custom_headers."""
         mock_check_name.return_value = False
@@ -473,9 +492,9 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_data['custom_headers'], custom_headers)
         self.assertTrue(call_data['status'])
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_add_disabled_with_custom_headers(self, mock_check_name, mock_health_check, mock_create):
         """Test add_mcp_service with enabled=False and custom_headers."""
         mock_check_name.return_value = False
@@ -499,9 +518,9 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_data['custom_headers'], custom_headers)
         self.assertIsNone(call_data['status'])
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_add_with_none_custom_headers(self, mock_check_name, mock_health_check, mock_create):
         """Test add_mcp_service with custom_headers=None (default)."""
         mock_check_name.return_value = False
@@ -527,11 +546,11 @@ class TestAddMcpServiceCustomHeaders(unittest.IsolatedAsyncioTestCase):
 class TestAddMcpServiceNameConflictGroupVisibility(unittest.IsolatedAsyncioTestCase):
     """Test add_mcp_service name conflict logic with group restrictions."""
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('database.group_db.query_group_ids_by_user')
-    @patch('database.remote_mcp_db.get_mcp_records_by_tenant')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch('management.db.identity.group.query_group_ids_by_user')
+    @patch('management.db.mcp.remote.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_name_conflict_allowed_when_existing_mcp_invisible(
         self, mock_check_name, mock_get_records, mock_query_groups, mock_health, mock_create
     ):
@@ -553,11 +572,11 @@ class TestAddMcpServiceNameConflictGroupVisibility(unittest.IsolatedAsyncioTestC
             )
         mock_create.assert_not_called()
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('database.group_db.query_group_ids_by_user')
-    @patch('database.remote_mcp_db.get_mcp_records_by_tenant')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch('management.db.identity.group.query_group_ids_by_user')
+    @patch('management.db.mcp.remote.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_name_conflict_blocks_when_user_in_allowed_group(
         self, mock_check_name, mock_get_records, mock_query_groups, mock_health, mock_create
     ):
@@ -578,11 +597,11 @@ class TestAddMcpServiceNameConflictGroupVisibility(unittest.IsolatedAsyncioTestC
                 enabled=False, config_json=None, market_id=None,
             )
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('database.group_db.query_group_ids_by_user')
-    @patch('database.remote_mcp_db.get_mcp_records_by_tenant')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch('management.db.identity.group.query_group_ids_by_user')
+    @patch('management.db.mcp.remote.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_name_conflict_blocks_when_same_creator(
         self, mock_check_name, mock_get_records, mock_query_groups, mock_health, mock_create
     ):
@@ -602,10 +621,10 @@ class TestAddMcpServiceNameConflictGroupVisibility(unittest.IsolatedAsyncioTestC
                 enabled=False, config_json=None, market_id=None,
             )
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('database.remote_mcp_db.get_mcp_records_by_tenant')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch('management.db.mcp.remote.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_name_conflict_blocks_when_no_group_ids(
         self, mock_check_name, mock_get_records, mock_health, mock_create
     ):
@@ -632,10 +651,11 @@ class TestAddMcpServiceNameConflictGroupVisibility(unittest.IsolatedAsyncioTestC
 class TestAddMcpServiceApiType(unittest.IsolatedAsyncioTestCase):
     """Test add_mcp_service with API-type (OpenAPI JSON) config."""
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.tool.configuration.update_tool_list', new_callable=AsyncMock)
     async def test_api_type_skips_mcp_protocol_and_extracts_tools(
-        self, mock_check_name, mock_create
+        self, mock_update_tool_list, mock_check_name, mock_create
     ):
         """API-type MCP should skip MCP protocol check and extract tool names from OpenAPI."""
         mock_check_name.return_value = False
@@ -663,6 +683,7 @@ class TestAddMcpServiceApiType(unittest.IsolatedAsyncioTestCase):
             call_data['registry_json']['_toolNames'],
             ["ping", "echo"],
         )
+        mock_update_tool_list.assert_awaited_once_with(tenant_id='tid', user_id='uid')
 
 
 # ============================================================================
@@ -672,10 +693,10 @@ class TestAddMcpServiceApiType(unittest.IsolatedAsyncioTestCase):
 class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
     """Test get_remote_mcp_server_list group-based visibility filtering."""
 
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
-    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
-    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.query_group_ids_by_user')
+    @patch_import_context('management.services.mcp.service.get_user_tenant_by_user_id')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
     async def test_user_sees_only_own_and_group_mcps(
         self, mock_mgr, mock_tenant, mock_groups, mock_records
     ):
@@ -706,10 +727,10 @@ class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
         self.assertIn("shared-mcp", names)   # shared with group 2
         self.assertNotIn("private-mcp", names)  # group 3, not visible
 
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
-    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
-    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.query_group_ids_by_user')
+    @patch_import_context('management.services.mcp.service.get_user_tenant_by_user_id')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
     async def test_null_group_ids_visible_to_all(
         self, mock_mgr, mock_tenant, mock_groups, mock_records
     ):
@@ -728,10 +749,10 @@ class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
         names = [r['remote_mcp_server_name'] for r in result]
         self.assertIn("public-mcp", names)
 
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
-    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
-    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.query_group_ids_by_user')
+    @patch_import_context('management.services.mcp.service.get_user_tenant_by_user_id')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
     async def test_null_group_ids_editable_by_all(
         self, mock_mgr, mock_tenant, mock_groups, mock_records
     ):
@@ -749,10 +770,10 @@ class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
         result = await get_remote_mcp_server_list(tenant_id='tid', user_id='uid')
         self.assertEqual(result[0]['permission'], PERMISSION_EDIT)
 
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
-    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
-    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.query_group_ids_by_user')
+    @patch_import_context('management.services.mcp.service.get_user_tenant_by_user_id')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
     async def test_empty_string_group_ids_hidden_from_non_creator(
         self, mock_mgr, mock_tenant, mock_groups, mock_records
     ):
@@ -771,10 +792,10 @@ class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
         names = [r['remote_mcp_server_name'] for r in result]
         self.assertNotIn("empty-group", names)
 
-    @patch('backend.services.remote_mcp_service.query_group_ids_by_user', side_effect=Exception('query failed'))
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
-    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
+    @patch_import_context('management.services.mcp.service.query_group_ids_by_user', side_effect=Exception('query failed'))
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.get_user_tenant_by_user_id')
     async def test_group_query_failure_falls_back_gracefully(
         self, mock_tenant, mock_records, mock_mgr, mock_groups
     ):
@@ -786,10 +807,10 @@ class TestGetRemoteMcpServerListGroupFilter(unittest.IsolatedAsyncioTestCase):
         result = await get_remote_mcp_server_list(tenant_id='tid', user_id='uid')
         self.assertEqual(len(result), 0)
 
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
-    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
-    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.query_group_ids_by_user')
+    @patch_import_context('management.services.mcp.service.get_user_tenant_by_user_id')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
     async def test_private_mcp_hidden_from_non_creator(
         self, mock_mgr, mock_tenant, mock_groups, mock_records
     ):
@@ -865,10 +886,10 @@ class TestUpdateMcpServiceEnabledApiType(unittest.IsolatedAsyncioTestCase):
         base.update(overrides)
         return base
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
-    @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_status_by_id')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_api_enable_skips_health_check(
         self, mock_records, mock_get, mock_status, mock_enabled
     ):
@@ -892,10 +913,10 @@ class TestUpdateMcpServiceEnabledApiType(unittest.IsolatedAsyncioTestCase):
 class TestGetRemoteMcpServerListPermission(unittest.IsolatedAsyncioTestCase):
     """Test get_remote_mcp_server_list permission computation with ingroup_permission."""
 
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
-    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
-    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.query_group_ids_by_user')
+    @patch_import_context('management.services.mcp.service.get_user_tenant_by_user_id')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
     async def test_ingroup_edit_grants_edit_permission(
         self, mock_mgr, mock_tenant, mock_groups, mock_records
     ):
@@ -915,10 +936,10 @@ class TestGetRemoteMcpServerListPermission(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result[0]['permission'], PERMISSION_EDIT)
 
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
-    @patch('backend.services.remote_mcp_service.query_group_ids_by_user')
-    @patch('backend.services.remote_mcp_service.get_user_tenant_by_user_id')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.query_group_ids_by_user')
+    @patch_import_context('management.services.mcp.service.get_user_tenant_by_user_id')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
     async def test_ingroup_readonly_grants_read_permission(
         self, mock_mgr, mock_tenant, mock_groups, mock_records
     ):
@@ -946,9 +967,9 @@ class TestGetRemoteMcpServerListPermission(unittest.IsolatedAsyncioTestCase):
 class TestUpdateRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
     """Test update_remote_mcp_server_list with custom_headers."""
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_by_name_and_url')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_by_name_and_url')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_update_with_custom_headers(self, mock_check_name, mock_health, mock_update_record):
         """Test update_remote_mcp_server_list passes custom_headers to health check."""
         mock_check_name.side_effect = [True, False]
@@ -972,9 +993,9 @@ class TestUpdateRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCas
             custom_headers=custom_headers,
         )
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_by_name_and_url')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_by_name_and_url')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_update_with_none_custom_headers(self, mock_check_name, mock_health, mock_update_record):
         """Test update_remote_mcp_server_list when custom_headers is None."""
         mock_check_name.side_effect = [True, False]
@@ -1005,9 +1026,9 @@ class TestUpdateRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCas
 class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
     """Test update_mcp_service with custom_headers parameter."""
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     def test_update_with_custom_headers(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service passes custom_headers to database update."""
         mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
@@ -1026,9 +1047,9 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         call_kwargs = mock_update.call_args[1]
         self.assertEqual(call_kwargs['custom_headers'], custom_headers)
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     def test_update_with_none_custom_headers(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service when custom_headers is None."""
         mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
@@ -1046,9 +1067,9 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         call_kwargs = mock_update.call_args[1]
         self.assertIsNone(call_kwargs['custom_headers'])
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     def test_update_with_group_ids(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service passes group_ids to database update."""
         mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
@@ -1066,9 +1087,9 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         call_kwargs = mock_update.call_args[1]
         self.assertEqual(call_kwargs['group_ids'], "2,4")
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     def test_update_with_ingroup_permission(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service passes ingroup_permission to database update."""
         mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
@@ -1086,9 +1107,9 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
         call_kwargs = mock_update.call_args[1]
         self.assertEqual(call_kwargs['ingroup_permission'], "READ_ONLY")
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     def test_update_with_shared_fields(self, mock_get, mock_check, mock_update):
         """Test update_mcp_service passes shared_fields to database update."""
         mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
@@ -1118,9 +1139,9 @@ class TestUpdateMcpServiceCustomHeaders(unittest.TestCase):
 class TestUpdateMcpServiceNameConflict(unittest.TestCase):
     """Test update_mcp_service name uniqueness check."""
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     def test_name_conflict_raises_error(self, mock_get, mock_check, mock_update):
         """Renaming to an existing name in same tenant should raise McpNameConflictError."""
         mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
@@ -1136,9 +1157,9 @@ class TestUpdateMcpServiceNameConflict(unittest.TestCase):
 
         mock_update.assert_not_called()  # should not proceed to update
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     def test_name_unchanged_skips_check(self, mock_get, mock_check, mock_update):
         """Not changing the name should skip the uniqueness check."""
         mock_get.return_value = {"mcp_id": 1, "mcp_name": "same-name", "source": "local", "config_json": None}
@@ -1152,9 +1173,9 @@ class TestUpdateMcpServiceNameConflict(unittest.TestCase):
 
         mock_check.assert_not_called()
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_manage_fields_by_id')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_manage_fields_by_id')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     def test_name_unique_allows_update(self, mock_get, mock_check, mock_update):
         """Renaming to a unique name should proceed with the update."""
         mock_get.return_value = {"mcp_id": 1, "mcp_name": "old-name", "source": "local", "config_json": None}
@@ -1188,11 +1209,11 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
         base.update(overrides)
         return base
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
-    @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_status_by_id')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_non_container_enable_with_custom_headers(
         self, mock_records, mock_get, mock_health, mock_status, mock_enabled
     ):
@@ -1212,11 +1233,11 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
             custom_headers={"X-Enabling-Custom": "value"},
         )
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
-    @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_status_by_id')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_non_container_enable_without_custom_headers(
         self, mock_records, mock_get, mock_health, mock_status, mock_enabled
     ):
@@ -1236,11 +1257,11 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
             custom_headers=None,
         )
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
-    @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
-    @patch('backend.services.remote_mcp_service.mcp_server_health', return_value=False)
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_status_by_id')
+    @patch_import_context('management.services.mcp.service.mcp_server_health', return_value=False)
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_non_container_enable_health_fail_raises_error(
         self, mock_records, mock_get, mock_health, mock_status, mock_enabled
     ):
@@ -1255,13 +1276,13 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
             mcp_id=1, tenant_id='tid', user_id='uid', status=False,
         )
 
-    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available', return_value=True)
-    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
-    @patch('backend.services.remote_mcp_service.update_mcp_record_container_fields_by_id')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.check_runtime_host_port_available', return_value=True)
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_container_fields_by_id')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_container_enable_with_custom_headers(
         self, mock_records, mock_get, mock_mgr_cls, mock_health, mock_cont_fields, mock_enabled, mock_port_check
     ):
@@ -1300,7 +1321,7 @@ class TestUpdateMcpServiceEnabledCustomHeaders(unittest.IsolatedAsyncioTestCase)
 class TestGetRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
     """Test get_remote_mcp_server_list includes custom_headers in response."""
 
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_list_includes_custom_headers_when_auth_needed(self, mock_get):
         """Test custom_headers is included in list response when is_need_auth=True."""
         mock_get.return_value = [
@@ -1324,7 +1345,7 @@ class TestGetRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]["custom_headers"], {"X-Custom1": "value1"})
         self.assertEqual(result[1]["custom_headers"], {"X-Custom2": "value2"})
 
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_list_custom_headers_none(self, mock_get):
         """Test custom_headers is None when not set in record."""
         mock_get.return_value = [
@@ -1348,7 +1369,7 @@ class TestGetRemoteMcpServerListCustomHeaders(unittest.IsolatedAsyncioTestCase):
 class TestGetMcpRecordByIdCustomHeaders(unittest.IsolatedAsyncioTestCase):
     """Test get_mcp_record_by_id includes custom_headers in response."""
 
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_get_record_includes_custom_headers(self, mock_get_record):
         """Test custom_headers is included in get_mcp_record_by_id response."""
         mock_get_record.return_value = {
@@ -1363,7 +1384,7 @@ class TestGetMcpRecordByIdCustomHeaders(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result)
         self.assertEqual(result["custom_headers"], {"X-Record-Custom": "record-value"})
 
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_get_record_custom_headers_none(self, mock_get_record):
         """Test custom_headers is None when not set in record."""
         mock_get_record.return_value = {
@@ -1378,6 +1399,49 @@ class TestGetMcpRecordByIdCustomHeaders(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(result)
         self.assertIsNone(result["custom_headers"])
 
+    @patch_import_context('management.services.mcp.service.get_remote_mcp_server_list')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    async def test_get_record_hidden_for_non_creator_private_mcp(
+        self, mock_get_record, mock_list
+    ):
+        """PRIVATE MCP detail must be hidden from users who cannot see it in the list."""
+        mock_get_record.return_value = {
+            "mcp_name": "private-service",
+            "mcp_server": "https://private.com/mcp",
+            "authorization_token": "Bearer token",
+            "custom_headers": None,
+        }
+        # List view applies visibility filtering; an empty result means the
+        # record is invisible to this user (e.g. PRIVATE group MCP).
+        mock_list.return_value = []
+
+        result = await get_mcp_record_by_id(
+            mcp_id=1, tenant_id="tenant123", user_id="user_a"
+        )
+
+        self.assertIsNone(result)
+        mock_list.assert_awaited_once_with(
+            tenant_id="tenant123", user_id="user_a", is_need_auth=False
+        )
+
+    @patch_import_context('management.services.mcp.service.get_remote_mcp_server_list')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    async def test_get_record_visible_without_user_id(
+        self, mock_get_record, mock_list
+    ):
+        """Legacy callers without user_id keep the old behavior (no visibility check)."""
+        mock_get_record.return_value = {
+            "mcp_name": "test-service",
+            "mcp_server": "https://test.com/mcp",
+            "authorization_token": "Bearer token123",
+            "custom_headers": None,
+        }
+
+        result = await get_mcp_record_by_id(mcp_id=1, tenant_id="tenant123")
+
+        self.assertIsNotNone(result)
+        mock_list.assert_not_awaited()
+
 
 # ============================================================================
 # check_mcp_health_and_update_db - custom_headers tests (lines 901-905, 910-911)
@@ -1386,10 +1450,10 @@ class TestGetMcpRecordByIdCustomHeaders(unittest.IsolatedAsyncioTestCase):
 class TestCheckMcpHealthAndUpdateDbCustomHeaders(unittest.IsolatedAsyncioTestCase):
     """Test check_mcp_health_and_update_db uses custom_headers from database."""
 
-    @patch('backend.services.remote_mcp_service.update_mcp_status_by_name_and_url')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.get_mcp_custom_headers_by_name_and_url')
-    @patch('backend.services.remote_mcp_service.get_mcp_authorization_token_by_name_and_url')
+    @patch_import_context('management.services.mcp.service.update_mcp_status_by_name_and_url')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.get_mcp_custom_headers_by_name_and_url')
+    @patch_import_context('management.services.mcp.service.get_mcp_authorization_token_by_name_and_url')
     async def test_check_health_with_custom_headers(
         self, mock_get_token, mock_get_headers, mock_health, mock_update
     ):
@@ -1412,10 +1476,10 @@ class TestCheckMcpHealthAndUpdateDbCustomHeaders(unittest.IsolatedAsyncioTestCas
             custom_headers={"X-Health-Custom": "health-value"},
         )
 
-    @patch('backend.services.remote_mcp_service.update_mcp_status_by_name_and_url')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.get_mcp_custom_headers_by_name_and_url')
-    @patch('backend.services.remote_mcp_service.get_mcp_authorization_token_by_name_and_url')
+    @patch_import_context('management.services.mcp.service.update_mcp_status_by_name_and_url')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.get_mcp_custom_headers_by_name_and_url')
+    @patch_import_context('management.services.mcp.service.get_mcp_authorization_token_by_name_and_url')
     async def test_check_health_with_none_custom_headers(
         self, mock_get_token, mock_get_headers, mock_health, mock_update
     ):
@@ -1432,10 +1496,10 @@ class TestCheckMcpHealthAndUpdateDbCustomHeaders(unittest.IsolatedAsyncioTestCas
             custom_headers=None,
         )
 
-    @patch('backend.services.remote_mcp_service.update_mcp_status_by_name_and_url')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.get_mcp_custom_headers_by_name_and_url')
-    @patch('backend.services.remote_mcp_service.get_mcp_authorization_token_by_name_and_url')
+    @patch_import_context('management.services.mcp.service.update_mcp_status_by_name_and_url')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.get_mcp_custom_headers_by_name_and_url')
+    @patch_import_context('management.services.mcp.service.get_mcp_authorization_token_by_name_and_url')
     async def test_check_health_failure_raises_exception(
         self, mock_get_token, mock_get_headers, mock_health, mock_update
     ):
@@ -1455,9 +1519,9 @@ class TestCheckMcpHealthAndUpdateDbCustomHeaders(unittest.IsolatedAsyncioTestCas
 class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
     """Test check_mcp_service_health uses custom_headers from record."""
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_status_by_id')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_health_with_custom_headers(self, mock_get, mock_health, mock_status):
         """Test check_mcp_service_health retrieves and uses custom_headers."""
         mock_get.return_value = {
@@ -1476,9 +1540,9 @@ class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
             custom_headers={"X-Service-Custom": "service-value"},
         )
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_status_by_id')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_status_by_id')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_health_without_custom_headers(self, mock_get, mock_health, mock_status):
         """Test check_mcp_service_health when custom_headers is None."""
         mock_get.return_value = {
@@ -1497,8 +1561,8 @@ class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
             custom_headers=None,
         )
 
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check', new_callable=AsyncMock)
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check', new_callable=AsyncMock)
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_protocol_health_check_requires_service_name(self, mock_get, mock_protocol):
         """A healthy protocol response still requires a configured MCP name."""
         mock_get.return_value = {"mcp_server": "https://srv/mcp", "mcp_name": None}
@@ -1517,8 +1581,8 @@ class TestCheckMcpServiceHealthCustomHeaders(unittest.IsolatedAsyncioTestCase):
 class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase):
     """Test list_mcp_service_tools_by_id uses custom_headers from record."""
 
-    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server', new_callable=AsyncMock)
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.tool.discovery.get_tool_from_remote_mcp_server', new_callable=AsyncMock)
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_tools_with_custom_headers(self, mock_get, mock_get_tools):
         """Test list_mcp_service_tools_by_id passes custom_headers to tool retrieval."""
         mock_get.return_value = {
@@ -1542,8 +1606,8 @@ class TestListMcpServiceToolsByIdCustomHeaders(unittest.IsolatedAsyncioTestCase)
             custom_headers={"X-Tools-Custom": "tools-value"},
         )
 
-    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server', new_callable=AsyncMock)
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.tool.discovery.get_tool_from_remote_mcp_server', new_callable=AsyncMock)
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_tools_without_custom_headers(self, mock_get, mock_get_tools):
         """Test list_mcp_service_tools_by_id when custom_headers is None."""
         mock_get.return_value = {
@@ -1583,10 +1647,10 @@ class TestAddContainerMcpServicePortConflict(unittest.IsolatedAsyncioTestCase):
             "test-svc": {"command": "echo", "args": [], "env": {}}
         })
 
-    @patch('backend.services.remote_mcp_service.add_mcp_service')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.add_mcp_service')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_container_port_conflict')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_rejects_in_use_port(
         self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
     ):
@@ -1606,10 +1670,10 @@ class TestAddContainerMcpServicePortConflict(unittest.IsolatedAsyncioTestCase):
         mock_mgr_cls.assert_not_called()
         mock_add.assert_not_awaited()
 
-    @patch('backend.services.remote_mcp_service.add_mcp_service')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.add_mcp_service')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_container_port_conflict')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_proceeds_when_port_free(
         self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
     ):
@@ -1636,12 +1700,12 @@ class TestAddContainerMcpServicePortConflict(unittest.IsolatedAsyncioTestCase):
         mock_mgr.start_mcp_container.assert_awaited_once()
         mock_add.assert_awaited_once()
 
-    @patch('backend.services.remote_mcp_service.asyncio.sleep', new_callable=AsyncMock)
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.add_mcp_service')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.asyncio.sleep', new_callable=AsyncMock)
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.add_mcp_service')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_container_port_conflict')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_streaming_deploy_notifies_and_waits_for_readiness(
         self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add,
         mock_health, mock_sleep,
@@ -1669,11 +1733,11 @@ class TestAddContainerMcpServicePortConflict(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_health.await_count, 2)
         mock_sleep.assert_awaited_once_with(5)
 
-    @patch('backend.services.remote_mcp_service.asyncio.sleep', new_callable=AsyncMock)
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_container_port_conflict', return_value=True)
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists', return_value=False)
+    @patch_import_context('management.services.mcp.service.asyncio.sleep', new_callable=AsyncMock)
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_container_port_conflict', return_value=True)
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists', return_value=False)
     async def test_streaming_deploy_raises_after_readiness_retries(
         self, mock_check_name, mock_port_check, mock_mgr_cls, mock_health, mock_sleep,
     ):
@@ -1714,10 +1778,10 @@ class TestAddContainerMcpServiceCallsAddMcpServiceWithCustomHeaders(unittest.Iso
             }
         })
 
-    @patch('backend.services.remote_mcp_service.add_mcp_service')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.add_mcp_service')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_container_port_conflict')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_add_container_passes_custom_headers_to_add_mcp_service(
         self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
     ):
@@ -1756,9 +1820,9 @@ class TestAddContainerMcpServiceCallsAddMcpServiceWithCustomHeaders(unittest.Iso
 class TestCustomHeadersIntegration(unittest.IsolatedAsyncioTestCase):
     """Integration tests for custom_headers parameter across multiple functions."""
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_by_name_and_url')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_by_name_and_url')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_full_flow_with_custom_headers(self, mock_check_name, mock_health, mock_update):
         """Test complete flow: update with custom_headers, health check uses them."""
         mock_check_name.side_effect = [True, False]
@@ -1791,25 +1855,25 @@ class TestBuildMcpHeaders(unittest.TestCase):
 
     def test_no_auth_no_custom_headers(self):
         """Both None => empty dict."""
-        from backend.services.remote_mcp_service import _build_mcp_headers
+        from management.services.mcp.service import _build_mcp_headers
         result = _build_mcp_headers(None, None)
         self.assertEqual(result, {})
 
     def test_auth_token_only(self):
         """Auth token sets Authorization header."""
-        from backend.services.remote_mcp_service import _build_mcp_headers
+        from management.services.mcp.service import _build_mcp_headers
         result = _build_mcp_headers("Bearer my-token", None)
         self.assertEqual(result, {"Authorization": "Bearer my-token"})
 
     def test_custom_headers_only(self):
         """Custom headers passed through directly."""
-        from backend.services.remote_mcp_service import _build_mcp_headers
+        from management.services.mcp.service import _build_mcp_headers
         result = _build_mcp_headers(None, {"X-Custom": "val"})
         self.assertEqual(result, {"X-Custom": "val"})
 
     def test_both_merged(self):
         """Auth token and custom headers are merged."""
-        from backend.services.remote_mcp_service import _build_mcp_headers
+        from management.services.mcp.service import _build_mcp_headers
         result = _build_mcp_headers("tok", {"X-One": "1", "X-Two": "2"})
         self.assertEqual(result, {"Authorization": "tok", "X-One": "1", "X-Two": "2"})
 
@@ -1821,30 +1885,30 @@ class TestBuildMcpHeaders(unittest.TestCase):
 class TestCheckMcpConnectivity(unittest.IsolatedAsyncioTestCase):
     """Test _check_mcp_connectivity health check wrapper."""
 
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
     async def test_healthy_returns_tool_names(self, mock_health):
         """Health check returns tool names => function returns them."""
-        from backend.services.remote_mcp_service import _check_mcp_connectivity
+        from management.services.mcp.service import _check_mcp_connectivity
         mock_health.return_value = ["tool1", "tool2"]
 
         result = await _check_mcp_connectivity("https://srv/mcp", {}, False, "svc")
 
         self.assertEqual(result, ["tool1", "tool2"])
 
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
     async def test_container_unreachable_returns_none(self, mock_health):
         """Container unreachable => returns None, no exception."""
-        from backend.services.remote_mcp_service import _check_mcp_connectivity
+        from management.services.mcp.service import _check_mcp_connectivity
         mock_health.return_value = []
 
         result = await _check_mcp_connectivity("https://srv/mcp", {}, True, "container-svc")
 
         self.assertIsNone(result)
 
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
     async def test_non_container_unreachable_raises(self, mock_health):
         """Non-container unreachable => raises MCPConnectionError."""
-        from backend.services.remote_mcp_service import _check_mcp_connectivity
+        from management.services.mcp.service import _check_mcp_connectivity
         mock_health.return_value = []
 
         with self.assertRaises(MCPConnectionError):
@@ -1858,7 +1922,7 @@ class TestCheckMcpConnectivity(unittest.IsolatedAsyncioTestCase):
 class TestMcpProtocolConnect(unittest.IsolatedAsyncioTestCase):
     """Test _mcp_protocol_connect transport selection and connection."""
 
-    @patch('backend.services.remote_mcp_service.Client')
+    @patch_import_context('management.services.mcp.service.Client')
     async def test_sse_url_uses_sse_transport(self, mock_client_cls):
         """URL ending in /sse => SSETransport."""
         from unittest.mock import AsyncMock
@@ -1868,7 +1932,7 @@ class TestMcpProtocolConnect(unittest.IsolatedAsyncioTestCase):
         mock_client.is_connected.return_value = True
         mock_client_cls.return_value = mock_client
 
-        from backend.services.remote_mcp_service import _mcp_protocol_connect
+        from management.services.mcp.service import _mcp_protocol_connect
         result = await _mcp_protocol_connect("https://srv/sse", {"X-Test": "1"})
 
         self.assertTrue(result)
@@ -1876,7 +1940,7 @@ class TestMcpProtocolConnect(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(transport, SSETransport)
         self.assertEqual(transport.url, "https://srv/sse")
 
-    @patch('backend.services.remote_mcp_service.Client')
+    @patch_import_context('management.services.mcp.service.Client')
     async def test_mcp_url_uses_streamable_http_transport(self, mock_client_cls):
         """URL ending in /mcp => StreamableHttpTransport."""
         from unittest.mock import AsyncMock
@@ -1886,7 +1950,7 @@ class TestMcpProtocolConnect(unittest.IsolatedAsyncioTestCase):
         mock_client.is_connected.return_value = True
         mock_client_cls.return_value = mock_client
 
-        from backend.services.remote_mcp_service import _mcp_protocol_connect
+        from management.services.mcp.service import _mcp_protocol_connect
         result = await _mcp_protocol_connect("https://srv/mcp", {})
 
         self.assertTrue(result)
@@ -1894,7 +1958,7 @@ class TestMcpProtocolConnect(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(transport, StreamableHttpTransport)
         self.assertEqual(transport.url, "https://srv/mcp")
 
-    @patch('backend.services.remote_mcp_service.Client')
+    @patch_import_context('management.services.mcp.service.Client')
     async def test_unknown_url_defaults_to_streamable_http(self, mock_client_cls):
         """URL without /sse or /mcp suffix defaults to StreamableHttpTransport."""
         from unittest.mock import AsyncMock
@@ -1904,14 +1968,14 @@ class TestMcpProtocolConnect(unittest.IsolatedAsyncioTestCase):
         mock_client.is_connected.return_value = True
         mock_client_cls.return_value = mock_client
 
-        from backend.services.remote_mcp_service import _mcp_protocol_connect
+        from management.services.mcp.service import _mcp_protocol_connect
         result = await _mcp_protocol_connect("https://srv/api", {})
 
         self.assertTrue(result)
         transport = mock_client_cls.call_args[1]['transport']
         self.assertIsInstance(transport, StreamableHttpTransport)
 
-    @patch('backend.services.remote_mcp_service.Client')
+    @patch_import_context('management.services.mcp.service.Client')
     async def test_connection_failure_returns_false(self, mock_client_cls):
         """async with client raises => returns False."""
         from unittest.mock import AsyncMock
@@ -1919,12 +1983,12 @@ class TestMcpProtocolConnect(unittest.IsolatedAsyncioTestCase):
         mock_client.__aenter__.side_effect = Exception("Connection refused")
         mock_client_cls.return_value = mock_client
 
-        from backend.services.remote_mcp_service import _mcp_protocol_connect
+        from management.services.mcp.service import _mcp_protocol_connect
         result = await _mcp_protocol_connect("https://srv/mcp", {})
 
         self.assertFalse(result)
 
-    @patch('backend.services.remote_mcp_service.Client')
+    @patch_import_context('management.services.mcp.service.Client')
     async def test_headers_passed_to_transport(self, mock_client_cls):
         """Custom headers are forwarded to the transport."""
         from unittest.mock import AsyncMock
@@ -1933,7 +1997,7 @@ class TestMcpProtocolConnect(unittest.IsolatedAsyncioTestCase):
         mock_client.is_connected.return_value = True
         mock_client_cls.return_value = mock_client
 
-        from backend.services.remote_mcp_service import _mcp_protocol_connect
+        from management.services.mcp.service import _mcp_protocol_connect
         headers = {"Authorization": "Bearer tok", "X-Custom": "val"}
         await _mcp_protocol_connect("https://srv/mcp", headers)
 
@@ -1949,10 +2013,10 @@ class TestMcpProtocolConnect(unittest.IsolatedAsyncioTestCase):
 class TestMcpConnectionEndpoint(unittest.IsolatedAsyncioTestCase):
     """Test test_mcp_connection wrapper function."""
 
-    @patch('backend.services.remote_mcp_service._mcp_protocol_connect')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_connect')
     async def test_with_auth_token(self, mock_connect):
         """Auth token is passed in Authorization header."""
-        from backend.services.remote_mcp_service import test_mcp_connection
+        from management.services.mcp.service import test_mcp_connection
         mock_connect.return_value = True
 
         result = await test_mcp_connection(
@@ -1966,10 +2030,10 @@ class TestMcpConnectionEndpoint(unittest.IsolatedAsyncioTestCase):
             {"Authorization": "Bearer tok"},
         )
 
-    @patch('backend.services.remote_mcp_service._mcp_protocol_connect')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_connect')
     async def test_with_custom_headers(self, mock_connect):
         """Custom headers are passed through."""
-        from backend.services.remote_mcp_service import test_mcp_connection
+        from management.services.mcp.service import test_mcp_connection
         mock_connect.return_value = True
 
         result = await test_mcp_connection(
@@ -1983,10 +2047,10 @@ class TestMcpConnectionEndpoint(unittest.IsolatedAsyncioTestCase):
             {"X-Custom": "val"},
         )
 
-    @patch('backend.services.remote_mcp_service._mcp_protocol_connect')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_connect')
     async def test_with_both_auth_and_custom_headers(self, mock_connect):
         """Auth token and custom headers are merged."""
-        from backend.services.remote_mcp_service import test_mcp_connection
+        from management.services.mcp.service import test_mcp_connection
         mock_connect.return_value = True
 
         result = await test_mcp_connection(
@@ -2001,10 +2065,10 @@ class TestMcpConnectionEndpoint(unittest.IsolatedAsyncioTestCase):
             {"Authorization": "tok", "X-Custom": "val"},
         )
 
-    @patch('backend.services.remote_mcp_service._mcp_protocol_connect')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_connect')
     async def test_no_auth_or_headers(self, mock_connect):
         """No credentials => empty headers dict."""
-        from backend.services.remote_mcp_service import test_mcp_connection
+        from management.services.mcp.service import test_mcp_connection
         mock_connect.return_value = True
 
         result = await test_mcp_connection("https://srv/mcp")
@@ -2012,20 +2076,20 @@ class TestMcpConnectionEndpoint(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result)
         mock_connect.assert_called_once_with("https://srv/mcp", {})
 
-    @patch('backend.services.remote_mcp_service._mcp_protocol_connect')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_connect')
     async def test_connection_failure_returns_false(self, mock_connect):
         """Underlying connect fails => wrapper returns False."""
-        from backend.services.remote_mcp_service import test_mcp_connection
+        from management.services.mcp.service import test_mcp_connection
         mock_connect.return_value = False
 
         result = await test_mcp_connection("https://srv/mcp")
 
         self.assertFalse(result)
 
-    @patch('backend.services.remote_mcp_service._mcp_protocol_connect')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_connect')
     async def test_url_stripped(self, mock_connect):
         """URL whitespace is stripped before passing to connect."""
-        from backend.services.remote_mcp_service import test_mcp_connection
+        from management.services.mcp.service import test_mcp_connection
         mock_connect.return_value = True
 
         result = await test_mcp_connection("  https://srv/mcp  ")
@@ -2041,10 +2105,10 @@ class TestMcpConnectionEndpoint(unittest.IsolatedAsyncioTestCase):
 class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
     """Test refresh_mcp_service_tool_count."""
 
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('backend.services.remote_mcp_service.update_mcp_record_registry_json_by_id')
-    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_registry_json_by_id')
+    @patch_import_context('management.services.tool.discovery.get_tool_from_remote_mcp_server')
     async def test_success(self, mock_tools, mock_update, mock_health, mock_get):
         """Complete tool snapshot is fetched and persisted successfully."""
         mock_get.return_value = {
@@ -2076,7 +2140,7 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_record_not_found(self, mock_get):
         """Missing record raises McpNotFoundError."""
         mock_get.return_value = None
@@ -2086,7 +2150,7 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
                 tenant_id="tid", user_id="uid", mcp_id=999,
             )
 
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_no_server_url(self, mock_get):
         """Record without server URL raises McpValidationError."""
         mock_get.return_value = {
@@ -2100,8 +2164,8 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
                 tenant_id="tid", user_id="uid", mcp_id=1,
             )
 
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
     async def test_server_unreachable(self, mock_health, mock_get):
         """Server unreachable raises MCPConnectionError."""
         mock_get.return_value = {
@@ -2116,10 +2180,10 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
                 tenant_id="tid", user_id="uid", mcp_id=1,
             )
 
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('backend.services.remote_mcp_service.update_mcp_record_registry_json_by_id')
-    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_registry_json_by_id')
+    @patch_import_context('management.services.tool.discovery.get_tool_from_remote_mcp_server')
     async def test_with_auth_token_and_custom_headers(self, mock_tools, mock_update, mock_health, mock_get):
         """Auth token and custom headers are passed to health check."""
         mock_get.return_value = {
@@ -2149,12 +2213,12 @@ class TestRefreshMcpServiceToolCount(unittest.IsolatedAsyncioTestCase):
             },
         )
 
-    @patch('backend.services.remote_mcp_service.update_mcp_market_record')
-    @patch('backend.services.remote_mcp_service.get_mcp_market_record_by_source_mcp_id')
-    @patch('backend.services.remote_mcp_service.update_mcp_record_registry_json_by_id')
-    @patch('services.tool_configuration_service.get_tool_from_remote_mcp_server')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_market_record')
+    @patch_import_context('management.services.mcp.service.get_mcp_market_record_by_source_mcp_id')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_registry_json_by_id')
+    @patch_import_context('management.services.tool.discovery.get_tool_from_remote_mcp_server')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_syncs_tool_snapshot_to_market_record(
         self, mock_get, mock_health, mock_tools, mock_update_record,
         mock_market_lookup, mock_market_update,
@@ -2189,9 +2253,9 @@ if __name__ == '__main__':
 class TestAddMcpServiceSkipHealthCheck(unittest.IsolatedAsyncioTestCase):
     """Test add_mcp_service with skip_health_check parameter."""
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_skip_true_skips_health_check(self, mock_check_name, mock_health_check, mock_create):
         """skip_health_check=True → health check is NOT called."""
         mock_check_name.return_value = False
@@ -2213,9 +2277,9 @@ class TestAddMcpServiceSkipHealthCheck(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(call_data['market_id'], 1)
         self.assertIsNone(call_data['status'])
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_skip_false_runs_health_check(self, mock_check_name, mock_health_check, mock_create):
         """skip_health_check=False (default) → health check IS called."""
         mock_check_name.return_value = False
@@ -2233,9 +2297,9 @@ class TestAddMcpServiceSkipHealthCheck(unittest.IsolatedAsyncioTestCase):
         mock_health_check.assert_called_once()
         mock_create.assert_called_once()
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_skip_true_with_enabled(self, mock_check_name, mock_health_check, mock_create):
         """skip_health_check=True + enabled=True → status=True without health check."""
         mock_check_name.return_value = False
@@ -2254,9 +2318,9 @@ class TestAddMcpServiceSkipHealthCheck(unittest.IsolatedAsyncioTestCase):
         call_data = mock_create.call_args[1]['mcp_data']
         self.assertTrue(call_data['status'])  # enabled=True → status=True
 
-    @patch('backend.services.remote_mcp_service.create_mcp_record')
-    @patch('backend.services.remote_mcp_service._mcp_protocol_health_check')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.create_mcp_record')
+    @patch_import_context('management.services.mcp.service._mcp_protocol_health_check')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_skip_true_with_container_port(self, mock_check_name, mock_health_check, mock_create):
         """skip_health_check=True + container_port is stored."""
         mock_check_name.return_value = False
@@ -2283,7 +2347,7 @@ class TestAddMcpServiceSkipHealthCheck(unittest.IsolatedAsyncioTestCase):
 class TestListMcpServiceToolsByIdApiType(unittest.IsolatedAsyncioTestCase):
     """Test list_mcp_service_tools_by_id for API-type MCPs (OpenAPI)."""
 
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_api_type_returns_tool_names(self, mock_get):
         """API-type MCP should return tool names from registry_json._toolNames."""
         mock_get.return_value = {
@@ -2297,7 +2361,7 @@ class TestListMcpServiceToolsByIdApiType(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]["name"], "getUsers")
         self.assertEqual(result[1]["name"], "createUser")
 
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_api_type_no_tool_names(self, mock_get):
         """API-type MCP with no _toolNames should return empty list."""
         mock_get.return_value = {
@@ -2309,7 +2373,7 @@ class TestListMcpServiceToolsByIdApiType(unittest.IsolatedAsyncioTestCase):
         result = await list_mcp_service_tools_by_id(tenant_id='tid', mcp_id=1)
         self.assertEqual(result, [])
 
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_non_api_type_calls_mcp_protocol(self, mock_get):
         """Non-API-type MCP should still try MCP protocol (mcp_server required)."""
         mock_get.return_value = {
@@ -2334,10 +2398,10 @@ class TestAddContainerMcpServiceCleanupOnFailure(unittest.IsolatedAsyncioTestCas
             "test-svc": {"command": "echo", "args": [], "env": {}}
         })
 
-    @patch('backend.services.remote_mcp_service.add_mcp_service')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.add_mcp_service')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_container_port_conflict')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_registration_failure_stops_started_container(
         self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
     ):
@@ -2367,10 +2431,10 @@ class TestAddContainerMcpServiceCleanupOnFailure(unittest.IsolatedAsyncioTestCas
         # The orphan container must be stopped to free the host port
         mock_mgr.stop_mcp_container.assert_awaited_once_with("orphan-cid")
 
-    @patch('backend.services.remote_mcp_service.add_mcp_service')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_container_port_conflict')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.add_mcp_service')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_container_port_conflict')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_cleanup_failure_swallowed_original_raised(
         self, mock_check_name, mock_port_check, mock_mgr_cls, mock_add
     ):
@@ -2431,13 +2495,13 @@ class TestUpdateMcpServiceEnabledContainerRebuild(unittest.IsolatedAsyncioTestCa
         mock_mgr_cls.return_value = mock_mgr
         return mock_mgr
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
-    @patch('backend.services.remote_mcp_service.update_mcp_record_container_fields_by_id')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_container_fields_by_id')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_runtime_host_port_available')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_container_enable_missing_port_raises(
         self, mock_records, mock_get, mock_port_check, mock_mgr_cls,
         mock_health, mock_cont_fields, mock_enabled,
@@ -2452,13 +2516,13 @@ class TestUpdateMcpServiceEnabledContainerRebuild(unittest.IsolatedAsyncioTestCa
         mock_mgr_cls.assert_not_called()
         mock_enabled.assert_not_called()
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
-    @patch('backend.services.remote_mcp_service.update_mcp_record_container_fields_by_id')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_container_fields_by_id')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_runtime_host_port_available')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_container_enable_stops_existing_container_before_rebuild(
         self, mock_records, mock_get, mock_port_check, mock_mgr_cls,
         mock_health, mock_cont_fields, mock_enabled,
@@ -2477,13 +2541,13 @@ class TestUpdateMcpServiceEnabledContainerRebuild(unittest.IsolatedAsyncioTestCa
         mock_cont_fields.assert_called_once()
         mock_enabled.assert_called_once()
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
-    @patch('backend.services.remote_mcp_service.update_mcp_record_container_fields_by_id')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_container_fields_by_id')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_runtime_host_port_available')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_container_enable_stop_existing_failure_continues(
         self, mock_records, mock_get, mock_port_check, mock_mgr_cls,
         mock_health, mock_cont_fields, mock_enabled,
@@ -2503,13 +2567,13 @@ class TestUpdateMcpServiceEnabledContainerRebuild(unittest.IsolatedAsyncioTestCa
         mock_cont_fields.assert_called_once()
         mock_enabled.assert_called_once()
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
-    @patch('backend.services.remote_mcp_service.update_mcp_record_container_fields_by_id')
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_container_fields_by_id')
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_runtime_host_port_available')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_port_conflict_recovery_stops_orphan_then_succeeds(
         self, mock_records, mock_get, mock_port_check, mock_mgr_cls,
         mock_health, mock_cont_fields, mock_enabled,
@@ -2532,11 +2596,11 @@ class TestUpdateMcpServiceEnabledContainerRebuild(unittest.IsolatedAsyncioTestCa
         mock_cont_fields.assert_called_once()
         mock_enabled.assert_called_once()
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_runtime_host_port_available')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_port_conflict_no_orphan_raises(
         self, mock_records, mock_get, mock_port_check, mock_mgr_cls, mock_enabled,
     ):
@@ -2553,11 +2617,11 @@ class TestUpdateMcpServiceEnabledContainerRebuild(unittest.IsolatedAsyncioTestCa
 
         mock_enabled.assert_not_called()
 
-    @patch('backend.services.remote_mcp_service.update_mcp_record_enabled_by_id')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_runtime_host_port_available')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.update_mcp_record_enabled_by_id')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_runtime_host_port_available')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_port_conflict_orphan_scan_failure_raises(
         self, mock_records, mock_get, mock_port_check, mock_mgr_cls, mock_enabled,
     ):
@@ -2582,10 +2646,38 @@ class TestUpdateMcpServiceEnabledContainerRebuild(unittest.IsolatedAsyncioTestCa
 class TestDeleteMcpServiceToolsUnavailable(unittest.IsolatedAsyncioTestCase):
     """Test delete_mcp_service hides the deleted MCP's tools."""
 
-    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_id')
-    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.tool.configuration._refresh_openapi_services_in_mcp')
+    @patch_import_context('management.services.tool.configuration.delete_openapi_service')
+    @patch_import_context('management.services.mcp.service.delete_mcp_record_by_id')
+    @patch_import_context('management.services.mcp.service.set_mcp_tools_unavailable')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    async def test_delete_api_mcp_removes_openapi_service_and_outer_tools(
+        self, mock_get, mock_mgr_cls, mock_tools, mock_delete, mock_delete_openapi, mock_refresh_openapi
+    ):
+        """Deleting an API MCP also removes its converted service and tools."""
+        mock_get.return_value = {
+            "mcp_id": 1,
+            "mcp_name": "api-svc",
+            "container_id": None,
+            "config_json": {"openapi": "3.0.0", "paths": {}},
+        }
+
+        await delete_mcp_service(tenant_id='tid', user_id='uid', mcp_id=1)
+
+        mock_delete_openapi.assert_called_once_with(
+            service_name='api-svc', tenant_id='tid', user_id='uid'
+        )
+        mock_refresh_openapi.assert_called_once_with('tid')
+        mock_tools.assert_called_once_with(
+            tenant_id='tid', mcp_server_name='outer-apis', user_id='uid'
+        )
+        mock_delete.assert_called_once()
+
+    @patch_import_context('management.services.mcp.service.delete_mcp_record_by_id')
+    @patch_import_context('management.services.mcp.service.set_mcp_tools_unavailable')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_delete_marks_tools_unavailable(
         self, mock_get, mock_mgr_cls, mock_tools, mock_delete,
     ):
@@ -2607,24 +2699,25 @@ class TestDeleteMcpServiceToolsUnavailable(unittest.IsolatedAsyncioTestCase):
         )
         mock_delete.assert_called_once()
 
-    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_id')
-    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
-    async def test_tools_unavailable_failure_does_not_block_delete(
+    @patch_import_context('management.services.mcp.service.delete_mcp_record_by_id')
+    @patch_import_context('management.services.mcp.service.set_mcp_tools_unavailable')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
+    async def test_tools_cleanup_failure_blocks_delete(
         self, mock_get, mock_tools, mock_delete,
     ):
-        """Even if marking tools fails, the MCP record is still deleted."""
+        """A failed tool cleanup must keep the MCP record intact."""
         mock_get.return_value = {"mcp_id": 1, "mcp_name": "test-svc", "container_id": None}
         mock_tools.side_effect = Exception("tool db down")
 
-        await delete_mcp_service(tenant_id='tid', user_id='uid', mcp_id=1)
+        with self.assertRaisesRegex(Exception, "tool db down"):
+            await delete_mcp_service(tenant_id='tid', user_id='uid', mcp_id=1)
 
         mock_tools.assert_called_once()
-        mock_delete.assert_called_once()
+        mock_delete.assert_not_called()
 
-    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_id')
-    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
-    @patch('backend.services.remote_mcp_service.get_mcp_record_by_id_and_tenant')
+    @patch_import_context('management.services.mcp.service.delete_mcp_record_by_id')
+    @patch_import_context('management.services.mcp.service.set_mcp_tools_unavailable')
+    @patch_import_context('management.services.mcp.service.get_mcp_record_by_id_and_tenant')
     async def test_delete_not_found_raises(self, mock_get, mock_tools, mock_delete):
         """Deleting a missing MCP raises McpNotFoundError and does not delete."""
         mock_get.return_value = None
@@ -2643,9 +2736,9 @@ class TestDeleteMcpServiceToolsUnavailable(unittest.IsolatedAsyncioTestCase):
 class TestDeleteMcpByContainerIdToolsUnavailable(unittest.IsolatedAsyncioTestCase):
     """Test delete_mcp_by_container_id hides tools for the matching record."""
 
-    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_container_id')
-    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.delete_mcp_record_by_container_id')
+    @patch_import_context('management.services.mcp.service.set_mcp_tools_unavailable')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_delete_marks_matching_record_tools_unavailable(
         self, mock_records, mock_tools, mock_delete,
     ):
@@ -2664,9 +2757,9 @@ class TestDeleteMcpByContainerIdToolsUnavailable(unittest.IsolatedAsyncioTestCas
         )
         mock_delete.assert_called_once()
 
-    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_container_id')
-    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
+    @patch_import_context('management.services.mcp.service.delete_mcp_record_by_container_id')
+    @patch_import_context('management.services.mcp.service.set_mcp_tools_unavailable')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
     async def test_delete_no_matching_record_skips_tools(
         self, mock_records, mock_tools, mock_delete,
     ):
@@ -2680,36 +2773,38 @@ class TestDeleteMcpByContainerIdToolsUnavailable(unittest.IsolatedAsyncioTestCas
         mock_tools.assert_not_called()
         mock_delete.assert_called_once()
 
-    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_container_id')
-    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
-    async def test_tools_unavailable_failure_does_not_block_delete(
+    @patch_import_context('management.services.mcp.service.delete_mcp_record_by_container_id')
+    @patch_import_context('management.services.mcp.service.set_mcp_tools_unavailable')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
+    async def test_tools_cleanup_failure_blocks_delete(
         self, mock_records, mock_tools, mock_delete,
     ):
-        """set_mcp_tools_unavailable raising is swallowed; delete still runs."""
+        """A failed tool cleanup must keep the container MCP record intact."""
         mock_records.return_value = [
             {"container_id": "target-cid", "mcp_name": "target-svc"},
         ]
         mock_tools.side_effect = Exception("tool db down")
 
-        await delete_mcp_by_container_id(tenant_id='tid', user_id='uid', container_id='target-cid')
+        with self.assertRaisesRegex(Exception, "tool db down"):
+            await delete_mcp_by_container_id(tenant_id='tid', user_id='uid', container_id='target-cid')
 
         mock_tools.assert_called_once()
-        mock_delete.assert_called_once()
+        mock_delete.assert_not_called()
 
-    @patch('backend.services.remote_mcp_service.delete_mcp_record_by_container_id')
-    @patch('backend.services.remote_mcp_service.set_mcp_tools_unavailable')
-    @patch('backend.services.remote_mcp_service.get_mcp_records_by_tenant')
-    async def test_record_query_failure_does_not_block_delete(
+    @patch_import_context('management.services.mcp.service.delete_mcp_record_by_container_id')
+    @patch_import_context('management.services.mcp.service.set_mcp_tools_unavailable')
+    @patch_import_context('management.services.mcp.service.get_mcp_records_by_tenant')
+    async def test_record_query_failure_blocks_delete(
         self, mock_records, mock_tools, mock_delete,
     ):
-        """get_mcp_records_by_tenant raising is swallowed; delete still runs."""
+        """A failed MCP lookup must not skip cleanup and delete the record."""
         mock_records.side_effect = Exception("db down")
 
-        await delete_mcp_by_container_id(tenant_id='tid', user_id='uid', container_id='target-cid')
+        with self.assertRaisesRegex(Exception, "db down"):
+            await delete_mcp_by_container_id(tenant_id='tid', user_id='uid', container_id='target-cid')
 
         mock_tools.assert_not_called()
-        mock_delete.assert_called_once()
+        mock_delete.assert_not_called()
 
 
 # ============================================================================
@@ -2731,9 +2826,9 @@ class TestUploadAndStartMcpImageCleanupOnFailure(unittest.IsolatedAsyncioTestCas
         mock_mgr_cls.return_value = mock_mgr
         return mock_mgr
 
-    @patch('backend.services.remote_mcp_service.add_remote_mcp_server_list')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.add_remote_mcp_server_list')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_registration_failure_stops_started_container(
         self, mock_check_name, mock_mgr_cls, mock_add,
     ):
@@ -2751,9 +2846,9 @@ class TestUploadAndStartMcpImageCleanupOnFailure(unittest.IsolatedAsyncioTestCas
 
         mock_mgr.stop_mcp_container.assert_awaited_once_with("image-cid")
 
-    @patch('backend.services.remote_mcp_service.add_remote_mcp_server_list')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.add_remote_mcp_server_list')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_cleanup_failure_swallowed_original_raised(
         self, mock_check_name, mock_mgr_cls, mock_add,
     ):
@@ -2773,9 +2868,9 @@ class TestUploadAndStartMcpImageCleanupOnFailure(unittest.IsolatedAsyncioTestCas
 
         mock_mgr.stop_mcp_container.assert_awaited_once_with("image-cid")
 
-    @patch('backend.services.remote_mcp_service.add_remote_mcp_server_list')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.add_remote_mcp_server_list')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_non_tar_file_rejected_before_start(
         self, mock_check_name, mock_mgr_cls, mock_add,
     ):
@@ -2791,11 +2886,11 @@ class TestUploadAndStartMcpImageCleanupOnFailure(unittest.IsolatedAsyncioTestCas
 
         mock_mgr_cls.assert_not_called()
 
-    @patch('backend.services.remote_mcp_service.asyncio.sleep', new_callable=AsyncMock)
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.add_remote_mcp_server_list')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists')
+    @patch_import_context('management.services.mcp.service.asyncio.sleep', new_callable=AsyncMock)
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.add_remote_mcp_server_list')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists')
     async def test_upload_notifies_and_retries_readiness(
         self, mock_check_name, mock_mgr_cls, mock_add, mock_health, mock_sleep,
     ):
@@ -2815,10 +2910,10 @@ class TestUploadAndStartMcpImageCleanupOnFailure(unittest.IsolatedAsyncioTestCas
         assert mock_health.await_count == 2
         mock_sleep.assert_awaited_once_with(5)
 
-    @patch('backend.services.remote_mcp_service.os.unlink', side_effect=OSError("cleanup failed"))
-    @patch('backend.services.remote_mcp_service.add_remote_mcp_server_list')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists', return_value=False)
+    @patch_import_context('management.services.mcp.service.os.unlink', side_effect=OSError("cleanup failed"))
+    @patch_import_context('management.services.mcp.service.add_remote_mcp_server_list')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists', return_value=False)
     async def test_upload_continues_when_temp_file_cleanup_fails(
         self, mock_check_name, mock_mgr_cls, mock_add, mock_unlink,
     ):
@@ -2832,10 +2927,10 @@ class TestUploadAndStartMcpImageCleanupOnFailure(unittest.IsolatedAsyncioTestCas
         assert result["status"] == "success"
         mock_unlink.assert_called_once()
 
-    @patch('backend.services.remote_mcp_service.asyncio.sleep', new_callable=AsyncMock)
-    @patch('backend.services.remote_mcp_service.mcp_server_health')
-    @patch('backend.services.remote_mcp_service.MCPContainerManager')
-    @patch('backend.services.remote_mcp_service.check_mcp_name_exists', return_value=False)
+    @patch_import_context('management.services.mcp.service.asyncio.sleep', new_callable=AsyncMock)
+    @patch_import_context('management.services.mcp.service.mcp_server_health')
+    @patch_import_context('management.services.mcp.service.MCPContainerManager')
+    @patch_import_context('management.services.mcp.service.check_mcp_name_exists', return_value=False)
     async def test_upload_raises_after_readiness_retries(
         self, mock_check_name, mock_mgr_cls, mock_health, mock_sleep,
     ):

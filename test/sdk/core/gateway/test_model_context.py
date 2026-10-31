@@ -3,19 +3,7 @@
 from nexent.core.gateway.model_context import LLMContext, VLMContext
 
 
-def test_cache_key_uses_empty_defaults():
-    context = VLMContext(
-        model_name="qwen-vl-max",
-        base_url="https://api.example.com",
-        api_key="sk-key",
-        modality="vlm",
-        factory="openai",
-    )
-
-    assert context.cache_key() == ("", "vlm", "", "qwen-vl-max", "openai")
-
-
-def test_cache_key_includes_tenant_and_slot():
+def test_context_carries_full_connection_config():
     context = VLMContext(
         model_name="qwen-vl-max",
         base_url="https://api.example.com",
@@ -24,9 +12,15 @@ def test_cache_key_includes_tenant_and_slot():
         factory="openai",
         tenant_id="tenant-1",
         slot="vlm3",
+        ssl_verify=False,
+        timeout_seconds=12.5,
     )
 
-    assert context.cache_key() == ("tenant-1", "vlm", "vlm3", "qwen-vl-max", "openai")
+    assert context.base_url == "https://api.example.com"
+    assert context.api_key == "sk-key"
+    assert context.ssl_verify is False
+    assert context.timeout_seconds == 12.5
+    assert (context.tenant_id, context.slot) == ("tenant-1", "vlm3")
 
 
 def test_subclass_fields_are_independent():

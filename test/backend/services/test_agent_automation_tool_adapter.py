@@ -1,9 +1,14 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 
 import pytest
+from management.services.agent.context import (
+    strip_current_time_prefix,
+)
 
-from services.agent_automation import tool_adapter as adapter_module
-from services.agent_automation.tool_adapter import (
+from management.services.automation import proposal as adapter_module
+from management.services.automation.proposal import (
     AgentLoopAutomationToolAdapter,
     AutomationToolRuntimeContext,
     link_persisted_proposal_card,
@@ -12,7 +17,7 @@ from services.agent_automation.tool_adapter import (
 
 def test_build_tool_config_registers_scheduled_task_as_builtin(monkeypatch):
     monkeypatch.setattr(
-        "services.conversation_management_service.get_current_run_user_message_id",
+        "management.services.conversation.service.get_current_run_user_message_id",
         lambda conversation_id, user_id: 101,
     )
 
@@ -34,6 +39,24 @@ def test_build_tool_config_registers_scheduled_task_as_builtin(monkeypatch):
     assert tool_config.source == "builtin"
     assert tool_config.usage == "builtin"
     assert callable(tool_config.metadata["create_proposal"])
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        (
+            "每天早上9点查一下八字信息\n\n[当前时间: 2026-08-26 09:20:28]",
+            "每天早上9点查一下八字信息",
+        ),
+        (
+            "Every day at 9 AM, check the report\n\n[Current time: 2026-08-26 09:20:28]",
+            "Every day at 9 AM, check the report",
+        ),
+        ("每天九点生成日报", "每天九点生成日报"),
+    ],
+)
+def test_strip_runtime_time_marker_keeps_only_the_original_request(message, expected):
+    assert strip_current_time_prefix(message) == expected
 
 
 def test_build_callback_runs_coroutine_without_an_event_loop(monkeypatch):
@@ -101,7 +124,7 @@ async def test_agent_loop_adapter_uses_trusted_message_and_east_eight_timezone(m
         user_id="user-1",
         conversation_id=20,
         agent_id=7,
-        user_message="每天九点生成日报",
+        user_message="每天九点生成日报\n\n[当前时间: 2026-08-26 09:20:28]",
         source_message_id=101,
         model_id=3,
     )

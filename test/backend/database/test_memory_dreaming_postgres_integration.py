@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Opt-in PostgreSQL integration coverage for Dreaming advisory locks."""
 
 import os
@@ -10,13 +12,27 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import Session
 
-from database.db_models import MemoryDreamingAudit, MemoryDreamingDecision, MemoryLongTermVersion
-from database.memory_dreaming_db import advisory_lock_key
+from management.db.models import MemoryDreamingAudit, MemoryDreamingDecision, MemoryLongTermVersion
+from management.db.memory.dreaming import advisory_lock_key
 
 pytestmark = pytest.mark.skipif(
     os.getenv("RUN_POSTGRES_INTEGRATION") != "1",
     reason="set RUN_POSTGRES_INTEGRATION=1 with local PostgreSQL env",
 )
+
+DREAMING_SOURCE_MARKER = (
+    "-- Source migration: v2.5.0_0813_versioned_markdown_long_term_memory.sql"
+)
+
+
+def _read_dreaming_migration() -> str:
+    root = Path(__file__).resolve().parents[3]
+    merged = (root / "deploy/sql/migrations/v2.5.0_merged_migrations.sql").read_text()
+    assert DREAMING_SOURCE_MARKER in merged
+    dreaming_and_later = merged.split(DREAMING_SOURCE_MARKER, maxsplit=1)[1]
+    next_source_marker = "\n-- Source migration:"
+    assert next_source_marker in dreaming_and_later
+    return dreaming_and_later.split(next_source_marker, maxsplit=1)[0]
 
 
 def _connect():
@@ -181,10 +197,7 @@ def test_ac010_real_postgres_evidence_types_round_trip_through_orm():
 
 def test_ac075_real_postgres_upgrades_json_decisions_and_is_repeatable():
     connection = _connect()
-    migration = (
-        Path(__file__).resolve().parents[3]
-        / "deploy/sql/migrations/v2.5.0_0813_versioned_markdown_long_term_memory.sql"
-    ).read_text()
+    migration = _read_dreaming_migration()
     try:
         with connection.cursor() as cursor:
             cursor.execute(

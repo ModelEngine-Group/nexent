@@ -1,5 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import {
@@ -11,7 +14,7 @@ import {
   TextQuote,
   AlertTriangle,
 } from "lucide-react";
-import { Button, Row, Col, Card } from "antd";
+import { Button, Row, Col, Card, Result } from "antd";
 import { motion } from "framer-motion";
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useAuthenticationContext } from "@/components/providers/AuthenticationProvider";
@@ -23,15 +26,49 @@ import { useGlobalConfigStore } from "@/stores/global";
  */
 export default function Homepage() {
   const { t } = useTranslation("common");
-  const { isSpeedMode } = useDeployment();
-  const { isAuthenticated, openAuthPromptModal } = useAuthenticationContext();
-  const { canAccessRoute, openAuthzPromptModal } = useAuthorizationContext();
+  const { isSpeedMode, isDeploymentReady, enableAgentWorkbench, hideHomePage } =
+    useDeployment();
+  const { isAuthenticated, isAuthChecking, openAuthPromptModal } =
+    useAuthenticationContext();
+  const {
+    isAuthzReady,
+    accessibleRoutes,
+    canAccessRoute,
+    openAuthzPromptModal,
+    isLoading: isAuthzLoading,
+    error: authzError,
+    refetch: retryAuthorization,
+  } = useAuthorizationContext();
   const router = useRouter();
   const { config } = useGlobalConfigStore();
+  const [isRetrying, setIsRetrying] = useState(false);
+
+  const needsAuthorization = isAuthenticated || isSpeedMode;
+  const isEntryReady =
+    isDeploymentReady &&
+    (isSpeedMode || !isAuthChecking) &&
+    (!needsAuthorization ||
+      (isAuthzReady && !isAuthzLoading && !authzError && !isRetrying));
+  const defaultEntry = !needsAuthorization
+    ? enableAgentWorkbench
+      ? "/workbench"
+      : "/newchat"
+    : enableAgentWorkbench && canAccessRoute("/workbench")
+      ? "/workbench"
+      : canAccessRoute("/newchat")
+        ? "/newchat"
+        : accessibleRoutes.find((route) => route !== "/");
+
+  useEffect(() => {
+    if (isEntryReady && hideHomePage && defaultEntry) {
+      router.replace(defaultEntry);
+    }
+  }, [isEntryReady, hideHomePage, defaultEntry, router]);
+
   /**
- * Navigate to a route with permission pre-check
- * Returns true if navigation is allowed, false if permission is denied
- */
+   * Navigate to a route with permission pre-check
+   * Returns true if navigation is allowed, false if permission is denied
+   */
   const navigateWithPermissionCheck = (route: string): boolean => {
     // Check authentication first
     if (!isAuthenticated && !isSpeedMode) {
@@ -50,11 +87,49 @@ export default function Homepage() {
     return true;
   };
 
-  const navigateToChat = () => navigateWithPermissionCheck("/chat");
+  const navigateToChat = () => navigateWithPermissionCheck("/newchat");
   const navigateToAgent = () => navigateWithPermissionCheck("/agents");
-  const navigateToRepository = () => navigateWithPermissionCheck("/agent-space");
+  const navigateToRepository = () =>
+    navigateWithPermissionCheck("/agent-space");
   const canShowQuickAction = (route: string) =>
     !isAuthenticated || canAccessRoute(route);
+
+  if (!isDeploymentReady) {
+    return null;
+  }
+
+  if (needsAuthorization && (authzError || isRetrying)) {
+    return (
+      <div className="flex min-h-full items-center justify-center" role="alert">
+        <Result
+          status="error"
+          title={t("page.authorizationError")}
+          subTitle={t("page.authorizationErrorDescription")}
+          extra={
+            <Button
+              type="primary"
+              loading={isRetrying || isAuthzLoading}
+              disabled={isRetrying || isAuthzLoading}
+              onClick={async () => {
+                setIsRetrying(true);
+                try {
+                  await retryAuthorization();
+                } finally {
+                  setIsRetrying(false);
+                }
+              }}
+            >
+              {t("page.retryAuthorization")}
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
+
+  if (hideHomePage && (!isEntryReady || defaultEntry)) {
+    return null;
+  }
 
   return (
     <div className="w-full min-h-full flex flex-col items-center justify-center pt-6 pb-8">
@@ -89,7 +164,7 @@ export default function Homepage() {
           transition={{ duration: 0.8, delay: 0.4 }}
         >
           <Row gutter={[16, 16]} justify="center">
-            {canShowQuickAction("/chat") && (
+            {canShowQuickAction("/newchat") && (
               <Col xs={24} sm={24} md={8}>
                 <div style={{ display: "flex", justifyContent: "center" }}>
                   <Button type="primary" size="large" onClick={navigateToChat}>
@@ -127,7 +202,7 @@ export default function Homepage() {
         </motion.div>
 
         {/* Data protection notice - only shown in full version */}
-        {!isSpeedMode && config.aboutConfig === 'open' && (
+        {!isSpeedMode && config.aboutConfig === "open" && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -161,7 +236,6 @@ export default function Homepage() {
           transition={{ duration: 0.8, delay: 0.8 }}
           className="grid grid-cols-1 md:grid-cols-2 gap-4 "
         >
-
           {(
             t("page.features", { returnObjects: true }) as Array<{
               title: string;
@@ -197,8 +271,6 @@ export default function Homepage() {
               </motion.div>
             );
           })}
-
-
         </motion.div>
       </motion.section>
     </div>

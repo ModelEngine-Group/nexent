@@ -1,0 +1,22 @@
+schema_version: '1.0'
+case_id: AGENT-CALLABLE-D3-001
+timeout_seconds: 1800
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_current_source_real_docker_a2a_and_legacy_callable
+acceptance_bindings:
+  AC-01: [test_current_source_real_docker_a2a_and_legacy_callable]
+  AC-02: [test_current_source_real_docker_a2a_and_legacy_callable]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Self-contained business fixtures: the script creates and cleans up its own
+  published peers, external registrations, optional access key, staged sources
+  and Docker sandboxes. No shared preparation families or anchors are used.
+  Requires the configured tenant_a_admin account, existing llm/vlm model entries
+  and an accessible text-capable model, running Runtime/Config/Northbound,
+  Docker CLI/daemon and the configured sandbox image; these remain prerequisites.

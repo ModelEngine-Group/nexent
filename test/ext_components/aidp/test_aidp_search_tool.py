@@ -1,3 +1,6 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import importlib.util
 import json
 import os
@@ -32,7 +35,7 @@ def aidp_module():
     register_module("sdk.nexent", nexent_pkg)
 
     core_pkg = ModuleType("sdk.nexent.core")
-    core_pkg.__path__ = []
+    core_pkg.__path__ = [os.path.join(PROJECT_ROOT, "sdk", "nexent", "core")]
     register_module("sdk.nexent.core", core_pkg)
 
     tools_pkg = ModuleType("sdk.nexent.core.tools")
@@ -116,6 +119,7 @@ def aidp_module():
 def mock_observer(aidp_module):
     observer = MagicMock(spec=aidp_module.MessageObserver)
     observer.lang = "en"
+    observer.reserve_citations.side_effect = aidp_module.MessageObserver(lang="en").reserve_citations
     return observer
 
 
@@ -184,8 +188,8 @@ class TestAidpSearchToolInit:
                 reranking_mode="high_accuracy",
                 rewrite_enable=True,
                 related_search_enable=True,
-                score_threshold=1.5,
-                top_k=200,
+                score_threshold=1.0,
+                top_k=100,
                 multi_modal=True,
                 observer=mock_observer,
             )
@@ -242,18 +246,21 @@ class TestAidpSearchToolInit:
 
         assert "kds_list must be a valid JSON array" in str(exc_info.value)
 
-    def test_init_invalid_modes_fall_back(self, aidp_module, mock_observer):
+    def test_init_reads_official_legacy_method_without_revalidation(self, aidp_module, mock_observer, monkeypatch):
         mock_client = MagicMock()
         aidp_module.http_client_manager.get_sync_client.return_value = mock_client
 
+        def unexpected(*args, **kwargs):
+            raise AssertionError("Persisted retrieval configuration must not be revalidated")
+        monkeypatch.setattr(aidp_module, "validate_config", unexpected, raising=False)
         tool = aidp_module.AidpSearchTool(
                 server_url="https://aidp.example.com",
                 api_key="jwt-token",
                 tenant_id="aidp",
                 kds_list='["kb1"]',
-                search_method="bad-method",
+                search_method="hybrid_search",
                 reranking_enable=True,
-                reranking_mode="bad-mode",
+                reranking_mode="performance",
                 rewrite_enable=False,
                 related_search_enable=False,
                 score_threshold=0.0,
@@ -262,7 +269,7 @@ class TestAidpSearchToolInit:
                 observer=mock_observer,
             )
 
-        assert tool.search_method == "hybrid_search"
+        assert tool.search_method == "vector_search|full_text_search|graph_search"
         assert tool.reranking_mode == "performance"
 
 
@@ -289,21 +296,24 @@ class TestAidpSearchToolForward:
             json={
                 "query": "find images",
                 "kds_list": ["kb1", "kb2"],
-                "search_method": "hybrid_search",
+                "search_method": "vector_search|full_text_search|graph_search",
                 "reranking_enable": True,
                 "rewrite_enable": True,
                 "related_search_enable": True,
                 "score_threshold": 0.7,
-                "top_k": 2,
-                "multi_modal": True,
+                "topk": 2,
+                "multi_modal_enable": True,
+                "query_expansion_enable": False,
+                "hybrid_search_config": {"hybrid_top_k": 0, "vector_candidates": 10, "full_text_candidates": 10, "vector_score_threshold": 0.0, "full_text_score_threshold": 0.0},
+                "graph_search_config": {"graph_top_k": 0, "graph_score_threshold": 0.0, "graph_reranking_enable": True},
                 "reranking_mode": "high_accuracy",
             },
         )
 
         parsed = json.loads(result)
-        assert len(parsed) == 2
-        assert parsed[0]["title"] == "Text Doc"
-        assert parsed[1]["title"] == "Image Doc"
+        assert len(parsed["results"]) == 2
+        assert parsed["results"][0]["title"] == "Text Doc"
+        assert parsed["results"][1]["title"] == "Image Doc"
         assert aidp_tool.record_ops == 3
 
         assert mock_observer.add_message.call_count == 3
@@ -338,7 +348,7 @@ class TestAidpSearchToolForward:
 
         result = aidp_tool.forward("text only")
 
-        assert len(json.loads(result)) == 1
+        assert len(json.loads(result)["results"]) == 1
         process_types = [call.args[1] for call in mock_observer.add_message.call_args_list]
         assert aidp_module.ProcessType.PICTURE_WEB not in process_types
 
@@ -356,8 +366,30 @@ class TestAidpSearchToolForward:
 
         result = json.loads(aidp_tool.forward("nothing"))
 
-        assert "No relevant information" in result
-        assert "selected AIDP knowledge bases" in result
+        assert result["results"] == []
+        assert set(result) == {"notice", "results"}
+        assert "No knowledge-base scope was specified" in result["notice"]
+        assert "No relevant information was found" in result["notice"]
+
+    def test_forward_reports_display_names_but_sends_kds_ids(self, aidp_tool):
+        aidp_tool.kds_name_to_id_map = {
+            "AIDP FAQ": "kb1",
+            "AIDP API Guide": "kb2",
+        }
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"result": []}
+        aidp_tool._mock_http_client.post.return_value = mock_response
+
+        result = json.loads(
+            aidp_tool.forward("query", kds_list=["AIDP FAQ", "missing-kb"])
+        )
+
+        assert aidp_tool._mock_http_client.post.call_args.kwargs["json"]["kds_list"] == ["kb1"]
+        assert set(result) == {"notice", "results"}
+        assert 'not configured or unavailable: ["missing-kb"]' in result["notice"]
+        assert 'remaining available knowledge bases ["AIDP FAQ"]' in result["notice"]
+        assert "kb1" not in result["notice"]
 
     def test_forward_http_error_raises_wrapped_exception(self, aidp_tool):
         aidp_tool._mock_http_client.post.side_effect = httpx.HTTPError("boom")
@@ -365,7 +397,7 @@ class TestAidpSearchToolForward:
         with pytest.raises(Exception) as exc_info:
             aidp_tool.forward("query")
 
-        assert "AIDP HTTP error: boom" in str(exc_info.value)
+        assert "AIDP HTTP error: request failed (HTTPError" in str(exc_info.value)
 
     def test_forward_invalid_response_shape_raises_wrapped_exception(self, aidp_tool):
         mock_response = MagicMock()
@@ -376,7 +408,7 @@ class TestAidpSearchToolForward:
         with pytest.raises(Exception) as exc_info:
             aidp_tool.forward("query")
 
-        assert "AIDP search error: Invalid AIDP response" in str(exc_info.value)
+        assert "AIDP response field 'result' must be a list" in str(exc_info.value)
 
 
 class TestAidpBuildImageUrl:
@@ -485,6 +517,7 @@ class TestAidpBuildImageUrl:
         assert "aidp.example.com" not in model_results[0]["text"]
         assert ui_results[0]["text"] == "Description "
         assert ui_results[0]["image_key"] == "j1"
+        assert ui_results[0]["url"] == images_url[0]
         assert images_url == [
             "https://aidp.example.com/KnowledgeBase/Tenants/aidp/"
             "KnowledgeBases/75/ViewImage/image-id.png"
@@ -612,7 +645,33 @@ class TestAidpSearchToolWhitelist:
 
         result = json.loads(aidp_tool.forward("some query"))
 
-        assert "No AIDP knowledge base is accessible" in result
+        assert result["results"] == []
+        assert "No configured knowledge bases are accessible" in result["notice"]
+        aidp_tool._mock_http_client.post.assert_not_called()
+
+    def test_forward_explicit_empty_scope_uses_configured_scope(self, aidp_tool):
+        """An empty scope has the same meaning as an omitted scope."""
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"result": []}
+        aidp_tool._mock_http_client.post.return_value = mock_response
+
+        result = json.loads(aidp_tool.forward("query", kds_list=[]))
+
+        assert result["results"] == []
+        assert "No knowledge-base scope was specified" in result["notice"]
+        assert "No relevant information was found" in result["notice"]
+        assert aidp_tool._mock_http_client.post.call_args.kwargs["json"]["kds_list"] == ["kb1", "kb2"]
+
+    def test_forward_invalid_scope_with_no_available_kds_reports_no_search(self, aidp_tool):
+        """An invalid request with an empty whitelist must not claim a search ran."""
+        aidp_tool.set_allowed_kds([])
+
+        result = json.loads(aidp_tool.forward("query", kds_list=["kb-missing"]))
+
+        assert result["results"] == []
+        assert 'not configured or unavailable: ["kb-missing"]' in result["notice"]
+        assert "No accessible knowledge bases remained" in result["notice"]
         aidp_tool._mock_http_client.post.assert_not_called()
 
     def test_forward_configured_kds_blocked_by_empty_whitelist(self, aidp_tool):
@@ -623,7 +682,8 @@ class TestAidpSearchToolWhitelist:
 
         result = json.loads(aidp_tool.forward("query"))
 
-        assert "No AIDP knowledge base is accessible" in result
+        assert result["results"] == []
+        assert "No configured knowledge bases are accessible" in result["notice"]
         aidp_tool._mock_http_client.post.assert_not_called()
 
     # ------------------------------------------------------------------
@@ -633,7 +693,7 @@ class TestAidpSearchToolWhitelist:
     def test_forward_strips_unauthorized_kds_from_user_input(self, aidp_tool):
         """When the LLM passes kds_list that includes a non-whitelisted KB,
         that KB is silently removed and the query proceeds with allowed ones."""
-        aidp_tool.set_allowed_kds(["kb-1", "kb2"])
+        aidp_tool.set_allowed_kds(["kb1", "kb2"])
 
         mock_response = MagicMock()
         mock_response.raise_for_status.return_value = None
@@ -654,25 +714,55 @@ class TestAidpSearchToolWhitelist:
         aidp_tool._mock_http_client.post.return_value = mock_response
 
         # "kb-99" is not whitelisted and must be stripped
-        aidp_tool.forward("query", kds_list=["kb-1", "kb-99", "kb2"])
+        aidp_tool.forward("query", kds_list=["kb1", "kb-99", "kb2"])
 
         # Verify the HTTP call used only whitelisted KBs
         call_kwargs = aidp_tool._mock_http_client.post.call_args.kwargs
         sent_payload = call_kwargs["json"]
         assert "kb-99" not in sent_payload["kds_list"]
-        assert "kb-1" in sent_payload["kds_list"]
+        assert "kb1" in sent_payload["kds_list"]
         assert "kb2" in sent_payload["kds_list"]
 
+    def test_forward_notice_distinguishes_permission_and_unknown_kds(self, aidp_tool):
+        aidp_tool.kds_name_to_id_map = {
+            "AIDP FAQ": "kb1",
+            "AIDP API Guide": "kb2",
+        }
+        aidp_tool.set_allowed_kds(["kb1"])
+        aidp_tool._mock_http_client.post.return_value = MagicMock(
+            raise_for_status=MagicMock(),
+            json=MagicMock(return_value={"result": []}),
+        )
+
+        result = json.loads(
+            aidp_tool.forward(
+                "query", kds_list=["AIDP FAQ", "AIDP API Guide", "missing-kb"]
+            )
+        )
+
+        sent_payload = aidp_tool._mock_http_client.post.call_args.kwargs["json"]
+        assert sent_payload["kds_list"] == ["kb1"]
+        assert 'no read permission: ["AIDP API Guide"]' in result["notice"]
+        assert 'not configured or unavailable: ["missing-kb"]' in result["notice"]
+
     def test_forward_all_kds_filtered_returns_observation(self, aidp_tool):
-        """Fully filtered user input returns a denial without calling AIDP."""
-        aidp_tool.set_allowed_kds(["kb-allowed"])
+        """An all-invalid request behaves like an omitted scope."""
+        aidp_tool.set_allowed_kds(["kb1"])
+        mock_response = MagicMock()
+        mock_response.raise_for_status.return_value = None
+        mock_response.json.return_value = {"result": []}
+        aidp_tool._mock_http_client.post.return_value = mock_response
 
         result = json.loads(
             aidp_tool.forward("query", kds_list=["kb-bad1", "kb-bad2"])
         )
 
-        assert "No AIDP knowledge base is accessible" in result
-        aidp_tool._mock_http_client.post.assert_not_called()
+        assert result["results"] == []
+        assert 'not configured or unavailable: ["kb-bad1", "kb-bad2"]' in result["notice"]
+        assert 'broadened to all available configured knowledge bases ["kb1"]' in result["notice"]
+        assert "Do not retry the filtered knowledge bases" in result["notice"]
+        sent_payload = aidp_tool._mock_http_client.post.call_args.kwargs["json"]
+        assert sent_payload["kds_list"] == ["kb1"]
 
     def test_forward_no_whitelist_passes_all_kds(self, aidp_tool):
         """When set_allowed_kds was never called, all configured KBs pass."""
@@ -687,6 +777,43 @@ class TestAidpSearchToolWhitelist:
         call_kwargs = aidp_tool._mock_http_client.post.call_args.kwargs
         sent_payload = call_kwargs["json"]
         assert sent_payload["kds_list"] == ["kb1", "kb2"]
+
+    @pytest.mark.parametrize(
+        ("requested", "expected_used", "expected_ignored", "fallback"),
+        [
+            (["kb1", "kb2"], ["kb1", "kb2"], [], False),
+            (["kb1", "kb-missing"], ["kb1"], ["kb-missing"], False),
+            (["kb-missing"], ["kb1", "kb2"], ["kb-missing"], True),
+        ],
+    )
+    def test_forward_corrects_requested_scope(
+        self,
+        requested,
+        expected_used,
+        expected_ignored,
+        fallback,
+        aidp_tool,
+    ):
+        aidp_tool._mock_http_client.post.return_value = MagicMock(
+            raise_for_status=MagicMock(),
+            json=MagicMock(return_value={"result": []}),
+        )
+
+        response = json.loads(aidp_tool.forward("query", kds_list=requested))
+
+        sent_payload = aidp_tool._mock_http_client.post.call_args.kwargs["json"]
+        assert sent_payload["kds_list"] == expected_used
+        if expected_ignored:
+            assert "not configured or unavailable" in response["notice"]
+            for ignored_kb in expected_ignored:
+                assert ignored_kb in response["notice"]
+            assert "Do not retry the filtered knowledge bases" in response["notice"]
+            if fallback:
+                assert "broadened to all available configured knowledge bases" in response["notice"]
+            else:
+                assert "remaining available knowledge bases" in response["notice"]
+        else:
+            assert "Search was executed in the requested knowledge bases" in response["notice"]
 
     # ------------------------------------------------------------------
     # E. State switching
@@ -772,8 +899,8 @@ class TestExecuteRequestRetry:
         assert len(records) == 1
         assert aidp_tool._mock_http_client.post.call_count == 2
 
-    def test_retry_503_all_attempts_exhausted_raises_503_specific(self, aidp_tool, monkeypatch):
-        """All 3 attempts return 503. Should raise AidpSearchError with 503-specific message."""
+    def test_retry_503_all_attempts_exhausted_raises_shared_error(self, aidp_tool, monkeypatch):
+        """All three failures use the shared status and attempt-count error."""
         resp_503 = self._make_response(503)
         aidp_tool._mock_http_client.post.return_value = resp_503
 
@@ -782,7 +909,7 @@ class TestExecuteRequestRetry:
 
         with pytest.raises(Exception) as exc_info:
             aidp_tool._execute_request("query", ["kb1"])
-        assert "temporarily unavailable" in str(exc_info.value).lower() or "503" in str(exc_info.value)
+        assert "HTTP 503 after 3 attempts" in str(exc_info.value)
         assert aidp_tool._mock_http_client.post.call_count == 3
 
     def test_retry_502_all_attempts_exhausted_raises_generic(self, aidp_tool, monkeypatch):
@@ -798,12 +925,12 @@ class TestExecuteRequestRetry:
         assert "502" in str(exc_info.value)
         assert aidp_tool._mock_http_client.post.call_count == 3
 
-    def test_no_retry_on_400(self, aidp_tool):
+    def test_no_retry_on_400(self, aidp_tool, aidp_module):
         """400 is not a retryable status. Should raise immediately after one call."""
         resp_400 = self._make_response(400)
         aidp_tool._mock_http_client.post.return_value = resp_400
 
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(aidp_module.AidpSearchError, match="HTTP 400 after 1 attempts"):
             aidp_tool._execute_request("query", ["kb1"])
         assert aidp_tool._mock_http_client.post.call_count == 1
 
@@ -876,7 +1003,7 @@ class TestForwardWithoutObserver:
         tool._http_client = mock_client
         result = tool.forward("no observer query")
         parsed = json.loads(result)
-        assert len(parsed) == 1
+        assert len(parsed["results"]) == 1
 
 
 class TestResolveFieldDefault:
@@ -986,6 +1113,7 @@ class TestConvertKdsIds:
         """End-to-end: set kds_name_to_id_map, call forward with kds_list
         containing a kds_name, verify the HTTP call uses the converted kds_id."""
         aidp_tool.kds_name_to_id_map = {"kb-a": "real-id-1"}
+        aidp_tool.kds_list = ["real-id-1"]
         aidp_tool.set_allowed_kds(["real-id-1"])
 
         mock_response = MagicMock()

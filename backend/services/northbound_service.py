@@ -1,78 +1,60 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from contracts.authentication import NorthboundContext
 import asyncio
 import hashlib
 import json
 import logging
 import time
-from dataclasses import dataclass
 from os.path import basename
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import UploadFile
 from fastapi.responses import StreamingResponse
+from nexent.core.concurrency import ManagedTaskSpec
 
 
-from consts.const import (
-    AIDP_API_KEY,
-    AIDP_SERVER_URL,
-    ASSET_OWNER_TENANT_ID,
-    NORTHBOUND_IDEMPOTENCY_TTL_SECONDS,
-    NORTHBOUND_RATE_LIMIT_ENABLED,
-    NORTHBOUND_RATE_LIMIT_PER_MINUTE,
-)
-from consts.exceptions import (
-    AppException,
-    RuntimeMetadataValidationError,
-    LimitExceededError,
-    RuntimeServiceTimeoutError,
-    RuntimeServiceUnavailableError,
-    RuntimeUpstreamError,
-    UnauthorizedError,
-    ConversationNotFoundError,
-)
-from consts.error_code import ErrorCode, RuntimeMetadataValidationCode
-from consts.model import AgentRequest, ToolParamsRequest
-from database.knowledge_db import get_knowledge_info_by_tenant_id
-from database.conversation_db import get_conversation_messages
-from database.token_db import get_latest_usage_metadata, log_token_usage
-from services.agent_service import (
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, NORTHBOUND_IDEMPOTENCY_TTL_SECONDS, NORTHBOUND_RATE_LIMIT_ENABLED, NORTHBOUND_RATE_LIMIT_PER_MINUTE
+from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+from contracts.errors.exceptions import AppException, RuntimeMetadataValidationError, LimitExceededError, RuntimeServiceTimeoutError, RuntimeServiceUnavailableError, RuntimeUpstreamError, UnauthorizedError, ConversationNotFoundError
+from contracts.errors.codes import ErrorCode, RuntimeMetadataValidationCode
+from contracts.agent import AgentRequest
+from contracts.tool import ToolParamsRequest
+from management.db.knowledge_base.repository import get_knowledge_info_by_tenant_id
+from management.db.conversation.repository import get_conversation_list, get_conversation_messages
+from management.db.identity.token import get_latest_usage_metadata, log_token_usage
+from management.services.agent.service import (
     get_agent_by_name_impl,
 )
-from services.runtime_proxy_service import forward_agent_run, forward_agent_stop
-from services.runtime_state_service import runtime_state_service
-from services.agent_version_service import list_published_agents_impl
-from services.knowledge_scope_service import (
+from management.services.agent.runtime_client import forward_agent_run, forward_agent_stop
+from infrastructure.concurrency import northbound_thread_manager
+from management.services.agent.run_state import runtime_state_service
+from management.services.agent.versions import list_published_agents_impl
+from management.services.knowledge_base.scope import (
     AIDP_TOOL_CLASS,
     LOCAL_TOOL_CLASS,
     get_agent_knowledge_capabilities,
 )
-from services.vectordatabase_service import (
-    ElasticSearchService,
-    _is_multimodal_by_model_id,
-)
-from services.conversation_management_service import (
+from management.services.knowledge_base.service import ElasticSearchService
+from management.services.model.resolver import get_model_descriptor
+from management.services.conversation.service import (
     save_conversation_user,
-    get_conversation_list_service,
     create_new_conversation,
+    generate_conversation_title_service,
+    get_conversation_service,
     update_conversation_title as update_conversation_title_service,
 )
-from utils.runtime_metadata_utils import (
+from management.services.model.management import list_models_for_tenant
+from infrastructure.serialization.runtime_metadata import (
     runtime_metadata_hash,
     validate_runtime_metadata,
 )
-from services.file_management_service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
-from database.attachment_db import get_file_url, get_file_size_from_minio
+from management.services.file.service import upload_to_minio, resolve_minio_upload_folder, validate_urls_access
+from management.db.file.attachment import get_file_url, get_file_size_from_minio
 from nexent.multi_modal.utils import parse_s3_url
 
 logger = logging.getLogger("northbound_service")
 
 
-@dataclass
-class NorthboundContext:
-    request_id: str
-    tenant_id: str
-    user_id: str
-    authorization: str
-    token_id: int = 0
 
 
 def _build_northbound_file_descriptor(
@@ -165,7 +147,7 @@ def _normalize_northbound_attachments(
     1. List of S3 URL strings (backward compatible): ["s3://nexent/...", "/nexent/...", "attachments/..."]
     2. List of attachment objects (full metadata): [{"object_name": "...", "name": "...", ...}]
     """
-    from database.attachment_db import _build_mcp_presigned_url
+    from management.db.file.attachment import _build_mcp_presigned_url
 
     if attachments is None:
         return None
@@ -382,8 +364,10 @@ async def start_streaming_chat(
     meta_data: Optional[Dict[str, Any]] = None,
     tool_params: Optional[ToolParamsRequest] = None,
     model_id: Optional[int] = None,
-    idempotency_key: Optional[str] = None
+    idempotency_key: Optional[str] = None,
+    final_answer_mode: Literal["complete", "delta"] = "complete",
 ) -> StreamingResponse:
+    new_conversation_data: Optional[Dict[str, Any]] = None
     try:
         if metadata is not None:
             try:
@@ -406,15 +390,19 @@ async def start_streaming_chat(
         latest_version_no = agent_info["latest_version_no"]
         if conversation_id is None:
             logging.info("No conversation_id provided, creating a new conversation")
-            new_conversation = create_new_conversation(
+            new_conversation_data = create_new_conversation(
                 title="New Conversation",
                 user_id=ctx.user_id,
                 agent_id=agent_id,
             )
-            conversation_id = new_conversation["conversation_id"]
+            conversation_id = new_conversation_data["conversation_id"]
             logging.info(f"Created new conversation with id: {conversation_id}")
 
         internal_conversation_id = conversation_id
+
+        # Authorize before reading history or persisting the incoming message.
+        if get_conversation_service(conversation_id, ctx.user_id, ctx.tenant_id) is None:
+            raise PermissionError("Conversation is not accessible to the current identity")
 
         # Get history according to internal_conversation_id
         history_resp = await get_conversation_history_internal(ctx, internal_conversation_id)
@@ -448,14 +436,15 @@ async def start_streaming_chat(
         )
         agent_request.__dict__["_runtime_metadata_entrypoint"] = "northbound"
 
-        # Persist the user message off the event loop before starting the stream.
-        # We deliberately keep this synchronous step (not async submit) for
-        # northbound reliability -- external callers may not have SSE reconnect
-        # capability, so a late INSERT failure after the stream starts would
-        # silently lose the user message.  asyncio.to_thread avoids blocking
-        # the event loop while preserving the synchronous commit semantics.
+        # Persist before starting the stream. External callers may not reconnect,
+        # so the managed control-I/O task preserves synchronous commit semantics.
         try:
-            await asyncio.to_thread(
+            await northbound_thread_manager.run(
+                "control-io",
+                ManagedTaskSpec(
+                    task_name="northbound-save-user-message",
+                    owner="services.northbound_service",
+                ),
                 save_conversation_user,
                 agent_request,
                 ctx.user_id,
@@ -470,6 +459,8 @@ async def start_streaming_chat(
         raise UnauthorizedError("Cannot authenticate.")
     except AppException:
         raise
+    except PermissionError:
+        raise
     except Exception as e:
         raise Exception(f"Failed to start streaming chat for conversation_id {conversation_id}: {str(e)}")
 
@@ -478,6 +469,7 @@ async def start_streaming_chat(
             agent_request=agent_request,
             user_id=ctx.user_id,
             tenant_id=ctx.tenant_id,
+            final_answer_mode=final_answer_mode,
         )
     finally:
         if composed_key:
@@ -500,6 +492,17 @@ async def start_streaming_chat(
     response.headers["X-Request-Id"] = ctx.request_id
     response.headers["conversation_id"] = str(conversation_id)
     response.headers["X-Accel-Buffering"] = "no"
+
+    if new_conversation_data is not None and response.status_code < 400:
+        original_body_iterator = response.body_iterator
+
+        async def body_iterator_with_conversation_created():
+            yield ("data: " + json.dumps({"type": "conversation_created", "content": {"conversation_id": conversation_id}}, ensure_ascii=False) + "\n\n").encode("utf-8")
+            async for chunk in original_body_iterator:
+                yield chunk
+
+        response.body_iterator = body_iterator_with_conversation_created()
+
     return response
 
 
@@ -535,16 +538,22 @@ async def stop_chat(ctx: NorthboundContext, conversation_id: int, meta_data: Opt
 
 
 async def list_conversations(ctx: NorthboundContext) -> Dict[str, Any]:
-    conversations = get_conversation_list_service(ctx.user_id)
-    # get_conversation_list_service is sync
+    conversations = get_conversation_list(ctx.user_id)
 
     # Now return internal conversation_id directly
     return {"message": "success", "data": conversations, "requestId": ctx.request_id}
 
 
+async def list_configured_models(ctx: NorthboundContext) -> Dict[str, Any]:
+    """List the models configured for the authenticated tenant."""
+    models = await list_models_for_tenant(ctx.tenant_id)
+    return {"message": "success", "data": models, "requestId": ctx.request_id}
+
+
 async def get_conversation_history_internal(ctx: NorthboundContext, conversation_id: int) -> Dict[str, Any]:
     """Internal helper to get conversation history without logging."""
-    history = get_conversation_messages(conversation_id)
+    conversation = get_conversation_service(conversation_id, ctx.user_id, ctx.tenant_id)
+    history = get_conversation_messages(conversation_id) if conversation is not None else []
     result = []
     for message in history:
         # Parse minio_files from database (stored as JSON string)
@@ -716,10 +725,9 @@ async def get_agent_knowledge_bases_for_northbound(
                 "name": str(record.get("knowledge_name") or record["index_name"]),
                 "embedding_model": str(record.get("embedding_model_name") or ""),
                 "embedding_model_id": record.get("embedding_model_id"),
-                "is_multimodal": _is_multimodal_by_model_id(
-                    record.get("embedding_model_id"),
-                    agent_tenant_id,
-                ),
+                "is_multimodal": get_model_descriptor(
+                    record.get("embedding_model_id"), agent_tenant_id
+                ).is_multimodal,
             }
             for record in records
             if str(record.get("index_name") or "") in accessible_indices
@@ -735,7 +743,12 @@ async def get_agent_knowledge_bases_for_northbound(
             get_aidp_kb_impl,
         )
 
-        snapshot = await asyncio.to_thread(
+        snapshot = await northbound_thread_manager.run(
+            "control-io",
+            ManagedTaskSpec(
+                task_name="northbound-resolve-aidp-access",
+                owner="services.northbound_service",
+            ),
             resolve_current_aidp_access,
             server_url=AIDP_SERVER_URL,
             api_key=AIDP_API_KEY,
@@ -749,7 +762,12 @@ async def get_agent_knowledge_bases_for_northbound(
             detail: Dict[str, Any] = {}
             resource_status = str(row.get("resource_status") or "ACTIVE")
             try:
-                detail = await asyncio.to_thread(
+                detail = await northbound_thread_manager.run(
+                    "control-io",
+                    ManagedTaskSpec(
+                        task_name="northbound-get-aidp-knowledge-base",
+                        owner="services.northbound_service",
+                    ),
                     get_aidp_kb_impl,
                     AIDP_SERVER_URL,
                     AIDP_API_KEY,
@@ -841,3 +859,22 @@ async def update_conversation_title(ctx: NorthboundContext, conversation_id: int
     finally:
         if composed_key:
             asyncio.create_task(_release_idempotency_after_delay(composed_key))
+
+
+async def generate_conversation_title(
+    ctx: NorthboundContext,
+    conversation_id: int,
+    question: str,
+    language: str,
+    model_id: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Generate and persist a conversation title from the user's question."""
+    title = await generate_conversation_title_service(
+        conversation_id=conversation_id,
+        question=question,
+        user_id=ctx.user_id,
+        tenant_id=ctx.tenant_id,
+        language=language,
+        model_id=model_id,
+    )
+    return {"message": "success", "data": title, "requestId": ctx.request_id}

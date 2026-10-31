@@ -1,6 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * Types for tenant skill repository marketplace listings.
  */
+
+import type { TagResourcePredicate } from "@/types/tagManagement";
 
 export type SkillRepositoryListingStatus =
   "not_shared" | "pending_review" | "rejected" | "shared";
@@ -19,7 +23,9 @@ export interface SkillRepositoryListingItem {
   downloads?: number;
   category_id?: number | null;
   author?: string | null;
+  author_cas_username?: string | null;
   submitted_by?: string | null;
+  submitted_by_cas_username?: string | null;
   content?: string | null;
   can_take_down?: boolean;
 }
@@ -43,6 +49,8 @@ export interface SkillRepositoryListingListParams {
   page?: number;
   page_size?: number;
   search?: string;
+  tag_predicates?: TagResourcePredicate[];
+  tag?: string;
   sort_by_update_time?: boolean;
 }
 
@@ -101,6 +109,7 @@ export interface MyEditableSkillListParams {
   page_size?: number;
   search?: string;
   new_skill_padding?: boolean;
+  tag_predicates?: TagResourcePredicate[];
 }
 
 export interface MyEditableSkillPagination {

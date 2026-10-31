@@ -1,4 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import { getSourceLabel } from "@/lib/source";
 
 import "@assistant-ui/react-markdown/styles/dot.css";
 
@@ -13,7 +17,6 @@ import { useAuiState } from "@assistant-ui/react";
 import { type FC, memo, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CheckIcon, CopyIcon } from "lucide-react";
-import remarkGfm from "remark-gfm";
 import { defaultUrlTransform, type UrlTransform } from "react-markdown";
 
 import { MermaidDiagram } from "./mermaid-diagram";
@@ -21,185 +24,202 @@ import { MermaidDiagram } from "./mermaid-diagram";
 import { SyntaxHighlighter } from "./shiki-highlighter";
 import { TooltipIconButton } from "./tooltip-icon-button";
 import { cn } from "@/lib/utils";
+import { ENABLE_CITATION_CLICK_HIGHLIGHT } from "@/const/citation";
 import { remarkCite } from "./remark-cite";
+import {
+  chatRemarkPlugins,
+  chatRehypePlugins,
+  preprocessChatMarkdown,
+} from "./markdown-plugins";
 import { CiteMarker } from "./cite-marker";
 import { AuthenticatedImage } from "./authenticated-image";
-import { isLocalStorageObjectUrl } from "@/services/storageService";
-import { useSourcesPanel } from "./sources-panel-context";
-import type { PanelSourceItem } from "./sources-panel";
 import {
-  searchSourcesRegistry,
-  searchImagesRegistry,
-  conversationSourcesRegistry,
-  type SearchSource,
-} from "../adapter/remote-chat-model-adapter";
+  getLocalFileDownloadUrl,
+  isLocalStorageObjectUrl,
+} from "@/services/storageService";
+import { useSourcesPanelActions } from "./sources-panel-context";
+import {
+  useMessageSources,
+  findMessageSource,
+  type MessageSourcePart,
+} from "./message-sources";
+import { getCitationKey, getCitationLabel } from "./sources-panel";
+import { searchImagesRegistry } from "../adapter/remote-chat-model-adapter";
 
-/**
- * Looks up a SearchSource from either registry by citekey (e.g. "b1" or "1").
- * Checks searchSourcesRegistry first (streaming messages), then
- * conversationSourcesRegistry (historical messages).
- */
-interface MessageSourcePart {
-  type?: string;
-  sourceType?: string;
-  url?: string;
-  title?: string;
-  text?: string;
-  filename?: string;
-  downloadUrl?: string;
-  objectName?: string;
-  citeIndex?: number | string;
-  isImage?: boolean;
-  imageKey?: string;
-}
-
-const markdownUrlTransform: UrlTransform = (url, key, node) => {
-  if (key === "src" && node.tagName === "img" && url.startsWith("s3://")) {
+const markdownUrlTransform: UrlTransform = (url) => {
+  // React Markdown rejects non-web protocols by default. s3:// is Nexent's
+  // permanent file-reference protocol and is converted by custom renderers.
+  if (url.startsWith("s3://")) {
     return url;
   }
   return defaultUrlTransform(url);
 };
 
-function normalizeCiteIndex(value: unknown): number | undefined {
-  const citeIndex = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(citeIndex) ? citeIndex : undefined;
-}
-
-function resolveCiteSources(
-  messageId: string | undefined,
-  content: readonly MessageSourcePart[]
-): SearchSource[] {
-  const contentSources = content.flatMap((part) => {
-    const citeIndex = normalizeCiteIndex(part.citeIndex);
-    if (part.type !== "source" || citeIndex === undefined) {
-      return [];
-    }
-
-    return [
-      {
-        citeIndex,
-        url: part.url ?? "",
-        title: part.title || part.filename || part.url || `Source ${citeIndex}`,
-        text: part.text,
-        sourceType: part.sourceType,
-        filename: part.filename,
-        downloadUrl: part.downloadUrl,
-        objectName: part.objectName,
-        isImage: part.isImage,
-        imageKey: part.imageKey,
-      },
-    ];
-  });
-
-  if (contentSources.length > 0) return contentSources;
-  if (!messageId) return [];
-
-  return (
-    searchSourcesRegistry.get(messageId) ??
-    conversationSourcesRegistry.get(messageId) ??
-    []
-  );
-}
-
-function getCiteIndex(citekey: string): number | undefined {
-  const numericPart = citekey.replace(/^[a-z]+/i, "");
-  const citeIndex = Number.parseInt(numericPart, 10);
-  return Number.isNaN(citeIndex) ? undefined : citeIndex;
-}
-
-function buildCitationDisplayIndexMap(
-  content: readonly MessageSourcePart[]
-): Map<string, number> {
-  const displayIndexMap = new Map<string, number>();
-
-  for (const part of content) {
-    if (part.type !== "text" || typeof part.text !== "string") continue;
-
-    for (const match of part.text.matchAll(/\[\[([^\]]+)\]\]/g)) {
-      const citekey = match[1];
-      if (!displayIndexMap.has(citekey)) {
-        displayIndexMap.set(citekey, displayIndexMap.size + 1);
-      }
+/**
+ * A reference marker belongs to the one sentence immediately before it.
+ * Consecutive markers, such as [[a1]][[b2]], share that sentence.  Newlines
+ * and Markdown table cell separators also stop the scope so a marker never
+ * expands to a following paragraph or table.
+ */
+function getSentenceStartOffset(text: string, endOffset: number): number {
+  for (let offset = endOffset - 1; offset >= 0; offset -= 1) {
+    const character = text[offset];
+    if (character === "\n" || character === "|") return offset + 1;
+    if ("。！？!?".includes(character)) return offset + 1;
+    if (
+      character === "." &&
+      (offset + 1 === text.length || /\s|\[/.test(text[offset + 1]))
+    ) {
+      return offset + 1;
     }
   }
-
-  return displayIndexMap;
+  return 0;
 }
 
-function toPanelSource(source: SearchSource): PanelSourceItem {
-  return {
-    sourceType:
-      source.sourceType === "file" || source.sourceType === "document"
-        ? "document"
-        : "url",
-    url: source.url,
-    title: source.title,
-    text: source.text,
-    filename: source.filename,
-    downloadUrl: source.downloadUrl,
-    objectName: source.objectName,
-    citeIndex: source.citeIndex,
-    isImage: source.isImage,
-  };
+function getCitationScopeText(
+  content: readonly MessageSourcePart[],
+  citekey: string,
+  citationElement: HTMLElement | null
+): string {
+  const answerText = content
+    .filter((part) => part.type === "text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("\n");
+  if (!answerText) return "";
+
+  const normalizedKey = citekey.trim().toLowerCase();
+  const markers = Array.from(answerText.matchAll(/\[\[([^\]]+)\]\]/g));
+  const matchingMarkers = markers.filter(
+    (marker) => marker[1].trim().toLowerCase() === normalizedKey
+  );
+  if (!matchingMarkers.length) return "";
+
+  const renderedMarkers = citationElement
+    ? Array.from(
+        citationElement
+          .closest(".aui-md")
+          ?.querySelectorAll<HTMLElement>("[data-citekey]") || []
+      ).filter((marker) => marker.dataset.citekey === normalizedKey)
+    : [];
+  const occurrence = Math.max(0, renderedMarkers.indexOf(citationElement!));
+  const selectedMarker =
+    matchingMarkers[Math.min(occurrence, matchingMarkers.length - 1)];
+  const selectedMarkerIndex = markers.indexOf(selectedMarker);
+  if (selectedMarker.index === undefined || selectedMarkerIndex < 0) return "";
+
+  let groupStart = selectedMarkerIndex;
+  while (
+    groupStart > 0 &&
+    !answerText
+      .slice(
+        (markers[groupStart - 1].index || 0) +
+          markers[groupStart - 1][0].length,
+        markers[groupStart].index
+      )
+      .trim()
+  ) {
+    groupStart -= 1;
+  }
+  let groupEnd = selectedMarkerIndex;
+  while (
+    groupEnd < markers.length - 1 &&
+    !answerText
+      .slice(
+        (markers[groupEnd].index || 0) + markers[groupEnd][0].length,
+        markers[groupEnd + 1].index
+      )
+      .trim()
+  ) {
+    groupEnd += 1;
+  }
+
+  const groupStartOffset = markers[groupStart].index || 0;
+  const scopeStart = getSentenceStartOffset(answerText, groupStartOffset);
+  return answerText
+    .slice(scopeStart, groupStartOffset)
+    .replace(/\[\[[^\]]+\]\]/g, "")
+    .trim();
 }
 
 /**
  * Custom cite component rendered for [[citekey]] markers in markdown.
  * Looks up the source from the registry and renders a CiteMarker with hover.
  */
-const CiteComponent: FC<
-  React.ComponentProps<"cite"> & { citekey?: string }
-> = ({ citekey }) => {
-  const messageId = useAuiState((s) => s.message.id as string | undefined);
-  const content = useAuiState(
-    (s) => s.message.content as readonly MessageSourcePart[]
-  );
-  const { open } = useSourcesPanel();
-
+const CiteComponent = memo(function CiteComponent({
+  citekey,
+}: React.ComponentProps<"cite"> & { citekey?: string }) {
+  const model = useMessageSources();
+  const { messageId, content, sources, images, displayIndices } = model;
+  const { open } = useSourcesPanelActions();
+  const { t } = useTranslation();
   if (!citekey) return null;
-
-  const citeIndex = getCiteIndex(citekey);
-  const messageSources = resolveCiteSources(messageId, content);
-  const source = messageSources.find((item) => item.citeIndex === citeIndex);
-  const sourceIndex = source?.citeIndex ?? citeIndex ?? 0;
-  const citationDisplayIndexMap = buildCitationDisplayIndexMap(content);
-  const displayIndex = citationDisplayIndexMap.get(citekey) ?? sourceIndex;
-  const panelItems = messageSources.map(toPanelSource);
-  const sources = panelItems.filter((item) => !item.isImage);
-  const images = panelItems.filter((item) => item.isImage);
+  const source = findMessageSource(model, citekey);
+  const sourceIndex =
+    source?.citeIndex ??
+    (Number.parseInt(citekey.replace(/^[a-z]+/i, ""), 10) || 0);
+  const citationKey = source
+    ? getCitationKey(source)
+    : citekey.trim().toLowerCase();
+  const displayIndex =
+    displayIndices.get(citekey.trim().toLowerCase()) ?? sourceIndex;
+  const panelSource = source;
 
   return (
     <CiteMarker
       citekey={citekey}
       displayIndex={displayIndex}
       sourceIndex={sourceIndex}
-      url={source?.url}
-      title={source?.title ?? `Source ${sourceIndex}`}
-      text={source?.text}
+      label={
+        panelSource
+          ? getCitationLabel(panelSource, {
+              knowledgeBase: t("chat.sources.knowledgeBase"),
+              web: t("chat.sources.web"),
+              source: t("chat.sources.source"),
+            })
+          : `${t("chat.sources.source")} ${displayIndex}`
+      }
+      title={source?.title ?? `Source ${displayIndex}`}
+      text={panelSource?.text}
+      filename={panelSource?.filename}
+      url={panelSource?.url}
+      sourceType={panelSource?.sourceType}
+      sourceLabel={
+        panelSource
+          ? getSourceLabel(panelSource, {
+              knowledgeBase: t("chat.sources.knowledgeBase"),
+              web: t("chat.sources.web"),
+              document: t("chat.sources.document"),
+              source: t("chat.sources.source"),
+            })
+          : undefined
+      }
       loading={!source}
       onClick={
         source && messageId
-          ? () =>
+          ? (citationElement) =>
               open({
                 messageId,
                 groupId: "citations",
                 sources,
                 images,
-                selectedCiteIndex: source.citeIndex,
+                selectedCitationKey: citationKey,
+                // The flag only gates sentence-level highlight terms; the
+                // panel still selects and scrolls to the source card.
+                citationContext: ENABLE_CITATION_CLICK_HIGHLIGHT
+                  ? getCitationScopeText(content, citekey, citationElement)
+                  : undefined,
               })
           : undefined
       }
     />
   );
-};
+});
 
 // Wrapper component that safely renders MarkdownTextPrimitive
 // Guards against rendering for non-text parts or when text is not a valid string
 const MarkdownTextImpl = () => {
-  const messageId = useAuiState((s) => s.message.id as string | undefined);
-  const content = useAuiState(
-    (s) => s.message.content as readonly MessageSourcePart[]
-  );
+  const { messageId, displayIndices: citationDisplayIndexMap } =
+    useMessageSources();
   // Check if we have a valid text part context using useAuiState
   const isValidTextPart = useAuiState((s) => {
     const part = s.part;
@@ -210,10 +230,6 @@ const MarkdownTextImpl = () => {
       part.text.length > 0
     );
   });
-  const citationDisplayIndexMap = useMemo(
-    () => buildCitationDisplayIndexMap(content),
-    [content]
-  );
   const citationIndexMapAttribute = useMemo(
     () => JSON.stringify(Object.fromEntries(citationDisplayIndexMap)),
     [citationDisplayIndexMap]
@@ -235,9 +251,11 @@ const MarkdownTextImpl = () => {
   return (
     <div data-citation-index-map={citationIndexMapAttribute}>
       <MarkdownTextPrimitive
-        remarkPlugins={[remarkGfm, remarkCite]}
+        remarkPlugins={[...chatRemarkPlugins, remarkCite]}
+        rehypePlugins={chatRehypePlugins}
+        preprocess={preprocessChatMarkdown}
         urlTransform={markdownUrlTransform}
-        className="aui-md"
+        className="aui-md [&_.katex-display]:max-w-full [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden"
         components={defaultComponents}
         componentsByLanguage={{
           mermaid: {
@@ -314,6 +332,7 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
   alt,
   ...props
 }) => {
+  const imageSrc = typeof src === "string" ? src : undefined;
   const messageId = useAuiState((s) => s.message.id as string | undefined);
   const messageContent = useAuiState(
     (s) => s.message.content as readonly MessageSourcePart[]
@@ -326,7 +345,9 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
           typeof part.url === "string"
       )
     : [];
-  const markerMatch = src?.match(/\/__aidp_image__\/([a-z]+\d+)(?:[?#].*)?$/i);
+  const markerMatch = imageSrc?.match(
+    /\/__aidp_image__\/([a-z]+\d+)(?:[?#].*)?$/i
+  );
   if (markerMatch) {
     const contentImage = trustedImages.find(
       (image) => image.imageKey === markerMatch[1]
@@ -354,12 +375,12 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
   // through PICTURE_WEB. Local storage URLs can be resolved directly because
   // the authenticated file endpoint performs its own access check; this also
   // covers relevant S3 images that were omitted by optional image filtering.
-  const trustedImage = src
-    ? trustedImages.find((image) => image.url === src)
+  const trustedImage = imageSrc
+    ? trustedImages.find((image) => image.url === imageSrc)
     : undefined;
   const verifiedImageUrl =
     trustedImage?.url ||
-    (src && isLocalStorageObjectUrl(src) ? src : undefined);
+    (imageSrc && isLocalStorageObjectUrl(imageSrc) ? imageSrc : undefined);
   if (verifiedImageUrl) {
     return (
       <figure className="my-4 overflow-hidden rounded-xl border bg-muted/20">
@@ -374,11 +395,29 @@ const VerifiedMarkdownImage: FC<React.ComponentProps<"img">> = ({
     );
   }
 
-  if (trustedImages.length > 0 || !src) {
+  if (trustedImages.length > 0 || !imageSrc) {
     return null;
   }
 
-  return <AuthenticatedImage src={src} alt={alt} {...props} />;
+  return <AuthenticatedImage src={imageSrc} alt={alt} {...props} />;
+};
+
+const PermanentFileLink: FC<React.ComponentProps<"a">> = ({
+  href,
+  className,
+  ...props
+}) => {
+  const resolvedHref = getLocalFileDownloadUrl(href) || href;
+  return (
+    <a
+      href={resolvedHref}
+      className={cn(
+        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
+        className
+      )}
+      {...props}
+    />
+  );
 };
 
 const defaultComponents = memoizeMarkdownComponents({
@@ -447,15 +486,7 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
-  a: ({ className, ...props }) => (
-    <a
-      className={cn(
-        "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2",
-        className
-      )}
-      {...props}
-    />
-  ),
+  a: PermanentFileLink,
   blockquote: ({ className, ...props }) => (
     <blockquote
       className={cn(
@@ -534,6 +565,7 @@ const defaultComponents = memoizeMarkdownComponents({
       {...props}
     />
   ),
+  del: ({ children, ...props }) => <span {...props}>{children}</span>,
   sup: ({ className, ...props }) => (
     <sup
       className={cn("aui-md-sup [&>a]:text-xs [&>a]:no-underline", className)}

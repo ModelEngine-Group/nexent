@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -euo pipefail
 
@@ -7,6 +8,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../common/common.sh"
 # shellcheck source=/dev/null
 source "$SCRIPT_DIR/../common/version.sh"
+# shellcheck source=/dev/null
+source "$SCRIPT_DIR/../k8s/env.sh"
 
 TMP_DIR="${TMPDIR:-/tmp}/nexent-deployment-test-$$"
 mkdir -p "$TMP_DIR"
@@ -14,6 +17,8 @@ trap 'rm -rf "$TMP_DIR"' EXIT
 DEPLOYMENT_ROOT_ENV="$TMP_DIR/root.env"
 : > "$DEPLOYMENT_ROOT_ENV"
 export DEPLOYMENT_LANG=en
+
+SHARED_STORAGE_TEMPLATE="$(cat "$SCRIPT_DIR/../k8s/helm/nexent/charts/nexent-common/templates/shared-storage.yaml")"
 
 assert_eq() {
   local expected="$1"
@@ -71,6 +76,9 @@ assert_success() {
   fi
 }
 
+assert_contains "$SHARED_STORAGE_TEMPLATE" $'  capacity:\n    storage: {{ $skillsSize }}\n  accessModes:' "skills PV accessModes should be a sibling of capacity"
+assert_not_contains "$SHARED_STORAGE_TEMPLATE" $'    storage: {{ $skillsSize }}\n    accessModes:' "skills PV accessModes should not be nested under capacity"
+
 write_full_config() {
   local file="$1"
   {
@@ -80,10 +88,10 @@ write_full_config() {
     echo '  - infrastructure'
     echo '  - application'
     echo '  - data-process'
-    echo '  - supabase'
     echo '  - terminal'
     echo 'portPolicy: "development"'
     echo 'imageSource: "local-latest"'
+    echo 'sandboxMode: "full"'
   } > "$file"
 }
 
@@ -102,6 +110,14 @@ assert_contains "$ZH_DEPLOY_HELP" "--defaults" "deploy wrapper help should docum
 EN_DEPLOY_HELP="$(DEPLOYMENT_LANG=en LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../deploy.sh" --help)"
 assert_contains "$EN_DEPLOY_HELP" "Usage:" "DEPLOYMENT_LANG should force English deploy wrapper help"
 assert_contains "$EN_DEPLOY_HELP" "--defaults" "English deploy wrapper help should document defaults mode"
+DOCKER_DEPLOY_HELP="$(DEPLOYMENT_LANG=en bash "$SCRIPT_DIR/../docker/deploy.sh" --help)"
+assert_contains "$DOCKER_DEPLOY_HELP" "--sandbox-mode MODE" "Docker deploy help should document sandbox mode selection"
+DOCKER_DEPLOY_CONTENT="$(cat "$SCRIPT_DIR/../docker/deploy.sh")"
+assert_contains "$DOCKER_DEPLOY_CONTENT" 'DEPLOYMENT_SANDBOX_MODE_SELECTION_ENABLED="true"' "Docker deployment should enable the Sandbox selection step"
+assert_contains "$DOCKER_DEPLOY_CONTENT" 'if [ "$DEPLOYMENT_SANDBOX_MODE" = "disabled" ]' "disabled Sandbox mode should skip image pulling"
+assert_contains "$DOCKER_DEPLOY_CONTENT" 'update_env_var "NEXENT_SANDBOX_DEFAULT_LEVEL"' "Docker deployment should persist the selected execution level"
+assert_contains "$DOCKER_DEPLOY_CONTENT" 'current_image" = "$NEXENT_SANDBOX_IMAGE"' "Docker deployment should retain a matching fixed Sandbox container"
+assert_contains "$DOCKER_DEPLOY_CONTENT" 'docker rm -f "$container_name"' "Docker deployment should replace a stale fixed Sandbox container"
 
 ZH_ROOT_DEPLOY_HELP="$(DEPLOYMENT_LANG="" LANG="zh_CN.UTF-8" bash "$SCRIPT_DIR/../../deploy.sh" --help)"
 assert_contains "$ZH_ROOT_DEPLOY_HELP" "用法：" "root deploy help should follow Chinese locale"
@@ -138,14 +154,16 @@ assert_contains "$(cat /tmp/nexent-image-build-zh-invalid.log)" "未知选项：
 
 APP_VERSION="latest"
 deployment_prepare_config --app-version latest
-assert_eq "infrastructure,application,data-process,supabase" "$DEPLOYMENT_COMPONENTS" "default components should include data-process and supabase"
+assert_eq "infrastructure,application,data-process" "$DEPLOYMENT_COMPONENTS" "default components should include data-process and local authentication"
+assert_eq "lightweight" "$DEPLOYMENT_SANDBOX_MODE" "the lightweight Sandbox should be enabled by default"
 assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-data-process" "default docker services should include data-process"
-assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-supabase-db" "default helm charts should include supabase db"
 deployment_prepare_config --components infrastructure,application --port-policy production --image-source general --app-version latest
 assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "components should come from CLI"
 assert_eq "production" "$DEPLOYMENT_PORT_POLICY" "port policy should come from CLI"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "image source should come from CLI"
 assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-web" "application services should include web"
+assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-ops" "application services should include ops"
+assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-ops" "application selection should include the ops Helm chart"
 DOCKER_SUMMARY="$(deployment_print_summary docker)"
 assert_contains "$DOCKER_SUMMARY" "Deployment components: infrastructure,application" "docker summary should include selected components"
 assert_contains "$DOCKER_SUMMARY" "Port policy: production" "docker summary should include selected port policy"
@@ -157,7 +175,43 @@ if [[ "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" == *"nexent-data-process"* ]]; then
 fi
 assert_contains "$DEPLOYMENT_DOCKER_PORTS" "3000" "production should expose web"
 assert_contains "$DEPLOYMENT_DOCKER_PORTS" "5013" "production should expose northbound"
+assert_contains "$DEPLOYMENT_DOCKER_PORTS" "5016" "production should expose ops"
 
+OPS_PORT=15016
+assert_contains "$(deployment_compute_docker_ports)" "15016" "production should use the configured ops port"
+DEPLOYMENT_PORT_POLICY=development
+assert_contains "$(deployment_compute_docker_ports)" "15016" "development should use the configured ops port"
+unset OPS_PORT
+assert_contains "$(deployment_compute_docker_ports)" "5016" "development should default to ops port 5016"
+DEPLOYMENT_COMPONENTS=infrastructure
+deployment_compute_selection
+assert_not_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-ops" "infrastructure-only should not start ops"
+assert_not_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-ops" "infrastructure-only should not select the ops Helm chart"
+assert_not_contains "$DEPLOYMENT_DOCKER_PORTS" "5016" "infrastructure-only should not reserve the ops port"
+
+unset NEXENT_SANDBOX_IMAGE NEXENT_SANDBOX_DEFAULT_LEVEL
+deployment_prepare_config --components infrastructure,application --image-source general --sandbox-mode full --app-version v2.2.0
+deployment_apply_image_source
+assert_eq "docker" "$NEXENT_SANDBOX_DEFAULT_LEVEL" "full Sandbox mode should enable Docker isolation"
+assert_eq "nexent/nexent-sandbox-full:v2.2.0" "$NEXENT_SANDBOX_IMAGE" "full Sandbox mode should select the full image"
+FULL_SANDBOX_DOCKER_ENV="$TMP_DIR/full-sandbox-docker.env"
+deployment_render_docker_env "$FULL_SANDBOX_DOCKER_ENV"
+assert_contains "$(cat "$FULL_SANDBOX_DOCKER_ENV")" 'NEXENT_SANDBOX_DEFAULT_LEVEL="docker"' "Docker env should enable Docker isolation for full Sandbox mode"
+
+unset NEXENT_SANDBOX_IMAGE NEXENT_SANDBOX_DEFAULT_LEVEL
+deployment_prepare_config --components infrastructure,application --image-source general --sandbox-mode disabled --app-version v2.2.0
+deployment_apply_image_source
+assert_eq "local" "$NEXENT_SANDBOX_DEFAULT_LEVEL" "disabled Sandbox mode should use local execution"
+assert_eq "nexent/nexent-sandbox:v2.2.0" "$NEXENT_SANDBOX_IMAGE" "disabled mode should retain a valid lightweight image reference"
+
+if deployment_prepare_config --sandbox-mode unsupported --app-version latest 2>"$TMP_DIR/invalid-sandbox-mode.log"; then
+  echo "FAIL: unsupported Sandbox mode should fail validation"
+  exit 1
+fi
+assert_contains "$(cat "$TMP_DIR/invalid-sandbox-mode.log")" "Unsupported sandbox mode: unsupported" "invalid Sandbox mode should explain supported values"
+
+unset NEXENT_SANDBOX_IMAGE NEXENT_SANDBOX_DEFAULT_LEVEL
+deployment_prepare_config --components infrastructure,application --port-policy production --image-source general --app-version latest
 deployment_apply_image_source
 PRODUCTION_HELM_VALUES="$TMP_DIR/production-generated-values.yaml"
 deployment_render_helm_values "$PRODUCTION_HELM_VALUES"
@@ -180,14 +234,13 @@ deployment_render_helm_values "$PREFIXED_HELM_VALUES"
 PREFIXED_HELM_CONTENT="$(cat "$PREFIXED_HELM_VALUES")"
 assert_contains "$PREFIXED_HELM_CONTENT" 'imageRegistryPrefix: "registry.local/nexent"' "helm values should record registry prefix"
 assert_contains "$PREFIXED_HELM_CONTENT" 'repository: "registry.local/nexent/nexent/nexent"' "helm values should use prefixed app image repositories"
-assert_contains "$PREFIXED_HELM_CONTENT" $'  initImage:\n    repository: "registry.local/nexent/postgres"\n    tag: "15-alpine"\n    pullPolicy: "IfNotPresent"' "helm values should use prefixed supabase auth init image"
 assert_contains "$PREFIXED_HELM_CONTENT" 'pullPolicy: "IfNotPresent"' "prefixed local-latest images should be pulled from the registry"
 unset NEXENT_IMAGE NEXENT_WEB_IMAGE NEXENT_DATA_PROCESS_IMAGE NEXENT_MCP_DOCKER_IMAGE
 unset ELASTICSEARCH_IMAGE POSTGRESQL_IMAGE REDIS_IMAGE MINIO_IMAGE OPENSSH_SERVER_IMAGE
 unset SUPABASE_KONG SUPABASE_GOTRUE SUPABASE_DB
 
-deployment_prepare_config --components supabase --port-policy development --app-version latest
-assert_eq "infrastructure,supabase" "$DEPLOYMENT_COMPONENTS" "only infrastructure should be required and added"
+deployment_prepare_config --components infrastructure --port-policy development --app-version latest
+assert_eq "infrastructure" "$DEPLOYMENT_COMPONENTS" "only infrastructure should be required and added"
 if [[ "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" == *"nexent-web"* ]]; then
   echo "FAIL: application should not be auto-added"
   exit 1
@@ -210,7 +263,6 @@ DEPLOYMENT_VERSION="full"
 DEPLOYMENT_MODE="development"
 IS_MAINLAND="Y"
 deployment_prepare_config --app-version latest
-assert_contains "$DEPLOYMENT_COMPONENTS" "supabase" "legacy full should include supabase"
 assert_eq "mainland" "$DEPLOYMENT_REGISTRY_PROFILE" "legacy mainland flag should map registry profile"
 assert_eq "mainland" "$DEPLOYMENT_IMAGE_SOURCE" "legacy mainland flag should map image source"
 unset DEPLOYMENT_VERSION DEPLOYMENT_MODE IS_MAINLAND
@@ -222,6 +274,7 @@ APP_VERSION="v2.2.2"
 NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$FULL_CONFIG"
 assert_eq "v2.2.2" "$DEPLOYMENT_APP_VERSION" "local config appVersion should not override current VERSION"
 assert_contains "$DEPLOYMENT_COMPONENTS" "data-process" "local config should still load saved components while ignoring appVersion"
+assert_eq "full" "$DEPLOYMENT_SANDBOX_MODE" "local config should restore the selected Sandbox mode"
 NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$FULL_CONFIG" --version v2.2.3
 assert_eq "v2.2.3" "$DEPLOYMENT_APP_VERSION" "explicit --version should override current VERSION"
 APP_VERSION="latest"
@@ -232,11 +285,11 @@ assert_eq "nexent/nexent:latest" "$NEXENT_IMAGE" "local-latest image should be a
 assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-data-process" "data-process chart should be selected"
 
 NEXENT_DEPLOY_CONFIG_MODE=defaults deployment_prepare_config --local-config "$TMP_DIR/missing.yaml" --app-version latest
-assert_eq "infrastructure,application,data-process,supabase" "$DEPLOYMENT_COMPONENTS" "defaults mode should use built-in defaults when local config is absent"
+assert_eq "infrastructure,application,data-process" "$DEPLOYMENT_COMPONENTS" "defaults mode should use built-in defaults when local config is absent"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "defaults mode should use built-in image source when local config is absent"
 
 deployment_prepare_config --defaults --local-config "$TMP_DIR/missing.yaml" --app-version latest
-assert_eq "infrastructure,application,data-process,supabase" "$DEPLOYMENT_COMPONENTS" "--defaults should use built-in defaults when local config is absent"
+assert_eq "infrastructure,application,data-process" "$DEPLOYMENT_COMPONENTS" "--defaults should use built-in defaults when local config is absent"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "--defaults should use built-in image source when local config is absent"
 
 deployment_prepare_config --local-config "$FULL_CONFIG" --defaults --image-source general --app-version latest
@@ -378,10 +431,13 @@ assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/depl
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-data-process/templates/deployment.yaml")" "checksum/nexent-backend:" "data-process deployment should not keep removed backend rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_DEFAULT_TENANT_ID" "common configmap should expose the CAS default tenant"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/values.yaml")" "defaultTenantId: \"tenant_id\"" "common values should preserve the CAS default tenant"
-assert_contains "$(cat "$SCRIPT_DIR/../k8s/deploy.sh")" "CAS_DEFAULT_TENANT_ID" "k8s deploy should render the CAS default tenant from environment configuration"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_DEFAULT_ROLE" "common configmap should expose the CAS default role"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/values.yaml")" "defaultRole: \"USER\"" "common values should preserve the CAS default role"
-assert_contains "$(cat "$SCRIPT_DIR/../k8s/deploy.sh")" "CAS_DEFAULT_ROLE" "k8s deploy should render the CAS default role from environment configuration"
+CAS_ENV_FILE="$TMP_DIR/cas.env"
+printf 'CAS_DEFAULT_TENANT_ID=synthetic-tenant\nCAS_DEFAULT_ROLE=ADMIN\n' > "$CAS_ENV_FILE"
+CAS_ENV_DATA="$(k8s_env_file_data "$CAS_ENV_FILE")"
+assert_contains "$CAS_ENV_DATA" "CAS_DEFAULT_TENANT_ID: \"$(printf '%s' synthetic-tenant | base64 | tr -d '\r\n')\"" "k8s env Secret should preserve the configured CAS default tenant"
+assert_contains "$CAS_ENV_DATA" "CAS_DEFAULT_ROLE: \"$(printf '%s' ADMIN | base64 | tr -d '\r\n')\"" "k8s env Secret should preserve the configured CAS default role"
 assert_contains "$(cat "$SCRIPT_DIR/../env/.env.example")" "CAS_DEFAULT_ROLE=USER" "docker environment example should preserve the CAS default role"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_HEARTBEAT_URL" "common configmap should expose the CAS heartbeat URL"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.yaml")" "CAS_HEARTBEAT_INTERVAL_SECONDS" "common configmap should expose the CAS heartbeat interval"
@@ -389,19 +445,10 @@ assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/configmap.
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/values.yaml")" "heartbeatIntervalSeconds: \"300\"" "common values should default the CAS heartbeat interval to five minutes"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-ssh-image" "openssh deployment should include ssh image rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-env" "openssh deployment should include env rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-env" "minio deployment should include env rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" "checksum/nexent-supabase-secret" "supabase auth deployment should include supabase secret rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" ".Values.initImage.repository" "supabase auth init container should use configurable image repository"
-assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" "image: postgres:15-alpine" "supabase auth init container should not hardcode postgres image"
-assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-auth/templates/deployment.yaml")" "checksum/nexent-env" "supabase auth deployment should not use full env rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-db/templates/deployment.yaml")" "checksum/nexent-supabase-secret" "supabase db deployment should include supabase secret rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-db/templates/deployment.yaml")" "checksum/nexent-sql" "supabase db deployment should keep SQL rollout annotation"
-assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-db/templates/deployment.yaml")" "checksum/nexent-env" "supabase db deployment should not use full env rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-kong/templates/deployment.yaml")" "checksum/nexent-supabase-secret" "supabase kong deployment should include supabase secret rollout annotation"
-assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-supabase-kong/templates/deployment.yaml")" "checksum/nexent-env" "supabase kong deployment should not use full env rollout annotation"
+assert_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-env" "minio deployment should include env rollout annotation"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-web:" "web deployment should not keep component-named env checksum annotation"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-openssh/templates/deployment.yaml")" "checksum/nexent-ssh:" "openssh deployment should not keep component-named env checksum annotation"
-assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-minio" "minio deployment should not keep component-named env checksum annotation"
+assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-minio/templates/deployment.yaml")" "checksum/nexent-minio" "minio deployment should not keep component-named env checksum annotation"
 
 ENV_CHECKSUM_A="$TMP_DIR/env-checksum-a.env"
 cat > "$ENV_CHECKSUM_A" <<'ENV'
@@ -454,6 +501,7 @@ deployment_prepare_monitoring_env k8s
 assert_eq "true" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "ENABLE_TELEMETRY")" "monitoring.env should record selected monitoring enablement"
 assert_eq "langsmith" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_PROVIDER")" "monitoring.env should record selected provider"
 assert_eq "https://smith.langchain.com/" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_URL")" "monitoring.env should record K8s dashboard URL"
+assert_eq "SU,SPEED" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_ALLOWED_ROLES")" "monitoring.env should default dashboard roles compatibly"
 assert_eq "http://nexent-otel-collector:4318" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "OTEL_EXPORTER_OTLP_ENDPOINT")" "monitoring.env should record K8s OTLP endpoint"
 assert_eq "otel-collector-langsmith-config.yml" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "OTEL_COLLECTOR_CONFIG_FILE")" "monitoring.env should record K8s collector config file"
 assert_eq "ls-root-fallback" "$(deployment_get_env_var_file "$MONITORING_ENV_TMP" "LANGSMITH_API_KEY")" "monitoring.env should migrate LangSmith key from root .env when missing"
@@ -464,12 +512,18 @@ MONITORING_CHECKSUM_A="$(deployment_env_values_checksum)"
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "MONITORING_TRACE_MAX_CHARS" "1234"
 MONITORING_CHECKSUM_B="$(deployment_env_values_checksum)"
 assert_not_eq "$MONITORING_CHECKSUM_A" "$MONITORING_CHECKSUM_B" "env checksum should change when monitoring.env changes"
+deployment_update_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_ALLOWED_ROLES" "SU,ADMIN,SPEED"
 MONITORING_HELM_VALUES="$TMP_DIR/monitoring-generated-values.yaml"
 deployment_render_helm_values "$MONITORING_HELM_VALUES"
 MONITORING_HELM_CONTENT="$(cat "$MONITORING_HELM_VALUES")"
 assert_contains "$MONITORING_HELM_CONTENT" 'provider: "langsmith"' "Helm values should render monitoring provider from monitoring.env"
+assert_contains "$MONITORING_HELM_CONTENT" 'dashboardAllowedRoles: "SU,ADMIN,SPEED"' "Helm values should render dashboard roles from monitoring.env"
 assert_contains "$MONITORING_HELM_CONTENT" 'langsmithApiKey: "ls-root-fallback"' "Helm values should pass LangSmith key to monitoring collector values"
 assert_contains "$MONITORING_HELM_CONTENT" 'configFile: "otel-collector-langsmith-config.yml"' "Helm values should pass collector config from monitoring.env"
+deployment_update_env_var_file "$MONITORING_ENV_TMP" "MONITORING_DASHBOARD_ALLOWED_ROLES" ""
+deployment_render_helm_values "$MONITORING_HELM_VALUES"
+MONITORING_HELM_CONTENT="$(cat "$MONITORING_HELM_VALUES")"
+assert_contains "$MONITORING_HELM_CONTENT" 'dashboardAllowedRoles: ""' "Helm values should preserve an explicitly empty dashboard role list"
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_INIT_PROJECT_PUBLIC_KEY" "pk-test"
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_INIT_PROJECT_SECRET_KEY" "sk-test"
 deployment_update_env_var_file "$MONITORING_ENV_TMP" "LANGFUSE_OTLP_AUTH_HEADER" "Basic stale"
@@ -501,20 +555,9 @@ assert_eq "$MISSING_ENV_CHECKSUM_A" "$MISSING_ENV_CHECKSUM_B" "missing env file 
 K8S_DEPLOY_CHECKSUM_BLOCK="$(awk '/render_runtime_secret_values\(\) {/,/deployment_render_image_rollout_checksums/' "$SCRIPT_DIR/../k8s/deploy.sh")"
 assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'env_checksum="$(deployment_env_values_checksum)"' "k8s deploy should compute rollout checksum from root and monitoring env files"
 assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    env: %s\\n'" "k8s deploy should render the combined env checksum under the env name"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "supabase_secret_checksum" "k8s deploy should compute a dedicated Supabase secret rollout checksum"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    supabaseSecret: %s\\n'" "k8s deploy should render the Supabase secret checksum"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'JWT_SECRET:-' "supabase secret checksum should include JWT secret"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'SECRET_KEY_BASE:-' "supabase secret checksum should include secret key base"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'VAULT_ENC_KEY:-' "supabase secret checksum should include vault encryption key"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'SUPABASE_ANON_KEY:-' "supabase secret checksum should include anon key"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'SUPABASE_SERVICE_ROLE_KEY:-' "supabase secret checksum should include service role key"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'supabase_postgres_password' "supabase secret checksum should include Supabase postgres password"
-assert_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'gotrue_db_url' "supabase secret checksum should include gotrue DB URL"
 assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    backend:" "k8s deploy should not render the removed backend rollout checksum"
 assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "backend_checksum" "k8s deploy should not compute the removed backend rollout checksum"
 assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'ELASTICSEARCH_API_KEY' "k8s deploy should not enumerate backend env variables in rollout checksum"
-assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'DASHBOARD_USERNAME' "supabase secret checksum should not include direct Supabase env values"
-assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" 'SITE_URL' "supabase secret checksum should not include direct Supabase env values"
 assert_not_contains "$K8S_DEPLOY_CHECKSUM_BLOCK" "printf '    web:" "k8s deploy should not render component-named env checksum keys"
 
 DEPLOYMENT_VERSION="speed"
@@ -581,11 +624,18 @@ DOCKER_COMPOSE_FILE="$SCRIPT_DIR/../docker/compose/docker-compose.yml"
 DOCKER_PROD_COMPOSE_FILE="$SCRIPT_DIR/../docker/compose/docker-compose.prod.yml"
 DOCKER_DEV_COMPOSE_FILE="$SCRIPT_DIR/../docker/compose/docker-compose.dev.yml"
 for compose_file in "$DOCKER_COMPOSE_FILE" "$DOCKER_PROD_COMPOSE_FILE"; do
-  assert_contains "$(awk '/^  nexent-config:/,/^  nexent-runtime:/' "$compose_file")" $'env_file:\n      - ../../env/.env\n      - ../../env/monitoring.env' "docker config service should load monitoring.env after root .env"
-  assert_contains "$(awk '/^  nexent-runtime:/,/^  nexent-mcp:/' "$compose_file")" $'env_file:\n      - ../../env/.env\n      - ../../env/monitoring.env' "docker runtime service should load monitoring.env after root .env"
+  CONFIG_COMPOSE_BLOCK="$(awk '/^  nexent-config:/,/^  nexent-runtime:/' "$compose_file")"
+  RUNTIME_COMPOSE_BLOCK="$(awk '/^  nexent-runtime:/,/^  nexent-mcp:/' "$compose_file")"
+  WEB_COMPOSE_BLOCK="$(awk '/^  nexent-web:/,/^  nexent-data-process:/' "$compose_file")"
+  assert_contains "$CONFIG_COMPOSE_BLOCK" $'env_file:\n      - ../../env/.env\n      - ../../env/monitoring.env' "docker config service should load monitoring.env after root .env"
+  assert_contains "$RUNTIME_COMPOSE_BLOCK" $'env_file:\n      - ../../env/.env\n      - ../../env/monitoring.env' "docker runtime service should load monitoring.env after root .env"
+  assert_contains "$CONFIG_COMPOSE_BLOCK" '${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins' "docker config service should mount external memory provider plugins"
+  assert_contains "$RUNTIME_COMPOSE_BLOCK" '${ROOT_DIR}/memory-provider-plugins:/mnt/nexent-data/memory-provider-plugins' "docker runtime service should mount external memory provider plugins"
   assert_not_contains "$(awk '/^  nexent-mcp:/,/^  nexent-northbound:/' "$compose_file")" "monitoring.env" "docker mcp service should not receive monitoring.env"
   assert_not_contains "$(awk '/^  nexent-northbound:/,/^  nexent-web:/' "$compose_file")" "monitoring.env" "docker northbound service should not receive monitoring.env"
   assert_not_contains "$(awk '/^  nexent-data-process:/,/^  redis:/' "$compose_file")" "monitoring.env" "docker data-process service should not receive monitoring.env"
+  assert_contains "$WEB_COMPOSE_BLOCK" '${ROOT_DIR}/project-config:/mnt/nexent-data/project-config' "docker web should mount persistent project configuration"
+  assert_contains "$WEB_COMPOSE_BLOCK" 'PROJECT_CONFIG_DIR=/mnt/nexent-data/project-config' "docker web should read and write the persistent project configuration path"
   MINIO_COMPOSE_BLOCK="$(awk '/^  nexent-minio:/,/^  nexent-openssh-server:/' "$compose_file")"
   assert_contains "$MINIO_COMPOSE_BLOCK" '${ROOT_DIR}/minio/data:/data' "docker MinIO should bind the persistent host directory to the image data path"
   assert_contains "$MINIO_COMPOSE_BLOCK" "minio server /data" "docker MinIO should serve objects from the bind-mounted data path"
@@ -599,7 +649,107 @@ for compose_file in "$DOCKER_COMPOSE_FILE" "$DOCKER_PROD_COMPOSE_FILE"; do
   assert_not_contains "$MINIO_COMPOSE_BLOCK" "/etc/minio/data" "docker MinIO should not retain the obsolete data mount"
   assert_not_contains "$MINIO_COMPOSE_BLOCK" "command: server /data" "docker MinIO should not keep the old unused image command override"
 done
+assert_contains "$(awk '/^  nexent-web:/,/^  nexent-data-process:/' "$DOCKER_COMPOSE_FILE")" '../../env/.env' "docker standard web should refresh the upload size from its env file"
+assert_contains "$(awk '/^  nexent-web:/,/^  nexent-data-process:/' "$DOCKER_PROD_COMPOSE_FILE")" 'FILE_UPLOAD_SIZE_LIMIT=${FILE_UPLOAD_SIZE_LIMIT:-10}' "docker production web should refresh the persisted upload size during startup"
 assert_contains "$(awk '/^prepare_directory_and_data\(\)/,/^deploy_core_services\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")" 'create_dir_with_permission "$ROOT_DIR/minio/data" 775' "docker deploy should initialize the exact MinIO bind-mount directory"
+DOCKER_PREPARE_DATA_BLOCK="$(awk '/^prepare_directory_and_data\(\)/,/^deploy_core_services\(\)/' "$SCRIPT_DIR/../docker/deploy.sh")"
+assert_contains "$DOCKER_PREPARE_DATA_BLOCK" 'prepare_project_config_dir || return 1' "docker deploy should initialize the project configuration bind-mount directory"
+assert_contains "$DOCKER_PREPARE_DATA_BLOCK" 'migrate_legacy_project_config || return 1' "docker deploy should stop before recreation when project configuration migration fails"
+assert_contains "$(cat "$SCRIPT_DIR/../docker/deploy.sh")" 'docker cp' "docker deploy should migrate legacy web project configuration before recreation"
+
+DOCKER_PROJECT_CONFIG_FUNCTIONS="$(awk '
+  /^project_config_dir_is_empty\(\) \{/ { capture=1 }
+  /^sql_files_checksum\(\) \{/ { capture=0 }
+  capture { print }
+' "$SCRIPT_DIR/../docker/deploy.sh")"
+DOCKER_PROJECT_CONFIG_TEST_ROOT="$TMP_DIR/docker-project-config"
+DOCKER_PROJECT_CONFIG_LEGACY="$DOCKER_PROJECT_CONFIG_TEST_ROOT/legacy"
+mkdir -p \
+  "$DOCKER_PROJECT_CONFIG_LEGACY/locales/zh" \
+  "$DOCKER_PROJECT_CONFIG_LEGACY/locales/en"
+printf 'primary-logo' > "$DOCKER_PROJECT_CONFIG_LEGACY/modelengine-logo.png"
+printf 'secondary-logo' > "$DOCKER_PROJECT_CONFIG_LEGACY/modelengine-logo2.png"
+printf '{"productName":"持久化项目"}' > "$DOCKER_PROJECT_CONFIG_LEGACY/locales/zh/custom.json"
+printf '{"productName":"Persistent Project"}' > "$DOCKER_PROJECT_CONFIG_LEGACY/locales/en/custom.json"
+
+(
+  eval "$DOCKER_PROJECT_CONFIG_FUNCTIONS"
+  ROOT_DIR="$DOCKER_PROJECT_CONFIG_TEST_ROOT/success"
+  MOCK_DOCKER_LOG="$DOCKER_PROJECT_CONFIG_TEST_ROOT/success-docker.log"
+  docker() {
+    printf '%s\n' "$*" >> "$MOCK_DOCKER_LOG"
+    if [ "$1" = "inspect" ]; then
+      return 0
+    fi
+    if [ "$1" = "cp" ]; then
+      local relative_path="${2#nexent-web:/opt/frontend-dist/public/}"
+      cp "$DOCKER_PROJECT_CONFIG_LEGACY/$relative_path" "$3"
+      return $?
+    fi
+    return 1
+  }
+  prepare_project_config_dir
+  migrate_legacy_project_config
+  assert_eq "primary-logo" "$(cat "$ROOT_DIR/project-config/modelengine-logo.png")" "docker migration should preserve the primary Logo"
+  assert_eq "Persistent Project" "$(sed -n 's/.*:\"\([^\"]*\)\".*/\1/p' "$ROOT_DIR/project-config/locales/en/custom.json")" "docker migration should preserve English project configuration"
+  if [ -x "$ROOT_DIR/project-config/modelengine-logo.png" ]; then
+    echo "FAIL: migrated project configuration files should not be executable"
+    exit 1
+  fi
+)
+
+(
+  eval "$DOCKER_PROJECT_CONFIG_FUNCTIONS"
+  ROOT_DIR="$DOCKER_PROJECT_CONFIG_TEST_ROOT/existing"
+  MOCK_DOCKER_LOG="$DOCKER_PROJECT_CONFIG_TEST_ROOT/existing-docker.log"
+  mkdir -p "$ROOT_DIR/project-config/locales/en"
+  printf 'keep-me' > "$ROOT_DIR/project-config/locales/en/custom.json"
+  chmod 600 "$ROOT_DIR/project-config/locales/en/custom.json"
+  docker() {
+    printf '%s\n' "$*" >> "$MOCK_DOCKER_LOG"
+    return 1
+  }
+  prepare_project_config_dir
+  migrate_legacy_project_config
+  assert_eq "keep-me" "$(cat "$ROOT_DIR/project-config/locales/en/custom.json")" "docker migration should not overwrite an existing project configuration directory"
+  if [ -x "$ROOT_DIR/project-config/locales/en/custom.json" ]; then
+    echo "FAIL: preparing the project configuration directory should not make existing files executable"
+    exit 1
+  fi
+  if [ -e "$MOCK_DOCKER_LOG" ]; then
+    echo "FAIL: docker migration should not inspect the legacy container when the target is nonempty"
+    exit 1
+  fi
+)
+
+(
+  eval "$DOCKER_PROJECT_CONFIG_FUNCTIONS"
+  ROOT_DIR="$DOCKER_PROJECT_CONFIG_TEST_ROOT/failure"
+  MOCK_DOCKER_LOG="$DOCKER_PROJECT_CONFIG_TEST_ROOT/failure-docker.log"
+  docker() {
+    printf '%s\n' "$*" >> "$MOCK_DOCKER_LOG"
+    if [ "$1" = "inspect" ]; then
+      return 0
+    fi
+    if [ "$1" = "cp" ]; then
+      return 1
+    fi
+    return 1
+  }
+  prepare_project_config_dir
+  if migrate_legacy_project_config; then
+    echo "FAIL: docker migration should fail when a legacy file cannot be copied"
+    exit 1
+  fi
+  if ! project_config_dir_is_empty "$ROOT_DIR/project-config"; then
+    echo "FAIL: failed docker migration should not partially populate the target directory"
+    exit 1
+  fi
+  if [ -z "$(find "$ROOT_DIR" -maxdepth 1 -type d -name '.project-config-migration.*' -print -quit)" ]; then
+    echo "FAIL: failed docker migration should preserve its staging directory"
+    exit 1
+  fi
+)
 assert_not_contains "$(cat "$DOCKER_DEV_COMPOSE_FILE")" "monitoring.env" "docker dev data-process compose should not receive monitoring.env"
 assert_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" 'LANGFUSE_OTLP_AUTH_HEADER: ${LANGFUSE_OTLP_AUTH_HEADER:-}' "docker monitoring compose should pass Langfuse OTLP auth header to the collector"
 assert_not_contains "$(cat "$SCRIPT_DIR/../docker/compose/docker-compose-monitoring.yml")" "LANGFUSE_OLTP_AUTH_HEADER" "docker monitoring compose should not pass the misspelled Langfuse auth header alias"
@@ -624,6 +774,7 @@ assert_contains "$DOCKER_UNINSTALL_CONTENT" 'nexent-grafana' "docker uninstall s
 assert_contains "$DOCKER_UNINSTALL_CONTENT" 'nexent-zipkin' "docker uninstall should include Zipkin containers in fallback cleanup"
 assert_contains "$DOCKER_UNINSTALL_CONTENT" 'monitor_langfuse-postgres-data' "docker uninstall should include monitoring volumes in delete-all cleanup"
 assert_contains "$DOCKER_UNINSTALL_CONTENT" 'remove_docker_volumes_by_name < <(monitoring_volume_names)' "docker uninstall should remove monitoring volumes when delete-volumes is enabled"
+assert_contains "$DOCKER_UNINSTALL_CONTENT" '"$root_dir/project-config"' "docker uninstall should delete project configuration only with persistent data cleanup"
 
 K8S_UNINSTALL_CONTENT="$(cat "$SCRIPT_DIR/../k8s/uninstall.sh")"
 assert_contains "$K8S_UNINSTALL_CONTENT" "cleanup_leftover_monitoring_resources()" "k8s uninstall should define monitoring fallback cleanup"
@@ -706,6 +857,7 @@ if grep -q 'appVersion' "$LOCAL_CONFIG"; then
   exit 1
 fi
 assert_contains "$(cat "$LOCAL_CONFIG")" 'imageRegistryPrefix: "registry.local/nexent"' "persisted local config should include image registry prefix"
+assert_contains "$(cat "$LOCAL_CONFIG")" 'sandboxMode: "' "persisted local config should include the Sandbox mode"
 
 DEPLOY_OPTIONS_FILE="$TMP_DIR/deploy.options"
 deployment_init_defaults
@@ -737,18 +889,19 @@ fi
 
 deployment_tui_step_should_run() {
   case "$1" in
-    0|1|2)
+    0|1|2|3)
       return 0
       ;;
-    3)
+    4)
       return 1
       ;;
   esac
   return 1
 }
 assert_eq "1" "$(deployment_tui_next_step 0)" "TUI next step should advance to the next runnable step"
-assert_eq "4" "$(deployment_tui_next_step 2)" "TUI next step should skip non-runnable monitoring provider"
-assert_eq "2" "$(deployment_tui_previous_step 3)" "TUI previous step should skip non-runnable steps"
+assert_eq "3" "$(deployment_tui_next_step 2)" "TUI should select Sandbox mode immediately after image source"
+assert_eq "6" "$(deployment_tui_next_step 3)" "TUI next step should skip non-runnable monitoring and HTTPS steps"
+assert_eq "3" "$(deployment_tui_previous_step 4)" "TUI previous step should return to Sandbox mode"
 
 assert_eq "$(sed -n '1p' "$SCRIPT_DIR/../../VERSION")" "$(deployment_read_version "")" "deployment version should come from root VERSION"
 assert_eq "v-test" "$(deployment_read_version "v-test")" "explicit deployment version should win"
@@ -802,23 +955,13 @@ fi
 unset NEXENT_DEPLOYMENT_OFFLINE NEXENT_DEPLOY_CONFIG_MODE
 
 DOCKER_SUPER_ADMIN_BLOCK="$(awk '/^create_default_super_admin_user\(\) {/{capture=1} capture{print} capture && /^}/{exit}' "$SCRIPT_DIR/../docker/deploy.sh")"
-K8S_SUPER_ADMIN_BLOCK="$(awk '/^create_supabase_super_admin_user\(\) {/{capture=1} capture{print} capture && /^}/{exit}' "$SCRIPT_DIR/../k8s/create-suadmin.sh")"
+K8S_SUPER_ADMIN_BLOCK="$(cat "$SCRIPT_DIR/../k8s/create-suadmin.sh")"
 assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" "deployment_should_prompt_super_admin_password" "Docker super admin creation should use the shared prompt policy"
 assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" "deployment_super_admin_password" "Docker super admin creation should use the shared default password"
 assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" 'bash "$script_path" "$password" "$display_password"' "Docker super admin creation should pass the password display policy"
 assert_contains "$DOCKER_SUPER_ADMIN_BLOCK" 'if bash "$script_path"; then' "Docker should reuse the normal creation path for an existing super admin"
-assert_contains "$K8S_SUPER_ADMIN_BLOCK" "deployment_should_prompt_super_admin_password" "K8s super admin creation should use the shared prompt policy"
-assert_contains "$K8S_SUPER_ADMIN_BLOCK" "deployment_super_admin_password" "K8s super admin creation should use the shared default password"
-assert_contains "$K8S_SUPER_ADMIN_BLOCK" 'echo "   🔏 Password: ${password}"' "K8s should display non-interactive super admin passwords"
-assert_contains "$K8S_SUPER_ADMIN_BLOCK" 'echo "   🔏 Password: [hidden]"' "K8s should hide interactively entered super admin passwords"
 DOCKER_CREATE_SU_CONTENT="$(cat "$SCRIPT_DIR/../docker/create-su.sh")"
 K8S_CREATE_SU_CONTENT="$(cat "$SCRIPT_DIR/../k8s/create-suadmin.sh")"
-assert_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password: ${password}"' "Docker should display non-interactive super admin passwords"
-assert_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password: [hidden]"' "Docker should hide interactively entered super admin passwords"
-assert_contains "$DOCKER_CREATE_SU_CONTENT" 'SELECT user_id, tenant_id, user_role, user_email, created_by, updated_by FROM nexent.user_tenant_t LIMIT 0;' "Docker should wait for the complete user_tenant_t schema contract"
-assert_contains "$K8S_CREATE_SU_CONTENT" 'SELECT user_id, tenant_id, user_role, user_email, created_by, updated_by FROM nexent.user_tenant_t LIMIT 0;' "K8s should wait for the complete user_tenant_t schema contract"
-assert_contains "$DOCKER_CREATE_SU_CONTENT" 'ON_ERROR_STOP=1' "Docker super admin writes should stop on SQL errors"
-assert_contains "$K8S_CREATE_SU_CONTENT" 'ON_ERROR_STOP=1' "K8s super admin writes should stop on SQL errors"
 assert_contains "$(cat "$SCRIPT_DIR/../k8s/deploy.sh")" 'Error: Super admin user creation failed. Deployment aborted.' "K8s deployment should stop when super admin initialization fails"
 assert_contains "$(cat "$SCRIPT_DIR/../env/.env.example")" "NEXENT_SUPER_ADMIN_PASSWORD=Nexent@123" "deployment env example should define the default super admin password"
 
@@ -985,4 +1128,251 @@ if [ -f "$GENERATE_DOCKER_EXAMPLE_ONLY_ROOT/deploy/env/.env" ]; then
   echo "FAIL: generate_env should not create deploy/env/.env from docker/.env.example"
   exit 1
 fi
+# ---------------------------------------------------------------------------
+# HTTPS option tests
+# ---------------------------------------------------------------------------
+
+HTTPS_TEST_DIR="$TMP_DIR/https"
+mkdir -p "$HTTPS_TEST_DIR/certs" "$HTTPS_TEST_DIR/ssl-root/nginx/ssl"
+
+# Fixture: valid cert/key pair (unencrypted)
+openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 365 \
+  -keyout "$HTTPS_TEST_DIR/certs/valid.key" -out "$HTTPS_TEST_DIR/certs/valid.pem" \
+  -subj "/CN=localhost" >/dev/null 2>&1
+
+# Fixture: encrypted key (correct passphrase: secret123)
+openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 365 \
+  -keyout "$HTTPS_TEST_DIR/certs/plain.key" -out "$HTTPS_TEST_DIR/certs/plain.pem" \
+  -subj "/CN=encrypted" >/dev/null 2>&1
+openssl rsa -aes256 -in "$HTTPS_TEST_DIR/certs/plain.key" -out "$HTTPS_TEST_DIR/certs/enc.key" \
+  -passout pass:secret123 >/dev/null 2>&1
+
+# Fixture: another cert (for mismatch test)
+openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 365 \
+  -keyout "$HTTPS_TEST_DIR/certs/other.key" -out "$HTTPS_TEST_DIR/certs/other.pem" \
+  -subj "/CN=other" >/dev/null 2>&1
+
+deployment_prepare_config --components infrastructure,application --port-policy development --app-version latest
+assert_eq "disabled" "$DEPLOYMENT_HTTPS_MODE" "HTTPS mode should default to disabled"
+
+# Invalid mode must be rejected
+if deployment_prepare_config --components infrastructure --https-mode invalid --app-version latest >/dev/null 2>&1; then
+  echo "FAIL: invalid HTTPS mode should be rejected"
+  exit 1
+fi
+
+# SAN entry classification: IP vs DNS
+assert_eq "10.0.0.5|IP:10.0.0.5,DNS:example.com" \
+  "$(deployment_https_build_san_entries "10.0.0.5, example.com")" \
+  "SAN builder should classify IPv4/DNS and strip spaces"
+assert_eq "example.com|DNS:example.com,DNS:api.example.com" \
+  "$(deployment_https_build_san_entries "example.com,api.example.com")" \
+  "SAN builder should use the first entry as CN"
+
+# Cert validation: valid pair
+DEPLOYMENT_HTTPS_CERT_FILE="$HTTPS_TEST_DIR/certs/valid.pem"
+DEPLOYMENT_HTTPS_KEY_FILE="$HTTPS_TEST_DIR/certs/valid.key"
+DEPLOYMENT_HTTPS_KEY_PASSPHRASE=""
+deployment_https_validate_cert_pair || {
+  echo "FAIL: valid cert pair should pass validation"
+  exit 1
+}
+
+# Cert validation: mismatched pair
+DEPLOYMENT_HTTPS_CERT_FILE="$HTTPS_TEST_DIR/certs/other.pem"
+DEPLOYMENT_HTTPS_KEY_FILE="$HTTPS_TEST_DIR/certs/valid.key"
+if deployment_https_validate_cert_pair >/dev/null 2>&1; then
+  echo "FAIL: mismatched cert pair should fail validation"
+  exit 1
+fi
+
+# Cert validation: invalid PEM content
+printf 'not a certificate\n' > "$HTTPS_TEST_DIR/certs/bad.pem"
+DEPLOYMENT_HTTPS_CERT_FILE="$HTTPS_TEST_DIR/certs/bad.pem"
+DEPLOYMENT_HTTPS_KEY_FILE="$HTTPS_TEST_DIR/certs/valid.key"
+if deployment_https_validate_cert_pair >/dev/null 2>&1; then
+  echo "FAIL: invalid PEM certificate should fail validation"
+  exit 1
+fi
+
+# Cert validation: encrypted key with correct passphrase
+DEPLOYMENT_HTTPS_CERT_FILE="$HTTPS_TEST_DIR/certs/plain.pem"
+DEPLOYMENT_HTTPS_KEY_FILE="$HTTPS_TEST_DIR/certs/enc.key"
+DEPLOYMENT_HTTPS_KEY_PASSPHRASE="secret123"
+deployment_https_validate_cert_pair || {
+  echo "FAIL: encrypted key with correct passphrase should pass validation"
+  exit 1
+}
+
+# Cert validation: encrypted key with wrong passphrase
+DEPLOYMENT_HTTPS_KEY_PASSPHRASE="wrong"
+if deployment_https_validate_cert_pair >/dev/null 2>&1; then
+  echo "FAIL: wrong passphrase should fail validation"
+  exit 1
+fi
+
+# Cert validation: encrypted key without passphrase should demand one
+DEPLOYMENT_HTTPS_KEY_PASSPHRASE=""
+if deployment_https_validate_cert_pair >/dev/null 2>&1; then
+  echo "FAIL: encrypted key without passphrase should fail validation"
+  exit 1
+fi
+
+# Custom mode: missing cert file must fail with a clear error
+if deployment_prepare_config --components infrastructure --https-mode custom \
+  --https-cert-file "$HTTPS_TEST_DIR/certs/missing.pem" \
+  --https-key-file "$HTTPS_TEST_DIR/certs/valid.key" --app-version latest >/dev/null 2>&1; then
+  echo "FAIL: custom mode with missing cert file should fail"
+  exit 1
+fi
+
+# Self-signed cert generation: explicit SAN, first run creates the pair
+DEPLOYMENT_HTTPS_MODE="self-signed"
+DEPLOYMENT_HTTPS_SAN="10.1.2.3,example.internal"
+ROOT_DIR="$HTTPS_TEST_DIR/ssl-root"
+deployment_https_ensure_self_signed_cert "$ROOT_DIR/nginx/ssl" || {
+  echo "FAIL: self-signed cert generation should succeed"
+  exit 1
+}
+assert_contains "$(openssl x509 -in "$ROOT_DIR/nginx/ssl/server.pem" -noout -text 2>/dev/null)" \
+  "IP Address:10.1.2.3" "generated cert should include the explicit IP SAN"
+assert_contains "$(openssl x509 -in "$ROOT_DIR/nginx/ssl/server.pem" -noout -text 2>/dev/null)" \
+  "DNS:example.internal" "generated cert should include the explicit DNS SAN"
+
+# Self-signed cert reuse: a second run must not change the certificate
+HTTPS_CERT_BEFORE="$(openssl x509 -in "$ROOT_DIR/nginx/ssl/server.pem" -noout -fingerprint -sha256 2>/dev/null)"
+DEPLOYMENT_HTTPS_SAN=""  # force re-detection path; existing pair must still be reused
+deployment_https_ensure_self_signed_cert "$ROOT_DIR/nginx/ssl" || {
+  echo "FAIL: self-signed cert reuse should succeed"
+  exit 1
+}
+assert_eq "$HTTPS_CERT_BEFORE" \
+  "$(openssl x509 -in "$ROOT_DIR/nginx/ssl/server.pem" -noout -fingerprint -sha256 2>/dev/null)" \
+  "existing valid cert pair should be reused without regeneration"
+
+# Self-signed cert regeneration: a corrupted cert must trigger regeneration
+printf 'broken' > "$ROOT_DIR/nginx/ssl/server.pem"
+deployment_https_ensure_self_signed_cert "$ROOT_DIR/nginx/ssl" || {
+  echo "FAIL: self-signed cert regeneration should succeed"
+  exit 1
+}
+if openssl x509 -in "$ROOT_DIR/nginx/ssl/server.pem" -noout >/dev/null 2>&1; then
+  assert_not_eq "$HTTPS_CERT_BEFORE" \
+    "$(openssl x509 -in "$ROOT_DIR/nginx/ssl/server.pem" -noout -fingerprint -sha256 2>/dev/null)" \
+    "corrupted cert should be regenerated"
+else
+  echo "FAIL: regenerated cert should be valid PEM"
+  exit 1
+fi
+unset ROOT_DIR
+
+# K8s port values: disabled keeps web on NodePort 30000
+deployment_prepare_config --components infrastructure,application --port-policy production --app-version latest
+HTTPS_DISABLED_PORTS="$(deployment_render_k8s_port_values)"
+assert_contains "$HTTPS_DISABLED_PORTS" 'type: "NodePort"' "disabled HTTPS should keep web as NodePort"
+if [[ "$HTTPS_DISABLED_PORTS" == *"nexent-nginx"* ]]; then
+  echo "FAIL: disabled HTTPS should not render the nginx service block"
+  exit 1
+fi
+
+# K8s port values: enabled keeps web on NodePort 30000 and adds nginx NodePort 31000
+deployment_prepare_config --components infrastructure,application --port-policy production --https-mode self-signed --app-version latest
+HTTPS_ENABLED_PORTS="$(deployment_render_k8s_port_values)"
+assert_contains "$HTTPS_ENABLED_PORTS" $'nexent-web:\n  services:\n    web:\n      type: "NodePort"\n      nodePort: 30000' "enabled HTTPS should keep web on NodePort 30000"
+assert_contains "$HTTPS_ENABLED_PORTS" $'nexent-nginx:\n  enabled: true\n  services:\n    nginx:\n      type: "NodePort"\n      entryPort: 31000\n      nodePort: 31000' "enabled HTTPS should render nginx NodePort 31000"
+
+
+# Custom mode with an encrypted key: prepare must materialize a decrypted copy
+deployment_prepare_config --components infrastructure --https-mode custom \
+  --https-cert-file "$HTTPS_TEST_DIR/certs/plain.pem" \
+  --https-key-file "$HTTPS_TEST_DIR/certs/enc.key" \
+  --https-key-passphrase secret123 --app-version latest >/dev/null 2>&1 || {
+  echo "FAIL: custom mode with encrypted key should pass prepare config"
+  exit 1
+}
+ROOT_DIR="$HTTPS_TEST_DIR/custom-root"
+deployment_https_prepare || {
+  echo "FAIL: deployment_https_prepare should succeed with an encrypted custom key"
+  exit 1
+}
+assert_contains "$DEPLOYMENT_HTTPS_KEY_PATH" "$HTTPS_TEST_DIR/custom-root/nginx/ssl/server.key" \
+  "custom key path should point at the materialized copy"
+if ! openssl pkey -in "$DEPLOYMENT_HTTPS_KEY_PATH" -noout >/dev/null 2>&1; then
+  echo "FAIL: materialized key should load without a passphrase"
+  exit 1
+fi
+if grep -q "ENCRYPTED" "$DEPLOYMENT_HTTPS_KEY_PATH" 2>/dev/null; then
+  echo "FAIL: materialized key should be unencrypted"
+  exit 1
+fi
+if ! grep -q "ENCRYPTED" "$HTTPS_TEST_DIR/certs/enc.key"; then
+  echo "FAIL: original encrypted key file must not be modified"
+  exit 1
+fi
+if [ "$(openssl x509 -in "$DEPLOYMENT_HTTPS_CERT_PATH" -noout -fingerprint -sha256 2>/dev/null)" != \
+     "$(openssl x509 -in "$HTTPS_TEST_DIR/certs/plain.pem" -noout -fingerprint -sha256 2>/dev/null)" ]; then
+  echo "FAIL: materialized cert should match the source cert"
+  exit 1
+fi
+unset ROOT_DIR
+
+# Custom mode with a wrong passphrase: config validation must reject it
+if deployment_prepare_config --components infrastructure --https-mode custom \
+  --https-cert-file "$HTTPS_TEST_DIR/certs/plain.pem" \
+  --https-key-file "$HTTPS_TEST_DIR/certs/enc.key" \
+  --https-key-passphrase wrongpass --app-version latest >/dev/null 2>&1; then
+  echo "FAIL: wrong passphrase should fail config validation"
+  exit 1
+fi
+
+HTTPS_HELM_VALUES="$TMP_DIR/https-generated-values.yaml"
+# Helm chart values: enabled renders the nginx block with certificate content
+deployment_prepare_config --components infrastructure,application --port-policy production --https-mode self-signed --app-version latest >/dev/null 2>&1
+ROOT_DIR="$HTTPS_TEST_DIR/ssl-root"
+deployment_https_prepare || {
+  echo "FAIL: deployment_https_prepare should succeed for self-signed mode"
+  exit 1
+}
+deployment_render_helm_chart_values > "$HTTPS_HELM_VALUES"
+assert_contains "$(cat "$HTTPS_HELM_VALUES")" $'nexent-nginx:\n  enabled: true' "helm values should enable the nginx subchart"
+assert_contains "$(cat "$HTTPS_HELM_VALUES")" $'nexent-nginx:\n  enabled: true\n  images:\n    nginx:\n      repository: "registry.local/nexent/nginx"\n      tag: "alpine"\n      pullPolicy: "IfNotPresent"\n  services:\n    nginx:\n      type: "NodePort"\n      entryPort: 31000\n      nodePort: 31000' "helm values should render the nginx NodePort from NEXENT_HTTPS_PORT"
+assert_contains "$(cat "$HTTPS_HELM_VALUES")" "BEGIN CERTIFICATE" "helm values should embed the certificate content"
+
+# Reset to disabled for the summary path
+deployment_prepare_config --components infrastructure,application --port-policy production --app-version latest
+assert_eq "disabled" "$DEPLOYMENT_HTTPS_MODE" "HTTPS mode should reset to disabled after re-prepare"
+
+
+assert_not_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-supabase" "selected deployment must not start retired auth services"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-common/templates/secrets.yaml")" ".Values.secrets.jwtSecret" "JWT signing secret must be independent of optional components"
+assert_contains "$K8S_SUPER_ADMIN_BLOCK" "/opt/backend/account_admin.py bootstrap-su" "K8s bootstrap must use local accounts"
+
+assert_not_contains "$DOCKER_CREATE_SU_CONTENT" 'echo "   🔏 Password:' "bootstrap should not print plaintext credentials"
+assert_not_contains "$K8S_CREATE_SU_CONTENT" 'echo "   🔏 Password:' "K8s bootstrap should not print plaintext credentials"
+
+DEPLOYMENT_VERSION=""
+deployment_prepare_config --components infrastructure,supabase --port-policy development --app-version latest
+assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "legacy authentication component must use application local accounts"
+assert_eq "full" "$DEPLOYMENT_VERSION" "legacy authentication selection must keep auth enabled"
+assert_not_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "kong" "legacy input must not start GoTrue/Kong"
+# Exercise the host migration hook with a controlled Python executable.
+mkdir -p "$TMP_DIR/auto-auth-bin"
+cat > "$TMP_DIR/auto-auth-bin/python3" <<'PYTHON'
+#!/usr/bin/env bash
+if [ "${1:-}" = -c ]; then exit 0; fi
+printf '%s\n' "$@" > "$AUTH_HOOK_ARGUMENTS"
+printf '%s\n' "$MSYS_NO_PATHCONV/$MSYS2_ARG_CONV_EXCL" >> "$AUTH_HOOK_ARGUMENTS"
+PYTHON
+chmod +x "$TMP_DIR/auto-auth-bin/python3"
+export AUTH_HOOK_ARGUMENTS="$TMP_DIR/auth-hook-arguments"
+PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts prepare docker
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate_docker.py" "deployment must use the consolidated migration script"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "$DEPLOYMENT_ROOT_ENV" "deployment must pass its actual root environment path"
+assert_not_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "prepare must not import accounts"
+PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts apply kubernetes custom-namespace
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate_k8s.py" "Kubernetes deployment must select its dedicated entry point"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "apply hook must commit the import"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "custom-namespace" "Kubernetes hook must preserve the namespace"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "1/*" "Git Bash must not rewrite container paths"
+
 echo "All deployment common tests passed."

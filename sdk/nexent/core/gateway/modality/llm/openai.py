@@ -6,6 +6,8 @@ import asyncio
 from typing import Any, AsyncIterator
 
 from nexent.core.models import OpenAILongContextModel, OpenAIModel
+from nexent.core.models.retry import DEFAULT_MODEL_RETRY
+from nexent.core.concurrency import run_blocking
 
 from ...model_context import LLMContext
 from ...multimodal_adapter import ModelInfo
@@ -56,13 +58,15 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
             kwargs["top_p"] = ctx.top_p
         if ctx.stream is not None:
             kwargs["stream"] = ctx.stream
+        kwargs["retry_config"] = DEFAULT_MODEL_RETRY
         self._model = OpenAIModel(**kwargs)
 
     async def invoke(self, request: LLMRequest) -> Any:
         """Return a smolagents ChatMessage, offloaded to a worker thread."""
         if self._model is None:
             self._build_model()
-        return await asyncio.to_thread(
+        return await run_blocking(
+            "gateway-llm-invoke",
             self._model, request.messages, **request.kwargs
         )
 
@@ -135,6 +139,7 @@ class OpenAILongContextLLMAdapter(OpenAILLMAdapter):
             timeout_seconds=ctx.timeout_seconds,
             extra_body=ctx.extra_body,
             max_output_tokens=ctx.max_output_tokens,
+            retry_config=DEFAULT_MODEL_RETRY,
         )
 
     def analyze_long_text(

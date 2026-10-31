@@ -27,6 +27,7 @@ import {
 } from "@ant-design/icons";
 import quotaService from "@/services/quotaService";
 import { ASSET_OWNER_TENANT_ID } from "@/const/auth";
+import { QUOTA_USAGE_CHANGED_EVENT } from "@/lib/quotaEvents";
 import {
   getQuotaConflictTranslationKey,
   type PlatformQuotaOverview,
@@ -56,7 +57,9 @@ function toQuotaInput(bytes: number): { value: number; unit: QuotaUnit } {
   if (bytes >= GB && bytes % GB === 0) {
     return { value: bytes / GB, unit: "GB" };
   }
-  return { value: Math.floor(bytes / MB), unit: "MB" };
+  // A nonzero finite quota must never collapse to 0: clamp the MB view to at
+  // least 1 MB so sub-MB remainders (or stale 0 inputs) stay representable.
+  return { value: Math.max(1, Math.floor(bytes / MB)), unit: "MB" };
 }
 
 function getProgressColor(usagePct: number | null | undefined): string {
@@ -118,6 +121,15 @@ export function PlatformQuotaPanel({
 
   useEffect(() => {
     fetchData();
+  }, [fetchData]);
+
+  // Refresh when any quota-affecting change happens elsewhere
+  // (tenant allocation modals, KB uploads, capacity updates, polling).
+  useEffect(() => {
+    window.addEventListener(QUOTA_USAGE_CHANGED_EVENT, fetchData);
+    return () => {
+      window.removeEventListener(QUOTA_USAGE_CHANGED_EVENT, fetchData);
+    };
   }, [fetchData]);
 
   // Inline edit for tenant hard quota
@@ -424,6 +436,10 @@ export function PlatformQuotaPanel({
               ? ` / ${record.hard_limit_readable}`
               : ""}
           </Text>
+          <Text type="secondary" style={{ display: "block", fontSize: 11 }}>
+            {t("quota.esPhysicalIndex", "ES Physical Index")}:{" "}
+            {record.es_physical_readable || "0 B"}
+          </Text>
         </div>
       ),
     },
@@ -447,14 +463,18 @@ export function PlatformQuotaPanel({
       }}
     >
       {/* Platform Capacity Header */}
-      <Card size="small" style={{ marginBottom: 16 }}>
+      <Card
+        size="small"
+        style={{ marginBottom: 16 }}
+        loading={loading && data == null}
+      >
         <Row gutter={[32, 20]} align="middle">
           <Col xs={24} lg={15}>
             <Text strong style={{ fontSize: 16 }}>
               {t("quota.platformOverview", "Platform Quota Overview")}
             </Text>
             <Row gutter={[24, 16]} style={{ marginTop: 16 }}>
-              <Col xs={24} sm={8}>
+              <Col xs={24} sm={6}>
                 <Space direction="vertical" size={2}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t("quota.platformCapacity", "Platform Capacity")}
@@ -466,7 +486,7 @@ export function PlatformQuotaPanel({
                   </Text>
                 </Space>
               </Col>
-              <Col xs={24} sm={8}>
+              <Col xs={24} sm={6}>
                 <Space direction="vertical" size={2}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t("quota.allocated", "Allocated")}
@@ -476,13 +496,23 @@ export function PlatformQuotaPanel({
                   </Text>
                 </Space>
               </Col>
-              <Col xs={24} sm={8}>
+              <Col xs={24} sm={6}>
                 <Space direction="vertical" size={2}>
                   <Text type="secondary" style={{ fontSize: 12 }}>
                     {t("quota.used", "Used")}
                   </Text>
                   <Text strong style={{ fontSize: 20 }}>
                     {data?.total_actual_readable || "0 B"}
+                  </Text>
+                </Space>
+              </Col>
+              <Col xs={24} sm={6}>
+                <Space direction="vertical" size={2}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    {t("quota.esPhysicalIndex", "ES Physical Index")}
+                  </Text>
+                  <Text strong style={{ fontSize: 20 }}>
+                    {data?.total_es_physical_readable || "0 B"}
                   </Text>
                 </Space>
               </Col>
@@ -547,7 +577,7 @@ export function PlatformQuotaPanel({
             type="info"
             showIcon
             style={{ marginBottom: 16 }}
-            message={t("quota.unmanagedTenants", {
+            title={t("quota.unmanagedTenants", {
               count: data.unmanaged_tenant_count,
               defaultValue: "{{count}} tenant(s) have no hard quota",
             })}
@@ -563,7 +593,7 @@ export function PlatformQuotaPanel({
           type="warning"
           showIcon
           style={{ marginBottom: 16 }}
-          message={t(
+          title={t(
             "quota.platformOversubscribed",
             "Tenant quotas exceed platform capacity"
           )}

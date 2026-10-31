@@ -1,11 +1,20 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { create } from "zustand";
 
+import { safeStringify } from "@/lib/utils";
+import { queryClient } from "@/lib/queryClient";
 import {
   searchToolConfig,
   updateAgentInfo,
   updateToolConfig,
 } from "@/services/agentConfigService";
 import type { Agent, Skill, Tool } from "@/types/agentConfig";
+import {
+  AIDP_NON_PERSISTED_PARAM_NAMES,
+  isAidpManagedKnowledgeTool,
+  isManagedKnowledgeTool,
+} from "@/lib/managedKnowledgeTools";
 
 export type AgentDraft = Pick<
   Agent,
@@ -17,22 +26,21 @@ export type AgentDraft = Pick<
   | "model"
   | "model_ids"
   | "model_names"
+  | "model_params_override"
+  | "unavailable_reasons"
   | "max_step"
   | "requested_output_tokens"
   | "is_main_agent"
   | "provide_run_summary"
   | "allow_chat_metadata"
+  | "enable_protocol_repair_retry"
   | "enable_context_manager"
   | "is_a2a"
   | "verification_config"
   | "tools"
-  | "duty_prompt"
-  | "constraint_prompt"
-  | "few_shots_prompt"
+  | "prompt"
   | "business_logic_model_name"
   | "business_logic_model_id"
-  | "prompt_template_id"
-  | "prompt_template_name"
   | "sub_agent_id_list"
   | "sub_agent_relations"
   | "external_sub_agent_id_list"
@@ -47,6 +55,8 @@ export type AgentDraftPatch = Partial<AgentDraft>;
 export interface AgentSaveTask {
   agentId: number;
   patch: AgentDraftPatch;
+  source?: "user" | "automatic-model-reconciliation";
+  signature?: string;
 }
 
 export interface PersistedResourceBindings {
@@ -60,10 +70,11 @@ interface AgentStoreState {
   isReadOnly: boolean;
   editedAgent: AgentDraft | null;
   savedAgent: AgentDraft | null;
+  lastSavedAt: number | null;
   serverSnapshotRevision: number;
   queue: AgentSaveTask[];
   isGenerating: boolean;
-  saveError: string | null;
+  saveError: Error | string | null;
   lastSaveFailed: boolean;
   defaultLlmConfig: {
     id: number | null;
@@ -75,6 +86,7 @@ interface AgentStoreState {
   updateDraft: (patch: AgentDraftPatch) => void;
   flushDraft: () => void;
   updateAgentConfig: (patch: AgentDraftPatch) => void;
+  reconcileUnavailableModels: (patch: AgentDraftPatch) => void;
   updateTools: (tools: Tool[]) => void;
   updateSkills: (skills: AgentDraft["skills"]) => void;
   updateSubAgentIds: (ids: number[]) => void;
@@ -105,23 +117,21 @@ const toDraft = (agent: Agent): AgentDraft => ({
   model: agent.model || "",
   model_ids: agent.model_ids || [],
   model_names: agent.model_names || [],
+  unavailable_reasons: agent.unavailable_reasons || [],
   max_step: agent.max_step,
   requested_output_tokens: agent.requested_output_tokens ?? null,
   is_main_agent: agent.is_main_agent ?? true,
   provide_run_summary: agent.provide_run_summary,
   allow_chat_metadata: agent.allow_chat_metadata ?? false,
+  enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
   enable_context_manager: agent.enable_context_manager,
   is_a2a: agent.is_a2a,
   verification_config: agent.verification_config,
   tools: [...(agent.tools || [])],
   skills: [...(agent.skills || [])],
-  duty_prompt: agent.duty_prompt || "",
-  constraint_prompt: agent.constraint_prompt || "",
-  few_shots_prompt: agent.few_shots_prompt || "",
+  prompt: agent.prompt || "",
   business_logic_model_name: agent.business_logic_model_name || "",
   business_logic_model_id: agent.business_logic_model_id || 0,
-  prompt_template_id: agent.prompt_template_id ?? 0,
-  prompt_template_name: agent.prompt_template_name || "system_default",
   sub_agent_id_list: agent.sub_agent_id_list || [],
   sub_agent_relations: agent.sub_agent_relations || [],
   external_sub_agent_id_list: agent.external_sub_agent_id_list || [],
@@ -130,6 +140,10 @@ const toDraft = (agent: Agent): AgentDraft => ({
   greeting_message: agent.greeting_message || "",
   example_questions: agent.example_questions || [],
   icon_url: agent.icon_url,
+  // v2.6.0 per-agent inference-param overrides. Without this line the value
+  // loaded from the API is dropped when the agent is converted to a draft,
+  // so the override dialog always reads back empty after reopening.
+  model_params_override: agent.model_params_override ?? null,
 });
 
 const cloneDraft = <T>(value: T): T => structuredClone(value);
@@ -188,6 +202,26 @@ let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let saveQueue: AgentSaveTask[] = [];
 let saveQueueProcessing = false;
 let idleWaiters: Array<(success: boolean) => void> = [];
+const failedAutoReconciliationSignatures = new Set<string>();
+
+const serializeModelIds = (modelIds: number[]): string =>
+  JSON.stringify(modelIds);
+
+const getModelReconciliationSignature = (
+  agentId: number,
+  currentModelIds: number[],
+  nextModelIds: number[]
+): string =>
+  `${agentId}:${serializeModelIds(currentModelIds)}=>${serializeModelIds(nextModelIds)}`;
+
+const clearAutoReconciliationFailures = (agentId: number): void => {
+  const prefix = `${agentId}:`;
+  failedAutoReconciliationSignatures.forEach((signature) => {
+    if (signature.startsWith(prefix)) {
+      failedAutoReconciliationSignatures.delete(signature);
+    }
+  });
+};
 
 const resolveIdleWaiters = () => {
   if (saveQueueProcessing || saveQueue.length > 0) {
@@ -259,6 +293,9 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.allow_chat_metadata !== undefined
     ? { allow_chat_metadata: patch.allow_chat_metadata }
     : {}),
+  ...(patch.enable_protocol_repair_retry !== undefined
+    ? { enable_protocol_repair_retry: patch.enable_protocol_repair_retry }
+    : {}),
   ...(patch.is_a2a !== undefined ? { is_a2a: patch.is_a2a } : {}),
   ...(patch.enable_context_manager !== undefined
     ? { enable_context_manager: patch.enable_context_manager }
@@ -272,25 +309,16 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.business_logic_model_id !== undefined
     ? { business_logic_model_id: patch.business_logic_model_id }
     : {}),
-  ...(patch.prompt_template_id !== undefined
-    ? { prompt_template_id: patch.prompt_template_id }
-    : {}),
-  ...(patch.prompt_template_name !== undefined
-    ? { prompt_template_name: patch.prompt_template_name }
-    : {}),
-  ...(patch.duty_prompt !== undefined
-    ? { duty_prompt: patch.duty_prompt }
-    : {}),
-  ...(patch.constraint_prompt !== undefined
-    ? { constraint_prompt: patch.constraint_prompt }
-    : {}),
-  ...(patch.few_shots_prompt !== undefined
-    ? { few_shots_prompt: patch.few_shots_prompt }
+  ...(patch.prompt !== undefined
+    ? { prompt: patch.prompt }
     : {}),
   ...(patch.tools !== undefined
     ? {
         enabled_tool_ids: patch.tools
-          .filter((tool) => tool.is_available !== false)
+          .filter(
+            (tool) =>
+              tool.is_available !== false || isManagedKnowledgeTool(tool)
+          )
           .map((tool) => Number(tool.id))
           .filter(Number.isFinite),
       }
@@ -332,11 +360,20 @@ const toAgentPayload = (agentId: number, patch: AgentDraftPatch) => ({
   ...(patch.example_questions !== undefined
     ? { example_questions: patch.example_questions }
     : {}),
+  ...(patch.model_params_override !== undefined
+    ? { model_params_override: patch.model_params_override }
+    : {}),
 });
 
 const toToolParams = (tool: Tool): Record<string, unknown> =>
   (tool.initParams ?? []).reduce<Record<string, unknown>>(
     (params, parameter) => {
+      if (
+        isAidpManagedKnowledgeTool(tool) &&
+        AIDP_NON_PERSISTED_PARAM_NAMES.has(parameter.name)
+      ) {
+        return params;
+      }
       if (parameter.value !== undefined && parameter.value !== null) {
         params[parameter.name] = parameter.value;
       }
@@ -345,14 +382,41 @@ const toToolParams = (tool: Tool): Record<string, unknown> =>
     {}
   );
 
+const areToolParamsEqual = (left: Tool, right: Tool): boolean => {
+  const leftParams = toToolParams(left);
+  const rightParams = toToolParams(right);
+  const leftKeys = Object.keys(leftParams).sort();
+  const rightKeys = Object.keys(rightParams).sort();
+
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every((key, index) => {
+    if (key !== rightKeys[index]) return false;
+
+    const leftValue = safeStringify(leftParams[key]);
+    const rightValue = safeStringify(rightParams[key]);
+    return leftValue !== null && leftValue === rightValue;
+  });
+};
+
 async function persistToolChanges(
   agentId: number,
   currentTools: Tool[],
   savedTools: Tool[]
 ): Promise<void> {
   const currentToolIds = new Set(currentTools.map((tool) => Number(tool.id)));
+  const savedToolsById = new Map(
+    savedTools.map((tool) => [Number(tool.id), tool])
+  );
 
   for (const tool of currentTools) {
+    if (tool.is_available === false) {
+      continue;
+    }
+    const savedTool = savedToolsById.get(Number(tool.id));
+    if (savedTool && areToolParamsEqual(tool, savedTool)) {
+      continue;
+    }
+
     const result = await updateToolConfig(
       Number(tool.id),
       agentId,
@@ -367,6 +431,9 @@ async function persistToolChanges(
   for (const tool of savedTools) {
     const toolId = Number(tool.id);
     if (currentToolIds.has(toolId)) {
+      continue;
+    }
+    if (tool.is_available === false) {
       continue;
     }
 
@@ -405,8 +472,9 @@ async function processSaveQueue(): Promise<void> {
           toAgentPayload(task.agentId, task.patch)
         );
         if (!result.success) {
-          throw new Error(result.message);
+          throw result.error ?? new Error(result.message);
         }
+        void queryClient.invalidateQueries({ queryKey: ["agents"] });
 
         const savedAgent = useAgentStore.getState().savedAgent;
         if (task.patch.tools !== undefined) {
@@ -425,6 +493,7 @@ async function processSaveQueue(): Promise<void> {
         saveQueue = saveQueue.slice(1);
         useAgentStore.setState((state) => ({
           savedAgent: mergeDraft(state.savedAgent, task.patch),
+          lastSavedAt: Date.now(),
           lastSaveFailed:
             drainHadFailure || saveQueue.length > 0
               ? state.lastSaveFailed
@@ -437,6 +506,13 @@ async function processSaveQueue(): Promise<void> {
           return;
         }
 
+        if (
+          task.source === "automatic-model-reconciliation" &&
+          task.signature
+        ) {
+          failedAutoReconciliationSignatures.add(task.signature);
+        }
+
         saveQueue = saveQueue.slice(1);
         useAgentStore.setState((state) => ({
           editedAgent: mergeDraft(
@@ -445,9 +521,7 @@ async function processSaveQueue(): Promise<void> {
           ),
           lastSaveFailed: true,
           saveError:
-            error instanceof Error
-              ? error.message
-              : "Failed to save agent changes",
+            error instanceof Error ? error : "Failed to save agent changes",
         }));
       }
     }
@@ -461,13 +535,34 @@ async function processSaveQueue(): Promise<void> {
 }
 
 export const useAgentStore = create<AgentStoreState>((set) => {
-  const enqueue = (patch: AgentDraftPatch) => {
+  const enqueue = (
+    patch: AgentDraftPatch,
+    options: Pick<AgentSaveTask, "source" | "signature"> = {}
+  ) => {
     const { agentId, isReadOnly } = useAgentStore.getState();
     if (agentId === null || isReadOnly) {
       return;
     }
 
-    const task: AgentSaveTask = { agentId, patch: cloneDraft(patch) };
+    if (
+      options.source === "automatic-model-reconciliation" &&
+      options.signature &&
+      failedAutoReconciliationSignatures.has(options.signature)
+    ) {
+      return;
+    }
+
+    if (options.source !== "automatic-model-reconciliation") {
+      if (patch.model_ids !== undefined) {
+        clearAutoReconciliationFailures(agentId);
+      }
+    }
+
+    const task: AgentSaveTask = {
+      agentId,
+      patch: cloneDraft(patch),
+      ...options,
+    };
     saveQueue = [...saveQueue, task];
     set((state) => ({
       editedAgent: mergeDraft(state.editedAgent, task.patch),
@@ -482,6 +577,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
     isReadOnly: true,
     editedAgent: null,
     savedAgent: null,
+    lastSavedAt: null,
     serverSnapshotRevision: 0,
     queue: [],
     isGenerating: false,
@@ -500,6 +596,7 @@ export const useAgentStore = create<AgentStoreState>((set) => {
         isReadOnly: agent.permission === "READ_ONLY",
         editedAgent: cloneDraft(draft),
         savedAgent: cloneDraft(draft),
+        lastSavedAt: null,
         serverSnapshotRevision: state.serverSnapshotRevision + 1,
         isGenerating: false,
         saveError: null,
@@ -538,6 +635,34 @@ export const useAgentStore = create<AgentStoreState>((set) => {
       }
     },
     updateAgentConfig: enqueue,
+    reconcileUnavailableModels: (patch) => {
+      const { agentId, editedAgent, isReadOnly } = useAgentStore.getState();
+      const nextModelIds = patch.model_ids;
+      if (
+        agentId === null ||
+        isReadOnly ||
+        !editedAgent ||
+        nextModelIds === undefined
+      ) {
+        return;
+      }
+
+      const currentModelIds = editedAgent.model_ids ?? [];
+      if (
+        serializeModelIds(currentModelIds) === serializeModelIds(nextModelIds)
+      ) {
+        return;
+      }
+
+      enqueue(patch, {
+        source: "automatic-model-reconciliation",
+        signature: getModelReconciliationSignature(
+          agentId,
+          currentModelIds,
+          nextModelIds
+        ),
+      });
+    },
     updateTools: (tools) => enqueue({ tools }),
     updateSkills: (skills) => enqueue({ skills }),
     updateSubAgentIds: (sub_agent_id_list) => enqueue({ sub_agent_id_list }),
@@ -595,12 +720,14 @@ export const useAgentStore = create<AgentStoreState>((set) => {
     reset: () => {
       clearPendingDraftSave();
       saveQueue = [];
+      failedAutoReconciliationSignatures.clear();
       set((state) => ({
         agentId: null,
         currentAgentId: null,
         isReadOnly: true,
         editedAgent: null,
         savedAgent: null,
+        lastSavedAt: null,
         serverSnapshotRevision: state.serverSnapshotRevision + 1,
         isGenerating: false,
         saveError: null,

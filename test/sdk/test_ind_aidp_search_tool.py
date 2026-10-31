@@ -1,9 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
 
+import nexent.core.ext_components.aidp.retrieval_client as retrieval_client
 import nexent.core.tools.ind_aidp_search_tool as ind_aidp_search_tool_module
 from nexent.core.tools.ind_aidp_search_tool import (
     IndependentAidpSearchError,
@@ -53,7 +56,7 @@ def test_retries_transient_status_and_uses_bearer(monkeypatch):
     ]
     tool._http_client = MagicMock()
     tool._http_client.post.side_effect = responses
-    monkeypatch.setattr(ind_aidp_search_tool_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(retrieval_client.time, "sleep", lambda _: None)
 
     assert tool._execute_request("question") == []
     assert tool._http_client.post.call_count == 2
@@ -90,15 +93,56 @@ def test_image_uses_proxy_builder_and_removes_html_image_tag():
     assert image_urls == ["/api/ind-aidp/images/signed:kb-1/images/a.png"]
 
 
-def test_forward_can_override_configured_kds_without_mutating_configuration():
+def test_forward_falls_back_to_configured_kds_without_mutating_configuration():
     tool = make_tool(kds_list=["kb-fixed"])
     tool._execute_request = MagicMock(return_value=[])
 
     result = json.loads(tool.forward("question", kds_list=["kb-runtime"]))
 
-    tool._execute_request.assert_called_once_with("question", ["kb-runtime"])
+    tool._execute_request.assert_called_once_with("question", ["kb-fixed"])
     assert tool.kds_list == ["kb-fixed"]
-    assert "No relevant information" in result
+    assert "not configured or unavailable" in result["notice"]
+    assert "kb-runtime" in result["notice"]
+    assert "broadened to all available configured knowledge bases" in result["notice"]
+
+
+def test_forward_explicit_empty_scope_uses_configured_scope():
+    tool = make_tool(kds_list=["kb-fixed"])
+    tool._execute_request = MagicMock(return_value=[])
+
+    result = json.loads(tool.forward("question", kds_list=[]))
+
+    tool._execute_request.assert_called_once_with("question", ["kb-fixed"])
+    assert result["results"] == []
+    assert "No knowledge-base scope was specified" in result["notice"]
+    assert "No relevant information was found" in result["notice"]
+
+
+@pytest.mark.parametrize(
+    ("requested", "expected_used", "expected_ignored", "fallback"),
+    [
+        (["kb-1", "kb-2"], ["kb-1", "kb-2"], [], False),
+        (["kb-1", "kb-missing"], ["kb-1"], ["kb-missing"], False),
+        (["kb-missing"], ["kb-1", "kb-2"], ["kb-missing"], True),
+    ],
+)
+def test_forward_corrects_requested_scope(requested, expected_used, expected_ignored, fallback):
+    tool = make_tool(kds_list=["kb-1", "kb-2"])
+    tool._execute_request = MagicMock(return_value=[])
+
+    response = json.loads(tool.forward("question", kds_list=requested))
+
+    tool._execute_request.assert_called_once_with("question", expected_used)
+    if expected_ignored:
+        assert "not configured or unavailable" in response["notice"]
+        for ignored_kb in expected_ignored:
+            assert ignored_kb in response["notice"]
+        if fallback:
+            assert "broadened to all available configured knowledge bases" in response["notice"]
+        else:
+            assert "remaining available knowledge bases" in response["notice"]
+    else:
+        assert "Search was executed in the requested knowledge bases" in response["notice"]
 
 
 def test_forward_uses_configured_kds_when_runtime_value_is_omitted():
@@ -114,6 +158,7 @@ def test_parse_kds_list_json_string_and_validation():
     tool_module = ind_aidp_search_tool_module
     assert tool_module._parse_kds_list('["a", "a", "b"]') == ["a", "a", "b"]
     assert tool_module._parse_kds_list([1, 2]) == ["1", "2"]
+    assert tool_module._parse_kds_list([], allow_empty=True) == []
 
     with pytest.raises(ValueError, match="JSON"):
         tool_module._parse_kds_list("{not-json")
@@ -138,11 +183,15 @@ def test_validate_base_url_rejects_bad_inputs():
     )
 
 
-def test_init_rejects_invalid_search_method_and_rerank_mode():
-    with pytest.raises(ValueError, match="search_method"):
-        make_tool(search_method="magic")
-    with pytest.raises(ValueError, match="reranking_mode"):
-        make_tool(reranking_mode="magic")
+def test_init_reads_official_legacy_method_without_revalidation(monkeypatch):
+    def unexpected(*args, **kwargs):
+        raise AssertionError("Persisted retrieval configuration must not be revalidated")
+    monkeypatch.setattr(ind_aidp_search_tool_module, "validate_config", unexpected, raising=False)
+    tool = make_tool(search_method="hybrid_search", top_k=7, reranking_enable=False)
+    payload = tool._payload("q")
+    assert payload["search_method"] == "vector_search|full_text_search|graph_search"
+    assert payload["hybrid_search_config"]["vector_candidates"] == 10
+    assert payload["graph_search_config"]["graph_reranking_enable"] is False
     with pytest.raises(ValueError, match="tenant_id"):
         make_tool(tenant_id="")
 
@@ -152,7 +201,7 @@ def test_payload_embeds_rerank_mode_when_reranking_enabled():
     payload = tool._payload("q", kds_list=["kb-2"])
     assert payload["kds_list"] == ["kb-2"]
     assert payload["reranking_mode"] == "performance"
-    assert payload["multi_modal"] is True
+    assert payload["multi_modal_enable"] is True
     assert 0.0 <= payload["score_threshold"] <= 1.0
 
 
@@ -161,7 +210,7 @@ def test_exhausts_retries_then_raises(monkeypatch):
     request = httpx.Request("POST", tool._retrieve_url())
     tool._http_client = MagicMock()
     tool._http_client.post.return_value = httpx.Response(503, request=request)
-    monkeypatch.setattr(ind_aidp_search_tool_module.time, "sleep", lambda _: None)
+    monkeypatch.setattr(retrieval_client.time, "sleep", lambda _: None)
 
     with pytest.raises(IndependentAidpSearchError, match="HTTP 503"):
         tool._execute_request("question")
@@ -195,7 +244,8 @@ def test_forward_rejects_empty_query_and_wraps_http_errors():
     with pytest.raises(ValueError, match="query"):
         tool.forward("   ")
 
-    tool._execute_request = MagicMock(side_effect=httpx.HTTPError("boom"))
+    tool._http_client = MagicMock()
+    tool._http_client.post.side_effect = httpx.HTTPError("boom")
     with pytest.raises(IndependentAidpSearchError, match="HTTP error"):
         tool.forward("question")
 
@@ -231,7 +281,7 @@ def test_forward_emits_messages_with_observer():
 
     result = json.loads(tool.forward("question"))
 
-    assert result[0]["text"] == "content"
+    assert result["results"][0]["text"] == "content"
     assert tool.record_ops == 2
     tool.observer.add_message.call_count >= 2
 

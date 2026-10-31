@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Business logic for the ephemeral NL2Skill runtime."""
 
 import asyncio
@@ -9,29 +11,33 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from nexent.core.agents.agent_model import AgentHistory, AgentRunInfo
-from nexent.core.agents.run_agent import agent_run
+from nexent.core.agents.context import ContextManagerConfig
+from runtime.adapters.nexent.runner import agent_run
 from nexent.core.utils.observer import MessageObserver
 
-from agents.create_agent_info import create_model_config_list
-from agents.nl2skill_agent import create_nl2skill_agent_config
-from consts.const import LANGUAGE, MODEL_CONFIG_MAPPING
-from consts.model import HistoryItem, NL2SkillRunRequest
-from database.model_management_db import get_model_by_model_id
-from utils.config_utils import tenant_config_manager, get_model_name_from_config
-from utils.content_classifier_utils import ContentClassifier
-from utils.prompt_template_utils import get_skill_creation_simple_prompt_template
+from management.services.model.run_budget import _resolve_input_budget
+from management.services.model.run_budget import _resolve_context_budget
+from management.services.model.run_bindings import create_model_config_list
+from management.services.agent.preparation.inputs import join_minio_file_description_to_query
+from management.services.skill.creation import create_nl2skill_agent_config
+from management.services.agent.context import build_authorized_context_input
+from contracts.constants.constants import LANGUAGE
+from contracts.constants.constants import MODEL_CONFIG_MAPPING
+from contracts.conversation import HistoryItem
+from contracts.agent import NL2SkillRunRequest
+from management.db.model.repository import get_model_by_model_id
+from management.services.configuration.tenant.settings import tenant_config_manager
+from management.services.model.names import get_model_name_from_config
+from management.services.skill.stream_parser import SkillStreamParser
+from management.services.skill.prompt import (
+    get_nl2skill_prompt_template,
+)
+from infrastructure.concurrency import runtime_thread_manager
+from nexent.core.concurrency import run_blocking
+from management.services.agent.system import system_agent_provider
+from management.services.model.run_controls import resolve_creator_model, validate_selected_record, preflight_turn_controls
 
 logger = logging.getLogger(__name__)
-
-PARSABLE_MODEL_TYPES = frozenset(
-    {
-        "model_output",
-        "model_output_thinking",
-        "model_output_deep_thinking",
-        "model_output_code",
-        "model_thinking_output",
-    }
-)
 
 SKILL_FILE_DIRECTIVE_PATTERN = re.compile(
     r'<(?:reference|use_script)\b[^>]*\bpath\s*=\s*(["\'])(.*?)\1[^>]*/\s*>',
@@ -80,6 +86,26 @@ def _convert_history(history: list[HistoryItem] | None) -> list[AgentHistory]:
     ]
 
 
+def _skill_history_turns(history: list[AgentHistory]) -> list[dict[str, Any]]:
+    """Preserve failed or unanswered turns without restoring legacy AgentMemory."""
+    turns: list[dict[str, Any]] = []
+    pending_user = False
+    for index, entry in enumerate(history):
+        if entry.role == "assistant" and pending_user:
+            turns[-1]["assistant_final_answer"] = entry.content
+            pending_user = False
+            continue
+        turns.append({
+            "user_message": entry.content if entry.role == "user" else "",
+            "assistant_final_answer": entry.content if entry.role == "assistant" else "",
+            "attachments": [],
+            "user_message_id": -(index * 2 + 1),
+            "assistant_message_id": -(index * 2 + 2),
+        })
+        pending_user = entry.role == "user"
+    return turns
+
+
 def _assemble_draft_content(draft_snapshot: dict[str, Any]) -> str:
     content = str(draft_snapshot.get("content") or "")
     files = draft_snapshot.get("files")
@@ -96,12 +122,12 @@ def _assemble_draft_content(draft_snapshot: dict[str, Any]) -> str:
         if path == "SKILL.md":
             skill_content = file_content
         elif path and file_content.strip():
-            parts.append(f'<FILE path="{path}">\n{file_content}\n</FILE>')
+            parts.append(f'<file path="{path}">\n{file_content}\n</file>')
 
     if not skill_content.strip() and not parts:
         return ""
 
-    return "\n\n".join([f"<SKILL>\n{skill_content}\n</SKILL>", *parts])
+    return "\n\n".join([f"<skill>\n{skill_content}\n</skill>", *parts])
 
 
 def _normalize_draft_snapshot(
@@ -140,6 +166,7 @@ def _resolve_model_for_nl2skill(
     if model_id is not None:
         # Use the explicitly requested model
         model_info = get_model_by_model_id(model_id, tenant_id)
+        validate_selected_record(model_info)
         if model_info:
             return (
                 model_info["display_name"],
@@ -176,17 +203,25 @@ async def build_nl2skill_run_info(
     request: NL2SkillRunRequest,
     tenant_id: str,
     language: str,
+    system_ref=None,
 ) -> AgentRunInfo:
     """Build all request-scoped objects for one NL2Skill turn."""
 
+    system_ref = system_ref or await run_blocking("load-nl2skill-identity", system_agent_provider.get_nl2skill_main_ref, tenant_id)
     template_language = LANGUAGE["EN"] if language == LANGUAGE["EN"] else LANGUAGE["ZH"]
+    preflight_turn_controls(request, tenant_id)
     target_files = _extract_target_files(request.query, request.draft_snapshot)
     draft_snapshot = _normalize_draft_snapshot(request.draft_snapshot)
-    template = get_skill_creation_simple_prompt_template(
+    final_query = await join_minio_file_description_to_query(
+        minio_files=request.minio_files,
+        query=request.query,
+        history=request.history,
+        language=template_language,
+    )
+    template = get_nl2skill_prompt_template(
         language=template_language,
         existing_skill=draft_snapshot,
-        complexity=request.complexity,
-        user_request=request.query,
+        user_request=final_query,
         target_files=target_files,
     )
     model_config_list = await create_model_config_list(tenant_id)
@@ -200,20 +235,49 @@ async def build_nl2skill_run_info(
         model_config_list=model_config_list,
     )
 
-    return AgentRunInfo(
-        query=template.get("user_prompt") or request.query,
+    agent_config = create_nl2skill_agent_config(
+        system_prompt=template.get("system_prompt", ""),
+        model_name=cite_name,
+        system_ref=system_ref,
+    )
+    if request.model_id is not None or request.generation_config is not None:
+        model_info = resolve_creator_model(
+            model_config_list, agent_config, tenant_id, request.model_id,
+            request.generation_config.model_dump(exclude_unset=True) if request.generation_config else None,
+            model_info,
+        )
+    input_budget, capacity_snapshot, resolved_capacity = _resolve_input_budget(model_info)
+    context_budget = _resolve_context_budget(
+        capacity_snapshot=resolved_capacity, tenant_id=tenant_id,
+        agent_requested_output_tokens=None, request_requested_output_tokens=None,
+    )
+    agent_config.capacity_snapshot = capacity_snapshot
+    agent_config.context_budget_snapshot = context_budget
+    # The SDK consumes the same selected-model capacity snapshot as the root.
+    agent_config.context_manager_config = ContextManagerConfig(
+        token_threshold=context_budget.compaction_trigger_threshold_tokens if context_budget else input_budget,
+        context_window_tokens=(resolved_capacity.context_window_tokens if resolved_capacity else None) or input_budget,
+        effective_input_limit_tokens=context_budget.effective_input_limit_tokens if context_budget else 0,
+        compaction_trigger_threshold_tokens=context_budget.compaction_trigger_threshold_tokens if context_budget else 0,
+        compaction_target_tokens=context_budget.compaction_target_tokens if context_budget else 0,
+    )
+    run_info = AgentRunInfo(
+        query=template.get("user_prompt") or final_query,
         model_config_list=model_config_list,
         observer=MessageObserver(lang=template_language),
-        agent_config=create_nl2skill_agent_config(
-            system_prompt=template.get("system_prompt", ""),
-            model_name=model_name,
-        ),
+        agent_config=agent_config,
+        capacity_snapshot=capacity_snapshot,
+        context_budget_snapshot=context_budget,
         history=_convert_history(request.history),
         stop_event=threading.Event(),
         enable_planning=False,
         sandbox_config=None,
         redis_client=None,
     )
+    run_info.context_input = build_authorized_context_input(
+        run_info, historical_context={"conversation_turns": _skill_history_turns(run_info.history)},
+    )
+    return run_info
 
 
 def _decorate_event(
@@ -235,15 +299,16 @@ async def create_nl2skill_stream(
     request: NL2SkillRunRequest,
     tenant_id: str,
     language: str,
+    system_ref=None,
 ) -> AsyncIterator[str]:
     """Create the SSE payload stream for one ephemeral NL2Skill turn."""
 
-    run_info = await build_nl2skill_run_info(request, tenant_id, language)
+    run_info = await build_nl2skill_run_info(request, tenant_id, language, system_ref=system_ref)
     target_files = _extract_target_files(request.query, request.draft_snapshot)
     target_file_set = set(target_files)
 
     async def generate() -> AsyncIterator[str]:
-        classifier = ContentClassifier()
+        parser = SkillStreamParser()
         sequence = 0
 
         def serialize(event: dict[str, Any]) -> str:
@@ -270,7 +335,10 @@ async def create_nl2skill_stream(
                         "paths": target_files,
                     }
                 )
-            async for raw_chunk in agent_run(run_info):
+            async for raw_chunk in agent_run(
+                run_info,
+                thread_manager=runtime_thread_manager,
+            ):
                 try:
                     chunk = json.loads(raw_chunk) if isinstance(raw_chunk, str) else raw_chunk
                 except json.JSONDecodeError:
@@ -279,35 +347,21 @@ async def create_nl2skill_stream(
                 if not isinstance(chunk, dict):
                     continue
 
-                chunk_type = str(chunk.get("type") or "")
-                content = str(chunk.get("content") or "")
-                if chunk_type in PARSABLE_MODEL_TYPES:
-                    for event in classifier.classify(content, origin_type=chunk_type):
-                        if is_allowed_write(event):
-                            yield serialize(event)
-                    continue
+                for event in parser.process(chunk):
+                    if is_allowed_write(event):
+                        yield serialize(event)
 
-                if chunk_type == "final_answer" and classifier.saw_control_tag:
-                    continue
-
-                if chunk_type == "final_answer" and "<" in content:
-                    for event in classifier.classify(content, origin_type=chunk_type):
-                        if is_allowed_write(event):
-                            yield serialize(event)
-                    continue
-
-                yield serialize(chunk)
-
-            for event in classifier.flush():
+            for event in parser.flush():
                 if is_allowed_write(event):
                     yield serialize(event)
             yield serialize({"type": "done", "content": ""})
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("NL2Skill execution failed")
+            from management.services.agent.stream import sampling_configuration_error_payload
             yield serialize(
-                {
+                sampling_configuration_error_payload(exc) or {
                     "type": "error",
                     "content": "NL2Skill execution failed.",
                 }

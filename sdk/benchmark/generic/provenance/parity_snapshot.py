@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Build and compare redacted AgentRunInfo parity snapshots."""
 
 from __future__ import annotations
@@ -10,8 +12,7 @@ from .experiment_manifest import _jsonable, sha256_value
 
 PROMPT_COMPONENT_IDS = {
     "basic_information": "system:header",
-    "duty_prompt": "system:duty",
-    "constraint_prompt": "system:constraint",
+    "prompt": "system:duty",
     "execution_prompt": "system:execution_flow",
     "resource_prompt": "system:available_resources_header",
     "code_rules_prompt": "system:code_norms",
@@ -19,7 +20,7 @@ PROMPT_COMPONENT_IDS = {
 RESOURCE_TYPES = {
     "tools": "tool",
     "skills": "skill",
-    "managed_agents": "managed_agent",
+    "managed_agents": "worker_agent",
     "external_agents": "external_agent",
     "memory": "memory",
     "knowledge_base": "knowledge_base",
@@ -143,7 +144,7 @@ def build_context_item_snapshot(context_items: list[Any]) -> list[dict[str, Any]
                 "stable"
                 if item_type in {
                     "system", "system_prompt", "tool", "skill",
-                    "managed_agent", "external_agent",
+                    "worker_agent", "external_agent",
                 }
                 else "dynamic"
             ),
@@ -303,8 +304,9 @@ def build_agent_run_info_parity_snapshot(
         "policy_layers": _jsonable(policy_layers),
         "token_threshold": _field(context_config, "token_threshold", 0) if context_config else 0,
         "context_window_tokens": _field(context_config, "context_window_tokens", 0) if context_config else 0,
-        "soft_input_budget_tokens": _field(context_config, "soft_input_budget_tokens", 0) if context_config else 0,
-        "hard_input_budget_tokens": _field(context_config, "hard_input_budget_tokens", 0) if context_config else 0,
+        "effective_input_limit_tokens": _field(context_config, "effective_input_limit_tokens", 0) if context_config else 0,
+        "compaction_trigger_threshold_tokens": _field(context_config, "compaction_trigger_threshold_tokens", 0) if context_config else 0,
+        "compaction_target_tokens": _field(context_config, "compaction_target_tokens", 0) if context_config else 0,
         "keep_recent_steps": _field(context_config, "keep_recent_steps", 0) if context_config else 0,
     }
     history = list(_field(agent_run_info, "history", []) or [])
@@ -327,8 +329,8 @@ def build_agent_run_info_parity_snapshot(
     capacity_snapshot = {
         "model_capacity": _field(agent_run_info, "capacity_snapshot")
         or _field(agent_config, "capacity_snapshot"),
-        "safe_input_budget": _field(agent_run_info, "safe_input_budget_snapshot")
-        or _field(agent_config, "safe_input_budget_snapshot"),
+        "context_budget": _field(agent_run_info, "context_budget_snapshot")
+        or _field(agent_config, "context_budget_snapshot"),
     }
     return build_parity_snapshot(
         context_items=list(_field(agent_config, "context_items", []) or []),

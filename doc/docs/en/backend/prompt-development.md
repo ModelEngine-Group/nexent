@@ -1,48 +1,22 @@
 # Prompt Development Guide
 
-This guide explains how Nexent prompt templates are organized under `backend/prompts/` and how to extend them for new agents.
+Nexent packages built-in prompt YAML under `sdk/nexent/core/prompts/`. Backend services collect business data and select templates. The SDK loads resources and renders fields with supplied parameters.
 
-## 📂 File Layout & Naming
+## Files and interfaces
 
-- Core templates live in `backend/prompts/` using `{agent_type}_agent.yaml` or `{scope}_prompt_template.yaml`.
-- Utility templates are under `backend/prompts/utils/` for meta generation (e.g., prompt/title helpers).
+- Localized resources live under `zh/` and `en/`, then in purpose-specific folders such as `agent`, `meta`, `evaluation`, and `tool`. Both languages have matching relative paths. The `meta/` folder contains prompts used to generate prompts, Agent drafts, and skill drafts.
+- Agent resources live in `zh/agent/` and `en/agent/`; manager and worker roles use `agent_manager.yaml` and `agent_worker.yaml`. Chat-title generation uses `agent/generate_chat_title.yaml`. Role templates have `system_sections`, role-specific stage fields, and `final_answer`.
+- Human interaction, context summary, and answer verification live in each language's `agent/human_interaction.yaml`, `agent/context_summary.yaml`, and `agent/answer_verifier.yaml`. The Chinese context-summary and verifier resources are simple translations of the English originals.
+- `load_prompt(language, relative_path)` loads an independent mapping relative to the language directory, for example `load_prompt("zh", "agent/human_interaction")`. The `.yaml` suffix is optional. Use `render_prompt_text(source, parameters)` to render Jinja text with runtime values.
+- Backend services call the SDK using the resource language, purpose, and filename. User-defined prompt generation templates remain in the database; their built-in defaults come from SDK YAML.
 
-## 🧩 Template Structure
+## Parameters
 
-Each YAML may contain:
-- `system_prompt`: role, responsibilities, execution flow, tool/sub-agent usage rules, Python code constraints, and examples.
-- `planning`: `initial_facts`, `initial_plan`, update hooks before/after facts or plans.
-- `managed_agent`: prompts for delegating tasks and collecting reports from sub-agents.
-- `final_answer`: pre/post messages to shape final output.
-- `tools_requirement`: priorities and guardrails for tool usage.
-- `few_shots`: examples to steer behavior.
+Callers pass current values to the SDK renderer. Agent configuration or conversation state supplies values such as `duty`, `constraint`, `few_shots`, and delegated tasks. NL2Agent, skill creation, and other workflows supply their tool names, skill drafts, document content, and related values. Missing required Jinja parameters raise an error instead of sending unresolved template placeholders to the model.
 
-## 🔄 Variables
+## Extending a template
 
-Common placeholders for runtime rendering:
-- `tools`, `managed_agents`
-- `task`, `remaining_steps`
-- `authorized_imports`
-- `facts_update`, `answer_facts`
-
-## 📑 Key Templates
-
-- Manager agents: `manager_system_prompt_template.yaml`, `manager_system_prompt_template_en.yaml`
-- Managed agents: `managed_system_prompt_template.yaml`, `managed_system_prompt_template_en.yaml`
-- Knowledge summary: `knowledge_summary_agent.yaml`, `knowledge_summary_agent_en.yaml`
-- File analysis: `analyze_file.yaml`, `analyze_file_en.yaml`
-- Cluster summary: `cluster_summary_agent.yaml`, `cluster_summary_reduce.yaml` (and `_zh` variants)
-- Utilities (`utils/`): `prompt_generate*.yaml`, `generate_title*.yaml`
-
-## 🚀 How to Extend
-
-1. Copy the closest existing template and adjust `system_prompt`/`planning` for your scenario.
-2. Keep placeholders intact unless intentionally removed.
-3. Align tool lists with actual tools available to the agent; update `authorized_imports` if needed.
-4. Validate with a small task to ensure flows (`Think → Code → Observe → Repeat`) produce the expected behavior.
-
-## ✅ Standards & Tips
-
-- Use executable code fences for runnable snippets: ````py````, and display-only fences for non-executable examples.
-- Prefer keyword args for tool calls; avoid excessive tool invocations per step.
-- Keep comments and docstrings in English and respect repository coding rules.
+1. Add YAML to the appropriate language and purpose folder, for example `zh/evaluation/judge.yaml`. Preserve the workflow's field names and placeholders.
+2. Use the resource language and relative path at the call site. Existing Agent templates also pass SDK bundle validation. Meta prompts use `meta/nl2agent.yaml` and `meta/nl2skill.yaml`.
+3. Add parameter rendering and package resource tests. SDK `pyproject.toml` declares YAML package data in the two-level subdirectories.
+4. Run the consuming Backend service tests to verify final message content, language selection, and user template fallback.

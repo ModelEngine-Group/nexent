@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nexent.dev/schemas/feature.schema.json",
+  "title": "Nexent feature inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "module", "features"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "module": {"$ref": "#/$defs/module"},
+    "features": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/feature"}
+    }
+  },
+  "$defs": {
+    "identifier": {"type": "string", "pattern": "^[A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+$"},
+    "nonEmpty": {"type": "string", "minLength": 1},
+    "module": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "name": {"$ref": "#/$defs/nonEmpty"},
+        "description": {"$ref": "#/$defs/nonEmpty"}
+      }
+    },
+    "businessRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_id", "description"],
+      "properties": {
+        "rule_id": {"$ref": "#/$defs/identifier"},
+        "description": {"$ref": "#/$defs/nonEmpty"}
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requirement_ids": {"type": "array", "items": {"$ref": "#/$defs/identifier"}, "uniqueItems": true},
+        "spec_path": {"type": "string", "minLength": 1},
+        "notes": {"type": "string"}
+      }
+    },
+    "feature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["feature_id", "name", "status", "description", "business_rules", "required_test_stages"],
+      "properties": {
+        "feature_id": {"$ref": "#/$defs/identifier"},
+        "name": {"$ref": "#/$defs/nonEmpty"},
+        "status": {"enum": ["active", "deprecated", "planned", "retired"]},
+        "description": {"$ref": "#/$defs/nonEmpty"},
+        "business_rules": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/businessRule"}},
+        "required_test_stages": {
+          "type": "array",
+          "items": {"enum": ["D1", "D2", "D3", "D4", "D5"]},
+          "uniqueItems": true
+        },
+        "source": {"$ref": "#/$defs/source"}
+      }
+    }
+  }
+}

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ASSET_OWNER visibility helpers."""
 
 import sys
@@ -10,39 +12,34 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from consts.const import (
-    ASSET_OWNER_ROLE,
-    ASSET_OWNER_TENANT_ID,
-    PERMISSION_EDIT,
-    PERMISSION_READ,
-)
+from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, PERMISSION_EDIT, PERMISSION_READ
 
 PROMPTS_HIDDEN_FLAG = "prompts_hidden"
-from consts.exceptions import ValidationError
-from backend.services import asset_owner_visibility as aov
+from contracts.errors.exceptions import ValidationError
+from management.services.permission import asset_owner as aov
 
 ASSET_OWNER_RESOURCES_ROUTE = aov.ASSET_OWNER_RESOURCES_ROUTE
 OWNER_MANAGE_ROUTE = aov.OWNER_MANAGE_ROUTE
 
 
 class TestRequireAssetOwnerEnabled:
-    @patch("backend.services.asset_owner_visibility.ENABLE_ASSET_OWNER_ROLE", False)
+    @patch("management.services.permission.asset_owner.ENABLE_ASSET_OWNER_ROLE", False)
     def test_raises_when_feature_disabled(self):
         with pytest.raises(ValidationError, match="ASSET_OWNER feature is not enabled"):
             aov.require_asset_owner_enabled()
 
-    @patch("backend.services.asset_owner_visibility.ENABLE_ASSET_OWNER_ROLE", True)
+    @patch("management.services.permission.asset_owner.ENABLE_ASSET_OWNER_ROLE", True)
     def test_no_op_when_feature_enabled(self):
         aov.require_asset_owner_enabled()
 
 
 class TestFilterAccessibleRoutes:
-    @patch("backend.services.asset_owner_visibility.ENABLE_ASSET_OWNER_ROLE", True)
+    @patch("management.services.permission.asset_owner.ENABLE_ASSET_OWNER_ROLE", True)
     def test_returns_routes_unchanged_when_enabled(self):
         routes = ["/home", ASSET_OWNER_RESOURCES_ROUTE, OWNER_MANAGE_ROUTE, "/settings"]
         assert aov.filter_accessible_routes_for_asset_owner_feature(routes) == routes
 
-    @patch("backend.services.asset_owner_visibility.ENABLE_ASSET_OWNER_ROLE", False)
+    @patch("management.services.permission.asset_owner.ENABLE_ASSET_OWNER_ROLE", False)
     def test_removes_asset_owner_routes_when_disabled(self):
         routes = ["/home", ASSET_OWNER_RESOURCES_ROUTE, OWNER_MANAGE_ROUTE, "/settings"]
         result = aov.filter_accessible_routes_for_asset_owner_feature(routes)
@@ -106,40 +103,41 @@ class TestResolveAgentListPermission:
 
 
 class TestApplyAgentDetailPromptVisibility:
+    def test_current_agent_mask_does_not_add_removed_prompt_fields(self):
+        result = aov.apply_agent_detail_prompt_visibility("regular_tenant", {
+            "tenant_id": ASSET_OWNER_TENANT_ID, "prompt": "Complete prompt",
+        })
+        assert result["prompt"] is None
+        assert result[PROMPTS_HIDDEN_FLAG] is True
+        assert "constraint_prompt" not in result
+        assert "few_shots_prompt" not in result
+
     def test_masks_prompts_for_non_asset_owner_viewer(self):
         agent_info = {
             "tenant_id": ASSET_OWNER_TENANT_ID,
-            "duty_prompt": "duty",
-            "constraint_prompt": "constraint",
-            "few_shots_prompt": "few",
+            "prompt": "duty",
         }
         result = aov.apply_agent_detail_prompt_visibility("regular_tenant", agent_info)
-        assert result["duty_prompt"] is None
-        assert result["constraint_prompt"] is None
-        assert result["few_shots_prompt"] is None
+        assert result["prompt"] is None
         assert result[PROMPTS_HIDDEN_FLAG] is True
-        assert agent_info["duty_prompt"] == "duty"
+        assert agent_info["prompt"] == "duty"
 
     def test_no_mask_for_asset_owner_tenant_viewer(self):
         agent_info = {
             "tenant_id": ASSET_OWNER_TENANT_ID,
-            "duty_prompt": "duty",
-            "constraint_prompt": "constraint",
-            "few_shots_prompt": "few",
+            "prompt": "duty",
         }
         result = aov.apply_agent_detail_prompt_visibility(ASSET_OWNER_TENANT_ID, agent_info)
-        assert result["duty_prompt"] == "duty"
+        assert result["prompt"] == "duty"
         assert PROMPTS_HIDDEN_FLAG not in result
 
     def test_no_mask_for_regular_agent(self):
         agent_info = {
             "tenant_id": "tenant_a",
-            "duty_prompt": "duty",
-            "constraint_prompt": "constraint",
-            "few_shots_prompt": "few",
+            "prompt": "duty",
         }
         result = aov.apply_agent_detail_prompt_visibility("regular_tenant", agent_info)
-        assert result["duty_prompt"] == "duty"
+        assert result["prompt"] == "duty"
         assert PROMPTS_HIDDEN_FLAG not in result
 
 

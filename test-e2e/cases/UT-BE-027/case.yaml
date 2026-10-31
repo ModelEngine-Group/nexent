@@ -1,0 +1,52 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-BE-027
+  feature_id: F-179
+  business_rule_ids:
+  - F-179-RULE-01
+  title: 普通 AgentRequest 可用且旧 HITL 控制字段被明确拒绝
+  type: BE-UT
+  priority: P0
+  status: active
+  automation: automated
+  objective: 普通 AgentRequest 可用且旧 HITL 控制字段被明确拒绝
+  preconditions:
+  - 本地测试环境健康检查通过，NEXENT_TEST_HOME 位于源码仓库外。
+  - 测试基线固定为 develop 当前批次锁定的产品提交，当次资源使用 run_id 隔离。
+  - 所需资产存在：${NEXENT_TEST_HOME}/config/users.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/config/models.yaml。
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 构造只有 query 的普通 AgentRequest。
+    expected: 普通 query 校验通过且内容不变。
+  - order: 2
+    action: 分别加入 enable_hitl、hitl_run_id、hitl_after_event 旧字段。
+    expected: 每个旧控制字段均返回明确校验错误，不被静默忽略或启动旧运行。
+  - order: 3
+    action: 验证每种旧字段均被模型校验拒绝。
+    expected: 每个旧控制字段均返回明确校验错误，不被静默忽略或启动旧运行。
+  expected_results:
+  - 普通 query 校验通过且内容不变。
+  - 每个旧控制字段均返回明确校验错误，不被静默忽略或启动旧运行。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 374
+  unit_boundary: 旧 HITL 兼容
+  inputs:
+  - '- ${NEXENT_TEST_HOME}/config/users.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env
+
+    - ${NEXENT_TEST_HOME}/config/models.yaml'
+  assertions:
+  - 普通 query 校验通过且内容不变。
+  - 每个旧控制字段均返回明确校验错误，不被静默忽略或启动旧运行。

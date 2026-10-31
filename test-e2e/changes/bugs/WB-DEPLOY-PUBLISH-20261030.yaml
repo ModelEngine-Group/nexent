@@ -1,0 +1,44 @@
+schema_version: '1.0'
+change:
+  change_id: WB-DEPLOY-PUBLISH-20261030
+  change_type: bugfix
+  bug_id: WB-DEPLOY-PUBLISH-20261030
+  title: Connect shared Workbench publication to deployment
+  description: Run idempotent Workbench initialization and publication after SQL prerequisites in application deployment.
+  observed_behavior: Deploy scripts apply SQL but never invoke the extracted Workbench initializer or publisher.
+  expected_behavior: Application deployment invokes both commands in order and fails if either command fails; unrelated components skip publication.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Lifecycle database tests cover the publisher but existing deployment UT does not assert its invocation or failure propagation.
+  feature_contract_changed: false
+  affected_features:
+    existing: [SYS-AGENT-LIFECYCLE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [SYS-AGENT-D5-001]
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+      - test/backend/deploy/test_workbench_publication.py
+      - test/backend/database/test_tool_default_tags_db.py
+      - test/backend/database/test_tool_db.py
+    behaviors:
+      - Docker config deployment runs initialization then publication through the SQL entrypoint before core startup.
+      - K8s application deployment uses its Ready config pod after official Skill synchronization.
+      - Failed commands and missing Ready pods fail deployment; unrelated component selections do not publish.
+      - Windows Git Bash preserves container /opt paths while converting host file paths for both Compose command forms, without leaking conversion settings.
+      - Shared system tool registration skips tenant-only default tags, while normal tenants retain transactional tag assignment and errors.
+    reason: Isolated shell orchestration belongs in UT; reuse the existing real PostgreSQL Case for publication concurrency and idempotence.
+  notes: >-
+    SPEC ../nexent-doc/docs/Developing/chat-shared-system-agents/design.md AC-022.
+    Existing SYS-AGENT-D5-001 is regression-only and retains its contract and binding.
+    No new D1 or database migration is needed. Controlled CLI tests do not establish a live Docker/K8s rollout pass.
+    Windows follow-up reproduced native argument corruption in four regression variants before the fix.
+    Scoped MSYS2_ARG_CONV_EXCL prevents container path rewriting while preserving host path conversion.
+    Shared-catalog follow-up strengthens SYS-AGENT-D5-001 to register and rescan search tools against real PostgreSQL without a tenant tag library.

@@ -1,9 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
-Unit tests for backend/database/a2a_agent_db.py
+Unit tests for backend/management/db/a2a/repository.py
 Tests all public functions including external agent operations,
 server agent operations, task operations, message operations,
 nacos config operations, and artifact operations.
 """
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../.."))
@@ -12,6 +15,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 from datetime import datetime, timezone
 
+from contracts.errors.exceptions import AgentNotFoundError
 
 # ---------------------------------------------------------------------------
 # Mock consts module
@@ -19,15 +23,22 @@ from datetime import datetime, timezone
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 
 # ---------------------------------------------------------------------------
-# Mock database.client
+# Mock management.db.client
 # ---------------------------------------------------------------------------
 db_client_mock = MagicMock()
-sys.modules['database.client'] = db_client_mock
-sys.modules['backend.database.client'] = db_client_mock
+sys.modules['management.db.client'] = db_client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = db_client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +135,7 @@ def _make_cls(name, col_names, bases=(MockOrmObject,)):
 def _make_ext_agent_cls():
     return _make_cls('A2AExternalAgent', [
         'id', 'source_url', 'name', 'description', 'version', 'agent_url',
-        'protocol_type', 'streaming', 'supported_interfaces', 'source_type',
+        'protocol_type', 'streaming', 'ssl_verify', 'supported_interfaces', 'source_type',
         'nacos_config_id', 'nacos_agent_name', 'base_url', 'agent_card_headers', 'security_schemes',
         'security_requirements', 'security_credentials', 'selected_security_requirement_index', 'raw_card', 'is_available',
         'last_check_at', 'last_check_result', 'cached_at', 'cache_expires_at',
@@ -183,6 +194,7 @@ def _make_artifact_cls():
 # Build mock db_models module
 # ---------------------------------------------------------------------------
 db_models_mock = MagicMock()
+db_models_mock.AgentInfo = _make_cls('AgentInfo', ['agent_id', 'tenant_id', 'version_no', 'delete_flag'])
 db_models_mock.A2AExternalAgent = _make_ext_agent_cls()
 db_models_mock.A2AExternalAgentRelation = _make_ext_rel_cls()
 db_models_mock.A2AServerAgent = _make_server_agent_cls()
@@ -193,8 +205,8 @@ db_models_mock.A2AArtifact = _make_artifact_cls()
 db_models_mock.PROTOCOL_HTTP_JSON = "HTTP+JSON"
 db_models_mock.PROTOCOL_JSONRPC = "JSONRPC"
 db_models_mock.PROTOCOL_GRPC = "GRPC"
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +222,7 @@ def factory_external_agent(**kw):
         'nacos_config_id': None, 'nacos_agent_name': None, 'agent_card_headers': None,
         'security_schemes': None, 'security_requirements': None, 'security_credentials': None,
         'selected_security_requirement_index': None, 'raw_card': None,
-        'is_available': True, 'last_check_at': None, 'last_check_result': None,
+        'is_available': True, 'ssl_verify': True, 'last_check_at': None, 'last_check_result': None,
         'cached_at': datetime(2024, 1, 1, tzinfo=timezone.utc),
         'cache_expires_at': datetime(2024, 1, 2, tzinfo=timezone.utc),
         'create_time': datetime(2024, 1, 1, tzinfo=timezone.utc),
@@ -435,7 +447,8 @@ class MockSession:
 # ---------------------------------------------------------------------------
 # Import module under test (must be after mocks are set up)
 # ---------------------------------------------------------------------------
-from backend.database import a2a_agent_db as a2a_db
+from management.db.a2a import repository as a2a_db
+from management.utils import a2a as a2a_db_a2a
 
 
 # ---------------------------------------------------------------------------
@@ -486,36 +499,36 @@ def artifact():
 
 class TestGenerateTaskId:
     def test_prefix(self):
-        assert a2a_db._generate_task_id().startswith('task_')
+        assert a2a_db_a2a._generate_task_id().startswith('task_')
 
     def test_unique(self):
-        ids = [a2a_db._generate_task_id() for _ in range(20)]
+        ids = [a2a_db_a2a._generate_task_id() for _ in range(20)]
         assert len(set(ids)) == 20
 
 
 class TestGenerateMessageId:
     def test_prefix(self):
-        assert a2a_db._generate_message_id().startswith('msg_')
+        assert a2a_db_a2a._generate_message_id().startswith('msg_')
 
     def test_unique(self):
-        ids = [a2a_db._generate_message_id() for _ in range(20)]
+        ids = [a2a_db_a2a._generate_message_id() for _ in range(20)]
         assert len(set(ids)) == 20
 
 
 class TestGenerateEndpointId:
     def test_includes_agent_id(self):
-        ep = a2a_db._generate_endpoint_id(42)
+        ep = a2a_db_a2a._generate_endpoint_id(42)
         assert '42' in ep
         assert ep.startswith('a2a_42_')
 
     def test_unique(self):
-        ids = [a2a_db._generate_endpoint_id(1) for _ in range(10)]
+        ids = [a2a_db_a2a._generate_endpoint_id(1) for _ in range(10)]
         assert len(set(ids)) == 10
 
 
 class TestExtractPrimaryInterface:
     def test_empty_returns_defaults(self):
-        url, ver = a2a_db._extract_primary_interface([])
+        url, ver = a2a_db_a2a._extract_primary_interface([])
         assert url == ""
         assert ver == "1.0"
 
@@ -524,13 +537,13 @@ class TestExtractPrimaryInterface:
             {"protocolBinding": "http+json", "url": "http://rest.example.com", "protocolVersion": "1.0"},
             {"protocolBinding": "grpc", "url": "http://g.example.com", "protocolVersion": "2.0"},
         ]
-        url, ver = a2a_db._extract_primary_interface(ifaces)
+        url, ver = a2a_db_a2a._extract_primary_interface(ifaces)
         assert url == "http://rest.example.com"
         assert ver == "1.0"
 
     def test_falls_back_to_first(self):
         ifaces = [{"protocolBinding": "custom", "url": "http://c.example.com", "protocolVersion": "3.0"}]
-        url, ver = a2a_db._extract_primary_interface(ifaces)
+        url, ver = a2a_db_a2a._extract_primary_interface(ifaces)
         assert url == "http://c.example.com"
 
 
@@ -540,39 +553,39 @@ class TestGetInterfaceByProtocol:
             {"protocolBinding": "rest", "url": "http://rest.example.com"},
             {"protocolBinding": "http-json-rpc", "url": "http://rpc.example.com"},
         ]
-        assert a2a_db._get_interface_by_protocol(ifaces, "rest")["url"] == "http://rest.example.com"
+        assert a2a_db_a2a._get_interface_by_protocol(ifaces, "rest")["url"] == "http://rest.example.com"
 
     def test_not_found_returns_none(self):
-        assert a2a_db._get_interface_by_protocol([], "rest") is None
+        assert a2a_db_a2a._get_interface_by_protocol([], "rest") is None
 
     def test_none_interfaces_returns_none(self):
-        assert a2a_db._get_interface_by_protocol(None, "rest") is None
+        assert a2a_db_a2a._get_interface_by_protocol(None, "rest") is None
 
 
 class TestExtractProtocolType:
     def test_jsonrpc_binding(self):
-        assert a2a_db._extract_protocol_type([{"protocolBinding": "http-json-rpc"}]) == "JSONRPC"
+        assert a2a_db_a2a._extract_protocol_type([{"protocolBinding": "http-json-rpc"}]) == "JSONRPC"
 
     def test_httpjsonrpc_binding(self):
-        assert a2a_db._extract_protocol_type([{"protocolBinding": "httpjsonrpc"}]) == "JSONRPC"
+        assert a2a_db_a2a._extract_protocol_type([{"protocolBinding": "httpjsonrpc"}]) == "JSONRPC"
 
     def test_httprest_binding(self):
-        assert a2a_db._extract_protocol_type([{"protocolBinding": "httprest"}]) == "HTTP+JSON"
+        assert a2a_db_a2a._extract_protocol_type([{"protocolBinding": "httprest"}]) == "HTTP+JSON"
 
     def test_grpc_binding(self):
-        assert a2a_db._extract_protocol_type([{"protocolBinding": "grpc"}]) == "GRPC"
+        assert a2a_db_a2a._extract_protocol_type([{"protocolBinding": "grpc"}]) == "GRPC"
 
     def test_none_interfaces_returns_jsonrpc(self):
-        assert a2a_db._extract_protocol_type(None) == "JSONRPC"
-        assert a2a_db._extract_protocol_type([]) == "JSONRPC"
+        assert a2a_db_a2a._extract_protocol_type(None) == "JSONRPC"
+        assert a2a_db_a2a._extract_protocol_type([]) == "JSONRPC"
 
     def test_unknown_returns_jsonrpc(self):
-        assert a2a_db._extract_protocol_type([{"protocolBinding": "unknown"}]) == "JSONRPC"
+        assert a2a_db_a2a._extract_protocol_type([{"protocolBinding": "unknown"}]) == "JSONRPC"
 
 
 class TestGetProtocolBindingMapping:
     def test_has_all_protocols(self):
-        m = a2a_db._get_protocol_binding_mapping()
+        m = a2a_db_a2a._get_protocol_binding_mapping()
         assert "JSONRPC" in m
         assert "HTTP+JSON" in m
         assert "GRPC" in m
@@ -585,13 +598,13 @@ class TestFindInterfaceByProtocolType:
             {"protocolBinding": "http-json-rpc", "url": "http://rpc.example.com"},
             {"protocolBinding": "rest", "url": "http://rest.example.com"},
         ]
-        assert a2a_db._find_interface_by_protocol_type(ifaces, "JSONRPC")["url"] == "http://rpc.example.com"
+        assert a2a_db_a2a._find_interface_by_protocol_type(ifaces, "JSONRPC")["url"] == "http://rpc.example.com"
 
     def test_not_found(self):
-        assert a2a_db._find_interface_by_protocol_type([], "JSONRPC") is None
+        assert a2a_db_a2a._find_interface_by_protocol_type([], "JSONRPC") is None
 
     def test_none_interfaces(self):
-        assert a2a_db._find_interface_by_protocol_type(None, "JSONRPC") is None
+        assert a2a_db_a2a._find_interface_by_protocol_type(None, "JSONRPC") is None
 
 
 # ===========================================================================
@@ -599,6 +612,36 @@ class TestFindInterfaceByProtocolType:
 # ===========================================================================
 
 class TestCreateExternalAgentFromUrl:
+    @pytest.mark.parametrize('value', [True, False])
+    def test_ssl_preference_survives_create_read_list_and_rediscovery(self, value):
+        with patch.object(a2a_db, '_get_db_session') as mk:
+            session = MockSession()
+            mk.return_value = session
+            args = dict(source_url='https://peer/card', name='Peer', description='',
+                        agent_url='https://peer', tenant_id='tenant-1', user_id='user-1')
+            created = a2a_db.create_external_agent_from_url(**args, ssl_verify=value)
+            agent = session.added[0]
+            assert agent.ssl_verify is value
+            assert created['ssl_verify'] is value
+            agent.last_check_at = None
+            agent.last_check_result = None
+            agent.create_time = None
+            agent.nacos_config_id = None
+            agent.nacos_agent_name = None
+            agent.is_available = True
+            session._qr[a2a_db.A2AExternalAgent] = [agent]
+            assert a2a_db.get_external_agent_by_id(agent.id, 'tenant-1')['ssl_verify'] is value
+            assert a2a_db.list_external_agents('tenant-1')[0]['ssl_verify'] is value
+            updated = a2a_db.create_external_agent_from_url(**args, ssl_verify=not value)
+            assert updated['ssl_verify'] is not value
+            assert len(session.added) == 1
+
+    def test_verification_defaults_on(self):
+        with patch.object(a2a_db, '_get_db_session', return_value=MockSession()):
+            result = a2a_db.create_external_agent_from_url(
+                'https://peer/card', 'Peer', '', 'https://peer', 'tenant-1', 'user-1')
+        assert result['ssl_verify'] is True
+
     def test_creates_new_agent(self):
         with patch.object(a2a_db, '_get_db_session') as mk:
             mk.return_value = MockSession()
@@ -1152,6 +1195,21 @@ class TestUpdateAgentAvailability:
 # ===========================================================================
 
 class TestAddExternalAgentRelation:
+    @pytest.fixture(autouse=True)
+    def owned_references(self):
+        original_query = MockSession.query
+
+        def query(session, model, *others):
+            if model is db_models_mock.AgentInfo:
+                return MockQuery([db_models_mock.AgentInfo(
+                    agent_id=100, tenant_id='tenant-1', version_no=0, delete_flag='N')])
+            if model is db_models_mock.A2AExternalAgent:
+                return MockQuery([factory_external_agent(id=1)])
+            return original_query(session, model, *others)
+
+        with patch.object(MockSession, 'query', query):
+            yield
+
     def test_creates_new_relation(self):
         with patch.object(a2a_db, '_get_db_session') as mk:
             mk.return_value = MockSession()
@@ -1254,7 +1312,7 @@ class TestListExternalRelationsByLocalAgent:
 
 class TestMakeDefaultInterfaces:
     def test_includes_both_protocols(self):
-        ifaces = a2a_db._make_default_interfaces('a2a_10_abc12345')
+        ifaces = a2a_db_a2a._make_default_interfaces('a2a_10_abc12345')
         assert len(ifaces) == 2
         protocols = [i['protocolBinding'] for i in ifaces]
         assert 'JSONRPC' in protocols
@@ -1477,6 +1535,26 @@ class TestUpdateTaskState:
             mk.return_value = MockSession()
             result = a2a_db.update_task_state('nonexistent', 'TASK_STATE_WORKING')
             assert result is False
+
+
+class TestFailActiveTasksOnStartup:
+    def test_moves_submitted_and_working_tasks_to_failed(self):
+        query = MagicMock(name="query")
+        query.filter.return_value = query
+        query.update.return_value = 2
+        session = MagicMock(name="session")
+        session.query.return_value = query
+        context = MagicMock(name="context")
+        context.__enter__.return_value = session
+        context.__exit__.return_value = None
+
+        with patch.object(a2a_db, '_get_db_session', return_value=context):
+            assert a2a_db.fail_active_tasks_on_startup() == 2
+
+        updates = query.update.call_args.args[0]
+        assert updates["task_state"] == "TASK_STATE_FAILED"
+        assert updates["result_data"]["error"]["code"] == "CONTAINER_RESTARTED"
+        assert updates["completed_at"] is not None
 
 
 class TestListTasks:

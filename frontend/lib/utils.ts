@@ -15,6 +15,32 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export const safeStringify = (value: unknown): string | null => {
+  const seen = new WeakSet<object>();
+
+  try {
+    const serialized = JSON.stringify(value, (_key, currentValue: unknown) => {
+      if (typeof currentValue === "bigint") {
+        return `${currentValue}n`;
+      }
+
+      if (typeof currentValue !== "object" || currentValue === null) {
+        return currentValue;
+      }
+
+      if (seen.has(currentValue)) {
+        return "[Circular]";
+      }
+
+      seen.add(currentValue);
+      return currentValue;
+    });
+    return serialized ?? null;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Check if current language is Chinese
  * @returns true if current language is Chinese (zh or zh-CN)

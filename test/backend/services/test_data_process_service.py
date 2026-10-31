@@ -1,16 +1,20 @@
-import sys
-import unittest
-import os
-import io
-import base64
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import asyncio
-import time
+import base64
+import io
+import os
+import sys
 import types
-from unittest.mock import patch, MagicMock, AsyncMock
+import unittest
 import warnings
-from PIL import Image
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from celery import states
+from PIL import Image
 
 # Set required environment variables
 os.environ['REDIS_URL'] = 'redis://mock:6379/0'
@@ -20,10 +24,13 @@ os.environ['REDIS_BACKEND_URL'] = 'redis://mock:6379/0'
 sys.modules['data_process.app'] = MagicMock()
 sys.modules['data_process.app'].app = MagicMock()
 sys.modules['data_process.tasks'] = MagicMock()
-sys.modules['data_process.ray_actors'] = MagicMock()
-sys.modules['database.attachment_db'] = MagicMock()
-sys.modules['database.client'] = MagicMock()
-sys.modules['database.client'].minio_client = MagicMock()
+sys.modules['management.db.file.attachment'] = MagicMock()
+sys.modules['management.db.client'] = MagicMock()
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'].minio_client = MagicMock()
 sys.modules['transformers'] = MagicMock()
 sys.modules['transformers'].CLIPProcessor = MagicMock()
 sys.modules['transformers'].CLIPModel = MagicMock()
@@ -38,14 +45,15 @@ sys.modules['nexent.data_process'] = MagicMock()
 sys.modules['nexent.data_process.core'] = MagicMock()
 sys.modules['nexent.data_process.core'].DataProcessCore = MagicMock()
 
-# Mock constants from consts.const
+# Mock constants from contracts.constants.environment
 mock_const = MagicMock()
 mock_const.CLIP_MODEL_PATH = "mock_clip_path"
 mock_const.IMAGE_FILTER = True
 mock_const.REDIS_BACKEND_URL = "redis://mock:6379/0"
 mock_const.REDIS_URL = "redis://mock:6379/0"
 mock_const.MAX_CONCURRENT_CONVERSIONS = 3
-sys.modules['consts.const'] = mock_const
+sys.modules['contracts.constants.environment'] = mock_const
+install_business_constant_stubs(mock_const)
 
 # Stub torch (data_process_service.py imports it unconditionally).
 _torch_mod = types.ModuleType('torch')
@@ -54,12 +62,12 @@ _torch_mod.float16 = 'float16'
 _torch_mod.no_grad = lambda: (_ for _ in ()).throw(StopIteration)  # callable that acts as context manager decorator
 sys.modules.setdefault('torch', _torch_mod)
 
-# Stub consts.model — data_process_service.py imports BatchTaskRequest from it.
-_model_mod = types.ModuleType('consts.model')
+# Stub contracts.agent — data_process_service.py imports BatchTaskRequest from it.
+_model_mod = types.ModuleType('contracts.agent')
 
 
 class _BatchTaskRequest:
-    """Lightweight stand-in for consts.model.BatchTaskRequest.
+    """Lightweight stand-in for contracts.knowledge.BatchTaskRequest.
 
     Implements just enough to support `request.sources` iteration that
     production code uses inside `create_batch_tasks_impl`.
@@ -69,31 +77,56 @@ class _BatchTaskRequest:
         self.sources = sources or []
 
 _model_mod.BatchTaskRequest = _BatchTaskRequest
-sys.modules.setdefault('consts.model', _model_mod)
+sys.modules.setdefault('contracts.agent', _model_mod)
 
-# Stub consts.exceptions with a *real* exception class so assertRaises works correctly
-_exceptions_mod = types.ModuleType('consts.exceptions')
+# Stub contracts.errors.exceptions with real exception classes so assertRaises works correctly
+_exceptions_mod = types.ModuleType('contracts.errors.exceptions')
+
+
+class AppException(Exception):
+    """Stub AppException carrying the production error-code contract."""
+
+    def __init__(self, error_code=None, message=None):
+        self.error_code = error_code
+        self.message = message
+        super().__init__(message or error_code or "application error")
 
 
 class OfficeConversionException(Exception):
     """Stub OfficeConversionException used in tests."""
 
 
-_exceptions_mod.OfficeConversionException = OfficeConversionException
-sys.modules['consts.exceptions'] = _exceptions_mod
+class FileTooLargeException(Exception):
+    """Stub file-size validation exception."""
 
-# Stub utils.file_management_utils (new import in data_process_service)
-if 'utils.file_management_utils' not in sys.modules:
+
+class UnsupportedFileTypeException(Exception):
+    """Stub file-type validation exception."""
+
+
+class QuotaExceededError(Exception):
+    """Stub quota exception."""
+
+
+_exceptions_mod.AppException = AppException
+_exceptions_mod.OfficeConversionException = OfficeConversionException
+_exceptions_mod.FileTooLargeException = FileTooLargeException
+_exceptions_mod.UnsupportedFileTypeException = UnsupportedFileTypeException
+_exceptions_mod.QuotaExceededError = QuotaExceededError
+install_shared_contract_stub(_exceptions_mod, 'exceptions')
+
+# Stub management.services.file.upload (new import in data_process_service)
+if 'management.services.file.upload' not in sys.modules:
     import types as _types
-    _utils_mod = _types.ModuleType('utils.file_management_utils')
+    _utils_mod = _types.ModuleType('management.services.file.upload')
     _utils_mod.convert_office_to_pdf = AsyncMock()
-    sys.modules['utils.file_management_utils'] = _utils_mod
+    sys.modules['management.services.file.upload'] = _utils_mod
 
 # Mock data_process.utils as a top-level module so patch('data_process.utils.get_task_info')
 # resolves to a real module (otherwise it falls through to `from data_process.utils import ...`
 # which would try to import the heavy .tasks chain).
 _data_process_pkg = types.ModuleType('data_process')
-_data_process_pkg.__path__ = []
+_data_process_pkg.__path__ = [str(Path(__file__).resolve().parents[3] / "backend/data_process")]
 sys.modules.setdefault('data_process', _data_process_pkg)
 _data_process_utils = types.ModuleType('data_process.utils')
 _data_process_utils.get_task_info = AsyncMock()
@@ -105,6 +138,7 @@ sys.modules.setdefault('data_process.utils', _data_process_utils)
 # patch below resolves. Python's normal import system will resolve the submodule
 # from `backend/services/` once the package is registered.
 import os as _os
+
 _backend_services_dir = _os.path.join(
     _os.path.dirname(_os.path.abspath(__file__)),
     '..', '..', '..', 'backend', 'services'
@@ -119,13 +153,17 @@ if 'backend.services' not in sys.modules:
 # `nexent.data_process.core`, `transformers`, `torch`, etc. are already in
 # sys.modules so the heavy import chain succeeds. This also installs the module
 # under sys.modules, so the subsequent patch(...) call resolves correctly.
-import backend.services.data_process_service as _dps  # noqa: E402,F401
+import data_process.services.tasks as _dps
+
 del _dps
 
-# from backend.services.data_process_service import DataProcessService, get_data_process_service
+# from data_process.services.tasks import DataProcessService, get_data_process_service
 with patch('data_process.utils.get_task_info') as mock_get_task_info, \
-        patch('backend.services.data_process_service.get_all_task_ids_from_redis') as mock_get_redis_task_ids:
-    from backend.services.data_process_service import DataProcessService, get_data_process_service
+        patch('data_process.services.tasks.get_all_task_ids_from_redis') as mock_get_redis_task_ids:
+    from data_process.services.tasks import (
+        DataProcessService,
+        get_data_process_service,
+    )
 
 
 class TestDataProcessService(unittest.TestCase):
@@ -154,7 +192,7 @@ class TestDataProcessService(unittest.TestCase):
         warnings.filterwarnings('ignore', category=UserWarning)
 
         # Replace module-level semaphore with a no-op to avoid asyncio loop issues
-        import backend.services.data_process_service as _dm
+        import data_process.services.tasks as _dm
         self._dm = _dm
         self._orig_sem = _dm._conversion_semaphore
         self._nop_sem = TestDataProcessService._NopSemaphore()
@@ -179,8 +217,8 @@ class TestDataProcessService(unittest.TestCase):
         from io import BytesIO
         return BytesIO(data)
 
-    @patch('backend.services.data_process_service.redis.ConnectionPool.from_url')
-    @patch('backend.services.data_process_service.redis.Redis')
+    @patch('data_process.services.tasks.redis.ConnectionPool.from_url')
+    @patch('data_process.services.tasks.redis.Redis')
     def test_init_redis_client_with_url(self, mock_redis, mock_pool):
         """
         Test Redis client initialization with URL.
@@ -208,7 +246,7 @@ class TestDataProcessService(unittest.TestCase):
         self.assertIsNotNone(service.redis_client)
         self.assertIsNotNone(service.redis_pool)
 
-    @patch('backend.services.data_process_service.redis.ConnectionPool.from_url')
+    @patch('data_process.services.tasks.redis.ConnectionPool.from_url')
     def test_init_redis_client_without_url(self, mock_pool):
         """
         Test Redis client initialization without URL.
@@ -224,7 +262,7 @@ class TestDataProcessService(unittest.TestCase):
             del os.environ['REDIS_BACKEND_URL']
 
         # Temporarily set REDIS_BACKEND_URL to None in the mock
-        import backend.services.data_process_service as dps_module
+        import data_process.services.tasks as dps_module
         original_redis_backend_url = dps_module.REDIS_BACKEND_URL
         dps_module.REDIS_BACKEND_URL = None
 
@@ -240,7 +278,7 @@ class TestDataProcessService(unittest.TestCase):
             # Restore the original value
             dps_module.REDIS_BACKEND_URL = original_redis_backend_url
 
-    @patch('backend.services.data_process_service.redis.ConnectionPool.from_url')
+    @patch('data_process.services.tasks.redis.ConnectionPool.from_url')
     def test_init_redis_client_with_exception(self, mock_pool):
         """
         Test Redis client initialization with exception.
@@ -264,8 +302,8 @@ class TestDataProcessService(unittest.TestCase):
         self.assertIsNone(service.redis_client)
         self.assertIsNone(service.redis_pool)
 
-    @patch('backend.services.data_process_service.CLIPModel.from_pretrained')
-    @patch('backend.services.data_process_service.CLIPProcessor.from_pretrained')
+    @patch('data_process.services.tasks.CLIPModel.from_pretrained')
+    @patch('data_process.services.tasks.CLIPProcessor.from_pretrained')
     def test_init_clip_model_success(self, mock_processor, mock_model):
         """
         Test successful CLIP model initialization.
@@ -288,7 +326,7 @@ class TestDataProcessService(unittest.TestCase):
         self.assertIsNotNone(self.service.model)
         self.assertIsNotNone(self.service.processor)
 
-    @patch('backend.services.data_process_service.CLIPModel.from_pretrained')
+    @patch('data_process.services.tasks.CLIPModel.from_pretrained')
     def test_init_clip_model_failure(self, mock_model):
         """
         Test CLIP model initialization failure.
@@ -357,7 +395,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         asyncio.run(self.async_test_start_stop())
 
-    @patch('backend.services.data_process_service.celery_app')
+    @patch('data_process.services.tasks.celery_app')
     def test_get_celery_inspector_success(self, mock_celery_app):
         """
         Test successful retrieval of Celery inspector.
@@ -381,7 +419,7 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(self.service._inspector, mock_inspector)
         self.assertGreater(self.service._inspector_last_time, 0)
 
-    @patch('backend.services.data_process_service.celery_app')
+    @patch('data_process.services.tasks.celery_app')
     def test_get_celery_inspector_failure(self, mock_celery_app):
         """
         Test Celery inspector creation failure.
@@ -403,7 +441,7 @@ class TestDataProcessService(unittest.TestCase):
         self.assertIn("Failed to create inspector with celery_app",
                       str(context.exception))
 
-    @patch('backend.services.data_process_service.celery_app')
+    @patch('data_process.services.tasks.celery_app')
     def test_get_celery_inspector_cache(self, mock_celery_app):
         """
         Test Celery inspector caching behavior.
@@ -438,8 +476,8 @@ class TestDataProcessService(unittest.TestCase):
         inspector3 = self.service._get_celery_inspector()
         self.assertEqual(inspector3, mock_inspector2)
 
-    @patch('backend.services.data_process_service.celery_app')
-    @patch('backend.services.data_process_service.logger')
+    @patch('data_process.services.tasks.celery_app')
+    @patch('data_process.services.tasks.logger')
     def test_get_celery_inspector_missing_broker_url(self, mock_logger, mock_celery_app):
         """
         Test Celery inspector creation when broker_url is missing.
@@ -479,8 +517,8 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(self.service._inspector, mock_inspector)
         self.assertGreater(self.service._inspector_last_time, 0)
 
-    @patch('backend.services.data_process_service.celery_app')
-    @patch('backend.services.data_process_service.logger')
+    @patch('data_process.services.tasks.celery_app')
+    @patch('data_process.services.tasks.logger')
     def test_get_celery_inspector_missing_both_urls(self, mock_logger, mock_celery_app):
         """
         Test Celery inspector creation when both broker_url and result_backend are missing.
@@ -521,8 +559,8 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(self.service._inspector, mock_inspector)
         self.assertGreater(self.service._inspector_last_time, 0)
 
-    @patch('backend.services.data_process_service.celery_app')
-    @patch('backend.services.data_process_service.logger')
+    @patch('data_process.services.tasks.celery_app')
+    @patch('data_process.services.tasks.logger')
     def test_get_celery_inspector_empty_string_urls(self, mock_logger, mock_celery_app):
         """
         Test Celery inspector creation when broker_url and result_backend are empty strings.
@@ -564,8 +602,8 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(self.service._inspector, mock_inspector)
         self.assertGreater(self.service._inspector_last_time, 0)
 
-    @patch('backend.services.data_process_service.celery_app')
-    @patch('backend.services.data_process_service.logger')
+    @patch('data_process.services.tasks.celery_app')
+    @patch('data_process.services.tasks.logger')
     def test_get_celery_inspector_no_reconfiguration_needed(self, mock_logger, mock_celery_app):
         """
         Test Celery inspector creation when both URLs are already configured.
@@ -602,7 +640,7 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(self.service._inspector, mock_inspector)
         self.assertGreater(self.service._inspector_last_time, 0)
 
-    @patch('backend.services.data_process_service.get_task_info')
+    @patch('data_process.services.tasks.get_task_info')
     @pytest.mark.asyncio
     async def async_test_get_task(self, mock_get_task_info):
         """
@@ -633,9 +671,20 @@ class TestDataProcessService(unittest.TestCase):
         """
         asyncio.run(self.async_test_get_task())
 
-    @patch('backend.services.data_process_service.celery_app')
-    @patch('backend.services.data_process_service.get_task_info')
-    @patch('backend.services.data_process_service.get_all_task_ids_from_redis')
+    @patch('data_process.services.tasks.get_task_details_info')
+    @pytest.mark.asyncio
+    async def test_get_task_details(self, mock_get_task_details):
+        task_details = {"id": "task1", "status": "SUCCESS", "result": {"chunks_count": 1}}
+        mock_get_task_details.return_value = task_details
+
+        result = await self.service.get_task_details("task1")
+
+        self.assertEqual(result, task_details)
+        mock_get_task_details.assert_awaited_once_with("task1")
+
+    @patch('data_process.services.tasks.celery_app')
+    @patch('data_process.services.tasks.get_task_info')
+    @patch('data_process.services.tasks.get_all_task_ids_from_redis')
     @pytest.mark.asyncio
     async def async_test_get_all_tasks(self, mock_get_redis_task_ids, mock_get_task_info, mock_celery_app):
         """
@@ -652,7 +701,7 @@ class TestDataProcessService(unittest.TestCase):
         # Setup mocks — get_all_tasks creates short-timeout inspectors via celery_app
         mock_inspector = MagicMock()
         mock_inspector.active.return_value = {
-            'worker1': [{'id': 'task1'}, {'id': 'task2'}]
+            'worker1': [{'id': 'task1', 'kwargs': {'file_id': 'fid-runtime'}}, {'id': 'task2'}]
         }
         mock_inspector.reserved.return_value = {
             'worker1': [{'id': 'task3'}]
@@ -669,7 +718,13 @@ class TestDataProcessService(unittest.TestCase):
                 'task1': {'id': 'task1', 'status': 'ACTIVE', 'index_name': 'index1', 'task_name': 'task_name1'},
                 'task2': {'id': 'task2', 'status': 'ACTIVE', 'index_name': 'index2', 'task_name': 'task_name2'},
                 'task3': {'id': 'task3', 'status': 'RESERVED', 'index_name': 'index3', 'task_name': 'task_name3'},
-                'task4': {'id': 'task4', 'status': 'SUCCESS', 'index_name': 'index4', 'task_name': 'task_name4'},
+                'task4': {
+                    'id': 'task4',
+                    'status': 'SUCCESS',
+                    'index_name': 'index4',
+                    'task_name': 'task_name4',
+                    'file_id': 'fid-result',
+                },
                 'task5': {'id': 'task5', 'status': 'FAILURE', 'index_name': None, 'task_name': None},
             }
             return task_data.get(task_id, {})
@@ -681,6 +736,8 @@ class TestDataProcessService(unittest.TestCase):
 
         # task1-task4 have index_name + task_name; task5 is filtered out
         self.assertEqual(len(result), 4)
+        self.assertEqual(next(task for task in result if task['id'] == 'task1')['file_id'], 'fid-runtime')
+        self.assertEqual(next(task for task in result if task['id'] == 'task4')['file_id'], 'fid-result')
 
         # Get all tasks without filtering
         result = await self.service.get_all_tasks(filter=False)
@@ -698,9 +755,9 @@ class TestDataProcessService(unittest.TestCase):
         """
         asyncio.run(self.async_test_get_all_tasks())
 
-    @patch('backend.services.data_process_service.celery_app')
-    @patch('backend.services.data_process_service.get_task_info')
-    @patch('backend.services.data_process_service.get_all_task_ids_from_redis')
+    @patch('data_process.services.tasks.celery_app')
+    @patch('data_process.services.tasks.get_task_info')
+    @patch('data_process.services.tasks.get_all_task_ids_from_redis')
     @pytest.mark.asyncio
     async def test_get_all_tasks_redis_error(self, mock_get_redis_task_ids, mock_get_task_info, mock_celery_app):
         """
@@ -745,7 +802,7 @@ class TestDataProcessService(unittest.TestCase):
         # Verify that Redis was called and failed
         mock_get_redis_task_ids.assert_called_once()
 
-    @patch('backend.services.data_process_service.DataProcessService.get_all_tasks')
+    @patch('data_process.services.tasks.DataProcessService.get_all_tasks')
     @pytest.mark.asyncio
     async def async_test_get_index_tasks(self, mock_get_all_tasks):
         """
@@ -867,7 +924,7 @@ class TestDataProcessService(unittest.TestCase):
         img.save(img_byte_arr, format='JPEG')
         img_byte_arr.seek(0)
 
-        with patch('backend.services.data_process_service.get_file_stream', return_value=img_byte_arr):
+        with patch('data_process.services.tasks.get_file_stream', return_value=img_byte_arr):
             result = await self.service.load_image("s3://bucket/path/to/image.jpg")
 
         self.assertIsNotNone(result)
@@ -1202,7 +1259,7 @@ class TestDataProcessService(unittest.TestCase):
     @patch('PIL.Image.new')
     @patch('os.unlink')
     @patch('os.path.splitext')
-    @patch('backend.services.data_process_service.logger')
+    @patch('data_process.services.tasks.logger')
     @pytest.mark.asyncio
     async def async_test_load_image_temp_file_fallback(self, mock_logger, mock_splitext, mock_unlink, mock_image_new, mock_image_open, mock_tempfile, mock_session):
         """
@@ -1281,7 +1338,7 @@ class TestDataProcessService(unittest.TestCase):
 
     @patch('os.path.isfile')
     @patch('PIL.Image.open')
-    @patch('backend.services.data_process_service.logger')
+    @patch('data_process.services.tasks.logger')
     @pytest.mark.asyncio
     async def async_test_load_image_local_file_exception(self, mock_logger, mock_image_open, mock_isfile):
         """
@@ -1348,9 +1405,9 @@ class TestDataProcessService(unittest.TestCase):
         asyncio.run(self.async_test_load_image_temp_file_fallback())
         asyncio.run(self.async_test_load_image_local_file_exception())
 
-    @patch('backend.services.data_process_service.DataProcessService.load_image')
-    @patch('backend.services.data_process_service.DataProcessService.check_image_size')
-    @patch('backend.services.data_process_service.DataProcessService._init_clip_model')
+    @patch('data_process.services.tasks.DataProcessService.load_image')
+    @patch('data_process.services.tasks.DataProcessService.check_image_size')
+    @patch('data_process.services.tasks.DataProcessService._init_clip_model')
     @pytest.mark.asyncio
     async def async_test_filter_important_image_size_filter(self, mock_init_clip, mock_check_size, mock_load_image):
         """
@@ -1380,9 +1437,9 @@ class TestDataProcessService(unittest.TestCase):
         mock_check_size.assert_called_once_with(100, 100)
         mock_init_clip.assert_not_called()  # CLIP should not be initialized
 
-    @patch('backend.services.data_process_service.IMAGE_FILTER', False)
-    @patch('backend.services.data_process_service.DataProcessService.load_image')
-    @patch('backend.services.data_process_service.DataProcessService.check_image_size')
+    @patch('data_process.services.tasks.IMAGE_FILTER', False)
+    @patch('data_process.services.tasks.DataProcessService.load_image')
+    @patch('data_process.services.tasks.DataProcessService.check_image_size')
     @pytest.mark.asyncio
     async def async_test_filter_important_image_filter_disabled(self, mock_check_size, mock_load_image):
         """
@@ -1407,9 +1464,9 @@ class TestDataProcessService(unittest.TestCase):
         self.assertTrue(result["is_important"])
         self.assertEqual(result["confidence"], 1.0)
 
-    @patch('backend.services.data_process_service.IMAGE_FILTER', True)
-    @patch('backend.services.data_process_service.DataProcessService.load_image')
-    @patch('backend.services.data_process_service.DataProcessService.check_image_size')
+    @patch('data_process.services.tasks.IMAGE_FILTER', True)
+    @patch('data_process.services.tasks.DataProcessService.load_image')
+    @patch('data_process.services.tasks.DataProcessService.check_image_size')
     @patch('torch.no_grad')
     @pytest.mark.asyncio
     async def async_test_filter_important_image_with_clip(self, mock_no_grad, mock_check_size, mock_load_image):
@@ -1464,11 +1521,11 @@ class TestDataProcessService(unittest.TestCase):
         self.service.processor.assert_called_once()
         self.service.model.assert_called_once()
 
-    @patch('backend.services.data_process_service.IMAGE_FILTER', True)
-    @patch('backend.services.data_process_service.DataProcessService.load_image')
-    @patch('backend.services.data_process_service.DataProcessService.check_image_size')
-    @patch('backend.services.data_process_service.DataProcessService._init_clip_model')
-    @patch('backend.services.data_process_service.logger')
+    @patch('data_process.services.tasks.IMAGE_FILTER', True)
+    @patch('data_process.services.tasks.DataProcessService.load_image')
+    @patch('data_process.services.tasks.DataProcessService.check_image_size')
+    @patch('data_process.services.tasks.DataProcessService._init_clip_model')
+    @patch('data_process.services.tasks.logger')
     @pytest.mark.asyncio
     async def async_test_filter_important_image_clip_not_available(self, mock_logger, mock_init_clip, mock_check_size, mock_load_image):
         """
@@ -1497,11 +1554,11 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(result["confidence"], 1.0)
         mock_init_clip.assert_called_once()  # CLIP initialization attempted
 
-    @patch('backend.services.data_process_service.IMAGE_FILTER', True)
-    @patch('backend.services.data_process_service.DataProcessService.load_image')
-    @patch('backend.services.data_process_service.DataProcessService.check_image_size')
-    @patch('backend.services.data_process_service.DataProcessService._init_clip_model')
-    @patch('backend.services.data_process_service.logger')
+    @patch('data_process.services.tasks.IMAGE_FILTER', True)
+    @patch('data_process.services.tasks.DataProcessService.load_image')
+    @patch('data_process.services.tasks.DataProcessService.check_image_size')
+    @patch('data_process.services.tasks.DataProcessService._init_clip_model')
+    @patch('data_process.services.tasks.logger')
     @pytest.mark.asyncio
     async def async_test_filter_important_image_clip_processing_failure(self, mock_logger, mock_init_clip, mock_check_size, mock_load_image):
         """
@@ -1553,11 +1610,11 @@ class TestDataProcessService(unittest.TestCase):
         # Verify CLIP was attempted
         self.service.processor.assert_called_once()
 
-    @patch('backend.services.data_process_service.IMAGE_FILTER', True)
-    @patch('backend.services.data_process_service.DataProcessService.load_image')
-    @patch('backend.services.data_process_service.DataProcessService.check_image_size')
-    @patch('backend.services.data_process_service.DataProcessService._init_clip_model')
-    @patch('backend.services.data_process_service.logger')
+    @patch('data_process.services.tasks.IMAGE_FILTER', True)
+    @patch('data_process.services.tasks.DataProcessService.load_image')
+    @patch('data_process.services.tasks.DataProcessService.check_image_size')
+    @patch('data_process.services.tasks.DataProcessService._init_clip_model')
+    @patch('data_process.services.tasks.logger')
     @patch('PIL.Image.new')
     @pytest.mark.asyncio
     async def async_test_filter_important_image_general_exception(self, mock_image_new, mock_logger, mock_init_clip, mock_check_size, mock_load_image):
@@ -1625,7 +1682,7 @@ class TestDataProcessService(unittest.TestCase):
             self.async_test_filter_important_image_clip_processing_failure())
         asyncio.run(self.async_test_filter_important_image_general_exception())
 
-    @patch('backend.services.data_process_service.DataProcessService')
+    @patch('data_process.services.tasks.DataProcessService')
     def test_get_data_process_service(self, mock_service_class):
         """
         Test the get_data_process_service global instance function.
@@ -1637,7 +1694,7 @@ class TestDataProcessService(unittest.TestCase):
         4. The global variable _data_process_service is properly set
         """
         # Set up module level variable to None
-        import backend.services.data_process_service as dps_module
+        import data_process.services.tasks as dps_module
         dps_module._data_process_service = None
 
         # Create mock service
@@ -1655,7 +1712,7 @@ class TestDataProcessService(unittest.TestCase):
         self.assertEqual(service2, mock_service)
         self.assertEqual(service1, service2)
 
-    @patch('backend.services.data_process_service.submit_process_forward_chain')
+    @patch('data_process.services.tasks.submit_process_forward_chain')
     @pytest.mark.asyncio
     async def async_test_create_batch_tasks_impl_success(self, mock_submit_chain):
         """
@@ -1670,7 +1727,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.side_effect = ["task_id_1", "task_id_2"]
 
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1678,7 +1735,8 @@ class TestDataProcessService(unittest.TestCase):
                     'source_type': 'url',
                     'chunking_strategy': 'semantic',
                     'index_name': 'test_index_1',
-                    'original_filename': 'doc1.pdf'
+                    'original_filename': 'doc1.pdf',
+                    'file_id': 'fid-batch-1',
                 },
                 {
                     'source': 'http://example.com/doc2.pdf',
@@ -1692,9 +1750,9 @@ class TestDataProcessService(unittest.TestCase):
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
 
-        self.assertEqual(len(result), 2)
-        self.assertEqual(result[0], "task_id_1")
-        self.assertEqual(result[1], "task_id_2")
+        self.assertEqual(result["task_ids"], ["task_id_1", "task_id_2"])
+        self.assertEqual(result["status"], "success")
+        self.assertEqual([item["status"] for item in result["results"]], ["SUBMITTED", "SUBMITTED"])
         self.assertEqual(mock_submit_chain.call_count, 2)
 
         expected_calls = [
@@ -1708,6 +1766,7 @@ class TestDataProcessService(unittest.TestCase):
                 'embedding_model_id': None,
                 'tenant_id': None,
                 'telemetry_context': {},
+                'file_id': 'fid-batch-1',
             },
             {
                 'source': 'http://example.com/doc2.pdf',
@@ -1724,7 +1783,7 @@ class TestDataProcessService(unittest.TestCase):
         actual_calls = [kwargs for args, kwargs in mock_submit_chain.call_args_list]
         self.assertEqual(actual_calls, expected_calls)
 
-    @patch('backend.services.data_process_service.submit_process_forward_chain')
+    @patch('data_process.services.tasks.submit_process_forward_chain')
     @pytest.mark.asyncio
     async def async_test_create_batch_tasks_impl_missing_source(self, mock_submit_chain):
         """
@@ -1739,7 +1798,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.return_value = "task_id_1"
 
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1761,15 +1820,16 @@ class TestDataProcessService(unittest.TestCase):
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
 
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], "task_id_1")
+        self.assertEqual(result["task_ids"], ["task_id_1"])
+        self.assertEqual(result["status"], "partial_success")
+        self.assertEqual(result["results"][0]["error_code"], "000103")
         mock_submit_chain.assert_called_once()
         self.assertEqual(
             mock_submit_chain.call_args[1]['source'], 'http://example.com/doc2.pdf')
         self.assertEqual(
             mock_submit_chain.call_args[1]['index_name'], 'test_index_2')
 
-    @patch('backend.services.data_process_service.submit_process_forward_chain')
+    @patch('data_process.services.tasks.submit_process_forward_chain')
     @pytest.mark.asyncio
     async def async_test_create_batch_tasks_impl_missing_index_name(self, mock_submit_chain):
         """
@@ -1784,7 +1844,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.return_value = "task_id_1"
 
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1806,15 +1866,16 @@ class TestDataProcessService(unittest.TestCase):
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
 
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], "task_id_1")
+        self.assertEqual(result["task_ids"], ["task_id_1"])
+        self.assertEqual(result["status"], "partial_success")
+        self.assertEqual(result["results"][0]["error_code"], "000103")
         mock_submit_chain.assert_called_once()
         self.assertEqual(
             mock_submit_chain.call_args[1]['source'], 'http://example.com/doc2.pdf')
         self.assertEqual(
             mock_submit_chain.call_args[1]['index_name'], 'test_index_2')
 
-    @patch('backend.services.data_process_service.submit_process_forward_chain')
+    @patch('data_process.services.tasks.submit_process_forward_chain')
     @pytest.mark.asyncio
     async def async_test_create_batch_tasks_impl_missing_both_required_fields(self, mock_submit_chain):
         """
@@ -1827,7 +1888,7 @@ class TestDataProcessService(unittest.TestCase):
         3. No tasks are created when all sources are invalid
         4. The method returns an empty list
         """
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1847,10 +1908,12 @@ class TestDataProcessService(unittest.TestCase):
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
 
-        self.assertEqual(len(result), 0)
+        self.assertEqual(result["task_ids"], [])
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failed_count"], 2)
         mock_submit_chain.assert_not_called()
 
-    @patch('backend.services.data_process_service.submit_process_forward_chain')
+    @patch('data_process.services.tasks.submit_process_forward_chain')
     @pytest.mark.asyncio
     async def async_test_create_batch_tasks_impl_empty_sources(self, mock_submit_chain):
         """
@@ -1862,15 +1925,17 @@ class TestDataProcessService(unittest.TestCase):
         2. The method returns an empty list
         3. No errors occur during processing
         """
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(sources=[])
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
 
-        self.assertEqual(len(result), 0)
+        self.assertEqual(result["task_ids"], [])
+        self.assertEqual(result["results"], [])
+        self.assertEqual(result["status"], "success")
         mock_submit_chain.assert_not_called()
 
-    @patch('backend.services.data_process_service.submit_process_forward_chain')
+    @patch('data_process.services.tasks.submit_process_forward_chain')
     @pytest.mark.asyncio
     async def async_test_create_batch_tasks_impl_optional_fields(self, mock_submit_chain):
         """
@@ -1884,7 +1949,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.return_value = "task_id_1"
 
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1897,8 +1962,7 @@ class TestDataProcessService(unittest.TestCase):
 
         result = await self.service.create_batch_tasks_impl("Bearer test_token", request)
 
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], "task_id_1")
+        self.assertEqual(result["task_ids"], ["task_id_1"])
         mock_submit_chain.assert_called_once()
         kwargs = mock_submit_chain.call_args[1]
         self.assertEqual(kwargs['source'], 'http://example.com/doc1.pdf')
@@ -1908,7 +1972,7 @@ class TestDataProcessService(unittest.TestCase):
         self.assertIsNone(kwargs['original_filename'])
         self.assertEqual(kwargs['authorization'], 'Bearer test_token')
 
-    @patch('backend.services.data_process_service.submit_process_forward_chain')
+    @patch('data_process.services.tasks.submit_process_forward_chain')
     @pytest.mark.asyncio
     async def async_test_create_batch_tasks_impl_no_authorization(self, mock_submit_chain):
         """
@@ -1922,7 +1986,7 @@ class TestDataProcessService(unittest.TestCase):
         """
         mock_submit_chain.return_value = "task_id_1"
 
-        from consts.model import BatchTaskRequest
+        from contracts.knowledge import BatchTaskRequest
         request = BatchTaskRequest(
             sources=[
                 {
@@ -1937,8 +2001,7 @@ class TestDataProcessService(unittest.TestCase):
 
         result = await self.service.create_batch_tasks_impl(None, request)
 
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0], "task_id_1")
+        self.assertEqual(result["task_ids"], ["task_id_1"])
         mock_submit_chain.assert_called_once()
         kwargs = mock_submit_chain.call_args[1]
         self.assertEqual(kwargs['source'], 'http://example.com/doc1.pdf')
@@ -1967,7 +2030,53 @@ class TestDataProcessService(unittest.TestCase):
         asyncio.run(self.async_test_create_batch_tasks_impl_optional_fields())
         asyncio.run(self.async_test_create_batch_tasks_impl_no_authorization())
 
-    @patch('backend.services.data_process_service.DataProcessCore')
+    @patch('data_process.services.tasks.submit_process_forward_chain')
+    @pytest.mark.asyncio
+    async def async_test_create_batch_tasks_impl_continues_after_submission_exception(self, mock_submit_chain):
+        """A single Celery submission exception must not discard later files."""
+        mock_submit_chain.side_effect = [RuntimeError("broker unavailable"), "task_id_2"]
+
+        from contracts.knowledge import BatchTaskRequest
+        request = BatchTaskRequest(sources=[
+            {"source": "/tmp/a.txt", "source_type": "local", "index_name": "idx", "file_id": "fid-a"},
+            {"source": "/tmp/b.txt", "source_type": "local", "index_name": "idx", "file_id": "fid-b"},
+        ])
+
+        result = await self.service.create_batch_tasks_impl("Bearer token", request)
+
+        self.assertEqual(result["task_ids"], ["task_id_2"])
+        self.assertEqual(result["status"], "partial_success")
+        self.assertEqual(result["results"][0]["file_id"], "fid-a")
+        self.assertEqual(result["results"][0]["error_code"], "060108")
+        self.assertEqual(result["results"][1]["task_id"], "task_id_2")
+
+    def test_create_batch_tasks_impl_submission_exception(self):
+        asyncio.run(self.async_test_create_batch_tasks_impl_continues_after_submission_exception())
+
+    @patch('data_process.services.tasks.submit_process_forward_chain', return_value="")
+    @pytest.mark.asyncio
+    async def async_test_create_batch_tasks_impl_empty_task_id(self, mock_submit_chain):
+        """An empty task id is reported as a durable per-file submission failure."""
+        from contracts.knowledge import BatchTaskRequest
+        request = BatchTaskRequest(sources=[{
+            "source": "/tmp/a.txt",
+            "source_type": "local",
+            "index_name": "idx",
+            "original_filename": "a.txt",
+            "file_id": "fid-a",
+        }])
+
+        result = await self.service.create_batch_tasks_impl("Bearer token", request)
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["failed_count"], 1)
+        self.assertEqual(result["results"][0]["file_id"], "fid-a")
+        mock_submit_chain.assert_called_once()
+
+    def test_create_batch_tasks_impl_empty_task_id(self):
+        asyncio.run(self.async_test_create_batch_tasks_impl_empty_task_id())
+
+    @patch('data_process.services.tasks.DataProcessCore')
     @pytest.mark.asyncio
     async def async_test_process_uploaded_text_file(self, mock_data_process_core):
         """
@@ -2159,11 +2268,11 @@ class TestDataProcessService(unittest.TestCase):
         asyncio.run(self.async_test_convert_to_base64())
 
 
-    @patch('backend.services.data_process_service.convert_office_to_pdf',
+    @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
-    @patch('backend.services.data_process_service.upload_file')
-    @patch('backend.services.data_process_service.get_file_size_from_minio')
-    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('data_process.services.tasks.upload_file')
+    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
     @patch('os.path.exists', return_value=True)
@@ -2190,7 +2299,7 @@ class TestDataProcessService(unittest.TestCase):
         mock_convert.assert_called_once()
         mock_rmtree.assert_called_once_with('/tmp/test_cv')
 
-    @patch('backend.services.data_process_service.get_file_stream',
+    @patch('data_process.services.tasks.get_file_stream',
            return_value=None)
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
@@ -2200,7 +2309,7 @@ class TestDataProcessService(unittest.TestCase):
     ):
         """Source file missing → OfficeConversionException."""
         # Prevent cleanup path from calling real delete_file
-        sys.modules['database.attachment_db'].file_exists = MagicMock(
+        sys.modules['management.db.file.attachment'].file_exists = MagicMock(
             return_value=False
         )
         with self.assertRaises(OfficeConversionException) as ctx:
@@ -2211,9 +2320,9 @@ class TestDataProcessService(unittest.TestCase):
             )
         self.assertIn('Source file not found', str(ctx.exception))
 
-    @patch('backend.services.data_process_service.convert_office_to_pdf',
+    @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
-    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
     @patch('os.path.exists', return_value=True)
@@ -2223,7 +2332,7 @@ class TestDataProcessService(unittest.TestCase):
         """LibreOffice error → OfficeConversionException."""
         mock_get_stream.return_value = self._make_stream(b'DOC data')
         mock_convert.side_effect = RuntimeError('soffice not found')
-        sys.modules['database.attachment_db'].file_exists = MagicMock(
+        sys.modules['management.db.file.attachment'].file_exists = MagicMock(
             return_value=False
         )
         with patch('builtins.open', MagicMock()):
@@ -2235,10 +2344,10 @@ class TestDataProcessService(unittest.TestCase):
                 )
         self.assertIn('LibreOffice conversion failed', str(ctx.exception))
 
-    @patch('backend.services.data_process_service.convert_office_to_pdf',
+    @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
-    @patch('backend.services.data_process_service.upload_file')
-    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('data_process.services.tasks.upload_file')
+    @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
     @patch('os.path.exists', return_value=True)
@@ -2250,7 +2359,7 @@ class TestDataProcessService(unittest.TestCase):
         mock_get_stream.return_value = self._make_stream(b'DOC data')
         mock_convert.return_value = '/tmp/test_cv/doc.pdf'
         mock_upload.return_value = {'success': False, 'error': 'quota exceeded'}
-        sys.modules['database.attachment_db'].file_exists = MagicMock(
+        sys.modules['management.db.file.attachment'].file_exists = MagicMock(
             return_value=False
         )
         with patch('builtins.open', MagicMock()):
@@ -2262,13 +2371,13 @@ class TestDataProcessService(unittest.TestCase):
                 )
         self.assertIn('Failed to upload PDF', str(ctx.exception))
 
-    @patch('backend.services.data_process_service.delete_file')
-    @patch('backend.services.data_process_service.file_exists', return_value=True)
-    @patch('backend.services.data_process_service.convert_office_to_pdf',
+    @patch('data_process.services.tasks.delete_file')
+    @patch('data_process.services.tasks.file_exists', return_value=True)
+    @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
-    @patch('backend.services.data_process_service.upload_file')
-    @patch('backend.services.data_process_service.get_file_size_from_minio')
-    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('data_process.services.tasks.upload_file')
+    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
     @patch('os.path.exists', return_value=True)
@@ -2296,8 +2405,8 @@ class TestDataProcessService(unittest.TestCase):
         self.assertIn('invalid PDF header', str(ctx.exception))
         mock_delete_file.assert_called_once_with('converted/doc.pdf')
 
-    @patch('backend.services.data_process_service.file_exists', return_value=False)
-    @patch('backend.services.data_process_service.get_file_stream', return_value=None)
+    @patch('data_process.services.tasks.file_exists', return_value=False)
+    @patch('data_process.services.tasks.get_file_stream', return_value=None)
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
     @patch('os.path.exists', return_value=True)
@@ -2305,7 +2414,7 @@ class TestDataProcessService(unittest.TestCase):
         self, _exists, _mkdtemp, mock_rmtree, _get_stream, mock_file_exists
     ):
         """OfficeConversionException raised and file_exists=False → delete_file never called."""
-        with patch('backend.services.data_process_service.delete_file') as mock_del:
+        with patch('data_process.services.tasks.delete_file') as mock_del:
             with self.assertRaises(OfficeConversionException):
                 asyncio.run(
                     self.service.convert_office_to_pdf_impl(
@@ -2314,7 +2423,7 @@ class TestDataProcessService(unittest.TestCase):
                 )
         mock_del.assert_not_called()
 
-    @patch('backend.services.data_process_service.get_file_stream', return_value=None)
+    @patch('data_process.services.tasks.get_file_stream', return_value=None)
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', side_effect=OSError('no space left on device'))
     @patch('os.path.exists', return_value=True)
@@ -2331,11 +2440,11 @@ class TestDataProcessService(unittest.TestCase):
         self.assertIn('Unexpected error', str(ctx.exception))
         mock_rmtree.assert_not_called()
 
-    @patch('backend.services.data_process_service.convert_office_to_pdf',
+    @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
-    @patch('backend.services.data_process_service.upload_file')
-    @patch('backend.services.data_process_service.get_file_size_from_minio')
-    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('data_process.services.tasks.upload_file')
+    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
     @patch('os.path.exists', return_value=True)
@@ -2348,7 +2457,7 @@ class TestDataProcessService(unittest.TestCase):
         mock_get_size.return_value = 0
         mock_upload.return_value = {'success': True}
         mock_convert.return_value = '/tmp/test_cv/doc.pdf'
-        sys.modules['database.attachment_db'].file_exists = MagicMock(return_value=False)
+        sys.modules['management.db.file.attachment'].file_exists = MagicMock(return_value=False)
         with patch('builtins.open', MagicMock()):
             with self.assertRaises(OfficeConversionException) as ctx:
                 asyncio.run(
@@ -2358,11 +2467,11 @@ class TestDataProcessService(unittest.TestCase):
                 )
         self.assertIn('cannot read remote file size', str(ctx.exception))
 
-    @patch('backend.services.data_process_service.convert_office_to_pdf',
+    @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
-    @patch('backend.services.data_process_service.upload_file')
-    @patch('backend.services.data_process_service.get_file_size_from_minio')
-    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('data_process.services.tasks.upload_file')
+    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
     @patch('os.path.exists', return_value=True)
@@ -2375,7 +2484,7 @@ class TestDataProcessService(unittest.TestCase):
         mock_get_size.return_value = 50
         mock_upload.return_value = {'success': True}
         mock_convert.return_value = '/tmp/test_cv/doc.pdf'
-        sys.modules['database.attachment_db'].file_exists = MagicMock(return_value=False)
+        sys.modules['management.db.file.attachment'].file_exists = MagicMock(return_value=False)
         with patch('builtins.open', MagicMock()):
             with self.assertRaises(OfficeConversionException) as ctx:
                 asyncio.run(
@@ -2385,11 +2494,11 @@ class TestDataProcessService(unittest.TestCase):
                 )
         self.assertIn('file too small', str(ctx.exception))
 
-    @patch('backend.services.data_process_service.convert_office_to_pdf',
+    @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
-    @patch('backend.services.data_process_service.upload_file')
-    @patch('backend.services.data_process_service.get_file_size_from_minio')
-    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('data_process.services.tasks.upload_file')
+    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
     @patch('os.path.exists', return_value=True)
@@ -2405,7 +2514,7 @@ class TestDataProcessService(unittest.TestCase):
         mock_get_size.return_value = 208
         mock_upload.return_value = {'success': True}
         mock_convert.return_value = '/tmp/test_cv/doc.pdf'
-        sys.modules['database.attachment_db'].file_exists = MagicMock(return_value=False)
+        sys.modules['management.db.file.attachment'].file_exists = MagicMock(return_value=False)
         with patch('builtins.open', MagicMock()):
             with self.assertRaises(OfficeConversionException) as ctx:
                 asyncio.run(
@@ -2415,11 +2524,11 @@ class TestDataProcessService(unittest.TestCase):
                 )
         self.assertIn('cannot read uploaded file', str(ctx.exception))
 
-    @patch('backend.services.data_process_service.convert_office_to_pdf',
+    @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
-    @patch('backend.services.data_process_service.upload_file')
-    @patch('backend.services.data_process_service.get_file_size_from_minio')
-    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('data_process.services.tasks.upload_file')
+    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
     @patch('os.path.exists', return_value=True)
@@ -2446,10 +2555,10 @@ class TestDataProcessService(unittest.TestCase):
             )
         mock_convert.assert_called_once()
 
-    @patch('backend.services.data_process_service.convert_office_to_pdf',
+    @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
-    @patch('backend.services.data_process_service.upload_file')
-    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('data_process.services.tasks.upload_file')
+    @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
     @patch('os.path.exists', return_value=True)
@@ -2470,11 +2579,11 @@ class TestDataProcessService(unittest.TestCase):
                 )
         self.assertIn('Unexpected error', str(ctx.exception))
 
-    @patch('backend.services.data_process_service.convert_office_to_pdf',
+    @patch('data_process.services.tasks.convert_office_to_pdf',
            new_callable=AsyncMock)
-    @patch('backend.services.data_process_service.upload_file')
-    @patch('backend.services.data_process_service.get_file_size_from_minio')
-    @patch('backend.services.data_process_service.get_file_stream')
+    @patch('data_process.services.tasks.upload_file')
+    @patch('data_process.services.tasks.get_file_size_from_minio')
+    @patch('data_process.services.tasks.get_file_stream')
     @patch('shutil.rmtree')
     @patch('tempfile.mkdtemp', return_value='/tmp/test_cv')
     @patch('os.path.exists', return_value=True)
@@ -2499,9 +2608,9 @@ class TestDataProcessService(unittest.TestCase):
                 )
             )
 
-    @patch('backend.services.data_process_service.celery_app')
-    @patch('backend.services.data_process_service.get_all_task_ids_from_redis', return_value=[])
-    @patch('backend.services.data_process_service.get_task_info')
+    @patch('data_process.services.tasks.celery_app')
+    @patch('data_process.services.tasks.get_all_task_ids_from_redis', return_value=[])
+    @patch('data_process.services.tasks.get_task_info')
     def test_get_all_tasks_handles_string_kwargs_and_bad_json(
         self, mock_get_task_info, _mock_ids, mock_celery_app
     ):
@@ -2549,14 +2658,14 @@ class TestDataProcessService(unittest.TestCase):
 
     def test_init_redis_client_no_url(self):
         """If REDIS_BACKEND_URL is empty, the warning branch fires."""
-        with patch('backend.services.data_process_service.REDIS_BACKEND_URL', ''):
+        with patch('data_process.services.tasks.REDIS_BACKEND_URL', ''):
             service = DataProcessService()
         self.assertIsNone(service.redis_pool)
         self.assertIsNone(service.redis_client)
 
     def test_init_redis_client_raises(self):
         """If redis.Redis raises, the except branch logs and leaves pool/client None."""
-        from backend.services import data_process_service as _dps
+        from data_process.services import tasks as _dps
         original = _dps.redis
         fake_redis = MagicMock()
         fake_redis.ConnectionPool.from_url.side_effect = RuntimeError('boom')
@@ -2568,9 +2677,9 @@ class TestDataProcessService(unittest.TestCase):
         finally:
             _dps.redis = original
 
-    @patch('backend.services.data_process_service.celery_app')
-    @patch('backend.services.data_process_service.get_task_info')
-    @patch('backend.services.data_process_service.get_all_task_ids_from_redis')
+    @patch('data_process.services.tasks.celery_app')
+    @patch('data_process.services.tasks.get_task_info')
+    @patch('data_process.services.tasks.get_all_task_ids_from_redis')
     def test_get_all_tasks_inspector_raises(self, mock_get_redis_task_ids, mock_get_task_info, mock_celery_app):
         """If inspector raises, get_all_tasks returns empty tasks (with logged warning)."""
         mock_celery_app.conf.broker_url = "redis://mock:6379/0"
@@ -2585,9 +2694,9 @@ class TestDataProcessService(unittest.TestCase):
 
         asyncio.run(_run())
 
-    @patch('backend.services.data_process_service.celery_app')
-    @patch('backend.services.data_process_service.get_task_info')
-    @patch('backend.services.data_process_service.get_all_task_ids_from_redis', return_value=[])
+    @patch('data_process.services.tasks.celery_app')
+    @patch('data_process.services.tasks.get_task_info')
+    @patch('data_process.services.tasks.get_all_task_ids_from_redis', return_value=[])
     def test_get_all_tasks_outer_exception(self, _mock_ids, mock_get_task_info, mock_celery_app):
         """If get_all_tasks raises during processing, empty list is returned."""
         mock_celery_app.conf.broker_url = "redis://mock:6379/0"
@@ -2613,7 +2722,7 @@ class TestDataProcessService(unittest.TestCase):
 
         asyncio.run(_run())
 
-    @patch('backend.services.data_process_service.get_file_stream', return_value=None)
+    @patch('data_process.services.tasks.get_file_stream', return_value=None)
     def test_load_image_s3_returns_none(self, _mock_get_stream):
         """If s3:// path resolves to None from MinIO, _load_image raises FileNotFoundError → caught → None."""
         result = asyncio.run(self.service.load_image('s3://bucket/missing.jpg'))
@@ -2649,7 +2758,7 @@ class TestDataProcessService(unittest.TestCase):
         service.processor = MagicMock(return_value={'input_ids': 'ids'})
         service.model = fake_model
 
-        from backend.services import data_process_service as _dps
+        from data_process.services import tasks as _dps
         torch_mod = MagicMock()
         torch_mod.no_grad.return_value.__enter__ = MagicMock(return_value=None)
         torch_mod.no_grad.return_value.__exit__ = MagicMock(return_value=False)
@@ -2677,7 +2786,7 @@ class TestDataProcessService(unittest.TestCase):
         service.processor = fake_processor
         service.model = MagicMock()
 
-        from backend.services import data_process_service as _dps
+        from data_process.services import tasks as _dps
         torch_mod = MagicMock()
         torch_mod.no_grad.return_value.__enter__ = MagicMock(return_value=None)
         torch_mod.no_grad.return_value.__exit__ = MagicMock(return_value=False)
@@ -2722,7 +2831,7 @@ class TestDataProcessService(unittest.TestCase):
         service.processor = MagicMock(return_value={'input_ids': 'ids'})
         service.model = fake_model
 
-        from backend.services import data_process_service as _dps
+        from data_process.services import tasks as _dps
         torch_mod = MagicMock()
         torch_mod.no_grad.return_value.__enter__ = MagicMock(return_value=None)
         torch_mod.no_grad.return_value.__exit__ = MagicMock(return_value=False)

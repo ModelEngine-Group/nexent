@@ -1,11 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """
 Unit tests for app_factory module.
 
 Tests the create_app function and register_exception_handlers function
 for FastAPI application factory with common configurations and exception handlers.
 """
-import sys
 import os
+import sys
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -15,10 +17,10 @@ backend_path = os.path.abspath(os.path.join(
     os.path.dirname(__file__), '../../../backend'))
 sys.path.insert(0, backend_path)
 
-# Import AppException from consts.exceptions where it is defined
-from consts.error_code import ErrorCode
-from consts.exceptions import AppException
-from backend.apps.app_factory import create_app, register_exception_handlers
+# Import AppException from contracts.errors.exceptions where it is defined
+from contracts.errors.codes import ErrorCode
+from contracts.errors.exceptions import AppException
+from management.utils.app_factory import create_app, register_exception_handlers
 
 class TestCreateApp:
     """Test class for create_app function."""
@@ -101,6 +103,15 @@ class TestCreateApp:
         assert app.description == "Full description"
         assert app.version == "3.0.0"
         assert app.root_path == "/v3"
+
+    def test_create_app_uses_lifespan_context(self):
+        @asynccontextmanager
+        async def lifespan(_app):
+            yield
+
+        app = create_app(lifespan=lifespan)
+
+        assert app.router.lifespan_context is lifespan
 
 
 class TestRegisterExceptionHandlers:
@@ -504,8 +515,8 @@ class TestMonitoringImportFailure:
         from unittest.mock import patch, MagicMock
 
         # Mock the monitoring module to raise ImportError
-        with patch.dict('sys.modules', {'utils.monitoring': None}):
-            with patch('backend.apps.app_factory.logger') as mock_logger:
+        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': None}):
+            with patch('management.utils.app_factory.logger') as mock_logger:
                 # Create app with monitoring enabled - import will fail
                 app = create_app(enable_monitoring=True)
 
@@ -521,7 +532,7 @@ class TestMonitoringImportFailure:
         """Test that no warning is logged when monitoring is disabled."""
         from unittest.mock import patch
 
-        with patch('backend.apps.app_factory.logger') as mock_logger:
+        with patch('management.utils.app_factory.logger') as mock_logger:
             app = create_app(enable_monitoring=False)
 
             # Warning should not be called when monitoring is disabled
@@ -540,8 +551,8 @@ class TestMonitoringImportFailure:
             "No module named 'monitoring'"
         )
 
-        with patch.dict('sys.modules', {'utils.monitoring': mock_module}):
-            with patch('backend.apps.app_factory.logger') as mock_logger:
+        with patch.dict('sys.modules', {'infrastructure.observability.bootstrap': mock_module}):
+            with patch('management.utils.app_factory.logger') as mock_logger:
                 app = create_app(enable_monitoring=True)
 
                 # Should log warning about monitoring utilities not available
@@ -684,7 +695,7 @@ class TestGenericExceptionHandlerAppExceptionCheck:
                 ErrorCode.COMMON_VALIDATION_ERROR, "Validation error")
 
         # Use capture to check logging
-        with patch('backend.apps.app_factory.logger') as mock_logger:
+        with patch('management.utils.app_factory.logger') as mock_logger:
             client = TestClient(app, raise_server_exceptions=False)
             response = client.get("/test-app-exc")
 
@@ -706,7 +717,7 @@ class TestQuotaExceededErrorHandler:
 
     def test_quota_exceeded_error_returns_413(self):
         """Test QuotaExceededError returns 413 with correct body."""
-        from consts.exceptions import QuotaExceededError
+        from contracts.errors.exceptions import QuotaExceededError
 
         app = FastAPI()
         register_exception_handlers(app)
@@ -909,3 +920,23 @@ class TestGenericHandlerAppExceptionDelegation:
         body = __import__("json").loads(response.body)
         assert body["message"] == "Delegated error"
         assert body["code"] == ErrorCode.COMMON_VALIDATION_ERROR.value
+
+    def test_token_expired_exception_handler(self):
+        """Test TokenExpiredError handler returns 401 with TOKEN_EXPIRED code."""
+        from contracts.errors.exceptions import TokenExpiredError
+
+        app = FastAPI()
+        register_exception_handlers(app)
+
+        @app.get("/test-token-expired")
+        def raise_token_expired():
+            raise TokenExpiredError("expired")
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.get("/test-token-expired")
+
+        assert response.status_code == 401
+        assert response.json() == {
+            "message": "Session expired, please log in again",
+            "code": "TOKEN_EXPIRED",
+        }

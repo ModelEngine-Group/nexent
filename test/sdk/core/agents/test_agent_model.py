@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for sdk.nexent.core.agents.agent_model module.
 
@@ -54,7 +56,6 @@ def _create_mock_smolagents():
     setattr(mock_smolagents, "agents", agents_mod)
 
     local_python_mod = ModuleType("smolagents.local_python_executor")
-    setattr(local_python_mod, "fix_final_answer_code", MagicMock(name="fix_final_answer_code"))
     setattr(mock_smolagents, "local_python_executor", local_python_mod)
 
     memory_mod = ModuleType("smolagents.memory")
@@ -243,6 +244,21 @@ def _load_agent_model_module():
     sys.modules["sdk.nexent"] = ModuleType("sdk.nexent")
     sys.modules["sdk.nexent.core"] = ModuleType("sdk.nexent.core")
     sys.modules["sdk.nexent.core.agents"] = ModuleType("sdk.nexent.core.agents")
+    models_package = ModuleType("sdk.nexent.core.models")
+    models_package.__path__ = []
+    capacity_budget = ModuleType("sdk.nexent.core.models.capacity_budget")
+    class ContextBudgetSnapshot(BaseModel):
+        fingerprint: str = "budget"
+    capacity_budget.ContextBudgetSnapshot = ContextBudgetSnapshot
+    sys.modules["sdk.nexent.core.models"] = models_package
+    sampling_spec = importlib.util.spec_from_file_location(
+        "sdk.nexent.core.models.sampling",
+        os.path.join(project_root, "sdk", "nexent", "core", "models", "sampling.py"),
+    )
+    sampling_module = importlib.util.module_from_spec(sampling_spec)
+    sampling_spec.loader.exec_module(sampling_module)
+    sys.modules["sdk.nexent.core.models.sampling"] = sampling_module
+    sys.modules["sdk.nexent.core.models.capacity_budget"] = capacity_budget
     context_package = ModuleType("sdk.nexent.core.agents.context")
     context_package.__path__ = []
     context_models = ModuleType("sdk.nexent.core.agents.context.models")
@@ -339,8 +355,8 @@ class TestModelConfig:
         )
         assert config.cite_name == "gpt-4"
         assert config.api_key == ""
-        assert config.temperature == 0.1
-        assert config.top_p == 0.95
+        assert config.temperature == 1.0
+        assert config.top_p == 1.0
         assert config.ssl_verify is True
         assert config.model_factory is None
         assert config.extra_body is None
@@ -356,8 +372,8 @@ class TestModelConfig:
             url="https://example.com"
         )
         assert config.api_key == ""
-        assert config.temperature == 0.1
-        assert config.top_p == 0.95
+        assert config.temperature == 1.0
+        assert config.top_p == 1.0
         assert config.ssl_verify is True
         assert config.model_factory is None
 
@@ -882,6 +898,16 @@ class TestAgentRunInfoPlanning:
 # Tests for ExternalA2AAgentConfig
 # ----------------------------------------------------------------------------
 
+@pytest.mark.parametrize("preference", [{}, {"ssl_verify": True}, {"ssl_verify": False}])
+def test_certificate_preference_reaches_proxy(preference):
+    config = agent_model_module.ExternalA2AAgentConfig(
+        agent_id="peer", name="Peer", url="https://peer", **preference)
+    config.to_a2a_agent_info()
+    proxy_info = _module_mocks["sdk.nexent.core.agents.a2a_agent_proxy"].A2AAgentInfo
+    assert proxy_info.call_args.kwargs["ssl_verify"] is preference.get("ssl_verify", True)
+    proxy_info.reset_mock()
+
+
 class TestExternalA2AAgentConfig:
     """Tests for ExternalA2AAgentConfig Pydantic model."""
 
@@ -901,7 +927,7 @@ class TestExternalA2AAgentConfig:
         assert config.transport_type == "http-streaming"
         assert config.protocol_version == "1.0"
         assert config.protocol_type == agent_model_module.PROTOCOL_JSONRPC
-        assert config.timeout == 300.0
+        assert config.timeout == 900.0
         assert config.raw_card is None
 
     def test_external_a2a_agent_config_with_all_fields(self):
@@ -937,7 +963,7 @@ class TestExternalA2AAgentConfig:
         assert config.transport_type == "http-streaming"
         assert config.protocol_version == "1.0"
         assert config.protocol_type == agent_model_module.PROTOCOL_JSONRPC
-        assert config.timeout == 300.0
+        assert config.timeout == 900.0
 
     def test_external_a2a_agent_config_custom_headers_default(self):
         """Test custom_headers defaults to None."""
@@ -1226,7 +1252,7 @@ class TestAgentConfig:
             model_name="gpt-4",
             provide_run_summary=True,
             instructions="Additional instructions",
-            managed_agents=[],
+            worker_agents=[],
             external_a2a_agents=[]
         )
         assert config.name == "test_agent"
@@ -1248,9 +1274,11 @@ class TestAgentConfig:
         )
         assert config.prompt_templates is None
         assert config.max_steps == 15
+        assert config.output_protocol == "code_action"
+        assert config.enable_protocol_repair_retry is False
         assert config.provide_run_summary is False
         assert config.instructions is None
-        assert config.managed_agents == []
+        assert config.worker_agents == []
         assert config.external_a2a_agents == []
 
     def test_agent_config_with_tools(self):
@@ -1273,8 +1301,8 @@ class TestAgentConfig:
         assert len(config.tools) == 1
         assert config.tools[0].class_name == "TavilySearchTool"
 
-    def test_agent_config_with_managed_agents(self):
-        """Test AgentConfig with nested managed agents."""
+    def test_agent_config_with_worker_agents(self):
+        """Test AgentConfig with nested worker agents."""
         sub_agent = agent_model_module.AgentConfig(
             name="sub_agent",
             description="A sub agent",
@@ -1286,10 +1314,11 @@ class TestAgentConfig:
             description="Parent agent with sub-agents",
             tools=[],
             model_name="parent-model",
-            managed_agents=[sub_agent]
+            worker_agents=[sub_agent]
         )
-        assert len(config.managed_agents) == 1
-        assert config.managed_agents[0].name == "sub_agent"
+        assert len(config.worker_agents) == 1
+        assert config.worker_agents[0].name == "sub_agent"
+        assert "managed_agents" not in config.model_dump()
 
     def test_agent_config_with_external_a2a_agents(self):
         """Test AgentConfig with external A2A agents."""

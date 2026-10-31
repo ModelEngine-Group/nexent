@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for ``aidp_permission_service``.
 
 Exercises the v7.1 permission matrix by stubbing the local DB helpers
@@ -56,7 +58,7 @@ from ext_components.aidp.consts.aidp_exceptions import (  # noqa: E402
     AidpKbPermissionDeniedError,
     AidpGroupValidationError,
 )
-from consts.const import CAN_EDIT_ALL_USER_ROLES  # noqa: E402
+from contracts.constants.constants import CAN_EDIT_ALL_USER_ROLES
 
 
 # --- Helpers --------------------------------------------------------------
@@ -98,8 +100,9 @@ def patched(monkeypatch):
 
 
 class TestResolvePermission:
-    def test_management_role_cannot_access_other_users_private_kb(self, patched):
-        patched["get_role"].return_value = "ADMIN"
+    @pytest.mark.parametrize("role", sorted(CAN_EDIT_ALL_USER_ROLES))
+    def test_management_roles_cannot_access_other_users_private_kb(self, patched, role):
+        patched["get_role"].return_value = role
         decision = svc._resolve_permission(_record(ingroup_permission="PRIVATE"), "u", "t")
         assert decision.permission is None
         assert decision.is_management_role is False
@@ -110,7 +113,7 @@ class TestResolvePermission:
         assert decision.permission == "EDIT"
         assert decision.is_management_role is True
 
-    def test_asset_owner_is_management(self, patched):
+    def test_asset_owner_cannot_access_other_users_private_kb(self, patched):
         patched["get_role"].return_value = "ASSET_OWNER"
         decision = svc._resolve_permission(_record(ingroup_permission="PRIVATE"), "u", "t")
         assert decision.permission is None
@@ -170,6 +173,42 @@ class TestResolvePermission:
             user_groups=[1],
         )
         assert decision.permission is None
+
+    @pytest.mark.parametrize("role", sorted(CAN_EDIT_ALL_USER_ROLES))
+    def test_management_roles_can_edit_shared_kb_without_group_access(self, patched, role):
+        patched["get_role"].return_value = role
+
+        decision = svc._resolve_permission(
+            _record(
+                owner_user_id="another-user",
+                ingroup_permission="READ_ONLY",
+                group_ids=[8],
+            ),
+            user_id="management-user",
+            tenant_id="t",
+            user_groups=[7],
+        )
+
+        assert decision.permission == "EDIT"
+        assert decision.is_management_role is True
+        assert decision.matched_group_ids == ()
+
+    def test_unknown_role_cannot_access_shared_kb_even_with_group_intersection(self, patched):
+        patched["get_role"].return_value = "UNKNOWN"
+
+        decision = svc._resolve_permission(
+            _record(
+                owner_user_id="another-user",
+                ingroup_permission="READ_ONLY",
+                group_ids=[1],
+            ),
+            user_id="u",
+            tenant_id="t",
+            user_groups=[1],
+        )
+
+        assert decision.permission is None
+        assert decision.matched_group_ids == ()
 
     def test_missing_record_raises_not_found(self, patched):
         with pytest.raises(AidpKbNotFoundError):
@@ -345,9 +384,9 @@ class TestGetAccessibleKbs:
         out = svc.get_accessible_kbs("u", "t")
         assert [row["kb_id"] for row in out] == ["own"]
 
-    def test_filters_out_inaccessible_rows(self, monkeypatch):
-        # Regression guard: rows where the user has no access (PRIVATE / not-in-group)
-        # must be dropped, not leaked with ``permission=None``.
+    def test_management_role_sees_all_shared_rows_but_not_private(self, monkeypatch):
+        # Management roles bypass group membership for shared rows, while
+        # PRIVATE rows remain visible only to their creator.
         rows = [
             _record(kb_id="editable",   owner_user_id="other", ingroup_permission="EDIT",      group_ids=[1]),
             _record(kb_id="private-kb", owner_user_id="other", ingroup_permission="PRIVATE",   group_ids=[1]),
@@ -356,10 +395,10 @@ class TestGetAccessibleKbs:
         monkeypatch.setattr(svc.aidp_permission_db, "list_all_permissions_by_tenant",
                             lambda tenant_id: rows)
         monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [1])
-        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "DEV")
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "ADMIN")
 
         out = svc.get_accessible_kbs("u", "t")
-        assert [r["kb_id"] for r in out] == ["editable"]
+        assert [r["kb_id"] for r in out] == ["editable", "no-access"]
 
     def test_count_matches_visible_rows(self, monkeypatch):
         rows = [
@@ -376,6 +415,34 @@ class TestGetAccessibleKbs:
 
 
 class TestIntersectAccessibleKbs:
+    def test_name_map_reuses_permission_rows_and_covers_inaccessible_kbs(self, monkeypatch):
+        rows = [
+            _record(
+                kb_id="allowed",
+                kds_name="Allowed KB",
+                owner_user_id="u",
+                ingroup_permission="EDIT",
+            ),
+            _record(
+                kb_id="denied",
+                kds_name="Denied KB",
+                owner_user_id="another-user",
+                ingroup_permission="PRIVATE",
+            ),
+        ]
+        monkeypatch.setattr(
+            svc.aidp_permission_db,
+            "list_all_permissions_by_tenant",
+            lambda tenant_id: rows,
+        )
+        monkeypatch.setattr(svc, "_get_user_groups", lambda u, t: [])
+        monkeypatch.setattr(svc, "_get_user_role", lambda u, t: "USER")
+
+        accessible, name_map = svc._compute_accessible_rows_with_name_map("u", "t")
+
+        assert [row["kb_id"] for row in accessible] == ["allowed"]
+        assert name_map == {"Allowed KB": "allowed", "Denied KB": "denied"}
+
     def test_intersects_remote_catalog_and_preserves_remote_order(self, monkeypatch):
         rows = [
             _record(kb_id="kb-1", owner_user_id="u"),
@@ -732,6 +799,7 @@ class TestIntersectAccessibleKbs:
             {
                 "kb_id": "k1", "kds_name": "Local KB 1", "tenant_id": "t",
                 "owner_user_id": "owner", "ingroup_permission": "READ_ONLY",
+                "creator_name": None,
                 "group_ids": [1], "permission": "READ",
             },
             {
@@ -740,7 +808,11 @@ class TestIntersectAccessibleKbs:
                 "group_ids": [], "permission": "EDIT",
             },
         ]
-        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+        with patch.object(
+            svc,
+            "_compute_accessible_rows_with_name_map",
+            return_value=(local_rows, {}),
+        ):
             remote = [
                 {"kds_id": "k1", "kds_name": "Remote KB 1"},
                 {"kds_id": "k2", "kds_name": "Remote KB 2"},
@@ -751,11 +823,16 @@ class TestIntersectAccessibleKbs:
         assert result[0]["kds_name"] == "Remote KB 1"
         assert result[0]["tenant_id"] == "t"
         assert result[0]["owner_user_id"] == "owner"
+        assert result[0]["creator_name"] is None
         assert result[0]["kb_id"] == "k1"
         assert result[0]["kds_id"] == "k1"
 
     def test_skips_missing_ids_and_permissionless(self, patched):
-        with patch.object(svc, "_compute_accessible_rows", return_value=[]):
+        with patch.object(
+            svc,
+            "_compute_accessible_rows_with_name_map",
+            return_value=([], {}),
+        ):
             remote = [
                 None,
                 {"kds_name": "no id"},
@@ -771,7 +848,11 @@ class TestIntersectAccessibleKbs:
                 "group_ids": [], "permission": "READ",
             }
         ]
-        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+        with patch.object(
+            svc,
+            "_compute_accessible_rows_with_name_map",
+            return_value=(local_rows, {}),
+        ):
             remote = [
                 {"kds_id": "k1"},
                 {"id": "k1"},
@@ -789,7 +870,31 @@ class TestIntersectAccessibleKbs:
                 "group_ids": [], "permission": "READ",
             }
         ]
-        with patch.object(svc, "_compute_accessible_rows", return_value=local_rows):
+        with patch.object(
+            svc,
+            "_compute_accessible_rows_with_name_map",
+            return_value=(local_rows, {}),
+        ):
             result = svc.intersect_accessible_kbs([{"kds_id": 7}], "u", "t")
 
         assert result[0]["kds_id"] == "7"
+
+    def test_tolerates_missing_optional_protected_local_fields(self, patched):
+        local_rows = [{"kb_id": "k1", "permission": "EDIT"}]
+        with patch.object(
+            svc,
+            "_compute_accessible_rows_with_name_map",
+            return_value=(local_rows, {}),
+        ):
+            result = svc.intersect_accessible_kbs(
+                [{"kds_id": "k1", "kds_name": "Remote KB"}],
+                "u",
+                "t",
+            )
+
+        assert result == [{
+            "kb_id": "k1",
+            "permission": "EDIT",
+            "kds_id": "k1",
+            "kds_name": "Remote KB",
+        }]

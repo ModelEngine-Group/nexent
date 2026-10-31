@@ -1,27 +1,28 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import os
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../backend"))
 sys.path.insert(0, backend_dir)
 
-prompt_service_stub = type(sys)("services.prompt_service")
-prompt_service_stub.gen_system_prompt_streamable = MagicMock()
+prompt_service_stub = type(sys)("management.services.agent.prompt_generation")
 prompt_service_stub.OptimizeRequest = type("OptimizeRequest", (), {"__init__": lambda self, **kwargs: self.__dict__.update(kwargs)})
 prompt_service_stub.OptimizeResult = type("OptimizeResult", (), {})
 prompt_service_stub.PromptOptimizationService = MagicMock()
-sys.modules["services.prompt_service"] = prompt_service_stub
-sys.modules["backend.services.prompt_service"] = prompt_service_stub
+sys.modules["management.services.agent.prompt_generation"] = prompt_service_stub
+sys.modules["management.services.agent.prompt_generation"] = prompt_service_stub
 
-auth_utils_stub = type(sys)("utils.auth_utils")
+auth_utils_stub = type(sys)("gateway.authentication.auth")
 auth_utils_stub.get_current_user_info = MagicMock()
-sys.modules["utils.auth_utils"] = auth_utils_stub
-sys.modules["backend.utils.auth_utils"] = auth_utils_stub
+sys.modules["gateway.authentication.auth"] = auth_utils_stub
+sys.modules["gateway.authentication.auth"] = auth_utils_stub
 
-from apps.prompt_app import router
+from management.api.prompt.prompt import router
 
 
 app = FastAPI()
@@ -29,8 +30,12 @@ app.include_router(router)
 client = TestClient(app)
 
 
-@patch("apps.prompt_app.get_current_user_info")
-@patch("apps.prompt_app.PromptOptimizationService")
+
+
+
+
+@patch("management.api.prompt.prompt.get_current_user_info")
+@patch("management.api.prompt.prompt.PromptOptimizationService")
 def test_optimize_prompt_section_api_success(mock_service_cls, mock_get_current_user_info):
     """Test /prompt/optimize returns optimized content with X-Prompt-Source header"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "en")
@@ -74,8 +79,8 @@ def test_optimize_prompt_section_api_success(mock_service_cls, mock_get_current_
     mock_svc_instance.optimize.assert_called_once()
 
 
-@patch("apps.prompt_app.get_current_user_info")
-@patch("apps.prompt_app.PromptOptimizationService")
+@patch("management.api.prompt.prompt.get_current_user_info")
+@patch("management.api.prompt.prompt.PromptOptimizationService")
 def test_optimize_prompt_section_api_with_mode(mock_service_cls, mock_get_current_user_info):
     """Test /prompt/optimize accepts mode/start_pos/end_pos parameters"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "zh")
@@ -115,8 +120,8 @@ def test_optimize_prompt_section_api_with_mode(mock_service_cls, mock_get_curren
     assert call_args[0][0].end_pos == 20
 
 
-@patch("apps.prompt_app.get_current_user_info")
-@patch("apps.prompt_app.PromptOptimizationService")
+@patch("management.api.prompt.prompt.get_current_user_info")
+@patch("management.api.prompt.prompt.PromptOptimizationService")
 def test_optimize_prompt_section_api_nexent_capability_error(mock_service_cls, mock_get_current_user_info):
     """Test /prompt/optimize returns 400 when NexentCapabilityError is raised"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "en")
@@ -148,8 +153,8 @@ def test_optimize_prompt_section_api_nexent_capability_error(mock_service_cls, m
     assert "general" in data["message"]
 
 
-@patch("apps.prompt_app.get_current_user_info")
-@patch("apps.prompt_app.PromptOptimizationService")
+@patch("management.api.prompt.prompt.get_current_user_info")
+@patch("management.api.prompt.prompt.PromptOptimizationService")
 def test_optimize_badcase_api_success(mock_service_cls, mock_get_current_user_info):
     """Test /prompt/optimize/badcase returns optimized content with X-Prompt-Source header"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "zh")
@@ -195,8 +200,8 @@ def test_optimize_badcase_api_success(mock_service_cls, mock_get_current_user_in
     mock_svc_instance.optimize_badcase.assert_called_once()
 
 
-@patch("apps.prompt_app.get_current_user_info")
-@patch("apps.prompt_app.PromptOptimizationService")
+@patch("management.api.prompt.prompt.get_current_user_info")
+@patch("management.api.prompt.prompt.PromptOptimizationService")
 def test_optimize_badcase_api_nexent_capability_error(mock_service_cls, mock_get_current_user_info):
     """Test /prompt/optimize/badcase returns 400 when NexentCapabilityError is raised"""
     mock_get_current_user_info.return_value = ("user-1", "tenant-1", "zh")
@@ -226,3 +231,12 @@ def test_optimize_badcase_api_nexent_capability_error(mock_service_cls, mock_get
     assert response.status_code == 400
     data = response.json()
     assert "badcase" in data["message"]
+
+
+@pytest.mark.parametrize("payload", [{}, {"agent_id": 1, "model_id": 2, "task_description": "Generate instructions"}])
+def test_retired_generation_route_returns_404_without_work(payload, mocker):
+    authenticate = mocker.patch("management.api.prompt.prompt.get_current_user_info")
+    response = client.post("/prompt/generate", json=payload)
+    assert response.status_code == 404
+    assert "text/event-stream" not in response.headers.get("content-type", "")
+    authenticate.assert_not_called()

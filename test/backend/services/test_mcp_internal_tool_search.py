@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -8,9 +10,10 @@ from mcp.types import Tool
 from pydantic import ValidationError
 
 import services.nl2agent_service as nl2agent_service
-import services.tool_configuration_service as tool_configuration_service
+from management.services.tool import configuration as tool_configuration_service
 import tool_collection.mcp.nl2agent_mcp_tools as nl2agent_mcp_tools_module
-from services.tool_configuration_service import get_tool_from_remote_mcp_server
+from contracts.errors.exceptions import AgentDraftEditError
+from management.services.tool.configuration import get_tool_from_remote_mcp_server
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
@@ -27,6 +30,7 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     NL2A_WRAPPER_DESCRIPTION,
     NL2A_WRAPPER_LOCAL_NAME,
     NL2A_WRAPPER_NAME,
+    InstalledResourceBindingPayload,
     RecommendResourcesOutput,
     RECOMMEND_RESOURCES_DESCRIPTION,
     RECOMMEND_RESOURCES_LOCAL_NAME,
@@ -38,14 +42,21 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
     SEARCH_INSTALLED_RESOURCES_DESCRIPTION,
     SEARCH_INSTALLED_RESOURCES_LOCAL_NAME,
     SEARCH_INSTALLED_RESOURCES_NAME,
+    SEARCH_UNINSTALLED_RESOURCES_DESCRIPTION,
+    SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME,
+    SEARCH_UNINSTALLED_RESOURCES_NAME,
     SAVE_AGENT_DRAFT_FIELDS_DESCRIPTION,
     SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME,
     SAVE_AGENT_DRAFT_FIELDS_NAME,
+    SearchUninstalledResourcesInput,
+    SuggestedResourceInstallationPayload,
+    build_nl2a_wrapper,
     nl2a_wrapper,
     recommend_resources,
     save_agent_draft_fields,
     search_installed_mcp_tools,
     search_installed_resources,
+    search_uninstalled_resources,
 )
 
 
@@ -260,6 +271,7 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     mounted_tools = await parent.get_tools()
     tool = mounted_tools[SEARCH_INSTALLED_MCP_TOOLS_NAME]
     resource_search_tool = mounted_tools[SEARCH_INSTALLED_RESOURCES_NAME]
+    uninstalled_search_tool = mounted_tools[SEARCH_UNINSTALLED_RESOURCES_NAME]
     recommend_tool = mounted_tools[RECOMMEND_RESOURCES_NAME]
     wrapper_tool = mounted_tools[NL2A_WRAPPER_NAME]
     save_tool = mounted_tools[SAVE_AGENT_DRAFT_FIELDS_NAME]
@@ -278,6 +290,7 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     }
     assert SEARCH_INSTALLED_MCP_TOOLS_LOCAL_NAME not in local_tools
     assert SEARCH_INSTALLED_RESOURCES_LOCAL_NAME not in local_tools
+    assert SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME not in local_tools
     assert RECOMMEND_RESOURCES_LOCAL_NAME not in local_tools
     assert SAVE_AGENT_DRAFT_FIELDS_LOCAL_NAME not in local_tools
     assert f"local_{SEARCH_INSTALLED_MCP_TOOLS_NAME}" not in mounted_tools
@@ -299,6 +312,15 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
         "agent_id",
         "requirements",
     ]
+    assert uninstalled_search_tool.description == (
+        SEARCH_UNINSTALLED_RESOURCES_DESCRIPTION
+    )
+    assert uninstalled_search_tool.name == SEARCH_UNINSTALLED_RESOURCES_LOCAL_NAME
+    assert set(uninstalled_search_tool.parameters["properties"]) == {
+        "agent_id",
+        "requirements",
+        "exclude_refs",
+    }
     assert recommend_tool.description == RECOMMEND_RESOURCES_DESCRIPTION
     assert recommend_tool.name == RECOMMEND_RESOURCES_LOCAL_NAME
     assert set(recommend_tool.parameters["properties"]) == {
@@ -327,9 +349,139 @@ async def test_mcp_search_registration_has_stable_name_schema_and_marker():
     }
     assert wrapper_tool.parameters["properties"]["subtype"]["enum"] == [
         "requirement_clarification",
+        "suggested_resource_installation",
         "installed_resource_binding",
     ]
     assert wrapper_tool.meta["nexent_internal"] is True
+
+
+def test_uninstalled_resource_models_reject_invalid_identifiers_and_options():
+    requirement = {"requirement_id": "lookup", "query": "Search data"}
+    with pytest.raises(ValidationError, match="requirement_id values must be unique"):
+        SearchUninstalledResourcesInput(
+            requirements=[requirement, requirement],
+        )
+
+    for exclude_refs in (
+        ["tenant_skill_repository:1", "tenant_skill_repository:1"],
+        ["   "],
+    ):
+        with pytest.raises(
+            ValidationError,
+            match="exclude_refs must be non-empty and unique",
+        ):
+            SearchUninstalledResourcesInput(
+                requirements=[requirement],
+                exclude_refs=exclude_refs,
+            )
+
+    candidate = {
+        "candidate_ref": "tenant_skill_repository:1",
+        "resource_type": "skill",
+        "source": "TENANT_SKILL_REPOSITORY",
+        "name": "tenant-skill",
+        "requirement_ids": ["lookup"],
+        "score": 0.9,
+    }
+    option = {
+        "option_id": "repository",
+        "label": "Install",
+        "form_kind": "SKILL_CONFIG",
+        "config": [],
+    }
+
+    invalid_resources = [
+        {
+            "candidate": candidate,
+            "recommendation": "recommended",
+            "form_kind": "SKILL_CONFIG",
+            "config": [],
+            "installation_options": [option, option],
+            "default_option_id": "repository",
+        },
+        {
+            "candidate": candidate,
+            "recommendation": "recommended",
+            "form_kind": "SKILL_CONFIG",
+            "config": [],
+            "installation_options": [option],
+            "default_option_id": "missing",
+        },
+        {
+            "candidate": candidate,
+            "recommendation": "recommended",
+            "form_kind": "SKILL_CONFIG",
+            "config": [],
+            "installation_options": [],
+            "default_option_id": "repository",
+        },
+    ]
+    for resource in invalid_resources:
+        with pytest.raises(ValidationError):
+            RecommendResourcesOutput.model_validate({
+                "status": "success",
+                "resources": [resource],
+            })
+
+
+def test_resource_card_payloads_reject_wrong_availability():
+    installed_resource = {
+        "candidate": {
+            "candidate_ref": "tool:7",
+            "resource_type": "tool",
+            "source": "LOCAL_TOOL",
+            "name": "search",
+            "requirement_ids": ["lookup"],
+            "score": 0.9,
+        },
+        "recommendation": "recommended",
+        "form_kind": "TOOL_CONFIG",
+        "config": [],
+    }
+    uninstalled_resource = {
+        "candidate": {
+            "candidate_ref": "tenant_skill_repository:1",
+            "resource_type": "skill",
+            "source": "TENANT_SKILL_REPOSITORY",
+            "name": "tenant-skill",
+            "requirement_ids": ["lookup"],
+            "score": 0.9,
+        },
+        "recommendation": "recommended",
+        "form_kind": "SKILL_CONFIG",
+        "config": [],
+        "installation_options": [{
+            "option_id": "repository",
+            "label": "Install",
+            "form_kind": "SKILL_CONFIG",
+            "config": [],
+        }],
+        "default_option_id": "repository",
+    }
+
+    with pytest.raises(ValidationError, match="already be installed"):
+        InstalledResourceBindingPayload(
+            agent_id=42,
+            resources=[uninstalled_resource],
+        )
+    with pytest.raises(ValidationError, match="must be installable"):
+        SuggestedResourceInstallationPayload(
+            agent_id=42,
+            resources=[installed_resource],
+        )
+
+
+def test_build_resource_wrapper_requires_result_and_supported_subtype():
+    with pytest.raises(ValueError, match="requires agent_id and resource_result"):
+        build_nl2a_wrapper(
+            subtype="suggested_resource_installation",
+            agent_id=42,
+        )
+    with pytest.raises(ValueError, match="unsupported nl2a subtype"):
+        build_nl2a_wrapper(
+            subtype="unsupported",  # type: ignore[arg-type]
+            agent_id=42,
+        )
 
 
 @pytest.mark.asyncio
@@ -389,8 +541,6 @@ async def test_save_agent_draft_fields_emits_saved_fields_state(
     ("agent_id", "fields"),
     [
         (None, {"description": "Missing ID"}),
-        (1042, {"name": "renamed_agent"}),
-        (1042, {"display_name": "Renamed Agent"}),
         (1042, {"business_description": "Removed field"}),
         (1042, {}),
     ],
@@ -434,7 +584,7 @@ async def test_save_agent_draft_fields_emits_prompt_failure_state(mocker):
     )
 
     result_json, state_wrapper = (
-        await save_agent_draft_fields(1042, {"duty_prompt": "Research"})
+        await save_agent_draft_fields(1042, {"prompt": "Research"})
     ).split("\n", 1)
 
     assert json.loads(result_json)["code"] == "draft_save_failed"
@@ -443,7 +593,7 @@ async def test_save_agent_draft_fields_emits_prompt_failure_state(mocker):
     ) == {
         "event": "prompt_generation_failed",
         "agent_id": 1042,
-        "failed_fields": ["duty_prompt"],
+        "failed_fields": ["prompt"],
     }
 
 
@@ -479,10 +629,15 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
         "save_agent_draft_fields_impl",
         side_effect=save_impl,
     )
+    validate_complete = mocker.patch.object(
+        nl2agent_service,
+        "validate_agent_generation_complete_impl",
+        new=AsyncMock(),
+    )
     first = await save_agent_draft_fields(1042, {"description": "Updated"})
     second = await save_agent_draft_fields(
         1042,
-        {"duty_prompt": "Verify sources"},
+        {"prompt": "Verify sources"},
     )
 
     assert [call.kwargs["agent_id"] for call in save.call_args_list] == [1042, 1042]
@@ -495,7 +650,15 @@ async def test_save_agent_draft_fields_reuses_trusted_context_across_rounds(mock
     )["updated_fields"] == ["description"]
     assert json.loads(
         second_state.removeprefix("<nl2a_state>").removesuffix("</nl2a_state>")
-    )["updated_fields"] == ["duty_prompt"]
+    ) == {
+        "event": "agent_generation_completed",
+        "agent_id": 1042,
+    }
+    validate_complete.assert_awaited_once_with(
+        agent_id=1042,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
 
 
 @pytest.mark.asyncio
@@ -548,7 +711,7 @@ async def test_clarification_wrapper_keeps_trusted_agent_id(mocker):
         return_value=("user-a", "tenant-a"),
     )
     require_edit = mocker.patch(
-        "services.agent_draft_permission_service.require_agent_draft_edit"
+        "management.services.agent.authorization.require_agent_draft_edit"
     )
 
     wrapped = await nl2a_wrapper(
@@ -583,12 +746,21 @@ async def test_resource_tools_reject_invalid_model_echoes_without_service_calls(
         nl2agent_service,
         "search_installed_resources_impl",
     )
+    uninstalled_impl = mocker.patch.object(
+        nl2agent_service,
+        "search_uninstalled_resources_impl",
+    )
     recommend_impl = mocker.patch.object(
         nl2agent_service,
-        "recommend_installed_resources_impl",
+        "recommend_resources_impl",
     )
 
     search_result = await search_installed_resources(agent_id=42, requirements=[])
+    uninstalled_result = await search_uninstalled_resources(
+        agent_id=42,
+        requirements=[],
+        exclude_refs=[],
+    )
     recommend_result = await recommend_resources(
         agent_id=42,
         candidates=[
@@ -605,11 +777,86 @@ async def test_resource_tools_reject_invalid_model_echoes_without_service_calls(
     )
 
     assert search_result["code"] == "invalid_requirements"
+    assert uninstalled_result["code"] == "invalid_requirements"
     assert search_result["retryable"] is False
     assert recommend_result["code"] == "invalid_candidates"
     assert recommend_result["retryable"] is False
     search_impl.assert_not_called()
+    uninstalled_impl.assert_not_called()
     recommend_impl.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_uninstalled_search_rejects_cross_agent_context(mocker):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(
+            headers={
+                "Authorization": "Bearer token",
+                NL2AGENT_AGENT_ID_HEADER: "41",
+            }
+        ),
+    )
+    search_impl = mocker.patch.object(
+        nl2agent_service,
+        "search_uninstalled_resources_impl",
+    )
+
+    result = await search_uninstalled_resources(
+        agent_id=42,
+        requirements=[{"requirement_id": "lookup", "query": "Search data"}],
+    )
+
+    assert result["code"] == "agent_context_mismatch"
+    assert result["retryable"] is False
+    search_impl.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_uninstalled_search_returns_stable_permission_and_runtime_errors(mocker):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    require_edit = mocker.patch(
+        "management.services.agent.authorization.require_agent_draft_edit"
+    )
+    search_impl = mocker.patch.object(
+        nl2agent_service,
+        "search_uninstalled_resources_impl",
+        new=AsyncMock(),
+    )
+    call = {
+        "agent_id": 42,
+        "requirements": [{
+            "requirement_id": "lookup",
+            "query": "Search data",
+        }],
+    }
+
+    require_edit.side_effect = AgentDraftEditError("agent_read_only")
+    read_only = await search_uninstalled_resources(**call)
+    assert read_only["code"] == "agent_read_only"
+    assert read_only["retryable"] is False
+
+    require_edit.side_effect = None
+    search_impl.side_effect = PermissionError("private authorization details")
+    unauthorized = await search_uninstalled_resources(**call)
+    assert unauthorized["code"] == "unauthorized"
+    assert "private" not in json.dumps(unauthorized)
+
+    search_impl.side_effect = RuntimeError("private search details")
+    failed = await search_uninstalled_resources(**call)
+    assert failed["code"] == "resource_search_failed"
+    assert failed["retryable"] is True
+    assert "private" not in json.dumps(failed)
 
 
 @pytest.mark.asyncio
@@ -637,6 +884,11 @@ async def test_resource_tools_return_tenant_scoped_results_and_stable_errors(
         "search_installed_resources_impl",
         new=AsyncMock(return_value=search_output),
     )
+    uninstalled_impl = mocker.patch.object(
+        nl2agent_service,
+        "search_uninstalled_resources_impl",
+        new=AsyncMock(return_value=search_output),
+    )
     recommend_output = MagicMock()
     recommend_output.model_dump.return_value = {
         "status": "success",
@@ -644,11 +896,11 @@ async def test_resource_tools_return_tenant_scoped_results_and_stable_errors(
     }
     recommend_impl = mocker.patch.object(
         nl2agent_service,
-        "recommend_installed_resources_impl",
+        "recommend_resources_impl",
         new=AsyncMock(return_value=recommend_output),
     )
     mocker.patch(
-        "services.agent_draft_permission_service.require_agent_draft_edit"
+        "management.services.agent.authorization.require_agent_draft_edit"
     )
     requirements = [{"requirement_id": "lookup", "query": "web search"}]
     candidate = {
@@ -664,15 +916,27 @@ async def test_resource_tools_return_tenant_scoped_results_and_stable_errors(
         await search_installed_resources(agent_id=42, requirements=requirements)
     )["status"] == "success"
     assert (
+        await search_uninstalled_resources(
+            agent_id=42,
+            requirements=requirements,
+            exclude_refs=["tenant_mcp_repository:8"],
+        )
+    )["status"] == "success"
+    assert (
         await recommend_resources(
             agent_id=42,
             candidates=[candidate],
             recommended_refs=["tool:7"],
         )
     )["status"] == "success"
-    assert get_user.call_count == 2
+    assert get_user.call_count == 3
     assert search_impl.await_args.kwargs["tenant_id"] == "tenant-a"
+    assert "scope" not in uninstalled_impl.await_args.kwargs
+    assert uninstalled_impl.await_args.kwargs["exclude_refs"] == [
+        "tenant_mcp_repository:8"
+    ]
     assert recommend_impl.await_args.kwargs["user_id"] == "user-a"
+    assert recommend_impl.await_args.kwargs["agent_id"] == 42
 
     search_impl.side_effect = PermissionError("private auth details")
     assert (
@@ -727,7 +991,7 @@ async def test_installed_binding_wrapper_rechecks_agent_and_candidates(mocker):
         return_value=("user-a", "tenant-a"),
     )
     require_edit = mocker.patch(
-        "services.agent_draft_permission_service.require_agent_draft_edit"
+        "management.services.agent.authorization.require_agent_draft_edit"
     )
     resource_result = {
         "status": "success",
@@ -742,15 +1006,25 @@ async def test_installed_binding_wrapper_rechecks_agent_and_candidates(mocker):
                     "score": 0.9,
                 },
                 "recommendation": "recommended",
+                "is_bound": True,
                 "form_kind": "TOOL_CONFIG",
                 "config": [],
             }
         ],
     }
-    verified = RecommendResourcesOutput.model_validate(resource_result)
+    verified_result = {
+        **resource_result,
+        "resources": [
+            {
+                **resource_result["resources"][0],
+                "is_bound": False,
+            }
+        ],
+    }
+    verified = RecommendResourcesOutput.model_validate(verified_result)
     recommend_impl = mocker.patch.object(
         nl2agent_service,
-        "recommend_installed_resources_impl",
+        "recommend_resources_impl",
         new=AsyncMock(return_value=verified),
     )
 
@@ -760,13 +1034,157 @@ async def test_installed_binding_wrapper_rechecks_agent_and_candidates(mocker):
         resource_result=resource_result,
     )
 
-    assert _unwrap_nl2a(wrapped)["resources"][0]["candidate"]["name"] == "search"
+    wrapped_resource = _unwrap_nl2a(wrapped)["resources"][0]
+    assert wrapped_resource["candidate"]["name"] == "search"
+    assert wrapped_resource["is_bound"] is False
     require_edit.assert_called_once_with(
         agent_id=42,
         tenant_id="tenant-a",
         user_id="user-a",
     )
+    assert recommend_impl.await_args.kwargs["agent_id"] == 42
     assert recommend_impl.await_args.kwargs["recommended_refs"] == ["tool:7"]
+
+
+@pytest.mark.asyncio
+async def test_installation_wrapper_rechecks_agent_and_candidates(mocker):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch(
+        "management.services.agent.authorization.require_agent_draft_edit"
+    )
+    resource_result = {
+        "status": "success",
+        "resources": [{
+            "candidate": {
+                "candidate_ref": "nexent_official_skill:daily-report",
+                "resource_type": "skill",
+                "source": "NEXENT_OFFICIAL_SKILL",
+                "name": "daily-report",
+                "requirement_ids": ["report"],
+                "score": 0.9,
+            },
+            "recommendation": "recommended",
+            "form_kind": "SKILL_CONFIG",
+            "config": [],
+            "installation_options": [{
+                "option_id": "official",
+                "label": "Install",
+                "form_kind": "SKILL_CONFIG",
+                "config": [],
+            }],
+            "default_option_id": "official",
+        }],
+    }
+    verified = RecommendResourcesOutput.model_validate(resource_result)
+    recommend_impl = mocker.patch.object(
+        nl2agent_service,
+        "recommend_resources_impl",
+        new=AsyncMock(return_value=verified),
+    )
+
+    wrapped = await nl2a_wrapper(
+        subtype="suggested_resource_installation",
+        agent_id=42,
+        resource_result=resource_result,
+    )
+
+    payload = _unwrap_nl2a(wrapped)
+    assert payload["subtype"] == "suggested_resource_installation"
+    assert payload["resources"][0]["default_option_id"] == "official"
+    assert payload["resources"][0]["is_bound"] is False
+    assert recommend_impl.await_args.kwargs["agent_id"] == 42
+    assert recommend_impl.await_args.kwargs["recommended_refs"] == [
+        "nexent_official_skill:daily-report"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resource_wrapper_validates_results_sources_and_empty_binding(mocker):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch(
+        "management.services.agent.authorization.require_agent_draft_edit"
+    )
+
+    with pytest.raises(ValueError, match="requires agent_id and resource_result"):
+        await nl2a_wrapper(
+            subtype="suggested_resource_installation",
+            agent_id=42,
+        )
+
+    installed_result = {
+        "status": "success",
+        "resources": [{
+            "candidate": {
+                "candidate_ref": "tool:7",
+                "resource_type": "tool",
+                "source": "LOCAL_TOOL",
+                "name": "search",
+                "requirement_ids": ["lookup"],
+                "score": 0.9,
+            },
+            "recommendation": "recommended",
+            "form_kind": "TOOL_CONFIG",
+            "config": [],
+        }],
+    }
+    with pytest.raises(
+        ValueError,
+        match="invalid resources for suggested_resource_installation",
+    ):
+        await nl2a_wrapper(
+            subtype="suggested_resource_installation",
+            agent_id=42,
+            resource_result=installed_result,
+        )
+    recommend_impl = mocker.patch.object(
+        nl2agent_service,
+        "recommend_resources_impl",
+        new=AsyncMock(),
+    )
+    empty_binding = await nl2a_wrapper(
+        subtype="installed_resource_binding",
+        agent_id=42,
+        resource_result={"status": "success", "resources": []},
+    )
+    payload = json.loads(empty_binding)
+
+    assert payload == {
+        "status": "success",
+        "subtype": "installed_resource_binding",
+        "agent_id": 42,
+        "binding_required": False,
+        "resources": [],
+    }
+    assert "<nl2a>" not in empty_binding
+    recommend_impl.assert_not_awaited()
+
+    with pytest.raises(
+        ValueError,
+        match="invalid resources for suggested_resource_installation",
+    ):
+        await nl2a_wrapper(
+            subtype="suggested_resource_installation",
+            agent_id=42,
+            resource_result={"status": "success", "resources": []},
+        )
 
 
 @pytest.mark.asyncio
@@ -828,6 +1246,146 @@ async def test_final_prompt_batch_emits_generation_completed_state(mocker):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fields", "updated_fields"),
+    [
+        (
+            {
+                "prompt": "Use reliable sources.",
+                "greeting_message": "Hello",
+                "example_questions": ["What should I research?"],
+            },
+            [
+                "prompt",
+                "greeting_message",
+                "example_questions",
+            ],
+        ),
+        (
+            {"example_questions": ["What should I research?"]},
+            ["example_questions"],
+        ),
+        ({"prompt": "Research the requested topic."}, ["prompt"]),
+        (
+            {"greeting_message": "Hello"},
+            ["greeting_message"],
+        ),
+        (
+            {"prompt": "Question: Example\nAnswer: Example", "example_questions": ["Question"]},
+            ["prompt", "example_questions"],
+        ),
+    ],
+)
+async def test_completion_validation_uses_persisted_state_for_prompt_saves(
+    mocker,
+    fields,
+    updated_fields,
+):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "save_agent_draft_fields_impl",
+        return_value={
+            "status": "success",
+            "agent_id": 42,
+            "created": False,
+            "updated_fields": updated_fields,
+        },
+    )
+    validate_complete = mocker.patch.object(
+        nl2agent_service,
+        "validate_agent_generation_complete_impl",
+        new=AsyncMock(),
+    )
+
+    result_json, state_wrapper = (
+        await save_agent_draft_fields(42, fields)
+    ).split("\n", 1)
+
+    assert json.loads(result_json)["updated_fields"] == updated_fields
+    assert json.loads(
+        state_wrapper.removeprefix("<nl2a_state>").removesuffix(
+            "</nl2a_state>"
+        )
+    ) == {
+        "event": "agent_generation_completed",
+        "agent_id": 42,
+    }
+    validate_complete.assert_awaited_once_with(
+        agent_id=42,
+        tenant_id="tenant-a",
+        user_id="user-a",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fields", "updated_fields"),
+    [
+        ({"greeting_message": "Hello"}, ["greeting_message"]),
+        ({"prompt": "Research the requested topic."}, ["prompt"]),
+    ],
+)
+async def test_partial_prompt_save_remains_saved_when_database_is_incomplete(
+    mocker, fields, updated_fields
+):
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_http_request",
+        return_value=SimpleNamespace(headers={"Authorization": "Bearer token"}),
+    )
+    mocker.patch.object(
+        nl2agent_mcp_tools_module,
+        "get_current_user_id",
+        return_value=("user-a", "tenant-a"),
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "save_agent_draft_fields_impl",
+        return_value={
+            "status": "success",
+            "agent_id": 42,
+            "created": False,
+            "updated_fields": updated_fields,
+        },
+    )
+    mocker.patch.object(
+        nl2agent_service,
+        "validate_agent_generation_complete_impl",
+        new=AsyncMock(
+            side_effect=nl2agent_service.Nl2AgentCompletionError(
+                "prompt_fields_incomplete",
+                ["example_questions"],
+            )
+        ),
+    )
+
+    result_json, state_wrapper = (await save_agent_draft_fields(42, fields)).split(
+        "\n", 1
+    )
+
+    assert json.loads(result_json)["updated_fields"] == updated_fields
+    assert json.loads(
+        state_wrapper.removeprefix("<nl2a_state>").removesuffix(
+            "</nl2a_state>"
+        )
+    ) == {
+        "event": "agent_draft_fields_saved",
+        "agent_id": 42,
+        "updated_fields": updated_fields,
+    }
+
+
+@pytest.mark.asyncio
 async def test_final_prompt_batch_emits_failure_when_database_is_incomplete(mocker):
     mocker.patch.object(
         nl2agent_mcp_tools_module,
@@ -855,7 +1413,7 @@ async def test_final_prompt_batch_emits_failure_when_database_is_incomplete(mock
         new=AsyncMock(
             side_effect=nl2agent_service.Nl2AgentCompletionError(
                 "prompt_fields_incomplete",
-                ["few_shots_prompt"],
+                ["prompt"],
             )
         ),
     )
@@ -885,7 +1443,7 @@ async def test_final_prompt_batch_emits_failure_when_database_is_incomplete(mock
     ) == {
         "event": "prompt_generation_failed",
         "agent_id": 42,
-        "failed_fields": ["few_shots_prompt"],
+        "failed_fields": ["prompt"],
     }
 
 
@@ -1015,6 +1573,8 @@ async def test_mcp_search_empty_result_returns_business_payload(mocker):
 
 @pytest.mark.asyncio
 async def test_public_mcp_scanner_skips_internal_tools(mocker):
+    from management.services.tool import discovery as tool_discovery
+
     client = AsyncMock()
     client.__aenter__.return_value = client
     client.list_tools.return_value = [
@@ -1037,12 +1597,12 @@ async def test_public_mcp_scanner_skips_internal_tools(mocker):
         ),
     ]
     client_class = mocker.patch.object(
-        tool_configuration_service,
+        tool_discovery,
         "Client",
         return_value=client,
     )
     transport = mocker.patch.object(
-        tool_configuration_service,
+        tool_discovery,
         "_create_mcp_transport",
         return_value=object(),
     )

@@ -174,7 +174,7 @@ export function LongTermMemoryPanel({ scope }: { scope: LongTermScope }) {
           if (!activating) setVersionToActivate(null);
         }}
         closable={!activating}
-        maskClosable={!activating}
+        mask={{ closable: !activating }}
       >
         <Text>
           {t("memory.longTerm.activateConfirmDescription", {

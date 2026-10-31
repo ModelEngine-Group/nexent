@@ -1,0 +1,5 @@
+# Compatibility production overlay; DB remains published on loopback for host-side import.
+services:
+  auth:
+    environment:
+      GOTRUE_SITE_URL: ${SITE_URL:-http://nexent:3000}

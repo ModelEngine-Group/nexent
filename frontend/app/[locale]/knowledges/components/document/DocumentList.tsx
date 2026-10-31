@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import React, {
   useState,
   useRef,
@@ -5,6 +7,7 @@ import React, {
   useImperativeHandle,
   useEffect,
   useMemo,
+  useCallback,
 } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -14,12 +17,19 @@ import {
   Button,
   App,
   Select,
+  Popover,
+  Progress,
   Segmented,
-  Space,
+  Modal,
+  Spin,
+  Tooltip,
 } from "antd";
-import { useStorageQuotaBlocked } from "@/hooks/useStorageQuotaBlocked";
 const { TextArea } = Input;
-import { InfoCircleFilled } from "@ant-design/icons";
+import {
+  FileTextOutlined,
+  FilterOutlined,
+  ReloadOutlined,
+} from "@ant-design/icons";
 import {
   BookText,
   Pilcrow,
@@ -28,6 +38,11 @@ import {
   Glasses,
   CircleOff,
   AlertCircle,
+  Settings2,
+  Tag,
+  SlidersHorizontal,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
@@ -46,15 +61,35 @@ import { modelService } from "@/services/modelService";
 import { getTenantDefaultGroupId } from "@/services/groupService";
 import { extractObjectNameFromUrl } from "@/services/storageService";
 import { Document } from "@/types/knowledgeBase";
+import type { KBQuotaStatus } from "@/types/quota";
+import type {
+  TagDocumentPredicate,
+  TagDocumentBatchStatusEntry,
+} from "@/types/tagManagement";
 import { ModelOption } from "@/types/modelConfig";
 import { formatFileSize } from "@/lib/utils";
+import { getKnowledgeBaseQuotaDisplay } from "@/lib/knowledgeBaseQuota";
 import log from "@/lib/logger";
+import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
+import {
+  ModelAdvancedSettings,
+  ModelAdvancedSettingsValue,
+  advancedSettingsValueFromRecord,
+  buildModelOverrideEntry,
+} from "../../../models/components/model/ModelAdvancedSettings";
 import { useConfig } from "@/hooks/useConfig";
 import { useGroupDetails, useGroupList } from "@/hooks/group/useGroupList";
 
 import DocumentStatus from "./DocumentStatus";
 import DocumentChunk from "./DocumentChunk";
 import UploadArea from "../upload/UploadArea";
+import ResourceTagAssignmentModal from "@/components/tag/ResourceTagAssignmentModal";
+import TagChips from "@/components/tag/TagChips";
+import TagDefinitionManagementModal from "@/components/tag/TagDefinitionManagementModal";
+import TagFilterControls from "@/components/tag/TagFilterControls";
+import { StandardPaginator } from "@/components/common/StandardPaginator";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
+import { tagManagementApi } from "@/services/tagManagementService";
 import { useDocumentContext } from "../../contexts/DocumentContext";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Can } from "@/components/permission/Can";
@@ -72,7 +107,7 @@ const TITLE_BAR_HEIGHT_CLASS_MAP: Record<string, string> = {
 
 interface DocumentListProps {
   documents: Document[];
-  onDelete: (id: string) => void;
+  onDelete: (id: string, fileId?: string) => void;
   // Knowledge base source, e.g. "nexent" or "datamate"
   knowledgeBaseSource?: string;
   // User-facing knowledge base name (display name)
@@ -89,6 +124,7 @@ interface DocumentListProps {
   hasDocuments?: boolean;
   isNewlyCreatedAndWaiting?: boolean; // New prop to track newly created KB waiting for documents
   onChunkCountChange?: () => void; // Callback when chunk count changes
+  onRefresh?: () => void;
 
   // Group permission and user groups for create mode
   ingroupPermission?: string;
@@ -99,9 +135,30 @@ interface DocumentListProps {
   availableEmbeddingModels?: ModelOption[];
   selectedEmbeddingModel?: string;
   onEmbeddingModelChange?: (value: string) => void;
+  // v2.6.0: per-KB embedding model params override
+  // Shape: { "<model_id>": { temperature?, top_p?, extra_params? } }
+  embeddingModelParamsOverride?: Record<
+    string,
+    {
+      temperature?: number | null;
+      top_p?: number | null;
+      extra_params?: Record<string, unknown> | null;
+    }
+  >;
+  onEmbeddingModelParamsOverrideChange?: (
+    value: Record<
+      string,
+      {
+        temperature?: number | null;
+        top_p?: number | null;
+        extra_params?: Record<string, unknown> | null;
+      }
+    >
+  ) => void;
   isMultimodal?: boolean;
   quotaLimitBytes?: number | null;
   onQuotaLimitBytesChange?: (value: number | null) => void;
+  quotaStatus?: KBQuotaStatus;
   onMultimodalChange?: (value: boolean) => void;
   permission?: string; // User's permission for this knowledge base (READ_ONLY, EDIT, etc.)
   preserveSourceFile?: boolean;
@@ -117,8 +174,12 @@ interface DocumentListProps {
   onDragLeave?: (e: React.DragEvent) => void;
   onDrop?: (e: React.DragEvent) => void;
   onFileSelect: (files: File[]) => void;
+  selectedFiles?: File[];
   onUpload?: (files: File[]) => Promise<void>;
   isUploading?: boolean;
+  // Tenant storage quota, derived by the parent so this view never re-reads it.
+  uploadStorageBlocked?: boolean;
+  uploadStorageBlockedMessage?: string;
 }
 
 export interface DocumentListRef {
@@ -143,6 +204,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       hasDocuments = false,
       isNewlyCreatedAndWaiting = false, // New prop
       onChunkCountChange,
+      onRefresh,
       // Group permission and user groups for create mode
       ingroupPermission,
       onIngroupPermissionChange,
@@ -152,6 +214,9 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       availableEmbeddingModels,
       selectedEmbeddingModel,
       onEmbeddingModelChange,
+      // v2.6.0: per-KB embedding model params override
+      embeddingModelParamsOverride,
+      onEmbeddingModelParamsOverrideChange,
       isMultimodal = false,
       onMultimodalChange,
       permission,
@@ -159,6 +224,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       onPreserveSourceFileChange,
       quotaLimitBytes = null,
       onQuotaLimitBytesChange,
+      quotaStatus,
       // Auto-summary frequency
       summaryFrequency,
       onSummaryFrequencyChange,
@@ -169,18 +235,21 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       onDragLeave,
       onDrop,
       onFileSelect,
+      selectedFiles = [],
       onUpload,
       isUploading = false,
+      uploadStorageBlocked = false,
+      uploadStorageBlockedMessage,
     },
     ref
   ) => {
     const { message } = App.useApp();
     const uploadAreaRef = useRef<any>(null);
+    const isDataMate = (knowledgeBaseSource || "").toLowerCase() === "datamate";
     const { state: docState } = useDocumentContext();
     const { modelConfig } = useConfig();
     const { user, getAccessibleGroupIds } = useAuthorizationContext();
     const tenantId = user?.tenantId || null;
-    const storageQuota = useStorageQuotaBlocked(tenantId);
 
     // Fetch tenant groups and limit selections to accessible groups (all for admin roles).
     const { data: groupData } = useGroupList(tenantId);
@@ -188,7 +257,10 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       () => getAccessibleGroupIds(),
       [getAccessibleGroupIds]
     );
-    const { groups } = useGroupDetails(groupData?.groups ?? [], accessibleGroupIds);
+    const { groups } = useGroupDetails(
+      groupData?.groups ?? [],
+      accessibleGroupIds
+    );
 
     const groupOptions = groups.map((group) => ({
       label: group.group_name,
@@ -204,10 +276,112 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       fileType?: string;
       fileSize?: number;
     } | null>(null);
+    const handlePreviewClose = useCallback(() => {
+      setSelectedFile(null);
+    }, []);
 
     // Use fixed height instead of percentage
     const titleBarHeight = UI_CONFIG.TITLE_BAR_HEIGHT;
     const uploadHeight = UI_CONFIG.UPLOAD_COMPONENT_HEIGHT;
+    const [isAdvancedSettingsOpen, setIsAdvancedSettingsOpen] = useState(false);
+    const [assignTarget, setAssignTarget] = useState<{
+      docId: string;
+      canEdit: boolean;
+    } | null>(null);
+    // Tag metadata is only read after the user opens a tag-related UI.
+    const [tagsUiRequested, setTagsUiRequested] = useState(false);
+    const {
+      data: tagLibraries,
+      loading: tagLibrariesLoading,
+      error: tagLibrariesError,
+      refresh: refreshTagLibraries,
+    } = useTagLibraries({ enabled: tagsUiRequested });
+    const documentLibrary =
+      tagLibraries?.find((lib) => lib.bucket_key === "knowledge_content") ??
+      null;
+    const {
+      data: assignDefinitions,
+      loading: assignDefinitionsLoading,
+      refresh: refreshAssignDefinitions,
+    } = useTagDefinitions(documentLibrary?.bucket_id ?? null, {
+      enabled: tagsUiRequested,
+    });
+    const [documentPage, setDocumentPage] = useState(1);
+    const [documentPageSize, setDocumentPageSize] = useState(10);
+
+    const [tagManagementOpen, setTagManagementOpen] = useState(false);
+    const [documentPredicates, setDocumentPredicates] = useState<
+      TagDocumentPredicate[]
+    >([]);
+    const [documentBatchStatus, setDocumentBatchStatus] = useState<
+      TagDocumentBatchStatusEntry[]
+    >([]);
+
+    const activeDocumentIds = useMemo(() => {
+      if (documentPredicates.length === 0) return null;
+      return new Set(documentBatchStatus.map((entry) => entry.document_id));
+    }, [documentBatchStatus, documentPredicates]);
+
+    const projectionByDocument = useMemo(() => {
+      const map = new Map<string, TagDocumentBatchStatusEntry>();
+      for (const entry of documentBatchStatus) {
+        map.set(entry.document_id, entry);
+      }
+      return map;
+    }, [documentBatchStatus]);
+
+    // A new knowledge base or a new tag filter starts from the first page.
+    useEffect(() => {
+      setDocumentPage(1);
+    }, [knowledgeBaseId, documentPredicates]);
+
+    // Batch-fetch document tag assignment and projection status for the
+    // currently visible knowledge base. Local documents do not need the tag
+    // metadata to render their projection badges.
+    useEffect(() => {
+      const visibleIds = documents.map((doc) => doc.id);
+      if (
+        isCreatingMode ||
+        !knowledgeBaseId ||
+        visibleIds.length === 0 ||
+        (isDataMate && !documentLibrary)
+      ) {
+        setDocumentBatchStatus([]);
+        return;
+      }
+      let cancelled = false;
+      const timeoutId = window.setTimeout(() => {
+        void tagManagementApi
+          .getDocumentBatchStatus(
+            {
+              provider: "local",
+              knowledgeBaseId,
+              documentIds: visibleIds.slice(0, 200),
+            },
+            documentPredicates
+          )
+          .then((entries) => {
+            if (!cancelled) setDocumentBatchStatus(entries);
+          })
+          .catch((error) => {
+            if (!cancelled) {
+              log.error("Failed to load document tag status:", error);
+              setDocumentBatchStatus([]);
+            }
+          });
+      }, 250);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timeoutId);
+      };
+    }, [
+      documentLibrary,
+      documentPredicates,
+      documents,
+      isCreatingMode,
+      isDataMate,
+      knowledgeBaseId,
+    ]);
 
     // Sort documents by create_time (latest first)
     const sortedDocuments = [...documents].sort((a, b) => {
@@ -282,13 +456,104 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
     const [frequencyOptions, setFrequencyOptions] = useState<FrequencyOption[]>(
       []
     );
+    // v2.6.0: embedding model advanced settings modal state
+    const [embeddingAdvancedOpen, setEmbeddingAdvancedOpen] = useState(false);
+    const [embeddingAdvancedValue, setEmbeddingAdvancedValue] =
+      useState<ModelAdvancedSettingsValue>({});
     const { t } = useTranslation();
-    const isDataMate = (knowledgeBaseSource || "").toLowerCase() === "datamate";
+    const { specs: inferenceSpecs } = useInferenceFieldSpecs({
+      enabled: embeddingAdvancedOpen,
+    });
+    const {
+      hasQuota,
+      availableCapacity: quotaAvailable,
+      totalCapacity: quotaTotal,
+      usagePercent: quotaUsagePercent,
+    } = getKnowledgeBaseQuotaDisplay(quotaStatus, t);
+    let documentListClassName = "flex-grow min-h-0 overflow-auto px-6 py-5";
+    if (isCreatingMode) {
+      documentListClassName = "w-full bg-white p-2";
+    } else if (showChunk) {
+      documentListClassName = "flex-grow min-h-0 overflow-hidden px-6 pt-5";
+    }
 
     // Determine if user has read-only permission
     const isReadOnlyMode = permission === "READ_ONLY";
     const canToggleMultimodal =
       isCreatingMode && typeof onMultimodalChange === "function";
+
+    // v2.6.0: resolve the currently selected embedding model to a ModelOption
+    // for the advanced settings modal. The Select value is "displayName::type".
+    const selectedEmbeddingModelOption = React.useMemo<
+      ModelOption | undefined
+    >(() => {
+      if (!selectedEmbeddingModel || !availableEmbeddingModels)
+        return undefined;
+      const delimiterIndex = selectedEmbeddingModel.lastIndexOf("::");
+      if (delimiterIndex < 0) return undefined;
+      const displayName = selectedEmbeddingModel.slice(0, delimiterIndex);
+      const modelType = selectedEmbeddingModel.slice(delimiterIndex + 2);
+      return availableEmbeddingModels.find(
+        (m) => m.displayName === displayName && m.type === modelType
+      );
+    }, [selectedEmbeddingModel, availableEmbeddingModels]);
+
+    // Sync the advanced settings form value when opening the modal or switching models
+    React.useEffect(() => {
+      if (!embeddingAdvancedOpen) return;
+      if (!selectedEmbeddingModelOption) {
+        setEmbeddingAdvancedValue({});
+        return;
+      }
+      const existingOverride =
+        embeddingModelParamsOverride?.[
+          String(selectedEmbeddingModelOption.id)
+        ] ?? {};
+      const hasOverride = Object.keys(existingOverride).length > 0;
+      // When no per-KB override exists yet, fall back to the model-level defaults
+      // (temperature/top_p/extra_params, including __custom__) so the user can
+      // see the currently effective values. Once an override exists, it takes
+      // precedence.
+      const formRecord = hasOverride
+        ? existingOverride
+        : {
+            temperature: selectedEmbeddingModelOption.temperature,
+            top_p: selectedEmbeddingModelOption.topP,
+            extra_params: selectedEmbeddingModelOption.extraParams,
+          };
+      setEmbeddingAdvancedValue(
+        advancedSettingsValueFromRecord(
+          formRecord,
+          inferenceSpecs,
+          selectedEmbeddingModelOption.type
+        )
+      );
+    }, [
+      embeddingAdvancedOpen,
+      selectedEmbeddingModelOption,
+      embeddingModelParamsOverride,
+      inferenceSpecs,
+    ]);
+
+    const handleEmbeddingAdvancedChange = (
+      next: ModelAdvancedSettingsValue
+    ) => {
+      setEmbeddingAdvancedValue(next);
+      if (
+        !selectedEmbeddingModelOption ||
+        !onEmbeddingModelParamsOverrideChange
+      )
+        return;
+      const entry = buildModelOverrideEntry(next);
+      const current = embeddingModelParamsOverride ?? {};
+      const updated = { ...current };
+      if (Object.keys(entry).length === 0) {
+        delete updated[String(selectedEmbeddingModelOption.id)];
+      } else {
+        updated[String(selectedEmbeddingModelOption.id)] = entry;
+      }
+      onEmbeddingModelParamsOverrideChange(updated);
+    };
 
     // Permission options with icons shown inside dropdown
     const permissionOptions = [
@@ -345,7 +610,12 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         };
         initDefaultGroup();
       }
-    }, [isCreatingMode, tenantId, accessibleGroupIds, onSelectedGroupIdsChange]);
+    }, [
+      isCreatingMode,
+      tenantId,
+      accessibleGroupIds,
+      onSelectedGroupIdsChange,
+    ]);
 
     // Clear group IDs when permission is set to PRIVATE
     React.useEffect(() => {
@@ -561,6 +831,28 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
       }
     };
 
+    const filteredDocuments = activeDocumentIds
+      ? sortedDocuments.filter((doc) => activeDocumentIds.has(doc.id))
+      : sortedDocuments;
+    const filteredDocumentCount = filteredDocuments.length;
+    const documentPageCount = Math.max(
+      1,
+      Math.ceil(filteredDocumentCount / documentPageSize)
+    );
+    const currentDocumentPage = Math.min(documentPage, documentPageCount);
+    const pagedDocuments = isDataMate
+      ? filteredDocuments
+      : filteredDocuments.slice(
+          (currentDocumentPage - 1) * documentPageSize,
+          currentDocumentPage * documentPageSize
+        );
+
+    // Deleting or filtering can shrink the list; converge on the last page
+    // without resetting the page while polling refreshes documents.
+    useEffect(() => {
+      if (documentPage > documentPageCount) setDocumentPage(documentPageCount);
+    }, [documentPage, documentPageCount]);
+
     const containerHeightClass =
       CONTAINER_HEIGHT_CLASS_MAP[containerHeight] ?? "h-full";
     const titleBarHeightClass =
@@ -568,222 +860,168 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
 
     return (
       <div
-        className={`flex flex-col w-full h-full bg-white border border-gray-200 rounded-md shadow-sm overflow-hidden`}
+        className={`relative flex w-full flex-col overflow-x-hidden shadow-sm ${
+          isCreatingMode
+            ? "overflow-hidden rounded-2xl border border-gray-200 bg-white"
+            : "h-full overflow-hidden rounded-2xl border border-gray-200 bg-white"
+        }`}
       >
         {/* Title bar */}
         <div
-          className={`${LAYOUT.KB_HEADER_PADDING} border-b border-gray-200 flex-shrink-0 flex items-start ${titleBarHeightClass}`}
+          className={`${
+            isCreatingMode
+              ? "border-b border-gray-200 px-5 pb-5 pt-6"
+              : "border-b border-gray-100 px-6 pb-5 pt-6"
+          } flex-shrink-0 flex items-start ${titleBarHeightClass}`}
         >
           <div
-            className="flex items-start justify-between w-full"
+            className="flex w-full items-start justify-between gap-4"
             style={{ width: "100%" }}
           >
-            <div className="flex items-start flex-1 min-w-0 overflow-hidden">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-5 gap-y-2 overflow-hidden">
               {isCreatingMode ? (
-                <div className="flex flex-wrap items-start gap-3 w-full overflow-hidden">
-                  <div
-                    className="flex flex-col flex-1"
-                    style={{ minWidth: 120 }}
-                  >
-                    <Input
-                      value={knowledgeBaseName}
-                      onChange={(e) =>
-                        onNameChange && onNameChange(e.target.value)
-                      }
-                      placeholder={t("document.input.knowledgeBaseName")}
-                      className={`${LAYOUT.KB_TITLE_MARGIN} max-w-[240px] font-medium`}
-                      size="large"
-                      prefix={<span className="text-blue-600">📚</span>}
-                      status={
-                        isCreatingMode &&
-                        (nameStatus === NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
-                          nameStatus ===
-                            NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT)
-                          ? "error"
-                          : undefined
-                      }
-                      autoFocus
-                      disabled={
-                        hasDocuments ||
-                        isUploading ||
-                        docState.isLoadingDocuments
-                      }
-                    />
-                    {isCreatingMode &&
-                      (nameStatus === NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
-                        nameStatus ===
-                          NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT) && (
-                        <div className="flex items-center gap-1 text-red-500 text-s whitespace-nowrap mt-0.5 ml-3">
-                          <AlertCircle size={14} />
-                          <span>
-                            {t("tenantResources.knowledgeBase.nameExists")}
-                          </span>
-                        </div>
-                      )}
-                  </div>
-                  {/* Right dropdowns for create mode */}
-                  <div
-                    className="flex items-center justify-end flex-wrap"
-                    style={{ gap: "12px" }}
-                  >
-                    {/* Embedding model selection - first position in create mode */}
-                    {isCreatingMode && onEmbeddingModelChange && (
-                      <Select
-                        value={selectedEmbeddingModel}
-                        onChange={onEmbeddingModelChange}
-                        style={{
-                          flex: "1 1 200px",
-                          minWidth: 200,
-                          justifyContent: "center",
-                          alignItems: "flex-end",
-                        }}
-                        placeholder={
-                          t("knowledgeBase.create.embeddingModelPlaceholder") ||
-                          "Select embedding model"
-                        }
-                        allowClear={false}
-                        options={[
-                          {
-                            label: t("modelConfig.option.embeddingModel"),
-                            options: embeddingModelsForOptions
-                              .filter((model) => model.type === "embedding")
-                              .map((model) => ({
-                                value: `${model.displayName}::${model.type}`,
-                                label: model.displayName,
-                                disabled: !isEmbeddingModelSelectable(model),
-                              })),
-                          },
-                          {
-                            label: t("modelConfig.option.multiEmbeddingModel"),
-                            options: embeddingModelsForOptions
-                              .filter(
-                                (model) => model.type === "multi_embedding"
-                              )
-                              .map((model) => ({
-                                value: `${model.displayName}::${model.type}`,
-                                label: model.displayName,
-                                disabled: !isEmbeddingModelSelectable(model),
-                              })),
-                          },
-                        ].filter((group) => group.options.length > 0)}
-                      />
-                    )}
-                    {/* User groups multi-select */}
-                    <Can permission="kb.groups:update">
-                      <Select
-                        mode="multiple"
-                        value={isGroupSelectDisabled ? [] : selectedGroupIds}
-                        onChange={onSelectedGroupIdsChange}
-                        style={{
-                          flex: "1 1 200px",
-                          minWidth: 200,
-                          justifyContent: "center",
-                          alignItems: "flex-end",
-                        }}
-                        placeholder={t(
-                          "knowledgeBase.create.permission.groupPlaceholder"
-                        )}
-                        options={groupOptions}
-                        maxTagCount={2}
-                        allowClear
-                        disabled={isGroupSelectDisabled}
-                      />
-                    </Can>
-                    {/* Group permission dropdown */}
-                    <Can permission="kb.groups:update">
-                      <Select
-                        value={ingroupPermission}
-                        onChange={onIngroupPermissionChange}
-                        style={{
-                          flex: "1 1 160px",
-                          minWidth: 160,
-                          justifyContent: "center",
-                          alignItems: "flex-end",
-                        }}
-                        placeholder={t(
-                          "knowledgeBase.ingroup.permission.DEFAULT"
-                        )}
-                        options={permissionOptions}
-                      />
-                    </Can>
-                    {onPreserveSourceFileChange && (
-                      <Select
-                        value={preserveSourceFile}
-                        onChange={onPreserveSourceFileChange}
-                        style={{
-                          flex: "1 1 200px",
-                          minWidth: 200,
-                          justifyContent: "center",
-                          alignItems: "flex-end",
-                        }}
-                        allowClear={false}
-                        options={[
-                          {
-                            value: true,
-                            label: t("knowledgeBase.create.preserveSourceFile"),
-                          },
-                          {
-                            value: false,
-                            label: t("knowledgeBase.tag.noPreserveSourceFile"),
-                          },
-                        ]}
-                      />
-                    )}
-                    {onQuotaLimitBytesChange && (
-                      <Space size={4}>
-                        <InputNumber
-                          value={
-                            quotaLimitBytes != null
-                              ? quotaUnit === "GB"
-                                ? Math.round(
-                                    quotaLimitBytes / (1024 * 1024 * 1024)
-                                  )
-                                : Math.round(quotaLimitBytes / (1024 * 1024))
-                              : null
-                          }
-                          onChange={(v) => {
-                            if (v == null) {
-                              onQuotaLimitBytesChange(null);
-                            } else if (quotaUnit === "GB") {
-                              onQuotaLimitBytesChange(v * 1024 * 1024 * 1024);
-                            } else {
-                              onQuotaLimitBytesChange(v * 1024 * 1024);
-                            }
-                          }}
-                          addonAfter={quotaUnit}
-                          placeholder={t("quota.unlimited", "无限制")}
-                          min={0}
-                          precision={0}
-                          style={{ width: 130 }}
-                        />
-                        <Segmented
-                          size="small"
-                          options={["GB", "MB"]}
-                          value={quotaUnit}
-                          onChange={(val) => setQuotaUnit(val as "GB" | "MB")}
-                        />
-                      </Space>
-                    )}
-                  </div>
+                <div className="w-full">
+                  <h2 className="text-xl font-semibold tracking-tight text-gray-900">
+                    {t("document.title.createNew")}
+                  </h2>
+                  <p className="mt-1 text-sm text-gray-500">
+                    {t("knowledgeBase.create.subtitle")}
+                  </p>
                 </div>
               ) : (
-                <h3
-                  className={`${LAYOUT.KB_TITLE_MARGIN} ${LAYOUT.KB_TITLE_SIZE} font-semibold text-blue-500 flex items-center truncate`}
-                >
-                  {knowledgeBaseName}
-                </h3>
-              )}
-              {modelMismatch && !isCreatingMode && (
-                <div className="ml-3 mt-0.5 px-1.5 py-1 inline-flex items-center rounded-md text-xs font-medium bg-yellow-100 text-yellow-800 border border-yellow-200">
-                  {getMismatchInfo()}
-                </div>
+                <>
+                  <div className="flex min-w-0 flex-[1_1_260px] items-center gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                      <FileTextOutlined />
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="truncate text-xl font-semibold tracking-tight text-blue-600">
+                        {knowledgeBaseName}
+                      </h3>
+                      <div className="mt-1 flex min-w-0 flex-wrap items-center gap-2 text-sm text-gray-500">
+                        <span>
+                          {t("knowledgeBase.tag.documents", {
+                            count: documents.length,
+                          })}
+                        </span>
+                        {modelMismatch && (
+                          <span
+                            className="max-w-full truncate rounded-md border border-yellow-200 bg-yellow-50 px-2 py-1 text-xs font-medium text-yellow-800"
+                            title={getMismatchInfo()}
+                          >
+                            {getMismatchInfo()}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {quotaStatus && (
+                    <div className="min-w-[240px] max-w-[420px] flex-[1_1_300px] rounded-lg border border-gray-100 bg-gray-50/80 px-3 py-2">
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                        <span className="font-medium text-gray-600">
+                          {t("knowledgeBase.capacity.title")}
+                        </span>
+                        <span className="text-gray-500">
+                          {t("knowledgeBase.capacity.available")}:{" "}
+                          {quotaAvailable}
+                        </span>
+                        <span className="text-gray-500">
+                          {t("knowledgeBase.capacity.total")}: {quotaTotal}
+                        </span>
+                        {hasQuota && (
+                          <span className="text-gray-400">
+                            {Math.round(quotaUsagePercent)}%
+                          </span>
+                        )}
+                      </div>
+                      {hasQuota && (
+                        <Progress
+                          className="!mb-0 !mt-1"
+                          percent={quotaUsagePercent}
+                          showInfo={false}
+                          size="small"
+                          status={
+                            quotaStatus.kb_warning_level === "exceeded"
+                              ? "exception"
+                              : "normal"
+                          }
+                        />
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </div>
-            {/* Right: overview and detail buttons */}
+            {/* Right: tag filter, Tag Management, overview and detail buttons */}
             {!isCreatingMode && !isDataMate && (
-              <div className="flex gap-2 flex-shrink-0 ml-3">
+              <div className="ml-3 flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <Popover
+                  trigger="click"
+                  placement="bottomRight"
+                  title={t("document.tagFilter.placeholder")}
+                  onOpenChange={(open) => {
+                    if (open) setTagsUiRequested(true);
+                  }}
+                  content={
+                    <div className="w-64">
+                      {assignDefinitions ? (
+                        <>
+                          <TagFilterControls
+                            definitions={assignDefinitions}
+                            value={documentPredicates}
+                            onChange={setDocumentPredicates}
+                          />
+                          {documentPredicates.length > 0 && (
+                            <Button
+                              size="small"
+                              block
+                              className="mt-2"
+                              onClick={() => setDocumentPredicates([])}
+                            >
+                              {t("document.tagFilter.clear")}
+                            </Button>
+                          )}
+                        </>
+                      ) : tagLibrariesLoading || assignDefinitionsLoading ? (
+                        <div className="flex justify-center py-2">
+                          <Spin size="small" />
+                        </div>
+                      ) : (
+                        <Button
+                          size="small"
+                          block
+                          onClick={() => {
+                            if (tagLibrariesError) void refreshTagLibraries();
+                            else void refreshAssignDefinitions();
+                          }}
+                        >
+                          {t("repository.common.retry")}
+                        </Button>
+                      )}
+                    </div>
+                  }
+                >
+                  <Button
+                    icon={<FilterOutlined />}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {t("document.tagFilter.placeholder")}
+                  </Button>
+                </Popover>
+                {!isReadOnlyMode && (
+                  <Button
+                    icon={<Tag size={16} />}
+                    onClick={() => {
+                      setTagsUiRequested(true);
+                      setTagManagementOpen(true);
+                    }}
+                  >
+                    {t("knowledgeBase.button.tagManagement")}
+                  </Button>
+                )}
                 <Button
-                  type="primary"
+                  type={showDetail ? "primary" : "default"}
+                  size="middle"
                   icon={<BookText size={16} />}
                   onClick={() => {
                     if (showDetail) {
@@ -799,7 +1037,8 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                   {t("document.button.overview")}
                 </Button>
                 <Button
-                  type="primary"
+                  type={showChunk ? "primary" : "default"}
+                  size="middle"
                   icon={<Pilcrow size={16} />}
                   onClick={() => {
                     if (showChunk) {
@@ -812,6 +1051,17 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
                 >
                   {t("document.button.detail")}
                 </Button>
+                {onRefresh && (
+                  <Tooltip title={t("common.refresh")}>
+                    <Button
+                      aria-label={t("common.refresh")}
+                      className="!h-10 !w-10 !rounded-lg !p-0"
+                      icon={<ReloadOutlined spin={isUploading} />}
+                      onClick={onRefresh}
+                      disabled={isUploading || docState.isLoadingDocuments}
+                    />
+                  </Tooltip>
+                )}
               </div>
             )}
           </div>
@@ -820,9 +1070,7 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
         {/* Document list */}
 
         <div
-          className={`p-2 flex-grow min-h-0 ${
-            showChunk ? "overflow-hidden" : "overflow-auto"
-          }`}
+          className={documentListClassName}
           onDragOver={(e) => {
             if (!isCreatingMode && knowledgeBaseName) {
               return;
@@ -844,20 +1092,30 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
           }}
         >
           {showChunk ? (
-            <div className="flex h-full min-h-0 flex-col px-8">
-              <DocumentChunk
-                knowledgeBaseName={knowledgeBaseName}
-                knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
-                documents={documents}
-                getFileIcon={getFileIcon}
-                currentEmbeddingModel={currentModel}
-                knowledgeBaseEmbeddingModel={knowledgeBaseModel}
-                onChunkCountChange={onChunkCountChange}
-                permission={permission}
-              />
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="min-h-0 flex-1">
+                <DocumentChunk
+                  knowledgeBaseName={knowledgeBaseName}
+                  knowledgeBaseId={knowledgeBaseId || knowledgeBaseName}
+                  documents={documents}
+                  getFileIcon={getFileIcon}
+                  onChunkCountChange={onChunkCountChange}
+                  permission={permission}
+                />
+              </div>
+              <div className="flex shrink-0 justify-end py-3">
+                <Button
+                  size="large"
+                  onClick={() => {
+                    setShowChunk(false);
+                  }}
+                >
+                  {t("common.back")}
+                </Button>
+              </div>
             </div>
           ) : showDetail ? (
-            <div className="px-8 py-4 h-full flex flex-col">
+            <div className="flex h-full flex-col">
               <div className="flex items-center justify-between mb-5">
                 <span className="font-bold text-lg">
                   {t("document.summary.title")}
@@ -997,215 +1255,615 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
               </div>
             </div>
           ) : isCreatingMode ? (
-            hasDocuments || isUploading || docState.isLoadingDocuments ? (
-              <div className="flex items-center justify-center border border-gray-200 rounded-md h-full">
-                <div className="text-center">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
-                  <p className="text-sm text-gray-600">
-                    {t("document.status.waitingForTask")}
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center justify-center border border-gray-200 rounded-md h-full">
-                <div className="text-center p-6">
-                  <div className="mb-4 text-blue-600 text-[36px]">
-                    <InfoCircleFilled />
+            <div className="flex flex-col">
+              {hasDocuments || isUploading || docState.isLoadingDocuments ? (
+                <div className="flex min-h-[220px] items-center justify-center rounded-md border border-gray-200">
+                  <div className="text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+                    <p className="text-sm text-gray-600">
+                      {t("document.status.waitingForTask")}
+                    </p>
                   </div>
-                  <h3 className="text-lg font-medium text-gray-800 mb-2">
-                    {t("document.title.createNew")}
-                  </h3>
-                  <p className="text-gray-500 text-sm max-w-md">
-                    {t("document.hint.uploadToCreate")}
-                  </p>
                 </div>
-              </div>
-            )
-          ) : sortedDocuments.length > 0 ? (
-            <div className="overflow-y-auto border border-gray-200 rounded-md h-full">
-              <table className="min-w-full bg-white">
-                <thead
-                  className={`${LAYOUT.TABLE_HEADER_BG} sticky top-0 z-10`}
-                >
-                  <tr>
-                    <th
-                      className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.NAME}]`}
-                    >
-                      {t("document.table.header.name")}
-                    </th>
-                    <th
-                      className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.STATUS}]`}
-                    >
-                      {t("document.table.header.status")}
-                    </th>
-                    {!isDataMate && (
-                      <th
-                        className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.SIZE}]`}
-                      >
-                        {t("document.table.header.size")}
-                      </th>
+              ) : (
+                <div className="flex flex-col gap-3 px-3 py-4">
+                  <div className="shrink-0">
+                    <label className="mb-2 block text-sm font-medium text-gray-900">
+                      {t("knowledgeBase.create.field.name")}{" "}
+                      <span className="text-red-500">*</span>
+                    </label>
+                    <Input
+                      value={knowledgeBaseName}
+                      onChange={(e) =>
+                        onNameChange && onNameChange(e.target.value)
+                      }
+                      placeholder={t(
+                        "knowledgeBase.create.namePlaceholder",
+                        "例如：产品知识中心"
+                      )}
+                      className="!rounded-xl"
+                      size="large"
+                      status={
+                        nameStatus === NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
+                        nameStatus === NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT
+                          ? "error"
+                          : undefined
+                      }
+                      autoFocus
+                      disabled={
+                        hasDocuments ||
+                        isUploading ||
+                        docState.isLoadingDocuments
+                      }
+                    />
+                    {(nameStatus === NAME_CHECK_STATUS.EXISTS_IN_TENANT ||
+                      nameStatus ===
+                        NAME_CHECK_STATUS.EXISTS_IN_OTHER_TENANT) && (
+                      <div className="mt-2 flex items-center gap-1 text-xs text-red-500">
+                        <AlertCircle size={14} />
+                        <span>
+                          {t("tenantResources.knowledgeBase.nameExists")}
+                        </span>
+                      </div>
                     )}
-                    <th
-                      className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.DATE}]`}
-                    >
-                      {t("document.table.header.date")}
-                    </th>
-                    {!isDataMate && (
-                      <th
-                        className={`${LAYOUT.CELL_PADDING} text-left ${LAYOUT.HEADER_TEXT} w-[${COLUMN_WIDTHS.ACTION}]`}
-                      >
-                        {t("document.table.header.action")}
-                      </th>
+                  </div>
+
+                  <div className="shrink-0">
+                    <div className="mb-1 text-xs font-medium text-gray-900">
+                      {t("knowledgeBase.create.uploadTitle")}{" "}
+                      <span className="text-red-500">*</span>
+                    </div>
+                    <div className="h-[146px]">
+                      <UploadArea
+                        ref={uploadAreaRef}
+                        onFileSelect={onFileSelect}
+                        onUpload={onUpload || (async () => {})}
+                        isUploading={isUploading}
+                        isDragging={isDragging}
+                        onDragOver={onDragOver}
+                        onDragLeave={onDragLeave}
+                        onDrop={onDrop}
+                        disabled={uploadStorageBlocked || isReadOnlyMode}
+                        disabledMessage={
+                          uploadStorageBlocked
+                            ? uploadStorageBlockedMessage ||
+                              t(
+                                "quota.uploadBlocked",
+                                "Uploads are blocked - storage limit reached"
+                              )
+                            : undefined
+                        }
+                        componentHeight={uploadHeight}
+                        isCreatingMode
+                        indexName={knowledgeBaseId || "new-knowledge-base"}
+                        newKnowledgeBaseName={knowledgeBaseName}
+                        modelMismatch={modelMismatch}
+                        onNameStatusChange={setNameStatus}
+                        selectedFiles={selectedFiles}
+                        autoUpload={false}
+                      />
+                    </div>
+                  </div>
+
+                  {onEmbeddingModelChange && (
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-gray-900">
+                        {t("knowledgeBase.create.field.embeddingModel")}{" "}
+                        <span className="text-red-500">*</span>
+                      </label>
+                      <Select
+                        value={selectedEmbeddingModel}
+                        onChange={onEmbeddingModelChange}
+                        className="w-full"
+                        size="large"
+                        placeholder={
+                          t("knowledgeBase.create.embeddingModelPlaceholder") ||
+                          "Select embedding model"
+                        }
+                        allowClear={false}
+                        options={[
+                          {
+                            label: t("modelConfig.option.embeddingModel"),
+                            options: embeddingModelsForOptions
+                              .filter((model) => model.type === "embedding")
+                              .map((model) => ({
+                                value: [model.displayName, model.type].join(
+                                  "::"
+                                ),
+                                label: model.displayName,
+                                disabled: !isEmbeddingModelSelectable(model),
+                              })),
+                          },
+                          {
+                            label: t("modelConfig.option.multiEmbeddingModel"),
+                            options: embeddingModelsForOptions
+                              .filter(
+                                (model) => model.type === "multi_embedding"
+                              )
+                              .map((model) => ({
+                                value: [model.displayName, model.type].join(
+                                  "::"
+                                ),
+                                label: model.displayName,
+                                disabled: !isEmbeddingModelSelectable(model),
+                              })),
+                          },
+                        ].filter((group) => group.options.length > 0)}
+                      />
+                      <Button
+                        size="small"
+                        icon={<Settings2 size={14} />}
+                        onClick={() => setEmbeddingAdvancedOpen(true)}
+                        disabled={
+                          !selectedEmbeddingModel ||
+                          !availableEmbeddingModels ||
+                          availableEmbeddingModels.length === 0
+                        }
+                        title={t(
+                          "knowledgeBase.create.embeddingAdvancedSettings",
+                          {
+                            defaultValue: "高级设置",
+                          }
+                        )}
+                      />
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    className={
+                      isAdvancedSettingsOpen
+                        ? "flex w-full items-center justify-between rounded-xl border-2 border-blue-300 bg-gray-50 px-4 py-3 text-left transition-colors"
+                        : "flex w-full items-center justify-between rounded-xl border-2 border-gray-200 bg-gray-50 px-4 py-3 text-left transition-colors hover:border-blue-300"
+                    }
+                    onClick={() =>
+                      setIsAdvancedSettingsOpen((isOpen) => !isOpen)
+                    }
+                  >
+                    <span className="flex items-center gap-2 text-base font-medium text-gray-900">
+                      <SlidersHorizontal size={16} />
+                      {t("knowledgeBase.create.advancedSettings")}
+                    </span>
+                    {isAdvancedSettingsOpen ? (
+                      <ChevronUp size={18} />
+                    ) : (
+                      <ChevronDown size={18} />
                     )}
-                  </tr>
-                </thead>
-                <tbody className={LAYOUT.TABLE_ROW_DIVIDER}>
-                  {sortedDocuments.map((doc) => (
-                    <tr key={doc.id} className={LAYOUT.TABLE_ROW_HOVER}>
-                      <td className={LAYOUT.CELL_PADDING}>
-                        <div className="flex items-center">
-                          <span
-                            className={`${LAYOUT.ICON_MARGIN} ${LAYOUT.ICON_SIZE}`}
-                          >
-                            {getFileIcon(doc.type)}
-                          </span>
-                          <span
-                            className={`${LAYOUT.TEXT_SIZE} font-medium text-gray-800 truncate max-w-[${DOCUMENT_NAME_CONFIG.MAX_WIDTH}] whitespace-${DOCUMENT_NAME_CONFIG.WHITE_SPACE} overflow-${DOCUMENT_NAME_CONFIG.OVERFLOW} text-${DOCUMENT_NAME_CONFIG.TEXT_OVERFLOW}`}
-                            title={doc.name}
-                          >
-                            {doc.name}
-                          </span>
-                        </div>
-                      </td>
-                      <td className={LAYOUT.CELL_PADDING}>
-                        <div className="flex items-center">
-                          <DocumentStatus
-                            status={doc.status}
-                            showIcon={true}
-                            errorReason={doc.error_reason}
-                            kbId={knowledgeBaseId}
-                            docId={doc.id}
-                            processedChunkNum={doc.processed_chunk_num}
-                            totalChunkNum={doc.total_chunk_num}
+                  </button>
+
+                  {isAdvancedSettingsOpen && (
+                    <div className="grid grid-cols-1 gap-2 rounded-2xl border border-gray-200 bg-gray-50/60 p-3">
+                      <Can permission="kb.groups:update">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-900">
+                            {t("knowledgeBase.create.field.permission")}
+                          </label>
+                          <Select
+                            value={ingroupPermission}
+                            onChange={onIngroupPermissionChange}
+                            className="w-full"
+                            size="middle"
+                            placeholder={t(
+                              "knowledgeBase.ingroup.permission.DEFAULT"
+                            )}
+                            options={permissionOptions}
                           />
                         </div>
-                      </td>
-                      {!isDataMate && (
-                        <td
-                          className={`${LAYOUT.CELL_PADDING} ${LAYOUT.TEXT_SIZE} text-gray-600`}
-                        >
-                          {formatFileSize(doc.size)}
-                        </td>
-                      )}
-                      <td
-                        className={`${LAYOUT.CELL_PADDING} ${LAYOUT.TEXT_SIZE} text-gray-600`}
-                      >
-                        {new Date(doc.create_time).toLocaleString()}
-                      </td>
-                      {!isDataMate && (
-                        <td className={LAYOUT.CELL_PADDING}>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => {
-                                const objectName =
-                                  extractObjectNameFromUrl(doc.id) || undefined;
-                                if (!objectName) {
-                                  message.warning(
-                                    t("filePreview.previewFailed")
-                                  );
-                                  return;
-                                }
+                      </Can>
 
-                                setSelectedFile({
-                                  objectName,
-                                  fileName: doc.name,
-                                  fileType: doc.type,
-                                  fileSize: doc.size,
-                                });
-                              }}
-                              className={LAYOUT.PREVIEW_TEXT}
-                              title={t("common.preview")}
-                            >
-                              {t("common.preview")}
-                            </button>
-                            {!isReadOnlyMode && (
-                              <button
-                                onClick={() => onDelete(doc.id)}
-                                className={LAYOUT.ACTION_TEXT}
-                                title={
-                                  doc.status === DOCUMENT_STATUS.PROCESSING ||
-                                  doc.status === DOCUMENT_STATUS.FORWARDING
-                                    ? t("document.delete.terminateTask")
-                                    : undefined
-                                }
-                              >
-                                {t("common.delete")}
-                              </button>
+                      <Can permission="kb.groups:update">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-900">
+                            {t("knowledgeBase.create.field.groups")}
+                          </label>
+                          <Select
+                            mode="multiple"
+                            showSearch={{ optionFilterProp: "label" }}
+                            value={
+                              isGroupSelectDisabled ? [] : selectedGroupIds
+                            }
+                            onChange={onSelectedGroupIdsChange}
+                            className="w-full"
+                            size="middle"
+                            placeholder={t(
+                              "knowledgeBase.create.permission.groupPlaceholder"
                             )}
+                            options={groupOptions}
+                            maxTagCount={2}
+                            allowClear
+                            disabled={isGroupSelectDisabled}
+                          />
+                        </div>
+                      </Can>
+
+                      {onPreserveSourceFileChange && (
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-gray-900">
+                            {t("knowledgeBase.create.field.preserve")}
+                          </label>
+                          <Select
+                            value={preserveSourceFile}
+                            onChange={onPreserveSourceFileChange}
+                            className="w-full"
+                            size="middle"
+                            allowClear={false}
+                            options={[
+                              {
+                                value: true,
+                                label: t(
+                                  "knowledgeBase.create.preserveSourceFile"
+                                ),
+                              },
+                              {
+                                value: false,
+                                label: t(
+                                  "knowledgeBase.tag.noPreserveSourceFile"
+                                ),
+                              },
+                            ]}
+                          />
+                        </div>
+                      )}
+
+                      {onQuotaLimitBytesChange && (
+                        <div>
+                          <label className="mb-2 block text-sm font-medium text-gray-900">
+                            {t("knowledgeBase.create.field.quota")}
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <InputNumber
+                              value={
+                                quotaLimitBytes != null
+                                  ? quotaUnit === "GB"
+                                    ? Math.round(
+                                        quotaLimitBytes / (1024 * 1024 * 1024)
+                                      )
+                                    : Math.round(
+                                        quotaLimitBytes / (1024 * 1024)
+                                      )
+                                  : null
+                              }
+                              onChange={(v) => {
+                                if (v == null) {
+                                  onQuotaLimitBytesChange(null);
+                                } else if (quotaUnit === "GB") {
+                                  onQuotaLimitBytesChange(
+                                    v * 1024 * 1024 * 1024
+                                  );
+                                } else {
+                                  onQuotaLimitBytesChange(v * 1024 * 1024);
+                                }
+                              }}
+                              addonAfter={quotaUnit}
+                              placeholder={t("quota.unlimited", "无限制")}
+                              min={0}
+                              precision={0}
+                              className="min-w-0 flex-1"
+                              size="middle"
+                            />
+                            <Segmented
+                              size="middle"
+                              options={["GB", "MB"]}
+                              value={quotaUnit}
+                              onChange={(val) =>
+                                setQuotaUnit(val as "GB" | "MB")
+                              }
+                            />
                           </div>
-                        </td>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : filteredDocuments.length > 0 ? (
+            <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-gray-200">
+              <div className="min-h-0 flex-1 overflow-auto">
+                <table className="min-w-full bg-white">
+                  <thead className="sticky top-0 z-10 bg-gray-50">
+                    <tr>
+                      <th
+                        className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.NAME}]`}
+                      >
+                        {t("document.table.header.name")}
+                      </th>
+                      {!isDataMate && (
+                        <th className="min-w-[180px] px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500">
+                          {t("document.table.header.tags")}
+                        </th>
+                      )}
+                      <th
+                        className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.STATUS}]`}
+                      >
+                        {t("document.table.header.status")}
+                      </th>
+                      {!isDataMate && (
+                        <th
+                          className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.SIZE}]`}
+                        >
+                          {t("document.table.header.size")}
+                        </th>
+                      )}
+                      <th
+                        className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.DATE}]`}
+                      >
+                        {t("document.table.header.date")}
+                      </th>
+                      {!isDataMate && (
+                        <th
+                          className={`px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-gray-500 w-[${COLUMN_WIDTHS.ACTION}]`}
+                        >
+                          {t("document.table.header.action")}
+                        </th>
                       )}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {pagedDocuments.map((doc) => (
+                      <tr
+                        key={doc.id}
+                        className="transition-colors hover:bg-gray-50"
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center">
+                            <span
+                              className={`${LAYOUT.ICON_MARGIN} ${LAYOUT.ICON_SIZE}`}
+                            >
+                              {getFileIcon(doc.type)}
+                            </span>
+                            <span
+                              className={`${LAYOUT.TEXT_SIZE} font-medium text-gray-800 truncate max-w-[${DOCUMENT_NAME_CONFIG.MAX_WIDTH}] whitespace-${DOCUMENT_NAME_CONFIG.WHITE_SPACE} overflow-${DOCUMENT_NAME_CONFIG.OVERFLOW} text-${DOCUMENT_NAME_CONFIG.TEXT_OVERFLOW}`}
+                              title={doc.name}
+                            >
+                              {doc.name}
+                            </span>
+                            {(() => {
+                              const entry = projectionByDocument.get(doc.id);
+                              const status = entry?.projection_status?.status;
+                              if (status === "pending" || status === "failed") {
+                                return (
+                                  <Tooltip
+                                    title={t(
+                                      status === "failed"
+                                        ? "document.tagProjection.failed"
+                                        : "document.tagProjection.pending"
+                                    )}
+                                  >
+                                    <span
+                                      className={`ml-1 inline-flex items-center rounded px-1 text-[10px] leading-4 ${
+                                        status === "failed"
+                                          ? "bg-red-100 text-red-700"
+                                          : "bg-amber-100 text-amber-700"
+                                      }`}
+                                    >
+                                      {status}
+                                    </span>
+                                  </Tooltip>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </div>
+                        </td>
+                        {!isDataMate && (
+                          <td className="px-4 py-3 align-top">
+                            {knowledgeBaseId && (doc.tags ?? []).length > 0 ? (
+                              <TagChips
+                                assignments={doc.tags ?? []}
+                                max={5}
+                                overflowLabel="..."
+                                singleLine
+                              />
+                            ) : (
+                              <span className="text-sm text-gray-400">—</span>
+                            )}
+                          </td>
+                        )}
+                        <td className="px-4 py-3">
+                          <div className="flex items-center">
+                            <DocumentStatus
+                              status={doc.status}
+                              showIcon={true}
+                              errorCode={doc.error_code}
+                              errorReason={doc.error_reason}
+                              kbId={knowledgeBaseId}
+                              docId={doc.id}
+                              fileId={doc.file_id}
+                              processedChunkNum={doc.processed_chunk_num}
+                              totalChunkNum={doc.total_chunk_num}
+                            />
+                          </div>
+                        </td>
+                        {!isDataMate && (
+                          <td className="px-4 py-3 text-sm text-gray-600">
+                            {formatFileSize(doc.size)}
+                          </td>
+                        )}
+                        <td className="px-4 py-3 text-sm text-gray-600">
+                          {new Date(doc.create_time).toLocaleString()}
+                        </td>
+                        {!isDataMate && (
+                          <td className="px-4 py-3">
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => {
+                                  const objectName =
+                                    extractObjectNameFromUrl(doc.id) ||
+                                    undefined;
+                                  if (!objectName) {
+                                    message.warning(
+                                      t("filePreview.previewFailed")
+                                    );
+                                    return;
+                                  }
+
+                                  setSelectedFile({
+                                    objectName,
+                                    fileName: doc.name,
+                                    fileType: doc.type,
+                                    fileSize: doc.size,
+                                  });
+                                }}
+                                className={LAYOUT.ACTION_PREVIEW_TEXT}
+                                title={t("common.preview")}
+                              >
+                                {t("common.preview")}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (!knowledgeBaseId) return;
+                                  setTagsUiRequested(true);
+                                  setAssignTarget({
+                                    docId: doc.id,
+                                    canEdit: !isReadOnlyMode,
+                                  });
+                                }}
+                                className={LAYOUT.ACTION_PREVIEW_TEXT}
+                                title={t("document.action.assignTags")}
+                              >
+                                {t("document.action.assignTags")}
+                              </button>
+                              {!isReadOnlyMode && (
+                                <button
+                                  onClick={() => onDelete(doc.id, doc.file_id)}
+                                  className={LAYOUT.ACTION_DELETE_TEXT}
+                                  title={
+                                    doc.status === DOCUMENT_STATUS.PROCESSING ||
+                                    doc.status === DOCUMENT_STATUS.FORWARDING
+                                      ? t("document.delete.terminateTask")
+                                      : undefined
+                                  }
+                                >
+                                  {t("common.delete")}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {!isDataMate && (
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-gray-100 px-4 py-2 text-xs">
+                  <span>
+                    {t("agentConfig.list.total", {
+                      count: filteredDocumentCount,
+                    })}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Select
+                      aria-label={t("agentConfig.list.pageSize")}
+                      value={documentPageSize}
+                      options={[10, 20, 50].map((size) => ({
+                        value: size,
+                        label: t("agentConfig.list.perPage", { count: size }),
+                      }))}
+                      onChange={(size) => {
+                        setDocumentPageSize(size);
+                        setDocumentPage(1);
+                      }}
+                      className="!h-8 !w-[116px]"
+                    />
+                    <StandardPaginator
+                      current={currentDocumentPage}
+                      pageSize={documentPageSize}
+                      total={filteredDocumentCount}
+                      showSizeChanger={false}
+                      onChange={setDocumentPage}
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
-            <div className="text-center py-2 text-gray-500 text-xs border border-gray-200 rounded-md h-full">
+            <div className="flex h-full min-h-[180px] items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50/40 text-center text-sm text-gray-400">
               {t("document.hint.noDocuments")}
             </div>
           )}
         </div>
 
         {/* Upload area */}
-        {!showDetail &&
-          !showChunk &&
-          (isDataMate ? (
-            <div className="p-3 bg-gray-50 border-t border-gray-200 h-[30%] flex items-center justify-center min-h-[120px]">
-              <span className="text-base font-medium text-center leading-[1.7] text-gray-500">
-                {t("knowledgeBase.datamate.editDisabled")}
-              </span>
-            </div>
-          ) : (
-            <UploadArea
-              key={
-                isCreatingMode
-                  ? `create-${knowledgeBaseName}`
-                  : `view-${knowledgeBaseName}`
-              }
-              ref={uploadAreaRef}
-              onFileSelect={onFileSelect}
-              onUpload={onUpload || (async () => {})}
-              isUploading={isUploading}
-              isDragging={isDragging}
-              onDragOver={onDragOver}
-              onDragLeave={onDragLeave}
-              onDrop={onDrop}
-              disabled={
-                storageQuota.isBlocked ||
-                isReadOnlyMode ||
-                (!isCreatingMode && !knowledgeBaseId)
-              }
-              disabledMessage={
-                storageQuota.isBlocked
-                  ? storageQuota.message ||
-                    t(
-                      "quota.uploadBlocked",
-                      "Uploads are blocked - storage limit reached"
-                    )
-                  : undefined
-              }
-              componentHeight={uploadHeight}
-              isCreatingMode={isCreatingMode}
-              // Use internal ID for backend operations; fall back to name in creation mode
-              indexName={knowledgeBaseId || knowledgeBaseName}
-              newKnowledgeBaseName={isCreatingMode ? knowledgeBaseName : ""}
-              modelMismatch={modelMismatch}
-              onNameStatusChange={setNameStatus}
-            />
-          ))}
+        {!showDetail && !showChunk && !isCreatingMode && (
+          <div className="shrink-0 px-6 pb-5 pt-2">
+            {isDataMate ? (
+              <div className="flex min-h-[150px] items-center justify-center rounded-xl border border-dashed border-gray-200 bg-gray-50/60 px-6 text-center">
+                <span className="text-sm font-medium leading-[1.7] text-gray-500">
+                  {t("knowledgeBase.datamate.editDisabled")}
+                </span>
+              </div>
+            ) : (
+              <UploadArea
+                key={
+                  isCreatingMode
+                    ? `create-${knowledgeBaseName}`
+                    : `view-${knowledgeBaseName}`
+                }
+                ref={uploadAreaRef}
+                onFileSelect={onFileSelect}
+                onUpload={onUpload || (async () => {})}
+                isUploading={isUploading}
+                isDragging={isDragging}
+                onDragOver={onDragOver}
+                onDragLeave={onDragLeave}
+                onDrop={onDrop}
+                disabled={
+                  uploadStorageBlocked ||
+                  isReadOnlyMode ||
+                  (!isCreatingMode && !knowledgeBaseId)
+                }
+                disabledMessage={
+                  uploadStorageBlocked
+                    ? uploadStorageBlockedMessage ||
+                      t(
+                        "quota.uploadBlocked",
+                        "Uploads are blocked - storage limit reached"
+                      )
+                    : undefined
+                }
+                componentHeight={uploadHeight}
+                isCreatingMode={isCreatingMode}
+                // Use internal ID for backend operations; fall back to name in creation mode
+                indexName={knowledgeBaseId || knowledgeBaseName}
+                newKnowledgeBaseName={isCreatingMode ? knowledgeBaseName : ""}
+                modelMismatch={modelMismatch}
+                onNameStatusChange={setNameStatus}
+              />
+            )}
+          </div>
+        )}
 
         {/* File preview drawer */}
+        <TagDefinitionManagementModal
+          open={tagManagementOpen}
+          onClose={() => {
+            setTagManagementOpen(false);
+            void refreshAssignDefinitions();
+          }}
+          bucketId={documentLibrary?.bucket_id ?? 0}
+          bucketName={documentLibrary?.bucket_name ?? ""}
+          canManage={!isReadOnlyMode}
+        />
+
+        <ResourceTagAssignmentModal
+          open={assignTarget !== null}
+          onClose={() => setAssignTarget(null)}
+          resourceType="knowledge_document"
+          resourceId={assignTarget?.docId ?? ""}
+          definitions={assignDefinitions ?? []}
+          canEdit={assignTarget?.canEdit ?? false}
+          provider="local"
+          knowledgeBaseId={knowledgeBaseId}
+          definitionsLoading={assignDefinitionsLoading}
+          onSaved={() => onRefresh?.()}
+          onManageDefinitions={() => {
+            setTagsUiRequested(true);
+            setTagManagementOpen(true);
+          }}
+        />
+
         {selectedFile && (
           <FilePreviewDrawer
             open={!!selectedFile}
@@ -1214,9 +1872,41 @@ const DocumentListContainer = forwardRef<DocumentListRef, DocumentListProps>(
             fileType={selectedFile.fileType}
             fileSize={selectedFile.fileSize}
             previewContext="knowledgeBase"
-            onClose={() => setSelectedFile(null)}
+            onClose={handlePreviewClose}
           />
         )}
+
+        {/* v2.6.0: Embedding model advanced settings modal */}
+        <Modal
+          open={embeddingAdvancedOpen}
+          onCancel={() => setEmbeddingAdvancedOpen(false)}
+          onOk={() => setEmbeddingAdvancedOpen(false)}
+          title={t("knowledgeBase.create.embeddingAdvancedSettings", {
+            defaultValue: "Embedding 模型高级设置",
+          })}
+          okText={t("common.confirm", { defaultValue: "确定" })}
+          cancelText={t("common.cancel", { defaultValue: "取消" })}
+          width={720}
+          centered
+          destroyOnHidden={false}
+          styles={{ body: { maxHeight: "70vh", overflowY: "auto" } }}
+        >
+          {selectedEmbeddingModelOption ? (
+            <ModelAdvancedSettings
+              modelType={selectedEmbeddingModelOption.type}
+              specs={inferenceSpecs}
+              value={embeddingAdvancedValue}
+              onChange={handleEmbeddingAdvancedChange}
+              mode="override"
+            />
+          ) : (
+            <div className="text-gray-500 text-sm">
+              {t("knowledgeBase.create.noEmbeddingModelSelected", {
+                defaultValue: "请先选择 Embedding 模型",
+              })}
+            </div>
+          )}
+        </Modal>
       </div>
     );
   }

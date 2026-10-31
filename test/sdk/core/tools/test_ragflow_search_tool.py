@@ -75,7 +75,8 @@ _MODULE_MOCKS = {
 # Restoring sys.modules prevents the collection-time stubs from affecting
 # unrelated tool tests.
 with patch.dict(sys.modules, _MODULE_MOCKS):
-    from sdk.nexent.core.tools.ragflow_search_tool import RAGFlowSearchTool, _resolve_default  # noqa: E402
+    from sdk.nexent.core.tools.ragflow_search_tool import RAGFlowSearchTool  # noqa: E402
+    from sdk.nexent.core.utils.pydantic_utils import unwrap_field_info  # noqa: E402
     from sdk.nexent.core.utils.observer import MessageObserver, ProcessType  # noqa: E402
 
 
@@ -150,20 +151,20 @@ def _build_search_response(chunks: List[dict] = None, total: int = None):
 
 
 # ---------------------------------------------------------------------------
-# _resolve_default
+# unwrap_field_info
 # ---------------------------------------------------------------------------
 
-class TestResolveDefault:
-    def test_resolve_default_returns_plain_value(self):
-        assert _resolve_default("hello") == "hello"
-        assert _resolve_default(42) == 42
-        assert _resolve_default(None) is None
-        assert _resolve_default(True) is True
+class TestUnwrapFieldInfo:
+    def test_unwrap_field_info_returns_plain_value(self):
+        assert unwrap_field_info("hello") == "hello"
+        assert unwrap_field_info(42) == 42
+        assert unwrap_field_info(None) is None
+        assert unwrap_field_info(True) is True
 
-    def test_resolve_default_returns_fieldinfo_default(self):
+    def test_unwrap_field_info_returns_fieldinfo_default(self):
         from pydantic import Field
         field_info = Field(default="my_default", description="test")
-        assert _resolve_default(field_info) == "my_default"
+        assert unwrap_field_info(field_info) == "my_default"
 
 
 # ---------------------------------------------------------------------------

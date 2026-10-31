@@ -1,0 +1,16 @@
+schema_version: '1.0'
+case_id: CHAT-SIDEBAR-D4-002
+implementations:
+  - framework: playwright
+    file: test.spec.ts
+    selector: CHAT-SIDEBAR-D4-002
+timeout_seconds: 360
+acceptance_bindings:
+  AC-01: [CHAT-SIDEBAR-D4-002]
+  AC-02: [CHAT-SIDEBAR-D4-002]
+  AC-03: [CHAT-SIDEBAR-D4-002]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

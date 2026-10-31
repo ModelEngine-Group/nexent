@@ -96,6 +96,19 @@ class TestNormalizer:
         assert RetrievalSource.AGENT_SHORT_TERM in sources
         assert RetrievalSource.EXTERNAL in sources
 
+    def test_ac_p3_38_identical_internal_and_external_content_is_deduplicated(self):
+        normalizer = Normalizer()
+        content = "The user prefers concise weekly status summaries."
+
+        records = normalizer.normalize(
+            [self._make_result(1, content, score=0.9)],
+            external_results=[self._make_external(content=content, score=0.8)],
+        )
+
+        assert len(records) == 1
+        assert records[0].content == content
+        assert records[0].source == RetrievalSource.AGENT_SHORT_TERM
+
     def test_normalize_empty(self):
         normalizer = Normalizer()
         assert normalizer.normalize([]) == []

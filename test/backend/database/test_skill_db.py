@@ -1,4 +1,8 @@
-"""Unit tests for backend.database.skill_db module."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Unit tests for management.db.skill.repository module."""
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import sys
 import os
 import types
@@ -9,6 +13,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../../sdk"))
 import pytest
 from unittest.mock import patch, MagicMock
 from datetime import datetime
+
+
+@pytest.fixture(autouse=True)
+def _default_to_ordinary_agent(monkeypatch):
+    """Isolate the Agent collaborator without importing its database graph."""
+    from management.db import agent as agent_package
+
+    agent_db_mock = types.ModuleType("management.db.agent.repository")
+    agent_db_mock.is_system_agent = MagicMock(return_value=False)
+    monkeypatch.setitem(sys.modules, "management.db.agent.repository", agent_db_mock)
+    monkeypatch.setattr(agent_package, "repository", agent_db_mock, raising=False)
 
 boto3_mock = MagicMock()
 sys.modules['boto3'] = boto3_mock
@@ -26,9 +41,33 @@ consts_mock.const.NEXENT_POSTGRES_PASSWORD = "test_password"
 consts_mock.const.POSTGRES_DB = "test_db"
 consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
+consts_mock.const.MAX_SKILLS_PER_TENANT = 1000
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
-sys.modules['consts.model'] = MagicMock()
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
+install_business_contract_stubs(MagicMock())
+
+error_code_mock = types.ModuleType('contracts.errors.codes')
+error_code_mock.ErrorCode = types.SimpleNamespace(
+    TENANT_RESOURCE_EXCEEDED="120104",
+    FILE_TOO_LARGE="000403",
+)
+exceptions_mock = types.ModuleType('contracts.errors.exceptions')
+
+class AppException(Exception):
+    def __init__(self, _error_code=None, message=None, details=None):
+        self.details = details or {}
+        super().__init__(message or _error_code)
+
+
+class TenantResourceLimitError(AppException):
+    code = "120104"
+
+
+exceptions_mock.AppException = AppException
+exceptions_mock.TenantResourceLimitError = TenantResourceLimitError
+install_shared_contract_stub(error_code_mock, 'error_code')
+install_shared_contract_stub(exceptions_mock, 'exceptions')
 
 client_mock = MagicMock()
 client_mock.MinioClient = MagicMock()
@@ -37,59 +76,35 @@ client_mock.db_client = MagicMock()
 client_mock.get_db_session = MagicMock()
 client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
-sys.modules['database.client'] = client_mock
-sys.modules['backend.database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 db_models_mock = MagicMock()
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
 utils_skill_params_mock = MagicMock()
 utils_skill_params_mock.strip_params_comments_for_db = lambda x: x
-utils_str_utils_mock = types.ModuleType('utils.str_utils')
+utils_str_utils_mock = types.ModuleType('management.utils.serialization')
 utils_str_utils_mock.convert_list_to_string = lambda items: "" if items is None else ",".join(str(item) for item in items)
 utils_str_utils_mock.convert_string_to_list = (
     lambda items: [] if not items else [int(item.strip()) for item in items.split(",") if item.strip().isdigit()]
 )
 sys.modules['utils'] = MagicMock()
-sys.modules['utils.auth_utils'] = MagicMock()
-sys.modules['utils.skill_params_utils'] = utils_skill_params_mock
-sys.modules['utils.str_utils'] = utils_str_utils_mock
+sys.modules['gateway.authentication.auth'] = MagicMock()
+sys.modules['management.services.skill.params'] = utils_skill_params_mock
+sys.modules['management.utils.serialization'] = utils_str_utils_mock
 sys.modules['backend.utils'] = MagicMock()
-sys.modules['backend.utils.skill_params_utils'] = utils_skill_params_mock
-sys.modules['backend.utils.str_utils'] = utils_str_utils_mock
+sys.modules['management.services.skill.params'] = utils_skill_params_mock
+sys.modules['management.utils.serialization'] = utils_str_utils_mock
 
-from backend.database.skill_db import (
-    _params_value_for_db,
-    _build_skill_update_values,
-    _replace_skill_tool_relations,
-    create_or_update_skill_by_skill_info,
-    query_skill_instances_by_agent_id,
-    query_enabled_skill_instances,
-    query_skill_instance_by_id,
-    search_skills_for_agent,
-    delete_skills_by_agent_id,
-    delete_skill_instances_by_skill_id,
-    delete_skill_instances_by_tenant,
-    list_skill_permission_summaries,
-    list_skills,
-    get_skill_by_name,
-    get_skill_by_id,
-    get_skill_by_id_global,
-    create_skill,
-    update_skill,
-    update_skill_by_id,
-    delete_skill,
-    get_tool_names_by_ids,
-    get_tool_ids_by_names,
-    get_tool_names_by_skill_name,
-    get_skill_with_tool_names,
-    list_global_official_skills,
-    check_skill_list_initialized,
-    upsert_scanned_skills,
-    _get_tool_ids,
-    _to_dict,
-)
+from management.db.skill.repository import _params_value_for_db, _build_skill_update_values, _replace_skill_tool_relations, create_or_update_skill_by_skill_info, query_skill_instances_by_agent_id, query_enabled_skill_instances, query_skill_instance_by_id, search_skills_for_agent, delete_skills_by_agent_id, delete_skill_instances_by_skill_id, delete_skill_instances_by_tenant, list_skill_permission_summaries, list_skills, get_skill_by_name, get_skill_by_id, get_skill_by_id_global, create_skill, update_skill, update_skill_by_id, delete_skill, get_tool_names_by_ids, get_tool_ids_by_names, get_tool_names_by_skill_name, get_skill_with_tool_names, list_global_official_skills, check_skill_list_initialized, upsert_scanned_skills, _get_tool_ids, _to_dict
 
 
 class MockSkillInstance:
@@ -175,7 +190,7 @@ class TestParamsValueForDb:
     def test_params_value_for_db_dict_with_comments(self, monkeypatch):
         """Test stripping _comment keys from dict."""
         monkeypatch.setattr(
-            "backend.database.skill_db.strip_params_comments_for_db",
+            "management.db.skill.repository.strip_params_comments_for_db",
             lambda x: {k: v for k, v in x.items() if k != '_comment'} if isinstance(x, dict) else x
         )
         input_data = {"key1": "value1", "_comment": "This is a comment"}
@@ -186,7 +201,7 @@ class TestParamsValueForDb:
     def test_params_value_for_db_nested_structure(self, monkeypatch):
         """Test handling nested dict structures."""
         monkeypatch.setattr(
-            "backend.database.skill_db.strip_params_comments_for_db",
+            "management.db.skill.repository.strip_params_comments_for_db",
             lambda x: x
         )
         input_data = {
@@ -223,9 +238,9 @@ class TestCreateOrUpdateSkillBySkillInfo:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -258,13 +273,13 @@ class TestCreateOrUpdateSkillBySkillInfo:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
         monkeypatch.setattr(
-            "backend.database.skill_db.filter_property",
+            "management.db.skill.repository.filter_property",
             lambda data, model: data
         )
 
@@ -284,7 +299,7 @@ class TestCreateOrUpdateSkillBySkillInfo:
                     setattr(self, key, value)
 
         monkeypatch.setattr(
-            "backend.database.skill_db.SkillInstance",
+            "management.db.skill.repository.SkillInstance",
             MockSkillInstanceClass
         )
         session.add = MagicMock()
@@ -319,9 +334,9 @@ class TestCreateOrUpdateSkillBySkillInfo:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -348,9 +363,9 @@ class TestCreateOrUpdateSkillBySkillInfo:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -385,9 +400,9 @@ class TestCreateOrUpdateSkillBySkillInfo:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -420,9 +435,9 @@ class TestCreateOrUpdateSkillBySkillInfo:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -461,9 +476,9 @@ class TestQuerySkillInstancesByAgentId:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -487,9 +502,9 @@ class TestQuerySkillInstancesByAgentId:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -512,9 +527,9 @@ class TestQuerySkillInstancesByAgentId:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -547,9 +562,9 @@ class TestQueryEnabledSkillInstances:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -572,9 +587,9 @@ class TestQueryEnabledSkillInstances:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -601,9 +616,9 @@ class TestQueryEnabledSkillInstances:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -637,9 +652,9 @@ class TestQuerySkillInstanceById:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -663,7 +678,7 @@ class TestQuerySkillInstanceById:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = query_skill_instance_by_id(10, 999, 'tenant1')
 
@@ -689,9 +704,9 @@ class TestQuerySkillInstanceById:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -725,9 +740,9 @@ class TestSearchSkillsForAgent:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -750,9 +765,9 @@ class TestSearchSkillsForAgent:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -778,9 +793,9 @@ class TestSearchSkillsForAgent:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -806,9 +821,9 @@ class TestSearchSkillsForAgent:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.as_dict",
+            "management.db.skill.repository.as_dict",
             lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj
         )
 
@@ -835,7 +850,7 @@ class TestDeleteSkillsByAgentId:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         delete_skills_by_agent_id(1, 'tenant1', 'user1')
 
@@ -855,7 +870,7 @@ class TestDeleteSkillsByAgentId:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         delete_skills_by_agent_id(1, 'tenant1', 'user1', version_no=5)
 
@@ -874,13 +889,24 @@ class TestDeleteSkillsByAgentId:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         delete_skills_by_agent_id(1, 'tenant1', 'deleter_user')
 
         update_call_args = mock_update.call_args
         update_dict = update_call_args[0][0]
         assert update_dict['updated_by'] == 'deleter_user'
+
+    def test_delete_rejects_system_agent(self, monkeypatch):
+        """UT-BE-SAL-012."""
+        monkeypatch.setattr(
+            sys.modules["management.db.agent.repository"],
+            "is_system_agent",
+            lambda *_args, **_kwargs: True,
+        )
+
+        with pytest.raises(ValueError, match="managed by the platform"):
+            delete_skills_by_agent_id(1, "tenant1", "user1")
 
 
 # ===== delete_skill_instances_by_skill_id Tests =====
@@ -901,7 +927,7 @@ class TestDeleteSkillInstancesBySkillId:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         delete_skill_instances_by_skill_id(5, 'user1')
 
@@ -920,7 +946,7 @@ class TestDeleteSkillInstancesBySkillId:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         delete_skill_instances_by_skill_id(5, 'skill_deleter')
 
@@ -941,7 +967,7 @@ class TestDeleteSkillInstancesBySkillId:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         delete_skill_instances_by_skill_id(999, 'user1')
 
@@ -1048,6 +1074,44 @@ class TestToDict:
         assert result['config_schemas'] is None
         assert result['config_values'] is None
 
+    def test_to_dict_malformed_tags(self):
+        """Test that non-array persisted tags are normalized to a string list."""
+        string_skill = MockSkillInfo(
+            skill_id=1,
+            skill_name='skill_with_string_tags',
+            skill_tags='security',
+            skill_content='',
+            config_schemas=None,
+            config_values=None,
+            create_time=None,
+            update_time=None
+        )
+        assert _to_dict(string_skill)['tags'] == ['security']
+
+        object_skill = MockSkillInfo(
+            skill_id=2,
+            skill_name='skill_with_object_tags',
+            skill_tags={'key': 'value'},
+            skill_content='',
+            config_schemas=None,
+            config_values=None,
+            create_time=None,
+            update_time=None
+        )
+        assert _to_dict(object_skill)['tags'] == []
+
+        mixed_skill = MockSkillInfo(
+            skill_id=3,
+            skill_name='skill_with_mixed_tags',
+            skill_tags=['valid', 42, '', '  spaced  '],
+            skill_content='',
+            config_schemas=None,
+            config_values=None,
+            create_time=None,
+            update_time=None
+        )
+        assert _to_dict(mixed_skill)['tags'] == ['valid', 'spaced']
+
 
 # ===== list_skills Tests =====
 
@@ -1071,9 +1135,9 @@ class TestListSkills:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._get_tool_ids",
+            "management.db.skill.repository._get_tool_ids",
             lambda s, skill_id: [1, 2] if skill_id == 1 else []
         )
 
@@ -1102,7 +1166,7 @@ class TestListSkills:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = list_skills('tenant1')
 
@@ -1126,7 +1190,7 @@ class TestListSkillPermissionSummaries:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session",
+            "management.db.skill.repository.get_db_session",
             lambda: mock_ctx,
         )
 
@@ -1161,9 +1225,9 @@ class TestGetSkillByName:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._get_tool_ids",
+            "management.db.skill.repository._get_tool_ids",
             lambda s, skill_id: [1, 2]
         )
 
@@ -1188,7 +1252,7 @@ class TestGetSkillByName:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = get_skill_by_name('nonexistent', 'tenant1')
 
@@ -1216,9 +1280,9 @@ class TestGetSkillById:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._get_tool_ids",
+            "management.db.skill.repository._get_tool_ids",
             lambda s, skill_id: [3]
         )
 
@@ -1242,7 +1306,7 @@ class TestGetSkillById:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = get_skill_by_id(999, 'tenant1')
 
@@ -1254,6 +1318,26 @@ class TestGetSkillById:
 class TestCreateSkill:
     """Tests for create_skill function."""
 
+    def test_create_skill_rejects_tenant_limit(self, monkeypatch, mock_session):
+        """Creating a Skill at the tenant quota returns structured limit details."""
+        session, query = mock_session
+        query.filter.return_value.count.return_value = 1
+        monkeypatch.setattr("management.db.skill.repository.MAX_SKILLS_PER_TENANT", 1)
+
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr(
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
+
+        with pytest.raises(AppException) as exc_info:
+            create_skill({"name": "blocked"}, "tenant1")
+
+        assert "Tenant skill limit reached" in str(exc_info.value)
+        assert getattr(exc_info.value, "details", {}).get("resource") == "skills"
+        assert getattr(exc_info.value, "details", {}).get("limit") == 1
+        session.add.assert_not_called()
+
     def test_create_skill_basic(self, monkeypatch, mock_session):
         """Test creating a basic skill."""
         session, query = mock_session
@@ -1262,9 +1346,9 @@ class TestCreateSkill:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._params_value_for_db",
+            "management.db.skill.repository._params_value_for_db",
             lambda x: x
         )
 
@@ -1289,7 +1373,7 @@ class TestCreateSkill:
                     setattr(self, key, value)
 
         monkeypatch.setattr(
-            "backend.database.skill_db.SkillInfo",
+            "management.db.skill.repository.SkillInfo",
             MockSkillInfoClass
         )
         session.add = MagicMock()
@@ -1312,6 +1396,35 @@ class TestCreateSkill:
         session.add.assert_called()
         session.commit.assert_called()
 
+    def test_create_skill_truncates_description_to_database_limit(self, monkeypatch, mock_session):
+        """Long third-party descriptions must not make skill uploads fail."""
+        session, query = mock_session
+        query.filter.return_value.count.return_value = 0
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = session
+        mock_ctx.__exit__.return_value = None
+        monkeypatch.setattr("management.db.skill.repository.get_db_session", lambda: mock_ctx)
+
+        created = []
+
+        class MockSkillInfoClass:
+            tenant_id = MagicMock()
+            delete_flag = MagicMock()
+
+            def __init__(self, **kwargs):
+                self.skill_id = 1
+                for key, value in kwargs.items():
+                    setattr(self, key, value)
+
+        monkeypatch.setattr("management.db.skill.repository.SkillInfo", MockSkillInfoClass)
+        session.add = lambda value: created.append(value)
+        session.flush = MagicMock()
+        session.commit = MagicMock()
+
+        create_skill({"name": "long-description", "description": "x" * 1001}, "tenant1")
+
+        assert len(created[0].skill_description) == 1000
+
     def test_create_skill_with_tool_ids(self, monkeypatch, mock_session):
         """Test creating a skill with associated tool IDs."""
         session, query = mock_session
@@ -1320,9 +1433,9 @@ class TestCreateSkill:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._params_value_for_db",
+            "management.db.skill.repository._params_value_for_db",
             lambda x: x
         )
 
@@ -1359,11 +1472,11 @@ class TestCreateSkill:
                     setattr(self, key, value)
 
         monkeypatch.setattr(
-            "backend.database.skill_db.SkillInfo",
+            "management.db.skill.repository.SkillInfo",
             MockSkillInfoClass
         )
         monkeypatch.setattr(
-            "backend.database.skill_db.SkillToolRelation",
+            "management.db.skill.repository.SkillToolRelation",
             MockSkillToolRelationClass
         )
         session.add = MagicMock()
@@ -1407,7 +1520,7 @@ class TestUpdateSkill:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         with pytest.raises(ValueError, match="Skill not found"):
             update_skill('nonexistent', {}, 'tenant1')
@@ -1447,17 +1560,17 @@ class TestUpdateSkill:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._params_value_for_db",
+            "management.db.skill.repository._params_value_for_db",
             lambda x: x
         )
         monkeypatch.setattr(
-            "backend.database.skill_db._get_tool_ids",
+            "management.db.skill.repository._get_tool_ids",
             lambda s, skill_id: []
         )
         monkeypatch.setattr(
-            "backend.database.skill_db.sa_update",
+            "management.db.skill.repository.sa_update",
             lambda x: MagicMock()
         )
         session.execute = MagicMock()
@@ -1510,13 +1623,13 @@ class TestUpdateSkill:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._get_tool_ids",
+            "management.db.skill.repository._get_tool_ids",
             lambda s, skill_id: [1, 2]
         )
         monkeypatch.setattr(
-            "backend.database.skill_db.sa_update",
+            "management.db.skill.repository.sa_update",
             lambda x: MagicMock()
         )
         session.execute = MagicMock()
@@ -1532,7 +1645,7 @@ class TestUpdateSkill:
                     setattr(self, key, value)
 
         monkeypatch.setattr(
-            "backend.database.skill_db.SkillToolRelation",
+            "management.db.skill.repository.SkillToolRelation",
             MockSkillToolRelationClass
         )
 
@@ -1569,9 +1682,9 @@ class TestUpdateSkill:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db.sa_update",
+            "management.db.skill.repository.sa_update",
             lambda x: MagicMock()
         )
         session.execute = MagicMock()
@@ -1618,17 +1731,17 @@ class TestUpdateSkill:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._params_value_for_db",
+            "management.db.skill.repository._params_value_for_db",
             lambda x: x
         )
         monkeypatch.setattr(
-            "backend.database.skill_db._get_tool_ids",
+            "management.db.skill.repository._get_tool_ids",
             lambda s, skill_id: []
         )
         monkeypatch.setattr(
-            "backend.database.skill_db.sa_update",
+            "management.db.skill.repository.sa_update",
             lambda x: MagicMock()
         )
         session.execute = MagicMock()
@@ -1679,13 +1792,13 @@ class TestUpdateSkill:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._get_tool_ids",
+            "management.db.skill.repository._get_tool_ids",
             lambda s, skill_id: []
         )
         monkeypatch.setattr(
-            "backend.database.skill_db.sa_update",
+            "management.db.skill.repository.sa_update",
             lambda x: MagicMock()
         )
         session.execute = MagicMock()
@@ -1717,7 +1830,7 @@ class TestDeleteSkill:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = delete_skill('nonexistent', 'tenant1')
 
@@ -1743,7 +1856,7 @@ class TestDeleteSkill:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         session.commit = MagicMock()
 
         result = delete_skill('to_delete', 'tenant1', updated_by='deleter1')
@@ -1772,7 +1885,7 @@ class TestDeleteSkill:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         session.commit = MagicMock()
 
         result = delete_skill('to_delete', 'tenant1')
@@ -1793,7 +1906,7 @@ class TestDeleteSkill:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = delete_skill('already_deleted_skill', 'tenant1')
 
@@ -1846,7 +1959,7 @@ class TestGetToolIdsByNames:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = get_tool_ids_by_names([], 'tenant1')
 
@@ -1871,7 +1984,7 @@ class TestGetToolIdsByNames:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = get_tool_ids_by_names(['tool_a', 'tool_b'], 'tenant1')
 
@@ -1897,7 +2010,7 @@ class TestGetToolNamesBySkillName:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = get_tool_names_by_skill_name('nonexistent', 'tenant1')
 
@@ -1919,13 +2032,13 @@ class TestGetToolNamesBySkillName:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._get_tool_ids",
+            "management.db.skill.repository._get_tool_ids",
             lambda s, skill_id: [1, 2]
         )
         monkeypatch.setattr(
-            "backend.database.skill_db.get_tool_names_by_ids",
+            "management.db.skill.repository.get_tool_names_by_ids",
             lambda s, ids: ['tool_a', 'tool_b']
         )
 
@@ -1953,7 +2066,7 @@ class TestGetSkillWithToolNames:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = get_skill_with_tool_names('nonexistent', 'tenant1')
 
@@ -1975,13 +2088,13 @@ class TestGetSkillWithToolNames:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._get_tool_ids",
+            "management.db.skill.repository._get_tool_ids",
             lambda s, skill_id: [1, 2]
         )
         monkeypatch.setattr(
-            "backend.database.skill_db.get_tool_names_by_ids",
+            "management.db.skill.repository.get_tool_names_by_ids",
             lambda s, ids: ['tool_a', 'tool_b']
         )
 
@@ -2012,7 +2125,7 @@ class TestDeleteSkillInstancesByTenant:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         session.commit = MagicMock()
 
         result = delete_skill_instances_by_tenant('tenant1', 'user1')
@@ -2033,7 +2146,7 @@ class TestDeleteSkillInstancesByTenant:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         session.commit = MagicMock()
 
         result = delete_skill_instances_by_tenant('nonexistent_tenant', 'user1')
@@ -2062,9 +2175,9 @@ class TestGetSkillByIdGlobal:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._get_tool_ids",
+            "management.db.skill.repository._get_tool_ids",
             lambda s, skill_id: [3]
         )
 
@@ -2087,7 +2200,7 @@ class TestGetSkillByIdGlobal:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = get_skill_by_id_global(999)
 
@@ -2116,7 +2229,7 @@ class TestListGlobalOfficialSkills:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = list_global_official_skills()
 
@@ -2138,7 +2251,7 @@ class TestListGlobalOfficialSkills:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = list_global_official_skills()
 
@@ -2164,7 +2277,7 @@ class TestCheckSkillListInitialized:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = check_skill_list_initialized('tenant1')
 
@@ -2184,7 +2297,7 @@ class TestCheckSkillListInitialized:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
 
         result = check_skill_list_initialized('tenant1')
 
@@ -2210,9 +2323,9 @@ class TestUpsertScannedSkills:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._params_value_for_db",
+            "management.db.skill.repository._params_value_for_db",
             lambda x: x
         )
         session.add = MagicMock()
@@ -2252,9 +2365,9 @@ class TestUpsertScannedSkills:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._params_value_for_db",
+            "management.db.skill.repository._params_value_for_db",
             lambda x: x
         )
 
@@ -2287,9 +2400,9 @@ class TestUpsertScannedSkills:
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
         monkeypatch.setattr(
-            "backend.database.skill_db.get_db_session", lambda: mock_ctx)
+            "management.db.skill.repository.get_db_session", lambda: mock_ctx)
         monkeypatch.setattr(
-            "backend.database.skill_db._params_value_for_db",
+            "management.db.skill.repository._params_value_for_db",
             lambda x: x
         )
         session.add = MagicMock()
@@ -2361,7 +2474,7 @@ class TestReplaceSkillToolRelations:
                     setattr(self, key, value)
 
         monkeypatch.setattr(
-            "backend.database.skill_db.SkillToolRelation",
+            "management.db.skill.repository.SkillToolRelation",
             MockSkillToolRelationClass,
         )
         mock_delete = MagicMock()
@@ -2400,7 +2513,7 @@ class TestUpdateSkillById:
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
-        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("management.db.skill.repository.get_db_session", lambda: mock_ctx)
         with pytest.raises(ValueError, match="Skill not found"):
             update_skill_by_id(999, {"description": "new"}, "tenant1")
 
@@ -2423,9 +2536,9 @@ class TestUpdateSkillById:
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
-        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
-        monkeypatch.setattr("backend.database.skill_db._get_tool_ids", lambda s, sid: [])
-        monkeypatch.setattr("backend.database.skill_db.sa_update", lambda x: MagicMock())
+        monkeypatch.setattr("management.db.skill.repository.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("management.db.skill.repository._get_tool_ids", lambda s, sid: [])
+        monkeypatch.setattr("management.db.skill.repository.sa_update", lambda x: MagicMock())
         session.execute = MagicMock()
         session.commit = MagicMock()
         result = update_skill_by_id(1, {"description": "new desc"}, "tenant1")
@@ -2449,8 +2562,8 @@ class TestUpdateSkillById:
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
-        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
-        monkeypatch.setattr("backend.database.skill_db.sa_update", lambda x: MagicMock())
+        monkeypatch.setattr("management.db.skill.repository.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("management.db.skill.repository.sa_update", lambda x: MagicMock())
         with pytest.raises(ValueError, match="already exists"):
             update_skill_by_id(1, {"name": "new_name"}, "tenant1")
 
@@ -2465,7 +2578,7 @@ class TestUpdateSkillById:
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
-        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("management.db.skill.repository.get_db_session", lambda: mock_ctx)
         with pytest.raises(ValueError, match="Skill name is required"):
             update_skill_by_id(1, {"name": ""}, "tenant1")
 
@@ -2488,10 +2601,10 @@ class TestUpdateSkillById:
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
-        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
-        monkeypatch.setattr("backend.database.skill_db._get_tool_ids", lambda s, sid: [1, 2])
-        monkeypatch.setattr("backend.database.skill_db.sa_update", lambda x: MagicMock())
-        monkeypatch.setattr("backend.database.skill_db._replace_skill_tool_relations", MagicMock())
+        monkeypatch.setattr("management.db.skill.repository.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("management.db.skill.repository._get_tool_ids", lambda s, sid: [1, 2])
+        monkeypatch.setattr("management.db.skill.repository.sa_update", lambda x: MagicMock())
+        monkeypatch.setattr("management.db.skill.repository._replace_skill_tool_relations", MagicMock())
         session.execute = MagicMock()
         session.commit = MagicMock()
         result = update_skill_by_id(1, {"tool_ids": [1, 2]}, "tenant1")
@@ -2515,8 +2628,8 @@ class TestUpdateSkillById:
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
-        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
-        monkeypatch.setattr("backend.database.skill_db.sa_update", lambda x: MagicMock())
+        monkeypatch.setattr("management.db.skill.repository.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("management.db.skill.repository.sa_update", lambda x: MagicMock())
         session.execute = MagicMock()
         session.commit = MagicMock()
         with pytest.raises(ValueError, match="Skill not found after update"):
@@ -2541,9 +2654,9 @@ class TestUpdateSkillById:
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
-        monkeypatch.setattr("backend.database.skill_db.get_db_session", lambda: mock_ctx)
-        monkeypatch.setattr("backend.database.skill_db._get_tool_ids", lambda s, sid: [])
-        monkeypatch.setattr("backend.database.skill_db.sa_update", lambda x: MagicMock())
+        monkeypatch.setattr("management.db.skill.repository.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("management.db.skill.repository._get_tool_ids", lambda s, sid: [])
+        monkeypatch.setattr("management.db.skill.repository.sa_update", lambda x: MagicMock())
         session.execute = MagicMock()
         session.commit = MagicMock()
         result = update_skill_by_id(1, {"name": "same_name"}, "tenant1")

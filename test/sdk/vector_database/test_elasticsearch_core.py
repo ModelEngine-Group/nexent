@@ -1611,6 +1611,8 @@ def test_accurate_search_builds_multi_index_query(elasticsearch_core_instance):
         assert index_pattern == "index_a,index_b"
         assert search_query["size"] == 7
         assert search_query["_source"]["excludes"] == ["embedding"]
+        assert search_query["highlight"]["fields"]["title"]["number_of_fragments"] == 0
+        assert search_query["highlight"]["fields"]["content"]["number_of_fragments"] == 3
 
 
 def test_semantic_search_success(elasticsearch_core_instance):
@@ -1702,7 +1704,8 @@ def test_hybrid_search_success(elasticsearch_core_instance):
             {
                 "score": 10.0,
                 "document": {"id": "doc1", "content": "Test doc 1"},
-                "index": "test_index"
+                "index": "test_index",
+                "highlight_terms": ["Test"],
             }
         ]
 
@@ -1730,6 +1733,7 @@ def test_hybrid_search_success(elasticsearch_core_instance):
         assert len(result) == 2
         assert all("score" in r for r in result)
         assert all("document" in r for r in result)
+        assert result[0]["highlight_terms"] == ["Test"]
         mock_accurate.assert_called_once()
         mock_semantic.assert_called_once()
 
@@ -1910,6 +1914,34 @@ def test_handle_bulk_errors_dim_mismatch_sets_specific_code(elasticsearch_core_i
     assert "es_dim_mismatch" in payload
     assert "Bulk indexing failed" in payload
 
+
+def test_handle_bulk_errors_disk_watermark_sets_specific_code(elasticsearch_core_instance):
+    """ES storage protection errors should produce the non-retryable watermark code."""
+    response = {
+        "errors": True,
+        "items": [
+            {
+                "index": {
+                    "error": {
+                        "type": "cluster_block_exception",
+                        "reason": (
+                            "index [knowledge] blocked by: [TOO_MANY_REQUESTS/12/disk usage exceeded "
+                            "flood-stage watermark; index has read-only-allow-delete block]"
+                        ),
+                    }
+                }
+            }
+        ],
+    }
+
+    with pytest.raises(Exception) as exc_info:
+        elasticsearch_core_instance._handle_bulk_errors(response)
+
+    payload = str(exc_info.value)
+    assert "es_disk_watermark" in payload
+    assert "Bulk indexing failed" in payload
+
+
 def test_bulk_operation_context(elasticsearch_core_instance):
     """Test bulk operation context manager."""
     with patch.object(elasticsearch_core_instance, '_apply_bulk_settings') as mock_apply, \
@@ -1932,7 +1964,12 @@ def test_exec_query_returns_formatted_results(elasticsearch_core_instance):
                     {
                         "_score": 10.5,
                         "_source": {"content": "Test document 1", "id": "doc1"},
-                        "_index": "test_index"
+                        "_index": "test_index",
+                        "highlight": {
+                            "content": [
+                                "__nexent_hit_start__Test__nexent_hit_end__ document"
+                            ]
+                        },
                     },
                     {
                         "_score": 8.3,
@@ -1950,6 +1987,7 @@ def test_exec_query_returns_formatted_results(elasticsearch_core_instance):
         assert result[0]["document"]["content"] == "Test document 1"
         assert result[0]["document"]["id"] == "doc1"
         assert result[0]["index"] == "test_index"
+        assert result[0]["highlight_terms"] == ["Test"]
         assert result[1]["score"] == 8.3
         assert result[1]["document"]["content"] == "Test document 2"
         assert result[1]["document"]["id"] == "doc2"

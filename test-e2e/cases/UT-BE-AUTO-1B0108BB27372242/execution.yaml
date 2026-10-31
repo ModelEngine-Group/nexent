@@ -1,0 +1,11 @@
+schema_version: '1.0'
+case_id: UT-BE-AUTO-1B0108BB27372242
+implementations:
+- framework: pytest
+  file: test.py
+  selector: UT-BE-AUTO-1B0108BB27372242
+notes: Pure validation test aligned with the merged optional-tags contract; no online preparation or persistent cleanup is needed.
+acceptance_bindings:
+  AC-01: [test_card_field_validation_and_tag_normalization]
+  AC-02: [test_card_field_validation_and_tag_normalization]
+  AC-03: [test_card_field_validation_and_tag_normalization]

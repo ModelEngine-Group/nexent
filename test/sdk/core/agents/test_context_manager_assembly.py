@@ -1,13 +1,15 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Focused tests for ContextManager-owned managed assembly."""
 from __future__ import annotations
 
 import pytest
-from smolagents.memory import ActionStep, TaskStep
+from nexent.core.agents.context import (
+    ContextItemInput,
+    ContextManager,
+    ContextManagerConfig,
+)
+from smolagents.memory import ActionStep, TaskStep, ToolCall
 from smolagents.monitoring import Timing
-
-from nexent.core.agents.context import ContextManager
-from nexent.core.agents.context import ContextItemInput
-from nexent.core.agents.context import ContextManagerConfig
 
 
 def _message_text(message):
@@ -90,6 +92,43 @@ def test_context_manager_assembles_stable_dynamic_and_history_messages():
     assert final.tools == [{"name": "a"}, {"name": "z"}]
 
 
+def test_oc_013_oc_023_request_only_messages_are_budgeted_and_not_saved():
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    manager.register_item(_text_item("system:policy", "stable policy"))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="")
+    memory.steps.append(TaskStep(task="current task"))
+    system_reminder = {"role": "system", "content": [{"type": "text", "text": "format contract"}]}
+    tail_reminder = {"role": "user", "content": [{"type": "text", "text": "format contract"}]}
+    continuation = {"role": "user", "content": [{"type": "text", "text": "continue with action"}]}
+    kwargs = {"model": None, "memory": memory, "current_run_start_idx": 0, "run_context": run_context}
+    baseline = manager.assemble_final_context(**kwargs)
+    first = manager.assemble_final_context(
+        **kwargs, request_system_messages=[system_reminder], request_tail_messages=[tail_reminder]
+    )
+    continued = manager.assemble_final_context(
+        **kwargs, request_system_messages=[system_reminder],
+        request_tail_messages=[tail_reminder, continuation], force_compaction=True,
+    )
+
+    assert [_message_text(message) for message in first.messages] == [
+        "stable policy", "format contract", "current task", "format contract"
+    ]
+    assert [_message_text(message) for message in continued.messages][-2:] == [
+        "format contract", "continue with action"
+    ]
+    assert [_message_text(message) for message in continued.memory_messages] == [
+        "stable policy", "current task"
+    ]
+    assert first.evidence.final_token_estimate > baseline.evidence.final_token_estimate
+    assert continued.evidence.final_token_estimate > first.evidence.final_token_estimate
+    assert len(memory.steps) == 1
+    with pytest.raises(ValueError):
+        manager.assemble_final_context(
+            **kwargs, purpose="final_answer", request_tail_messages=[continuation]
+        )
+
+
 def test_context_fingerprint_bounds_cycles_and_excessive_depth():
     manager = ContextManager()
     cyclic = {}
@@ -169,6 +208,7 @@ def test_context_manager_owns_final_answer_assembly():
         "system",
         "user",
         "assistant",
+        "assistant",
         "user",
     ]
     assert [_message_text(message) for message in final.messages[:3]] == [
@@ -176,6 +216,11 @@ def test_context_manager_owns_final_answer_assembly():
         "final instruction",
         "memory fact",
     ]
+    action_history = _message_text(final.messages[4])
+    assert '<CODE_EXEC_RESULT>' in action_history
+    assert "<RETURN_VALUE>work trace</RETURN_VALUE>" in action_history
+    assert "Calling tools:" not in action_history
+    assert "Observation:" not in action_history
     assert final.evidence.purpose == "final_answer"
     assert final.evidence.final_answer_prompt_fingerprint
     assert _message_text(final.messages[-1]) == "answer task: original task"
@@ -183,6 +228,76 @@ def test_context_manager_owns_final_answer_assembly():
     assert "context_purpose" in final.evidence.prefix_change_reasons or (
         final.evidence.prefix_change_reasons == ("initial_request",)
     )
+
+
+def test_current_run_keeps_only_task_as_user_message():
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="policy")
+    memory.steps.extend([
+        TaskStep(task="search once and answer"),
+        ActionStep(step_number=1, timing=Timing(start_time=0), action_output="first result"),
+        ActionStep(step_number=2, timing=Timing(start_time=1), action_output="second result"),
+    ])
+
+    final = manager.assemble_final_context(
+        model=None,
+        memory=memory,
+        current_run_start_idx=0,
+        run_context=run_context,
+    )
+
+    assert [message["role"] for message in final.messages] == [
+        "system",
+        "user",
+        "assistant",
+        "assistant",
+    ]
+    assert sum(message["role"] == "user" for message in final.messages) == 1
+
+
+def test_completed_skill_read_is_available_to_the_next_model_step():
+    """A successful skill read remains evidence; the model need not read it again."""
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(
+        memory=memory, fallback_system_prompt="policy"
+    )
+    memory.steps.extend(
+        [
+            TaskStep(task="use the matching skill"),
+            ActionStep(
+                step_number=1,
+                timing=Timing(start_time=0),
+                tool_calls=[
+                    ToolCall(
+                        name="python_interpreter",
+                        arguments='skill_content = read_skill_md("demo-skill")',
+                        id="call_1",
+                    )
+                ],
+                observations="Execution logs:\nSKILL_CONTENT_SENTINEL: follow the guide",
+                action_output="SKILL_CONTENT_SENTINEL: follow the guide",
+            ),
+        ]
+    )
+
+    final = manager.assemble_final_context(
+        model=None,
+        memory=memory,
+        current_run_start_idx=0,
+        run_context=run_context,
+    )
+
+    action_history = next(
+        _message_text(message)
+        for message in final.messages
+        if '<CODE_EXEC_RESULT>' in _message_text(message)
+    )
+    assert "read_skill_md" in str(final.messages)
+    assert 'read_skill_md("demo-skill")' in '\n'.join(_message_text(m) for m in final.messages)
+    assert "SKILL_CONTENT_SENTINEL: follow the guide" in action_history
+    assert "Do not copy this record's format as your next response." not in action_history
 
 
 def test_context_manager_attributes_tool_schema_change():
@@ -235,3 +350,35 @@ def test_context_manager_reports_multiple_stable_change_reasons():
 
     assert "tool_schema_version" in second.evidence.prefix_change_reasons
     assert "system_prompt_version" in second.evidence.prefix_change_reasons
+
+
+@pytest.mark.parametrize("purpose", ["step", "final_answer"])
+def test_current_run_preserves_action_clarification_and_guidance_order(purpose):
+    manager = ContextManager(ContextManagerConfig(token_threshold=10000))
+    memory = _Memory()
+    run_context = manager.prepare_run_context(memory=memory, fallback_system_prompt="stable policy")
+    memory.steps = [
+        TaskStep(task="Draft a notice"),
+        ActionStep(step_number=1, timing=Timing(start_time=0), observations="Asked for missing intent"),
+        TaskStep(task="Clarification: formal tone"),
+        ActionStep(step_number=2, timing=Timing(start_time=0), observations="Created formal draft"),
+        TaskStep(task="Guidance: friendly tone instead"),
+        ActionStep(step_number=3, timing=Timing(start_time=0), observations="Revised draft successfully"),
+    ]
+    kwargs = {
+        "model": None, "memory": memory, "current_run_start_idx": 0, "run_context": run_context,
+        "purpose": purpose, "task": "Draft a notice", "final_answer_templates": {
+            "final_answer": {"pre_messages": "Finalize", "post_messages": "Finish {{ task }}"},
+        },
+    }
+    expected = ["Draft a notice", "Asked for missing intent", "Clarification: formal tone",
+                "Created formal draft", "Guidance: friendly tone instead", "Revised draft successfully"]
+    # Reassembly exercises the projection cache, including a newly appended task.
+    for _ in range(2):
+        final = manager.assemble_final_context(**kwargs)
+        texts = [_message_text(message) for message in final.messages]
+        positions = [next(index for index, text in enumerate(texts) if marker in text) for marker in expected]
+        assert positions == sorted(positions)
+        if len(expected) == 6:
+            memory.steps.append(TaskStep(task="Guidance: include the date"))
+            expected.append("Guidance: include the date")
