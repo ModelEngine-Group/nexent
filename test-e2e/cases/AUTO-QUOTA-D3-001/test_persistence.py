@@ -192,3 +192,20 @@ def test_mixed_source_quota_activity_and_cursor(persistence):
     tail = client.get("/api/conversation/list", params={**params, "cursor": legacy_cursor}).json()["data"]
     assert [row["conversation_id"] for row in tail["items"]] == [2]
     assert tail["items"][0]["last_activity_time"] == pinned[2]["last_activity_time"]
+
+
+    # A legacy history with no activity becomes recent on its first visible message.
+    with sessions() as session:
+        assert session.get(ConversationRecord, 2).last_activity_time is None
+    db.create_conversation_message(
+        {"conversation_id": 2, "message_idx": 0, "role": "user", "content": "resume legacy history"},
+        "owner",
+    )
+    with sessions() as session:
+        resumed = session.get(ConversationRecord, 2).last_activity_time
+        assert resumed.tzinfo is None and resumed > answered
+        assert resumed <= datetime.now(timezone.utc).replace(tzinfo=None)
+    resumed_page = client.get("/api/conversation/list", params=params).json()["data"]
+    assert resumed_page["items"][0]["conversation_id"] == 2
+    assert resumed_page["items"][0]["last_activity_time"] == int(resumed.replace(tzinfo=timezone.utc).timestamp() * 1000)
+    assert resumed_page["metadata"] == {"total": 3, "today": 2, "last_7_days": 0, "older": 1}

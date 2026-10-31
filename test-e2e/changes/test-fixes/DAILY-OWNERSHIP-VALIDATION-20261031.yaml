@@ -1,0 +1,46 @@
+schema_version: '1.0'
+change:
+  change_id: DAILY-OWNERSHIP-VALIDATION-20261031
+  change_type: test-fix
+  title: Complete ops responsibility routing and isolate Daily metadata gaps
+  description: >-
+    Register OPS-BOOTSTRAP in the existing system domain because its independent
+    operations backend is platform operations functionality; both Cases inherit
+    this Feature mapping. Emit typed unresolved-routing findings for missing or
+    ambiguous matches. Daily continues every executable Case with metadata
+    warnings and incomplete coverage, while strict authoring validation rejects
+    all gaps. Invalid shared configuration and unknown scopes remain fatal.
+  affected_features:
+    existing: [OPS-BOOTSTRAP]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [OPS-BOOTSTRAP-D1-001]
+    added: []
+    modified: [OPS-BOOTSTRAP-D5-001]
+    retired: []
+  no_case_change_reason: >-
+    Routing metadata, framework validation and a self-contained preparation
+    declaration, plus a Windows standard-library socketpair audit compatibility
+    correction. Preserve product behavior, formal Case contracts and acceptance
+    assertions; direct business connects, imports and child commands stay forbidden.
+    Offline framework tests are not formal D1-D5 execution evidence.
+  notes: >-
+    Reproduce the run-41124924663 startup gap with real catalog inputs in
+    infra/tools/tests/test_daily_ownership_validation.py. Cover unassigned and
+    ambiguous routes, planned Features without Cases, strict design/implementation
+    rejection, shared configuration failures, unknown scopes, full-plan offline
+    worker accounting and FAILED/INCOMPLETE reporting even when all workers pass.
+    Add default preparation checks and missing-declaration regressions in
+    infra/tools/tests/test_preparation_gate.py; missing declarations block only the
+    owning Daily worker. OPS D5 uses no shared factories or services; its script
+    owns loopback processes/logs and reaps processes in finally. Verify that flow
+    separately through the real Windows worker. Update developer skill/SPEC
+    delivery instructions; no new remote CI or required checks are configured.
+    The isolated bootstrap allows only the actual socket module's socketpair
+    implementation code objects, covering Python 3.11 Windows and fallback variants.
+    Regress direct loopback/outbound connects, business imports and child commands
+    in infra/tools/tests/test_ops_isolation_guard.py without weakening isolation.
+    No workflow, Ubuntu repository, Runner, deployment, notification or full-suite
+    execution changes. Framework tests remain separate from traditional product UT.

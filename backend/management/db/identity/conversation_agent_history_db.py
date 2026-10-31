@@ -17,6 +17,7 @@ from contracts.conversation import (
 from management.db.client import get_db_session
 from management.db.agent.models import AgentInfo
 from management.db.conversation.models import ConversationRecord
+from management.db.conversation.classification import is_workbench_history
 
 
 def _escape_like(value: str) -> str:
@@ -51,7 +52,7 @@ def _group_source(user_id: str):
         .where(
             ConversationRecord.created_by == user_id,
             ConversationRecord.delete_flag == "N",
-            ConversationRecord.workbench_config.is_(None),
+            ~is_workbench_history(),
         )
         .group_by(ConversationRecord.agent_id)
         .subquery()
@@ -84,7 +85,7 @@ def _group_query(user_id: str, tenant_id: str, search: str):
         select(1).where(
             ConversationRecord.created_by == user_id,
             ConversationRecord.delete_flag == "N",
-            ConversationRecord.workbench_config.is_(None),
+            ~is_workbench_history(),
             ConversationRecord.workbench_pinned_at.is_not(None),
             ConversationRecord.agent_id.is_not_distinct_from(groups.c.agent_id),
         )
@@ -94,7 +95,7 @@ def _group_query(user_id: str, tenant_id: str, search: str):
             select(1).where(
                 ConversationRecord.created_by == user_id,
                 ConversationRecord.delete_flag == "N",
-                ConversationRecord.workbench_config.is_(None),
+                ~is_workbench_history(),
                 ConversationRecord.agent_id.is_not_distinct_from(groups.c.agent_id),
                 ConversationRecord.conversation_title.ilike(
                     f"%{_escape_like(search)}%", escape="\\"
@@ -229,7 +230,7 @@ def _conversation_statement(user_id: str, group_key: str, search: str):
     ).where(
         ConversationRecord.created_by == user_id,
         ConversationRecord.delete_flag == "N",
-        ConversationRecord.workbench_config.is_(None),
+        ~is_workbench_history(),
         _group_filter(group_key),
     )
     if search:
@@ -301,7 +302,7 @@ def list_agent_conversation_ids(user_id: str, agent_id: int) -> list[int]:
             .where(
                 ConversationRecord.created_by == user_id,
                 ConversationRecord.delete_flag == "N",
-                ConversationRecord.workbench_config.is_(None),
+                ~is_workbench_history(),
                 ConversationRecord.agent_id == agent_id,
             )
             .order_by(desc(ConversationRecord.conversation_id))

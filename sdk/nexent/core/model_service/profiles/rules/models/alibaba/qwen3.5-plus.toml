@@ -1,0 +1,12 @@
+schema_version = 1
+rule_id = "qwen35_plus_instruction_v1"
+version = 1
+target_kind = "model"
+target_key = "alibaba/qwen3.5-plus"
+reason = "Use Nexent's initial traditional instruction strategy"
+evidence = "Nexent model access SPEC: traditional instruction roles, strategy system_only_v1"
+aliases = ["qwen3.5-plus"]
+
+[instruction_mapping]
+ref = "system_only_v1"
+version = 1

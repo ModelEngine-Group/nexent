@@ -18,6 +18,7 @@ def _default_to_ordinary_agent(monkeypatch, _isolated_imports):
         sys.modules["management.db.agent.repository"],
         "is_system_agent",
         lambda *_args, **_kwargs: False,
+        raising=False,
     )
 
 # First mock the consts module to avoid ModuleNotFoundError

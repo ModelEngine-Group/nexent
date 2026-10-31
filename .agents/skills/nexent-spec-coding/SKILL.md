@@ -67,6 +67,8 @@ Implement the minimum change needed to satisfy the defined behavior, following e
 
 After product implementation, implement each affected D1-D5 primary script beside `test-e2e/cases/<Case-ID>/case.yaml`; keep reusable helpers under `test-e2e/infra/automation/`. Add or update that Case's `execution.yaml` with framework, file, selector, and declared profile/asset needs. Then run full binding and traceability validation. Do not hand-edit the derived registry.
 
+For added/changed active automated D2-D5 Cases, make preparation and cleanup explicit even for self-contained proofs. Record resource ownership, logical dependencies, cleanup/recovery and the primary responsibility domain in the design/task traceability; use nexent-test-assets' [preparation and delivery gate](../nexent-test-assets/references/test-implementation.md#preparation-and-delivery-gate). An empty family list requires a self-contained rationale and verified resource release.
+
 For a confirmed bug, a focused failing reproduction may be implemented before the product fix when that is the clearest way to preserve the regression. Existing formal cases should be strengthened instead of duplicated when they already own the behavior.
 
 Implement or demonstrate adequate traditional UT for the changed behavior using nexent-python-tests, even when existing UT was not broken by the change. New behavior needs appropriate success, boundary and error assertions; bugs need regression protection. An existing test may be reused when its assertions genuinely detect the defect. Keep UT outside the formal registry. For new or acceptance-modified formal Cases, apply nexent-test-assets/references/acceptance-integrity.md; test bindings and script hashes alone do not prove complete implementation.
@@ -80,6 +82,8 @@ Record sanitized commands, results, evidence paths, and unresolved blockers in `
 ### 6. Close out
 
 Run the unified formal-asset validator, deterministic Excel check, affected tests, and relevant product checks. Confirm SPEC, Feature, Case, change record, scripts, case-local bindings, implementation, and evidence agree. Report changed files, Case results, remaining risks, and unverified items. Formal completion requires every current required acceptance criterion to pass.
+
+Reconcile the current target branch before delivery/merge and repeat strict asset checks on that combined tree, including responsibility routing and preparation. Record the tested revision and preparation-test-cleanup evidence. A pass on an earlier branch revision or traditional UT alone is not a Daily startup preflight.
 
 Report UT results/coverage independently of formal Case outcomes. Do not combine frontend and Python percentages. Preserve legacy D1 execution results while explicitly distinguishing unreviewed acceptance completeness; a PASS script does not certify missing obligations. Daily consumes locked repository assets and does not generate/promote formal tests. No workflow or remote changes are implied by this lifecycle.
 

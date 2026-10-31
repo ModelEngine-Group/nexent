@@ -162,6 +162,8 @@ assert_eq "infrastructure,application" "$DEPLOYMENT_COMPONENTS" "components shou
 assert_eq "production" "$DEPLOYMENT_PORT_POLICY" "port policy should come from CLI"
 assert_eq "general" "$DEPLOYMENT_IMAGE_SOURCE" "image source should come from CLI"
 assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-web" "application services should include web"
+assert_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-ops" "application services should include ops"
+assert_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-ops" "application selection should include the ops Helm chart"
 DOCKER_SUMMARY="$(deployment_print_summary docker)"
 assert_contains "$DOCKER_SUMMARY" "Deployment components: infrastructure,application" "docker summary should include selected components"
 assert_contains "$DOCKER_SUMMARY" "Port policy: production" "docker summary should include selected port policy"
@@ -173,6 +175,19 @@ if [[ "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" == *"nexent-data-process"* ]]; then
 fi
 assert_contains "$DEPLOYMENT_DOCKER_PORTS" "3000" "production should expose web"
 assert_contains "$DEPLOYMENT_DOCKER_PORTS" "5013" "production should expose northbound"
+assert_contains "$DEPLOYMENT_DOCKER_PORTS" "5016" "production should expose ops"
+
+OPS_PORT=15016
+assert_contains "$(deployment_compute_docker_ports)" "15016" "production should use the configured ops port"
+DEPLOYMENT_PORT_POLICY=development
+assert_contains "$(deployment_compute_docker_ports)" "15016" "development should use the configured ops port"
+unset OPS_PORT
+assert_contains "$(deployment_compute_docker_ports)" "5016" "development should default to ops port 5016"
+DEPLOYMENT_COMPONENTS=infrastructure
+deployment_compute_selection
+assert_not_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "nexent-ops" "infrastructure-only should not start ops"
+assert_not_contains "$DEPLOYMENT_SELECTED_HELM_CHARTS" "nexent-ops" "infrastructure-only should not select the ops Helm chart"
+assert_not_contains "$DEPLOYMENT_DOCKER_PORTS" "5016" "infrastructure-only should not reserve the ops port"
 
 unset NEXENT_SANDBOX_IMAGE NEXENT_SANDBOX_DEFAULT_LEVEL
 deployment_prepare_config --components infrastructure,application --image-source general --sandbox-mode full --app-version v2.2.0

@@ -33,6 +33,8 @@ from management.services.skill.prompt import (
     get_nl2skill_prompt_template,
 )
 from infrastructure.concurrency import runtime_thread_manager
+from nexent.core.concurrency import run_blocking
+from management.services.agent.system import system_agent_provider
 from management.services.model.run_controls import resolve_creator_model, validate_selected_record, preflight_turn_controls
 
 logger = logging.getLogger(__name__)
@@ -201,9 +203,11 @@ async def build_nl2skill_run_info(
     request: NL2SkillRunRequest,
     tenant_id: str,
     language: str,
+    system_ref=None,
 ) -> AgentRunInfo:
     """Build all request-scoped objects for one NL2Skill turn."""
 
+    system_ref = system_ref or await run_blocking("load-nl2skill-identity", system_agent_provider.get_nl2skill_main_ref, tenant_id)
     template_language = LANGUAGE["EN"] if language == LANGUAGE["EN"] else LANGUAGE["ZH"]
     preflight_turn_controls(request, tenant_id)
     target_files = _extract_target_files(request.query, request.draft_snapshot)
@@ -234,6 +238,7 @@ async def build_nl2skill_run_info(
     agent_config = create_nl2skill_agent_config(
         system_prompt=template.get("system_prompt", ""),
         model_name=cite_name,
+        system_ref=system_ref,
     )
     if request.model_id is not None or request.generation_config is not None:
         model_info = resolve_creator_model(
@@ -294,10 +299,11 @@ async def create_nl2skill_stream(
     request: NL2SkillRunRequest,
     tenant_id: str,
     language: str,
+    system_ref=None,
 ) -> AsyncIterator[str]:
     """Create the SSE payload stream for one ephemeral NL2Skill turn."""
 
-    run_info = await build_nl2skill_run_info(request, tenant_id, language)
+    run_info = await build_nl2skill_run_info(request, tenant_id, language, system_ref=system_ref)
     target_files = _extract_target_files(request.query, request.draft_snapshot)
     target_file_set = set(target_files)
 

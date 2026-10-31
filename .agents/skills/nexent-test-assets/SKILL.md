@@ -20,12 +20,14 @@ Paths are relative to the repository root. Authoritative assets live under `test
 - Design cases before product implementation. Implement fixed scripts and case-local `execution.yaml` after product implementation, except an intentional bug reproduction may be written earlier.
 - If product code is already complete and the request is to add missing tests, use `test-backfill` rather than restarting product implementation. Inspect actual UT assertions before creating formal Cases; sufficient unit proof needs no duplicate D1 or formal Case ID.
 - Update only affected Case directories, then validate the complete derived registry.
+- Name new Cases `<MODULE>-<SCENARIO>-D1..D5-<001..999>` and make the embedded stage match `stage`; follow [case-design.md](references/case-design.md). Preserve existing IDs, including frozen historical exceptions; never append new exemptions to bypass naming validation.
 - In bugfix mode, reuse existing coverage before adding Cases; zero additions is valid. A missing SPEC or unavailable test baseline does not trigger whole-feature test generation. Follow [bugfix.md](references/bugfix.md) for impact selection.
 - Do not edit the generated Excel workbook directly.
 - Do not encode secrets, personal absolute paths, or environment-specific runtime IDs in formal cases or scripts.
 - Ordinary Cases need no deployment grouping fields. Only Cases requiring a different product deployment belong in the small repository `test-e2e/infra/config/deployment-exceptions.yaml` catalog; read [deployment-exceptions.md](references/deployment-exceptions.md) for mode-sensitive design or execution. Requiring a Mock alone does not imply a deployment switch.
 - Business tests must not depend on a specific SQL file path. Test migration behavior only at the D5 deployment boundary.
 - Store change records by type under `test-e2e/changes/{requirements,bugs,refactors,test-fixes}/`. Changes record affected IDs; the lasting Feature and Case definitions remain in their respective directories.
+- During Feature/Case design, confirm one primary responsibility domain in `test-e2e/infra/config/report-ownership.yaml`; Cases inherit their Feature mapping, with Case overrides only for different proving boundaries. Keep people in the central domain map, not Case IDs or contracts. See [case-design.md](references/case-design.md#responsibility-routing). Unified design and implementation validation enforce routing coverage; do not use an author or failure keyword to guess it.
 
 ## Select a mode
 
@@ -48,7 +50,9 @@ Read only the references needed for the selected mode.
 3. Preserve stable Feature and Case IDs. Retire instead of deleting historical contracts.
 4. During requirement design, run `python test-e2e/infra/tools/validate_test_assets.py --phase design --generate`.
 5. After fixed scripts and case-local bindings exist, run `python test-e2e/infra/tools/validate_test_assets.py --phase implementation --generate`; omit `--generate` for a read-only drift check.
+   Every active automated D2-D5 binding needs explicit `preparation`, including self-contained Cases. Assess resources, cleanup and recovery with the script; `families: []` means no shared factories, not an exemption from that assessment. Follow [test-implementation.md](references/test-implementation.md#preparation-and-delivery-gate).
 6. Run affected selectors through `python test-e2e/infra/tools/run_cases.py <Case-ID> --test-home <machine-local-directory>` and report exact results. Static validation is not execution evidence.
+7. Before delivery/merge, reconcile the current target branch and repeat strict validation on the combined tree, checking responsibility routing and preparation together. Record the validated revision and preparation-test-cleanup evidence; a prior branch-only or traditional UT pass does not establish Daily readiness.
 
 For new or acceptance-modified Cases, read [acceptance-integrity.md](references/acceptance-integrity.md). Give each acceptance obligation a stable ID, map every obligation to actual collected tests, and check the assertions against the requirement. Mapping or hashes alone do not certify completeness. Existing unmapped Cases remain executable but acceptance completeness is unreviewed; confirmed gaps must not be described as full acceptance passes.
 

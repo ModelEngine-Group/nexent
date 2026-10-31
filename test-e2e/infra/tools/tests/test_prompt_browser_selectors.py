@@ -31,11 +31,7 @@ new Function('require','module','exports',compiled)(
     <textarea aria-label="智能体描述" placeholder="新版描述提示">persisted description</textarea>
     <button aria-pressed="true">智能体调试</button>
     <div data-testid="agent-debug-panel">
-      <button id="options">调试选项</button>
-      <div id="menu" role="menu" hidden>
-        <button role="menuitem" id="compare-mode">对比模式</button>
-        <button role="menuitem" id="normal-mode">默认模式</button>
-      </div>
+      <button id="compare-mode" aria-pressed="false">切换对比模式</button>
       <div id="normal"><textarea aria-label="对话输入" placeholder=""></textarea></div>
       <div id="compare" hidden>
         <div class="flex h-full w-full flex-col"><select aria-label="左模型"><option>A</option></select><div id="left"></div></div>
@@ -45,10 +41,12 @@ new Function('require','module','exports',compiled)(
       <button id="send">发送</button>
     </div>
     <script>
-      const normal=document.querySelector('#normal'), compare=document.querySelector('#compare'), menu=document.querySelector('#menu');
-      document.querySelector('#options').onclick=()=>menu.hidden=false;
-      document.querySelector('#compare-mode').onclick=()=>{normal.hidden=true;compare.hidden=false;menu.hidden=true;};
-      document.querySelector('#normal-mode').onclick=()=>{normal.hidden=false;compare.hidden=true;menu.hidden=true;};
+      const normal=document.querySelector('#normal'), compare=document.querySelector('#compare'), toggle=document.querySelector('#compare-mode');
+      toggle.onclick=()=>{
+        const enabled=toggle.getAttribute('aria-pressed')!=='true';
+        toggle.setAttribute('aria-pressed',String(enabled));
+        normal.hidden=enabled;compare.hidden=!enabled;
+      };
       document.querySelector('#send').onclick=()=>{
         const text=compare.querySelector('[contenteditable]').textContent;
         for(const id of ['left','right']) {

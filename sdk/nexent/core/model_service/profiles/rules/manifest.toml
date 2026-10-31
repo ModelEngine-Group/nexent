@@ -1,0 +1,137 @@
+schema_version = 1
+
+[[rules]]
+path = "rules/models/alibaba/qwen3.5-plus.toml"
+content_sha256 = "4d224c51db0164b25333be6292764747060d53e1d69ff6feb2f12e32495876cd"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/provider.toml"
+content_sha256 = "1defa8dbcc173c84db79c9fad31c17bc570033951bcbbe7f40dfcfa8080343ab"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/qwen3.5-plus.toml"
+content_sha256 = "d9d1144d7d6ca02686aceefd4a8a1658838b0e24121d8778e461e20566b51315"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/deepseek-v4-flash.toml"
+content_sha256 = "73bed1583302aeea226835bd28f9d86dc2026871c7f6ad08c393cea4fae5eee7"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/deepseek-v4-pro.toml"
+content_sha256 = "22be7a8432b3808bbf634a545cbd63cb41049bf142b9e012c411cd4449bd551a"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/deepseek-v4.1-flash.toml"
+content_sha256 = "217e98b9d94989bc5faf7f41605f0b96c5446fd4a8fbc27baf1aabc220955b1b"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/glm-5.1.toml"
+content_sha256 = "02561502c0416231cc4dfaad96ab2832530c379ff955bbf956879e8516a452d2"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/glm-5.3.toml"
+content_sha256 = "e55f5afc1d19a057fa2fa8dd0b68e99383c9f2c70165c78fcd0c341404431d16"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/glm-5.toml"
+content_sha256 = "058ec2c46307217c3c64e9160af6f9ad34c73589691f795105b739db4d94bbc3"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/kimi-k3.toml"
+content_sha256 = "531223214346f6b6266c8358b10ba25002e05691b5079553a250e65acdccca85"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/qwen3.5-397b-a17b.toml"
+content_sha256 = "f2ad3aace634ee9fdd6c2f0e0a2cd632c4b7f1b1f03d664f76da197ee415eac9"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/qwen3.5-flash.toml"
+content_sha256 = "d9dba14e40e69835eb94c604afaf5a4a60ef4e9a69ac0330817f266523904f8a"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/qwen3.7-max.toml"
+content_sha256 = "f134180b58589496e24f7b1bff31f3a7135229ef689d08fcf365849655aab909"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/qwen3.7-plus.toml"
+content_sha256 = "b0ae6784eaa4928043972713e006771a3700b169663f2817674227768010a1b5"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/qwen3.8-flash.toml"
+content_sha256 = "fc0ab4a85f709e3d823c7ba166c5136ed3470dd2369faa032c3e578500429c60"
+
+[[rules]]
+path = "rules/providers/alibaba-cn/models/qwen3.8-max.toml"
+content_sha256 = "cdb054ab498b5a30bc4b4ab210700526f8bb07b0d54f87242c1b202dadcba22b"
+
+[[rules]]
+path = "rules/providers/deepseek/models/deepseek-flash.toml"
+content_sha256 = "127a9d916ae2ddf8d676a31cb8d92f6768df501983b2325c472ecd2c72c160c5"
+
+[[rules]]
+path = "rules/providers/deepseek/models/deepseek-v4-flash.toml"
+content_sha256 = "e1ab98d3fcdebf7413370919f78447b2d409567f8fef20f843e4c4771aecc4cb"
+
+[[rules]]
+path = "rules/providers/deepseek/models/deepseek-v4-pro.toml"
+content_sha256 = "2f0d21578a59816c3b47868ee8515ec9f085f0bcf2c42c8795ad391555dc9078"
+
+[[rules]]
+path = "rules/providers/siliconflow-cn/models/Pro/zai-org/GLM-5.toml"
+content_sha256 = "b88c977337d85b93215dc35430df6f44f605a3b6ba0f63aae04ec22d2be0ac05"
+
+[[rules]]
+path = "rules/providers/siliconflow-cn/models/deepseek-ai/DeepSeek-V4-Flash.toml"
+content_sha256 = "f143db517f6c563a72d453e08f9ce2b6210a835f41b09d342a4ce9a4a29c86cf"
+
+[[rules]]
+path = "rules/providers/siliconflow-cn/models/zai-org/GLM-5.2.toml"
+content_sha256 = "86135162014e0b5628229ce675bd60c10518ef90d429b5c9f5e1db8536e3b2e7"
+
+[[rules]]
+path = "rules/providers/volcengine-coding-plan/models/deepseek-v4-flash.toml"
+content_sha256 = "b0dd71bbd783be50713ea7d063bf088fb55b3740eceba98ec4b5c86542fee367"
+
+[[rules]]
+path = "rules/providers/volcengine-coding-plan/models/deepseek-v4-pro.toml"
+content_sha256 = "768cb798c55b2d8708de8efddce49bcc1c974b835d76b54c50c99810c7fcdc90"
+
+[[rules]]
+path = "rules/providers/volcengine-coding-plan/models/glm-5.3-flash.toml"
+content_sha256 = "7ef730aafd506cc418f4243b3906de73ce8921137d7f938cb1a5a9c3985f8956"
+
+[[rules]]
+path = "rules/providers/volcengine-coding-plan/models/glm-5.3.toml"
+content_sha256 = "e11cd3a7618e3fdcd0de50e3f47fb1347fa5e453bb79767a3efd987d6cf71c3d"
+
+[[rules]]
+path = "rules/providers/volcengine-coding-plan/models/kimi-k3.toml"
+content_sha256 = "4ac865e8296d3cd562c0a56e8942390e3447e3a0304c447e6306a4cf88df6591"
+
+[[rules]]
+path = "rules/providers/volcengine-coding-plan/models/minimax-m3.toml"
+content_sha256 = "a5ed68800751785096385a16331bc4593dbd15b67a4fc3c500f3a22b7c8ec7d8"
+
+[[rules]]
+path = "rules/providers/volcengine/models/deepseek-v4-flash-ga-260731.toml"
+content_sha256 = "417b732ec22c5a27096374a0f8e8c0e7d78229634ee34d65bf21af0601da37ea"
+
+[[rules]]
+path = "rules/providers/volcengine/models/deepseek-v4-pro-ga-260813.toml"
+content_sha256 = "68a73cdee1c005b82881f8075cb742ad7bdd2a5f2e122c28ccbb5e803114e68c"
+
+[[rules]]
+path = "rules/providers/volcengine/models/doubao-seed-2-1-pro-260628.toml"
+content_sha256 = "f45f11dc48706e35268e5babd2cf4d1f3dd28eef5c399d7f7cbb424604bdd16a"
+
+[[rules]]
+path = "rules/providers/volcengine/models/glm-5-2-260617.toml"
+content_sha256 = "bc38551ccad4513986a0fe5ec701a17bcd4e19837316baac476edd5c38086dfe"
+
+[[rules]]
+path = "rules/providers/volcengine/models/glm-5-3-flash-260828.toml"
+content_sha256 = "4b9924594b13541b7db9df89904531e6ca5e32e1eaaf6667a0453a6fde2c11a0"
+
+[[rules]]
+path = "rules/models/moonshotai/kimi-k3.toml"
+content_sha256 = "9ef8a931736137e010790fb11798c05c2609f2944182d3949c6702d7750af664"

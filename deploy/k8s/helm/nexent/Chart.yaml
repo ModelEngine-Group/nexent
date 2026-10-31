@@ -18,6 +18,10 @@ dependencies:
     repository: "file://./charts/nexent-common"
 
   # Application services
+  - name: nexent-ops
+    version: 0.1.0
+    repository: "file://./charts/nexent-ops"
+    condition: nexent-ops.enabled
   - name: nexent-config
     version: 0.1.0
     repository: "file://./charts/nexent-config"

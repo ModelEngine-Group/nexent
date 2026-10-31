@@ -64,7 +64,7 @@ def _ensure_agent_reasoning_snapshot(
             tenant_id=tenant_id,
             version_no=version_no,
         )
-        if not agent_info:
+        if not agent_info or agent_info.get("agent_origin") == "SYSTEM":
             return
         current_overrides = agent_info.get("model_params_override")
         updated_overrides = snapshot_agent_reasoning_config(

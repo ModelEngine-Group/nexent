@@ -44,9 +44,11 @@ data-process = [
     "unstructured[csv,docx,pdf,pptx,xlsx,md]==0.18.14",
     "openpyxl>=3.1.5",
     "xlrd>=2.0.1",
-    "huggingface_hub>=0.30.0,<1.0"
+    "huggingface_hub>=0.30.0,<1.0",
+    "nexent[data_process,performance]",
 ]
 test = [
+    "nexent[dev]",
     "pytest==9.1.1",
     "pytest-asyncio==1.4.0",
     "pytest-cov",
@@ -64,3 +66,23 @@ test = [
 
 [tool.setuptools]
 packages = []
+
+# CPU is the default; select the NVIDIA index by name when needed.
+[tool.uv]
+required-version = ">=0.13.6"
+preview-features = ["index-by-name"]
+# PyTorch also hosts older shared dependencies; fall through when incompatible.
+index-strategy = "unsafe-first-match"
+
+[tool.uv.sources]
+nexent = { path = "../sdk", editable = true }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+
+[[tool.uv.index]]
+name = "pytorch-nvidia"
+url = "https://download.pytorch.org/whl/cu130"
+# Opt in with --index pytorch-nvidia; never use this as a default fallback.
+explicit = true

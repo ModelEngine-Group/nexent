@@ -320,10 +320,12 @@ interface NexentRunConfig {
     resolution: import("@/types/knowledgeScope").KnowledgeScopeResolution
   ) => void;
   draftSnapshot?: Record<string, unknown>;
+  getDraftSnapshot?: () => Record<string, unknown>;
   language?: "zh" | "en";
   onNl2SkillEvent?: (event: Nl2SkillStreamEvent) => void;
   onNl2AgentState?: (event: Nl2AgentStateEvent) => void;
   persistCreationHistory?: boolean;
+  creationTarget?: import("@/types/conversation").ConversationTarget;
   retry_message_index?: number;
   retry_user_message_id?: number;
   creationWorkbenchConfig?: import("@/features/workbench").WorkbenchSessionConfig;
@@ -1542,7 +1544,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     const hasServerConversationId =
       Number.isInteger(numericServerThreadId) && numericServerThreadId > 0;
     if (
-      (!isEphemeralRuntime || custom?.persistCreationHistory) &&
+      (!isEphemeralRuntime || isNl2Agent || isNl2Skill) &&
       hasServerConversationId
     ) {
       requestBody.conversation_id = numericServerThreadId;
@@ -1757,7 +1759,13 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
           }>,
           conversation_id: requestBody.conversation_id as number | undefined,
           minio_files: requestBody.minio_files as any,
-          agent_id: requestBody.agent_id as number | undefined,
+          agent_id: isNl2Agent
+            ? undefined
+            : (requestBody.agent_id as number | undefined),
+          target:
+            isNl2Agent && nl2AgentId != null
+              ? { type: "agent", id: Number(nl2AgentId) }
+              : custom?.creationTarget,
           version_no: custom?.agentVersionNo,
           is_debug: isAgentDebug,
           is_resume: isResume,
@@ -1770,8 +1778,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             : isNl2Skill
               ? "nl2skill"
               : undefined,
-          persist_history:
-            isEphemeralRuntime && custom?.persistCreationHistory === true,
+          persist_history: isNl2Agent || isNl2Skill,
           retry_message_index: isEphemeralRuntime
             ? custom?.retry_message_index
             : undefined,
@@ -1779,7 +1786,9 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             ? custom?.retry_user_message_id
             : undefined,
           workbench_config: isEphemeralRuntime ? creationConfig : undefined,
-          draft_snapshot: isNl2Skill ? custom?.draftSnapshot : undefined,
+          draft_snapshot: isNl2Skill
+            ? (custom?.getDraftSnapshot?.() ?? custom?.draftSnapshot)
+            : undefined,
           language: isNl2Skill ? custom?.language : undefined,
           model_id: requestBody.model_id as number | undefined,
           generation_config: requestBody.generation_config as
@@ -2289,7 +2298,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     };
     const deliveredNl2AgentStates = new Set<string>();
     const upsertCreatedAgentPart = (completed: boolean) => {
-      if (!isNl2Agent || !custom?.persistCreationHistory) return;
+      if (!isNl2Agent) return;
       const agentId = Number(nl2AgentId);
       if (!Number.isInteger(agentId) || agentId <= 0) return;
       const existing = contentParts.find(
@@ -2595,7 +2604,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
 
           if (chunk.type === "nl2a_state") {
             deliverNl2AgentState(chunk);
-            if (isNl2Agent && custom?.persistCreationHistory) {
+            if (isNl2Agent) {
               yield buildStreamResult(contentParts);
             }
             continue;
@@ -3052,7 +3061,7 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
             }
           } else if (chunk.type === "nl2a_state") {
             deliverNl2AgentState(chunk);
-            if (isNl2Agent && custom?.persistCreationHistory) {
+            if (isNl2Agent) {
               yield buildStreamResult(contentParts);
             }
           } else if (chunk.type === "automation_proposal") {

@@ -7,8 +7,8 @@ import {
   ComposerDictation,
 } from "@/app/newchat/assistant-ui/composer-tools";
 import { useEffect, useMemo, useState, type FC } from "react";
-import { Button, Dropdown, Tooltip } from "antd";
-import { Brush, Maximize2, Minimize2 } from "lucide-react";
+import { Button, Tooltip } from "antd";
+import { Columns2, Maximize2, Minimize2, SquarePen, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   AssistantRuntimeProvider,
@@ -71,18 +71,21 @@ interface AgentDebugChatProps {
   agent: Agent;
   agentId: number;
   chatMode: ChatMode;
+  onChatModeChange: (mode: ChatMode) => void;
   clearEpoch: number;
 }
 
 function DebugConversation({
   agent,
   chatMode,
+  onChatModeChange,
   selectedModelId,
   onModelChange,
   dictationConfigured,
 }: {
   agent: Agent;
   chatMode: ChatMode;
+  onChatModeChange: (mode: ChatMode) => void;
   selectedModelId?: string;
   onModelChange: (id: string) => void;
   dictationConfigured: boolean;
@@ -94,7 +97,7 @@ function DebugConversation({
     <Thread
       agent={agent}
       chatMode={chatMode}
-      onChatModeChange={() => undefined}
+      onChatModeChange={onChatModeChange}
       selectedModelId={selectedModelId}
       onModelChange={onModelChange}
       showModelSelector
@@ -124,6 +127,7 @@ const AgentDebugChat: FC<AgentDebugChatProps> = ({
   agent,
   agentId,
   chatMode,
+  onChatModeChange,
   clearEpoch,
 }) => {
   const { modelConfig } = useConfig();
@@ -165,6 +169,7 @@ const AgentDebugChat: FC<AgentDebugChatProps> = ({
           <DebugConversation
             agent={agent}
             chatMode={chatMode}
+            onChatModeChange={onChatModeChange}
             selectedModelId={effectiveModelId}
             onModelChange={setSelectedModelId}
             dictationConfigured={isDictationConfigured(modelConfig?.stt)}
@@ -211,42 +216,30 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
       aria-label={t("agent.debug.title")}
     >
       <header className="agent-debug-header">
-        <Dropdown
-          trigger={["click"]}
-          menu={{
-            selectedKeys: [chatMode, isCompareMode ? "compare" : "single"],
-            items: [
-              { key: "execution", label: t("chat.composer.execution") },
-              { key: "planning", label: t("chat.composer.planning") },
-              { type: "divider" },
-              { key: "single", label: t("agent.debug.defaultMode") },
-              { key: "compare", label: t("agent.debug.compareMode") },
-              { type: "divider" },
-              { key: "close", label: t("agent.page.panel.debug.closeAria") },
-            ],
-            onClick: ({ key }) => {
-              if (key === "execution" || key === "planning") setChatMode(key);
-              else if (key === "single" || key === "compare")
-                onCompareModeChange?.(key === "compare");
-              else if (key === "close") onClose?.();
-            },
-          }}
-        >
-          <button
-            type="button"
+        <div className="flex min-w-0 items-center gap-4">
+          <span
             className="agent-debug-header-title"
-            aria-label={t("agent.debug.options")}
             title={debugAgent.display_name || debugAgent.name}
           >
             {debugAgent.display_name || debugAgent.name}
-          </button>
-        </Dropdown>
+          </span>
+          <Tooltip title={t("agent.debug.toggleCompareMode")}>
+            <Button
+              type="text"
+              aria-label={t("agent.debug.toggleCompareMode")}
+              aria-pressed={isCompareMode}
+              icon={<Columns2 size={24} />}
+              className="!size-6 shrink-0 !p-0 !text-[#4d4d4d]"
+              onClick={() => onCompareModeChange?.(!isCompareMode)}
+            />
+          </Tooltip>
+        </div>
         <div className="agent-debug-header-actions">
           <Tooltip title={t("agent.debug.clear")}>
             <Button
               type="text"
               aria-label={t("agent.debug.clear")}
-              icon={<Brush size={24} />}
+              icon={<SquarePen size={24} />}
               className="!size-6 !p-0 !text-[#4d4d4d]"
               onClick={() =>
                 isCompareMode
@@ -272,6 +265,15 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
               onClick={onToggleFullscreen}
             />
           </Tooltip>
+          <Tooltip title={t("agent.page.panel.debug.closeAria")}>
+            <Button
+              type="text"
+              aria-label={t("agent.page.panel.debug.closeAria")}
+              icon={<X size={24} />}
+              className="!size-6 !p-0 !text-[#4d4d4d]"
+              onClick={onClose}
+            />
+          </Tooltip>
         </div>
       </header>
       <div className="min-h-0 flex-1">
@@ -282,6 +284,7 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
             agent={debugAgent}
             agentId={agentId}
             chatMode={chatMode}
+            onChatModeChange={setChatMode}
             clearEpoch={clearEpoch}
           />
         </div>
