@@ -2,12 +2,12 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  GATEWAY_AUTH_ENABLED: "true"
   name: nexent-config
   namespace: {{ .Values.global.namespace }}
   annotations:
     "helm.sh/hook-weight": "-3"
 data:
+  GATEWAY_AUTH_ENABLED: "true"
   TZ: {{ .Values.config.timezone | quote }}
   # Deployment version
   DEPLOYMENT_VERSION: {{ .Values.global.deploymentVersion | quote }}

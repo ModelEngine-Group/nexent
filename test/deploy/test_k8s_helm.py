@@ -49,7 +49,6 @@ APPLICATION_SINGLE_REPLICA = {
 STARTUP_RECOVERY_DEPLOYMENTS = {
     "nexent-config",
     "nexent-data-process",
-    "nexent-northbound",
     "nexent-runtime",
 }
 APPLICATION_PVCS = {
@@ -250,6 +249,8 @@ def _instrument_shell_function(path: Path, function_name: str) -> None:
 
 def _application_dynamic_args() -> list[str]:
     return [
+        "--set",
+        "nexent-common.secrets.jwtSecret=helm-test-fixture-not-a-deployment-secret",
         "--set",
         "global.sharedStorage.mode=dynamic",
         "--set",

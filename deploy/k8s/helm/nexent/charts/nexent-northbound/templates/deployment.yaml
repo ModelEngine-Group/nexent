@@ -1,15 +1,3 @@
-{{- if ne (int .Values.replicaCount) 1 -}}
-{{- fail "nexent-northbound must remain single-replica for startup task recovery" -}}
-{{- end -}}
-{{- if ne .Values.strategy.type "Recreate" -}}
-{{- fail "nexent-northbound strategy.type must be Recreate for startup task recovery" -}}
-{{- end -}}
-{{- $global := default dict .Values.global -}}
-{{- $sqlFileNames := default dict $global.sqlFileNames -}}
-{{- $sharedStorage := default dict $global.sharedStorage -}}
-{{- $workspaceStorage := default dict $sharedStorage.workspace -}}
-{{- $skillsStorage := default dict $sharedStorage.skills -}}
-{{- $logsStorage := default dict $sharedStorage.logs -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,8 +21,7 @@ spec:
       annotations:
         checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" .Values.global | quote }}
         checksum/nexent-auth: {{ dig "rolloutChecksums" "authSecret" "" .Values.global | quote }}
-        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" .Values.global | quote }}
-        checksum/nexent-sql: {{ dig "rolloutChecksums" "sql" "" .Values.global | quote }}
+        checksum/nexent-gateway-image: {{ dig "rolloutChecksums" "gatewayImage" "" .Values.global | quote }}
     spec:
       containers:
         - name: nexent-northbound
@@ -43,35 +30,40 @@ spec:
           ports:
             - containerPort: 5013
               name: http
-          command:
-            - /opt/nexent/scripts/start-backend.sh
-            - python
-            - backend/northbound_service.py
-          envFrom:
-            - configMapRef:
-                name: nexent-config
-            - secretRef:
-                name: nexent-env
-            - secretRef:
-                name: nexent-secrets
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          command: ["uvicorn", "gateway.edge:app", "--host", "0.0.0.0", "--port", "5013", "--no-proxy-headers"]
           env:
             - name: GATEWAY_AUTH_ENABLED
               value: "true"
-{{ include "nexent.backendPlatformEnv" . | indent 12 }}
+            - name: JWT_ISSUER
+              valueFrom:
+                configMapKeyRef:
+                  name: nexent-config
+                  key: JWT_ISSUER
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: JWT_SECRET
+            - name: GATEWAY_SIGNING_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-secrets
+                  key: GATEWAY_SIGNING_SECRET
+                  optional: true
             - name: GATEWAY_MANAGEMENT_URL
               value: "http://nexent-config:5010"
             - name: GATEWAY_RUNTIME_URL
               value: "http://nexent-runtime:5014"
             - name: GATEWAY_NORTHBOUND_URL
               value: "http://nexent-config:5010"
-            - name: NEXENT_SQL_STARTUP_MODE
-              value: "off"
             - name: DEPLOYMENT_VERSION
               value: {{ .Values.global.deploymentVersion | quote }}
-            - name: skip_proxy
-              value: {{ .Values.config.skipProxy | quote }}
-            - name: UMASK
-              value: {{ .Values.config.umask | quote }}
           startupProbe:
             httpGet:
               path: /health/live
@@ -92,16 +84,6 @@ spec:
               port: 5013
             initialDelaySeconds: 5
             periodSeconds: 5
-          volumeMounts:
-            - name: nexent-sql-files
-              mountPath: /opt/nexent/sql
-              readOnly: true
-            - name: nexent-workspace
-              mountPath: /mnt/nexent
-            - name: nexent-skills
-              mountPath: /mnt/nexent-data/skills
-            - name: nexent-logs
-              mountPath: /mnt/nexent-data/logs
           resources:
             requests:
               memory: {{ .Values.resources.backend.requests.memory }}
@@ -109,26 +91,3 @@ spec:
             limits:
               memory: {{ .Values.resources.backend.limits.memory }}
               cpu: {{ .Values.resources.backend.limits.cpu }}
-      volumes:
-        - name: nexent-sql-files
-          configMap:
-            name: nexent-sql-files
-            items:
-              - key: init.sql
-                path: init.sql
-              - key: migrations-.keep
-                path: migrations/.keep
-{{ range $name := default (list) $sqlFileNames.migrations }}
-              - key: {{ printf "migrations-%s" $name | quote }}
-                path: {{ printf "migrations/%s" $name | quote }}
-{{ end }}
-
-        - name: nexent-workspace
-          persistentVolumeClaim:
-            claimName: {{ default "nexent-workspace" $workspaceStorage.existingClaim }}
-        - name: nexent-skills
-          persistentVolumeClaim:
-            claimName: {{ default "nexent-skills" $skillsStorage.existingClaim }}
-        - name: nexent-logs
-          persistentVolumeClaim:
-            claimName: {{ default "nexent-logs" $logsStorage.existingClaim }}

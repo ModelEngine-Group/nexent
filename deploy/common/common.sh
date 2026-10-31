@@ -2185,6 +2185,7 @@ deployment_image_rollout_checksum() {
 }
 
 deployment_render_image_rollout_checksums() {
+  printf '    gatewayImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_GATEWAY_IMAGE")"
   printf '    backendImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_IMAGE")"
   printf '    webImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_WEB_IMAGE")"
   printf '    dataProcessImage: "%s"\n' "$(deployment_image_rollout_checksum "$NEXENT_DATA_PROCESS_IMAGE")"
@@ -2196,6 +2197,7 @@ deployment_apply_image_source() {
   local image_var
 
   if [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ]; then
+    export NEXENT_GATEWAY_IMAGE="nexent/nexent-gateway:latest"
     export NEXENT_IMAGE="nexent/nexent:latest"
     export NEXENT_WEB_IMAGE="nexent/nexent-web:latest"
     export NEXENT_DATA_PROCESS_IMAGE="nexent/nexent-data-process:latest"
@@ -2204,6 +2206,7 @@ deployment_apply_image_source() {
     export OPENSSH_SERVER_IMAGE="nexent/nexent-ubuntu-terminal:latest"
   fi
 
+  export NEXENT_GATEWAY_IMAGE="${NEXENT_GATEWAY_IMAGE:-nexent/nexent-gateway:$version}"
   export NEXENT_IMAGE="${NEXENT_IMAGE:-nexent/nexent:$version}"
   export NEXENT_WEB_IMAGE="${NEXENT_WEB_IMAGE:-nexent/nexent-web:$version}"
   export NEXENT_DATA_PROCESS_IMAGE="${NEXENT_DATA_PROCESS_IMAGE:-nexent/nexent-data-process:$version}"
@@ -2254,6 +2257,7 @@ deployment_apply_image_source() {
 
   if [ -n "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX" ]; then
     for image_var in \
+      NEXENT_GATEWAY_IMAGE \
       NEXENT_IMAGE \
       NEXENT_WEB_IMAGE \
       NEXENT_DATA_PROCESS_IMAGE \
@@ -2339,6 +2343,7 @@ deployment_render_docker_env() {
   {
     printf 'DEPLOYMENT_IMAGE_REGISTRY_PREFIX="%s"\n' "$DEPLOYMENT_IMAGE_REGISTRY_PREFIX"
     printf 'NEXENT_IMAGE_REGISTRY_PREFIX="%s"\n' "$compose_image_registry_prefix"
+    printf 'NEXENT_GATEWAY_IMAGE="%s"\n' "$NEXENT_GATEWAY_IMAGE"
     printf 'NEXENT_IMAGE="%s"\n' "$NEXENT_IMAGE"
     printf 'NEXENT_WEB_IMAGE="%s"\n' "$NEXENT_WEB_IMAGE"
     printf 'NEXENT_DATA_PROCESS_IMAGE="%s"\n' "$NEXENT_DATA_PROCESS_IMAGE"
@@ -2389,7 +2394,7 @@ deployment_render_image_values() {
   printf 'nexent-mcp:\n'
   printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
   printf 'nexent-northbound:\n'
-  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_GATEWAY_IMAGE")" "$(deployment_image_tag "$NEXENT_GATEWAY_IMAGE")" "$local_pull_policy"
   printf 'nexent-web:\n'
   printf '  images:\n    web:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_WEB_IMAGE")" "$(deployment_image_tag "$NEXENT_WEB_IMAGE")" "$local_pull_policy"
   printf 'nexent-data-process:\n'
@@ -2485,7 +2490,7 @@ deployment_render_helm_chart_values() {
   printf '  service:\n    type: "%s"\n    nodePorts:\n      http: 30011\n      httpAlt: 30015\n' "$internal_type"
   printf 'nexent-northbound:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"
-  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_IMAGE")" "$(deployment_image_tag "$NEXENT_IMAGE")" "$local_pull_policy"
+  printf '  images:\n    backend:\n      repository: "%s"\n      tag: "%s"\n      pullPolicy: "%s"\n' "$(deployment_image_repo "$NEXENT_GATEWAY_IMAGE")" "$(deployment_image_tag "$NEXENT_GATEWAY_IMAGE")" "$local_pull_policy"
   printf '  services:\n    northbound:\n      type: "%s"\n      nodePort: 30013\n' "$northbound_type"
   printf 'nexent-web:\n'
   printf '  enabled: %s\n' "$(deployment_chart_enabled application)"

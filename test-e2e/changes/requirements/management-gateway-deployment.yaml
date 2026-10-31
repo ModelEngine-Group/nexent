@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: MGWI-GATEWAY-DEPLOYMENT-20261031
+  change_type: requirement
+  title: Select the independent authenticated Gateway image in default deployments
+  description: Preserve nexent-northbound and port 5013 while switching Compose and
+    Helm to the independent image, integrating build and offline selection, and
+    preserving Management recovery ownership.
+  affected_features:
+    existing: [GW-AUTH]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [GW-AUTH-D3-001]
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  notes: Existing D3 revalidates service trust over real local protocols. Deployment
+    selection and rendered configuration are traditional deployment tests. No new D1
+    duplicates these checks. Production database, browser and load acceptance remain
+    pending under the owning SPEC AC-004.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Explicit, all and application builds include the independent Gateway image.
+    - Registry sources, overrides, Helm values and offline packaging retain its image.
+    - Default Gateway deployments receive no business volumes or database environment.
+    - Stateless Gateway scales while Management retains its recovery constraints.
+    - Partial upstream failure and client disconnect close request-owned transports.
+    reason: Add executable deployment selection and rendering assertions; strengthen
+      proxy cleanup regression tests and reuse unchanged authentication tests.
+    test_selectors:
+    - test/backend/deploy/test_gateway_image.py
+    - test/backend/gateway/test_edge.py
+    - test/backend/gateway/test_edge_integration.py
+  requirement_id: GW-AUTH

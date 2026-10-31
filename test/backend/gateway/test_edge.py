@@ -8,6 +8,32 @@ from gateway.edge import create_edge_app
 from gateway.routing import select_upstream, filtered_headers
 
 
+@pytest.mark.asyncio
+async def test_partial_upstream_failure_closes_stream_without_retry():
+    closed = []
+    requests = []
+
+    class BrokenStream(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b"data: first\n\n"
+            raise httpx.ReadError("upstream disconnected after headers")
+
+        async def aclose(self):
+            closed.append(True)
+
+    async def upstream(request):
+        requests.append(request)
+        return httpx.Response(200, stream=BrokenStream())
+
+    app = create_edge_app(authentication=False, transport=httpx.MockTransport(upstream))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
+            with pytest.raises(httpx.ReadError):
+                await client.post("/api/agent/run")
+    assert len(requests) == 1
+    assert closed == [True]
+
+
 @pytest.mark.parametrize("method,path,target", [
     ("GET", "/api/model/list", "management"),
     ("POST", "/api/agent/run", "runtime"),

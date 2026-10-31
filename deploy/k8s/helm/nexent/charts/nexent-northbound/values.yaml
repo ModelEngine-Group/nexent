@@ -1,11 +1,11 @@
 replicaCount: 1
 
 strategy:
-  type: Recreate
+  type: RollingUpdate
 
 images:
   backend:
-    repository: nexent/nexent
+    repository: nexent/nexent-gateway
     tag: latest
     pullPolicy: IfNotPresent
 
@@ -17,10 +17,6 @@ resources:
     limits:
       memory: 2Gi
       cpu: 1
-
-config:
-  skipProxy: "true"
-  umask: "0022"
 
 probes:
   startup:

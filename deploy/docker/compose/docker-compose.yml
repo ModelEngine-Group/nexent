@@ -193,43 +193,38 @@ services:
       - nexent
     entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/mcp_service.py"]
 
+  # Keep the public service name and port for existing clients.
   nexent-northbound:
-    image: ${NEXENT_IMAGE}
+    image: ${NEXENT_GATEWAY_IMAGE:-nexent/nexent-gateway:latest}
     container_name: nexent-northbound
     restart: always
     ports:
-      - "5013:5013" # Northbound service port
-    volumes:
-      - ${NEXENT_USER_DIR:-$HOME/nexent}:/mnt/nexent
-      - ../../sql:/opt/nexent/sql:ro
-      - ${ROOT_DIR}/skills:/mnt/nexent-data/skills
-      - ${ROOT_DIR}/logs:/mnt/nexent-data/logs
-      - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
+      - "5013:5013"
     environment:
       GATEWAY_AUTH_ENABLED: "true"
+      JWT_ISSUER: "${JWT_ISSUER:-nexent}"
+      JWT_SECRET: "${JWT_SECRET:?Gateway requires the configured JWT_SECRET}"
+      GATEWAY_SIGNING_SECRET: "${GATEWAY_SIGNING_SECRET:-}"
+      DEPLOYMENT_VERSION: "${DEPLOYMENT_VERSION:-full}"
       GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
       GATEWAY_RUNTIME_URL: "http://nexent-runtime:5014"
       GATEWAY_NORTHBOUND_URL: "http://nexent-config:5010"
-      TZ: "${TZ:-Asia/Shanghai}"
-      <<: [*minio-vars, *es-vars]
-      NEXENT_SQL_STARTUP_MODE: "off"
-      NEXENT_SQL_FILES_CHECKSUM: ${NEXENT_SQL_FILES_CHECKSUM:-}
-      skip_proxy: "true"
-      UMASK: "0022"
-    env_file:
-      - ../../env/.env
-    user: root
+    command: ["uvicorn", "gateway.edge:app", "--host", "0.0.0.0", "--port", "5013", "--no-proxy-headers"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5013/health/ready', timeout=2)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     depends_on:
-      nexent-elasticsearch:
-        condition: service_healthy
+      - nexent-config
+      - nexent-runtime
     logging:
       driver: "json-file"
       options:
-        max-size: "10m" # Maximum size of a single log file
-        max-file: "3" # Maximum number of log files to keep
+        max-size: "10m"
+        max-file: "3"
     networks:
       - nexent
-    entrypoint: ["/opt/nexent/scripts/start-backend.sh", "python", "backend/northbound_service.py"]
 
   nexent-web:
     image: ${NEXENT_WEB_IMAGE}

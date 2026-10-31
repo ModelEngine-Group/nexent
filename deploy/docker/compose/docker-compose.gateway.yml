@@ -10,6 +10,8 @@ services:
       - "${NEXENT_GATEWAY_PORT:-5016}:5016"
     environment:
       GATEWAY_AUTH_ENABLED: "true"
+      DEPLOYMENT_VERSION: "${DEPLOYMENT_VERSION:-full}"
+      JWT_ISSUER: "${JWT_ISSUER:-nexent}"
       JWT_SECRET: "${JWT_SECRET:?Gateway requires the configured JWT_SECRET}"
       GATEWAY_SIGNING_SECRET: "${GATEWAY_SIGNING_SECRET:-}"
       GATEWAY_MANAGEMENT_URL: "http://nexent-config:5010"
