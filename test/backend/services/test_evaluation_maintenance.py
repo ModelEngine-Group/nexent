@@ -1,4 +1,5 @@
-"""UT for backend/services/evaluation_maintenance.py — background scheduler."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""UT for backend/management/services/evaluation/maintenance.py — background scheduler."""
 
 import importlib.util as _ilu
 import sys
@@ -20,23 +21,27 @@ def _register_package(name):
     return pkg
 
 
-# ---- stub chain: database.agent_evaluation_db / client / db_models ----
+# ---- stub chain: management.db.evaluation.runs / client / db_models ----
 database_pkg = _register_package("database")
-agent_evaluation_db = MagicMock(name="database.agent_evaluation_db")
-client = MagicMock(name="database.client")
-db_models = MagicMock(name="database.db_models")
+agent_evaluation_db = MagicMock(name="management.db.evaluation.runs")
+client = MagicMock(name="management.db.client")
+db_models = MagicMock(name="management.db.models")
 db_models.AgentEvaluation = MagicMock(name="AgentEvaluation")
 database_pkg.agent_evaluation_db = agent_evaluation_db
 database_pkg.client = client
 database_pkg.db_models = db_models
-sys.modules["database.agent_evaluation_db"] = agent_evaluation_db
-sys.modules["database.client"] = client
-sys.modules["database.db_models"] = db_models
+sys.modules["management.db.evaluation.runs"] = agent_evaluation_db
+sys.modules["management.db.client"] = client
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules["management.db.models"] = db_models
 
 if "evaluation_maintenance" in sys.modules:
     del sys.modules["evaluation_maintenance"]
 _spec = _ilu.spec_from_file_location(
-    "evaluation_maintenance", str(_BACKEND / "services" / "evaluation_maintenance.py"))
+    "evaluation_maintenance", str(_BACKEND / "management" / "services" / "evaluation" / "maintenance.py"))
 assert _spec is not None and _spec.loader is not None
 em = _ilu.module_from_spec(_spec)
 sys.modules["evaluation_maintenance"] = em
@@ -46,8 +51,20 @@ _spec.loader.exec_module(em)
 @pytest.fixture(autouse=True)
 def _reset_running():
     em._running = False
+    em._thread_manager = None
+    em._execution_id = None
+    em.list_dispatchable_pending_runs.return_value = []
     yield
     em._running = False
+
+
+class _OneIterationCancelEvent:
+    def is_set(self):
+        return False
+
+    def wait(self, _timeout):
+        em._running = False
+        return False
 
 
 def test_run_tenant_task_logs_info(mocker):
@@ -87,31 +104,106 @@ def _fake_session_rows(rows):
 
 def test_run_loop_reaps_and_cleans_up(mocker):
     _fake_session_rows([("t1",), ("t2",)])
+    pending_runs = [{"agent_evaluation_id": 7}]
+    em.list_dispatchable_pending_runs.return_value = pending_runs
+    dispatch = mocker.patch.object(em, "_dispatch_pending_runs")
     reap = mocker.patch("evaluation_maintenance.reap_stale_runs", return_value=2)
     cleanup = mocker.patch("evaluation_maintenance.cleanup_aged_evaluations", return_value=5)
-    mocker.patch("evaluation_maintenance.time.sleep",
-                 side_effect=lambda *a: setattr(em, "_running", False))
     info = mocker.patch.object(em.logger, "info")
 
     em._running = True
-    em._run_loop()
+    em._run_loop(_OneIterationCancelEvent())
 
+    dispatch.assert_called_once_with(pending_runs)
     assert reap.call_args_list == [call("t1"), call("t2")]
     assert cleanup.call_args_list == [call("t1"), call("t2")]
     info.assert_any_call("Reaped %d stale RUNNING evaluations for tenant %s", 2, "t1")
     info.assert_any_call("Cleaned up %d aged evaluations for tenant %s", 5, "t1")
 
 
+def test_dispatch_pending_runs_reuses_runtime_dispatcher(mocker, monkeypatch):
+    dispatcher = MagicMock()
+    runtime_proxy = types.ModuleType("management.services.agent.runtime_client")
+    runtime_proxy.dispatch_agent_evaluation_run = dispatcher
+    monkeypatch.setitem(sys.modules, "management.services.agent.runtime_client", runtime_proxy)
+
+    em._dispatch_pending_runs(
+        [
+            {
+                "agent_evaluation_id": 7,
+                "tenant_id": "tenant-1",
+                "created_by": "user-1",
+            }
+        ]
+    )
+
+    dispatcher.assert_called_once_with(
+        agent_evaluation_id=7,
+        user_id="user-1",
+        tenant_id="tenant-1",
+    )
+
+
+def test_dispatch_pending_runs_returns_immediately_when_empty(monkeypatch):
+    monkeypatch.delitem(sys.modules, "management.services.agent.runtime_client", raising=False)
+
+    em._dispatch_pending_runs([])
+
+    assert "management.services.agent.runtime_client" not in sys.modules
+
+
+def test_dispatch_pending_runs_skips_incomplete_identity(mocker, monkeypatch):
+    dispatcher = MagicMock()
+    runtime_proxy = types.ModuleType("management.services.agent.runtime_client")
+    runtime_proxy.dispatch_agent_evaluation_run = dispatcher
+    monkeypatch.setitem(sys.modules, "management.services.agent.runtime_client", runtime_proxy)
+    warning = mocker.patch.object(em.logger, "warning")
+
+    em._dispatch_pending_runs(
+        [
+            {
+                "agent_evaluation_id": 7,
+                "tenant_id": "tenant-1",
+                "created_by": None,
+            }
+        ]
+    )
+
+    dispatcher.assert_not_called()
+    warning.assert_called_once_with(
+        "Cannot redispatch pending evaluation %s without tenant and creator",
+        7,
+    )
+
+
+def test_dispatch_pending_runs_keeps_failed_dispatch_pending(mocker, monkeypatch):
+    dispatcher = MagicMock(side_effect=RuntimeError("runtime unavailable"))
+    runtime_proxy = types.ModuleType("management.services.agent.runtime_client")
+    runtime_proxy.dispatch_agent_evaluation_run = dispatcher
+    monkeypatch.setitem(sys.modules, "management.services.agent.runtime_client", runtime_proxy)
+    warning = mocker.patch.object(em.logger, "warning")
+
+    em._dispatch_pending_runs(
+        [
+            {
+                "agent_evaluation_id": 7,
+                "tenant_id": "tenant-1",
+                "created_by": "user-1",
+            }
+        ]
+    )
+
+    warning.assert_called_once()
+
+
 def test_run_loop_skips_cleanup_until_interval(mocker, monkeypatch):
     _fake_session_rows([("t1",)])
     reap = mocker.patch("evaluation_maintenance.reap_stale_runs", return_value=0)
     cleanup = mocker.patch("evaluation_maintenance.cleanup_aged_evaluations")
-    mocker.patch("evaluation_maintenance.time.sleep",
-                 side_effect=lambda *a: setattr(em, "_running", False))
     mocker.patch.object(em, "AGED_CLEANUP_INTERVAL", 10**12)
 
     monkeypatch.setattr(em, "_running", True)
-    em._run_loop()
+    em._run_loop(_OneIterationCancelEvent())
 
     reap.assert_called_once_with("t1")
     cleanup.assert_not_called()
@@ -121,12 +213,10 @@ def test_run_loop_handles_error_and_backs_off(mocker, monkeypatch):
     monkeypatch.setattr(
         client.get_db_session, "side_effect", RuntimeError("db down")
     )
-    error_log = mocker.patch.object(em.logger, "error")
-    mocker.patch("evaluation_maintenance.time.sleep",
-                 side_effect=lambda *a: setattr(em, "_running", False))
+    error_log = mocker.patch.object(em.logger, "exception")
 
     em._running = True
-    em._run_loop()
+    em._run_loop(_OneIterationCancelEvent())
 
     error_log.assert_called_once()
     _args = error_log.call_args.args
@@ -135,23 +225,26 @@ def test_run_loop_handles_error_and_backs_off(mocker, monkeypatch):
 
 
 def test_start_starts_thread(mocker):
-    thread_cls = mocker.patch("evaluation_maintenance.threading.Thread")
+    manager = MagicMock()
+    manager.register_service.return_value.execution_id = "execution-1"
     info = mocker.patch.object(em.logger, "info")
 
-    em.start()
+    em.start(manager)
 
     assert em._running is True
-    thread_cls.assert_called_once_with(
-        target=em._run_loop, daemon=True, name="eval-maintenance")
-    thread_cls.return_value.start.assert_called_once_with()
+    manager.register_service.assert_called_once()
+    registered = manager.register_service.call_args
+    assert registered.args[0].task_name == "evaluation-maintenance"
+    assert registered.args[1] is em._run_loop
+    manager.start_service.assert_called_once_with("execution-1")
     info.assert_called_once()
 
 
 def test_start_idempotent(mocker):
-    thread_cls = mocker.patch("evaluation_maintenance.threading.Thread")
+    manager = MagicMock()
     em._running = True
-    em.start()
-    thread_cls.assert_not_called()
+    em.start(manager)
+    manager.register_service.assert_not_called()
 
 
 def test_stop_sets_running_false(mocker, monkeypatch):

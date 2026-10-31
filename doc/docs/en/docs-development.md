@@ -28,7 +28,7 @@ pnpm install
 Start the dev server:
 
 ```bash
-pnpm vitepress dev docs
+pnpm run docs:dev
 ```
 
 After successfully start, visit:

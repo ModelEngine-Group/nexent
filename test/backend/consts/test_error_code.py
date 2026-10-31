@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for Error Code definitions.
 
@@ -5,7 +7,7 @@ Tests the ErrorCode enum and ERROR_CODE_HTTP_STATUS mapping
 to ensure error codes are properly defined and mapped.
 """
 import pytest
-from backend.consts.error_code import ErrorCode, ERROR_CODE_HTTP_STATUS
+from contracts.errors.codes import ErrorCode, ERROR_CODE_HTTP_STATUS
 
 
 class TestErrorCodeEnum:
@@ -137,6 +139,10 @@ class TestErrorCodeValues:
         """Test KNOWLEDGE_NOT_FOUND has correct string value."""
         assert ErrorCode.KNOWLEDGE_NOT_FOUND.value == "060101"
 
+    def test_knowledge_resource_exceeded_value(self):
+        """Knowledge resource limits use the Knowledge module's next code."""
+        assert ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED.value == "060110"
+
     def test_memory_not_found_value(self):
         """Test MEMORY_NOT_FOUND has correct string value."""
         assert ErrorCode.MEMORY_NOT_FOUND.value == "100101"
@@ -212,6 +218,10 @@ class TestErrorCodeHttpStatusMapping:
         """Test COMMON_RATE_LIMIT_EXCEEDED maps to HTTP 429."""
         assert ERROR_CODE_HTTP_STATUS[ErrorCode.COMMON_RATE_LIMIT_EXCEEDED] == 429
 
+    def test_tenant_resource_exceeded_maps_to_429(self):
+        """Test tenant resource quota errors map to HTTP 429."""
+        assert ERROR_CODE_HTTP_STATUS[ErrorCode.TENANT_RESOURCE_EXCEEDED] == 429
+
     def test_common_validation_error_maps_to_400(self):
         """Test COMMON_VALIDATION_ERROR maps to HTTP 400."""
         assert ERROR_CODE_HTTP_STATUS[ErrorCode.COMMON_VALIDATION_ERROR] == 400
@@ -227,6 +237,10 @@ class TestErrorCodeHttpStatusMapping:
     def test_file_too_large_maps_to_413(self):
         """Test FILE_TOO_LARGE maps to HTTP 413."""
         assert ERROR_CODE_HTTP_STATUS[ErrorCode.FILE_TOO_LARGE] == 413
+
+    def test_knowledge_resource_exceeded_maps_to_429(self):
+        """Knowledge resource limits map to the standard quota status."""
+        assert ERROR_CODE_HTTP_STATUS[ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED] == 429
 
     def test_file_not_found_maps_to_404(self):
         """Test FILE_NOT_FOUND maps to HTTP 404."""

@@ -1,430 +1,500 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { App, Empty, InputNumber, Modal, Select, Spin } from "antd";
 import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
-import { Button, Switch, Tag } from "antd";
-import {
-  History,
-  Maximize2,
-  Minimize2,
-  RefreshCw,
-  Sparkles,
-  X,
+  ChevronDown,
+  ChevronUp,
+  FileInput,
+  LayoutGrid,
+  List,
+  Search,
 } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useTranslation } from "react-i18next";
 
-import AgentSelectorHeader from "./agent-selector-header";
-import AgentConfig from "./agent-config";
-import AgentVersion from "./agent-version";
-import AgentDebugPanel from "./agent-debug";
-import { Nl2AgentChatPanel } from "../newchat/assistant-ui/nl2agent-chat-panel";
+import AgentImportWizard from "@/components/agent/AgentImportWizard";
+import CreateAgentModal from "@/components/agent/CreateAgentModal";
+import { StandardButton } from "@/components/common/StandardButton";
+import { StandardInput } from "@/components/common/StandardInput";
+import { StandardPaginator } from "@/components/common/StandardPaginator";
+import TagFilterPopover from "@/components/tag/TagFilterPopover";
+import { useGuidePreference } from "@/hooks/useGuidePreference";
+import { useAgentList } from "@/hooks/agent/useAgentList";
+import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import {
-  Nl2AgentFlowProvider,
-  useNl2AgentFlow,
-  type Nl2AgentConfigFocusTarget,
-} from "@/contexts/nl2AgentFlow";
-import { useAgentStore } from "@/stores/agentStore";
-import { useAgentInfo } from "@/hooks/agent/useAgentInfo";
-import { useAgentVersionDetail } from "@/hooks/agent/useAgentVersionDetail";
-import { useAgentVersionList } from "@/hooks/agent/useAgentVersionList";
-import { searchAgentInfo } from "@/services/agentConfigService";
+  openImportWizardWithFile,
+  type ImportAgentData,
+} from "@/lib/agentImportUtils";
 import log from "@/lib/logger";
-import type {
-  Nl2AgentDraftField,
-  Nl2AgentStateEvent,
-} from "../newchat/adapter/remote-chat-model-adapter";
+import { getTagSearchPredicates } from "@/lib/systemTagLabels";
+import { searchAgentInfo } from "@/services/agentConfigService";
+import { useAgentStore } from "@/stores/agentStore";
+import type { Agent } from "@/types/agentConfig";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 
-function resolveDraftFocusTarget(
-  updatedFields: readonly Nl2AgentDraftField[]
-): Nl2AgentConfigFocusTarget | null {
-  if (
-    updatedFields.includes("greeting_message") ||
-    updatedFields.includes("example_questions")
-  ) {
-    return { section: "conversation_guide" };
-  }
-  if (updatedFields.includes("few_shots_prompt")) {
-    return { section: "role_model", promptTab: "few-shots" };
-  }
-  if (updatedFields.includes("constraint_prompt")) {
-    return { section: "role_model", promptTab: "constraint" };
-  }
-  if (updatedFields.includes("duty_prompt")) {
-    return { section: "role_model", promptTab: "duty" };
-  }
-  if (updatedFields.includes("description")) {
-    return { section: "display_info" };
-  }
-  return null;
-}
+import AgentConfigurationGuide from "./components/agent-configuration-guide";
+import AgentListCard from "./components/agent-list-card";
+import AgentListTable, {
+  DEFAULT_AGENT_COLUMN_WIDTHS,
+} from "./components/agent-list-table";
+import AgentVersion from "./agent-version";
+import "./agent-list.css";
 
-interface PanelCardProps {
-  title: string;
-  children: ReactNode;
-  className?: string;
-  leftAction?: ReactNode;
-  rightAction?: ReactNode;
-  icon?: ReactNode;
-}
-
-function PanelCard({
-  title,
-  children,
-  className = "",
-  leftAction,
-  rightAction,
-  icon,
-}: PanelCardProps) {
-  return (
-    <section
-      className={`flex min-h-0 flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm ${className}`}
-    >
-        <div className="flex min-h-12 shrink-0 items-center justify-between border-b border-gray-200 px-4">
-          <div className="flex items-center gap-2">
-            {icon}
-            <h3 className="text-base font-medium text-gray-900">{title}</h3>
-            {leftAction}
-          </div>
-          {rightAction}
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function AgentSetupContent() {
+export default function AgentsPage() {
   const { t } = useTranslation("common");
-  const queryClient = useQueryClient();
-  const searchParams = useSearchParams();
-  const snapshotRefreshQueue = useRef<Promise<boolean>>(Promise.resolve(true));
-  const [isGenerationVisible, setIsGenerationVisible] = useState(true);
-  const [isDebugVisible, setIsDebugVisible] = useState(false);
-  const [isCompareMode, setIsCompareMode] = useState(false);
-  const [isDebugFullscreen, setIsDebugFullscreen] = useState(false);
-  const [isShowVersionManagePanel, setIsShowVersionManagePanel] =
-    useState(false);
-  const currentAgentId = useAgentStore((state) => state.currentAgentId);
-  const { agentInfo } = useAgentInfo(currentAgentId);
-  const { total } = useAgentVersionList(currentAgentId);
-  const { agentVersionDetail } = useAgentVersionDetail(
-    currentAgentId,
-    agentInfo?.current_version_no ?? null
+  const { message } = App.useApp();
+  const pathname = usePathname();
+  const router = useRouter();
+  const initialize = useAgentStore((state) => state.initialize);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(12);
+  const [jumpPage, setJumpPage] = useState<number | null>(null);
+  const [tableColumnWidths, setTableColumnWidths] = useState(
+    DEFAULT_AGENT_COLUMN_WIDTHS
   );
-  const permissionReadOnly = useAgentStore((state) => state.isReadOnly);
-  const {
-    isComposerDisabled,
-    completionSyncFailed,
-    markCompletionSynced,
-    markCompletionSyncFailed,
-    markGenerationCompleted,
-    markPromptGenerationFailed,
-    requestConfigFocus,
-    resetFlow,
-    sessionGeneration,
-  } = useNl2AgentFlow();
-  const requestedAgentId = Number(searchParams.get("agent_id"));
-  const isRequestedAgentLoading =
-    Number.isInteger(requestedAgentId) &&
-    requestedAgentId > 0 &&
-    requestedAgentId !== currentAgentId;
-  const isNl2AgentUnavailable = currentAgentId === null || permissionReadOnly;
+  const [view, setView] = useState<"grid" | "list">("grid");
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
+    []
+  );
+  const [isVersionManageOpen, setIsVersionManageOpen] = useState(false);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [importData, setImportData] = useState<ImportAgentData | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const { dismissed, ready, dismiss, reset } = useGuidePreference(
+    "agent-configuration"
+  );
+  const isGuideExpanded = ready && !dismissed;
+  const [isGuideMounted, setIsGuideMounted] = useState(false);
+  const guideCollapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    resetFlow(currentAgentId);
-  }, [currentAgentId, resetFlow]);
-
-  const enqueueSnapshotRefresh = useCallback(
-    (agentId: number, focusTarget: Nl2AgentConfigFocusTarget | null = null) => {
-      snapshotRefreshQueue.current = snapshotRefreshQueue.current
-        .then(async () => {
-          const initialState = useAgentStore.getState();
-          if (initialState.currentAgentId !== agentId) return false;
-
-          const autosaveSucceeded = await initialState.waitForIdle();
-          if (!autosaveSucceeded) {
-            throw new Error("Pending Agent edits could not be saved");
-          }
-          if (useAgentStore.getState().currentAgentId !== agentId) return false;
-
-          const result = await searchAgentInfo(agentId, undefined, 0);
-          if (!result.success || !result.data) {
-            throw new Error(result.message);
-          }
-          const currentState = useAgentStore.getState();
-          if (currentState.currentAgentId !== agentId) return false;
-          if (!currentState.replaceServerSnapshot(agentId, result.data)) {
-            throw new Error("Agent context changed during synchronization");
-          }
-
-          queryClient.setQueryData(["agentInfo", agentId], result.data);
-          await queryClient.invalidateQueries({ queryKey: ["agents"] });
-          if (focusTarget) requestConfigFocus(agentId, focusTarget);
-          return true;
-        })
-        .catch((error) => {
-          log.warn("[NL2Agent] Failed to refresh saved draft fields", {
-            agentId,
-            error,
-          });
-          return false;
-        });
-      return snapshotRefreshQueue.current;
+  useEffect(
+    () => () => {
+      if (guideCollapseTimer.current) {
+        clearTimeout(guideCollapseTimer.current);
+      }
     },
-    [queryClient, requestConfigFocus]
+    []
   );
 
-  const synchronizeCompletion = useCallback(
+  const setGuideExpanded = (expanded: boolean) => {
+    if (guideCollapseTimer.current) {
+      clearTimeout(guideCollapseTimer.current);
+      guideCollapseTimer.current = null;
+    }
+
+    if (expanded) {
+      setIsGuideMounted(true);
+      reset();
+      return;
+    }
+
+    dismiss();
+    guideCollapseTimer.current = setTimeout(() => {
+      setIsGuideMounted(false);
+      guideCollapseTimer.current = null;
+    }, 300);
+  };
+
+  const loadAgent = useCallback(
+    async (agentId: number) => {
+      const result = await searchAgentInfo(agentId);
+      if (!result.success || !result.data) {
+        message.error(
+          result.message || t("agentConfig.agents.detailsLoadFailed")
+        );
+        return null;
+      }
+      initialize(result.data);
+      return result.data;
+    },
+    [initialize, message, t]
+  );
+
+  const { data: tagLibraries } = useTagLibraries();
+  const defaultTagLibrary =
+    tagLibraries?.find(
+      (library) => library.bucket_key === "default_resource"
+    ) ?? null;
+  const { data: tagDefinitions } = useTagDefinitions(
+    defaultTagLibrary?.bucket_id ?? null
+  );
+  const searchTagPredicates = useMemo(
+    () => getTagSearchPredicates(tagDefinitions, search, t),
+    [tagDefinitions, search, t]
+  );
+  const { agents, pagination, isLoading, isError, refetch } = useAgentList({
+    search,
+    page,
+    pageSize,
+    includeRepositoryInfo: true,
+    ...(searchTagPredicates.length > 0 ? { searchTagPredicates } : {}),
+    ...(tagPredicates.length > 0 ? { tagPredicates } : {}),
+  });
+  const isEmptyAgentList =
+    !isLoading &&
+    !isError &&
+    !search.trim() &&
+    tagPredicates.length === 0 &&
+    agents.length === 0 &&
+    (pagination?.total ?? 0) === 0;
+  const updateUrl = useCallback(
     (agentId: number) => {
-      void enqueueSnapshotRefresh(agentId, {
-        section: "conversation_guide",
-      }).then((synchronized) => {
-        if (synchronized) markCompletionSynced(agentId);
-        else markCompletionSyncFailed(agentId);
-      });
+      router.push(`${pathname}/${agentId}`);
     },
-    [enqueueSnapshotRefresh, markCompletionSyncFailed, markCompletionSynced]
+    [pathname, router]
+  );
+  const openPublishFlow = useCallback(
+    (agentId: number) => {
+      router.push(`${pathname}/${agentId}?publish=1`);
+    },
+    [pathname, router]
   );
 
-  const handleStateEvent = useCallback(
-    (event: Nl2AgentStateEvent) => {
-      if (event.event === "prompt_generation_failed") {
-        markPromptGenerationFailed(event.agent_id, event.failed_fields);
-        return;
-      }
-      if (event.event === "agent_generation_completed") {
-        markGenerationCompleted(event.agent_id);
-        synchronizeCompletion(event.agent_id);
-        return;
-      }
-      void enqueueSnapshotRefresh(
-        event.agent_id,
-        resolveDraftFocusTarget(event.updated_fields)
-      );
-    },
-    [
-      enqueueSnapshotRefresh,
-      markGenerationCompleted,
-      markPromptGenerationFailed,
-      synchronizeCompletion,
-    ]
+  const handleOpenAgent = useCallback(
+    (agent: Agent) => updateUrl(Number(agent.id)),
+    [updateUrl]
   );
 
-  const retryCompletionSync = useCallback(() => {
-    if (currentAgentId !== null) synchronizeCompletion(currentAgentId);
-  }, [currentAgentId, synchronizeCompletion]);
+  const handleManageVersions = useCallback(
+    async (agentId: number) => {
+      const loadedAgent = await loadAgent(agentId);
+      if (!loadedAgent) return;
+      setSelectedAgent(loadedAgent);
+      setIsVersionManageOpen(true);
+    },
+    [loadAgent]
+  );
+
+  const refreshSelectedAgentInfo = useCallback(async () => {
+    if (!selectedAgent?.id) return null;
+    const loadedAgent = await loadAgent(Number(selectedAgent.id));
+    if (loadedAgent) setSelectedAgent(loadedAgent);
+    return loadedAgent;
+  }, [loadAgent, selectedAgent]);
+
+  const handleCreate = ({ agentId }: { agentId: number }) => {
+    setIsCreateOpen(false);
+    void refetch();
+    router.push(`${pathname}/${agentId}?onboarding=1`);
+  };
+
+  const handleImport = async () => {
+    await openImportWizardWithFile({
+      onSuccess: (data) => {
+        setImportData(data);
+        setIsImportOpen(true);
+      },
+      message,
+      t,
+      log,
+    });
+  };
+
+  const handleImportComplete = (agentId: number) => {
+    setIsImportOpen(false);
+    setImportData(null);
+    void refetch();
+    updateUrl(agentId);
+  };
 
   return (
-    <div className="flex h-full w-full min-h-0 flex-col bg-gray-50">
-      <div className="h-auto min-h-0 shrink-0 bg-white">
-        <AgentSelectorHeader
-          onToggleVersionManage={() =>
-            setIsShowVersionManagePanel((visible) => !visible)
-          }
-          isVersionManageVisible={isShowVersionManagePanel}
-        />
-      </div>
-
-      <main className="flex min-h-0 flex-1 flex-row gap-4 overflow-hidden p-6">
-        <div className="flex min-w-0 min-h-0 flex-1 flex-row gap-4">
-          {isGenerationVisible && (
-            <PanelCard
-              title={t("agent.page.panel.nl2agent")}
-              className={isDebugVisible ? "flex-1" : "flex-[1]"}
-              rightAction={
-                <button
-                  type="button"
-                  aria-label={t("agent.page.panel.nl2agent.closeAria")}
-                  onClick={() => setIsGenerationVisible(false)}
-                  className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                >
-                  <X size={18} />
-                </button>
-              }
-            >
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                {isNl2AgentUnavailable ? (
-                  <div
-                    className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
-                    role="status"
-                  >
-                    {t(
-                      "nl2agent.unavailable",
-                      "Create or select an editable Agent first."
-                    )}
-                  </div>
-                ) : null}
-                {completionSyncFailed ? (
-                  <div
-                    className="flex shrink-0 items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900"
-                    role="alert"
-                  >
-                    <span>
-                      {t(
-                        "nl2agent.completion.syncFailed",
-                        "The Agent was generated, but the form could not be refreshed."
-                      )}
-                    </span>
-                    <Button
-                      icon={<RefreshCw size={14} />}
-                      onClick={retryCompletionSync}
-                      size="small"
-                    >
-                      {t("nl2agent.completion.retry", "Retry")}
-                    </Button>
-                  </div>
-                ) : null}
-                <Nl2AgentChatPanel
-                  key={sessionGeneration}
-                  agentId={currentAgentId}
-                  disabled={
-                    isComposerDisabled ||
-                    isRequestedAgentLoading ||
-                    isNl2AgentUnavailable
-                  }
-                  onStateEvent={handleStateEvent}
-                />
-              </div>
-            </PanelCard>
+    <div className="agent-development-list flex h-full min-h-0 w-full flex-col overflow-y-auto bg-white p-6">
+      <header className="flex h-12 shrink-0 items-center justify-between py-[10px]">
+        <h1 className="text-[20px] font-medium leading-7 ![letter-spacing:0px] text-[#191919]">
+          {t("sidebar.agentConfig")}
+        </h1>
+        <button
+          type="button"
+          className="flex h-[22px] min-w-[72px] shrink-0 items-center justify-center gap-[6px] text-[14px] font-normal leading-[22px] tracking-[0px] text-[#191919]"
+          aria-expanded={isGuideExpanded}
+          aria-controls="agent-configuration-guide"
+          onClick={() => setGuideExpanded(!isGuideExpanded)}
+        >
+          <span>
+            {t(
+              isGuideExpanded
+                ? "agentConfig.guide.collapse"
+                : "agentConfig.guide.expand"
+            )}
+          </span>
+          {isGuideExpanded ? (
+            <ChevronUp className="size-2" aria-hidden="true" />
+          ) : (
+            <ChevronDown className="size-2" aria-hidden="true" />
           )}
+        </button>
+      </header>
 
-          <PanelCard
-            title={t("agent.page.panel.config")}
-            className={isDebugFullscreen ? "flex-1" : "flex-[2]"}
-            leftAction={
-              currentAgentId !== null &&
-              agentInfo?.current_version_no !== 0 &&
-              total > 0 ? (
-                <div className="flex shrink-0 items-center gap-1 rounded-lg px-3 py-1.5 text-gray-700">
-                  <History size={16} />
-                  <Tag
-                    color="cyan"
-                    variant="outlined"
-                    className="cursor-pointer rounded-md font-mono text-sm"
-                    onClick={() => setIsShowVersionManagePanel(true)}
-                  >
-                    {agentVersionDetail?.version.version_name}
-                  </Tag>
-                  <span className="text-xs text-gray-500">
-                    / {t("agent.version.totalVersions", { count: total })}
+      <section className="mt-3 flex min-h-0 w-full flex-1 flex-col">
+        <div
+          id="agent-configuration-guide"
+          data-testid="agent-guide-background"
+          className={
+            isGuideExpanded
+              ? "max-h-[2000px] shrink-0 overflow-hidden rounded-2xl p-6 opacity-100 transition-[max-height,opacity,padding] duration-300 ease-in-out [background:linear-gradient(180deg,rgba(236,243,255,1)_0%,rgba(255,255,255,0)_100%),rgba(255,255,255,1)]"
+              : "max-h-0 shrink-0 overflow-hidden p-0 opacity-0 transition-[max-height,opacity,padding] duration-300 ease-in-out"
+          }
+          aria-hidden={!isGuideExpanded}
+        >
+          {isGuideExpanded || isGuideMounted ? (
+            <AgentConfigurationGuide />
+          ) : null}
+        </div>
+
+        <div className="relative mt-3 flex min-h-[300px] flex-1 flex-col pb-5">
+          {isGuideExpanded ? (
+            <div
+              data-testid="agent-guide-divider"
+              aria-hidden="true"
+              className="absolute inset-x-0 top-0 h-px bg-[rgba(25,25,25,0.1)]"
+            />
+          ) : null}
+          {isEmptyAgentList ? (
+            <div className="relative flex min-h-0 flex-1 items-center justify-center">
+              <Empty
+                image={Empty.PRESENTED_IMAGE_DEFAULT}
+                description={
+                  <span className="text-[14px] leading-[22px] ![letter-spacing:0px] text-[#777777]">
+                    {t("agentConfig.empty.noAgents")}
                   </span>
-                </div>
-              ) : null
-            }
-            rightAction={
-              <Button
-                icon={<Sparkles size={16} />}
-                onClick={() => setIsGenerationVisible((visible) => !visible)}
-                type={isGenerationVisible ? "primary" : "default"}
+                }
               >
-                {t("agent.page.panel.nl2agent")}
-              </Button>
-            }
-          >
-            <div className="min-h-0 flex-1 overflow-auto px-4 py-2">
-              <AgentConfig
-                onToggleDebug={() => setIsDebugVisible((visible) => !visible)}
-              />
+                <StandardButton
+                  variant="primary"
+                  onClick={() => setIsCreateOpen(true)}
+                >
+                  {t("agent.action.create")}
+                </StandardButton>
+              </Empty>
             </div>
-          </PanelCard>
-
-          {isDebugVisible && (
-            <PanelCard
-              title={t("agent.page.panel.debug")}
-              className={isDebugFullscreen ? "flex-[2]" : "flex-1"}
-              leftAction={
-                <div className="flex items-center gap-2 text-sm text-gray-600">
-                  <span>{t("agent.debug.compareMode")}</span>
-                  <Switch
-                    checked={isCompareMode}
-                    onChange={setIsCompareMode}
-                    size="small"
+          ) : (
+            <>
+              <div className="mt-3 flex h-auto w-full shrink-0 flex-col items-start justify-between gap-3 lg:h-8 lg:flex-row lg:items-center lg:gap-4">
+                <div
+                  className={`flex w-full max-w-full shrink-0 items-center gap-2 ${view === "list" ? "lg:w-[296px]" : "lg:w-[360px]"}`}
+                >
+                  <StandardInput
+                    allowClear
+                    prefix={<Search className="size-4 text-[#777777]" />}
+                    placeholder={t("agentSelector.searchPlaceholder")}
+                    value={search}
+                    onChange={(event) => {
+                      setSearch(event.target.value);
+                      setPage(1);
+                    }}
+                    className="!h-8 !w-full"
+                  />
+                  <TagFilterPopover
+                    definitions={tagDefinitions ?? []}
+                    value={tagPredicates}
+                    onChange={(value) => {
+                      setTagPredicates(value);
+                      setPage(1);
+                    }}
+                    buttonClassName="!h-8 shrink-0"
                   />
                 </div>
-              }
-              rightAction={
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    aria-label={
-                      isDebugFullscreen
-                        ? "Restore debug panel size"
-                        : "Maximize debug panel"
-                    }
-                    onClick={() => {
-                      if (isDebugFullscreen) {
-                        setIsDebugFullscreen(false);
-                        return;
-                      }
-
-                      setIsGenerationVisible(false);
-                      setIsShowVersionManagePanel(false);
-                      setIsDebugFullscreen(true);
-                    }}
-                    className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                <div className="flex h-auto flex-wrap items-center gap-2 lg:h-8 lg:shrink-0 lg:flex-nowrap">
+                  <StandardButton
+                    icon={<FileInput className="size-4" />}
+                    onClick={handleImport}
                   >
-                    {isDebugFullscreen ? (
-                      <Minimize2 size={18} />
-                    ) : (
-                      <Maximize2 size={18} />
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={t("agent.page.panel.debug.closeAria")}
-                    onClick={() => {
-                      setIsDebugVisible(false);
-                      setIsDebugFullscreen(false);
-                    }}
-                    className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                    {t("agentConfig.button.import")}
+                  </StandardButton>
+                  <StandardButton
+                    variant="primary"
+                    onClick={() => setIsCreateOpen(true)}
                   >
-                    <X size={18} />
-                  </button>
+                    {t("agentConfig.list.new")}
+                  </StandardButton>
+                  <div className="flex h-8 items-center rounded-[4px] border border-solid border-[#c9c9c9]">
+                    <button
+                      type="button"
+                      className={`flex size-[30px] items-center justify-center ${
+                        view === "list"
+                          ? "bg-[#0067d1] text-white"
+                          : "text-[#777777]"
+                      }`}
+                      aria-label={t("agentConfig.list.listView")}
+                      aria-pressed={view === "list"}
+                      onClick={() => setView("list")}
+                    >
+                      <List className="size-4" aria-hidden="true" />
+                    </button>
+                    <button
+                      type="button"
+                      className={`flex size-[30px] items-center justify-center ${
+                        view === "grid"
+                          ? "bg-[#0067d1] text-white"
+                          : "text-[#777777]"
+                      }`}
+                      aria-label={t("agentConfig.list.gridView")}
+                      aria-pressed={view === "grid"}
+                      onClick={() => setView("grid")}
+                    >
+                      <LayoutGrid className="size-4" aria-hidden="true" />
+                    </button>
+                  </div>
                 </div>
-              }
-            >
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <AgentDebugPanel isCompareMode={isCompareMode} />
               </div>
-            </PanelCard>
-          )}
 
-          {isShowVersionManagePanel && (
-            <PanelCard
-              title={t("agent.version.manage")}
-              className="flex-1"
-              rightAction={
-                <button
-                  type="button"
-                  aria-label={t("agent.page.panel.debug.closeAria")}
-                  onClick={() => setIsShowVersionManagePanel(false)}
-                  className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-700"
-                >
-                  <X size={18} />
-                </button>
-              }
-            >
-              <div className="min-h-0 flex-1 overflow-hidden">
-                <AgentVersion />
+              <div
+                data-testid="agent-list-content"
+                className={`min-h-0 flex-1 ${
+                  view === "list"
+                    ? "mt-3 overflow-hidden"
+                    : "-mx-px mt-[11px] overflow-y-auto overflow-x-hidden px-px pb-5 pt-px"
+                }`}
+              >
+                {isLoading ? (
+                  <div className="flex min-h-40 items-center justify-center">
+                    <Spin size="large" />
+                  </div>
+                ) : isError ? (
+                  <div className="flex min-h-40 flex-col items-center justify-center gap-3">
+                    <p className="text-sm text-slate-500">
+                      {t("agentRepository.mine.loadError")}
+                    </p>
+                    <StandardButton onClick={() => refetch()}>
+                      {t("repository.common.retry")}
+                    </StandardButton>
+                  </div>
+                ) : (
+                  <div
+                    className={`flex min-h-0 flex-col gap-3 ${view === "list" ? "h-full" : ""}`}
+                  >
+                    {agents.length > 0 ? (
+                      view === "list" ? (
+                        <AgentListTable
+                          agents={agents}
+                          columnWidths={tableColumnWidths}
+                          onColumnWidthsChange={setTableColumnWidths}
+                          onOpen={handleOpenAgent}
+                          onConfigure={updateUrl}
+                          onPublish={openPublishFlow}
+                          onManageVersions={handleManageVersions}
+                        />
+                      ) : (
+                        <div className="grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                          {agents.map((agent) => (
+                            <AgentListCard
+                              key={agent.id}
+                              agent={agent}
+                              onOpen={handleOpenAgent}
+                              onConfigure={updateUrl}
+                              onPublish={openPublishFlow}
+                              onManageVersions={handleManageVersions}
+                            />
+                          ))}
+                        </div>
+                      )
+                    ) : (
+                      <Empty className="py-12" />
+                    )}
+                    <div className="flex min-h-8 w-full flex-wrap items-center justify-between gap-3">
+                      <span className="text-[12px] leading-[18px] ![letter-spacing:0px] text-[#191919]">
+                        {t("agentConfig.list.total", {
+                          count: pagination?.total ?? 0,
+                        })}
+                      </span>
+                      <div className="flex h-auto flex-wrap items-center justify-end gap-2 md:h-8">
+                        <Select
+                          aria-label={t("agentConfig.list.pageSize")}
+                          value={pageSize}
+                          options={[10, 12, 20, 50].map((size) => ({
+                            value: size,
+                            label: t("agentConfig.list.perPage", {
+                              count: size,
+                            }),
+                          }))}
+                          onChange={(nextSize) => {
+                            setPageSize(nextSize);
+                            setPage(1);
+                            setJumpPage(null);
+                          }}
+                          className="!h-8 !w-[116px] [&_.ant-select-selector]:!border-[#c9c9c9]"
+                        />
+                        <StandardPaginator
+                          current={pagination?.page ?? page}
+                          pageSize={pageSize}
+                          total={pagination?.total ?? 0}
+                          showSizeChanger={false}
+                          onChange={setPage}
+                        />
+                        <InputNumber
+                          aria-label={t("agentConfig.list.jumpPage")}
+                          min={1}
+                          max={Math.max(
+                            1,
+                            Math.ceil((pagination?.total ?? 0) / pageSize)
+                          )}
+                          controls={false}
+                          value={jumpPage}
+                          onChange={setJumpPage}
+                          className="!h-8 !w-10 [&_.ant-input-number-input]:!h-[30px] [&_.ant-input-number-input]:!text-center"
+                        />
+                        <StandardButton
+                          className="!px-2"
+                          onClick={() => {
+                            if (jumpPage !== null) {
+                              setPage(
+                                Math.min(
+                                  jumpPage,
+                                  Math.max(
+                                    1,
+                                    Math.ceil(
+                                      (pagination?.total ?? 0) / pageSize
+                                    )
+                                  )
+                                )
+                              );
+                            }
+                          }}
+                        >
+                          {t("agentConfig.list.jump")}
+                        </StandardButton>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
-            </PanelCard>
+            </>
           )}
         </div>
-      </main>
-    </div>
-  );
-}
+      </section>
 
-export default function AgentSetupOrchestrator() {
-  return (
-    <Nl2AgentFlowProvider>
-      <AgentSetupContent />
-    </Nl2AgentFlowProvider>
+      <Modal
+        centered
+        width={900}
+        open={isVersionManageOpen}
+        title={t("agent.version.manage")}
+        onCancel={() => setIsVersionManageOpen(false)}
+        footer={null}
+      >
+        <AgentVersion
+          currentVersionNo={selectedAgent?.current_version_no}
+          onRefreshAgentInfo={refreshSelectedAgentInfo}
+        />
+      </Modal>
+      <CreateAgentModal
+        open={isCreateOpen}
+        onCancel={() => setIsCreateOpen(false)}
+        onCreated={handleCreate}
+      />
+      <AgentImportWizard
+        visible={isImportOpen}
+        initialData={importData}
+        onCancel={() => {
+          setIsImportOpen(false);
+          setImportData(null);
+        }}
+        onImportComplete={handleImportComplete}
+      />
+    </div>
   );
 }

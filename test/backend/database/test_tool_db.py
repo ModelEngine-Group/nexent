@@ -1,11 +1,30 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import sys
 import pytest
 from unittest.mock import patch, MagicMock
 
+
+from test.common.module_stubs import capture_module_stubs
+
+_modules_before_stubs = sys.modules.copy()
+
+@pytest.fixture(autouse=True)
+def _default_to_ordinary_agent(monkeypatch, _isolated_imports):
+    """Keep general ToolInstance tests scoped to an ordinary Agent."""
+    monkeypatch.setattr(
+        sys.modules["management.db.agent.repository"],
+        "is_system_agent",
+        lambda *_args, **_kwargs: False,
+        raising=False,
+    )
+
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
-# Set up required constants in consts.const
+# Set up required constants in contracts.constants.environment
 consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
 consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
 consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
@@ -18,7 +37,7 @@ consts_mock.const.POSTGRES_DB = "test_db"
 consts_mock.const.POSTGRES_PORT = 5432
 consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 
-# Mock consts.model module and ToolSourceEnum
+# Mock contracts.agent module and ToolSourceEnum
 # Create a mock ToolSourceEnum that supports .value attribute access
 
 class MockEnumMember:
@@ -31,7 +50,7 @@ class MockToolSourceEnum:
     MCP = MockEnumMember("mcp")
     LANGCHAIN = MockEnumMember("langchain")
 
-# Create consts.model as a proper module-like object
+# Create contracts.agent as a proper module-like object
 
 
 class MockModelModule:
@@ -40,20 +59,21 @@ class MockModelModule:
 
 consts_mock.model = MockModelModule()
 
-# Mock consts.tool_labels with BUILTIN_LABEL_MAP
+# Mock contracts.constants.constants with BUILTIN_LABEL_MAP
 tool_labels_mock = MagicMock()
 tool_labels_mock.BUILTIN_LABEL_MAP = {}
 consts_mock.tool_labels = tool_labels_mock
 
 # consts_mock must have __path__ to be recognized as a package
-# so that `from consts.tool_labels import ...` works
+# so that `from contracts.constants.constants import ...` works
 consts_mock.__path__ = []
 
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
-sys.modules['consts.model'] = consts_mock.model
-sys.modules['consts.tool_labels'] = tool_labels_mock
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
+install_business_contract_stubs(consts_mock.model)
+install_shared_contract_stub(tool_labels_mock, 'tool_labels')
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -63,7 +83,7 @@ utils_mock.auth_utils.get_current_user_id_from_token = MagicMock(
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_mock.auth_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -80,8 +100,14 @@ client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['database.client'] = client_mock
-sys.modules['backend.database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock db_models module
 db_models_mock = MagicMock()
@@ -89,18 +115,22 @@ db_models_mock.ToolInstance = MagicMock()
 db_models_mock.ToolInfo = MagicMock()
 
 # Add the mocked db_models module to sys.modules
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
 # Mock agent_db module
 agent_db_mock = MagicMock()
+agent_db_mock.is_system_agent = MagicMock(return_value=False)
 agent_db_mock.logger = MagicMock()
+# Declared up front so the autouse fixture can monkeypatch it: setattr on a bare
+# MagicMock cannot create a brand-new attribute on every pytest version.
+agent_db_mock.is_system_agent = MagicMock(return_value=False)
 
 # Add the mocked agent_db module to sys.modules
-sys.modules['database.agent_db'] = agent_db_mock
-sys.modules['backend.database.agent_db'] = agent_db_mock
+sys.modules['management.db.agent.repository'] = agent_db_mock
+sys.modules['management.db.agent.repository'] = agent_db_mock
 
-# Mock utils.tool_utils module
+# Mock management.services.tool.catalog module
 tool_utils_mock = MagicMock()
 tool_utils_mock.get_local_tools_description_zh = MagicMock(return_value={})
 
@@ -108,29 +138,11 @@ utils_mock.tool_utils = tool_utils_mock
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_mock.auth_utils
-sys.modules['utils.tool_utils'] = tool_utils_mock
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.services.tool.catalog'] = tool_utils_mock
 
 # Now we can safely import the module being tested
-from backend.database.tool_db import (
-    create_tool,
-    create_or_update_tool_by_tool_info,
-    query_all_tools,
-    query_tools_by_labels,
-    update_tool_labels,
-    query_tool_instances_by_id,
-    query_tool_instances_by_agent_id,
-    query_tools_by_ids,
-    query_all_enabled_tool_instances,
-    update_tool_table_from_scan_tool_list,
-    add_tool_field,
-    search_tools_for_sub_agent,
-    check_tool_is_available,
-    delete_tools_by_agent_id,
-    search_last_tool_instance_by_tool_id,
-    check_tool_list_initialized,
-    set_mcp_tools_unavailable,
-)
+from management.db.tool.repository import create_tool, create_or_update_tool_by_tool_info, query_all_tools, query_tools_by_labels, update_tool_labels, query_tool_instances_by_id, query_tool_instances_by_agent_id, query_tools_by_ids, query_all_enabled_tool_instances, update_tool_table_from_scan_tool_list, add_tool_field, search_tools_for_sub_agent, check_tool_is_available, delete_tools_by_agent_id, search_last_tool_instance_by_tool_id, check_tool_list_initialized, set_mcp_tools_unavailable, ToolInstance
 
 class MockToolInstance:
     def __init__(self):
@@ -141,6 +153,7 @@ class MockToolInstance:
         self.user_id = "user1"
         self.enabled = True
         self.delete_flag = "N"
+        self.params = {"database_url": "original"}
         self.__dict__ = {
             "tool_instance_id": 1,
             "tool_id": 1,
@@ -148,7 +161,8 @@ class MockToolInstance:
             "tenant_id": "tenant1",
             "user_id": "user1",
             "enabled": True,
-            "delete_flag": "N"
+            "delete_flag": "N",
+            "params": {"database_url": "original"},
         }
 
 
@@ -200,10 +214,10 @@ def test_create_tool_success(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
-    monkeypatch.setattr("backend.database.tool_db.ToolInstance",
+        "management.db.tool.repository.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.tool.repository.ToolInstance",
                         lambda **kwargs: MagicMock())
 
     tool_info = {"tool_id": 1, "agent_id": 1, "tenant_id": "tenant1"}
@@ -227,17 +241,23 @@ def test_create_or_update_tool_by_tool_info_update_existing(monkeypatch, mock_se
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj)
 
     tool_info = MagicMock()
-    tool_info.__dict__ = {"agent_id": 1, "tool_id": 1}
+    tool_info.__dict__ = {
+        "agent_id": 1,
+        "tool_id": 1,
+        "params": {"database_url": "updated"},
+    }
 
     result = create_or_update_tool_by_tool_info(tool_info, "tenant1", "user1")
 
-    # Result is now as_dict() of the tool_instance
     assert isinstance(result, dict)
+    assert mock_tool_instance.tool_instance_id == 1
+    assert mock_tool_instance.params == {"database_url": "updated"}
+    session.add.assert_not_called()
 
 
 def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session):
@@ -253,9 +273,9 @@ def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     # Mock ToolInstance class - needs to have column attributes for query building
     mock_tool_instance = MockToolInstance()
@@ -278,8 +298,8 @@ def test_create_or_update_tool_by_tool_info_create_new(monkeypatch, mock_session
                 setattr(self, key, value)
 
     monkeypatch.setattr(
-        "backend.database.tool_db.ToolInstance", MockToolInstanceClass)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.ToolInstance", MockToolInstanceClass)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__ if hasattr(obj, '__dict__') else obj)
 
     session.add = MagicMock()
@@ -312,8 +332,8 @@ def test_query_all_tools(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
 
     result = query_all_tools("tenant1")
@@ -338,8 +358,8 @@ def test_query_tool_instances_by_id_found(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
 
     result = query_tool_instances_by_id(1, 1, "tenant1")
@@ -361,7 +381,7 @@ def test_query_tool_instances_by_id_not_found(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
 
     result = query_tool_instances_by_id(1, 1, "tenant1")
 
@@ -385,8 +405,8 @@ def test_query_tools_by_ids(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
 
     result = query_tools_by_ids([1, 2])
@@ -410,8 +430,8 @@ def test_query_all_enabled_tool_instances(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
 
     result = query_all_enabled_tool_instances(1, "tenant1")
@@ -437,9 +457,9 @@ def test_update_tool_table_from_scan_tool_list_success(monkeypatch, mock_session
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     # Create a mock for ToolInfo class with properly accessible attributes
     mock_tool_info_class = MagicMock()
@@ -447,7 +467,7 @@ def test_update_tool_table_from_scan_tool_list_success(monkeypatch, mock_session
     mock_tool_info_class.author = "tenant1"
     mock_tool_info_class.name = "test_tool"
     mock_tool_info_class.source = "test_source"
-    monkeypatch.setattr("backend.database.tool_db.ToolInfo",
+    monkeypatch.setattr("management.db.tool.repository.ToolInfo",
                         mock_tool_info_class)
 
     tool_list = [MockToolInfo()]
@@ -477,14 +497,14 @@ def test_update_tool_table_from_scan_tool_list_create_new_tool(monkeypatch, mock
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     # Create a mock for ToolInfo class constructor
     mock_tool_info_instance = MagicMock()
     mock_tool_info_class = MagicMock(return_value=mock_tool_info_instance)
-    monkeypatch.setattr("backend.database.tool_db.ToolInfo",
+    monkeypatch.setattr("management.db.tool.repository.ToolInfo",
                         mock_tool_info_class)
 
     # Create a new tool with different name&source that doesn't exist in database
@@ -508,6 +528,28 @@ def test_update_tool_table_from_scan_tool_list_create_new_tool(monkeypatch, mock
     mock_tool_info_class.assert_called_once_with(**expected_call_args)
 
 
+@pytest.mark.parametrize("already_registered", [False, True])
+def test_deepseek_default_tags_initialize_only_on_first_registration(monkeypatch, mock_session, already_registered):
+    from types import SimpleNamespace
+
+    session, query = mock_session
+    existing = SimpleNamespace(name="deepseek_search", source="local", tool_id=220)
+    query.filter.return_value.all.return_value = [existing] if already_registered else []
+    context = MagicMock()
+    context.__enter__.return_value = session
+    monkeypatch.setattr("management.db.tool.repository.get_db_session", lambda: context)
+    monkeypatch.setattr("management.db.tool.repository.filter_property", lambda data, model: data)
+    monkeypatch.setattr("management.db.tool.repository.ToolInfo", MagicMock(return_value=existing))
+    initialize = MagicMock()
+    monkeypatch.setitem(sys.modules, "management.db.tool.default_tags", SimpleNamespace(initialize_search_tool_tags=initialize))
+    update_tool_table_from_scan_tool_list("tenant", "actor", [SimpleNamespace(name="deepseek_search", source="local")])
+    if already_registered:
+        initialize.assert_not_called()
+    else:
+        initialize.assert_called_once_with(session, "tenant", 220, "actor")
+        session.flush.assert_called_once()
+
+
 def test_update_tool_table_from_scan_tool_list_create_new_tool_invalid_name(monkeypatch, mock_session):
     """Test creating new tool with invalid name (is_available=False)"""
     session, query = mock_session
@@ -529,14 +571,14 @@ def test_update_tool_table_from_scan_tool_list_create_new_tool_invalid_name(monk
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     # Create a mock for ToolInfo class constructor
     mock_tool_info_instance = MagicMock()
     mock_tool_info_class = MagicMock(return_value=mock_tool_info_instance)
-    monkeypatch.setattr("backend.database.tool_db.ToolInfo",
+    monkeypatch.setattr("management.db.tool.repository.ToolInfo",
                         mock_tool_info_class)
 
     # Create a new tool with invalid name (contains special characters)
@@ -582,14 +624,14 @@ def test_update_tool_table_mcp_tools_same_name_different_usage(monkeypatch, mock
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     # Create a mock for ToolInfo class constructor
     mock_tool_info_instance = MagicMock()
     mock_tool_info_class = MagicMock(return_value=mock_tool_info_instance)
-    monkeypatch.setattr("backend.database.tool_db.ToolInfo",
+    monkeypatch.setattr("management.db.tool.repository.ToolInfo",
                         mock_tool_info_class)
 
     # Create a new MCP tool with same name but different usage (different MCP server)
@@ -638,9 +680,9 @@ def test_update_tool_table_mcp_tools_same_name_same_usage(monkeypatch, mock_sess
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     # Create a new MCP tool with same name and same usage (should update existing)
     new_tool = MockToolInfo()
@@ -682,14 +724,14 @@ def test_update_tool_table_mcp_tools_empty_usage(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     # Create a mock for ToolInfo class constructor
     mock_tool_info_instance = MagicMock()
     mock_tool_info_class = MagicMock(return_value=mock_tool_info_instance)
-    monkeypatch.setattr("backend.database.tool_db.ToolInfo",
+    monkeypatch.setattr("management.db.tool.repository.ToolInfo",
                         mock_tool_info_class)
 
     # Create a new MCP tool with same name and empty usage (should update existing)
@@ -729,9 +771,9 @@ def test_update_tool_table_non_mcp_tools_use_name_source(monkeypatch, mock_sessi
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     # Create a new non-MCP tool with same name and source but different usage
     new_tool = MockToolInfo()
@@ -772,14 +814,14 @@ def test_update_tool_table_mcp_tools_multiple_different_servers(monkeypatch, moc
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     # Create a mock for ToolInfo class constructor
     mock_tool_info_instance = MagicMock()
     mock_tool_info_class = MagicMock(return_value=mock_tool_info_instance)
-    monkeypatch.setattr("backend.database.tool_db.ToolInfo",
+    monkeypatch.setattr("management.db.tool.repository.ToolInfo",
                         mock_tool_info_class)
 
     # Create two new MCP tools with same name but different usage (different servers)
@@ -828,14 +870,14 @@ def test_update_tool_table_mixed_mcp_and_non_mcp_tools(monkeypatch, mock_session
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     # Create a mock for ToolInfo class constructor
     mock_tool_info_instance = MagicMock()
     mock_tool_info_class = MagicMock(return_value=mock_tool_info_instance)
-    monkeypatch.setattr("backend.database.tool_db.ToolInfo",
+    monkeypatch.setattr("management.db.tool.repository.ToolInfo",
                         mock_tool_info_class)
 
     # Create tools: update existing MCP tool, update existing local tool, create new MCP tool
@@ -889,9 +931,9 @@ def test_update_tool_table_mcp_tool_update_existing_attributes(monkeypatch, mock
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     # Create updated MCP tool with same name and usage
     updated_tool = MockToolInfo()
@@ -941,14 +983,14 @@ def test_update_tool_table_existing_tools_set_unavailable(monkeypatch, mock_sess
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     # Create a mock for ToolInfo class constructor
     mock_tool_info_instance = MagicMock()
     mock_tool_info_class = MagicMock(return_value=mock_tool_info_instance)
-    monkeypatch.setattr("backend.database.tool_db.ToolInfo",
+    monkeypatch.setattr("management.db.tool.repository.ToolInfo",
                         mock_tool_info_class)
 
     # Create tool list with only one tool (tool2 will be updated, tool1 will remain unavailable)
@@ -996,13 +1038,13 @@ def test_update_tool_table_keeps_enabled_mcp_tools_unavailable_unchanged(monkeyp
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     mock_tool_info_instance = MagicMock()
     mock_tool_info_class = MagicMock(return_value=mock_tool_info_instance)
-    monkeypatch.setattr("backend.database.tool_db.ToolInfo",
+    monkeypatch.setattr("management.db.tool.repository.ToolInfo",
                         mock_tool_info_class)
 
     # Scan fails to reach "adeu" this time -> "adeu" not in tool_list,
@@ -1042,13 +1084,13 @@ def test_update_tool_table_downgrades_disabled_mcp_tools(monkeypatch, mock_sessi
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     mock_tool_info_instance = MagicMock()
     mock_tool_info_class = MagicMock(return_value=mock_tool_info_instance)
-    monkeypatch.setattr("backend.database.tool_db.ToolInfo",
+    monkeypatch.setattr("management.db.tool.repository.ToolInfo",
                         mock_tool_info_class)
 
     # "disabled_mcp" is NOT in the enabled set -> its tool should be downgraded
@@ -1081,14 +1123,14 @@ def test_update_tool_table_mcp_tool_invalid_name(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.tool_db.filter_property", lambda data, model: data)
+        "management.db.tool.repository.filter_property", lambda data, model: data)
 
     # Create a mock for ToolInfo class constructor
     mock_tool_info_instance = MagicMock()
     mock_tool_info_class = MagicMock(return_value=mock_tool_info_instance)
-    monkeypatch.setattr("backend.database.tool_db.ToolInfo",
+    monkeypatch.setattr("management.db.tool.repository.ToolInfo",
                         mock_tool_info_class)
 
     # Create a new MCP tool with invalid name (contains special characters)
@@ -1114,45 +1156,60 @@ def test_update_tool_table_mcp_tool_invalid_name(monkeypatch, mock_session):
 
 
 def test_set_mcp_tools_unavailable(monkeypatch, mock_session):
-    """Test marking all tools of a deleted MCP server as unavailable."""
-    session, query = mock_session
-    mock_update = MagicMock(return_value=3)
-    mock_filter = MagicMock()
-    mock_filter.update = mock_update
-    query.filter.return_value = mock_filter
+    """Test hiding MCP tools and soft-deleting only draft agent bindings."""
+    session, _ = mock_session
+    ToolInstance.version_no.reset_mock()
+    tool_lookup_query = MagicMock()
+    tool_lookup_query.filter.return_value.all.return_value = [(11,), (12,), (13,)]
+    tool_update_query = MagicMock()
+    tool_update = tool_update_query.filter.return_value.update
+    tool_update.return_value = 3
+    instance_update_query = MagicMock()
+    instance_update = instance_update_query.filter.return_value.update
+    instance_update.return_value = 2
+    session.query.side_effect = [
+        tool_lookup_query,
+        tool_update_query,
+        instance_update_query,
+    ]
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
 
     result = set_mcp_tools_unavailable(
         tenant_id="tenant1", mcp_server_name="deleted_server", user_id="user1")
 
     assert result == 3
-    mock_update.assert_called_once_with(
+    tool_update.assert_called_once_with(
         {"is_available": False, "updated_by": "user1"})
+    instance_update.assert_called_once_with(
+        {ToolInstance.delete_flag: "Y", "updated_by": "user1"},
+        synchronize_session=False,
+    )
+    ToolInstance.version_no.__eq__.assert_called_once_with(0)
 
 
 def test_set_mcp_tools_unavailable_no_rows(monkeypatch, mock_session):
-    """Test set_mcp_tools_unavailable returns 0 when no tool rows match."""
-    session, query = mock_session
-    mock_update = MagicMock(return_value=None)  # None from SQLAlchemy edge case
-    mock_filter = MagicMock()
-    mock_filter.update = mock_update
-    query.filter.return_value = mock_filter
+    """Test no tool or binding updates run when the MCP has no tools."""
+    session, _ = mock_session
+    tool_lookup_query = MagicMock()
+    tool_lookup_query.filter.return_value.all.return_value = []
+    session.query.return_value = tool_lookup_query
 
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
 
     result = set_mcp_tools_unavailable(
         tenant_id="tenant1", mcp_server_name="missing_server", user_id="user1")
 
     assert result == 0
+    assert session.query.call_count == 1
 
 
 def test_add_tool_field(monkeypatch, mock_session):
@@ -1170,8 +1227,8 @@ def test_add_tool_field(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
 
     tool_info = {"tool_id": 1, "params": {"param1": "value1"}}
@@ -1197,11 +1254,11 @@ def test_search_tools_for_sub_agent(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
     monkeypatch.setattr(
-        "backend.database.tool_db.add_tool_field", lambda data: data)
+        "management.db.tool.repository.add_tool_field", lambda data: data)
 
     result = search_tools_for_sub_agent(1, "tenant1")
 
@@ -1223,7 +1280,7 @@ def test_check_tool_is_available(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
 
     result = check_tool_is_available([1, 2])
 
@@ -1242,12 +1299,24 @@ def test_delete_tools_by_agent_id_success(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
 
     # Function returns no value, only verify successful execution
     delete_tools_by_agent_id(1, "tenant1", "user1")
 
     mock_update.assert_called_once()
+
+
+def test_delete_tools_by_agent_id_rejects_system_agent(monkeypatch):
+    """UT-BE-SAL-012."""
+    monkeypatch.setattr(
+        sys.modules["management.db.agent.repository"],
+        "is_system_agent",
+        lambda *_args, **_kwargs: True,
+    )
+
+    with pytest.raises(ValueError, match="managed by the platform"):
+        delete_tools_by_agent_id(1, "tenant1", "user1")
 
 
 def test_search_last_tool_instance_by_tool_id_found(monkeypatch, mock_session):
@@ -1269,8 +1338,8 @@ def test_search_last_tool_instance_by_tool_id_found(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
 
     result = search_last_tool_instance_by_tool_id(1, "tenant1", "user1")
@@ -1295,7 +1364,7 @@ def test_search_last_tool_instance_by_tool_id_not_found(monkeypatch, mock_sessio
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
 
     result = search_last_tool_instance_by_tool_id(999, "tenant1", "user1")
 
@@ -1320,8 +1389,8 @@ def test_search_last_tool_instance_by_tool_id_with_deleted_flag(monkeypatch, moc
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
 
     result = search_last_tool_instance_by_tool_id(1, "tenant1", "user1")
@@ -1348,8 +1417,8 @@ def test_search_last_tool_instance_by_tool_id_ordering(monkeypatch, mock_session
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
 
     result = search_last_tool_instance_by_tool_id(1, "tenant1", "user1")
@@ -1378,8 +1447,8 @@ def test_search_last_tool_instance_by_tool_id_different_tenants(monkeypatch, moc
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
 
     result = search_last_tool_instance_by_tool_id(1, "tenant2", "user2")
@@ -1405,8 +1474,8 @@ def test_query_tool_instances_by_agent_id(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
 
     result = query_tool_instances_by_agent_id(agent_id=1, tenant_id="tenant1")
@@ -1429,8 +1498,8 @@ def test_query_tool_instances_by_agent_id_empty(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
 
     result = query_tool_instances_by_agent_id(agent_id=1, tenant_id="tenant1")
@@ -1453,8 +1522,8 @@ def test_query_tool_instances_by_agent_id_with_version(monkeypatch, mock_session
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
 
     result = query_tool_instances_by_agent_id(
@@ -1477,7 +1546,7 @@ def test_check_tool_list_initialized_has_tools(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
 
     result = check_tool_list_initialized("tenant1")
 
@@ -1498,7 +1567,7 @@ def test_check_tool_list_initialized_no_tools(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
 
     result = check_tool_list_initialized("new_tenant")
 
@@ -1519,7 +1588,7 @@ def test_check_tool_list_initialized_with_deleted_tools_only(monkeypatch, mock_s
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
 
     result = check_tool_list_initialized("tenant_with_only_deleted_tools")
 
@@ -1539,7 +1608,7 @@ def test_check_tool_list_initialized_correct_tenant_filter(monkeypatch, mock_ses
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
 
     target_tenant = "specific_tenant_id"
     check_tool_list_initialized(target_tenant)
@@ -1547,40 +1616,40 @@ def test_check_tool_list_initialized_correct_tenant_filter(monkeypatch, mock_ses
     # Verify that filter was called with correct tenant
     filter_call_args = query.filter.call_args[0]
     # Check that ToolInfo.author == target_tenant is in the filter conditions
-    from backend.database.db_models import ToolInfo
+    from management.db.models import ToolInfo
     assert (ToolInfo.delete_flag != 'Y') in filter_call_args
 
 
 class TestAddToolFieldDescriptionZh:
     """Tests for add_tool_field function - description_zh i18n support.
-    
+
     These tests verify that the add_tool_field function correctly merges
     Chinese description (description_zh) from SDK for local tools.
     """
 
     def test_add_tool_field_merges_description_zh_from_sdk(self, monkeypatch, mock_session):
         """Test that add_tool_field merges description_zh from SDK for local tools."""
-        from backend.database.tool_db import add_tool_field
-        
+        from management.db.tool.repository import add_tool_field
+
         session, query = mock_session
-        
+
         # Create a mock tool with source="local"
         mock_tool_info = MockToolInfo()
         mock_tool_info.source = "local"
         mock_tool_info.name = "test_local_tool"
-        
+
         mock_first = MagicMock()
         mock_first.return_value = mock_tool_info
         mock_filter = MagicMock()
         mock_filter.first = mock_first
         query.filter.return_value = mock_filter
-        
+
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
-        monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
-        monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
-        
+        monkeypatch.setattr("management.db.tool.repository.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("management.db.tool.repository.as_dict", lambda obj: obj.__dict__)
+
         # Mock get_local_tools_description_zh to return SDK descriptions
         mock_sdk_descriptions = {
             "test_local_tool": {
@@ -1589,82 +1658,82 @@ class TestAddToolFieldDescriptionZh:
                 "inputs": {}
             }
         }
-        
+
         # Mock the function at the import path used in tool_db.py
         monkeypatch.setattr(
-            "backend.database.tool_db.get_local_tools_description_zh",
+            "management.db.tool.repository.get_local_tools_description_zh",
             lambda: mock_sdk_descriptions
         )
-        
+
         tool_info = {"tool_id": 1, "params": {}}
         result = add_tool_field(tool_info)
-        
+
         # Verify that description_zh was merged from SDK
         assert result["description_zh"] == "测试本地工具"
 
     def test_add_tool_field_skips_non_local_tools(self, monkeypatch, mock_session):
         """Test that add_tool_field skips description_zh merge for non-local tools."""
-        from backend.database.tool_db import add_tool_field
-        
+        from management.db.tool.repository import add_tool_field
+
         session, query = mock_session
-        
+
         # Create a mock tool with source="mcp" (not local)
         mock_tool_info = MockToolInfo()
         mock_tool_info.source = "mcp"
         mock_tool_info.name = "test_mcp_tool"
-        
+
         mock_first = MagicMock()
         mock_first.return_value = mock_tool_info
         mock_filter = MagicMock()
         mock_filter.first = mock_first
         query.filter.return_value = mock_filter
-        
+
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
-        monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
-        monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
-        
+        monkeypatch.setattr("management.db.tool.repository.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("management.db.tool.repository.as_dict", lambda obj: obj.__dict__)
+
         # Mock get_local_tools_description_zh - should not be called for non-local tools
         mock_get_sdk_descriptions = MagicMock(return_value={})
-        
+
         # Mock the function at the import path used in tool_db.py
         monkeypatch.setattr(
-            "backend.database.tool_db.get_local_tools_description_zh",
+            "management.db.tool.repository.get_local_tools_description_zh",
             mock_get_sdk_descriptions
         )
-        
+
         tool_info = {"tool_id": 1, "params": {}}
         result = add_tool_field(tool_info)
-        
+
         # Verify that get_local_tools_description_zh was NOT called for non-local tool
         mock_get_sdk_descriptions.assert_not_called()
 
     def test_add_tool_field_merges_params_description_zh(self, monkeypatch, mock_session):
         """Test that add_tool_field merges params description_zh from SDK."""
-        from backend.database.tool_db import add_tool_field
-        
+        from management.db.tool.repository import add_tool_field
+
         session, query = mock_session
-        
+
         # Create a mock tool with source="local"
         mock_tool_info = MockToolInfo()
         mock_tool_info.source = "local"
         mock_tool_info.name = "test_local_tool"
         mock_tool_info.params = [{"name": "param1", "description": "Param1"}]
         mock_tool_info.inputs = "{}"
-        
+
         mock_first = MagicMock()
         mock_first.return_value = mock_tool_info
         mock_filter = MagicMock()
         mock_filter.first = mock_first
         query.filter.return_value = mock_filter
-        
+
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
-        monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
-        monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
-        
+        monkeypatch.setattr("management.db.tool.repository.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("management.db.tool.repository.as_dict", lambda obj: obj.__dict__)
+
         # Mock get_local_tools_description_zh with params description_zh
         mock_sdk_descriptions = {
             "test_local_tool": {
@@ -1673,44 +1742,44 @@ class TestAddToolFieldDescriptionZh:
                 "inputs": {}
             }
         }
-        
+
         monkeypatch.setattr(
-            "backend.database.tool_db.get_local_tools_description_zh",
+            "management.db.tool.repository.get_local_tools_description_zh",
             lambda: mock_sdk_descriptions
         )
-        
+
         tool_info = {"tool_id": 1, "params": {"param1": "value1"}}
         result = add_tool_field(tool_info)
-        
+
         # Verify that params description_zh was merged
         assert result["params"][0]["description_zh"] == "参数1"
 
     def test_add_tool_field_merges_inputs_description_zh(self, monkeypatch, mock_session):
         """Test that add_tool_field merges inputs description_zh from SDK."""
-        from backend.database.tool_db import add_tool_field
+        from management.db.tool.repository import add_tool_field
         import json
-        
+
         session, query = mock_session
-        
+
         # Create a mock tool with source="local"
         mock_tool_info = MockToolInfo()
         mock_tool_info.source = "local"
         mock_tool_info.name = "test_local_tool"
         mock_tool_info.params = []
         mock_tool_info.inputs = json.dumps({"query": {"type": "string", "description": "Query"}})
-        
+
         mock_first = MagicMock()
         mock_first.return_value = mock_tool_info
         mock_filter = MagicMock()
         mock_filter.first = mock_first
         query.filter.return_value = mock_filter
-        
+
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
-        monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
-        monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
-        
+        monkeypatch.setattr("management.db.tool.repository.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("management.db.tool.repository.as_dict", lambda obj: obj.__dict__)
+
         # Mock get_local_tools_description_zh with inputs description_zh
         mock_sdk_descriptions = {
             "test_local_tool": {
@@ -1719,44 +1788,44 @@ class TestAddToolFieldDescriptionZh:
                 "inputs": {"query": {"description_zh": "查询词"}}
             }
         }
-        
+
         monkeypatch.setattr(
-            "backend.database.tool_db.get_local_tools_description_zh",
+            "management.db.tool.repository.get_local_tools_description_zh",
             lambda: mock_sdk_descriptions
         )
-        
+
         tool_info = {"tool_id": 1, "params": {}}
         result = add_tool_field(tool_info)
-        
+
         # Verify that inputs description_zh was merged
         inputs = json.loads(result["inputs"])
         assert inputs["query"]["description_zh"] == "查询词"
 
     def test_add_tool_field_inputs_json_decode_error(self, monkeypatch, mock_session):
         """Test that add_tool_field handles JSON decode error for inputs."""
-        from backend.database.tool_db import add_tool_field
-        
+        from management.db.tool.repository import add_tool_field
+
         session, query = mock_session
-        
+
         # Create a mock tool with source="local" and invalid JSON inputs
         mock_tool_info = MockToolInfo()
         mock_tool_info.source = "local"
         mock_tool_info.name = "test_local_tool"
         mock_tool_info.params = []
         mock_tool_info.inputs = "invalid json{"
-        
+
         mock_first = MagicMock()
         mock_first.return_value = mock_tool_info
         mock_filter = MagicMock()
         mock_filter.first = mock_first
         query.filter.return_value = mock_filter
-        
+
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
-        monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
-        monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
-        
+        monkeypatch.setattr("management.db.tool.repository.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("management.db.tool.repository.as_dict", lambda obj: obj.__dict__)
+
         # Mock get_local_tools_description_zh
         mock_sdk_descriptions = {
             "test_local_tool": {
@@ -1765,54 +1834,54 @@ class TestAddToolFieldDescriptionZh:
                 "inputs": {}
             }
         }
-        
+
         monkeypatch.setattr(
-            "backend.database.tool_db.get_local_tools_description_zh",
+            "management.db.tool.repository.get_local_tools_description_zh",
             lambda: mock_sdk_descriptions
         )
-        
+
         tool_info = {"tool_id": 1, "params": {}}
         result = add_tool_field(tool_info)
-        
+
         # Should not crash, inputs should remain as original string
         assert result["inputs"] == "invalid json{"
 
     def test_add_tool_field_tool_not_in_sdk(self, monkeypatch, mock_session):
         """Test that add_tool_field handles tool not found in SDK descriptions."""
-        from backend.database.tool_db import add_tool_field
-        
+        from management.db.tool.repository import add_tool_field
+
         session, query = mock_session
-        
+
         # Create a mock tool with source="local"
         mock_tool_info = MockToolInfo()
         mock_tool_info.source = "local"
         mock_tool_info.name = "unknown_tool"
         mock_tool_info.params = []
         mock_tool_info.inputs = "{}"
-        
+
         mock_first = MagicMock()
         mock_first.return_value = mock_tool_info
         mock_filter = MagicMock()
         mock_filter.first = mock_first
         query.filter.return_value = mock_filter
-        
+
         mock_ctx = MagicMock()
         mock_ctx.__enter__.return_value = session
         mock_ctx.__exit__.return_value = None
-        monkeypatch.setattr("backend.database.tool_db.get_db_session", lambda: mock_ctx)
-        monkeypatch.setattr("backend.database.tool_db.as_dict", lambda obj: obj.__dict__)
-        
+        monkeypatch.setattr("management.db.tool.repository.get_db_session", lambda: mock_ctx)
+        monkeypatch.setattr("management.db.tool.repository.as_dict", lambda obj: obj.__dict__)
+
         # Mock get_local_tools_description_zh with empty dict
         mock_sdk_descriptions = {}
-        
+
         monkeypatch.setattr(
-            "backend.database.tool_db.get_local_tools_description_zh",
+            "management.db.tool.repository.get_local_tools_description_zh",
             lambda: mock_sdk_descriptions
         )
-        
+
         tool_info = {"tool_id": 1, "params": {}}
         result = add_tool_field(tool_info)
-        
+
         # Should not have description_zh since tool not in SDK
         assert "description_zh" not in result or result.get("description_zh") is None
 
@@ -1833,8 +1902,8 @@ def test_query_tools_by_labels(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.tool_db.as_dict",
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.tool.repository.as_dict",
                         lambda obj: obj.__dict__)
 
     result = query_tools_by_labels("tenant1", ["database"])
@@ -1858,7 +1927,7 @@ def test_query_tools_by_labels_empty_result(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
 
     result = query_tools_by_labels("tenant1", ["nonexistent"])
 
@@ -1883,7 +1952,7 @@ def test_update_tool_labels_success(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
 
     result = update_tool_labels(1, "tenant1", ["new_label"], "user1")
 
@@ -1907,7 +1976,7 @@ def test_update_tool_labels_not_found(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.tool_db.get_db_session", lambda: mock_ctx)
+        "management.db.tool.repository.get_db_session", lambda: mock_ctx)
 
     result = update_tool_labels(999, "tenant1", ["label"], "user1")
 
@@ -1916,3 +1985,11 @@ def test_update_tool_labels_not_found(monkeypatch, mock_session):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+_install_module_stubs = capture_module_stubs(_modules_before_stubs)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_imports(monkeypatch):
+    _install_module_stubs(monkeypatch)

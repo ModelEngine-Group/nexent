@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { useEffect, useState } from "react";
 import {
   Button,
@@ -20,7 +22,6 @@ import { useMcpFormRules } from "@/hooks/mcpTools/useMcpFormRules";
 import { useGroupList } from "@/hooks/group/useGroupList";
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { Can } from "@/components/permission/Can";
-import TagEditor from "../../shared/TagEditor";
 import McpContainerLogsModal from "@/components/mcp/McpContainerLogsModal";
 
 /** Maps the shared add-server tabs (mirroring the MCP config modal) to deployment types. */
@@ -215,16 +216,6 @@ export default function AddMcpServiceLocalSection({
     },
   });
 
-  const addTag = (tag: string) => {
-    const next = (tag || "").trim();
-    if (!next || draft.tags.includes(next)) return;
-    patchDraft({ tags: [...draft.tags, next] });
-  };
-
-  const removeTag = (index: number) => {
-    patchDraft({ tags: draft.tags.filter((_, i) => i !== index) });
-  };
-
   const handlePermissionChange = (value: string) => {
     const permission = value as "EDIT" | "READ_ONLY" | "PRIVATE";
     patchDraft({ ingroupPermission: permission });
@@ -273,12 +264,12 @@ export default function AddMcpServiceLocalSection({
   const isGroupSelectDisabled = draft.ingroupPermission === "PRIVATE" || isApi;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex flex-col">
       <Form
         form={form}
         layout="vertical"
         requiredMark={false}
-        className="flex-1 space-y-5 px-6 py-5"
+        className="space-y-5 px-6 py-5"
       >
         <Tabs
           activeKey={activeTabKey}
@@ -407,7 +398,11 @@ export default function AddMcpServiceLocalSection({
                             )}
                             {...bindField("containerConfigJson")}
                             rows={6}
-                            style={{ fontFamily: "monospace", fontSize: 12 }}
+                            style={{
+                              fontFamily:
+                                "'HarmonyOS Sans SC', 'Huawei Sans', sans-serif",
+                              fontSize: 12,
+                            }}
                           />
                         </Form.Item>
                       </div>
@@ -676,9 +671,17 @@ export default function AddMcpServiceLocalSection({
               name="group_ids"
               label={t("tenantResources.knowledgeBase.groupNames")}
               className="mb-0"
+              help={
+                isApi ? (
+                  <span style={{ fontSize: 12, color: "rgba(0,0,0,0.45)" }}>
+                    {t("mcpTools.detail.groupPermissionUnsupported")}
+                  </span>
+                ) : undefined
+              }
             >
               <Select
                 mode="multiple"
+                showSearch={{ optionFilterProp: "label" }}
                 placeholder={
                   isGroupSelectDisabled
                     ? t("knowledgeBase.create.permission.groupPlaceholder")
@@ -727,26 +730,9 @@ export default function AddMcpServiceLocalSection({
             </Can>
           </div>
         </Can>
-        {isApi ? (
-          <p className="text-xs text-slate-400">
-            {t("mcpTools.detail.groupPermissionUnsupported")}
-          </p>
-        ) : null}
-
-        <div className="flex flex-col gap-4">
-          <TagEditor
-            title={t("mcpTools.detail.tags")}
-            titleClassName="mb-1 block text-sm font-medium text-slate-700"
-            tags={draft.tags}
-            onAddTag={(tag) => addTag(tag || "")}
-            onRemoveTag={removeTag}
-            removeAriaKey="mcpTools.detail.removeTagAria"
-            placeholderKey="mcpTools.detail.tagInputPlaceholder"
-          />
-        </div>
       </Form>
 
-      <div className="sticky bottom-0 flex items-center justify-between border-t border-slate-100 bg-white px-6 py-4">
+      <div className="flex items-center justify-between border-t border-slate-100 bg-white px-6 py-4">
         <div>
           {deploymentStarted ? (
             <Button onClick={() => setLogsOpen(true)}>

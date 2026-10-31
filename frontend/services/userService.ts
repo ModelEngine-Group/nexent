@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { API_ENDPOINTS, ApiError } from "./api";
 import { fetchWithAuth } from "@/lib/auth";
 
@@ -5,6 +7,7 @@ import { fetchWithAuth } from "@/lib/auth";
 export interface User {
   id: string;
   username: string;
+  cas_username?: string | null;
   role: string;
   group_names?: string[];
   email?: string;
@@ -46,7 +49,8 @@ export interface CreateUserResponse {
 export async function listUsers(
   tenantId: string | null,
   page?: number,
-  pageSize?: number
+  pageSize?: number,
+  filters?: { search?: string; roles?: string[]; groupIds?: number[] }
 ): Promise<{ users: User[]; total: number; totalPages?: number }> {
   if (!tenantId) return { users: [], total: 0 };
 
@@ -62,6 +66,9 @@ export async function listUsers(
       requestBody.page = page;
       requestBody.page_size = pageSize;
     }
+    if (filters?.search?.trim()) requestBody.search = filters.search.trim();
+    if (filters?.roles?.length) requestBody.roles = filters.roles;
+    if (filters?.groupIds?.length) requestBody.group_ids = filters.groupIds;
 
     const response = await fetchWithAuth(API_ENDPOINTS.users.list, {
       method: "POST",

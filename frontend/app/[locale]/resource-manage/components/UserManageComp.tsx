@@ -1,4 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import { UserIdentity } from "@/components/auth/UserIdentity";
+import { UserIdentityLabel } from "@/components/auth/UserIdentityLabel";
 
 import React, { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
@@ -36,6 +41,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import {
   type Tenant,
@@ -56,6 +62,7 @@ import UserList from "./resources/UserList";
 import ApiKeyList from "./resources/ApiKeyList";
 import GroupList from "./resources/GroupList";
 import ModelList from "./resources/ModelList";
+import TagList from "./resources/TagList";
 import KnowledgeList from "./resources/KnowledgeList";
 import InvitationList from "./resources/InvitationList";
 import AgentList from "./resources/AgentList";
@@ -71,6 +78,7 @@ import {
   validatePassword as validatePasswordUtil,
 } from "@/lib/utils";
 import ProjectConfigTab from "./resources/projectConfig";
+import { getTenantResourceLimitMessage } from "@/const/errorMessageI18n";
 
 // Default page size for pagination
 const DEFAULT_PAGE_SIZE = 20;
@@ -103,7 +111,7 @@ function TenantList({
   onPageChange?: (page: number) => void;
   onTenantsRefetch: () => Promise<unknown>;
   loading?: boolean;
-  t: (key: string, options?: any) => string;
+  t: TFunction;
   onUserListRefresh?: () => void;
   onInvitationListRefresh?: () => void;
   locale?: string;
@@ -243,7 +251,11 @@ function TenantList({
     } catch (error: any) {
       const errorMessage =
         error?.response?.data?.detail || error?.message || "";
-      message.error(errorMessage || t("tenantResources.tenantDeleteFailed"));
+      message.error(
+        getTenantResourceLimitMessage(error, t) ||
+          errorMessage ||
+          t("tenantResources.tenantDeleteFailed")
+      );
     } finally {
       setDeleteModalVisible(false);
       setDeletingTenant(null);
@@ -388,7 +400,13 @@ function TenantList({
             if (signupResult.error) {
               // Handle signup error
               const errorMsg = signupResult.error.message || "";
-              if (
+              const limitMessage = getTenantResourceLimitMessage(
+                signupResult.error,
+                t
+              );
+              if (limitMessage) {
+                message.error(limitMessage);
+              } else if (
                 errorMsg.includes("already exists") ||
                 errorMsg.includes("EMAIL_ALREADY_EXISTS")
               ) {
@@ -418,7 +436,10 @@ function TenantList({
             // Handle admin account creation error
             const errorMsg =
               adminError?.response?.data?.message || adminError?.message || "";
-            if (
+            const limitMessage = getTenantResourceLimitMessage(adminError, t);
+            if (limitMessage) {
+              message.error(limitMessage);
+            } else if (
               errorMsg.includes("already exists") ||
               errorMsg.includes("EMAIL_ALREADY_EXISTS")
             ) {
@@ -434,6 +455,7 @@ function TenantList({
       setModalVisible(false);
     } catch (err: any) {
       const errorMessage = err?.response?.data?.message || err?.message || "";
+      const limitMessage = getTenantResourceLimitMessage(err, t);
       const nameConflictMatch = errorMessage.match(
         /Tenant with name '(.*)' already exists/i
       );
@@ -450,7 +472,9 @@ function TenantList({
         message.error(t("tenantResources.tenants.nameRequired"));
       } else {
         message.error(
-          errorMessage || t("tenantResources.tenantOperationFailed")
+          limitMessage ||
+            errorMessage ||
+            t("tenantResources.tenantOperationFailed")
         );
       }
     }
@@ -969,7 +993,7 @@ function TenantList({
           type="error"
           showIcon
           className="mb-4"
-          message={t("common.cannotBeUndone")}
+          title={t("common.cannotBeUndone")}
           description={
             <ul className="list-disc pl-4 mt-2 space-y-1">
               <li>
@@ -997,7 +1021,7 @@ function TenantList({
                 <thead className="bg-gray-50 dark:bg-gray-800 sticky top-0">
                   <tr>
                     <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 text-xs font-normal">
-                      {t("tenantResources.users.email")}
+                      <UserIdentityLabel emailLabelKey="tenantResources.users.email" />
                     </th>
                     <th className="px-3 py-1.5 text-left text-gray-500 dark:text-gray-400 text-xs font-normal">
                       {t("tenantResources.users.role")}
@@ -1011,7 +1035,10 @@ function TenantList({
                       className="hover:bg-gray-50 dark:hover:bg-gray-800"
                     >
                       <td className="px-3 py-1.5 text-gray-900 dark:text-gray-100 text-sm">
-                        {user.username || "-"}
+                        <UserIdentity
+                          casUsername={user.cas_username}
+                          fallback={user.username || "-"}
+                        />
                       </td>
                       <td className="px-3 py-1.5 text-gray-900 dark:text-gray-100 text-sm">
                         {t(`user.role.${user.role?.toLowerCase()}`) || "-"}
@@ -1066,7 +1093,11 @@ export default function UserManageComp() {
     data: tenantData,
     isLoading: tenantsLoading,
     refetch: refetchTenants,
-  } = useTenantList({ page: currentPage, page_size: DEFAULT_PAGE_SIZE });
+  } = useTenantList({
+    page: currentPage,
+    page_size: DEFAULT_PAGE_SIZE,
+    enabled: isSuperAdmin,
+  });
 
   // For non-super admins, automatically select their own tenant based on user.tenantId
   // This must be declared before useQuery that uses tenantId
@@ -1173,8 +1204,12 @@ export default function UserManageComp() {
       }
       message.success(t("tenantResources.tenants.updated"));
       setIsEditingTenantName(false);
-    } catch (error) {
-      message.error(t("tenantResources.tenantOperationFailed"));
+    } catch (error: any) {
+      message.error(
+        getTenantResourceLimitMessage(error, t) ||
+          error?.message ||
+          t("tenantResources.tenantOperationFailed")
+      );
     }
   };
 
@@ -1194,9 +1229,9 @@ export default function UserManageComp() {
   };
 
   return (
-    <div className="flex flex-col w-full h-full">
+    <div className="flex flex-col gap-6 w-full h-full px-4 py-8 sm:px-6 sm:py-10 xl:px-16">
       {/* Page header: grouped header without dividing line */}
-      <div className="flex justify-between w-full px-6 pt-12">
+      <div className="flex justify-between w-full ">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-indigo-500 flex items-center justify-center shadow-sm">
             <Building2 className="h-6 w-6 text-white" />
@@ -1223,6 +1258,7 @@ export default function UserManageComp() {
               onCancel={hideModal}
               footer={null}
               width={800}
+              destroyOnHidden
             >
               <ProjectConfigTab showPlatformQuota />
             </Modal>
@@ -1230,12 +1266,15 @@ export default function UserManageComp() {
         )}
       </div>
       <div className="flex-1 min-h-0 h-full">
-        <div className="flex h-full">
-          <Can permission="tenant.list:read">
-            <Col className="flex flex-col h-full" style={{ width: 300 }}>
-              <div className="h-full pr-6">
-                <div className="sticky top-6">
-                  <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-3">
+        <div className="flex h-full gap-6">
+          {isSuperAdmin && (
+            <Can permission="tenant.list:read">
+              <Col
+                className="flex h-full shrink-0 flex-col"
+                style={{ width: 300 }}
+              >
+                <div className="h-full">
+                  <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-sm p-3 h-full">
                     <TenantList
                       selected={tenantId}
                       onSelect={(id) => {
@@ -1263,42 +1302,41 @@ export default function UserManageComp() {
                     />
                   </div>
                 </div>
-              </div>
-            </Col>
-          </Can>
-          <Col className="flex-1 flex flex-col px-6 pb-6 overflow-hidden">
-            <div className="bg-white dark:bg-gray-800 rounded-md shadow-sm p-4 h-full flex flex-col overflow-hidden">
-              <div className="flex items-center justify-between gap-4">
-                {!hasSelectedTenant ? (
-                  <div />
-                ) : isEditingTenantName ? (
-                  <Input
-                    ref={tenantNameInputRef}
-                    value={editingTenantName}
-                    onChange={(e) => setEditingTenantName(e.target.value)}
-                    onBlur={saveTenantName}
-                    onKeyDown={handleTenantNameKeyDown}
-                    className="text-lg font-semibold text-gray-900 dark:text-gray-100"
-                    placeholder={t("tenantResources.tenants.name")}
-                  />
-                ) : (
-                  <div
-                    className="flex items-center gap-2 group cursor-pointer"
-                    onClick={startEditingTenantName}
-                  >
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                      {currentTenantName ||
-                        (directTenantLoading
-                          ? t("tenantResources.tenants.loading")
-                          : t("tenantResources.tenants.name"))}
-                    </h2>
-                    <Edit2 className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                )}
-              </div>
+              </Col>
+            </Can>
+          )}
+          <Col className="min-w-0 min-h-0 flex-1 flex flex-col">
+            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-sm h-full flex flex-col gap-4 overflow-hidden p-4 px-8">
+              {hasSelectedTenant && (
+                <div className="flex items-center justify-between gap-4">
+                  {isEditingTenantName ? (
+                    <Input
+                      ref={tenantNameInputRef}
+                      value={editingTenantName}
+                      onChange={(e) => setEditingTenantName(e.target.value)}
+                      onBlur={saveTenantName}
+                      onKeyDown={handleTenantNameKeyDown}
+                      className="text-lg font-semibold text-gray-900 dark:text-gray-100"
+                      placeholder={t("tenantResources.tenants.name")}
+                    />
+                  ) : (
+                    <div
+                      className="flex items-center gap-2 group cursor-pointer"
+                      onClick={startEditingTenantName}
+                    >
+                      <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                        {currentTenantName ||
+                          (directTenantLoading
+                            ? t("tenantResources.tenants.loading")
+                            : t("tenantResources.tenants.name"))}
+                      </h2>
+                      <Edit2 className="h-4 w-4 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                    </div>
+                  )}
+                </div>
+              )}
 
-              <div className="flex-1 min-h-0 h-full">
-                <Divider size="small" />
+              <div className="flex-1 min-h-0">
                 <div className="flex h-full w-full">
                   {tenantId ? (
                     <Tabs
@@ -1365,6 +1403,11 @@ export default function UserManageComp() {
                           children: <SkillList tenantId={tenantId} />,
                         },
                         {
+                          key: "tags",
+                          label: t("tenantResources.tabs.tags"),
+                          children: <TagList tenantId={tenantId} />,
+                        },
+                        {
                           key: "invitations",
                           label:
                             t("tenantResources.invitation.tab") ||
@@ -1379,7 +1422,7 @@ export default function UserManageComp() {
                       ]}
                     />
                   ) : (
-                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <div className="flex h-full w-full flex-col items-center justify-center py-12 text-center">
                       <div className="w-16 h-16 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center mb-4">
                         <Users className="h-8 w-8 text-gray-400" />
                       </div>

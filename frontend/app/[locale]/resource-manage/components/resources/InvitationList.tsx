@@ -10,7 +10,6 @@ import {
   Form,
   Input,
   Select,
-  Popconfirm,
   message,
   Tag,
   Pagination,
@@ -23,6 +22,7 @@ import { copyToClipboard } from "@/lib/clipboard";
 import { ColumnsType } from "antd/es/table";
 import { useInvitationList } from "@/hooks/invitation/useInvitationList";
 import { useGroupList } from "@/hooks/group/useGroupList";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { getTenantDefaultGroupId } from "@/services/groupService";
 import {
   createInvitation,
@@ -60,6 +60,7 @@ export default function InvitationList({
   tenantId: string | null;
   refreshKey?: number;
 }) {
+  const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const { user } = useAuthorizationContext();
   const userRole = user?.role;
@@ -408,24 +409,21 @@ export default function InvitationList({
                 size="small"
               />
             </Tooltip>
-            <Popconfirm
-              title={t("tenantResources.invitation.confirmDeleteInvitation", {
-                code: record.invitation_code,
-              })}
-              description={t("common.cannotBeUndone")}
-              onConfirm={() => handleDelete(record.invitation_code)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Tooltip title={t("tenantResources.invitation.deleteInvitation")}>
-                <Button
-                  type="text"
-                  danger
-                  icon={<Trash2 className="h-4 w-4" />}
-                  size="small"
-                />
-              </Tooltip>
-            </Popconfirm>
+            <Tooltip title={t("tenantResources.invitation.deleteInvitation")}>
+              <Button
+                type="text"
+                danger
+                icon={<Trash2 className="h-4 w-4" />}
+                size="small"
+                onClick={() => confirm({
+                  title: t("tenantResources.invitation.confirmDeleteInvitation", { code: record.invitation_code }),
+                  content: t("common.cannotBeUndone"),
+                  okText: t("common.confirm"),
+                  cancelText: t("common.cancel"),
+                  onOk: () => handleDelete(record.invitation_code),
+                })}
+              />
+            </Tooltip>
           </div>
         ),
       },
@@ -644,6 +642,7 @@ export default function InvitationList({
             >
               <Select
                 mode="multiple"
+                showSearch={{ optionFilterProp: "label" }}
                 placeholder={t("tenantResources.invitation.groupNames")}
                 options={groups.map((group) => ({
                   label: group.group_name,

@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0",
+  "stage": "D3",
+  "module": "AIDP-KNOWLEDGE",
+  "case": {
+    "case_id": "AIDP-RET-REAL",
+    "feature_id": "AIDP-RETRIEVAL",
+    "business_rule_ids": [
+      "AIDP-RETRIEVAL-RULE-01"
+    ],
+    "title": "Real AIDP graph fallback and score contract",
+    "type": "INTEGRATION",
+    "priority": "P1",
+    "status": "blocked",
+    "automation": "manual",
+    "objective": "Real AIDP graph fallback and score contract",
+    "preconditions": [
+      "SDK/frontend dependencies available; use isolated run-owned resources.",
+      "Real provider and browser journeys require an authorized matching source environment."
+    ],
+    "test_data": {
+      "methods": "vector, full text, graph, all pairs and hybrid",
+      "legacy": "top_k=7, reranking_enable=false, multi_modal=false, candidates missing/null/fixed"
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Use authorized graph-enabled and graph-disabled knowledge bases with both wrappers.",
+        "expected": "Actual provider handles missing graph and both zero caps without a client vector fallback."
+      },
+      {
+        "order": 2,
+        "action": "Run pure graph, pairwise/hybrid, zero and finite caps, jargon_coverage with threshold.",
+        "expected": "Actual scores and retrieval_source meet the deployed normalized-score contract."
+      }
+    ],
+    "expected_results": [
+      "Actual provider handles missing graph and both zero caps without a client vector fallback.",
+      "Actual scores and retrieval_source meet the deployed normalized-score contract."
+    ],
+    "forbidden_side_effects": [
+      "Do not mutate other configurations, expand managed scope, expose credentials or issue HTTP for invalid settings."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Actual provider handles missing graph and both zero caps without a client vector fallback.; Actual scores and retrieval_source meet the deployed normalized-score contract.",
+        "steps": [
+          1,
+          2
+        ],
+        "expected_results": [
+          1,
+          2
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      }
+    ],
+    "integration_boundary": [
+      "Actual SDK to authorized AIDP deployment"
+    ],
+    "observations": [
+      "Actual provider handles missing graph and both zero caps without a client vector fallback.",
+      "Actual scores and retrieval_source meet the deployed normalized-score contract."
+    ],
+    "cleanup": [
+      "Remove only run-owned resources."
+    ]
+  }
+}

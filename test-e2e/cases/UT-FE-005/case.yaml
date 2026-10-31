@@ -1,0 +1,46 @@
+schema_version: '1.0'
+stage: D1
+module: V5-BASELINE
+case:
+  case_id: UT-FE-005
+  feature_id: F-160
+  business_rule_ids:
+  - F-160-RULE-01
+  title: locale 切换、路由保留、关键文案 fallback｜核心流程
+  type: FE-COMP
+  priority: P2
+  status: active
+  automation: automated
+  objective: locale 切换、路由保留、关键文案 fallback｜核心流程
+  preconditions:
+  - 仓库 D1 前端组件运行器及隔离依赖可用。
+  - TEST_HOME 位于仓库外；测试不访问生产资源。
+  test_data:
+    fixtures: &id001
+    - 内存 fixture 和受控服务响应；不依赖真实数据库 ID、模型或凭据。
+  steps:
+  - order: 1
+    action: 在带/不带 locale 和 BASE_PATH 的路由点击 zh/en 切换
+    expected: 目标 locale 正确，业务路径和 BASE_PATH 保留，NEXT_LOCALE Cookie 更新。
+  - order: 2
+    action: 加载未知 locale，并请求缺失的翻译键
+    expected: 未知 locale 使用英文，缺失键回退英文或 defaultValue。
+  - order: 3
+    action: 预先加载消息后模拟加载失败
+    expected: 已有翻译不被清空。
+  expected_results:
+  - 目标 locale 正确，业务路径和 BASE_PATH 保留，NEXT_LOCALE Cookie 更新。
+  - 未知 locale 使用英文，缺失键回退英文或 defaultValue。
+  - 已有翻译不被清空。
+  forbidden_side_effects:
+  - 不得访问真实用户、模型 Provider 或数据库，不得输出真实凭据。
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 302
+  unit_boundary: useLanguageSwitch、loadLocaleMessages 与真实 i18n
+  inputs: *id001
+  assertions:
+  - 目标 locale 正确，业务路径和 BASE_PATH 保留，NEXT_LOCALE Cookie 更新。
+  - 未知 locale 使用英文，缺失键回退英文或 defaultValue。
+  - 已有翻译不被清空。

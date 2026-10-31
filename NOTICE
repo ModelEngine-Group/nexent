@@ -1,17 +1,40 @@
 # Nexent Open Source Project
 
-Copyright © 2025 Huawei Technologies Co., Ltd.
+Copyright (c) 2025-2026 Huawei Technologies Co., Ltd.
 
-This product includes software developed by the Nexent Team.
+Nexent is developed by the Nexent Team and is distributed under the MIT
+License. See the `LICENSE` file in this repository for the full license text.
 
-=== Third-Party Components ===
-This software contains the following open-source components:
+## Third-Party Software
 
-1. Unstructured.io - Apache License 2.0
-   Source: https://github.com/Unstructured-IO/unstructured
+Nexent incorporates and depends on third-party open-source software. The
+following list identifies the principal components that are directly
+integrated into the project. Each component remains subject to its own
+license, copyright notices, and attribution requirements.
 
-2. SmolAgents - Apache License 2.0  
-   Source: https://github.com/huggingface/smolagents
+| Component | License | Source |
+| --- | --- | --- |
+| Unstructured | Apache License 2.0 | https://github.com/Unstructured-IO/unstructured |
+| smolagents | Apache License 2.0 | https://github.com/huggingface/smolagents |
+| FastAPI | MIT License | https://github.com/fastapi/fastapi |
+| LangChain | MIT License | https://github.com/langchain-ai/langchain |
+| FastMCP | Apache License 2.0 | https://github.com/jlowin/fastmcp |
+| Model Context Protocol Python SDK | MIT License | https://github.com/modelcontextprotocol/python-sdk |
+| openJiuwen | Apache License 2.0 | https://gitcode.com/openJiuwen/agent-core |
+| OpenAI Python library | Apache License 2.0 | https://github.com/openai/openai-python |
+| Next.js | MIT License | https://github.com/vercel/next.js |
+| React | MIT License | https://github.com/facebook/react |
+| Ant Design | MIT License | https://github.com/ant-design/ant-design |
+| assistant-ui | MIT License | https://github.com/assistant-ui/assistant-ui |
+| Vercel AI SDK | Apache License 2.0 | https://github.com/vercel/ai |
+| PDF.js | Apache License 2.0 | https://github.com/mozilla/pdf.js |
+| Mermaid | MIT License | https://github.com/mermaid-js/mermaid |
 
-3. Ray - Apache License 2.0
-   Source: https://github.com/ray-project/ray
+This list is not exhaustive. The dependency declarations in
+`backend/pyproject.toml`, `sdk/pyproject.toml`, `frontend/package.json`, and
+`doc/package.json` identify the current direct dependencies. Where lockfiles
+are present, including `backend/uv.lock` and `frontend/pnpm-lock.yaml`, they
+also record the dependency graph resolved for a particular build.
+
+Distributors must preserve all notices and license texts required by those
+dependencies.

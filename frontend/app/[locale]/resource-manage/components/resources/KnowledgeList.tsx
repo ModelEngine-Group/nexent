@@ -1,12 +1,15 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import React, { useMemo, useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Table,
-  Popconfirm,
   message,
   Button,
+  Input,
+  Select,
   Modal,
   Tag,
   Tooltip,
@@ -25,7 +28,8 @@ import {
 import { MarkdownRenderer } from "@/components/common/markdownRenderer";
 import { useKnowledgeList } from "@/hooks/knowledge/useKnowledgeList";
 import { useGroupList } from "@/hooks/group/useGroupList";
-import { useAuthorization } from "@/hooks/auth/useAuthorization";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import knowledgeBaseService from "@/services/knowledgeBaseService";
 import quotaService from "@/services/quotaService";
 import { type KnowledgeBase } from "@/types/knowledgeBase";
@@ -35,6 +39,8 @@ import PersonalKnowledgeBaseCapacity from "./PersonalKnowledgeBaseCapacity";
 import { QuotaSettingsModal } from "./QuotaSettingsModal";
 import { SuQuotaModal } from "./SuQuotaModal";
 import { formatDateTime as formatDateTimeUtil } from "@/lib/date";
+import { formatKnowledgeBaseDeleteError } from "@/lib/knowledgeBaseDeleteError";
+import KnowledgeBaseDeleteNotice from "@/components/knowledge-base/KnowledgeBaseDeleteNotice";
 
 // Color constants for progress bars
 const STROKE_COLORS = {
@@ -60,13 +66,19 @@ export default function KnowledgeList({
 }: {
   tenantId: string | null;
 }) {
+  const { confirm } = useConfirmModal();
   const { t } = useTranslation("common");
   const [kbView, setKbView] = useState<"shared" | "personal">("shared");
   const { data, isLoading, refetch } = useKnowledgeList(tenantId);
   const knowledgeBases = data || [];
+  const [keyword, setKeyword] = useState("");
+  const [groupFilters, setGroupFilters] = useState<number[]>([]);
+  const [previewingKnowledgeId, setPreviewingKnowledgeId] = useState<
+    string | null
+  >(null);
 
   // Get actual user role from auth context
-  const { user } = useAuthorization();
+  const { user } = useAuthorizationContext();
   const userRole = user?.role ?? "";
   // Only ADMIN can edit per-KB soft quotas
   const isAdmin = userRole === "ADMIN";
@@ -76,6 +88,18 @@ export default function KnowledgeList({
   // Fetch groups for group selection
   const { data: groupData } = useGroupList(tenantId);
   const groups = groupData?.groups || [];
+  const filteredKnowledgeBases = useMemo(() => {
+    const normalizedKeyword = keyword.trim().toLowerCase();
+    return knowledgeBases.filter((knowledgeBase) => {
+      const matchesName =
+        !normalizedKeyword ||
+        (knowledgeBase.name || "").toLowerCase().includes(normalizedKeyword);
+      const matchesGroup =
+        groupFilters.length === 0 ||
+        (knowledgeBase.group_ids || []).some((id) => groupFilters.includes(id));
+      return matchesName && matchesGroup;
+    });
+  }, [groupFilters, keyword, knowledgeBases]);
 
   // Quota state
   const [quotaUsage, setQuotaUsage] = useState<QuotaUsageResponse | null>(null);
@@ -175,7 +199,11 @@ export default function KnowledgeList({
       handleRefetch();
     } catch (error: any) {
       message.error(
-        error.message || t("tenantResources.knowledgeBase.deleteFailed")
+        formatKnowledgeBaseDeleteError(
+          error,
+          t,
+          "tenantResources.knowledgeBase.deleteFailed"
+        )
       );
     }
   };
@@ -321,16 +349,14 @@ export default function KnowledgeList({
     },
     {
       title: t("tenantResources.knowledgeBase.storeSize"),
-      key: "store_size",
+      key: "source_size",
       width: 140,
       render: (_: any, record: KnowledgeBase) => {
         const indexName = record.index_name || record.id;
         const quotaData = indexName ? quotaMap.get(indexName) : undefined;
-        const displaySize =
-          quotaData?.actual_readable ??
-          (isExternalSource(record) ? record.store_size || "0 B" : "—");
+        const displaySize = quotaData?.actual_readable ?? "—";
 
-        // Non-admin roles have read-only composite usage.
+        // Non-admin roles have read-only source-file usage.
         if (!isAdmin) {
           return <span style={{ color: "#666" }}>{displaySize}</span>;
         }
@@ -445,6 +471,18 @@ export default function KnowledgeList({
       },
     },
     {
+      title: t("tenantResources.knowledgeBase.esPhysicalSize"),
+      key: "es_physical_size",
+      width: 140,
+      render: (_: any, record: KnowledgeBase) => {
+        const indexName = record.index_name || record.id;
+        const quotaData = indexName ? quotaMap.get(indexName) : undefined;
+        const displaySize =
+          quotaData?.es_physical_readable ?? (record.store_size || "—");
+        return <span style={{ color: "#666" }}>{displaySize}</span>;
+      },
+    },
+    {
       title: t("tenantResources.knowledgeBase.processSource"),
       dataIndex: "process_source",
       key: "process_source",
@@ -515,22 +553,46 @@ export default function KnowledgeList({
                 size="small"
               />
             </Tooltip>
-            <Popconfirm
-              title={t("knowledgeBase.modal.deleteConfirm.title")}
-              description={t("common.cannotBeUndone")}
-              onConfirm={() => handleDelete(record.id)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Tooltip title={t("common.delete")}>
-                <Button
-                  type="text"
-                  danger
-                  icon={<Trash2 className="h-4 w-4" />}
-                  size="small"
-                />
-              </Tooltip>
-            </Popconfirm>
+            <Tooltip title={t("common.delete")}>
+              <Button
+                type="text"
+                danger
+                icon={<Trash2 className="h-4 w-4" />}
+                size="small"
+                loading={previewingKnowledgeId === record.id}
+                disabled={previewingKnowledgeId !== null}
+                onClick={async () => {
+                  // Deletion cascades: the dialog lists the agents that lose
+                  // their binding, plus a fixed notice for conversations.
+                  setPreviewingKnowledgeId(record.id);
+                  try {
+                    const preview =
+                      await knowledgeBaseService.previewBoundAgents(
+                        record.id,
+                        tenantId
+                      );
+                    confirm({
+                      title: t("knowledgeBase.modal.deleteConfirm.title", {
+                        name: record.name,
+                      }),
+                      content: (
+                        <div>
+                          <div>
+                            {t("knowledgeBase.modal.deleteConfirm.content")}
+                          </div>
+                          <KnowledgeBaseDeleteNotice preview={preview} />
+                        </div>
+                      ),
+                      okText: t("knowledgeBase.modal.deleteConfirm.confirm"),
+                      cancelText: t("common.cancel"),
+                      onOk: () => handleDelete(record.id),
+                    });
+                  } finally {
+                    setPreviewingKnowledgeId(null);
+                  }
+                }}
+              />
+            </Tooltip>
           </div>
         );
       },
@@ -567,44 +629,71 @@ export default function KnowledgeList({
       {kbView === "shared" && (
         <>
           {/* Header: Quota Management button + Inline overview bar (SU + ADMIN) */}
-          {canManageQuota && (
-            <div className="flex items-center justify-between mb-2 px-1">
-              {tenantUsagePct != null && tenantTotalReadable ? (
-                <div
-                  role="button"
-                  tabIndex={0}
-                  className="flex items-center gap-2 cursor-pointer flex-1 mr-4"
-                  onClick={() => setQuotaModalVisible(true)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setQuotaModalVisible(true);
-                    }
-                  }}
-                >
-                  <span className="text-sm text-gray-600">
-                    {t("quota.tenantUsage", "Tenant Usage")}:
-                  </span>
-                  <Progress
-                    percent={Math.min(tenantUsagePct, 100)}
-                    size="small"
-                    strokeColor={getProgressColor(
-                      quotaUsage?.tenant_warning_level
-                    )}
-                    format={() => ""}
-                    style={{ flex: 1, maxWidth: 300, marginBottom: 0 }}
-                  />
-                  <span className="text-sm text-gray-500 whitespace-nowrap">
-                    {tenantTotalReadable}
-                    {tenantHardLimitReadable
-                      ? ` / ${tenantHardLimitReadable}`
-                      : ""}{" "}
-                    ({Math.round(tenantUsagePct)}%)
-                  </span>
-                </div>
-              ) : (
-                <div />
-              )}
+          <div className="flex items-center justify-between gap-4 mb-2 px-1">
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <Input.Search
+                allowClear
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder={t(
+                  "tenantResources.knowledgeBase.searchPlaceholder"
+                )}
+                className="shrink-0"
+                style={{ width: 192, flex: "0 0 192px" }}
+              />
+              <Select
+                mode="multiple"
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                value={groupFilters}
+                onChange={setGroupFilters}
+                options={groups.map((group) => ({
+                  label: group.group_name,
+                  value: group.group_id,
+                }))}
+                placeholder={t("tenantResources.knowledgeBase.filterGroup")}
+                className="shrink-0"
+                style={{ width: 176, flex: "0 0 176px" }}
+              />
+              {canManageQuota &&
+                tenantUsagePct != null &&
+                tenantTotalReadable && (
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    className="flex min-w-0 max-w-[420px] flex-1 cursor-pointer items-center gap-2"
+                    onClick={() => setQuotaModalVisible(true)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setQuotaModalVisible(true);
+                      }
+                    }}
+                  >
+                    <span className="whitespace-nowrap text-sm text-gray-600">
+                      {t("quota.tenantUsage", "Tenant Usage")}:
+                    </span>
+                    <Progress
+                      percent={Math.min(tenantUsagePct, 100)}
+                      size="small"
+                      strokeColor={getProgressColor(
+                        quotaUsage?.tenant_warning_level
+                      )}
+                      format={() => ""}
+                      style={{ flex: 1, minWidth: 60, marginBottom: 0 }}
+                    />
+                    <span className="whitespace-nowrap text-sm text-gray-500">
+                      {tenantTotalReadable}
+                      {tenantHardLimitReadable
+                        ? ` / ${tenantHardLimitReadable}`
+                        : ""}{" "}
+                      ({Math.round(tenantUsagePct)}%)
+                    </span>
+                  </div>
+                )}
+            </div>
+            {canManageQuota && (
               <Button
                 type="primary"
                 icon={<SettingOutlined className="h-4 w-4" />}
@@ -614,12 +703,12 @@ export default function KnowledgeList({
                   ? t("quota.allocateStorage", "Allocate Storage")
                   : t("quota.quotaManagement", "Quota Management")}
               </Button>
-            </div>
-          )}
+            )}
+          </div>
 
           <Table
             columns={columns}
-            dataSource={knowledgeBases}
+            dataSource={filteredKnowledgeBases}
             loading={isLoading}
             rowKey="id"
             pagination={{ pageSize: 10 }}

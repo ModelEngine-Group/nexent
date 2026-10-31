@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Restore aidp_permission_service.require_permission after each test.
 
 A handful of legacy mgmt_app tests assign directly to the module attribute.
@@ -9,40 +11,13 @@ from __future__ import annotations
 
 import os
 import sys
-from types import ModuleType
-from unittest.mock import MagicMock
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../"))
 BACKEND_ROOT = os.path.join(PROJECT_ROOT, "backend")
 if BACKEND_ROOT not in sys.path:
     sys.path.insert(0, BACKEND_ROOT)
 
-# Stub nexent SDK and storage modules so the conftest does not require boto3
-# or other heavy optional deps at collection time.
-if "nexent" not in sys.modules:
-    _nexent = ModuleType("nexent")
-    _nexent.__path__ = []
-    sys.modules["nexent"] = _nexent
-    _nexent_utils = ModuleType("nexent.utils")
-    _nexent_utils.__path__ = []
-    sys.modules["nexent.utils"] = _nexent_utils
-    _http_mgr = ModuleType("nexent.utils.http_client_manager")
-    _http_mgr.http_client_manager = MagicMock()
-    sys.modules["nexent.utils.http_client_manager"] = _http_mgr
-    _nexent_storage = ModuleType("nexent.storage")
-    _nexent_storage.__path__ = []
-    sys.modules["nexent.storage"] = _nexent_storage
-    _storage_factory = ModuleType("nexent.storage.storage_client_factory")
-    _storage_factory.create_storage_client_from_config = MagicMock()
-
-    class _MinIOStorageConfig:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-
-    _storage_factory.MinIOStorageConfig = _MinIOStorageConfig
-    sys.modules["nexent.storage.storage_client_factory"] = _storage_factory
-
-# Ensure env vars are set so consts.const can load without .env
+# Ensure env vars are set so contracts.constants.environment can load without .env
 for var in (
     "POSTGRES_HOST", "POSTGRES_USER", "POSTGRES_PASSWORD",
     "POSTGRES_DB", "POSTGRES_PORT", "NEXENT_POSTGRES_PASSWORD",

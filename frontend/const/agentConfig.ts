@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 // ========== Agent Configuration Constants ==========
 
 import type { LayoutConfig } from "../types/agentConfig";
@@ -46,16 +48,6 @@ export const TOOL_SOURCE_TYPES = {
   OTHER: "other",
 } as const;
 
-export const GENERATE_PROMPT_STREAM_TYPES = {
-  DUTY: "duty",
-  CONSTRAINT: "constraint",
-  FEW_SHOTS: "few_shots",
-  AGENT_VAR_NAME: "agent_var_name",
-  AGENT_DESCRIPTION: "agent_description",
-  AGENT_DISPLAY_NAME: "agent_display_name",
-  GREETING_MESSAGE: "greeting_message",
-  EXAMPLE_QUESTIONS: "example_questions",
-} as const;
 
 export const TOOL_PARAM_TYPES = {
   STRING: "string",
@@ -78,8 +70,6 @@ export type NameCheckStatus =
 export type ToolSourceType =
   (typeof TOOL_SOURCE_TYPES)[keyof typeof TOOL_SOURCE_TYPES];
 
-export type GeneratePromptStreamType =
-  (typeof GENERATE_PROMPT_STREAM_TYPES)[keyof typeof GENERATE_PROMPT_STREAM_TYPES];
 
 // Agent call relationship node default size
 export const AGENT_CALL_RELATIONSHIP_NODE_SIZE = {
@@ -129,8 +119,9 @@ export const TOOL_PARAM_OPTIONS = {
       "hybrid_search",
       "vector_search",
       "full_text_search",
+      "graph_search",
     ],
-    reranking_mode: ["performance", "high_accuracy"],
+    reranking_mode: ["performance", "high_accuracy", "jargon_coverage"],
     multi_modal: [true, false],
     reranking_enable: [true, false],
     rewrite_enable: [true, false],

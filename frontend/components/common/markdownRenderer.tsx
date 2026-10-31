@@ -1,8 +1,9 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 "use client";
 
 import React from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -15,7 +16,10 @@ import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { unified } from "unified";
 import { visit } from "unist-util-visit";
 import { SearchResult } from "@/types/chat";
-import { resolveS3UrlToDataUrl } from "@/services/storageService";
+import {
+  getLocalFileDownloadUrl,
+  resolveS3UrlToDataUrl,
+} from "@/services/storageService";
 import {
   Tooltip,
   TooltipContent,
@@ -38,6 +42,7 @@ interface MarkdownRendererProps {
   searchResults?: SearchResult[];
   showDiagramToggle?: boolean;
   onCitationHover?: () => void;
+  onCitationClick?: (citationKey: string, citationContext: string) => void;
   enableMultimodal?: boolean;
   /**
    * When true, resolve s3:// media URLs in markdown into data URLs (base64)
@@ -81,6 +86,9 @@ const S3_MEDIA_SESSION_PREFIX = "s3-media-cache:";
 
 const isBrowserEnvironment = typeof window !== "undefined";
 
+const markdownUrlTransform = (url: string): string =>
+  url.startsWith("s3://") ? url : defaultUrlTransform(url);
+
 const flattenTextContent = (value: React.ReactNode): string => {
   if (typeof value === "string" || typeof value === "number") {
     return String(value);
@@ -91,7 +99,9 @@ const flattenTextContent = (value: React.ReactNode): string => {
   }
 
   if (React.isValidElement(value)) {
-    return flattenTextContent(value.props?.children);
+    return flattenTextContent(
+      (value.props as { children?: React.ReactNode }).children
+    );
   }
 
   return "";
@@ -258,7 +268,9 @@ const buildCitationDisplayIndexMap = (
 ): Map<string, number> => {
   const validCitationKeys = new Set(
     searchResults
-      .filter((result) => result.tool_sign && typeof result.cite_index === "number")
+      .filter(
+        (result) => result.tool_sign && typeof result.cite_index === "number"
+      )
       .map((result) => `${result.tool_sign}${result.cite_index}`)
   );
   const displayIndexMap = new Map<string, number>();
@@ -647,17 +659,70 @@ const CitationBadge = ({
   </span>
 );
 
+/**
+ * A citation belongs to the sentence immediately before it. Consecutive
+ * citation badges share that sentence, while another badge, a newline, or a
+ * sentence-ending punctuation mark starts a new citation scope.
+ */
+const getCitationScopeText = (citationElement: HTMLElement | null) => {
+  if (!citationElement) return "";
+  const citationBadge = citationElement.querySelector(".ds-markdown-cite");
+  const sentenceContainer = citationElement.closest(
+    "p, li, td, th, h1, h2, h3, h4, h5, h6"
+  );
+  if (!citationBadge || !sentenceContainer) return "";
+
+  const citationBadges = Array.from(
+    sentenceContainer.querySelectorAll(".ds-markdown-cite")
+  );
+  let firstBadgeInGroup = citationBadge;
+  let badgeIndex = citationBadges.indexOf(citationBadge);
+  while (badgeIndex > 0) {
+    const previousBadge = citationBadges[badgeIndex - 1];
+    const gap = document.createRange();
+    gap.setStartAfter(previousBadge);
+    gap.setEndBefore(firstBadgeInGroup);
+    if (gap.toString().trim()) break;
+    firstBadgeInGroup = previousBadge;
+    badgeIndex -= 1;
+  }
+
+  const range = document.createRange();
+  range.selectNodeContents(sentenceContainer);
+  range.setEndBefore(firstBadgeInGroup);
+  const textBeforeCitation = range.toString();
+  let sentenceStart = -1;
+  for (let offset = textBeforeCitation.length - 1; offset >= 0; offset -= 1) {
+    const character = textBeforeCitation[offset];
+    if (character === "\n" || character === "|") {
+      sentenceStart = offset;
+      break;
+    }
+    if ("。！？!?".includes(character)) {
+      sentenceStart = offset;
+      break;
+    }
+    if (character === "." && /\s/.test(textBeforeCitation[offset + 1] || "")) {
+      sentenceStart = offset;
+      break;
+    }
+  }
+  return textBeforeCitation.slice(sentenceStart + 1).trim();
+};
+
 // Modified HoverableText component
 const HoverableText = ({
   text,
   displayIndex,
   searchResults,
   onCitationHover,
+  onCitationClick,
 }: {
   text: string;
   displayIndex: number;
   searchResults?: SearchResult[];
   onCitationHover?: () => void;
+  onCitationClick?: (citationKey: string, citationContext: string) => void;
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
   const containerRef = React.useRef<HTMLSpanElement>(null);
@@ -684,6 +749,25 @@ const HoverableText = ({
   const matchedResult = searchResults?.find(
     (result) => result.tool_sign === toolSign && result.cite_index === citeIndex
   );
+
+  const handleCitationClick = (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (matchedResult) {
+      const citationContext = getCitationScopeText(containerRef.current);
+      onCitationClick?.(`${toolSign}${citeIndex}`, citationContext);
+    }
+  };
+
+  // Keyboard activation (Enter / Space) keeps the citation marker accessible.
+  const handleCitationKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (matchedResult) {
+      const citationContext = getCitationScopeText(containerRef.current);
+      onCitationClick?.(`${toolSign}${citeIndex}`, citationContext);
+    }
+  };
 
   // Handle mouse events
   React.useEffect(() => {
@@ -816,13 +900,20 @@ const HoverableText = ({
             className="inline-flex items-center relative"
             style={{ zIndex: isOpen ? 1000 : "auto" }}
           >
-            <span className="inline-flex items-center cursor-pointer transition-colors">
+            <button
+              type="button"
+              className="inline-flex cursor-pointer items-center border-0 bg-transparent p-0 transition-colors"
+              style={{ font: "inherit" }}
+              aria-label={`Citation ${toolSign}${citeIndex}`}
+              onClick={handleCitationClick}
+              onKeyDown={handleCitationKeyDown}
+            >
               <CitationBadge
                 toolSign={toolSign}
                 sourceIndex={citeIndex}
                 displayIndex={displayIndex}
               />
-            </span>
+            </button>
           </span>
         </TooltipTrigger>
         <TooltipContent
@@ -833,8 +924,8 @@ const HoverableText = ({
               "--scrollbar-width": "8px",
               "--scrollbar-height": "8px",
               "--scrollbar-track-bg": "transparent",
-              "--scrollbar-thumb-bg": "rgb(209, 213, 219)",
-              "--scrollbar-thumb-hover-bg": "rgb(156, 163, 175)",
+              "--scrollbar-thumb-bg": "var(--scrollbar-thumb)",
+              "--scrollbar-thumb-hover-bg": "var(--scrollbar-thumb-hover)",
               "--scrollbar-thumb-radius": "9999px",
               boxSizing: "border-box",
               maxWidth: "min(720px, 50vw)",
@@ -873,14 +964,6 @@ const HoverableText = ({
                 }
                 div::-webkit-scrollbar-thumb:hover {
                   background: var(--scrollbar-thumb-hover-bg);
-                }
-                @media (prefers-color-scheme: dark) {
-                  div::-webkit-scrollbar-thumb {
-                    background: rgb(55, 65, 81);
-                  }
-                  div::-webkit-scrollbar-thumb:hover {
-                    background: rgb(75, 85, 99);
-                  }
                 }
               `}</style>
               {matchedResult ? (
@@ -942,13 +1025,13 @@ const convertLatexDelimiters = (content: string): string => {
  * Handles both complete and incomplete tags (for streaming scenarios)
  * - <code>...</code> → ```python ... ```
  * - <code>... (incomplete) → ```python\n (open code fence)
- * - <DISPLAY:language>...</DISPLAY> → ```language ... ```
- * - <DISPLAY:language>... (incomplete) → ```language\n (open code fence)
+ * - <display:language>...</display> → ```language ... ```
+ * - <display:language>... (incomplete) → ```language\n (open code fence)
  */
 const convertCustomCodeTags = (content: string): string => {
-  // Step 1: Handle complete <DISPLAY:language>...</DISPLAY> blocks
+  // Step 1: Handle complete <display:language>...</display> blocks
   content = content.replace(
-    /<DISPLAY:(\w+)>([\s\S]*?)<\/DISPLAY>/g,
+    /<display:(\w+)>([\s\S]*?)<\/display>/g,
     (_match, language, code) => {
       return `\`\`\`${language}\n${code.trim()}\n\`\`\``;
     }
@@ -960,9 +1043,9 @@ const convertCustomCodeTags = (content: string): string => {
   });
 
   // Step 3: Handle incomplete tags during streaming
-  // <DISPLAY:language> without closing </DISPLAY> → ```language\n
+  // <display:language> without closing </display> → ```language\n
   content = content.replace(
-    /<DISPLAY:(\w+)>(?![\s\S]*<\/DISPLAY>)/g,
+    /<display:(\w+)>(?![\s\S]*<\/display>)/g,
     (_match, language) => {
       return `\`\`\`${language}\n`;
     }
@@ -1153,6 +1236,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
   searchResults = [],
   showDiagramToggle = true,
   onCitationHover,
+  onCitationClick,
   enableMultimodal = true,
   resolveS3Media = false,
   trustedImageUrls = [],
@@ -1289,6 +1373,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                   displayIndex={displayIndex}
                   searchResults={searchResults}
                   onCitationHover={onCitationHover}
+                  onCitationClick={onCitationClick}
                 />
               );
             } else {
@@ -1390,7 +1475,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
     );
     const headingId = matchedHeading?.id ?? slugifyHeadingText(headingText);
     renderedHeadingIndex += 1;
-    const HeadingTag = `h${level}` as keyof JSX.IntrinsicElements;
+    const HeadingTag = `h${level}` as React.ElementType;
 
     return (
       <HeadingTag
@@ -1437,6 +1522,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
       >
         <MarkdownErrorBoundary rawContent={processedContent}>
           <ReactMarkdown
+            urlTransform={markdownUrlTransform}
             remarkPlugins={
               [
                 remarkGfm,
@@ -1525,8 +1611,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
               ),
               // Link
               a: ({ href, children, ...props }: any) => {
+                const resolvedHref = getLocalFileDownloadUrl(href) || href;
                 return (
-                  <a href={href} className="markdown-link" {...props}>
+                  <a href={resolvedHref} className="markdown-link" {...props}>
                     <TextWrapper>{children}</TextWrapper>
                   </a>
                 );
@@ -1582,7 +1669,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                 const directSrc = props?.src;
                 const childSource = React.Children.toArray(children)
                   .map((child) =>
-                    React.isValidElement(child) ? child.props?.src : undefined
+                    React.isValidElement(child)
+                      ? (child.props as { src?: string }).src
+                      : undefined
                   )
                   .find(Boolean);
                 const videoSrc = directSrc ?? childSource;

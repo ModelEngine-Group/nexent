@@ -1,11 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Unit tests for repository import precheck."""
 
+from test.common.contract_stubs import install_business_contract_stubs
 import sys
 import types
 from enum import Enum
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from pydantic import BaseModel
@@ -15,17 +17,32 @@ _BACKEND_DIR = _REPO_ROOT / "backend"
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-sys.modules.setdefault("sqlalchemy", MagicMock())
+# sqlalchemy must look like a package so submodule imports succeed.
+_sqlalchemy_mock = types.ModuleType("sqlalchemy")
+_sqlalchemy_mock.__path__ = []
+sys.modules.setdefault("sqlalchemy", _sqlalchemy_mock)
+sys.modules.setdefault("sqlalchemy.orm", MagicMock())
 sys.modules.setdefault("sqlalchemy.dialects", MagicMock())
 sys.modules.setdefault("sqlalchemy.dialects.postgresql", MagicMock())
 
-sys.modules.setdefault("database.skill_db", MagicMock())
-sys.modules.setdefault("database.knowledge_db", MagicMock())
-sys.modules.setdefault("database.model_management_db", MagicMock())
-sys.modules.setdefault("database.remote_mcp_db", MagicMock())
-sys.modules.setdefault("database.tool_db", MagicMock())
+sys.modules.setdefault("management.db.skill.repository", MagicMock())
+sys.modules.setdefault("management.db.knowledge_base.repository", MagicMock())
+sys.modules.setdefault("management.db.model.repository", MagicMock())
+sys.modules.setdefault("management.db.mcp.remote", MagicMock())
+sys.modules.setdefault("management.db.tool.repository", MagicMock())
+sys.modules.setdefault("management.db.identity.group", MagicMock())
+sys.modules.setdefault("management.db.identity.user_tenant", MagicMock())
+sys.modules.setdefault("management.db.client", MagicMock())
 
-_consts_model = types.ModuleType("consts.model")
+_consts_model = types.ModuleType("contracts.agent")
+
+
+class _RepositoryImportRequirementType(str):
+    MODEL = "model"
+    KB = "knowledge_base"
+    MCP = "mcp"
+    SKILL = "skill"
+    TOOL = "tool"
 
 
 class _ModelConnectStatusEnum(Enum):
@@ -43,6 +60,9 @@ class _RepositoryImportRequirementItem(BaseModel):
     description: str | None = None
     available: bool
     reason_code: str | None = None
+    suggested_new_name: str | None = None
+    resolution_required: bool = False
+    existing_index_name: str | None = None
 
 
 class _RepositoryImportPrecheckResponse(BaseModel):
@@ -56,16 +76,45 @@ class _RepositoryImportPrecheckResponse(BaseModel):
 
 
 class _ToolSourceEnum(Enum):
+    LOCAL = "local"
     MCP = "mcp"
+    LANGCHAIN = "langchain"
+    BUILTIN = "builtin"
 
 
 _consts_model.ModelConnectStatusEnum = _ModelConnectStatusEnum
+_consts_model.RepositoryImportRequirementType = _RepositoryImportRequirementType
 _consts_model.RepositoryImportRequirementItem = _RepositoryImportRequirementItem
 _consts_model.RepositoryImportPrecheckResponse = _RepositoryImportPrecheckResponse
 _consts_model.ToolSourceEnum = _ToolSourceEnum
-sys.modules["consts.model"] = _consts_model
+install_business_contract_stubs(_consts_model)
 
-from services.repository_import_precheck import build_repository_import_precheck
+# Keep model availability real while isolating adapter construction and config.
+sys.modules.setdefault("management.services.model.adapter", MagicMock())
+sys.modules.setdefault("management.services.configuration.tenant.settings", MagicMock())
+
+from management.services.repository import precheck as precheck_service
+from management.services.repository.precheck import build_repository_import_precheck
+
+
+@pytest.mark.parametrize("params,available", [
+    ({"api_key": "old", "server_url": "old", "tenant_id": "old", "kds_list": ["kb"]}, True),
+    ({"unknown_option": 1}, False),
+])
+def test_aidp_precheck_validates_portable_params(params, available):
+    with patch("management.services.repository.precheck.query_all_tools", return_value=[{
+        "class_name": "AidpSearchTool", "source": "local", "is_available": True,
+        "params": [{"name": "kds_list"}],
+    }]), patch("management.services.repository.precheck.skill_db.list_skills", return_value=[]):
+        result = build_repository_import_precheck(
+            agent_repository_id=2, display_name="AIDP", tenant_id="tenant",
+            snapshot=_snapshot(model_name="", tools=[{
+                "class_name": "AidpSearchTool", "source": "local", "params": params,
+            }]),
+        )
+    tool = next(item for item in result.items if item.type == "tool")
+    assert tool.available is available
+    assert tool.reason_code == (None if available else "tool_params_incompatible")
 
 
 def _snapshot(
@@ -97,13 +146,13 @@ def _snapshot(
     )
 
 
-@patch("services.repository_import_precheck.skill_db.list_skills")
-@patch("services.repository_import_precheck.query_all_tools")
-@patch("services.repository_import_precheck.get_mcp_server_by_name_and_tenant")
-@patch("services.repository_import_precheck.get_knowledge_record")
-@patch("services.repository_import_precheck.get_knowledge_name_map_by_index_names")
-@patch("services.repository_import_precheck.get_model_by_model_id")
-@patch("services.repository_import_precheck.get_model_id_by_display_name")
+@patch("management.services.repository.precheck.skill_db.list_skills")
+@patch("management.services.repository.precheck.query_all_tools")
+@patch("management.services.repository.precheck.get_mcp_server_by_name_and_tenant")
+@patch("management.services.repository.precheck.get_knowledge_record")
+@patch("management.services.repository.precheck.get_knowledge_name_map_by_index_names")
+@patch("management.services.repository.precheck.get_model_by_model_id")
+@patch("management.services.repository.precheck.get_model_id_by_display_name")
 def test_build_precheck_all_available(
     mock_get_model_id,
     mock_get_model_by_id,
@@ -122,6 +171,7 @@ def test_build_precheck_all_available(
         "class_name": "KnowledgeBaseSearchTool",
         "source": "local",
         "is_available": True,
+        "params": [{"name": "index_names"}],
     }]
     mock_list_skills.return_value = []
 
@@ -151,10 +201,10 @@ def test_build_precheck_all_available(
     assert result.available_count == result.total_count
 
 
-@patch("services.repository_import_precheck.skill_db.list_skills")
-@patch("services.repository_import_precheck.query_all_tools")
-@patch("services.repository_import_precheck.get_model_by_model_id")
-@patch("services.repository_import_precheck.get_model_id_by_display_name")
+@patch("management.services.repository.precheck.skill_db.list_skills")
+@patch("management.services.repository.precheck.query_all_tools")
+@patch("management.services.repository.precheck.get_model_by_model_id")
+@patch("management.services.repository.precheck.get_model_id_by_display_name")
 def test_build_precheck_model_unavailable(
     mock_get_model_id,
     mock_get_model_by_id,
@@ -178,12 +228,12 @@ def test_build_precheck_model_unavailable(
     assert model_items[0].reason_code == "model_unavailable"
 
 
-@patch("services.repository_import_precheck.skill_db.list_skills")
-@patch("services.repository_import_precheck.query_all_tools")
-@patch("services.repository_import_precheck.get_knowledge_record")
-@patch("services.repository_import_precheck.get_knowledge_name_map_by_index_names")
-@patch("services.repository_import_precheck.get_model_by_model_id")
-@patch("services.repository_import_precheck.get_model_id_by_display_name")
+@patch("management.services.repository.precheck.skill_db.list_skills")
+@patch("management.services.repository.precheck.query_all_tools")
+@patch("management.services.repository.precheck.get_knowledge_record")
+@patch("management.services.repository.precheck.get_knowledge_name_map_by_index_names")
+@patch("management.services.repository.precheck.get_model_by_model_id")
+@patch("management.services.repository.precheck.get_model_id_by_display_name")
 def test_build_precheck_kb_not_found(
     mock_get_model_id,
     mock_get_model_by_id,
@@ -223,11 +273,11 @@ def test_build_precheck_kb_not_found(
     assert kb_items[0].reason_code == "kb_not_found"
 
 
-@patch("services.repository_import_precheck.skill_db.list_skills")
-@patch("services.repository_import_precheck.query_all_tools")
-@patch("services.repository_import_precheck.get_mcp_server_by_name_and_tenant")
-@patch("services.repository_import_precheck.get_model_by_model_id")
-@patch("services.repository_import_precheck.get_model_id_by_display_name")
+@patch("management.services.repository.precheck.skill_db.list_skills")
+@patch("management.services.repository.precheck.query_all_tools")
+@patch("management.services.repository.precheck.get_mcp_server_by_name_and_tenant")
+@patch("management.services.repository.precheck.get_model_by_model_id")
+@patch("management.services.repository.precheck.get_model_id_by_display_name")
 def test_build_precheck_mcp_not_found(
     mock_get_model_id,
     mock_get_model_by_id,
@@ -259,10 +309,10 @@ def test_build_precheck_mcp_not_found(
     assert mcp_items[0].reason_code == "mcp_not_found"
 
 
-@patch("services.repository_import_precheck.skill_db.list_skills")
-@patch("services.repository_import_precheck.query_all_tools")
-@patch("services.repository_import_precheck.get_model_by_model_id")
-@patch("services.repository_import_precheck.get_model_id_by_display_name")
+@patch("management.services.repository.precheck.skill_db.list_skills")
+@patch("management.services.repository.precheck.query_all_tools")
+@patch("management.services.repository.precheck.get_model_by_model_id")
+@patch("management.services.repository.precheck.get_model_id_by_display_name")
 def test_build_precheck_skill_duplicate(
     mock_get_model_id,
     mock_get_model_by_id,
@@ -289,3 +339,100 @@ def test_build_precheck_skill_duplicate(
     assert len(skill_items) == 1
     assert skill_items[0].available is False
     assert skill_items[0].reason_code == "skill_duplicate"
+
+
+@pytest.mark.parametrize(
+    ("record", "model", "expected_available"),
+    [
+        ({}, None, False),
+        ({"embedding_model_id": 7}, None, False),
+        ({"embedding_model_id": 7}, {"connect_status": "unavailable"}, False),
+        ({"embedding_model_id": 7}, {"connect_status": "available"}, True),
+    ],
+)
+def test_check_kb_embedding_available_checks_model_id_and_status(
+    record, model, expected_available
+):
+    with patch.object(
+        precheck_service, "get_model_by_model_id", return_value=model
+    ) as get_model:
+        available, reason = precheck_service._check_kb_embedding_available(
+            record, "tenant_a"
+        )
+
+    assert available is expected_available
+    if expected_available:
+        assert reason is None
+        get_model.assert_called_once_with(7, "tenant_a")
+    else:
+        assert reason == "model_unavailable"
+        if record.get("embedding_model_id"):
+            get_model.assert_called_once_with(record["embedding_model_id"], "tenant_a")
+        else:
+            get_model.assert_not_called()
+
+
+@patch("management.services.repository.precheck.skill_db.list_skills", return_value=[])
+@patch("management.services.repository.precheck.query_all_tools", return_value=[])
+@patch("management.services.repository.precheck.get_model_by_model_id")
+@patch("management.services.repository.precheck.get_model_id_by_display_name", return_value=7)
+@patch("management.services.repository.precheck.get_knowledge_record")
+@patch(
+    "management.services.repository.precheck.get_knowledge_name_map_by_index_names",
+    return_value={},
+)
+def test_build_precheck_falls_back_to_bundle_knowledge_name_and_checks_embedding(
+    mock_kb_name_map,
+    mock_kb_record,
+    mock_get_model_id,
+    mock_get_model_by_id,
+    mock_query_tools,
+    mock_list_skills,
+):
+    mock_kb_record.return_value = {
+        "knowledge_id": 9,
+        "knowledge_describe": "Official guidance",
+        "embedding_model_id": 7,
+        "index_name": "42-abc",
+    }
+    mock_get_model_by_id.return_value = {"connect_status": "available"}
+    snapshot = _snapshot(
+        tools=[
+            {
+                "class_name": "KnowledgeBaseSearchTool",
+                "source": "local",
+                "name": "knowledge_base_search",
+                "params": {"index_names": ["kb_index"]},
+            }
+        ]
+    )
+    snapshot.knowledge_bases = [
+        SimpleNamespace(
+            logical_index_name="kb_index",
+            display_name="Official KB",
+            description="Bundle description",
+        )
+    ]
+
+    result = build_repository_import_precheck(
+        agent_repository_id=42,
+        display_name="Writer",
+        snapshot=snapshot,
+        tenant_id="tenant_a",
+        require_kb_embedding_model=True,
+    )
+
+    kb_items = [item for item in result.items if item.type == "knowledge_base"]
+    assert len(kb_items) == 1
+    assert kb_items[0].available is True
+    assert kb_items[0].description == "Official guidance"
+    assert mock_kb_record.call_args_list == [
+        call({"knowledge_name": "Official KB", "tenant_id": "tenant_a"}),
+    ]
+    assert mock_get_model_by_id.call_count == 2
+    assert mock_get_model_by_id.call_args_list == [
+        call(7, "tenant_a"),
+        call(7, "tenant_a"),
+    ]
+    assert kb_items[0].resolution_required is True
+    assert kb_items[0].existing_index_name == "42-abc"

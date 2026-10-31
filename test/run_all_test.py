@@ -1,4 +1,6 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import importlib.util
+from io import StringIO
 import logging
 import os
 import re
@@ -29,17 +31,17 @@ def check_required_packages() -> None:
     missing_packages = [package for module, package in required.items() if not _has_module(module)]
     if missing_packages:
         logger.error("Missing required packages: %s", ", ".join(missing_packages))
-        logger.error("Please install them using: pip install %s", " ".join(missing_packages))
+        logger.error("Please install them using: uv pip install %s", " ".join(missing_packages))
         sys.exit(1)
     logger.info("All required packages are available")
 
 
 def _worker_count(total_files: int) -> int:
-    raw_workers = os.environ.get("NEXENT_PYTEST_WORKERS", "auto").strip().lower()
-    if raw_workers in {"", "0", "false", "none", "off"}:
-        return 1
-    if raw_workers == "auto":
+    raw_workers = os.environ.get("NEXENT_PYTEST_WORKERS", "").strip().lower()
+    if not raw_workers:
         return max(1, min(os.cpu_count() or 1, total_files))
+    if raw_workers in {"0", "false", "none", "off"}:
+        return 1
     try:
         return max(1, min(int(raw_workers), total_files))
     except ValueError:
@@ -136,6 +138,8 @@ def _run_test_file(
             cmd,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
             timeout=timeout_seconds or None,
         )
@@ -161,39 +165,39 @@ def _run_test_file(
 
 
 def _parse_test_counts(result: dict) -> dict[str, int]:
-    counts = {"total": 0, "passed": 0, "failed": 0}
+    counts = {"total": 0, "passed": 0, "failed": 0, "skipped": 0}
     summary_lines = [
         line.strip()
         for line in result["stdout"].splitlines()
-        if " in " in line and any(word in line for word in (" passed", " failed", " error", " errors"))
+        if " in " in line and any(word in line for word in (" passed", " failed", " error", " skipped"))
     ]
     if summary_lines:
         summary = summary_lines[-1]
-        for key in ("passed", "failed"):
+        for key in ("passed", "failed", "skipped"):
             match = re.search(rf"(\d+)\s+{key}\b", summary)
             if match:
                 counts[key] = int(match.group(1))
         error_match = re.search(r"(\d+)\s+errors?\b", summary)
         if error_match:
             counts["failed"] += int(error_match.group(1))
-        counts["total"] = counts["passed"] + counts["failed"]
+        counts["total"] = counts["passed"] + counts["failed"] + counts["skipped"]
 
     if result["returncode"] != 0 and counts["failed"] == 0:
         counts["failed"] = 1
-        counts["total"] = max(counts["total"], 1)
+        counts["total"] = counts["passed"] + counts["failed"] + counts["skipped"]
     return counts
 
 
 def _print_file_result(result: dict) -> None:
     summary = "execution failed"
     for line in reversed(result["stdout"].splitlines()):
-        if " passed" in line and " in " in line:
-            summary = line.strip()
-            break
-        if (" failed" in line or " error" in line or " errors" in line) and " in " in line:
+        if " in " in line and any(word in line for word in (" passed", " failed", " error", " skipped")):
             summary = line.strip()
             break
     status = "PASS" if result["returncode"] == 0 else "FAIL"
+    counts = _parse_test_counts(result)
+    if result["returncode"] == 0 and counts["skipped"] and not counts["passed"]:
+        status = "SKIP"
     logger.info("%-60s %s | %s", result["file"], status, summary)
 
 
@@ -201,23 +205,29 @@ def _print_test_summary(results: list[dict]) -> None:
     total_tests = 0
     passed_tests = 0
     failed_tests = 0
+    skipped_tests = 0
 
     logger.info("\n%s", "=" * 60)
     logger.info("Test Summary")
     logger.info("=" * 60)
     for result in sorted(results, key=lambda item: item["file"]):
         status = "PASSED" if result["returncode"] == 0 else "FAILED"
-        logger.info("%s - %s", status, result["file"])
         counts = _parse_test_counts(result)
+        if result["returncode"] == 0 and counts["skipped"] and not counts["passed"]:
+            status = "SKIPPED"
+        logger.info("%s - %s", status, result["file"])
         total_tests += counts["total"]
         passed_tests += counts["passed"]
         failed_tests += counts["failed"]
+        skipped_tests += counts["skipped"]
 
-    pass_rate = (passed_tests / total_tests * 100) if total_tests else 0
+    executed_tests = passed_tests + failed_tests
+    pass_rate = (passed_tests / executed_tests * 100) if executed_tests else 0
     logger.info("\nTest Results:")
     logger.info("  Total Tests: %s", total_tests)
     logger.info("  Passed: %s", passed_tests)
     logger.info("  Failed: %s", failed_tests)
+    logger.info("  Skipped: %s", skipped_tests)
     logger.info("  Pass Rate: %.1f%%", pass_rate)
 
 
@@ -283,7 +293,15 @@ def _combine_coverage(current_dir: Path, project_root: Path) -> bool:
         str(current_dir),
     )
     coverage_env = _coverage_env(project_root)
-    combine = subprocess.run(combine_cmd, cwd=project_root, env=coverage_env, text=True, capture_output=True)
+    combine = subprocess.run(
+        combine_cmd,
+        cwd=project_root,
+        env=coverage_env,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+    )
     if combine.returncode != 0:
         logger.error("Coverage combine failed:\n%s\n%s", combine.stdout, combine.stderr)
         return False
@@ -302,11 +320,8 @@ def _report_coverage(current_dir: Path) -> bool:
             config_file=str(cov_config) if cov_config.exists() else True,
         )
         cov.load()
-        total_coverage = cov.report(show_missing=True)
+        total_coverage = cov.report(show_missing=False, file=StringIO())
         logger.info("\nTotal Coverage: %.1f%%", total_coverage)
-        html_dir = current_dir / "coverage_html"
-        cov.html_report(directory=str(html_dir))
-        logger.info("\nHTML coverage report generated in: %s", html_dir)
         xml_file = current_dir / "coverage.xml"
         cov.xml_report(outfile=str(xml_file))
         logger.info("XML coverage report generated: %s", xml_file)

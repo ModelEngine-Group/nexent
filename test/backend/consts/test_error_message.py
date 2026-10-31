@@ -1,11 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for Error Message definitions.
 
 Tests the ErrorMessage class and its methods for getting error messages.
 """
 import pytest
-from backend.consts.error_code import ErrorCode
-from backend.consts.error_message import ErrorMessage
+from contracts.errors.codes import ErrorCode
+from contracts.errors.messages import ErrorMessage
 
 
 @pytest.mark.parametrize(
@@ -96,6 +98,11 @@ class TestErrorMessageGetMessage:
         """Test getting message for KNOWLEDGE_NOT_FOUND."""
         msg = ErrorMessage.get_message(ErrorCode.KNOWLEDGE_NOT_FOUND)
         assert "Knowledge" in msg
+
+    def test_get_message_knowledge_resource_exceeded(self):
+        """Test getting the default message for knowledge resource limits."""
+        msg = ErrorMessage.get_message(ErrorCode.KNOWLEDGE_RESOURCE_EXCEEDED)
+        assert "limit" in msg.lower()
 
     def test_get_message_memory_not_found(self):
         """Test getting message for MEMORY_NOT_FOUND."""
@@ -205,7 +212,10 @@ class TestErrorMessageGetAllMessages:
     def test_get_all_messages_all_values_are_strings(self):
         """Test that all message values in get_all_messages are non-empty strings."""
         messages = ErrorMessage.get_all_messages()
+        constraint_code = ErrorCode.MCP_PARAM_CONSTRAINT_ERROR_MESSAGES.value
         for code, msg in messages.items():
+            if code == constraint_code:
+                continue  # Nested template dict, not a single message string
             assert isinstance(msg, str), f"Message for {code} is not a string"
             assert len(msg) > 0, f"Message for {code} is empty"
 
@@ -249,8 +259,11 @@ class TestErrorMessageCoverage:
         """Test that all defined ErrorCodes have messages."""
         # Get all error codes from ErrorCode enum
         all_codes = list(ErrorCode)
+        constraint_code = ErrorCode.MCP_PARAM_CONSTRAINT_ERROR_MESSAGES
 
         for code in all_codes:
+            if code == constraint_code:
+                continue  # Value is a nested template dict, not a string message
             msg = ErrorMessage.get_message(code)
             assert msg != "", f"Error code {code} has no message"
             assert isinstance(msg, str), f"Message for {code} is not a string"

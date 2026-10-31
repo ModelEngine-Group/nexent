@@ -19,10 +19,15 @@ images:
 sqlFiles:
   init: ""
   migrations: {}
-  supabase: {}
+
+# Base64-encoded file-declared values; full env files are backend-only Secrets.
+envFiles:
+  rootData: {}
+  monitoringData: {}
 
 # ConfigMap data - this will be used by nexent-config ConfigMap
 config:
+  timezone: "Asia/Shanghai"
   # Service URLs (internal)
   services:
     configUrl: "http://nexent-config:5010"
@@ -69,7 +74,13 @@ config:
   umask: "0022"
   isDeployedByKubernetes: "true"
   skillsPath: "/mnt/nexent-data/skills"
-  marketBackend: "http://60.204.251.153:8010"
+  memoryProviderPluginsDir: "/mnt/nexent-data/memory-provider-plugins"
+  logDir: "/mnt/nexent-data/logs"
+  skill:
+    maxSkillsPerTenant: "1000"
+    maxUploadSizeMb: "10"
+  evaluationSet:
+    maxFileSizeMb: "20"
   modelEngine:
     enabled: "false"
   voiceService:
@@ -85,48 +96,28 @@ config:
     unstructuredDefaultModelInitializeParamsJsonPath: "/opt/models/yolox"
   terminal:
     sshPrivateKeyPath: "/path/to/openssh-server/ssh-keys/openssh_server_key"
-  supabase:
-    dashboardUsername: "supabase"
-    dashboardPassword: "Huawei123"
-    siteUrl: "http://localhost:3011"
-    supabaseUrl: "http://nexent-supabase-kong:8000"
-    apiExternalUrl: "http://nexent-supabase-kong:8000"
-    disableSignup: "false"
+  auth:
+    jwtIssuer: "nexent"
     jwtExpiry: "7200"
     debugJwtExpireSeconds: "0"
-    enableEmailSignup: "true"
-    enableEmailAutoconfirm: "true"
-    enableAnonymousUsers: "false"
-    enablePhoneSignup: "false"
-    enablePhoneAutoconfirm: "false"
     inviteCode: "nexent2025"
-    mailerUrlpathsConfirmation: "/auth/v1/verify"
-    mailerUrlpathsInvite: "/auth/v1/verify"
-    mailerUrlpathsRecovery: "/auth/v1/verify"
-    mailerUrlpathsEmailChange: "/auth/v1/verify"
-    postgresHost: "nexent-supabase-db"
-    postgresDb: "supabase"
-    postgresPort: "5436"
-    additionalRedirectUrls: ""
   dataProcess:
     flowerPort: "5555"
-    rayDashboardPort: "8265"
-    rayDashboardHost: "0.0.0.0"
-    rayActorNumCpus: "2"
     partProcessorCount: "3"
     fileSplitSizeMb: "5"
-    rayNumCpus: ""
-    rayObjectStoreMemoryGb: "0.25"
-    rayTempDir: "/tmp/ray"
-    rayLogLevel: "INFO"
-    disableRayDashboard: "true"
     disableCeleryFlower: "true"
     dockerEnvironment: "false"
     enableUploadImage: "false"
     celeryWorkerPrefetchMultiplier: "1"
     celeryTaskTimeLimit: "3600"
     elasticsearchRequestTimeout: "30"
-    queues: "process_q,process_part_q,forward_q"
+    queues: "process_q,parse_q,forward_q,forward_part_q,forward_aggregate_q"
+    parseMaxProcesses: "3"
+    parseMinProcesses: "1"
+    parseThreadsPerProcess: "2"
+    parseMaxTasksPerChild: "1000"
+    preloadModels: "unstructured_default"
+    parserStartupTimeout: "300"
     workerName: ""
     workerConcurrency: ""
   telemetry:
@@ -150,6 +141,7 @@ config:
     fastapiExcludedUrls: ""
     fastapiExcludeSpans: "receive,send"
     dashboardUrl: ""
+    dashboardAllowedRoles: "SU,SPEED"
     telemetrySampleRate: "1.0"
     traceContentMode: "full"
     traceMaxChars: "4000"
@@ -221,7 +213,6 @@ config:
 
 # Secrets used by common templates
 secrets:
-  elasticPassword: "nexent@2025"
   elasticsearchApiKey: ""
   postgresPassword: "nexent@4321"
   minio:
@@ -232,14 +223,7 @@ secrets:
   ssh:
     username: "nexent"
     password: "nexent@2025"
-  supabase:
-    jwtSecret: ""
-    secretKeyBase: ""
-    vaultEncKey: ""
-    anonKey: ""
-    serviceRoleKey: ""
-    postgresPassword: "Huawei123"
-    gotrueDbUrl: "postgres://supabase_auth_admin:Huawei123@nexent-supabase-db:5436/supabase?search_path=auth&sslmode=disable"
+  jwtSecret: ""
 
 # Storage configuration (can be referenced by other charts)
 storage:
@@ -251,8 +235,6 @@ storage:
     size: "5Gi"
   minio:
     size: "20Gi"
-  supabaseDb:
-    size: "10Gi"
 
 # Service account configuration
 serviceAccount:

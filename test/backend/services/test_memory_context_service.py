@@ -1,4 +1,5 @@
-"""Unit tests for ``backend.services.memory_context_service``.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Unit tests for ``management.services.memory.context``.
 
 Covers:
 
@@ -21,6 +22,7 @@ Covers:
 
 from __future__ import annotations
 
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import types
 from unittest.mock import AsyncMock, MagicMock
@@ -284,24 +286,24 @@ services_pkg.__path__ = []  # mark as package so submodule imports work
 sys.modules["services"] = services_pkg
 
 
-# Stub ``services.vectordatabase_service`` — transitively imported by
+# Stub ``management.services.knowledge_base.service`` — transitively imported by
 # ``memory_index_service`` during module import.
-vectordb_service_mod = types.ModuleType("services.vectordatabase_service")
+vectordb_service_mod = types.ModuleType("management.services.knowledge_base.service")
 vectordb_service_mod.get_vector_db_core = MagicMock(name="get_vector_db_core")
-sys.modules["services.vectordatabase_service"] = vectordb_service_mod
+sys.modules["management.services.knowledge_base.service"] = vectordb_service_mod
 
 
-# Stub ``services.memory_index_service`` (transitive only).
-memory_index_service_mod = types.ModuleType("services.memory_index_service")
+# Stub ``management.services.memory.index`` (transitive only).
+memory_index_service_mod = types.ModuleType("management.services.memory.index")
 memory_index_service_mod.MemoryIndexService = MagicMock(name="MemoryIndexService")
 memory_index_service_mod.get_memory_index_service = MagicMock(name="get_memory_index_service")
-sys.modules["services.memory_index_service"] = memory_index_service_mod
+sys.modules["management.services.memory.index"] = memory_index_service_mod
 
 
-# Stub ``services.memory_record_service`` — the unit under test imports
+# Stub ``management.services.memory.records`` — the unit under test imports
 # ``_compute_content_embedding`` and ``_resolve_tenant_embedding_model_info``
 # directly from this module.
-memory_record_service_mod = types.ModuleType("services.memory_record_service")
+memory_record_service_mod = types.ModuleType("management.services.memory.records")
 memory_record_service_mod.MemoryRecordService = MagicMock(name="MemoryRecordService")
 memory_record_service_mod._compute_content_embedding = MagicMock(
     name="_compute_content_embedding", return_value=None
@@ -310,11 +312,11 @@ memory_record_service_mod._resolve_tenant_embedding_model_info = MagicMock(
     name="_resolve_tenant_embedding_model_info", return_value=None
 )
 memory_record_service_mod.get_memory_record_service = MagicMock(name="get_memory_record_service")
-sys.modules["services.memory_record_service"] = memory_record_service_mod
+sys.modules["management.services.memory.records"] = memory_record_service_mod
 
 
-# Stub ``services.memory_retrieval_service``.
-memory_retrieval_service_mod = types.ModuleType("services.memory_retrieval_service")
+# Stub ``management.services.memory.retrieval``.
+memory_retrieval_service_mod = types.ModuleType("management.services.memory.retrieval")
 memory_retrieval_service_mod.MemoryRetrievalService = MagicMock(name="MemoryRetrievalService")
 memory_retrieval_service_mod.get_memory_retrieval_service = MagicMock(
     name="get_memory_retrieval_service"
@@ -322,13 +324,13 @@ memory_retrieval_service_mod.get_memory_retrieval_service = MagicMock(
 memory_retrieval_service_mod.reset_memory_retrieval_service = MagicMock(
     name="reset_memory_retrieval_service"
 )
-sys.modules["services.memory_retrieval_service"] = memory_retrieval_service_mod
-sys.modules["backend.services.memory_retrieval_service"] = memory_retrieval_service_mod
+sys.modules["management.services.memory.retrieval"] = memory_retrieval_service_mod
+sys.modules["management.services.memory.retrieval"] = memory_retrieval_service_mod
 
 
-# Stub ``consts.const`` with the constants the unit under test imports.
+# Stub ``contracts.constants.environment`` with the constants the unit under test imports.
 consts_pkg = types.ModuleType("consts")
-consts_mod = types.ModuleType("consts.const")
+consts_mod = types.ModuleType("contracts.constants.environment")
 consts_mod.AGENT_SHORT_TERM_HALF_LIFE_DAYS = 14
 consts_mod.MMR_CANDIDATE_TOP_K = 10
 consts_mod.MMR_DUPLICATE_THRESHOLD = 0.92
@@ -347,7 +349,8 @@ class _VectorDatabaseType:
 
 consts_mod.VectorDatabaseType = _VectorDatabaseType
 sys.modules["consts"] = consts_pkg
-sys.modules["consts.const"] = consts_mod
+sys.modules["contracts.constants.environment"] = consts_mod
+install_business_constant_stubs(consts_mod)
 
 
 # ---------------------------------------------------------------------------
@@ -355,7 +358,7 @@ sys.modules["consts.const"] = consts_mod
 # ---------------------------------------------------------------------------
 
 
-from backend.services import memory_context_service  # noqa: E402
+from management.services.memory import context as memory_context_service  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -533,7 +536,7 @@ class TestPrepareSearchEmbedding:
 
 class TestBuildPipelineConfig:
     def test_reads_constants_from_consts(self, monkeypatch):
-        # The module imports each constant via ``from consts.const import X``,
+        # The module imports each constant via ``from contracts.constants.environment import X``,
         # so the local binding in ``memory_context_service`` is what the
         # builder reads. Update the local bindings, not the source module.
         monkeypatch.setattr(
@@ -823,6 +826,30 @@ class TestBuildContextPipelineEnabled:
         assert context.external == []
         pipeline.run.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_ac_p3_18_pipeline_preserves_external_when_internal_empty(
+        self, service, fake_retrieval_service
+    ):
+        """AC-P3-18: external-only hits still traverse the retrieval pipeline."""
+        fake_retrieval_service.search.return_value = []
+        external_item = ExternalMemoryItem(
+            id="mem0-1", content="Sister Jules has an interview", score=0.9, provider="mem0"
+        )
+        pipeline = service.pipeline
+        pipeline.run_result = PipelineResult(external=[external_item])
+
+        context = await service.build_context(
+            tenant_id="tn",
+            user_id="u",
+            query="sister Jules",
+            embedding_model_info=MagicMock(),
+            external_results=[external_item],
+        )
+
+        assert pipeline.run_calls[0]["internal_results"] == []
+        assert pipeline.run_calls[0]["external_results"] == [external_item]
+        assert context.external == [external_item]
+
 
 # ---------------------------------------------------------------------------
 # MemoryContextService.build_context: pipeline-disabled branch
@@ -830,6 +857,26 @@ class TestBuildContextPipelineEnabled:
 
 
 class TestBuildContextPipelineDisabled:
+    @pytest.mark.asyncio
+    async def test_ac_p3_18_non_pipeline_preserves_external_when_internal_empty(
+        self, service_no_pipeline
+    ):
+        """AC-P3-18: fallback bucketing must retain external-only hits."""
+        service_no_pipeline.retrieval_service.search = AsyncMock(return_value=[])
+        external_item = ExternalMemoryItem(
+            id="mem0-1", content="Sister Jules has an interview", score=0.9, provider="mem0"
+        )
+
+        context = await service_no_pipeline.build_context(
+            tenant_id="tn",
+            user_id="u",
+            query="sister Jules",
+            embedding_model_info=MagicMock(),
+            external_results=[external_item],
+        )
+
+        assert context.external == [external_item]
+
     @pytest.mark.asyncio
     async def test_pipeline_disabled_buckets_results_into_context(self, service_no_pipeline):
         tenant = MemorySearchResult(memory_id=10, layer=MemoryLayer.TENANT)

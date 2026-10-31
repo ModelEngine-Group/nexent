@@ -1,0 +1,18 @@
+{{- range $component := list "nexent-elasticsearch" "nexent-postgresql" "nexent-redis" "nexent-minio" -}}
+{{- $componentValues := default dict (index $.Values $component) -}}
+{{- $enabled := default true (get $componentValues "enabled") -}}
+{{- $persistence := default dict (get $componentValues "persistence") -}}
+{{- $mode := default "dynamic" (get $persistence "mode") -}}
+{{- if and $enabled (gt (int (default 1 (get $componentValues "replicaCount"))) 1) -}}
+{{- fail (printf "%s must remain single-replica in this deployment baseline" $component) -}}
+{{- end -}}
+{{- if and $enabled (not (has $mode (list "local" "dynamic" "existing"))) -}}
+{{- fail (printf "%s.persistence.mode must be local, dynamic, or existing" $component) -}}
+{{- end -}}
+{{- if and $enabled (eq $mode "dynamic") (eq (default "" (get $persistence "storageClassName")) "") -}}
+{{- fail (printf "%s.persistence.storageClassName is required for dynamic storage" $component) -}}
+{{- end -}}
+{{- if and $enabled (eq $mode "existing") (eq (default "" (get $persistence "existingClaim")) "") -}}
+{{- fail (printf "%s.persistence.existingClaim is required for existing storage" $component) -}}
+{{- end -}}
+{{- end -}}

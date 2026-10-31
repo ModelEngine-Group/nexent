@@ -1,9 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import types
 import importlib.machinery
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
+import logging
 from typing import Optional
 
 # Add path for correct imports
@@ -25,17 +28,13 @@ minio_mock.client = MagicMock()
 
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
 # Import exception classes and models
-from consts.exceptions import NotFoundException, ValidationError, UnauthorizedError
-from consts.model import (
-    GroupCreateRequest, GroupUpdateRequest,
-    GroupUserRequest, GroupListRequest, SetDefaultGroupRequest,
-    GroupMembersUpdateRequest
-)
+from contracts.errors.exceptions import NotFoundException, TenantResourceLimitError, ValidationError, UnauthorizedError
+from contracts.identity import GroupCreateRequest, GroupUpdateRequest, GroupUserRequest, GroupListRequest, SetDefaultGroupRequest, GroupMembersUpdateRequest
 
 # Import the modules we need
 from fastapi.testclient import TestClient
@@ -43,7 +42,7 @@ from http import HTTPStatus
 from fastapi import FastAPI
 
 # Create a test client with a fresh FastAPI app
-from apps.group_app import router
+from management.api.identity.group import router
 
 app = FastAPI()
 app.include_router(router)
@@ -63,8 +62,8 @@ class TestGroupCreation:
             "created_by": "user-123"
         }
 
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.create_group') as mock_create_group:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.create_group') as mock_create_group:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_create_group.return_value = mock_group_info
@@ -91,7 +90,7 @@ class TestGroupCreation:
 
     def test_create_group_unauthorized(self):
         """Test group creation with unauthorized access"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user:
             mock_get_user.side_effect = UnauthorizedError("Invalid token")
 
             request_data = {
@@ -108,8 +107,8 @@ class TestGroupCreation:
 
     def test_create_group_validation_error(self):
         """Test group creation with validation error from service layer"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.create_group') as mock_create_group:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.create_group') as mock_create_group:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_create_group.side_effect = ValidationError("Group name already exists")
@@ -126,10 +125,41 @@ class TestGroupCreation:
             data = response.json()
             assert "Group name already exists" in data["detail"]
 
+    def test_create_group_limit_returns_standard_429_payload(self):
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.create_group') as mock_create_group:
+            mock_get_user.return_value = ("user-123", "tenant-123")
+            mock_create_group.side_effect = TenantResourceLimitError(
+                "Tenant group limit reached: maximum 1000 groups per tenant",
+                resource="groups",
+                scope="tenant",
+                limit=1000,
+                current_count=1000,
+            )
+
+            response = client.post(
+                "/groups",
+                json={
+                    "tenant_id": "tenant-123",
+                    "group_name": "Second Group",
+                    "group_description": "Test Description",
+                },
+                headers={"Authorization": "Bearer token"},
+            )
+
+            assert response.status_code == HTTPStatus.TOO_MANY_REQUESTS
+            assert response.json()["code"] == "120104"
+            assert response.json()["details"] == {
+                "resource": "groups",
+                "scope": "tenant",
+                "limit": 1000,
+                "current_count": 1000,
+            }
+
     def test_create_group_unexpected_error(self):
         """Test group creation with unexpected error"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.create_group') as mock_create_group:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.create_group') as mock_create_group:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_create_group.side_effect = Exception("Database connection failed")
@@ -147,6 +177,31 @@ class TestGroupCreation:
             assert data["detail"] == "Failed to create group"
 
 
+    def test_create_success_records_audit_entry(self, caplog):
+        """Test successful group creation records a security audit entry"""
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.create_group') as mock_create:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_create.return_value = {"group_id": 7, "group_name": "QA"}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/groups",
+                    headers={"Authorization": "Bearer token"},
+                    json={"tenant_id": "tenant-1", "group_name": "QA"},
+                )
+
+        assert response.status_code == HTTPStatus.CREATED
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_create" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert "tenant_id=tenant-1" in messages[0]
+        assert 'details={"tenant_id":"tenant-1","group_name":"QA"}' in messages[0]
+
+
 class TestGroupRetrieval:
     """Test group retrieval endpoints"""
 
@@ -159,7 +214,7 @@ class TestGroupRetrieval:
             "tenant_id": "tenant-123"
         }
 
-        with patch('apps.group_app.get_group_info') as mock_get_group:
+        with patch('management.api.identity.group.get_group_info') as mock_get_group:
             mock_get_group.return_value = mock_group_info
 
             response = client.get("/groups/1")
@@ -172,7 +227,7 @@ class TestGroupRetrieval:
 
     def test_get_group_not_found(self):
         """Test group retrieval when group doesn't exist"""
-        with patch('apps.group_app.get_group_info') as mock_get_group:
+        with patch('management.api.identity.group.get_group_info') as mock_get_group:
             mock_get_group.return_value = None
 
             response = client.get("/groups/999")
@@ -183,7 +238,7 @@ class TestGroupRetrieval:
 
     def test_get_group_unexpected_error(self):
         """Test group retrieval with unexpected error"""
-        with patch('apps.group_app.get_group_info') as mock_get_group:
+        with patch('management.api.identity.group.get_group_info') as mock_get_group:
             mock_get_group.side_effect = Exception("Database error")
 
             response = client.get("/groups/1")
@@ -204,8 +259,8 @@ class TestGroupListing:
         ]
         mock_result = {"groups": mock_groups, "total": 2}
 
-        with patch('apps.group_app.get_tenant_info') as mock_get_tenant, \
-             patch('apps.group_app.get_groups_by_tenant') as mock_get_groups:
+        with patch('management.api.identity.group.get_tenant_info') as mock_get_tenant, \
+             patch('management.api.identity.group.get_groups_by_tenant') as mock_get_groups:
 
             mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
             mock_get_groups.return_value = mock_result
@@ -237,6 +292,24 @@ class TestGroupListing:
                 sort_order="desc"
             )
 
+    def test_get_groups_passes_search_filter(self):
+        """Test that the optional search filter reaches the service layer."""
+        with patch('management.api.identity.group.get_tenant_info') as mock_get_tenant, \
+             patch('management.api.identity.group.get_groups_by_tenant') as mock_get_groups:
+            mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
+            mock_get_groups.return_value = {"groups": [], "total": 0}
+
+            response = client.post(
+                "/groups/list",
+                json={"tenant_id": "tenant-123", "search": "engineering"},
+            )
+
+            assert response.status_code == HTTPStatus.OK
+            mock_get_groups.assert_called_once_with(
+                tenant_id="tenant-123", page=None, page_size=None,
+                sort_by="created_at", sort_order="desc", search="engineering"
+            )
+
     def test_get_groups_success_without_pagination(self):
         """Test successful group listing without pagination (returns all data)"""
         mock_groups = [
@@ -246,8 +319,8 @@ class TestGroupListing:
         ]
         mock_result = {"groups": mock_groups, "total": 3}
 
-        with patch('apps.group_app.get_tenant_info') as mock_get_tenant, \
-             patch('apps.group_app.get_groups_by_tenant') as mock_get_groups:
+        with patch('management.api.identity.group.get_tenant_info') as mock_get_tenant, \
+             patch('management.api.identity.group.get_groups_by_tenant') as mock_get_groups:
 
             mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
             mock_get_groups.return_value = mock_result
@@ -279,8 +352,8 @@ class TestGroupListing:
         ]
         mock_result = {"groups": mock_groups, "total": 1}
 
-        with patch('apps.group_app.get_tenant_info') as mock_get_tenant, \
-             patch('apps.group_app.get_groups_by_tenant') as mock_get_groups:
+        with patch('management.api.identity.group.get_tenant_info') as mock_get_tenant, \
+             patch('management.api.identity.group.get_groups_by_tenant') as mock_get_groups:
 
             mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
             mock_get_groups.return_value = mock_result
@@ -304,8 +377,8 @@ class TestGroupListing:
         ]
         mock_result = {"groups": mock_groups, "total": 1}
 
-        with patch('apps.group_app.get_tenant_info') as mock_get_tenant, \
-             patch('apps.group_app.get_groups_by_tenant') as mock_get_groups:
+        with patch('management.api.identity.group.get_tenant_info') as mock_get_tenant, \
+             patch('management.api.identity.group.get_groups_by_tenant') as mock_get_groups:
 
             mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
             mock_get_groups.return_value = mock_result
@@ -329,8 +402,8 @@ class TestGroupListing:
         ]
         mock_result = {"groups": mock_groups, "total": 1}
 
-        with patch('apps.group_app.get_tenant_info') as mock_get_tenant, \
-             patch('apps.group_app.get_groups_by_tenant') as mock_get_groups:
+        with patch('management.api.identity.group.get_tenant_info') as mock_get_tenant, \
+             patch('management.api.identity.group.get_groups_by_tenant') as mock_get_groups:
 
             mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
             mock_get_groups.return_value = mock_result
@@ -363,8 +436,8 @@ class TestGroupListing:
         ]
         mock_result = {"groups": mock_groups, "total": 25}
 
-        with patch('apps.group_app.get_tenant_info') as mock_get_tenant, \
-             patch('apps.group_app.get_groups_by_tenant') as mock_get_groups:
+        with patch('management.api.identity.group.get_tenant_info') as mock_get_tenant, \
+             patch('management.api.identity.group.get_groups_by_tenant') as mock_get_groups:
 
             mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
             mock_get_groups.return_value = mock_result
@@ -387,7 +460,7 @@ class TestGroupListing:
 
     def test_get_groups_tenant_not_found(self):
         """Test group listing when tenant doesn't exist"""
-        with patch('apps.group_app.get_tenant_info') as mock_get_tenant:
+        with patch('management.api.identity.group.get_tenant_info') as mock_get_tenant:
             mock_get_tenant.side_effect = NotFoundException("Tenant not found")
 
             request_data = {
@@ -404,8 +477,8 @@ class TestGroupListing:
 
     def test_get_groups_unexpected_error(self):
         """Test group listing with unexpected error"""
-        with patch('apps.group_app.get_tenant_info') as mock_get_tenant, \
-             patch('apps.group_app.get_groups_by_tenant') as mock_get_groups:
+        with patch('management.api.identity.group.get_tenant_info') as mock_get_tenant, \
+             patch('management.api.identity.group.get_groups_by_tenant') as mock_get_groups:
 
             mock_get_tenant.return_value = {"tenant_id": "tenant-123"}
             mock_get_groups.side_effect = Exception("Database error")
@@ -428,8 +501,8 @@ class TestGroupUpdate:
 
     def test_update_group_success(self):
         """Test successful group update"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.update_group') as mock_update_group:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.update_group') as mock_update_group:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_update_group.return_value = True
@@ -452,7 +525,7 @@ class TestGroupUpdate:
 
     def test_update_group_no_updates(self):
         """Test group update with no valid fields"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user:
             mock_get_user.return_value = ("user-123", "tenant-123")
 
             request_data = {}
@@ -465,8 +538,8 @@ class TestGroupUpdate:
 
     def test_update_group_not_found(self):
         """Test group update when group doesn't exist"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.update_group') as mock_update_group:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.update_group') as mock_update_group:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_update_group.side_effect = NotFoundException("Group not found")
@@ -481,7 +554,7 @@ class TestGroupUpdate:
 
     def test_update_group_unauthorized(self):
         """Test group update with unauthorized access"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user:
             mock_get_user.side_effect = UnauthorizedError("Invalid token")
 
             request_data = {"group_name": "Updated Group"}
@@ -493,13 +566,36 @@ class TestGroupUpdate:
             assert "Invalid token" in data["detail"]
 
 
+    def test_update_success_records_audit_entry(self, caplog):
+        """Test successful group update records a security audit entry with the changed field names"""
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.update_group') as mock_update:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_update.return_value = True
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.put(
+                    "/groups/7",
+                    headers={"Authorization": "Bearer token"},
+                    json={"group_name": "Renamed"},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_update" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert 'details={"group_id":7,"updated_fields":["group_name"]}' in messages[0]
+
+
 class TestGroupDeletion:
     """Test group deletion endpoint"""
 
     def test_delete_group_success(self):
         """Test successful group deletion"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.delete_group') as mock_delete_group:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.delete_group') as mock_delete_group:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_delete_group.return_value = True
@@ -513,8 +609,8 @@ class TestGroupDeletion:
 
     def test_delete_group_not_found(self):
         """Test group deletion when group doesn't exist"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.delete_group') as mock_delete_group:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.delete_group') as mock_delete_group:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_delete_group.side_effect = NotFoundException("Group not found")
@@ -527,8 +623,8 @@ class TestGroupDeletion:
 
     def test_delete_group_validation_error(self):
         """Test group deletion with validation error"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.delete_group') as mock_delete_group:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.delete_group') as mock_delete_group:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_delete_group.side_effect = ValidationError("Cannot delete group with active members")
@@ -540,6 +636,26 @@ class TestGroupDeletion:
             assert "Cannot delete group with active members" in data["detail"]
 
 
+    def test_delete_success_records_audit_entry(self, caplog):
+        """Test successful group deletion records a security audit entry"""
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.delete_group') as mock_delete:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_delete.return_value = True
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.delete("/groups/7", headers={"Authorization": "Bearer token"})
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_delete" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert 'details={"group_id":7}' in messages[0]
+
+
 class TestGroupMembership:
     """Test group membership endpoints"""
 
@@ -547,8 +663,8 @@ class TestGroupMembership:
         """Test successful user addition to group"""
         mock_result = {"user_id": "user-123", "group_id": 1}
 
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.add_user_to_single_group') as mock_add_user:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.add_user_to_single_group') as mock_add_user:
 
             mock_get_user.return_value = ("user-456", "tenant-123")
             mock_add_user.return_value = mock_result
@@ -577,8 +693,8 @@ class TestGroupMembership:
 
     def test_add_user_to_group_not_found(self):
         """Test user addition when group or user doesn't exist"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.add_user_to_single_group') as mock_add_user:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.add_user_to_single_group') as mock_add_user:
 
             mock_get_user.return_value = ("user-456", "tenant-123")
             mock_add_user.side_effect = NotFoundException("Group not found")
@@ -593,8 +709,8 @@ class TestGroupMembership:
 
     def test_remove_user_from_group_success(self):
         """Test successful user removal from group"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.remove_user_from_single_group') as mock_remove_user:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.remove_user_from_single_group') as mock_remove_user:
 
             mock_get_user.return_value = ("user-456", "tenant-123")
             mock_remove_user.return_value = True
@@ -607,8 +723,8 @@ class TestGroupMembership:
 
     def test_remove_user_from_group_not_found(self):
         """Test user removal when group or user doesn't exist"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.remove_user_from_single_group') as mock_remove_user:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.remove_user_from_single_group') as mock_remove_user:
 
             mock_get_user.return_value = ("user-456", "tenant-123")
             mock_remove_user.side_effect = NotFoundException("User not in group")
@@ -626,7 +742,7 @@ class TestGroupMembership:
             {"user_id": "user-2", "email": "user2@example.com"}
         ]
 
-        with patch('apps.group_app.get_group_users') as mock_get_users:
+        with patch('management.api.identity.group.get_group_users') as mock_get_users:
             mock_get_users.return_value = mock_users
 
             response = client.get("/groups/1/members")
@@ -638,7 +754,7 @@ class TestGroupMembership:
 
     def test_get_group_users_not_found(self):
         """Test group users retrieval when group doesn't exist"""
-        with patch('apps.group_app.get_group_users') as mock_get_users:
+        with patch('management.api.identity.group.get_group_users') as mock_get_users:
             mock_get_users.side_effect = NotFoundException("Group not found")
 
             response = client.get("/groups/999/members")
@@ -655,8 +771,8 @@ class TestGroupMembership:
             "unchanged": 3
         }
 
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.update_group_members') as mock_update_members:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.update_group_members') as mock_update_members:
 
             mock_get_user.return_value = ("user-456", "tenant-123")
             mock_update_members.return_value = mock_result
@@ -679,8 +795,8 @@ class TestGroupMembership:
 
     def test_update_group_members_not_found(self):
         """Test group members update when group doesn't exist"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.update_group_members') as mock_update_members:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.update_group_members') as mock_update_members:
 
             mock_get_user.return_value = ("user-456", "tenant-123")
             mock_update_members.side_effect = NotFoundException("Group not found")
@@ -695,8 +811,8 @@ class TestGroupMembership:
 
     def test_update_group_members_validation_error(self):
         """Test group members update with validation error"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.update_group_members') as mock_update_members:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.update_group_members') as mock_update_members:
 
             mock_get_user.return_value = ("user-456", "tenant-123")
             mock_update_members.side_effect = ValidationError("Invalid user IDs provided")
@@ -711,7 +827,7 @@ class TestGroupMembership:
 
     def test_update_group_members_unauthorized(self):
         """Test group members update with unauthorized access"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user:
             mock_get_user.side_effect = UnauthorizedError("Invalid token")
 
             request_data = {"user_ids": ["user-1", "user-2"]}
@@ -724,8 +840,8 @@ class TestGroupMembership:
 
     def test_update_group_members_service_unauthorized(self):
         """Test group members update with service-level unauthorized error"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.update_group_members') as mock_update_members:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.update_group_members') as mock_update_members:
 
             mock_get_user.return_value = ("user-456", "tenant-123")
             mock_update_members.side_effect = UnauthorizedError("User does not have permission to update group members")
@@ -740,8 +856,8 @@ class TestGroupMembership:
 
     def test_update_group_members_unexpected_error(self):
         """Test group members update with unexpected error"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.update_group_members') as mock_update_members:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.update_group_members') as mock_update_members:
 
             mock_get_user.return_value = ("user-456", "tenant-123")
             mock_update_members.side_effect = Exception("Database connection failed")
@@ -755,6 +871,72 @@ class TestGroupMembership:
             assert data["detail"] == "Failed to update group members"
 
 
+    def test_add_member_success_records_audit_entry(self, caplog):
+        """Test successful member addition records who added which user to which group"""
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.add_user_to_single_group') as mock_add_user:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_add_user.return_value = {"added": True}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/groups/7/members",
+                    headers={"Authorization": "Bearer token"},
+                    json={"user_id": "user-9"},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_member_add" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert 'details={"target_user_id":"user-9","group_id":7}' in messages[0]
+
+    def test_remove_member_success_records_audit_entry(self, caplog):
+        """Test successful member removal records who removed which user from which group"""
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.remove_user_from_single_group') as mock_remove_user:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_remove_user.return_value = True
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.delete(
+                    "/groups/7/members/user-9",
+                    headers={"Authorization": "Bearer token"},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_member_remove" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert 'details={"target_user_id":"user-9","group_id":7}' in messages[0]
+
+    def test_update_members_success_records_audit_entry(self, caplog):
+        """Test setting the exact member list records the group and the bounded user ids"""
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.update_group_members') as mock_update_members:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_update_members.return_value = {"added": 2, "removed": 1}
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.put(
+                    "/groups/7/members",
+                    headers={"Authorization": "Bearer token"},
+                    json={"user_ids": ["u-1", "u-2"]},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_member_update" in messages[0]
+        assert 'details={"group_id":7,"user_count":2,"user_ids":["u-1","u-2"]}' in messages[0]
+
+
 class TestBatchGroupMembership:
     """Test batch group membership endpoint"""
 
@@ -765,8 +947,8 @@ class TestBatchGroupMembership:
             {"user_id": "user-123", "group_id": 2, "success": True}
         ]
 
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.add_user_to_groups') as mock_add_batch:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.add_user_to_groups') as mock_add_batch:
 
             mock_get_user.return_value = ("user-456", "tenant-123")
             mock_add_batch.return_value = mock_results
@@ -795,8 +977,8 @@ class TestBatchGroupMembership:
 
     def test_add_user_to_groups_validation_error(self):
         """Test batch user addition with validation error"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.add_user_to_groups') as mock_add_batch:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.add_user_to_groups') as mock_add_batch:
 
             mock_get_user.return_value = ("user-456", "tenant-123")
             mock_add_batch.side_effect = ValidationError("Invalid group IDs")
@@ -813,12 +995,35 @@ class TestBatchGroupMembership:
             assert "Invalid group IDs" in data["detail"]
 
 
+    def test_batch_add_success_records_audit_entry(self, caplog):
+        """Test batch membership addition records the user and the bounded group ids"""
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.add_user_to_groups') as mock_add_user_groups:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_add_user_groups.return_value = [{"added": True}, {"added": True}]
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.post(
+                    "/groups/members/batch",
+                    headers={"Authorization": "Bearer token"},
+                    json={"user_id": "user-9", "group_ids": [3, 4]},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_member_batch_add" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert 'details={"target_user_id":"user-9","group_count":2,"group_ids":[3,4]}' in messages[0]
+
+
 class TestDefaultGroupManagement:
     """Test default group management endpoints"""
 
     def test_get_tenant_default_group_success(self):
         """Test successful retrieval of tenant default group"""
-        with patch('apps.group_app.get_tenant_default_group_id') as mock_get_default:
+        with patch('management.api.identity.group.get_tenant_default_group_id') as mock_get_default:
             mock_get_default.return_value = 1
 
             response = client.get("/groups/tenants/tenant-123/default")
@@ -831,7 +1036,7 @@ class TestDefaultGroupManagement:
 
     def test_get_tenant_default_group_unexpected_error(self):
         """Test tenant default group retrieval with unexpected error"""
-        with patch('apps.group_app.get_tenant_default_group_id') as mock_get_default:
+        with patch('management.api.identity.group.get_tenant_default_group_id') as mock_get_default:
             mock_get_default.side_effect = Exception("Database error")
 
             response = client.get("/groups/tenants/tenant-123/default")
@@ -842,8 +1047,8 @@ class TestDefaultGroupManagement:
 
     def test_set_tenant_default_group_success(self):
         """Test successful setting of tenant default group"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.set_tenant_default_group_id') as mock_set_default:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.set_tenant_default_group_id') as mock_set_default:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_set_default.return_value = True
@@ -860,8 +1065,8 @@ class TestDefaultGroupManagement:
 
     def test_set_tenant_default_group_validation_error(self):
         """Test setting tenant default group with validation error"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.set_tenant_default_group_id') as mock_set_default:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.set_tenant_default_group_id') as mock_set_default:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_set_default.side_effect = ValidationError("Group does not belong to tenant")
@@ -876,8 +1081,8 @@ class TestDefaultGroupManagement:
 
     def test_set_tenant_default_group_not_found(self):
         """Test setting tenant default group when tenant doesn't exist"""
-        with patch('apps.group_app.get_current_user_id') as mock_get_user, \
-             patch('apps.group_app.set_tenant_default_group_id') as mock_set_default:
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.set_tenant_default_group_id') as mock_set_default:
 
             mock_get_user.return_value = ("user-123", "tenant-123")
             mock_set_default.side_effect = NotFoundException("Tenant not found")
@@ -889,3 +1094,26 @@ class TestDefaultGroupManagement:
             assert response.status_code == HTTPStatus.NOT_FOUND
             data = response.json()
             assert "Tenant not found" in data["detail"]
+
+    def test_set_default_success_records_audit_entry(self, caplog):
+        """Test setting the tenant default group records a security audit entry"""
+        with patch('management.api.identity.group.get_current_user_id') as mock_get_user, \
+             patch('management.api.identity.group.set_tenant_default_group_id') as mock_set_default:
+
+            mock_get_user.return_value = ("admin-1", "tenant-1")
+            mock_set_default.return_value = True
+
+            with caplog.at_level(logging.INFO, logger="audit.security"):
+                response = client.put(
+                    "/groups/tenants/tenant-1/default",
+                    headers={"Authorization": "Bearer token"},
+                    json={"default_group_id": 7},
+                )
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=group_default_set" in messages[0]
+        assert "result=success" in messages[0]
+        assert "user_id=admin-1" in messages[0]
+        assert 'details={"tenant_id":"tenant-1","default_group_id":7}' in messages[0]

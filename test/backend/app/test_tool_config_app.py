@@ -1,6 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import types
 import importlib.machinery
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import sys
 import os
 
@@ -19,21 +21,21 @@ minio_mock._ensure_bucket_exists = MagicMock()
 minio_mock.client = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_mock).start()
-patch('database.client.MinioClient', return_value=minio_mock).start()
-patch('backend.database.client.minio_client', minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_mock).start()
+patch('management.db.client.minio_client', minio_mock).start()
 patch('elasticsearch.Elasticsearch', return_value=MagicMock()).start()
 
-from consts.exceptions import MCPConnectionError, NotFoundException
+from contracts.errors.exceptions import MCPConnectionError, NotFoundException
 
 import pytest
 from fastapi.testclient import TestClient
 from http import HTTPStatus
 
-from apps.tool_config_app import router
+from management.api.tool.tool_config import router
 from fastapi import FastAPI
 
-import apps.tool_config_app as tool_config_app
+from management.api.tool import tool_config as tool_config_app
 tool_config_app.MCPConnectionError = MCPConnectionError
 
 app = FastAPI()
@@ -44,8 +46,8 @@ client = TestClient(app)
 class TestListToolsAPI:
     """Test endpoint for listing tools"""
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.list_all_tools')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.list_all_tools')
     def test_list_tools_success(self, mock_list_all_tools, mock_get_user_id):
         """Test successful retrieval of tool list"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -65,7 +67,7 @@ class TestListToolsAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_list_all_tools.assert_called_once_with(tenant_id="tenant456", labels=None)
 
-    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('management.api.tool.tool_config.get_current_user_id')
     def test_list_tools_auth_error(self, mock_get_user_id):
         """Test authentication error when listing tools"""
         mock_get_user_id.side_effect = Exception("Auth error")
@@ -76,8 +78,8 @@ class TestListToolsAPI:
         data = response.json()
         assert "Failed to get tool info, error in: Auth error" in data["detail"]
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.list_all_tools')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.list_all_tools')
     def test_list_tools_service_error(self, mock_list_all_tools, mock_get_user_id):
         """Test service error when listing tools"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -93,8 +95,8 @@ class TestListToolsAPI:
 class TestSearchToolInfoAPI:
     """Test endpoint for searching tool information"""
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.search_tool_info_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.search_tool_info_impl')
     def test_search_tool_info_success(self, mock_search_tool_info, mock_get_user_id):
         """Test successful tool information search"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -114,8 +116,8 @@ class TestSearchToolInfoAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_search_tool_info.assert_called_once_with(123, 456, "tenant456", "user123")
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.search_tool_info_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.search_tool_info_impl')
     def test_search_tool_info_service_error(self, mock_search_tool_info, mock_get_user_id):
         """Test service error when searching tool info"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -135,8 +137,8 @@ class TestUpdateToolInfoAPI:
     """Test endpoint for updating tool information"""
 
     @pytest.mark.asyncio
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.update_tool_info_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.update_tool_info_impl')
     async def test_update_tool_info_success(self, mock_update_tool_info, mock_get_user_id):
         """Test successful tool information update"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -150,7 +152,7 @@ class TestUpdateToolInfoAPI:
                 "params": {"key": "value"},
                 "enabled": True
             }),
-            authorization=None,
+            authorization=None, http_request=None,
         )
 
         assert response == {"updated": True, "tool_id": "tool456"}
@@ -162,8 +164,8 @@ class TestUpdateToolInfoAPI:
         assert args[2] == "user123"
 
     @pytest.mark.asyncio
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.update_tool_info_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.update_tool_info_impl')
     async def test_update_tool_info_service_error(self, mock_update_tool_info, mock_get_user_id):
         """Test service error when updating tool info"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -177,7 +179,7 @@ class TestUpdateToolInfoAPI:
                     params={"key": "value"},
                     enabled=True,
                 ),
-                authorization=None,
+                authorization=None, http_request=None,
             )
 
         assert exc_info.value.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
@@ -185,8 +187,8 @@ class TestUpdateToolInfoAPI:
         assert "Update error" not in str(exc_info.value.detail)
 
     @pytest.mark.asyncio
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.update_tool_info_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.update_tool_info_impl')
     async def test_update_tool_info_returns_stable_binding_error(
         self,
         mock_update_tool_info,
@@ -205,7 +207,7 @@ class TestUpdateToolInfoAPI:
                     params={},
                     enabled=True,
                 ),
-                authorization=None,
+                authorization=None, http_request=None,
             )
 
         assert exc_info.value.status_code == HTTPStatus.FORBIDDEN
@@ -218,8 +220,8 @@ class TestUpdateToolInfoAPI:
 class TestScanAndUpdateToolAPI:
     """Test endpoint for scanning and updating tools"""
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.update_tool_list')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.update_tool_list')
     def test_scan_and_update_tool_success(self, mock_update_tool_list, mock_get_user_id):
         """Test successful tool scan and update"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -236,8 +238,8 @@ class TestScanAndUpdateToolAPI:
         mock_update_tool_list.assert_called_once_with(
             tenant_id="tenant456", user_id="user123")
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.update_tool_list')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.update_tool_list')
     def test_scan_and_update_tool_mcp_error(self, mock_update_tool_list, mock_get_user_id):
         """Test MCP connection error during tool scan"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -250,8 +252,8 @@ class TestScanAndUpdateToolAPI:
         data = response.json()
         assert "MCP connection failed" in data["detail"]
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.update_tool_list')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.update_tool_list')
     def test_scan_and_update_tool_general_error(self, mock_update_tool_list, mock_get_user_id):
         """Test general error during tool scan"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -267,8 +269,8 @@ class TestScanAndUpdateToolAPI:
 class TestLoadLastToolConfigAPI:
     """Test endpoint for loading last tool configuration"""
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.load_last_tool_config_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.load_last_tool_config_impl')
     def test_load_last_tool_config_success(self, mock_load_config, mock_get_user_id):
         """Test successful loading of last tool configuration"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -285,8 +287,8 @@ class TestLoadLastToolConfigAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_load_config.assert_called_once_with(123, "tenant456", "user123")
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.load_last_tool_config_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.load_last_tool_config_impl')
     def test_load_last_tool_config_not_found(self, mock_load_config, mock_get_user_id):
         """Test loading tool config when not found"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -302,8 +304,8 @@ class TestLoadLastToolConfigAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_load_config.assert_called_once_with(123, "tenant456", "user123")
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.load_last_tool_config_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.load_last_tool_config_impl')
     def test_load_last_tool_config_service_error(self, mock_load_config, mock_get_user_id):
         """Test service error when loading tool config"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -318,7 +320,7 @@ class TestLoadLastToolConfigAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_load_config.assert_called_once_with(123, "tenant456", "user123")
 
-    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('management.api.tool.tool_config.get_current_user_id')
     def test_load_last_tool_config_auth_error(self, mock_get_user_id):
         """Test authentication error when loading tool config"""
         mock_get_user_id.side_effect = Exception("Auth error")
@@ -329,8 +331,8 @@ class TestLoadLastToolConfigAPI:
         data = response.json()
         assert "Failed to load tool config" in data["detail"]
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.load_last_tool_config_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.load_last_tool_config_impl')
     def test_load_last_tool_config_with_authorization_header(self, mock_load_config, mock_get_user_id):
         """Test loading tool config with authorization header"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -348,8 +350,8 @@ class TestLoadLastToolConfigAPI:
 class TestValidateToolAPI:
     """Test endpoint for validating tools"""
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.validate_tool_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.validate_tool_impl')
     def test_validate_tool_success(self, mock_validate_tool, mock_get_user_id):
         """Test successful tool validation"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -375,8 +377,8 @@ class TestValidateToolAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_validate_tool.assert_called_once()
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.validate_tool_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.validate_tool_impl')
     def test_validate_tool_mcp_connection_error(self, mock_validate_tool, mock_get_user_id):
         """Test MCP connection error during tool validation"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -400,8 +402,8 @@ class TestValidateToolAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_validate_tool.assert_called_once()
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.validate_tool_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.validate_tool_impl')
     def test_validate_tool_not_found_error(self, mock_validate_tool, mock_get_user_id):
         """Test tool not found error during validation"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -424,8 +426,8 @@ class TestValidateToolAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_validate_tool.assert_called_once()
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.validate_tool_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.validate_tool_impl')
     def test_validate_tool_general_error(self, mock_validate_tool, mock_get_user_id):
         """Test general error during tool validation"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -448,7 +450,7 @@ class TestValidateToolAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_validate_tool.assert_called_once()
 
-    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('management.api.tool.tool_config.get_current_user_id')
     def test_validate_tool_auth_error(self, mock_get_user_id):
         """Test authentication error during tool validation"""
         mock_get_user_id.side_effect = Exception("Auth error")
@@ -469,8 +471,8 @@ class TestValidateToolAPI:
 
         mock_get_user_id.assert_called_once_with(None)
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.validate_tool_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.validate_tool_impl')
     def test_validate_tool_with_authorization_header(self, mock_validate_tool, mock_get_user_id):
         """Test tool validation with authorization header"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -520,11 +522,13 @@ class TestValidateToolAPI:
 class TestImportOpenAPIServiceAPI:
     """Test endpoint for importing OpenAPI services"""
 
-    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.import_openapi_service')
+    @patch('management.api.tool.tool_config.update_tool_list', new_callable=AsyncMock)
+    @patch('management.api.tool.tool_config._refresh_openapi_services_in_mcp')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.import_openapi_service')
     def test_import_openapi_service_success(
-        self, mock_import_service, mock_get_user_id, mock_refresh_mcp
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp,
+        mock_update_tool_list
     ):
         """Test successful OpenAPI service import"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -568,11 +572,13 @@ class TestImportOpenAPIServiceAPI:
         )
         mock_refresh_mcp.assert_called_once_with("tenant456")
 
-    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.import_openapi_service')
+    @patch('management.api.tool.tool_config.update_tool_list', new_callable=AsyncMock)
+    @patch('management.api.tool.tool_config._refresh_openapi_services_in_mcp')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.import_openapi_service')
     def test_import_openapi_service_success_with_headers_template(
-        self, mock_import_service, mock_get_user_id, mock_refresh_mcp
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp,
+        mock_update_tool_list
     ):
         """Test successful OpenAPI service import with headers template"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -621,7 +627,7 @@ class TestImportOpenAPIServiceAPI:
         )
         mock_refresh_mcp.assert_called_once_with("tenant456")
 
-    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('management.api.tool.tool_config.get_current_user_id')
     def test_import_openapi_service_missing_service_name(self, mock_get_user_id):
         """Test import with missing service_name"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -638,7 +644,7 @@ class TestImportOpenAPIServiceAPI:
         data = response.json()
         assert "service_name is required" in data["detail"]
 
-    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('management.api.tool.tool_config.get_current_user_id')
     def test_import_openapi_service_missing_server_url(self, mock_get_user_id):
         """Test import with missing server_url"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -655,7 +661,7 @@ class TestImportOpenAPIServiceAPI:
         data = response.json()
         assert "server_url is required" in data["detail"]
 
-    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('management.api.tool.tool_config.get_current_user_id')
     def test_import_openapi_service_missing_openapi_json(self, mock_get_user_id):
         """Test import with missing openapi_json"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -672,11 +678,13 @@ class TestImportOpenAPIServiceAPI:
         data = response.json()
         assert "openapi_json is required" in data["detail"]
 
-    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.import_openapi_service')
+    @patch('management.api.tool.tool_config.update_tool_list', new_callable=AsyncMock)
+    @patch('management.api.tool.tool_config._refresh_openapi_services_in_mcp')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.import_openapi_service')
     def test_import_openapi_service_with_force_update(
-        self, mock_import_service, mock_get_user_id, mock_refresh_mcp
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp,
+        mock_update_tool_list
     ):
         """Test import with force_update=True"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -698,8 +706,8 @@ class TestImportOpenAPIServiceAPI:
         args = mock_import_service.call_args
         assert args[1]["force_update"] == True
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.import_openapi_service')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.import_openapi_service')
     def test_import_openapi_service_service_error(
         self, mock_import_service, mock_get_user_id
     ):
@@ -723,7 +731,7 @@ class TestImportOpenAPIServiceAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_import_service.assert_called_once()
 
-    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('management.api.tool.tool_config.get_current_user_id')
     def test_import_openapi_service_auth_error(self, mock_get_user_id):
         """Test authentication error during OpenAPI service import"""
         mock_get_user_id.side_effect = Exception("Auth error")
@@ -741,11 +749,13 @@ class TestImportOpenAPIServiceAPI:
         data = response.json()
         assert "Auth error" in data["detail"]
 
-    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.import_openapi_service')
+    @patch('management.api.tool.tool_config.update_tool_list', new_callable=AsyncMock)
+    @patch('management.api.tool.tool_config._refresh_openapi_services_in_mcp')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.import_openapi_service')
     def test_import_openapi_service_with_authorization_header(
-        self, mock_import_service, mock_get_user_id, mock_refresh_mcp
+        self, mock_import_service, mock_get_user_id, mock_refresh_mcp,
+        mock_update_tool_list
     ):
         """Test OpenAPI service import with authorization header"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -769,8 +779,8 @@ class TestImportOpenAPIServiceAPI:
 class TestListOpenAPIServicesAPI:
     """Test endpoint for listing OpenAPI services"""
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.list_openapi_services')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.list_openapi_services')
     def test_list_openapi_services_success(
         self, mock_list_services, mock_get_user_id
     ):
@@ -793,8 +803,8 @@ class TestListOpenAPIServicesAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_list_services.assert_called_once_with("tenant456")
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.list_openapi_services')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.list_openapi_services')
     def test_list_openapi_services_empty(
         self, mock_list_services, mock_get_user_id
     ):
@@ -812,8 +822,8 @@ class TestListOpenAPIServicesAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_list_services.assert_called_once_with("tenant456")
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.list_openapi_services')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.list_openapi_services')
     def test_list_openapi_services_service_error(
         self, mock_list_services, mock_get_user_id
     ):
@@ -830,7 +840,7 @@ class TestListOpenAPIServicesAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_list_services.assert_called_once_with("tenant456")
 
-    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('management.api.tool.tool_config.get_current_user_id')
     def test_list_openapi_services_auth_error(self, mock_get_user_id):
         """Test authentication error when listing OpenAPI services"""
         mock_get_user_id.side_effect = Exception("Auth error")
@@ -841,8 +851,8 @@ class TestListOpenAPIServicesAPI:
         data = response.json()
         assert "Auth error" in data["detail"]
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.list_openapi_services')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.list_openapi_services')
     def test_list_openapi_services_with_authorization_header(
         self, mock_list_services, mock_get_user_id
     ):
@@ -862,9 +872,9 @@ class TestListOpenAPIServicesAPI:
 class TestDeleteOpenAPIServiceAPI:
     """Test endpoint for deleting an OpenAPI service"""
 
-    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.delete_openapi_service')
+    @patch('management.api.tool.tool_config._refresh_openapi_services_in_mcp')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.delete_openapi_service')
     def test_delete_openapi_service_success(
         self, mock_delete_service, mock_get_user_id, mock_refresh_mcp
     ):
@@ -885,8 +895,8 @@ class TestDeleteOpenAPIServiceAPI:
         mock_delete_service.assert_called_once_with("test_service", "tenant456", "user123")
         mock_refresh_mcp.assert_called_once_with("tenant456")
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.delete_openapi_service')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.delete_openapi_service')
     def test_delete_openapi_service_not_found(
         self, mock_delete_service, mock_get_user_id
     ):
@@ -903,8 +913,8 @@ class TestDeleteOpenAPIServiceAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_delete_service.assert_called_once_with("nonexistent_service", "tenant456", "user123")
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.delete_openapi_service')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.delete_openapi_service')
     def test_delete_openapi_service_http_exception_reraised(
         self, mock_delete_service, mock_get_user_id
     ):
@@ -922,9 +932,9 @@ class TestDeleteOpenAPIServiceAPI:
         data = response.json()
         assert "Access denied" in data["detail"]
 
-    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.delete_openapi_service')
+    @patch('management.api.tool.tool_config._refresh_openapi_services_in_mcp')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.delete_openapi_service')
     def test_delete_openapi_service_mcp_refresh_error(
         self, mock_delete_service, mock_get_user_id, mock_refresh_mcp
     ):
@@ -939,8 +949,8 @@ class TestDeleteOpenAPIServiceAPI:
         data = response.json()
         assert "Failed to delete OpenAPI service" in data["detail"]
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.delete_openapi_service')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.delete_openapi_service')
     def test_delete_openapi_service_service_error(
         self, mock_delete_service, mock_get_user_id
     ):
@@ -957,7 +967,7 @@ class TestDeleteOpenAPIServiceAPI:
         mock_get_user_id.assert_called_once_with(None)
         mock_delete_service.assert_called_once_with("test_service", "tenant456", "user123")
 
-    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('management.api.tool.tool_config.get_current_user_id')
     def test_delete_openapi_service_auth_error(self, mock_get_user_id):
         """Test authentication error when deleting OpenAPI service"""
         mock_get_user_id.side_effect = Exception("Auth error")
@@ -968,9 +978,9 @@ class TestDeleteOpenAPIServiceAPI:
         data = response.json()
         assert "Auth error" in data["detail"]
 
-    @patch('apps.tool_config_app._refresh_openapi_services_in_mcp')
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.delete_openapi_service')
+    @patch('management.api.tool.tool_config._refresh_openapi_services_in_mcp')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.delete_openapi_service')
     def test_delete_openapi_service_with_authorization_header(
         self, mock_delete_service, mock_get_user_id, mock_refresh_mcp
     ):
@@ -996,8 +1006,8 @@ class TestDeleteOpenAPIServiceAPI:
 class TestEdgeCases:
     """Edge cases and boundary condition tests"""
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.list_all_tools')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.list_all_tools')
     def test_list_tools_empty_response(self, mock_list_all_tools, mock_get_user_id):
         """Test handling of empty tool list"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -1009,8 +1019,8 @@ class TestEdgeCases:
         data = response.json()
         assert data == []
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.search_tool_info_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.search_tool_info_impl')
     def test_search_tool_info_not_found(self, mock_search_tool_info, mock_get_user_id):
         """Test searching for non-existent tool"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -1025,8 +1035,8 @@ class TestEdgeCases:
         data = response.json()
         assert data is None
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.update_tool_info_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.update_tool_info_impl')
     def test_update_tool_info_with_empty_params(self, mock_update_tool_info, mock_get_user_id):
         """Test updating tool with empty parameters"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -1056,7 +1066,7 @@ class TestEdgeCases:
 
         assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
 
-    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('management.api.tool.tool_config.get_current_user_id')
     def test_auth_with_invalid_token_format(self, mock_get_user_id):
         """Test authentication with invalid token format"""
         mock_get_user_id.side_effect = Exception("Invalid token format")
@@ -1070,7 +1080,7 @@ class TestEdgeCases:
         data = response.json()
         assert "Invalid token format" in data["detail"]
 
-    @patch('apps.tool_config_app.get_current_user_id')
+    @patch('management.api.tool.tool_config.get_current_user_id')
     def test_scan_tool_auth_failure(self, mock_get_user_id):
         """Test scan tool with authentication failure"""
         mock_get_user_id.side_effect = Exception("Authentication failed")
@@ -1093,7 +1103,7 @@ class TestDataValidation:
         )
 
         assert response.status_code in [
-            HTTPStatus.OK, HTTPStatus.INTERNAL_SERVER_ERROR]
+            HTTPStatus.OK, HTTPStatus.INTERNAL_SERVER_ERROR, HTTPStatus.UNAUTHORIZED]
 
     def test_update_tool_invalid_data_types(self):
         """Test update with invalid data types"""
@@ -1139,8 +1149,8 @@ class TestDataValidation:
 class TestConcurrency:
     """Concurrency and performance tests"""
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.list_all_tools')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.list_all_tools')
     def test_multiple_simultaneous_requests(self, mock_list_all_tools, mock_get_user_id):
         """Test handling multiple simultaneous requests"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -1161,10 +1171,10 @@ class TestConcurrency:
 class TestIntegration:
     """Integration tests"""
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.list_all_tools')
-    @patch('apps.tool_config_app.search_tool_info_impl')
-    @patch('apps.tool_config_app.update_tool_info_impl')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.list_all_tools')
+    @patch('management.api.tool.tool_config.search_tool_info_impl')
+    @patch('management.api.tool.tool_config.update_tool_info_impl')
     def test_full_tool_lifecycle(self, mock_update_tool_info, mock_search_tool_info,
                                  mock_list_all_tools, mock_get_user_id):
         """Test complete tool configuration lifecycle"""
@@ -1199,8 +1209,8 @@ class TestIntegration:
 class TestErrorHandling:
     """Error handling tests"""
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('apps.tool_config_app.list_all_tools')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.list_all_tools')
     def test_authorization_header_handling(self, mock_list_all_tools, mock_get_user_id):
         """Test authorization header handling"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -1223,9 +1233,9 @@ class TestErrorHandling:
 class TestUpdateToolLabelsAPI:
     """Test endpoint for updating tool labels"""
 
-    @patch('apps.tool_config_app.get_user_email_map')
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('database.tool_db.update_tool_labels')
+    @patch('management.api.tool.tool_config.get_user_email_map')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.db.tool.repository.update_tool_labels')
     def test_update_tool_labels_success(self, mock_update_labels, mock_get_user_id, mock_get_user_email_map):
         """Test successful labels update"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -1247,8 +1257,8 @@ class TestUpdateToolLabelsAPI:
             1, "tenant456", ["database", "search"], "user123"
         )
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('database.tool_db.update_tool_labels')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.db.tool.repository.update_tool_labels')
     def test_update_tool_labels_not_found(self, mock_update_labels, mock_get_user_id):
         """Test update labels returns 404 when tool not found"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -1263,8 +1273,8 @@ class TestUpdateToolLabelsAPI:
         data = response.json()
         assert "Tool not found" in data["detail"]
 
-    @patch('apps.tool_config_app.get_current_user_id')
-    @patch('database.tool_db.update_tool_labels')
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.db.tool.repository.update_tool_labels')
     def test_update_tool_labels_service_error(self, mock_update_labels, mock_get_user_id):
         """Test update labels returns 500 on service error"""
         mock_get_user_id.return_value = ("user123", "tenant456")
@@ -1289,8 +1299,8 @@ if __name__ == "__main__":
 # ---------------------------------------------------------------------------
 
 
-@patch('apps.tool_config_app.get_current_user_id')
-@patch('apps.tool_config_app.search_tool_info_impl')
+@patch('management.api.tool.tool_config.get_current_user_id')
+@patch('management.api.tool.tool_config.search_tool_info_impl')
 def test_search_tool_info_passthrough_http_exception(mock_search_tool_info, mock_get_user_id):
     """HTTPException raised by the impl must propagate unchanged."""
     from fastapi import HTTPException
@@ -1308,11 +1318,11 @@ def test_search_tool_info_passthrough_http_exception(mock_search_tool_info, mock
     assert response.json()["detail"] == "forbidden"
 
 
-@patch('apps.tool_config_app.get_current_user_id')
-@patch('apps.tool_config_app.update_tool_info_impl')
+@patch('management.api.tool.tool_config.get_current_user_id')
+@patch('management.api.tool.tool_config.update_tool_info_impl')
 def test_update_tool_info_validation_error_bad_request(mock_update_tool_info, mock_get_user_id):
     """ValidationError from the impl maps to HTTP 400."""
-    from consts.exceptions import ValidationError
+    from contracts.errors.exceptions import ValidationError
 
     mock_get_user_id.return_value = ("user123", "tenant456")
     mock_update_tool_info.side_effect = ValidationError("invalid params")
@@ -1326,8 +1336,8 @@ def test_update_tool_info_validation_error_bad_request(mock_update_tool_info, mo
     assert response.json()["detail"] == "invalid params"
 
 
-@patch('apps.tool_config_app.get_current_user_id')
-@patch('apps.tool_config_app.update_tool_info_impl')
+@patch('management.api.tool.tool_config.get_current_user_id')
+@patch('management.api.tool.tool_config.update_tool_info_impl')
 def test_update_tool_info_passthrough_http_exception(mock_update_tool_info, mock_get_user_id):
     """HTTPException raised by the impl must propagate unchanged."""
     from fastapi import HTTPException
@@ -1343,3 +1353,148 @@ def test_update_tool_info_passthrough_http_exception(mock_update_tool_info, mock
 
     assert response.status_code == 409
     assert response.json()["detail"] == "conflict"
+
+
+class TestTokenExpiredMapping:
+    """Every tool config endpoint maps an expired token to 401."""
+
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    def test_list_tools_token_expired(self, mock_get_user_id):
+        from contracts.errors.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.get("/tool/list")
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    def test_search_tool_token_expired(self, mock_get_user_id):
+        from contracts.errors.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.post(
+            "/tool/search", json={"agent_id": 123, "tool_id": 456})
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    def test_update_tool_token_expired(self, mock_get_user_id):
+        from contracts.errors.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.post(
+            "/tool/update",
+            json={
+                "agent_id": 123,
+                "tool_id": 456,
+                "params": {"key": "value"},
+                "enabled": True,
+            },
+        )
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    def test_load_last_tool_config_token_expired(self, mock_get_user_id):
+        from contracts.errors.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.get("/tool/load_config/123")
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    def test_list_openapi_services_token_expired(self, mock_get_user_id):
+        from contracts.errors.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.get("/tool/openapi_services")
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    def test_update_tool_labels_token_expired(self, mock_get_user_id):
+        from contracts.errors.exceptions import TokenExpiredError
+
+        mock_get_user_id.side_effect = TokenExpiredError("expired")
+        response = client.put(
+            "/tool/labels", json={"tool_id": 1, "labels": ["database"]})
+        assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
+# ============================================================================
+# Security audit entries
+# ============================================================================
+
+class TestToolAuditEntries:
+    """Security audit entries emitted by tool configuration endpoints."""
+
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.update_tool_info_impl')
+    def test_update_emits_audit_entry_without_params(self, mock_update, mock_get_user_id, caplog):
+        """Successful tool update records ids and enabled, never the params dict."""
+        import logging
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_update.return_value = {"message": "ok"}
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.post("/tool/update", json={
+                "tool_id": 3, "agent_id": 7,
+                "params": {"api_key": "sk-param-secret"},
+                "enabled": True,
+            })
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tool_config_update" in messages[0]
+        assert "result=success" in messages[0]
+        assert '"tool_id":3' in messages[0]
+        assert '"agent_id":7' in messages[0]
+        assert '"enabled":true' in messages[0]
+        assert "sk-param-secret" not in messages[0]
+
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config.update_tool_list', new_callable=AsyncMock)
+    @patch('management.api.tool.tool_config._refresh_openapi_services_in_mcp')
+    @patch('management.api.tool.tool_config.import_openapi_service')
+    def test_openapi_register_emits_audit_entry_without_spec(
+            self, mock_import, mock_refresh, mock_tool_list, mock_get_user_id, caplog):
+        """Successful OpenAPI import records name/url, never the spec or headers."""
+        import logging
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_import.return_value = {"imported": 2}
+        mock_refresh.return_value = {"refreshed": True}
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.post("/tool/openapi_service", json={
+                "service_name": "pets-api",
+                "server_url": "https://api.example.com",
+                "openapi_json": {"openapi": "3.0.0", "paths": {}},
+                "headers_template": {"Authorization": "Bearer sk-openapi-secret"},
+            })
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tool_openapi_register" in messages[0]
+        assert '"service_name":"pets-api"' in messages[0]
+        assert '"server_url":"https://api.example.com"' in messages[0]
+        assert "sk-openapi-secret" not in messages[0]
+
+    @patch('management.api.tool.tool_config.get_current_user_id')
+    @patch('management.api.tool.tool_config._refresh_openapi_services_in_mcp')
+    @patch('management.api.tool.tool_config.delete_openapi_service')
+    def test_openapi_delete_emits_audit_entry(self, mock_delete, mock_refresh, mock_get_user_id, caplog):
+        """Successful OpenAPI service deletion records the service name."""
+        import logging
+        mock_get_user_id.return_value = ("user123", "tenant456")
+        mock_delete.return_value = True
+        mock_refresh.return_value = {}
+
+        with caplog.at_level(logging.INFO, logger="audit.security"):
+            response = client.delete("/tool/openapi_service/pets-api")
+
+        assert response.status_code == HTTPStatus.OK
+        messages = [record.getMessage() for record in caplog.records
+                    if record.name == "audit.security"]
+        assert len(messages) == 1
+        assert "event=tool_openapi_delete" in messages[0]
+        assert '"service_name":"pets-api"' in messages[0]

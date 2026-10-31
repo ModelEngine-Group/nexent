@@ -1,10 +1,7 @@
 replicaCount: 1
 
 strategy:
-  type: RollingUpdate
-  rollingUpdate:
-    maxSurge: 1
-    maxUnavailable: 0
+  type: Recreate
 
 images:
   backend:
@@ -24,6 +21,13 @@ resources:
 config:
   skipProxy: "true"
   umask: "0022"
+
+probes:
+  startup:
+    initialDelaySeconds: 30
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 60
 
 services:
   northbound:

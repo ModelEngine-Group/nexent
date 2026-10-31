@@ -1,0 +1,19 @@
+schema_version: '1.0'
+case_id: OPS-BOOTSTRAP-D5-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_ops_isolated_start_and_restart
+acceptance_bindings:
+  AC-01: [test_ops_isolated_start_and_restart]
+  AC-02: [test_ops_isolated_start_and_restart]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
+notes: >-
+  Self-contained process proof: the script selects a free loopback port, starts
+  and restarts its own operations process with isolated environment and temporary
+  logs, and reaps each child in finally. It requires no shared business assets,
+  anchors, provider services or deployed-product changes.

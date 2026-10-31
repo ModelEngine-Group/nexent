@@ -1,10 +1,13 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from backend.consts.model import AgentRequest
-from backend.services import agent_service
+from contracts.agent import AgentRequest
+from management.services.agent import execution as agent_execution
+from management.services.agent import run as agent_run
 
 
 @pytest.mark.asyncio
@@ -19,12 +22,12 @@ async def test_memory_enabled_stream_does_not_emit_presearch_events(monkeypatch)
     )
     channel = AsyncMock()
     monkeypatch.setattr(
-        agent_service.streaming_channel_manager,
+        agent_run.streaming_channel_manager,
         "get_or_create_channel",
         AsyncMock(return_value=channel),
     )
     monkeypatch.setattr(
-        agent_service,
+        agent_run,
         "build_memory_context",
         MagicMock(
             return_value=MagicMock(
@@ -33,16 +36,16 @@ async def test_memory_enabled_stream_does_not_emit_presearch_events(monkeypatch)
         ),
     )
     prepare = AsyncMock(return_value=(MagicMock(), MagicMock()))
-    monkeypatch.setattr(agent_service, "prepare_agent_run", prepare)
+    monkeypatch.setattr(agent_run, "prepare_agent_run", prepare)
 
     async def chunks(**_kwargs):
         yield "data: body\n\n"
 
-    monkeypatch.setattr(agent_service, "_stream_agent_chunks", chunks)
+    monkeypatch.setattr(agent_run, "_stream_agent_chunks", chunks)
 
     output = [
         chunk
-        async for chunk in agent_service.generate_stream(
+        async for chunk in agent_run.generate_stream(
             request,
             user_id="user-1",
             tenant_id="tenant-1",
@@ -60,7 +63,7 @@ async def test_memory_enabled_stream_does_not_emit_presearch_events(monkeypatch)
         agent_request=request,
         user_id="user-1",
         tenant_id="tenant-1",
-        language=agent_service.LANGUAGE["ZH"],
+        language=agent_run.LANGUAGE["ZH"],
         allow_memory_search=True,
     )
 
@@ -91,38 +94,37 @@ async def test_fixed_search_is_streamed_and_persisted_as_structured_tool(monkeyp
     run_info.agent_config.pre_run_tool_events = pre_run_events
     run_info.stop_event.is_set.return_value = False
 
-    async def fake_agent_run(_run_info):
+    async def fake_agent_run(_run_info, **_kwargs):
         yield json.dumps({"type": "final_answer", "content": "Done"})
 
-    monkeypatch.setattr(agent_service, "agent_run", fake_agent_run)
-    monkeypatch.setattr(agent_service, "save_message", lambda *args, **kwargs: 42)
+    async def run_inline(_lane, _spec, func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(agent_execution, "agent_run", fake_agent_run)
+    monkeypatch.setattr(agent_execution.runtime_thread_manager, "run", run_inline)
+    monkeypatch.setattr(agent_execution, "save_message", lambda *args, **kwargs: 42)
     monkeypatch.setattr(
-        agent_service.agent_run_manager,
+        agent_execution.agent_run_manager,
         "unregister_agent_run",
         lambda *args, **kwargs: None,
     )
-    monkeypatch.setattr(
-        agent_service,
-        "generate_conversation_title_service",
-        AsyncMock(),
-    )
     persisted_batches = []
     monkeypatch.setattr(
-        agent_service,
+        agent_execution,
         "persist_assistant_run_batch",
         lambda **kwargs: persisted_batches.append(kwargs),
     )
     monkeypatch.setattr(
-        agent_service.streaming_channel_manager,
+        agent_execution.streaming_channel_manager,
         "complete_channel",
         AsyncMock(),
     )
-    monkeypatch.setattr(agent_service, "_cleanup_channel_later", AsyncMock())
+    monkeypatch.setattr(agent_execution, "_cleanup_channel_later", AsyncMock())
     channel = AsyncMock()
 
     chunks = [
         chunk
-        async for chunk in agent_service._stream_agent_chunks(
+        async for chunk in agent_execution._stream_agent_chunks(
             request,
             "user-1",
             "tenant-1",

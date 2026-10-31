@@ -1,16 +1,10 @@
-﻿"use client";
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"use client";
 
 import React, { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Table,
-  Button,
-  Popconfirm,
-  message,
-  Tag,
-  Segmented,
-  Tooltip,
-} from "antd";
+import { Table, Button, message, Tag, Segmented, Tooltip } from "antd";
 import {
   CheckCircle,
   CircleEllipsis,
@@ -32,6 +26,7 @@ import { modelService } from "@/services/modelService";
 import { type ModelOption, type ModelType } from "@/types/modelConfig";
 import type { ModelMonitoringItem } from "@/types/monitoring";
 import { MODEL_TYPES } from "@/const/modelConfig";
+import { useConfirmModal } from "@/hooks/useConfirmModal";
 import { ModelAddDialog } from "../../../models/components/model/ModelAddDialog";
 import { ModelEditDialog } from "../../../models/components/model/ModelEditDialog";
 import ModelCapacityCoverageWidget from "./ModelCapacityCoverageWidget";
@@ -46,6 +41,7 @@ interface UnifiedModelRow extends ModelOption {
 
 export default function ModelList({ tenantId }: { tenantId: string | null }) {
   const { t } = useTranslation("common");
+  const { confirm } = useConfirmModal();
 
   const { bareModelIds } = useCapacityCoverage();
 
@@ -73,7 +69,6 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
 
   const [editingModel, setEditingModel] = useState<ModelOption | null>(null);
   const [addDialogVisible, setAddDialogVisible] = useState(false);
-  const [editDialogVisible, setEditDialogVisible] = useState(false);
 
   const [checkingConnectivity, setCheckingConnectivity] = useState<Set<string>>(
     new Set()
@@ -116,19 +111,16 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
   };
 
   const handleEditDialogClose = () => {
-    setEditDialogVisible(false);
     setEditingModel(null);
   };
 
   const handleEditDialogSuccess = async () => {
     await refetch();
-    setEditDialogVisible(false);
     setEditingModel(null);
   };
 
   const openEdit = (model: ModelOption) => {
     setEditingModel(model);
-    setEditDialogVisible(true);
   };
 
   const handleDelete = async (displayName: string, _provider?: string) => {
@@ -474,53 +466,62 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
               size="small"
             />
           </Tooltip>
-          <Popconfirm
-            title={t("tenantResources.models.confirmDelete")}
-            description={t("common.cannotBeUndone")}
-            onConfirm={() => handleDelete(record.displayName, record.source)}
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
-          >
-            <Tooltip title={t("tenantResources.models.deleteModel")}>
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
-                size="small"
-              />
-            </Tooltip>
-          </Popconfirm>
+          <Tooltip title={t("tenantResources.models.deleteModel")}>
+            <Button
+              type="text"
+              danger
+              icon={<Trash2 className="h-4 w-4" />}
+              size="small"
+              onClick={() =>
+                confirm({
+                  title: t("tenantResources.models.confirmDelete"),
+                  content: t("common.cannotBeUndone"),
+                  okText: t("common.confirm"),
+                  cancelText: t("common.cancel"),
+                  onOk: () => handleDelete(record.displayName, record.source),
+                })
+              }
+            />
+          </Tooltip>
         </div>
       ),
     },
   ];
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
-      <ModelCapacityCoverageWidget />
-      <div className="flex items-center justify-between mb-4 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <Segmented
-            size="small"
-            value={monitoringTimeRange}
-            onChange={(v) => setMonitoringTimeRange(v as TimeRange)}
-            options={[
-              { label: t("monitoring.dashboard.timeRange.24h"), value: "24h" },
-              { label: t("monitoring.dashboard.timeRange.7d"), value: "7d" },
-              { label: t("monitoring.dashboard.timeRange.30d"), value: "30d" },
-            ]}
-          />
-          <Button
-            icon={<RefreshCw className="h-3 w-3" />}
-            size="small"
-            onClick={refreshMonitoring}
-          >
-            {t("monitoring.dashboard.refresh")}
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="mb-4 flex shrink-0 flex-col gap-4 [&>.ant-card]:!mb-0">
+        <ModelCapacityCoverageWidget />
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Segmented
+              size="small"
+              value={monitoringTimeRange}
+              onChange={(v) => setMonitoringTimeRange(v as TimeRange)}
+              options={[
+                {
+                  label: t("monitoring.dashboard.timeRange.24h"),
+                  value: "24h",
+                },
+                { label: t("monitoring.dashboard.timeRange.7d"), value: "7d" },
+                {
+                  label: t("monitoring.dashboard.timeRange.30d"),
+                  value: "30d",
+                },
+              ]}
+            />
+            <Button
+              icon={<RefreshCw className="h-3 w-3" />}
+              size="small"
+              onClick={refreshMonitoring}
+            >
+              {t("monitoring.dashboard.refresh")}
+            </Button>
+          </div>
+          <Button type="primary" onClick={openCreate}>
+            + {t("modelConfig.button.addCustomModel")}
           </Button>
         </div>
-        <Button type="primary" onClick={openCreate}>
-          + {t("modelConfig.button.addCustomModel")}
-        </Button>
       </div>
 
       <Table
@@ -535,7 +536,7 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
         }}
         onChange={handlePageChange}
         scroll={{ y: "calc(100vh - 580px)" }}
-        className="flex-1 [&_.ant-table]:h-full [&_.ant-table-thead>tr>th]:whitespace-nowrap [&_.ant-table-thead>tr>th.ant-table-column-has-sorters_.ant-table-column-title]:mr-3 [&_.ant-table-thead>tr>th.ant-table-column-has-sorters_.ant-table-column-sorter]:shrink-0"
+        className="min-h-0 flex-1 [&_.ant-table]:h-full [&_.ant-table-thead>tr>th]:whitespace-nowrap [&_.ant-table-thead>tr>th.ant-table-column-has-sorters_.ant-table-column-title]:mr-3 [&_.ant-table-thead>tr>th.ant-table-column-has-sorters_.ant-table-column-sorter]:shrink-0"
       />
 
       <ModelAddDialog
@@ -546,11 +547,10 @@ export default function ModelList({ tenantId }: { tenantId: string | null }) {
       />
 
       <ModelEditDialog
-        isOpen={editDialogVisible}
         model={editingModel}
+        tenantId={tenantId || undefined}
         onClose={handleEditDialogClose}
         onSuccess={handleEditDialogSuccess}
-        tenantId={tenantId || undefined}
       />
     </div>
   );

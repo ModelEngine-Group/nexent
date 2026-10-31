@@ -4,29 +4,21 @@ Nexent 项目得益于我们核心团队成员的辛勤工作。我们想感谢�
 
 ## Nexent 团队
 
-### 团队经理 / 产品经理
-- **Shuangrui Chen** @Phinease
+### Maintainers
+- **Shuangrui Chen** [@Phinease](https://github.com/Phinease)
+- **Yafeng Zhang** [@yafengzhang2025](https://github.com/yafengzhang2025)
+- **Simeng Bian** [@SimengBian](https://github.com/SimengBian)
 
-### 高级系统工程师
-- **Simeng Bian** @Simeng Bian
-- **Tao Liu** @liutao12138
+### Committers
+- **Mingchen Wan** [@WMC001](https://github.com/WMC001)
+- **Peng Yang** [@Dallas98](https://github.com/Dallas98)
+- **Zhaofu Wu** [@jeffwu-1999](https://github.com/jeffwu-1999)
 
-### 开发组组长
-- **Jingyuan Li** @ljy65535
-
-### 开发者
-- **Yichen Xia** @Jasonxia007
-- **Mingchen Wan** @WMC001
-- **Yu Lin** @linsensen222
-- **Wenqi Bai** @Bavichi
-- **Feiyang Xiang** @feixiangkong
-- **Peiling Jiang** @porkpink
-
-### SRE (站点可靠性工程师)
-- **Peiling Jiang** @porkpink
+###### SRE
+- **Sicong He** [@hhhhsc701](https://github.com/hhhhsc701)
 
 ### 运营经理
-- **Chenxue Jia** @Davina-jcx
+- **Gaoqi Zheng** [@zgqhope](https://github.com/zgqhope)
 
 ## 致谢
 

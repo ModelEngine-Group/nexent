@@ -1,7 +1,8 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from contextlib import contextmanager
 from types import SimpleNamespace
 
-from services.agent_automation import agent_identity_adapter
+from management.services.automation import agent_identity as agent_identity_adapter
 
 
 def test_resolve_agent_display_names_uses_user_facing_name(monkeypatch):

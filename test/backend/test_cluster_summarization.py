@@ -1,8 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Test module for cluster summarization
 
 Tests for cluster summarization functionality.
 """
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -10,11 +14,11 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-# Mock consts module before patching backend.database.client to avoid ImportError
-# backend.database.client imports from consts.const, so we need to mock it first
+# Mock consts module before patching management.db.client to avoid ImportError
+# management.db.client imports from contracts.constants.environment, so we need to mock it first
 consts_mock = MagicMock()
 consts_const_mock = MagicMock()
-# Set required constants that backend.database.client might use
+# Set required constants that management.db.client might use
 consts_const_mock.MINIO_ENDPOINT = "http://localhost:9000"
 consts_const_mock.MINIO_ACCESS_KEY = "test_access_key"
 consts_const_mock.MINIO_SECRET_KEY = "test_secret_key"
@@ -30,33 +34,17 @@ consts_const_mock.MESSAGE_ROLE = {"USER": "user", "ASSISTANT": "assistant", "SYS
 consts_const_mock.THINK_START_PATTERN = "<think>"
 consts_const_mock.THINK_END_PATTERN = "</think>"
 consts_mock.const = consts_const_mock
-# Mock consts.error_code and consts.exceptions
+# Mock contracts.errors.codes and contracts.errors.exceptions
 consts_error_code_mock = MagicMock()
 consts_error_code_mock.ErrorCode = MagicMock()
 consts_exceptions_mock = MagicMock()
 consts_exceptions_mock.AppException = Exception
-consts_prompt_template_mock = MagicMock()
-consts_prompt_template_mock.PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP = {
-    "duty_system_prompt": "DUTY_SYSTEM_PROMPT",
-    "constraint_system_prompt": "CONSTRAINT_SYSTEM_PROMPT",
-    "few_shots_system_prompt": "FEW_SHOTS_SYSTEM_PROMPT",
-    "agent_variable_name_system_prompt": "AGENT_VARIABLE_NAME_SYSTEM_PROMPT",
-    "agent_display_name_system_prompt": "AGENT_DISPLAY_NAME_SYSTEM_PROMPT",
-    "agent_description_system_prompt": "AGENT_DESCRIPTION_SYSTEM_PROMPT",
-    "user_prompt": "USER_PROMPT",
-    "agent_name_regenerate_system_prompt": "AGENT_NAME_REGENERATE_SYSTEM_PROMPT",
-    "agent_name_regenerate_user_prompt": "AGENT_NAME_REGENERATE_USER_PROMPT",
-    "agent_display_name_regenerate_system_prompt": "AGENT_DISPLAY_NAME_REGENERATE_SYSTEM_PROMPT",
-    "agent_display_name_regenerate_user_prompt": "AGENT_DISPLAY_NAME_REGENERATE_USER_PROMPT",
-}
-consts_prompt_template_mock.PROMPT_GENERATE_TEMPLATE_FIELDS = tuple(
-    consts_prompt_template_mock.PROMPT_GENERATE_TEMPLATE_FIELD_ALIAS_MAP.keys()
-)
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_const_mock
-sys.modules['consts.error_code'] = consts_error_code_mock
-sys.modules['consts.exceptions'] = consts_exceptions_mock
-sys.modules['consts.prompt_template'] = consts_prompt_template_mock
+sys.modules['contracts.constants.environment'] = consts_const_mock
+install_business_constant_stubs(consts_const_mock)
+install_shared_contract_stub(consts_error_code_mock, 'error_code')
+install_shared_contract_stub(consts_exceptions_mock, 'exceptions')
+install_business_contract_stubs(consts_mock.model)
 
 # Add backend to path before patching backend modules
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -69,12 +57,9 @@ storage_client_mock = MagicMock()
 minio_client_mock = MagicMock()
 patch('nexent.storage.storage_client_factory.create_storage_client_from_config', return_value=storage_client_mock).start()
 patch('nexent.storage.minio_config.MinIOStorageConfig.validate', lambda self: None).start()
-patch('backend.database.client.MinioClient', return_value=minio_client_mock).start()
+patch('management.db.client.MinioClient', return_value=minio_client_mock).start()
 
-from backend.utils.document_vector_utils import (
-    summarize_cluster,
-    merge_cluster_summaries
-)
+from management.services.knowledge_base.summary import summarize_cluster, merge_cluster_summaries
 
 
 class TestClusterSummarization:

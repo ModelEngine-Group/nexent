@@ -1,0 +1,80 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-SIDEBAR-D5-001
+  feature_id: CHAT-SIDEBAR
+  requirement_ids:
+  - WB-PIN-SYNC-20261016
+  - CHAT-PIN-TIMESTAMP-20261021
+  business_rule_ids:
+  - CHAT-SIDEBAR-RULE-003
+  title: Workbench personal pin schema uses only the existing conversation table
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: Execute direct column/index SQL against disposable PostgreSQL schemas and prove repeatability
+    without separate-table creation.
+  preconditions:
+  - Reachable PostgreSQL configured by backend; disposable schemas only.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Apply the personal pin SQL to an existing conversation table with active, deleted and Agent-chat
+      rows.
+    expected: A nullable UTC timestamp without time zone, column comment and ordered partial index are created directly;
+      existing conversation data is unchanged and no separate pin table is created.
+  - order: 2
+    action: Set a current personal pin timestamp and repeat the same SQL.
+    expected: Current pin values and conversation activity/content remain unchanged; the field and index
+      are not duplicated.
+  - order: 3
+    action: Inspect the versioned migration catalog used by deployment.
+    expected: The old separate-table SQL is absent, no remaining migration creates that table, and the
+      unreleased pin migration declares TIMESTAMP directly without a separate type-conversion migration, backfill or deletion.
+  - order: 4
+    action: Apply and replay the pin migration to NULL and populated UTC TIMESTAMP pin values under UTC, Asia/Shanghai and America/New_York sessions.
+    expected: UTC instants, microseconds, pin order, partial index and unrelated conversation/audit fields are retained; subsequent replay does not shift timestamps.
+  expected_results:
+  - Personal pin schema is added directly to the existing conversation table without creating a separate
+    table or changing existing conversation data.
+  - Repeat execution preserves current pin values and keeps exactly one field and index.
+  - Existing UTC TIMESTAMP pin values retain their instants, NULLs and precision across database timezones and replay.
+  forbidden_side_effects:
+  - No changes outside disposable schemas; no separate pin table creation, legacy backfill or deletion
+    SQL; no conversation activity/content mutation.
+  risk_type: RELIABILITY
+  risk: Repeat deployment could shift pin values, lose precision or NULLs, reset current personal pins or invalidate the existing index.
+  condition:
+  - The pin field is created as UTC TIMESTAMP; existing native pin columns and indexes may already be populated.
+  metrics:
+  - Column type/nullability/comment, index definition, migration catalog and conversation snapshots.
+  thresholds:
+  - All direct schema and repeatability assertions pass.
+  recovery_expectations:
+  - Repeated deployment does not reset pin values or modify conversation data.
+  acceptance:
+  - id: AC-01
+    description: Direct field/index creation on the existing conversation table with no data changes.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Repeatability preserves pins and the catalog excludes the superseded separate-table sequence.
+    steps:
+    - 2
+    - 3
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: Fresh and populated UTC TIMESTAMP pin schemas retain values, precision, order and indexes across database timezones.
+    steps: [4]
+    expected_results: [3]
+    forbidden_side_effects: [1]

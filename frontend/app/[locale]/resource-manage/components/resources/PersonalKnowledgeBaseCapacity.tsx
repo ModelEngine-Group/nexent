@@ -1,4 +1,8 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
+
+import { useUserDisplayName } from "@/hooks/auth/useUserDisplayName";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -23,7 +27,7 @@ import {
 } from "antd";
 import { Search, Settings2 } from "lucide-react";
 import { ColumnsType, TableProps } from "antd/es/table";
-import { useAuthorization } from "@/hooks/auth/useAuthorization";
+import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useTenantList } from "@/hooks/tenant/useTenantList";
 import { USER_ROLES } from "@/const/auth";
 import { ErrorCode } from "@/const/errorCode";
@@ -371,11 +375,19 @@ function KbDetailModal({ kb, onClose }: KbDetailModalProps) {
       : kb.quota_limit_readable || formatBytes(kb.quota_limit_bytes);
   const stats = [
     {
-      label: t("tenantResources.personalCapacity.storeSizeLabel"),
+      label: t("tenantResources.personalCapacity.sourceSizeLabel"),
       value:
-        kb.total_size ||
+        kb.source_size ||
+        (kb.source_size_bytes != null
+          ? formatBytes(kb.source_size_bytes)
+          : "-"),
+    },
+    {
+      label: t("tenantResources.personalCapacity.esPhysicalSizeLabel"),
+      value:
+        kb.es_physical_size ||
         kb.store_size ||
-        formatBytes(kb.total_size_bytes ?? kb.store_size_bytes),
+        formatBytes(kb.es_physical_size_bytes ?? kb.store_size_bytes),
     },
     {
       label: t("tenantResources.personalCapacity.documents"),
@@ -455,7 +467,8 @@ export default function PersonalKnowledgeBaseCapacity({
   tenantId: string | null;
 }) {
   const { t } = useTranslation("common");
-  const { user, hasPermission } = useAuthorization();
+  const { user, hasPermission } = useAuthorizationContext();
+  const displayName = useUserDisplayName();
   const userRole = user?.role ?? "";
   const isSuperAdmin =
     userRole === USER_ROLES.SU || userRole === USER_ROLES.SPEED;
@@ -723,6 +736,11 @@ export default function PersonalKnowledgeBaseCapacity({
         value: summary?.total_readable || formatBytes(summary?.total_bytes),
       },
       {
+        key: "es-usage",
+        label: t("tenantResources.personalCapacity.esPhysicalSize"),
+        value: summary?.total_es_physical_readable || "0 B",
+      },
+      {
         key: "allocated",
         label: t("tenantResources.personalCapacity.allocatedQuota"),
         value:
@@ -776,9 +794,17 @@ export default function PersonalKnowledgeBaseCapacity({
       ),
       render: (_: unknown, record: PersonalCapacityUser) => (
         <div className="min-w-0">
-          <Tooltip title={record.user_name || record.user_id}>
+          <Tooltip
+            title={displayName(
+              record.cas_username,
+              record.user_name || record.user_id
+            )}
+          >
             <div className="font-medium truncate max-w-[160px]">
-              {record.user_name || record.user_id}
+              {displayName(
+                record.cas_username,
+                record.user_name || record.user_id
+              )}
             </div>
           </Tooltip>
           {record.email && (
@@ -808,6 +834,14 @@ export default function PersonalKnowledgeBaseCapacity({
       sortOrder: sortOrderFor("total_bytes"),
       render: (_: unknown, record: PersonalCapacityUser) =>
         record.total_readable || formatBytes(record.total_bytes),
+    },
+    {
+      title: t("tenantResources.personalCapacity.esPhysicalSize"),
+      dataIndex: "es_physical_bytes",
+      key: "es_physical_bytes",
+      width: 150,
+      render: (_: unknown, record: PersonalCapacityUser) =>
+        record.es_physical_readable || formatBytes(record.es_physical_bytes),
     },
     {
       title: t("tenantResources.personalCapacity.quota"),
@@ -940,14 +974,25 @@ export default function PersonalKnowledgeBaseCapacity({
       render: (value: number) => value ?? 0,
     },
     {
-      title: t("tenantResources.personalCapacity.storeSize"),
-      dataIndex: "store_size",
-      key: "store_size",
+      title: t("tenantResources.personalCapacity.sourceSize"),
+      dataIndex: "source_size",
+      key: "source_size",
       width: 130,
       render: (value: string | null, record: PersonalKnowledgeBaseItem) =>
-        record.total_size ||
         value ||
-        formatBytes(record.total_size_bytes ?? record.store_size_bytes),
+        (record.source_size_bytes != null
+          ? formatBytes(record.source_size_bytes)
+          : "-"),
+    },
+    {
+      title: t("tenantResources.personalCapacity.esPhysicalSize"),
+      dataIndex: "es_physical_size",
+      key: "es_physical_size",
+      width: 130,
+      render: (value: string | null, record: PersonalKnowledgeBaseItem) =>
+        value ||
+        record.store_size ||
+        formatBytes(record.es_physical_size_bytes ?? record.store_size_bytes),
     },
     {
       title: t("tenantResources.personalCapacity.kbQuota"),
@@ -1012,7 +1057,7 @@ export default function PersonalKnowledgeBaseCapacity({
 
   return (
     <div className="flex flex-col h-full overflow-hidden gap-3">
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 px-1">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 px-1">
         {statCards.map((card) => (
           <div
             key={card.key}

@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Private deployed TPC fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "runtime",
+    "provider",
+    "token",
+    "agent_id",
+    "real_agent_id",
+    "real_model_name"
+  ],
+  "properties": {
+    "base": {
+      "type": "string",
+      "format": "uri"
+    },
+    "web": {
+      "type": "string",
+      "format": "uri"
+    },
+    "runtime": {
+      "type": "string",
+      "format": "uri"
+    },
+    "provider": {
+      "type": "string",
+      "format": "uri"
+    },
+    "agent_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "real_agent_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "model_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "writeOnly": true
+    },
+    "admin_token": {
+      "type": "string",
+      "minLength": 1,
+      "writeOnly": true
+    },
+    "user_token": {
+      "type": "string",
+      "minLength": 1,
+      "writeOnly": true
+    },
+    "real_model_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "agent_display": {
+      "type": "string"
+    },
+    "skill_name": {
+      "type": "string"
+    },
+    "nonce": {
+      "type": "string"
+    },
+    "version_no": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "real_version_no": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

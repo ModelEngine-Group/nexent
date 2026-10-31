@@ -3,6 +3,7 @@
 import { API_ENDPOINTS } from "./api";
 import { STATUS_CODES } from "@/const/auth";
 import { getAuthHeaders } from "@/lib/auth";
+import { buildEvaluationTaskQuery } from "@/lib/evaluationTaskFilters";
 
 import type {
   AgentEvaluationCase,
@@ -100,19 +101,18 @@ export const evaluationService = {
     return result.data;
   },
 
-  listAgentEvaluationsByAgent: async (
-    agentId: number,
+  listAgentEvaluations: async (
+    agentIds: number[],
     params?: { limit?: number; offset?: number }
   ): Promise<AgentEvaluationRun[]> => {
     const url = new URL(
-      API_ENDPOINTS.agentEvaluations.listByAgent,
+      API_ENDPOINTS.agentEvaluations.list,
       window.location.origin
     );
-    url.searchParams.set("agent_id", String(agentId));
-    if (params?.limit != null)
-      url.searchParams.set("limit", String(params.limit));
-    if (params?.offset != null)
-      url.searchParams.set("offset", String(params.offset));
+    const query = new URLSearchParams(buildEvaluationTaskQuery(agentIds));
+    if (params?.limit != null) query.set("limit", String(params.limit));
+    if (params?.offset != null) query.set("offset", String(params.offset));
+    url.search = query.toString();
 
     const resp = await fetch(url.toString(), { headers: getAuthHeaders() });
     const result = await resp.json();

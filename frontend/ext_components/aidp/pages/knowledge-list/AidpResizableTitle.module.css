@@ -1,0 +1,33 @@
+.columnResizeHandle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 10;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.columnResizeHandle::after {
+  position: absolute;
+  right: 3px;
+  top: 25%;
+  height: 50%;
+  width: 1px;
+  background: #c9c9c9;
+  content: "";
+  opacity: 0;
+}
+
+.columnResizeHandle:hover::after,
+.columnResizeHandle:focus-visible::after {
+  background: var(--aidp-primary);
+  opacity: 1;
+}
+
+.columnResizeHandle:focus-visible {
+  outline: 1px solid var(--aidp-primary);
+  outline-offset: -1px;
+}

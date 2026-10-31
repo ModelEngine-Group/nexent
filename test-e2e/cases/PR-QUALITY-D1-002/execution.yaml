@@ -1,0 +1,13 @@
+schema_version: '1.0'
+case_id: PR-QUALITY-D1-002
+implementations:
+- framework: vitest
+  file: test.test.tsx
+  selector: PR-QUALITY-D1-002
+timeout_seconds: 180
+acceptance_bindings:
+  AC-01:
+  - '[PR-QUALITY-D1-002] Preserved knowledge dialog lifecycle > keeps knowledge configuration
+    props and resets transient state on close'
+  - '[PR-QUALITY-D1-002] Preserved knowledge dialog lifecycle > keeps warning content
+    and isolated cancel/confirm callbacks'

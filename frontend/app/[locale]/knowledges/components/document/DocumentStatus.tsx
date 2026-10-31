@@ -10,10 +10,12 @@ import log from "@/lib/logger";
 interface DocumentStatusProps {
   status: string;
   showIcon?: boolean;
+  errorCode?: string;
   errorReason?: string;
   suggestion?: string;
   kbId?: string;
   docId?: string;
+  fileId?: string;
   // Optional ingestion progress metrics
   processedChunkNum?: number | null;
   totalChunkNum?: number | null;
@@ -37,15 +39,18 @@ const inferErrorCodeFromReason = (errorReason?: string): string | null => {
 export const DocumentStatus: React.FC<DocumentStatusProps> = ({
   status,
   showIcon = false,
+  errorCode,
   errorReason,
   suggestion,
   kbId,
   docId,
+  fileId,
   processedChunkNum,
   totalChunkNum,
 }) => {
   const { t } = useTranslation();
   const [errorCodeState, setErrorCodeState] = useState<string | null>(null);
+  const [errorReasonState, setErrorReasonState] = useState<string | null>(null);
   const [isPopoverOpen, setIsPopoverOpen] = useState(false);
   const [isFetching, setIsFetching] = useState(false);
   const [hasFetched, setHasFetched] = useState(false);
@@ -53,8 +58,9 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
   useEffect(() => {
     // If parent props change (e.g. list refreshed), reset state
     setErrorCodeState(null);
+    setErrorReasonState(null);
     setHasFetched(false);
-  }, [kbId, docId]);
+  }, [kbId, docId, fileId]);
 
   // Map API status to display status
   const getDisplayStatus = (apiStatus: string): string => {
@@ -189,11 +195,13 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
     try {
       const result = await knowledgeBaseService.getDocumentErrorInfo(
         kbId,
-        docId
+        docId,
+        fileId
       );
 
       // Set error code - frontend will handle localization
       setErrorCodeState(result.errorCode ?? null);
+      setErrorReasonState(result.errorReason ?? null);
     } catch (error) {
       log.error("Failed to fetch document error info:", error);
     } finally {
@@ -210,7 +218,8 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
       docId &&
       !isFetching &&
       !hasFetched &&
-      !errorCodeState
+      !errorCodeState &&
+      !errorCode
     ) {
       fetchErrorInfo();
     }
@@ -218,8 +227,15 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
 
   // Keep old task records compatible when only the backend error reason is available.
   const localizedError = getLocalizedError(
-    errorCodeState || inferErrorCodeFromReason(errorReason)
+    errorCodeState ||
+      errorCode ||
+      inferErrorCodeFromReason(errorReasonState || errorReason)
   );
+  const effectiveErrorCode =
+    errorCodeState ||
+    errorCode ||
+    inferErrorCodeFromReason(errorReasonState || errorReason);
+  const rawErrorReason = errorReasonState || errorReason;
 
   const popoverContent = (
     <div className="max-w-md">
@@ -245,7 +261,9 @@ export const DocumentStatus: React.FC<DocumentStatusProps> = ({
         </div>
       ) : (
         <div className="text-sm text-gray-500">
-          {t("document.error.noReason")}
+          {effectiveErrorCode
+            ? t("document.error.code.unknown")
+            : rawErrorReason || t("document.error.noReason")}
         </div>
       )}
     </div>

@@ -1,0 +1,39 @@
+schema_version: '1.0'
+change:
+  change_id: WB-SKILL-STREAM-UPDATES-20261030
+  change_type: bugfix
+  bug_id: WB-SKILL-STREAM-UPDATES-20261030
+  title: Keep streamed Skill drafts out of composer configuration writes
+  description: Resolve the current Skill snapshot when starting a request rather than rewriting composer configuration for every file chunk.
+  observed_behavior: Workbench Skill streaming reports Maximum update depth exceeded; each file fragment writes composer run configuration.
+  expected_behavior: File fragments update the visible draft without writing composer configuration; continuation requests include the latest files.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing lifecycle and stream tests verify file content but do not assert configuration write counts during streaming.
+  feature_contract_changed: false
+  affected_features:
+    existing: [SYS-AGENT-LIFECYCLE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - frontend/tests/workbench/WorkbenchPageLifecycle.test.tsx
+      - frontend/tests/workbench/SkillCreationReasoningStream.test.ts
+    behaviors:
+      - One hundred file fragments update visible files without additional composer configuration writes or remounting the input.
+      - A request resolves the latest draft once and preserves legacy static snapshots.
+      - Local thread restoration and retry rollback preserve generated files.
+    reason: Local React lifecycle and adapter request boundaries are covered by frontend UT; Python behavior is unchanged.
+  notes: >-
+    SPEC ../nexent-doc/docs/Developing/chat-shared-system-agents/design.md, Skill streaming configuration synchronization.
+    Before the fix the new lifecycle regression observes 102 configuration writes instead of 2.
+    No new formal D1 duplicates local state/request UT. Existing SYS-AGENT-D5-001 concerns
+    identity and persistence and is unaffected. Browser reproduction remains separate from UT evidence.

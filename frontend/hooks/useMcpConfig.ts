@@ -460,7 +460,14 @@ export function useMcpConfig(options: UseMcpConfigOptions = {}) {
       } else {
         invalidateMcpContainers();
         invalidateMcpServers();
-        return { success: false, message: result.message, messageKey: "mcpConfig.message.uploadImageFailed" };
+        const isNameConflict = /already exists|name conflict|name already used/i.test(result.message || "");
+        return {
+          success: false,
+          message: result.message,
+          messageKey: isNameConflict
+            ? "mcpService.message.serviceNameAlreadyExists"
+            : "mcpConfig.message.uploadImageFailed",
+        };
       }
     } catch (error) {
       log.error("Failed to upload image:", error);

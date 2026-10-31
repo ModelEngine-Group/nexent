@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-PW-A2A-PUBLISH-01
+  name: 本地Agent发布为A2A→外部发现/调用Smoke
+  status: active
+  description: 发布本地Agent后通过真实北向入口发现和调用；未携带Message.metadata的普通调用无需开启allow_chat_metadata，显式metadata继续遵守现有权限策略。
+  business_rules:
+  - rule_id: V5-PW-A2A-PUBLISH-01-RULE-01
+    description: 本地Agent发布为A2A→外部发现/调用Smoke; publish success selects the editor publication tab, with access information
+      and A2A state consistent with the published agent.
+  required_test_stages:
+  - D4
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

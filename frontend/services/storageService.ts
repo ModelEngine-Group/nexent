@@ -1,3 +1,5 @@
+// Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+
 import { API_BASE_URL, API_ENDPOINTS } from "./api";
 import { StorageUploadResult } from "../types/chat";
 import { arrayBufferToBase64 } from "@/lib/agentImportUtils";
@@ -142,6 +144,24 @@ export function getLocalFilePreviewUrl(
 }
 
 /**
+ * Convert a permanent local-storage reference into an authenticated backend
+ * download URL. The permanent reference (normally s3://bucket/object_name) is
+ * safe to persist in Markdown; the browser-facing URL is derived at render
+ * time and therefore never contains an expiring MinIO signature.
+ */
+export function getLocalFileDownloadUrl(
+  url: string | undefined,
+  filename?: string
+): string | undefined {
+  if (!url || !isLocalStorageObjectUrl(url)) return undefined;
+
+  const objectName = extractObjectNameFromUrl(url);
+  if (!objectName) return undefined;
+
+  return API_ENDPOINTS.storage.file(objectName, "stream", filename);
+}
+
+/**
  * Convert image URL to backend API URL
  * @param url Original image URL (can be MinIO URL or local path)
  * @returns Backend API URL for the image
@@ -150,9 +170,6 @@ export async function fetchImageBlob(url: string): Promise<Blob> {
   const apiUrl = convertImageUrlToApiUrl(url);
   log.info(`[fetchImageBlob] input=${url}, apiUrl=${apiUrl}`);
   const response = await fetch(apiUrl);
-  log.info(
-    `[fetchImageBlob] status=${response.status}, contentType=${response.headers.get("content-type")}`
-  );
   if (!response.ok) {
     throw new Error(
       `Failed to fetch image: ${response.status} ${response.statusText}`
@@ -197,6 +214,11 @@ export function convertImageUrlToApiUrl(url: string): string {
   // Backend share URLs do not include the frontend base path.
   if (url.startsWith("/api/share/")) {
     return withBasePath(url);
+  }
+
+  // Protected AIDP images require the backend-owned credential on every host.
+  if (isHttpUrl && url.includes("/KnowledgeBase/Tenants/")) {
+    return API_ENDPOINTS.proxy.image(url);
   }
 
   // For localhost URLs in development, return original URL directly to avoid proxy issues

@@ -1,21 +1,72 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import {
   API_ENDPOINTS,
+  ApiError,
   fetchWithErrorHandling,
   toApiError,
-  type ApiError,
 } from "./api";
 
 import { NAME_CHECK_STATUS } from "@/const/agentConfig";
-import { getAuthHeaders } from "@/lib/auth";
+import { fetchWithAuth, getAuthHeaders } from "@/lib/auth";
 import { convertParamType } from "@/lib/utils";
 import log from "@/lib/logger";
+import { extractFilenameFromContentDisposition } from "@/lib/downloadFilename";
+import type { Agent } from "@/types/agentConfig";
 import yaml from "js-yaml";
 import type { SkillFileNode } from "@/types/skill";
+import type { TagResourcePredicate } from "@/types/tagManagement";
 
-/** Normalize tags field: Ant Design mode="tags" sends a string when only one tag is entered. */
-function normalizeTags(tags: unknown): string[] {
-  if (Array.isArray(tags)) return tags;
-  if (typeof tags === "string" && tags.trim() !== "") return [tags.trim()];
+/**
+ * Normalize tags field into a string array.
+ * Ant Design mode="tags" sends a string when only one tag is entered, and
+ * malformed/persisted data may also carry a non-array tags value, including a
+ * stringified array such as "['tag1', 'tag2']" or '["a", "b"]'. A plain
+ * non-empty scalar is treated as a single tag; anything else becomes an array.
+ */
+export function normalizeTags(tags: unknown): string[] {
+  if (Array.isArray(tags)) return cleanTagList(tags);
+  if (typeof tags === "string") {
+    const trimmed = tags.trim();
+    if (trimmed === "") return [];
+    const parsed = parseStringifiedTagArray(trimmed);
+    if (parsed !== null) return parsed;
+    return [trimmed];
+  }
+  return [];
+}
+
+function cleanTagList(values: unknown[]): string[] {
+  return values
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter((value) => value !== "");
+}
+
+/**
+ * Recover individual tags from a stringified array, or return null when the
+ * value does not look like an array. Array-like input that cannot be parsed
+ * yields an empty array so an unrecoverable value is ignored, not rendered.
+ */
+function parseStringifiedTagArray(value: string): string[] | null {
+  if (!value.startsWith("[") || !value.endsWith("]")) return null;
+  const candidates = [
+    value,
+    value
+      .replace(/"/g, "`")
+      .replace(/'/g, '"')
+      .replace(/\bTrue\b/g, "true")
+      .replace(/\bFalse\b/g, "false")
+      .replace(/\bNone\b/g, "null"),
+  ];
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed)) return cleanTagList(parsed);
+    } catch {
+      // Try the next candidate representation.
+    }
+  }
   return [];
 }
 
@@ -108,6 +159,7 @@ export const fetchTools = async () => {
           : [],
       updated_by: tool.updated_by || "",
       updated_by_name: tool.updated_by_name || "",
+      updated_by_cas_username: tool.updated_by_cas_username,
       inputs: tool.inputs,
       initParams: tool.params.map((param: any) => {
         return {
@@ -117,6 +169,14 @@ export const fetchTools = async () => {
           value: param.default,
           description: param.description,
           description_zh: param.description_zh,
+          // Bind Pydantic Field constraints (ge/le/gt/lt/...) so the
+          // config modal can validate non-required numeric params.
+          constraints:
+            param.constraints &&
+            typeof param.constraints === "object" &&
+            Object.keys(param.constraints).length > 0
+              ? param.constraints
+              : undefined,
         };
       }),
     }));
@@ -141,6 +201,102 @@ export const fetchTools = async () => {
  * @param tenantId optional tenant ID for filtering
  * @returns list of agents with basic info (id, name, description, is_available)
  */
+type AgentListApiItem = {
+  agent_id: number | string;
+  name: string;
+  display_name?: string;
+  description: string;
+  author?: string;
+  author_cas_username?: string | null;
+  created_by?: string | null;
+  create_time?: string;
+  update_time?: string;
+  tags?: unknown;
+  model_ids?: number[];
+  model_id?: number;
+  model_names?: string[];
+  model_name?: string;
+  is_available?: boolean;
+  unavailable_reasons?: string[];
+  group_ids?: number[];
+  is_new?: boolean;
+  permission?: "EDIT" | "READ_ONLY";
+  is_published?: boolean;
+  current_version_no?: number;
+  version_label?: string | null;
+  version_create_time?: string | null;
+  is_main_agent?: boolean;
+  is_a2a_server?: boolean;
+  allow_chat_metadata?: boolean;
+  enable_protocol_repair_retry?: boolean;
+  model_params_override?: Agent["model_params_override"];
+  icon_url?: string;
+  repository_info?: Agent["repository_info"];
+};
+
+const formatAgentListItem = (agent: AgentListApiItem): Agent =>
+  ({
+    id: String(agent.agent_id),
+    name: agent.name,
+    display_name: agent.display_name || agent.name,
+    description: agent.description,
+    author: agent.author,
+    author_cas_username: agent.author_cas_username,
+    created_by: agent.created_by,
+    create_time: agent.create_time,
+    update_time: agent.update_time,
+    tags: normalizeTags(agent.tags),
+    model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
+    model_names:
+      agent.model_names || (agent.model_name ? [agent.model_name] : []),
+    is_available: agent.is_available,
+    unavailable_reasons: agent.unavailable_reasons || [],
+    group_ids: agent.group_ids || [],
+    is_new: agent.is_new || false,
+    permission: agent.permission,
+    is_published: agent.is_published,
+    current_version_no: agent.current_version_no,
+    version_label: agent.version_label,
+    version_create_time: agent.version_create_time,
+    is_main_agent: agent.is_main_agent,
+    is_a2a_server: agent.is_a2a_server || false,
+    allow_chat_metadata: agent.allow_chat_metadata ?? false,
+    enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
+    model_params_override: agent.model_params_override ?? null,
+    icon_url: agent.icon_url,
+    repository_info: agent.repository_info,
+  }) as unknown as Agent;
+
+export type AgentListFilters = {
+  tenantId?: string | null;
+  enabled?: boolean;
+  includeRepositoryInfo?: boolean;
+  permission?: "EDIT" | "READ_ONLY";
+  tag?: string;
+  tagPredicates?: TagResourcePredicate[];
+  searchTagPredicates?: TagResourcePredicate[];
+  createdBy?: string;
+  createdByNot?: string;
+  search?: string;
+  page?: number;
+  pageSize?: number;
+  /** When true, request the latest-published-first ordering. */
+  sortByUpdateTime?: boolean;
+};
+
+export type AgentListPagination = {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+};
+
+export type PagedAgentList = {
+  agents: Agent[];
+  pagination: AgentListPagination;
+  creatorCounts?: { all: number; created: number; others: number };
+};
+
 export const fetchAgentList = async (tenantId?: string) => {
   try {
     const trimmedTenantId = tenantId?.trim();
@@ -156,26 +312,7 @@ export const fetchAgentList = async (tenantId?: string) => {
     const data = await response.json();
 
     // convert backend data to frontend format (basic info only)
-    const formattedAgents = data.map((agent: any) => ({
-      id: String(agent.agent_id),
-      name: agent.name,
-      display_name: agent.display_name || agent.name,
-      description: agent.description,
-      author: agent.author,
-      model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
-      model_names:
-        agent.model_names || (agent.model_name ? [agent.model_name] : []),
-      is_available: agent.is_available,
-      unavailable_reasons: agent.unavailable_reasons || [],
-      group_ids: agent.group_ids || [],
-      is_new: agent.is_new || false,
-      permission: agent.permission,
-      is_published: agent.is_published,
-      current_version_no: agent.current_version_no,
-      is_a2a_server: agent.is_a2a_server || false,
-      allow_chat_metadata: agent.allow_chat_metadata ?? false,
-      icon_url: agent.icon_url,
-    }));
+    const formattedAgents = data.map(formatAgentListItem);
 
     return {
       success: true,
@@ -187,6 +324,74 @@ export const fetchAgentList = async (tenantId?: string) => {
     return {
       success: false,
       data: [],
+      message: "agentConfig.agents.listFetchFailed",
+    };
+  }
+};
+
+export const fetchPagedAgentList = async (
+  filters: AgentListFilters
+): Promise<{ success: boolean; data: PagedAgentList; message: string }> => {
+  try {
+    const queryParams = new URLSearchParams();
+    const tenantId = filters.tenantId?.trim();
+    if (tenantId) queryParams.set("tenant_id", tenantId);
+    if (filters.permission) queryParams.set("permission", filters.permission);
+    if (filters.createdBy) queryParams.set("created_by", filters.createdBy);
+    if (filters.createdByNot)
+      queryParams.set("created_by_not", filters.createdByNot);
+    if (filters.tagPredicates?.length)
+      queryParams.set("tag_predicates", JSON.stringify(filters.tagPredicates));
+    if (filters.searchTagPredicates?.length)
+      queryParams.set(
+        "search_tag_predicates",
+        JSON.stringify(filters.searchTagPredicates)
+      );
+    if (filters.tag?.trim()) queryParams.set("tag", filters.tag.trim());
+    if (filters.search?.trim())
+      queryParams.set("search", filters.search.trim());
+    if (filters.includeRepositoryInfo)
+      queryParams.set("include_repository_info", "true");
+    if (filters.sortByUpdateTime)
+      queryParams.set("sort_by_update_time", "true");
+    queryParams.set("page", String(filters.page ?? 1));
+    queryParams.set("page_size", String(filters.pageSize ?? 20));
+
+    const response = await fetch(
+      `${API_ENDPOINTS.agent.listPage}?${queryParams.toString()}`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status}`);
+    }
+    const data = await response.json();
+    return {
+      success: true,
+      data: {
+        agents: (data.items || []).map(formatAgentListItem),
+        creatorCounts: data.creator_counts,
+        pagination: {
+          page: data.pagination.page,
+          pageSize: data.pagination.page_size,
+          total: data.pagination.total,
+          totalPages: data.pagination.total_pages,
+        },
+      },
+      message: "",
+    };
+  } catch (error) {
+    log.error("Failed to fetch paged agent list:", error);
+    return {
+      success: false,
+      data: {
+        agents: [],
+        pagination: {
+          page: filters.page ?? 1,
+          pageSize: filters.pageSize ?? 20,
+          total: 0,
+          totalPages: 0,
+        },
+      },
       message: "agentConfig.agents.listFetchFailed",
     };
   }
@@ -216,6 +421,7 @@ export const fetchPublishedAgentList = async () => {
       display_name: agent.display_name || agent.name,
       description: agent.description,
       author: agent.author,
+      author_cas_username: agent.author_cas_username,
       model_ids: agent.model_ids || (agent.model_id ? [agent.model_id] : []),
       model_names:
         agent.model_names || (agent.model_name ? [agent.model_name] : []),
@@ -230,7 +436,14 @@ export const fetchPublishedAgentList = async () => {
       greeting_message: agent.greeting_message,
       example_questions: agent.example_questions || [],
       allow_chat_metadata: agent.allow_chat_metadata ?? false,
+      model_params_override: agent.model_params_override ?? null,
+      enable_protocol_repair_retry: agent.enable_protocol_repair_retry ?? false,
       icon_url: agent.icon_url,
+      tags: Array.isArray(agent.tags)
+        ? agent.tags.filter(
+            (tag: unknown): tag is string => typeof tag === "string"
+          )
+        : [],
     }));
 
     return {
@@ -244,54 +457,6 @@ export const fetchPublishedAgentList = async () => {
       success: false,
       data: [],
       message: "agentConfig.agents.publishedListFetchFailed",
-    };
-  }
-};
-
-/**
- * get creating sub agent id
- * @param mainAgentId current main agent id
- * @returns new sub agent id
- */
-export const getCreatingSubAgentId = async () => {
-  try {
-    const response = await fetch(API_ENDPOINTS.agent.getCreatingSubAgentId, {
-      method: "GET",
-      headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return {
-      success: true,
-      data: {
-        agentId: data.agent_id,
-        name: data.name,
-        displayName: data.display_name,
-        description: data.description,
-        enabledToolIds: data.enable_tool_id_list || [],
-        modelIds: data.model_ids || (data.model_id ? [data.model_id] : []),
-        modelNames:
-          data.model_names || (data.model_name ? [data.model_name] : []),
-        maxSteps: data.max_steps,
-        requestedOutputTokens: data.requested_output_tokens ?? null,
-        businessDescription: data.business_description,
-        dutyPrompt: data.duty_prompt,
-        constraintPrompt: data.constraint_prompt,
-        fewShotsPrompt: data.few_shots_prompt,
-        sub_agent_id_list: data.sub_agent_id_list || [],
-      },
-      message: "",
-    };
-  } catch (error) {
-    log.error("Failed to get creating sub agent ID:", error);
-    return {
-      success: false,
-      data: null,
-      message: "agentConfig.agents.createSubAgentIdFailed",
     };
   }
 };
@@ -451,24 +616,33 @@ export interface UpdateAgentInfoPayload {
   display_name?: string;
   description?: string;
   author?: string;
-  duty_prompt?: string;
-  constraint_prompt?: string;
-  few_shots_prompt?: string;
+  author_cas_username?: string | null;
+  prompt?: string;
   group_ids?: number[];
   model_ids?: number[];
   max_steps?: number;
   requested_output_tokens?: number | null;
+  // v2.6.0: per-agent overrides for model inference params.
+  // Shape: { "<model_id>": { temperature?: number|null, top_p?: number|null, extra_params?: Record<string, unknown>|null } }
+  model_params_override?: Record<
+    string,
+    {
+      temperature?: number | null;
+      top_p?: number | null;
+      extra_params?: Record<string, unknown> | null;
+    }
+  > | null;
   is_main_agent?: boolean;
   provide_run_summary?: boolean;
   allow_chat_metadata?: boolean;
+  enable_protocol_repair_retry?: boolean;
   enable_context_manager?: boolean;
+  is_a2a?: boolean;
   verification_config?: Record<string, any>;
   enabled?: boolean;
   business_description?: string;
   business_logic_model_name?: string;
   business_logic_model_id?: number;
-  prompt_template_id?: number;
-  prompt_template_name?: string;
   enabled_tool_ids?: number[];
   enabled_skill_ids?: number[];
   skill_instances?: Array<{
@@ -487,28 +661,30 @@ export interface UpdateAgentInfoPayload {
 
 export const updateAgentInfo = async (payload: UpdateAgentInfoPayload) => {
   try {
-    const response = await fetch(API_ENDPOINTS.agent.update, {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.agent.update, {
       method: "POST",
       headers: getAuthHeaders(),
       body: JSON.stringify(payload),
     });
-
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status}`);
-    }
 
     const data = await response.json();
     return {
       success: true,
       data: data,
       message: "Agent updated successfully",
+      error: undefined,
     };
   } catch (error) {
     log.error("Failed to update Agent:", error);
+    const apiError = toApiError(
+      error,
+      "Failed to update Agent, please try again later"
+    );
     return {
       success: false,
       data: null,
-      message: "Failed to update Agent, please try again later",
+      message: apiError.message,
+      error: apiError,
     };
   }
 };
@@ -607,21 +783,11 @@ export const exportAgent = async (agentId: number) => {
 
 /**
  * Extract filename from Content-Disposition header
- * Handles both quoted and unquoted filename values
+ * Handles RFC 5987 filename* (UTF-8 percent-encoded), quoted and unquoted filename values
  * @param contentDisposition The Content-Disposition header value
  * @returns Extracted filename or null if not found
  */
-const extractFilenameFromContentDisposition = (
-  contentDisposition: string | null
-): string | null => {
-  if (!contentDisposition) {
-    return null;
-  }
-
-  const regex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
-  const match = regex.exec(contentDisposition);
-  return match?.[1]?.replace(/['"]/g, "").trim() ?? null;
-};
+export { extractFilenameFromContentDisposition };
 
 /**
  * Trigger browser download of a Blob
@@ -712,17 +878,29 @@ export const importAgent = async (
       const errorData = await response.json().catch(() => ({}));
       const errMsg = errorData?.message ?? errorData?.detail;
       if (typeof errMsg === "object" && errMsg !== null) {
+        const apiError = new ApiError(
+          errorData?.code ?? response.status,
+          typeof errorData?.message === "string"
+            ? errorData.message
+            : errMsg?.type === "skill_duplicate"
+              ? "Skill name conflict detected"
+              : "Failed to import Agent, please try again later",
+          errorData?.details
+        );
         return {
           success: false,
           data: { detail: errMsg },
-          message:
-            errMsg?.type === "skill_duplicate"
-              ? "Skill name conflict detected"
-              : (errorData?.message ??
-                "Failed to import Agent, please try again later"),
+          message: apiError.message,
+          error: apiError,
         };
       }
-      const error = new Error(`Request failed: ${response.status}`);
+      const error = new ApiError(
+        errorData?.code ?? response.status,
+        typeof errMsg === "string"
+          ? errMsg
+          : `Request failed: ${response.status}`,
+        errorData?.details
+      );
       (error as any).detail = errMsg;
       throw error;
     }
@@ -732,13 +910,19 @@ export const importAgent = async (
       success: true,
       data: data,
       message: "Agent imported successfully",
+      error: undefined,
     };
   } catch (error) {
     log.error("Failed to import Agent:", error);
+    const apiError = toApiError(
+      error,
+      "Failed to import Agent, please try again later"
+    );
     return {
       success: false,
       data: (error as any).detail ? { detail: (error as any).detail } : null,
-      message: "Failed to import Agent, please try again later",
+      message: apiError.message,
+      error: apiError,
     };
   }
 };
@@ -809,6 +993,36 @@ export const checkAgentNameConflictBatch = async (payload: {
       message: "agentConfig.agents.checkNameFailed",
     };
   }
+};
+
+/**
+ * Generate unique copy names by appending a numeric suffix when the base
+ * name/display_name already exists in the tenant. Mirrors the backend
+ * import-link deduplication (base_1, base_2, ...).
+ */
+export const generateUniqueCopyName = async (
+  baseName: string,
+  baseDisplayName: string
+): Promise<{ name: string; display_name: string }> => {
+  let name = baseName;
+  let displayName = baseDisplayName;
+
+  // Probe at most 100 suffix candidates, matching the backend limit.
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const result = await checkAgentNameConflictBatch({
+      items: [{ name, display_name: displayName }],
+    });
+    if (!result.success || !Array.isArray(result.data)) {
+      throw new Error("Failed to check agent name conflict");
+    }
+    const conflict = result.data[0];
+    if (!conflict?.name_conflict && !conflict?.display_name_conflict) {
+      return { name, display_name: displayName };
+    }
+    name = `${baseName}_${attempt + 1}`;
+    displayName = `${baseDisplayName}_${attempt + 1}`;
+  }
+  throw new Error("Failed to generate unique agent name after max attempts");
 };
 
 export const regenerateAgentNameBatch = async (payload: {
@@ -885,6 +1099,7 @@ export const searchAgentInfo = async (
       display_name: data.display_name,
       description: data.description,
       author: data.author,
+      author_cas_username: data.author_cas_username,
       icon_url: data.icon_url,
       model:
         data.model_name ||
@@ -896,16 +1111,15 @@ export const searchAgentInfo = async (
         data.model_names || (data.model_name ? [data.model_name] : []),
       max_step: data.max_steps,
       requested_output_tokens: data.requested_output_tokens ?? null,
+      // v2.6.0: per-agent model params override (model_id -> { temperature, top_p, extra_params })
+      model_params_override: data.model_params_override ?? null,
       is_main_agent: data.is_main_agent ?? true,
-      duty_prompt: data.duty_prompt,
-      constraint_prompt: data.constraint_prompt,
-      few_shots_prompt: data.few_shots_prompt,
+      prompt: data.prompt,
       business_description: data.business_description,
       business_logic_model_name: data.business_logic_model_name,
       business_logic_model_id: data.business_logic_model_id,
-      prompt_template_id: data.prompt_template_id ?? 0,
-      prompt_template_name: data.prompt_template_name ?? "system_default",
       provide_run_summary: data.provide_run_summary,
+      is_a2a: data.is_a2a ?? false,
       verification_config: data.verification_config,
       enabled: data.enabled,
       is_available: data.is_available,
@@ -963,6 +1177,14 @@ export const searchAgentInfo = async (
                     value: param.default,
                     description: param.description,
                     description_zh: param.description_zh,
+                    // Bind Pydantic Field constraints (ge/le/gt/lt/...) so the
+                    // config modal can validate non-required numeric params.
+                    constraints:
+                      param.constraints &&
+                      typeof param.constraints === "object" &&
+                      Object.keys(param.constraints).length > 0
+                        ? param.constraints
+                        : undefined,
                   }))
                 : [],
             };
@@ -973,6 +1195,7 @@ export const searchAgentInfo = async (
       example_questions: data.example_questions || [],
       current_version_no: data.current_version_no,
       allow_chat_metadata: data.allow_chat_metadata ?? false,
+      enable_protocol_repair_retry: data.enable_protocol_repair_retry ?? false,
     };
 
     return {
@@ -1011,6 +1234,7 @@ export const fetchAllAgents = async () => {
       display_name: agent.display_name || agent.name,
       description: agent.description,
       author: agent.author,
+      author_cas_username: agent.author_cas_username,
       is_available: agent.is_available,
       is_new: agent.is_new || false,
     }));
@@ -1143,7 +1367,8 @@ export const validateTool = async (
   source: string,
   usage: string,
   inputs: Record<string, any> | null = null,
-  params: Record<string, any> | null = null
+  params: Record<string, any> | null = null,
+  language: "zh" | "en" = "zh"
 ) => {
   try {
     const requestBody = {
@@ -1152,6 +1377,7 @@ export const validateTool = async (
       usage: usage,
       inputs: inputs,
       params: params,
+      language,
     };
 
     const response = await fetch(API_ENDPOINTS.tool.validate, {
@@ -1202,7 +1428,7 @@ export const fetchSkills = async (tenantId?: string | null) => {
       name: skill.name,
       description: skill.description || "",
       source: skill.source || "custom",
-      tags: skill.tags || [],
+      tags: normalizeTags(skill.tags),
       content: skill.content || "",
       config_schemas: skill.config_schemas ?? null,
       config_values: skill.config_values ?? null,
@@ -1391,7 +1617,7 @@ export const createSkill = async (skillData: {
       requestBody.ingroup_permission = skillData.ingroup_permission;
     }
 
-    const response = await fetch(API_ENDPOINTS.skills.create, {
+    const response = await fetchWithErrorHandling(API_ENDPOINTS.skills.create, {
       method: "POST",
       headers: {
         ...getAuthHeaders(),
@@ -1400,17 +1626,13 @@ export const createSkill = async (skillData: {
       body: JSON.stringify(requestBody),
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `Request failed: ${response.status}`);
-    }
-
     const data = await response.json();
 
     return {
       success: true,
       data: data,
       message: "",
+      error: null,
     };
   } catch (error) {
     log.error("Error creating skill:", error);
@@ -1419,6 +1641,7 @@ export const createSkill = async (skillData: {
       data: null,
       message:
         error instanceof Error ? error.message : "Failed to create skill",
+      error,
     };
   }
 };
@@ -1628,30 +1851,11 @@ export const createSkillFromFile = async (
       "User-Agent": "AgentFrontEnd/1.0",
     };
 
-    const response = await fetch(endpoint, {
+    const response = await fetchWithAuth(endpoint, {
       method: method,
       headers: headers,
       body: formData,
     });
-
-    if (!response.ok) {
-      let errorData: any = {};
-      try {
-        errorData = await response.json();
-      } catch {
-        // JSON parse failed
-      }
-
-      const errorMessage =
-        typeof errorData.detail === "string"
-          ? errorData.detail
-          : Array.isArray(errorData.detail)
-            ? errorData.detail
-                .map((e: any) => e.msg || JSON.stringify(e))
-                .join("; ")
-            : JSON.stringify(errorData.detail);
-      throw new Error(errorMessage || `Request failed: ${response.status}`);
-    }
 
     const data = await response.json();
 
@@ -1659,6 +1863,7 @@ export const createSkillFromFile = async (
       success: true,
       data: data,
       message: "",
+      error: null,
     };
   } catch (error) {
     log.error("Error creating skill from file:", error);
@@ -1669,6 +1874,7 @@ export const createSkillFromFile = async (
         error instanceof Error
           ? error.message
           : "Failed to create skill from file",
+      error,
     };
   }
 };

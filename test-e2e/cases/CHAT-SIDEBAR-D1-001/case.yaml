@@ -1,0 +1,117 @@
+schema_version: '1.0'
+stage: D1
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-SIDEBAR-D1-001
+  feature_id: CHAT-SIDEBAR
+  requirement_ids:
+  - CHAT-SIDEBAR-REQ-001
+  business_rule_ids:
+  - CHAT-SIDEBAR-RULE-001
+  - CHAT-SIDEBAR-RULE-002
+  - CHAT-SIDEBAR-RULE-009
+  - CHAT-SIDEBAR-RULE-011
+  title: Preserve conversation sidebar and agent batch selection interactions
+  type: FE-COMP
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify ThreadList and batch footer collaborate with persisted metadata,
+    rename, scoped Agent history selection and deletion boundaries.
+  preconditions:
+  - Render actual ThreadList and BatchSidebarFooter with a controlled assistant runtime
+    and conversation service.
+  - Agent conversation IDs and group history are returned by independent scoped queries.
+  test_data:
+    profile: mock
+  steps:
+  - order: 1
+    action: Render saved and unsent threads with generated titles.
+    expected: Only persisted conversation and its server title are visible.
+  - order: 2
+    action: Rename saved conversation with surrounding whitespace.
+    expected: Runtime receives normalized title; parent callback receives local ID,
+      remote ID and normalized title.
+  - order: 3
+    action: Select and confirm batch deletion with server-ID mapping.
+    expected: Deletion receives server ID and deleting the active thread invokes the
+      reset callback.
+  - order: 4
+    action: In agent-chat batch mode, select one Agent group with paged history while
+      another Agent is present.
+    expected: The dedicated Agent ID query includes every active persisted conversation
+      for that Agent, updates the selected/total count, and leaves the other Agent unselected.
+  - order: 5
+    action: Confirm deletion of the selected agent group.
+    expected: The existing batch-delete service receives only that agent's server IDs.
+  - order: 6
+    action: Make the selected Agent's complete conversation-ID query fail.
+    expected: No partial group selection is applied and no deletion is submitted.
+  - order: 7
+    action: Keep one Agent manually expanded and another collapsed, search for a conversation under the collapsed Agent, manually collapse the matching group and repeat searches three times, clear and repeat the same query, search by Agent name and by an unmatched keyword, then clear search. Enter a selected Agent and verify name-only, conversation-title and cleared searches within its recent conversations.
+    expected: Conversation-title matches expand their Agent group; manual collapse applies only to the current query and every subsequent search expands matching conversations again. Agent-name-only matches preserve manual expansion. A query matching both Agent and conversation also expands the group. Unmatched groups disappear, empty results are indicated and clearing search restores manual expansion.
+  expected_results:
+  - Only persisted conversation and its server title are visible.
+  - Runtime receives normalized title; parent callback receives local ID, remote ID
+    and normalized title.
+  - Deletion receives server ID and deleting the active thread invokes the reset callback.
+  - Agent selection includes every scoped history ID and excludes other Agents.
+  - The existing batch-delete service receives only the selected agent's server IDs.
+  - A failed Agent ID query leaves the selection unchanged and does not submit a deletion.
+  - Conversation-title matches expand their Agent group; Agent-name-only matches and clearing search preserve manual expansion.
+  forbidden_side_effects:
+  - No unsent draft displayed and no deletion of an unrelated conversation.
+  - No partial selection or deletion when an Agent ID query fails.
+  - Searching does not rename or delete a conversation.
+  unit_boundary: Actual sidebar components with mocked external assistant runtime
+    and conversation service.
+  inputs:
+  - persisted metadata
+  - remote-ID map
+  - Agent group page and complete Agent conversation IDs
+  - callback spies
+  assertions:
+  - Only persisted conversation and its server title are visible.
+  - Runtime receives normalized title; parent callback receives local ID, remote ID
+    and normalized title.
+  - Deletion receives server ID and deleting the active thread invokes the reset callback.
+  - Agent selection includes every scoped history ID and excludes other Agents.
+  - The existing batch-delete service receives only the selected agent's server IDs.
+  - A failed Agent ID query does not commit partial group selection or call batch deletion.
+  - Search reveals matching conversations under previously collapsed Agent groups; Agent-name-only matches and clearing search preserve manual expansion.
+  acceptance:
+  - id: AC-01
+    description: Visibility, rename and batch deletion preserve the existing contracts.
+    steps:
+    - 1
+    - 2
+    - 3
+    expected_results:
+    - 1
+    - 2
+    - 3
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Agent-group selection resolves all conversations for only that Agent.
+    steps:
+    - 4
+    - 5
+    expected_results:
+    - 4
+    - 5
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: A failed Agent ID query cannot apply or delete a partial selection.
+    steps:
+    - 6
+    expected_results:
+    - 6
+    forbidden_side_effects:
+    - 2
+  - id: AC-04
+    description: Conversation-title matches expand their Agent group, while Agent-name-only matches and clearing search preserve manual expansion without business writes.
+    steps: [7]
+    expected_results: [7]
+    forbidden_side_effects: [3]

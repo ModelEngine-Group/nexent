@@ -1,0 +1,77 @@
+schema_version: '1.0'
+stage: D5
+module: V5-BASELINE
+case:
+  case_id: REL-AUTO-D8CA17756DF9BC52
+  feature_id: V5-REL-AUTO-D8CA17756DF9BC52
+  business_rule_ids:
+  - V5-REL-AUTO-D8CA17756DF9BC52-RULE-01
+  title: 运行取消/停止时 stop_event、SSE 取消与线程/协程回收
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: NL2Agent 草稿配置生成经 agent_run 挂在 runtime_thread_manager 运行时，若取消/停止未置位 stop_event 或线程未被回收，会累积悬挂线程/协程，导致连接泄漏、内存与线程池耗尽，服务逐步退化甚至不可用。
+  preconditions:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env（仅本地测试环境参数；使用 mock/fixture 模型配置，不访问公网模型）'
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env（仅本地测试环境参数；使用 mock/fixture 模型配置，不访问公网模型）'
+  steps:
+  - order: 1
+    action: 本地组件测试环境启动并设置 NEXENT_TEST_HOME；使用 mock 模型配置构造 NL2AgentRunRequest，调用 build_nl2agent_run_info 得到 run_info，确认其为本次运行创建独立
+      threading.Event() 作为 stop_event。
+    expected: 正常边界停止与 SSE 取消两条路径下 stop_event 均被置位，agent 线程收到停止信号并解除阻塞。
+  - order: 2
+    action: 启动 create_nl2agent_stream 生成的异步迭代器 generate()，传入 runtime_thread_manager，记录运行开始前 threading.active_count() 基线。
+    expected: asyncio.CancelledError 原样传播而非吞为伪成功，finally 兜底始终置位 stop_event。
+  - order: 3
+    action: 消费首个 chunk，触发 _Nl2AgentBoundaryObserver 首个 NL2A 载荷命中边界，断言 stop_event.is_set() 为 True（正常早停路径）。
+    expected: 每次停止/取消后线程数回落到基线，连续多次循环无累积增长，无悬挂线程/协程泄漏。
+  - order: 4
+    action: 重新发起一次运行，在流式消费中途取消异步任务（asyncio.CancelledError），确认取消异常原样上抛（未被吞掉）且 finally 分支执行 run_info.stop_event.set()，断言 stop_event.is_set()
+      为 True。
+    expected: 测试可重复执行，日志无明文凭据、无非预期异常。
+  - order: 5
+    action: 等待 worker 线程返回，对比取消/停止后与基线 threading.active_count()，断言线程数回落到基线、无悬挂线程。
+    expected: 测试可重复执行，日志无明文凭据、无非预期异常。
+  - order: 6
+    action: 连续多次（如 20 次）重复“启动→停止/取消”循环，断言每次结束后线程数与基线一致、无累积增长，runtime_thread_manager 无遗留活跃任务。
+    expected: 测试可重复执行，日志无明文凭据、无非预期异常。
+  - order: 7
+    action: 确认日志不输出 API Key/Token/密码，无非预期异常栈；测试结束后释放临时对象，可重复执行。
+    expected: 测试可重复执行，日志无明文凭据、无非预期异常。
+  expected_results:
+  - 正常边界停止与 SSE 取消两条路径下 stop_event 均被置位，agent 线程收到停止信号并解除阻塞。
+  - asyncio.CancelledError 原样传播而非吞为伪成功，finally 兜底始终置位 stop_event。
+  - 每次停止/取消后线程数回落到基线，连续多次循环无累积增长，无悬挂线程/协程泄漏。
+  - 测试可重复执行，日志无明文凭据、无非预期异常。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 04_安全性能可靠性
+    legacy_row: 63
+  risk_type: RELIABILITY
+  risk: NL2Agent 草稿配置生成经 agent_run 挂在 runtime_thread_manager 运行时，若取消/停止未置位 stop_event 或线程未被回收，会累积悬挂线程/协程，导致连接泄漏、内存与线程池耗尽，服务逐步退化甚至不可用。
+  condition:
+  - '- ${NEXENT_TEST_HOME}/config/models.yaml
+
+    - ${NEXENT_TEST_HOME}/config/secrets.env（仅本地测试环境参数；使用 mock/fixture 模型配置，不访问公网模型）'
+  metrics:
+  - 正常边界停止与 SSE 取消两条路径下 stop_event 均被置位，agent 线程收到停止信号并解除阻塞。
+  - asyncio.CancelledError 原样传播而非吞为伪成功，finally 兜底始终置位 stop_event。
+  - 每次停止/取消后线程数回落到基线，连续多次循环无累积增长，无悬挂线程/协程泄漏。
+  - 测试可重复执行，日志无明文凭据、无非预期异常。
+  thresholds:
+  - 正常边界停止与 SSE 取消两条路径下 stop_event 均被置位，agent 线程收到停止信号并解除阻塞。
+  - asyncio.CancelledError 原样传播而非吞为伪成功，finally 兜底始终置位 stop_event。
+  - 每次停止/取消后线程数回落到基线，连续多次循环无累积增长，无悬挂线程/协程泄漏。
+  - 测试可重复执行，日志无明文凭据、无非预期异常。
+  recovery_expectations:
+  - 正常边界停止与 SSE 取消两条路径下 stop_event 均被置位，agent 线程收到停止信号并解除阻塞。
+  - asyncio.CancelledError 原样传播而非吞为伪成功，finally 兜底始终置位 stop_event。
+  - 每次停止/取消后线程数回落到基线，连续多次循环无累积增长，无悬挂线程/协程泄漏。
+  - 测试可重复执行，日志无明文凭据、无非预期异常。

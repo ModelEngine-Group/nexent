@@ -1,10 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
 
-from consts.exceptions import ConversationNotFoundError, ValidationError
-from services.conversation_management_service import (
+from contracts.errors.exceptions import ConversationNotFoundError, ValidationError
+from management.services.conversation.service import (
     update_conversation_knowledge_scope_service,
 )
 
@@ -16,9 +17,9 @@ SCOPE = {
 }
 
 
-@patch("services.conversation_management_service.update_conversation_knowledge_scope")
-@patch("services.conversation_management_service._resolve_knowledge_scope_for_update")
-@patch("services.conversation_management_service.get_conversation")
+@patch("management.services.conversation.service.update_conversation_knowledge_scope")
+@patch("management.services.conversation.service._resolve_knowledge_scope_for_update")
+@patch("management.services.conversation.service.get_conversation")
 def test_update_returns_effective_preview_and_warnings(
     mock_get_conversation, mock_resolve, mock_update
 ):
@@ -55,9 +56,9 @@ def test_update_returns_effective_preview_and_warnings(
     )
 
 
-@patch("services.conversation_management_service.update_conversation_knowledge_scope")
-@patch("services.conversation_management_service._resolve_knowledge_scope_for_update")
-@patch("services.conversation_management_service.get_conversation")
+@patch("management.services.conversation.service.update_conversation_knowledge_scope")
+@patch("management.services.conversation.service._resolve_knowledge_scope_for_update")
+@patch("management.services.conversation.service.get_conversation")
 def test_update_rejects_unavailable_items_before_save(
     mock_get_conversation, mock_resolve, mock_update
 ):
@@ -81,8 +82,8 @@ def test_update_rejects_unavailable_items_before_save(
     mock_update.assert_not_called()
 
 
-@patch("services.conversation_management_service.update_conversation_knowledge_scope")
-@patch("services.conversation_management_service.get_conversation")
+@patch("management.services.conversation.service.update_conversation_knowledge_scope")
+@patch("management.services.conversation.service.get_conversation")
 def test_update_without_agent_preserves_desired_scope(
     mock_get_conversation, mock_update
 ):
@@ -103,7 +104,7 @@ def test_update_without_agent_preserves_desired_scope(
     }]
 
 
-@patch("services.conversation_management_service.get_conversation", return_value=None)
+@patch("management.services.conversation.service.get_conversation", return_value=None)
 def test_update_rejects_inaccessible_conversation(_mock_get_conversation):
     with pytest.raises(ConversationNotFoundError):
         update_conversation_knowledge_scope_service(

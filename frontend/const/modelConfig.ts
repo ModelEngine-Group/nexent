@@ -1,4 +1,10 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { publicAsset } from "@/lib/publicAsset";
+
+export const APP_DISPLAY_NAME = "Nexent";
+export const APP_DISPLAY_DESCRIPTION =
+  "Nexent 是一个开源智能体平台，基于 MCP 工具生态系统，提供灵活的多模态问答、检索、数据分析、处理等能力。";
 
 // Model type constants
 export const MODEL_TYPES = {
@@ -24,7 +30,24 @@ export const MODEL_SOURCES = {
   DASHSCOPE: "dashscope",
   TOKENPONY: "tokenpony",
   VOLCENGINE: "volcengine",
+  DEEPSEEK: "deepseek",
+  ZHIPU: "zhipu",
+  ANTHROPIC: "anthropic",
+  GOOGLE: "google",
+  MISTRAL: "mistral",
+  XAI: "xai",
 } as const;
+
+// Providers exposed by the "Import from provider" flow.
+export const MODEL_IMPORT_PROVIDER_KEYS: readonly string[] = [
+  "silicon",
+  "dashscope",
+  "tokenpony",
+  "openai",
+  "volcengine",
+  "modelengine",
+  "deepseek",
+];
 
 // Model status constants
 export const MODEL_STATUS = {
@@ -33,6 +56,19 @@ export const MODEL_STATUS = {
   CHECKING: "detecting",
   UNCHECKED: "not_detected",
 } as const;
+
+export const DEFAULT_REASONING_EFFORT = "auto" as const;
+
+export const REASONING_EFFORT_VALUES = [
+  "auto",
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
 
 // Icon type constants
 export const ICON_TYPES = {
@@ -52,6 +88,11 @@ export const MODEL_PROVIDER_KEYS = [
   "tokenpony",
   "dashscope",
   "volcengine",
+  "zhipu",
+  "anthropic",
+  "google",
+  "mistral",
+  "xai",
 ] as const;
 
 export type ModelProviderKey = (typeof MODEL_PROVIDER_KEYS)[number];
@@ -68,6 +109,11 @@ export const PROVIDER_HINTS: Record<ModelProviderKey, string> = {
   tokenpony: "tokenpony",
   dashscope: "dashscope",
   volcengine: "bytedance",
+  zhipu: "bigmodel.cn",
+  anthropic: "anthropic",
+  google: "generativelanguage.googleapis.com",
+  mistral: "mistral.ai",
+  xai: "api.x.ai",
 };
 
 // Icon filenames for providers
@@ -82,10 +128,27 @@ export const PROVIDER_ICON_MAP: Record<ModelProviderKey, string> = {
   dashscope: publicAsset("/aliyuncs.png"),
   tokenpony: publicAsset("/tokenpony.png"),
   volcengine: publicAsset("/volcengine.png"),
+  zhipu: publicAsset("/default-icon.png"),
+  anthropic: publicAsset("/default-icon.png"),
+  google: publicAsset("/default-icon.png"),
+  mistral: publicAsset("/default-icon.png"),
+  xai: publicAsset("/default-icon.png"),
 };
 
 export const OFFICIAL_PROVIDER_ICON = publicAsset("/modelengine-logo.png");
 export const DEFAULT_PROVIDER_ICON = publicAsset("/default-icon.png");
+
+// Provider logo filenames for the agent model selection UI. Keys match the
+// lowercased modelFactory/source of a model; entries without a logo fall back
+// to an icon in the component.
+export const MODEL_PROVIDER_LOGOS: Record<string, string> = {
+  deepseek: "/deepseek.png",
+  openai: "/openai.png",
+  qwen: "/qwen.png",
+  silicon: "/siliconflow.png",
+  siliconflow: "/siliconflow.png",
+  modelengine: "/modelengine.png",
+};
 
 // Provider official website links
 export const PROVIDER_LINKS: Record<string, string> = {
@@ -100,6 +163,11 @@ export const PROVIDER_LINKS: Record<string, string> = {
   dashscope: "https://dashscope.aliyun.com/",
   tokenpony: "https://www.tokenpony.cn/",
   volcengine: "https://www.volcengine.com/",
+  zhipu: "https://open.bigmodel.cn/",
+  anthropic: "https://www.anthropic.com/",
+  google: "https://ai.google.dev/gemini-api/docs/openai",
+  mistral: "https://docs.mistral.ai/",
+  xai: "https://docs.x.ai/",
 };
 
 // User role constants

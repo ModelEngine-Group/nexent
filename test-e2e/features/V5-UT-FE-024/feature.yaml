@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: V5-UT-FE-024
+  name: transport/url/header/env/port/group/shared-fields校验与状态
+  status: active
+  description: transport/url/header/env/port/group/shared-fields校验与状态
+  business_rules:
+  - rule_id: V5-UT-FE-024-RULE-01
+    description: transport/url/header/env/port/group/shared-fields校验与状态
+  required_test_stages:
+  - D1
+  source:
+    notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

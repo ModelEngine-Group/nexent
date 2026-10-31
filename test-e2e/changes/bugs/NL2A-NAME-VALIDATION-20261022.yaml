@@ -1,0 +1,50 @@
+schema_version: '1.0'
+change:
+  change_id: NL2A-NAME-VALIDATION-20261022
+  change_type: bugfix
+  bug_id: NL2A-NAME-VALIDATION-20261022
+  title: Align NL2Agent name validation with backend runtime and storage
+  description: Restore explicit name constraints using backend import/runtime identifier rules and the 100-character storage limit.
+  observed_behavior: The MCP patch model rejects agent_170 before reaching the draft save service because it requires an _assistant suffix and additional format/length constraints.
+  expected_behavior: Name values are 1–100-character Python identifiers excluding Python keywords, with Unicode allowed and no required suffix; existing authorization, patch allowlist, initial naming, duplicate and persistence rules remain unchanged.
+  escaped_stage: D1
+  coverage_gap:
+    type: missing_boundary
+    description: Existing UT requires a suffix; the AGT-003 contract repeats that requirement while its broad legacy script does not assert detailed naming behavior.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [F-045]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AGT-003]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Valid Python identifiers including Unicode and suffix-free names of 1–100 characters pass unchanged; empty, whitespace, punctuation, digit-leading, keyword and overlong names fail without writes
+    - Bilingual prompts allow one regenerated-name retry after a retryable duplicate failure; successful persisted names cannot be overwritten
+    - Duplicate failure followed by an alternate name succeeds on the same draft; a later overwrite performs no write
+    - Non-string names, forbidden fields and invalid patches remain rejected
+    - Actual MCP-to-save-service orchestration retains target, authorization, duplicate and write behavior
+    - Tool schema exposes the 1–100-character bounds; rendered zh/en prompts and examples match runtime naming rules
+    test_selectors:
+    - test/backend/services/test_nl2agent_name_validation.py
+    - test/backend/services/test_nl2agent_service.py
+    - test/backend/services/test_mcp_internal_tool_search.py
+    - test/backend/agents/test_nl2agent_agent.py
+    - test/backend/agents/test_nl2agent_single_prompt.py
+    - test/backend/services/test_nl2agent_protocol_repair.py
+    - test/sdk/core/utils/test_observer_nl2agent_protocol.py
+    reason: Strengthen isolated name validation and tool/service/prompt regression proof; no duplicate formal unit Case.
+  notes: >-
+    Design: nexent-doc/docs/Developing/chat-nl2agent-name-validation/design.md.
+    User selected exact ordinary backend name-field validation after reviewing the 30/60-character discrepancy.
+    AGT-003 contract metadata is synchronized without claiming its legacy broad real-model script implements detailed naming assertions.
+    Earlier frontend transport patch and dedicated artifacts were withdrawn; unrelated changes are preserved.
+
+    Follow-up 2026-10-23 restores explicit constraints per user request, superseding request-DTO-only parity; ordinary edit DTO and frontend guards remain unchanged.
+    Follow-up clarifies one save per response rather than one attempt ever; existing F-045/AGT-003 duplicate and immutability contracts are retained.

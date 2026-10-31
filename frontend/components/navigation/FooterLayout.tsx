@@ -31,18 +31,6 @@ export function FooterLayout() {
           >
             {t("page.termsOfUse")}
           </Link>
-          <Link
-            href="http://nexent.tech/contact"
-            className="text-sm text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white transition-colors"
-          >
-            {t("page.contactUs")}
-          </Link>
-          <Link
-            href="http://nexent.tech/about"
-            className="text-sm text-slate-600 dark:text-slate-300 dark:hover:text-white transition-colors"
-          >
-            {t("page.aboutUs")}
-          </Link>
         </div>
       )}
     </div>

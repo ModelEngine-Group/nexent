@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 import { chatConfig } from "@/const/chatConfig";
 import { MESSAGE_ROLES } from "@/const/chatConfig";
 import type { AgentAutomationProposalData } from "@/types/agentAutomation";
@@ -165,6 +167,15 @@ type RemoteFilePreviewSource = {
   fileSize?: number;
   previewUrl?: string;
   downloadUrl?: string;
+  /**
+   * Set when the backend streams a document whose format it does not decide.
+   *
+   * AIDP serves the original bytes for docx/xlsx/pptx/pdf/txt and a PDF
+   * conversion for every other format, and reports the name it served in the
+   * `X-File-Name` header. The preview therefore resolves the renderer from that
+   * response instead of from the uploaded name, and offers no download.
+   */
+  rawStream?: boolean;
 };
 
 type LocalFilePreviewSource = {
@@ -177,6 +188,14 @@ export type FilePreviewProps = {
   open: boolean;
   onClose: () => void;
   previewContext?: "knowledgeBase";
+  /**
+   * How the preview is presented.
+   *
+   * - `"drawer"` (default): a side drawer over the current page.
+   * - `"fullscreen"`: a full-viewport surface with a back arrow, used where a
+   *   document is the whole task (AIDP knowledge base documents).
+   */
+  presentation?: "drawer" | "fullscreen";
 } & (RemoteFilePreviewSource | LocalFilePreviewSource);
 
 // Main chat message type
@@ -186,7 +205,8 @@ export interface ChatMessageType {
   message_id?: number;
   content: string;
   opinion_flag?: string;
-  timestamp: Date;
+  timestamp?: Date;
+  databaseCreateTime?: Date;
   sources?: {
     id: string;
     title: string;
@@ -251,6 +271,11 @@ export interface ChatStreamMainProps {
     modelNames?: string[]
   ) => void;
   onCitationHover?: () => void;
+  onCitationClick?: (
+    messageId: string,
+    citationKey: string,
+    answerText: string
+  ) => void;
   onScroll?: () => void;
   agentGreeting?: string | null;
   agentExampleQuestions?: string[];
@@ -350,6 +375,7 @@ export interface ApiMessage {
   message: ApiMessageItem[];
   message_id: number;
   message_index?: number;
+  create_time?: number | null;
   opinion_flag?: string;
   picture?: string[];
   search?: SearchResultItem[];
@@ -361,6 +387,7 @@ export interface ApiMessage {
 export interface ApiConversationDetail {
   create_time: number;
   conversation_id: number;
+  conversation_title?: string;
   agent_id?: number | null;
   message: ApiMessage[];
 }
@@ -407,6 +434,8 @@ export interface ChatRightPanelProps {
   isVisible?: boolean;
   toggleRightPanel?: () => void;
   selectedMessageId?: string;
+  selectedCitationKey?: string;
+  selectedCitationContext?: string;
 }
 
 // Task message type

@@ -1,0 +1,59 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-MESSAGE
+case:
+  case_id: FAF-D4-001
+  feature_id: FAF-001
+  requirement_ids:
+  - FAF-001
+  business_rule_ids:
+  - FAF-RULE-001
+  title: Final answer classification and display
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Verify the approved final answer display contract at the declared stage.
+  preconditions:
+  - Owned fixture instructions use the canonical prompt field; draft and published
+    instructions are verified before opening the browser conversation.
+  - Local deployment running this branch, authenticated test tenant and configured real model.
+  test_data:
+    profile: real_smoke
+    sequences:
+    - mixed step
+    - subagent
+    - pure final-answer step
+  steps:
+  - order: 1
+    action: Run mixed reasoning and final-answer envelope output.
+    expected: Thinking prefix remains; final answer occurs once outside reasoning.
+  - order: 2
+    action: Run a subagent final answer and reload persisted history.
+    expected: Answer remains once in its owning result area; sibling reasoning remains intact.
+  - order: 3
+    action: Run a step beginning with the final-answer opening tag.
+    expected: No reasoning card and no persisted step marker.
+  expected_results:
+  - Tag-free unique answer outside reasoning.
+  - Pure answer step has no empty reasoning card.
+  - Sibling and attempt attribution preserved.
+  forbidden_side_effects:
+  - No duplicate answer.
+  - No sibling deletion.
+  - No failed answer persisted.
+  actor: Authenticated test user
+  journey:
+  - Open conversation.
+  - Run parent and subagent fixtures.
+  - Inspect answer placement.
+  - Reload history.
+  final_business_result:
+  - Answer appears once outside reasoning in its own card before and after refresh.
+  failure_evidence:
+  - Retain screenshot and browser trace on failure.
+  execution:
+    profiles:
+    - name: real_smoke
+      required_services:
+      - model-provider

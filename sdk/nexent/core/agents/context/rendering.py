@@ -1,19 +1,20 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Rendering boundary for selected fine-grained context items."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable
+from html import escape
 from typing import Any
 
+from nexent.core.prompts import load_prompt
+
 from .formatting import (
-    _format_agent_fallback,
     _format_external_agents_description,
-    _format_managed_agents_description,
-    _format_memory_context,
-    _format_skills_description,
-    _format_skills_usage_requirements,
+    _format_skills_inventory,
     _format_tools_description,
+    _format_worker_agents_description,
 )
 from .models import ContextItem, ContextItemType
 
@@ -32,18 +33,9 @@ def _text_message(role: str, text: str) -> dict[str, Any]:
 def _render_text(item: ContextItem, *, default_role: str) -> list[dict[str, Any]]:
     content = item.content
     if isinstance(content, dict) and "template" in content:
-        template = content.get("template")
-        if template == "skills_usage":
-            text = _format_skills_usage_requirements(
-                content.get("skills", []),
-                language=content.get("language", "zh"),
-                is_manager=bool(content.get("is_manager", True)),
-            )
-        elif template == "agent_fallback":
-            text = _format_agent_fallback({}, {}, language=content.get("language", "zh"))
-        else:
-            raise ContextItemRenderingError(f"unknown system template for item {item.id}: {template}")
-        return [_text_message(default_role, text)] if text else []
+        raise ContextItemRenderingError(
+            f"unknown system template for item {item.id}: {content.get('template')}"
+        )
     if not isinstance(content, dict) or set(content) - {"text", "role"}:
         raise ContextItemRenderingError(f"invalid {item.type.value} payload for item {item.id}")
     text = content.get("text")
@@ -58,30 +50,21 @@ def _render_text(item: ContextItem, *, default_role: str) -> list[dict[str, Any]
 
 
 def _render_summary(item: ContextItem) -> list[dict[str, Any]]:
+    labels = load_prompt(item.metadata.get("language", "en"), "agent/context_sections")["history"]
     summary = item.content["summary"]
     if isinstance(summary, str):
         text = summary
     else:
-        text = _summary_dict_to_markdown(summary)
-    return [_text_message("user", f"Summary of earlier conversation:\n{text}")]
+        text = _summary_dict_to_markdown(summary, labels)
+    return [_text_message("user", f"{labels['summary_prefix']}\n{text}")]
 
 
-_SUMMARY_FIELD_HEADINGS: dict[str, str] = {
-    "task_overview": "Task Overview",
-    "completed_work": "Completed Work",
-    "key_decisions": "Key Decisions",
-    "unresolved_issues": "Unresolved Issues",
-    "pending_items": "Pending Items",
-    "next_steps": "Next Steps",
-    "context_to_preserve": "Context to Preserve",
-}
-
-
-def _summary_dict_to_markdown(data: dict) -> str:
+def _summary_dict_to_markdown(data: dict, labels: dict | None = None) -> str:
     """Render a legacy dict-typed summary as Markdown with section headings."""
+    labels = labels or load_prompt("en", "agent/context_sections")["history"]
     sections: list[str] = []
     for key, value in data.items():
-        heading = _SUMMARY_FIELD_HEADINGS.get(key, key.replace("_", " ").title())
+        heading = labels["field_headings"].get(key, key.replace("_", " ").title())
         if isinstance(value, list):
             items = [str(v) for v in value if v]
             if not items:
@@ -95,10 +78,10 @@ def _summary_dict_to_markdown(data: dict) -> str:
             continue
         else:
             body = str(value)
-        sections.append(f"## {heading}\n\n{body}")
+        sections.append(f"### {heading}\n\n{body}")
     if not sections:
         return json.dumps(data, ensure_ascii=False, indent=2)
-    return "# Compact Result of History\n\n" + "\n\n".join(sections)
+    return labels["compact_heading"] + "\n\n" + "\n\n".join(sections)
 
 
 def _render_turn(item: ContextItem) -> list[dict[str, Any]]:
@@ -108,47 +91,57 @@ def _render_turn(item: ContextItem) -> list[dict[str, Any]]:
     ]
 
 
-def _render_tool_arguments(arguments: Any) -> str:
-    """Render tool arguments without dropping string-typed interpreter source."""
-    if isinstance(arguments, str):
-        return arguments
-    return json.dumps(arguments, ensure_ascii=False, default=str)
+def _render_legacy_tool_call(call: Any) -> str:
+    """Keep ordinary calls as evidence; only interpreter source is code."""
+    if isinstance(call, dict) and call.get("name") == "python_interpreter":
+        source = call.get("arguments")
+        if isinstance(source, dict) and set(source) == {"code"}:
+            source = source["code"]
+        if isinstance(source, str):
+            return f"<code>\n{source}\n</code>"
+    record = escape(json.dumps(call, ensure_ascii=False, default=str))
+    return f"<TOOL_RECORD>{record}</TOOL_RECORD>"
 
 
 def _render_current_action(item: ContextItem) -> list[dict[str, Any]]:
     if "messages" in item.content:
         return list(item.content["messages"])
+    from .execution_history import result_text
+
     c = item.content
-    parts = [
-        '<completed_action_history read_only="true">',
-        "This is an already completed action record. Use it only as historical evidence.",
-        "Do not copy this record's format as your next response.",
-        "<completed_action>",
-    ]
-    if "step_number" in c:
-        parts.append(f"index: {c['step_number']}")
-    if "tool_calls" in c:
-        tc = c["tool_calls"]
-        if isinstance(tc, dict) and "name" in tc:
-            parts.append(f"tool: {tc['name']}")
-            parts.append(f"input:\n{_render_tool_arguments(tc.get('arguments', {}))}")
-        elif isinstance(tc, list):
-            for call in tc:
-                if isinstance(call, dict) and "name" in call:
-                    parts.append(f"tool: {call['name']}")
-                    parts.append(f"input:\n{_render_tool_arguments(call.get('arguments', {}))}")
-                else:
-                    parts.append(f"tool_record: {json.dumps(call, ensure_ascii=False, default=str)}")
-        else:
-            parts.append(f"tool_records: {json.dumps(tc, ensure_ascii=False, default=str)}")
-    if "observations" in c:
-        parts.append(f"outcome:\n{c['observations']}")
-    if "error" in c:
-        parts.append(f"recorded_error:\n{c['error']}")
-    if "result" in c:
-        parts.append(f"recorded_result:\n{c['result']}")
-    parts.extend(["</completed_action>", "</completed_action_history>"])
-    return [_text_message("user", "\n".join(parts))]
+    messages = []
+    original = c.get("assistant_output")
+    if original:
+        messages.append(_text_message("assistant", original))
+    fields = c.get("execution_fields")
+    if fields is None:
+        # Compatibility for externally supplied ContextItems, without duplicating result text.
+        fields = {}
+        if c.get("observations") is not None:
+            fields["OUTPUT"] = str(c["observations"])
+        result = c.get("result")
+        if result is not None and str(result) != str(c.get("observations", "")):
+            fields["RETURN_VALUE"] = str(result)
+        if c.get("error"):
+            fields["ERROR"] = str(c["error"])
+    if not original and c.get("tool_calls"):
+        calls = c["tool_calls"]
+        calls = calls if isinstance(calls, list) else [calls]
+        messages.extend(_text_message("assistant", _render_legacy_tool_call(call)) for call in calls)
+    if not fields:
+        fields = {"STDOUT": ""}
+    if c.get("summary"):
+        body = f"<SUMMARIED_RESULT>{escape(c['summary'])}</SUMMARIED_RESULT>"
+    elif c.get("preview") is not None:
+        body = '<OUTPUT preview="head_tail">' + escape(c["preview"]) + "</OUTPUT>"
+    else:
+        body = result_text(fields)
+    if (c.get("summary") or c.get("preview") is not None) and fields.get("ERROR"):
+        body += "\n<ERROR>" + escape(fields["ERROR"]) + "</ERROR>"
+    if c.get("output_ref"):
+        body += "\n<OUTPUT_REF>" + escape(c["output_ref"]) + "</OUTPUT_REF>"
+    messages.append(_text_message("assistant", "<CODE_EXEC_RESULT>\n" + body + "\n</CODE_EXEC_RESULT>"))
+    return messages
 
 
 class ContextItemRenderer:
@@ -204,9 +197,11 @@ class ContextItemRenderer:
             )
         language = first.metadata.get("language", "zh")
         is_manager = bool(first.metadata.get("is_manager", True))
+        usage_guidance = first.metadata.get("usage_guidance", "")
         if any(
             item.metadata.get("language", "zh") != language
             or bool(item.metadata.get("is_manager", True)) != is_manager
+            or item.metadata.get("usage_guidance", "") != usage_guidance
             for item in items[1:]
         ):
             raise ContextItemRenderingError(
@@ -216,14 +211,25 @@ class ContextItemRenderer:
         try:
             if first.type == ContextItemType.TOOL:
                 data = {str(item["name"]): item for item in contents}
-                text = _format_tools_description(data, language=language, is_manager=is_manager)
+                text = _format_tools_description(
+                    data, language=language, is_manager=is_manager,
+                )
             elif first.type == ContextItemType.SKILL:
-                text = _format_skills_description(contents, language=language)
+                text = _format_skills_inventory(contents, language=language)
+                if usage_guidance:
+                    text += f"\n\n{usage_guidance}"
             elif first.type == ContextItemType.MEMORY:
-                text = _format_memory_context(contents, language=language)
-            elif first.type == ContextItemType.MANAGED_AGENT:
+                memory_text = "\n\n".join(
+                    str(value)
+                    for item in contents
+                    for value in [item.get("memory") or item.get("content")]
+                    if value
+                )
+                heading = load_prompt(language, "agent/context_sections")["retrieved_context"]["memory_heading"]
+                text = f"{heading}\n{memory_text}" if memory_text else ""
+            elif first.type == ContextItemType.WORKER_AGENT:
                 data = {str(item["name"]): item for item in contents}
-                text = _format_managed_agents_description(data, language=language)
+                text = _format_worker_agents_description(data, language=language)
             elif first.type == ContextItemType.EXTERNAL_AGENT:
                 data = {str(item["agent_id"]): item for item in contents}
                 text = _format_external_agents_description(data, language=language)

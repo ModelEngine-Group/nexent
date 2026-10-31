@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: AIDP-RET-MIGRATION
+preparation:
+  anchors: false
+  families: []
+implementations:
+  - framework: pytest
+    file: test_migration.py
+    selector: test_
+timeout_seconds: 300
+acceptance_bindings:
+  AC-01: [test_legacy_numeric_representations]
+  AC-02: [test_preserves_versions_policies_and_unrelated_values]
+  AC-03: [test_directory_and_reapply_avoid_row_rewrites]

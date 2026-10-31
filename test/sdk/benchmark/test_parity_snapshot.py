@@ -172,8 +172,9 @@ def test_agent_run_info_snapshot_captures_runtime_surfaces_without_secrets():
         policy_layers={"platform": {"processing_mode": "adaptive_compact"}},
         token_threshold=1000,
         context_window_tokens=32000,
-        soft_input_budget_tokens=8000,
-        hard_input_budget_tokens=12000,
+        effective_input_limit_tokens=12000,
+        compaction_trigger_threshold_tokens=8000,
+        compaction_target_tokens=7200,
         keep_recent_steps=4,
     )
     agent_config = SimpleNamespace(
@@ -188,7 +189,7 @@ def test_agent_run_info_snapshot_captures_runtime_surfaces_without_secrets():
         max_steps=12,
         requested_output_tokens=2048,
         capacity_snapshot={"context_window_tokens": 32000},
-        safe_input_budget_snapshot={"safe_input_tokens": 12000},
+        context_budget_snapshot={"effective_input_limit_tokens": 12000},
     )
     run_info = SimpleNamespace(
         agent_config=agent_config,
@@ -198,7 +199,7 @@ def test_agent_run_info_snapshot_captures_runtime_surfaces_without_secrets():
         sandbox_config=None,
         run_time="frozen",
         capacity_snapshot=agent_config.capacity_snapshot,
-        safe_input_budget_snapshot=agent_config.safe_input_budget_snapshot,
+        context_budget_snapshot=agent_config.context_budget_snapshot,
         query="private query",
         user_id="private user",
     )

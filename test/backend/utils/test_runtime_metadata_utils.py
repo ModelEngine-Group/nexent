@@ -1,11 +1,12 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import math
 
 import pytest
 
-from consts.exceptions import RuntimeMetadataValidationError
-from consts.error_code import RuntimeMetadataValidationCode
+from contracts.errors.exceptions import RuntimeMetadataValidationError
+from contracts.errors.codes import RuntimeMetadataValidationCode
 
-from utils.runtime_metadata_utils import (
+from infrastructure.serialization.runtime_metadata import (
     MAX_RUNTIME_METADATA_ARRAY_ITEMS,
     MAX_RUNTIME_METADATA_BYTES,
     MAX_RUNTIME_METADATA_DEPTH,
@@ -103,4 +104,3 @@ def test_validate_runtime_metadata_rejects_overlong_key():
         validate_runtime_metadata({long_key: "value"})
 
     assert exc_info.value.code == RuntimeMetadataValidationCode.METADATA_TOO_MANY_ITEMS
-

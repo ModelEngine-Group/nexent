@@ -1,4 +1,6 @@
-"""Unit tests for ``services.evaluator_service``.
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
+"""Unit tests for ``management.services.evaluation.evaluators``.
 
 The module is loaded with ``spec_from_file_location`` while the
 ``consts`` / ``database`` / ``services`` / ``utils`` packages are stubbed
@@ -20,7 +22,7 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "backend")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-MODULE_UNDER_TEST = "services.evaluator_service"
+MODULE_UNDER_TEST = "management.services.evaluation.evaluators"
 
 _DB_IMPL_NAMES = [
     "create_evaluator",
@@ -67,32 +69,54 @@ def _install_stubs():
             self.extra = extra
 
     _consts = _register_package("consts")
-    _consts.error_code = _mk_mod("consts.error_code", ErrorCode=_ErrorCode)
-    _consts.exceptions = _mk_mod("consts.exceptions", AppException=_AppException)
+    _consts.error_code = _mk_mod("contracts.errors.codes", ErrorCode=_ErrorCode)
+    _consts.exceptions = _mk_mod("contracts.errors.exceptions", AppException=_AppException)
 
     _db = _register_package("database")
     _db.evaluator_db = _mk_mod(
-        "database.evaluator_db", **{n: MagicMock(name=n) for n in _DB_IMPL_NAMES}
+        "management.db.evaluation.evaluator", **{n: MagicMock(name=n) for n in _DB_IMPL_NAMES}
     )
 
     _svc = _register_package("services")
     _svc.agent_evaluation_service = _mk_mod(
-        "services.agent_evaluation_service",
+        "management.services.evaluation.runs",
         validate_code_evaluator=MagicMock(name="validate_code_evaluator"),
     )
 
     _utils = _register_package("utils")
-    _utils.agent_profile_utils = _mk_mod(
-        "utils.agent_profile_utils",
+    _mk_mod(
+        "management.services.agent.profile",
         fetch_agent_profile=MagicMock(name="fetch_agent_profile"),
         format_agent_profile_context=MagicMock(name="format_agent_profile_context"),
     )
-    _utils.llm_utils = _mk_mod(
-        "utils.llm_utils", call_llm_for_system_prompt=MagicMock(name="call_llm_for_system_prompt")
+    _mk_mod(
+        "management.services.model.invocation", call_llm_for_system_prompt=MagicMock(name="call_llm_for_system_prompt")
     )
-    _utils.prompt_template_utils = _mk_mod(
-        "utils.prompt_template_utils", get_prompt_template=MagicMock(name="get_prompt_template")
+    _mk_mod(
+        "management.services.agent.prompt", get_prompt_template=MagicMock(name="get_prompt_template")
     )
+    sdk_root = _REPO_ROOT / "sdk/nexent"
+    for package_name, package_path in (
+        ("nexent", sdk_root),
+        ("nexent.core", sdk_root / "core"),
+        ("nexent.core.prompts", sdk_root / "core/prompts"),
+    ):
+        package = types.ModuleType(package_name)
+        package.__path__ = [str(package_path)]
+        sys.modules[package_name] = package
+
+    def load_test_prompt(language, path):
+        import yaml
+        source = sdk_root / "core/prompts" / language / f"{path}.yaml"
+        return yaml.safe_load(source.read_text(encoding="utf-8"))
+
+    def render_test_prompt(source, parameters):
+        from jinja2 import Environment, StrictUndefined
+        return Environment(undefined=StrictUndefined).from_string(source).render(**parameters)
+
+    prompts = sys.modules["nexent.core.prompts"]
+    prompts.load_prompt = load_test_prompt
+    prompts.render_prompt_text = render_test_prompt
     return _ErrorCode, _AppException
 
 
@@ -109,15 +133,15 @@ def bundle():
     profile = MagicMock(name="fetch_agent_profile")
     fmt_profile = MagicMock(name="format_agent_profile_context")
     llm = MagicMock(name="call_llm_for_system_prompt")
-    tmpl = MagicMock(name="get_prompt_template")
+    tmpl = MagicMock(name="load_prompt")
 
     for n, m in db_impls.items():
-        setattr(sys.modules["database.evaluator_db"], n, m)
-    sys.modules["services.agent_evaluation_service"].validate_code_evaluator = code_val
-    sys.modules["utils.agent_profile_utils"].fetch_agent_profile = profile
-    sys.modules["utils.agent_profile_utils"].format_agent_profile_context = fmt_profile
-    sys.modules["utils.llm_utils"].call_llm_for_system_prompt = llm
-    sys.modules["utils.prompt_template_utils"].get_prompt_template = tmpl
+        setattr(sys.modules["management.db.evaluation.evaluator"], n, m)
+    sys.modules["management.services.evaluation.runs"].validate_code_evaluator = code_val
+    sys.modules["management.services.agent.profile"].fetch_agent_profile = profile
+    sys.modules["management.services.agent.profile"].format_agent_profile_context = fmt_profile
+    sys.modules["management.services.model.invocation"].call_llm_for_system_prompt = llm
+    sys.modules["management.services.agent.prompt"].get_prompt_template = tmpl
 
     if MODULE_UNDER_TEST in sys.modules:
         del sys.modules[MODULE_UNDER_TEST]
@@ -125,12 +149,13 @@ def bundle():
     if hasattr(svc_pkg, "evaluator_service"):
         delattr(svc_pkg, "evaluator_service")
 
-    src = _REPO_ROOT / "backend" / "services" / "evaluator_service.py"
+    src = _REPO_ROOT / "backend" / "management" / "services" / "evaluation" / "evaluators.py"
     spec = _ilu.spec_from_file_location(MODULE_UNDER_TEST, str(src))
     assert spec is not None and spec.loader is not None, f"cannot locate {src}"
     mod = _ilu.module_from_spec(spec)
     sys.modules[MODULE_UNDER_TEST] = mod
     spec.loader.exec_module(mod)
+    mod.load_prompt = tmpl
     svc_pkg.evaluator_service = mod
 
     class _Bundle:
@@ -336,11 +361,12 @@ class TestGenerateEvaluatorByLlm:
             {"name": "expected", "type": "string", "required": True},
             {"name": "actual", "type": "string", "required": True},
         ]
-        bundle.tmpl.assert_called_once_with("evaluation_generate_evaluator", "zh")
-        bundle.llm.assert_called_once_with(
-            model_id=7, user_prompt=bundle.llm.call_args.kwargs["user_prompt"],
-            system_prompt="sys", tenant_id="t1",
-        )
+        bundle.tmpl.assert_not_called()
+        bundle.llm.assert_called_once()
+        assert bundle.llm.call_args.kwargs["model_id"] == 7
+        assert bundle.llm.call_args.kwargs["tenant_id"] == "t1"
+        assert len(bundle.llm.call_args.kwargs["system_prompt"]) > 50
+        assert "desc" in bundle.llm.call_args.kwargs["user_prompt"]
 
     def test_success_code_with_agent(self, bundle):
         bundle.tmpl.return_value = {"SYSTEM_PROMPT": "sys"}

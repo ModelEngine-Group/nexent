@@ -1,3 +1,6 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+from test.common.contract_stubs import install_shared_contract_stub
+from test.common.contract_stubs import install_business_constant_stubs
 import sys
 import pytest
 from unittest.mock import MagicMock
@@ -5,7 +8,7 @@ from unittest.mock import MagicMock
 # First mock the consts module to avoid ModuleNotFoundError
 consts_mock = MagicMock()
 consts_mock.const = MagicMock()
-# Set required constants in consts.const
+# Set required constants in contracts.constants.environment
 consts_mock.const.MINIO_ENDPOINT = "http://localhost:9000"
 consts_mock.const.MINIO_ACCESS_KEY = "test_access_key"
 consts_mock.const.MINIO_SECRET_KEY = "test_secret_key"
@@ -20,7 +23,8 @@ consts_mock.const.DEFAULT_TENANT_ID = "default_tenant"
 
 # Add the mocked consts module to sys.modules
 sys.modules['consts'] = consts_mock
-sys.modules['consts.const'] = consts_mock.const
+sys.modules['contracts.constants.environment'] = consts_mock.const
+install_business_constant_stubs(consts_mock.const)
 
 # Mock utils module
 utils_mock = MagicMock()
@@ -31,8 +35,8 @@ utils_mock.str_utils.convert_list_to_string = MagicMock(side_effect=lambda x: ",
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['utils.auth_utils'] = utils_mock.auth_utils
-sys.modules['utils.str_utils'] = utils_mock.str_utils
+sys.modules['gateway.authentication.auth'] = utils_mock.auth_utils
+sys.modules['management.utils.serialization'] = utils_mock.str_utils
 
 # Provide a stub for the `boto3` module so that it can be imported safely even
 # if the testing environment does not have it available.
@@ -49,8 +53,14 @@ client_mock.as_dict = MagicMock()
 client_mock.filter_property = MagicMock()
 
 # Add the mocked client module to sys.modules
-sys.modules['database.client'] = client_mock
-sys.modules['backend.database.client'] = client_mock
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
+sys.modules['management.db.client'] = client_mock
+from test.common.database_stubs import install_serialization_stub
+install_serialization_stub(sys.modules["management.db.client"])
 
 # Mock db_models module
 db_models_mock = MagicMock()
@@ -86,13 +96,13 @@ class MockTenantInvitationRecord:
 
 
 # Add the mocked db_models module to sys.modules
-sys.modules['database.db_models'] = db_models_mock
-sys.modules['backend.database.db_models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
+sys.modules['management.db.models'] = db_models_mock
 
 # Mock exceptions module
 exceptions_mock = MagicMock()
-sys.modules['consts.exceptions'] = exceptions_mock
-sys.modules['backend.consts.exceptions'] = exceptions_mock
+install_shared_contract_stub(exceptions_mock, 'exceptions')
+install_shared_contract_stub(exceptions_mock, 'exceptions')
 
 # Mock sqlalchemy module
 sqlalchemy_mock = MagicMock()
@@ -108,19 +118,7 @@ sys.modules['sqlalchemy'] = sqlalchemy_mock
 sys.modules['sqlalchemy.exc'] = sqlalchemy_mock.exc
 
 # Now we can safely import the module under test
-from backend.database.invitation_db import (
-    query_invitation_by_code,
-    query_invitation_by_id,
-    query_invitations_by_tenant,
-    add_invitation,
-    modify_invitation,
-    remove_invitation,
-    query_invitation_records,
-    add_invitation_record,
-    count_invitation_usage,
-    query_invitation_status,
-    query_invitations_with_pagination
-)
+from management.db.identity.invitation import query_invitation_by_code, query_invitation_by_id, query_invitations_by_tenant, add_invitation, modify_invitation, remove_invitation, query_invitation_records, add_invitation_record, count_invitation_usage, query_invitation_status, query_invitations_with_pagination
 
 
 @pytest.fixture
@@ -147,8 +145,8 @@ def test_query_invitation_by_code_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.as_dict", lambda obj: obj.__dict__)
 
     result = query_invitation_by_code("test_code")
 
@@ -168,7 +166,7 @@ def test_query_invitation_by_code_not_found(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
 
     result = query_invitation_by_code("nonexistent_code")
 
@@ -191,9 +189,9 @@ def test_query_invitation_by_id_success(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+        "management.db.identity.invitation.get_db_session", lambda: mock_ctx)
     monkeypatch.setattr(
-        "backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+        "management.db.identity.invitation.as_dict", lambda obj: obj.__dict__)
 
     result = query_invitation_by_id(123)
 
@@ -214,7 +212,7 @@ def test_query_invitation_by_id_not_found(monkeypatch, mock_session):
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
     monkeypatch.setattr(
-        "backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+        "management.db.identity.invitation.get_db_session", lambda: mock_ctx)
 
     result = query_invitation_by_id(999)
 
@@ -235,8 +233,8 @@ def test_query_invitations_by_tenant_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.as_dict", lambda obj: obj.__dict__)
 
     result = query_invitations_by_tenant("test_tenant")
 
@@ -256,10 +254,10 @@ def test_add_invitation_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
 
     from unittest.mock import patch
-    with patch('backend.database.invitation_db.TenantInvitationCode', return_value=mock_invitation):
+    with patch('management.db.identity.invitation.TenantInvitationCode', return_value=mock_invitation):
         result = add_invitation(
             tenant_id="test_tenant",
             invitation_code="test_code",
@@ -287,10 +285,10 @@ def test_add_invitation_with_group_ids_list(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
 
     from unittest.mock import patch
-    with patch('backend.database.invitation_db.TenantInvitationCode', return_value=mock_invitation) as mock_constructor:
+    with patch('management.db.identity.invitation.TenantInvitationCode', return_value=mock_invitation) as mock_constructor:
         result = add_invitation(
             tenant_id="test_tenant",
             invitation_code="test_code",
@@ -333,7 +331,7 @@ def test_modify_invitation_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
 
     result = modify_invitation(
         invitation_id=123,
@@ -358,7 +356,7 @@ def test_remove_invitation_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
 
     result = remove_invitation(invitation_id=123, updated_by="test_user")
 
@@ -379,8 +377,8 @@ def test_query_invitation_records_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.as_dict", lambda obj: obj.__dict__)
 
     result = query_invitation_records(123)
 
@@ -400,10 +398,10 @@ def test_add_invitation_record_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
 
     from unittest.mock import patch
-    with patch('backend.database.invitation_db.TenantInvitationRecord', return_value=mock_record):
+    with patch('management.db.identity.invitation.TenantInvitationRecord', return_value=mock_record):
         result = add_invitation_record(
             invitation_id=123,
             user_id="test_user",
@@ -433,7 +431,7 @@ def test_count_invitation_usage_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
 
     result = count_invitation_usage(123)
 
@@ -454,7 +452,7 @@ def test_get_invitation_status_in_use(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
 
     result = query_invitation_status("test_code")
 
@@ -475,7 +473,7 @@ def test_get_invitation_status_expired(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
 
     result = query_invitation_status("test_code")
 
@@ -493,7 +491,7 @@ def test_get_invitation_status_not_found(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
 
     result = query_invitation_status("nonexistent_code")
 
@@ -508,7 +506,7 @@ def test_database_error_handling(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         query_invitation_by_code("test_code")
@@ -537,8 +535,8 @@ def test_query_invitations_with_pagination_success(monkeypatch, mock_session):
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.as_dict", lambda obj: obj.__dict__)
 
     result = query_invitations_with_pagination(page=1, page_size=2)
 
@@ -571,8 +569,8 @@ def test_query_invitations_with_pagination_empty_results(monkeypatch, mock_sessi
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.as_dict", lambda obj: obj.__dict__)
 
     result = query_invitations_with_pagination(page=1, page_size=10)
 
@@ -610,8 +608,8 @@ def test_query_invitations_with_pagination_with_tenant_filter(monkeypatch, mock_
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.as_dict", lambda obj: obj.__dict__)
 
     result = query_invitations_with_pagination(tenant_id="test_tenant", page=1, page_size=10)
 
@@ -646,8 +644,8 @@ def test_query_invitations_with_pagination_second_page(monkeypatch, mock_session
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.as_dict", lambda obj: obj.__dict__)
 
     result = query_invitations_with_pagination(page=2, page_size=2)
 
@@ -668,7 +666,7 @@ def test_query_invitations_with_pagination_database_error(monkeypatch, mock_sess
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
 
     with pytest.raises(MockSQLAlchemyError, match="Database error"):
         query_invitations_with_pagination()
@@ -701,8 +699,8 @@ def test_query_invitations_with_pagination_with_sorting(monkeypatch, mock_sessio
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.as_dict", lambda obj: obj.__dict__)
 
     result = query_invitations_with_pagination(
         page=1,
@@ -746,8 +744,8 @@ def test_query_invitations_with_pagination_sort_ascending(monkeypatch, mock_sess
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.as_dict", lambda obj: obj.__dict__)
 
     result = query_invitations_with_pagination(
         page=1,
@@ -786,8 +784,8 @@ def test_query_invitations_with_pagination_no_sorting(monkeypatch, mock_session)
     mock_ctx = MagicMock()
     mock_ctx.__enter__.return_value = session
     mock_ctx.__exit__.return_value = None
-    monkeypatch.setattr("backend.database.invitation_db.get_db_session", lambda: mock_ctx)
-    monkeypatch.setattr("backend.database.invitation_db.as_dict", lambda obj: obj.__dict__)
+    monkeypatch.setattr("management.db.identity.invitation.get_db_session", lambda: mock_ctx)
+    monkeypatch.setattr("management.db.identity.invitation.as_dict", lambda obj: obj.__dict__)
 
     result = query_invitations_with_pagination(page=1, page_size=10)
 

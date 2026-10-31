@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 /**
  * agentConfigStore
  *
@@ -18,7 +20,6 @@ import {
   DEFAULT_AGENT_VERIFICATION_CONFIG,
   DEFAULT_GUARDRAIL_CONFIG,
 } from "@/types/agentConfig";
-import { getAgentGenerationCache } from "@/lib/agentGenerationCache";
 
 /**
  * Fields we need to track for dirty detection and editing.
@@ -37,18 +38,16 @@ export type EditableAgent = Pick<
   | "model_ids"
   | "max_step"
   | "requested_output_tokens"
+  | "model_params_override"
   | "is_main_agent"
   | "provide_run_summary"
   | "allow_chat_metadata"
+  | "enable_protocol_repair_retry"
   | "tools"
-  | "duty_prompt"
-  | "constraint_prompt"
-  | "few_shots_prompt"
+  | "prompt"
   | "business_description"
   | "business_logic_model_name"
   | "business_logic_model_id"
-  | "prompt_template_id"
-  | "prompt_template_name"
   | "verification_config"
   | "sub_agent_id_list"
   | "sub_agent_relations"
@@ -206,19 +205,17 @@ function createEmptyEditableAgent(llmConfig?: {
     model_ids: llmConfig?.id ? [llmConfig.id] : [],
     max_step: 15,
     requested_output_tokens: null,
+    model_params_override: null,
     is_main_agent: true,
     provide_run_summary: false,
     allow_chat_metadata: false,
+    enable_protocol_repair_retry: false,
     tools: [],
     skills: [],
-    duty_prompt: "",
-    constraint_prompt: "",
-    few_shots_prompt: "",
+    prompt: "",
     business_description: "",
     business_logic_model_name: llmConfig?.name || "",
     business_logic_model_id: llmConfig?.id || 0,
-    prompt_template_id: 0,
-    prompt_template_name: "system_default",
     verification_config: {
       ...DEFAULT_AGENT_VERIFICATION_CONFIG,
       guardrail_config: { ...DEFAULT_GUARDRAIL_CONFIG },
@@ -246,19 +243,18 @@ const toEditable = (agent: Agent | null): EditableAgent =>
         model_ids: agent.model_ids || [],
         max_step: agent.max_step,
         requested_output_tokens: agent.requested_output_tokens ?? null,
+        model_params_override: agent.model_params_override ?? null,
         is_main_agent: agent.is_main_agent ?? true,
         provide_run_summary: agent.provide_run_summary,
         allow_chat_metadata: agent.allow_chat_metadata ?? false,
+        enable_protocol_repair_retry:
+          agent.enable_protocol_repair_retry ?? false,
         tools: [...(agent.tools || [])],
         skills: [...(agent.skills || [])],
-        duty_prompt: agent.duty_prompt || "",
-        constraint_prompt: agent.constraint_prompt || "",
-        few_shots_prompt: agent.few_shots_prompt || "",
+        prompt: agent.prompt || "",
         business_description: agent.business_description || "",
         business_logic_model_name: agent.business_logic_model_name || "",
         business_logic_model_id: agent.business_logic_model_id || 0,
-        prompt_template_id: agent.prompt_template_id ?? 0,
-        prompt_template_name: agent.prompt_template_name || "system_default",
         verification_config: agent.verification_config || {
           ...DEFAULT_AGENT_VERIFICATION_CONFIG,
         },
@@ -383,18 +379,17 @@ const isDirty = (
       normalizeArray(editedAgent.model_ids || []).length > 0 ||
       editedAgent.max_step !== 0 ||
       editedAgent.requested_output_tokens != null ||
+      // v2.6.0: treat any non-empty override map as a dirty state on new agents
+      (editedAgent.model_params_override != null &&
+        Object.keys(editedAgent.model_params_override || {}).length > 0) ||
       editedAgent.is_main_agent !== true ||
       editedAgent.provide_run_summary !== false ||
       editedAgent.allow_chat_metadata !== false ||
-      editedAgent.duty_prompt !== "" ||
-      editedAgent.constraint_prompt !== "" ||
-      editedAgent.few_shots_prompt !== "" ||
+      editedAgent.enable_protocol_repair_retry !== false ||
+      editedAgent.prompt !== "" ||
       editedAgent.business_description !== "" ||
       editedAgent.business_logic_model_name !== "" ||
       editedAgent.business_logic_model_id !== 0 ||
-      (editedAgent.prompt_template_id ?? 0) !== 0 ||
-      (editedAgent.prompt_template_name || "system_default") !==
-        "system_default" ||
       JSON.stringify(
         editedAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG
       ) !== JSON.stringify(DEFAULT_AGENT_VERIFICATION_CONFIG) ||
@@ -420,23 +415,21 @@ const isDirty = (
     baselineAgent.max_step !== editedAgent.max_step ||
     (baselineAgent.requested_output_tokens ?? null) !==
       (editedAgent.requested_output_tokens ?? null) ||
+    JSON.stringify(baselineAgent.model_params_override ?? null) !==
+      JSON.stringify(editedAgent.model_params_override ?? null) ||
     (baselineAgent.is_main_agent ?? true) !==
       (editedAgent.is_main_agent ?? true) ||
     baselineAgent.provide_run_summary !== editedAgent.provide_run_summary ||
     (baselineAgent.allow_chat_metadata ?? false) !==
       (editedAgent.allow_chat_metadata ?? false) ||
-    baselineAgent.duty_prompt !== editedAgent.duty_prompt ||
-    baselineAgent.constraint_prompt !== editedAgent.constraint_prompt ||
-    baselineAgent.few_shots_prompt !== editedAgent.few_shots_prompt ||
+    (baselineAgent.enable_protocol_repair_retry ?? false) !==
+      (editedAgent.enable_protocol_repair_retry ?? false) ||
+    baselineAgent.prompt !== editedAgent.prompt ||
     baselineAgent.business_description !== editedAgent.business_description ||
     baselineAgent.business_logic_model_name !==
       editedAgent.business_logic_model_name ||
     baselineAgent.business_logic_model_id !==
       editedAgent.business_logic_model_id ||
-    (baselineAgent.prompt_template_id ?? 0) !==
-      (editedAgent.prompt_template_id ?? 0) ||
-    (baselineAgent.prompt_template_name || "system_default") !==
-      (editedAgent.prompt_template_name || "system_default") ||
     JSON.stringify(
       baselineAgent.verification_config || DEFAULT_AGENT_VERIFICATION_CONFIG
     ) !==
@@ -486,47 +479,10 @@ export const useAgentConfigStore = create<AgentConfigStoreState>(
       const agentId = agent ? parseInt(agent.id) : null;
       const baselineAgent = agent ? toEditable(agent) : null;
       const { defaultLlmConfig } = get();
-      let editedAgent = baselineAgent
+      const editedAgent = baselineAgent
         ? { ...baselineAgent }
         : createEmptyEditableAgent(defaultLlmConfig ?? undefined);
 
-      // Check if there's a pending generation cache to restore
-      if (agentId !== null && baselineAgent) {
-        const cached = getAgentGenerationCache(agentId);
-        if (cached && !cached.isGenerating) {
-          // Generation completed while user was away, restore the cached data to editedAgent
-          const cacheUpdates: Partial<EditableAgent> = {};
-
-          if (cached.dutyPrompt) cacheUpdates.duty_prompt = cached.dutyPrompt;
-          if (cached.constraintPrompt)
-            cacheUpdates.constraint_prompt = cached.constraintPrompt;
-          if (cached.fewShotsPrompt)
-            cacheUpdates.few_shots_prompt = cached.fewShotsPrompt;
-          if (cached.greetingMessage)
-            cacheUpdates.greeting_message = cached.greetingMessage;
-          if (cached.exampleQuestions) {
-            cacheUpdates.example_questions =
-              typeof cached.exampleQuestions === "string"
-                ? (() => {
-                    try {
-                      return JSON.parse(cached.exampleQuestions);
-                    } catch {
-                      return [];
-                    }
-                  })()
-                : cached.exampleQuestions;
-          }
-
-          // Only restore agent metadata if not already set in baseline
-          if (cached.agentName && !editedAgent.name)
-            cacheUpdates.name = cached.agentName;
-          if (cached.agentDisplayName && !editedAgent.display_name)
-            cacheUpdates.display_name = cached.agentDisplayName;
-          if (cached.agentDescription && !editedAgent.description)
-            cacheUpdates.description = cached.agentDescription;
-          editedAgent = { ...editedAgent, ...cacheUpdates };
-        }
-      }
 
       set({
         currentAgentId: agentId,

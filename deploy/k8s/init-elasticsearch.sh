@@ -2,6 +2,8 @@
 # Script to initialize Elasticsearch API key for Nexent
 
 NAMESPACE=nexent
+INFRASTRUCTURE_SECRET_NAME="nexent-infrastructure-secrets"
+APPLICATION_SECRET_NAME="nexent-secrets"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -22,9 +24,10 @@ decode_base64() {
 }
 
 get_secret_value() {
-  local key="$1"
+  local secret_name="$1"
+  local key="$2"
   local encoded_value
-  encoded_value=$(kubectl get secret nexent-secrets -n $NAMESPACE -o jsonpath="{.data.${key}}" 2>/dev/null || true)
+  encoded_value=$(kubectl get secret "$secret_name" -n "$NAMESPACE" -o jsonpath="{.data.${key}}" 2>/dev/null || true)
   [ -n "$encoded_value" ] || return 1
   printf '%s' "$encoded_value" | decode_base64
 }
@@ -71,22 +74,36 @@ sync_api_key_to_root_env() {
 }
 
 # Get elastic password from secret
-ELASTIC_PASSWORD=$(get_secret_value "ELASTIC_PASSWORD")
+ELASTIC_PASSWORD=$(get_secret_value "$INFRASTRUCTURE_SECRET_NAME" "ELASTIC_PASSWORD")
+if [ -z "$ELASTIC_PASSWORD" ]; then
+  echo "Failed to read ELASTIC_PASSWORD from $INFRASTRUCTURE_SECRET_NAME."
+  exit 1
+fi
 
 echo "Waiting for Elasticsearch to be ready..."
 
-# Wait for Elasticsearch to be healthy
-until kubectl exec -n $NAMESPACE deploy/nexent-elasticsearch -- curl -s -u "elastic:$ELASTIC_PASSWORD" "http://localhost:9200/_cluster/health" 2>/dev/null | grep -q '"status":"green"\|"status":"yellow"'; do
+# Wait for Elasticsearch to be healthy with a bounded retry window.
+ES_INIT_TIMEOUT_SECONDS="${NEXENT_ES_INIT_TIMEOUT_SECONDS:-600}"
+ES_INIT_ELAPSED_SECONDS=0
+until kubectl exec -n "$NAMESPACE" deploy/nexent-elasticsearch -- curl -s -u "elastic:$ELASTIC_PASSWORD" "http://localhost:9200/_cluster/health" 2>/dev/null | grep -q '"status":"green"\|"status":"yellow"'; do
+  if [ "$ES_INIT_ELAPSED_SECONDS" -ge "$ES_INIT_TIMEOUT_SECONDS" ]; then
+    echo "Elasticsearch did not become healthy within ${ES_INIT_TIMEOUT_SECONDS}s."
+    exit 1
+  fi
   echo "Elasticsearch is unavailable - sleeping"
   sleep 5
+  ES_INIT_ELAPSED_SECONDS=$((ES_INIT_ELAPSED_SECONDS + 5))
 done
 echo "Elasticsearch is ready."
 
-EXISTING_API_KEY="$(get_secret_value "ELASTICSEARCH_API_KEY" 2>/dev/null || true)"
+EXISTING_API_KEY="${ELASTICSEARCH_API_KEY:-}"
+if [ -z "$EXISTING_API_KEY" ]; then
+  EXISTING_API_KEY="$(get_secret_value "$APPLICATION_SECRET_NAME" "ELASTICSEARCH_API_KEY" 2>/dev/null || true)"
+fi
 if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ] && [ "${DEPLOYMENT_REFRESH_ES_KEY:-false}" != "true" ] && [ -n "$EXISTING_API_KEY" ]; then
   echo "Validating existing ELASTICSEARCH_API_KEY..."
   if validate_api_key "$EXISTING_API_KEY"; then
-    echo "Existing ELASTICSEARCH_API_KEY is valid; keeping current Helm-managed value."
+    echo "Existing ELASTICSEARCH_API_KEY is valid; keeping the application value."
     write_api_key_output "$EXISTING_API_KEY"
     exit 0
   fi
@@ -98,21 +115,15 @@ fi
 echo "Generating API key..."
 
 # Generate API key
-API_KEY_JSON=$(kubectl exec -n $NAMESPACE deploy/nexent-elasticsearch -- sh -c "curl -s -u 'elastic:$ELASTIC_PASSWORD' 'http://localhost:9200/_security/api_key' -H 'Content-Type: application/json' -d '{\"name\":\"nexent_api_key\",\"role_descriptors\":{\"nexent_role\":{\"cluster\":[\"all\"],\"index\":[{\"names\":[\"*\"],\"privileges\":[\"all\"]}]}}}'")
-
-echo "API Key Response: $API_KEY_JSON"
+API_KEY_JSON=$(kubectl exec -n "$NAMESPACE" deploy/nexent-elasticsearch -- sh -c "curl -s -u 'elastic:$ELASTIC_PASSWORD' 'http://localhost:9200/_security/api_key' -H 'Content-Type: application/json' -d '{\"name\":\"nexent_api_key\",\"role_descriptors\":{\"nexent_role\":{\"cluster\":[\"all\"],\"index\":[{\"names\":[\"*\"],\"privileges\":[\"all\"]}]}}}'")
 
 # Extract API key using sed instead of jq
 ENCODED_KEY=$(echo "$API_KEY_JSON" | sed 's/.*"encoded":"\([^"]*\)".*/\1/')
 
-echo "Extracted key: $ENCODED_KEY"
-
 if [ -n "$ENCODED_KEY" ] && [ "$ENCODED_KEY" != "$API_KEY_JSON" ]; then
-  echo "Generated ELASTICSEARCH_API_KEY: $ENCODED_KEY"
-
   write_api_key_output "$ENCODED_KEY"
   sync_api_key_to_root_env "$ENCODED_KEY"
-  echo "ELASTICSEARCH_API_KEY generated; Helm will update nexent-secrets."
+  echo "ELASTICSEARCH_API_KEY generated for the Nexent application release."
 else
   echo "Failed to extract API key from response"
   echo "Full response: $API_KEY_JSON"

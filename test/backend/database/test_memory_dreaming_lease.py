@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Unit tests for Dreaming lease store DB functions (AC-028, AC-029, AC-030)."""
 
 from contextlib import contextmanager
@@ -5,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from database import memory_dreaming_db
+from management.db.memory import dreaming as memory_dreaming_db
 
 
 def _mock_session(monkeypatch, module=None):
@@ -151,3 +153,15 @@ def test_ac030_recover_stale_returns_zero_when_clean(monkeypatch):
     result = memory_dreaming_db.recover_stale()
 
     assert result == 0
+
+
+def test_startup_recovery_includes_unexpired_running_leases(monkeypatch):
+    session = _mock_session(monkeypatch)
+    session.execute.return_value.rowcount = 2
+
+    result = memory_dreaming_db.recover_stale(include_unexpired=True)
+
+    assert result == 2
+    sql_text = str(session.execute.call_args[0][0])
+    assert "status = 'running'" in sql_text
+    assert "lock_until < now()" not in sql_text

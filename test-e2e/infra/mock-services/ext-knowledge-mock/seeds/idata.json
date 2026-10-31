@@ -1,0 +1,67 @@
+{
+  "spaces": [
+    {"id": "space-alpha", "name": "Alpha Knowledge Space"},
+    {"id": "space-beta", "name": "Beta 知识空间"}
+  ],
+  "kbs_by_space": {
+    "space-alpha": [
+      {"id": "idata-kb-alpha-1", "name": "设备维护手册", "fileCount": 7},
+      {"id": "idata-kb-alpha-2", "name": "Safety Regulations", "fileCount": 3}
+    ],
+    "space-beta": [
+      {"id": "idata-kb-beta-1", "name": "民航规章库", "fileCount": 12}
+    ]
+  },
+  "chunks_by_kb": {
+    "idata-kb-alpha-1": [
+      {
+        "documentId": "idoc-001",
+        "documentName": "维护手册第三章.pdf",
+        "content": "设备维护周期为每季度一次，维护结果需记录并归档。",
+        "datasetId": "idata-kb-alpha-1",
+        "createTime": 1718000000000,
+        "reRankScore": 0.91,
+        "vsScore": 0.85,
+        "esScore": 0.74,
+        "title": "维护手册第三章"
+      },
+      {
+        "documentId": "idoc-002",
+        "documentName": "维护记录模板.xlsx",
+        "content": "Maintenance records must include operator, timestamp and equipment serial number.",
+        "datasetId": "idata-kb-alpha-1",
+        "createTime": 1718000100000,
+        "reRankScore": 0.82,
+        "vsScore": 0.76,
+        "esScore": 0.68,
+        "title": "Maintenance Record Template"
+      }
+    ],
+    "idata-kb-alpha-2": [
+      {
+        "documentId": "idoc-101",
+        "documentName": "safety-regulations.txt",
+        "content": "Safety regulations require protective equipment in all lab areas.",
+        "datasetId": "idata-kb-alpha-2",
+        "createTime": 1718000200000,
+        "reRankScore": 0.87,
+        "vsScore": 0.81,
+        "esScore": 0.7,
+        "title": "Safety Regulations"
+      }
+    ],
+    "idata-kb-beta-1": [
+      {
+        "documentId": "idoc-201",
+        "documentName": "民航规章-总则.md",
+        "content": "民航规章总则：所有飞行活动必须遵守空域管理规定。",
+        "datasetId": "idata-kb-beta-1",
+        "createTime": 1718000300000,
+        "reRankScore": 0.89,
+        "vsScore": 0.83,
+        "esScore": 0.72,
+        "title": "民航规章总则"
+      }
+    ]
+  }
+}

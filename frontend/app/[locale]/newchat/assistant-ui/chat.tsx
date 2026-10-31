@@ -1,9 +1,14 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
-import type { FC } from "react";
-import { useCallback } from "react";
+import type { ReasoningEffort } from "@/types/modelConfig";
+import type { ModelParameterSettingsControl } from "@/types/modelParameterSettings";
+
+import type { FC, ReactNode } from "react";
+import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Thread } from "./thread";
+import { Thread, type WelcomeSuggestion } from "./thread";
 import type { ChatMode } from "./composer";
 import { AgentLandingPage } from "./agent-landing";
 import type { Agent } from "@/types/agentConfig";
@@ -16,6 +21,8 @@ import type { SkillFileContent } from "@/types/skill";
 
 export interface ChatProps {
   generatedTitle?: string;
+  welcomeTitle?: string;
+  welcomeSuggestions?: readonly WelcomeSuggestion[];
   conversationId?: number;
   isLoadingAgents?: boolean;
   selectedAgent: Agent | null;
@@ -24,8 +31,19 @@ export interface ChatProps {
   chatMode?: ChatMode;
   onChatModeChange?: (mode: ChatMode) => void;
   showModelSelector?: boolean;
+  modelParameterSettings?: ModelParameterSettingsControl;
+  modelSelectionScope?: "agent" | "tenant";
+  fallbackAgentName?: string;
+  selectedModelId?: string;
+  onModelChange?: (modelId: string) => void;
+  deepThinking?: boolean;
+  onDeepThinkingChange?: (enabled: boolean) => void;
+  thinkingEffort?: ReasoningEffort;
+  onThinkingEffortChange?: (effort: ReasoningEffort) => void;
+  reasoningBudgetTokens?: number;
+  onReasoningBudgetTokensChange?: (budget: number) => void;
   showConversationTitle?: boolean;
-  isDictationConfigured?: boolean;
+  composerTools?: ReactNode;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
   knowledgeCapabilities?: KnowledgeCapabilities | null;
@@ -39,6 +57,15 @@ export interface ChatProps {
   runtimeMetadata?: Record<string, unknown>;
   onRuntimeMetadataChange?: (value: Record<string, unknown>) => void;
   readOnly?: boolean;
+  interactionContent?: ReactNode;
+  readOnlyReason?: string;
+  landingContent?: ReactNode;
+  /** Opt into the redesigned NewChat presentation. */
+  newChatDesign?: boolean;
+  workbenchPresentation?: import("@/features/workbench/types").WorkbenchComposerPresentation;
+  workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
+  onRemoveWorkbenchSkill?: (skillId: number) => void;
+  onOpenWorkbenchSkillPicker?: () => void;
 }
 
 const AgentsLoadingState: FC = () => {
@@ -58,16 +85,29 @@ const AgentsLoadingState: FC = () => {
 
 export const Chat: FC<ChatProps> = ({
   generatedTitle,
+  welcomeTitle,
+  welcomeSuggestions,
   conversationId,
   isLoadingAgents = false,
   selectedAgent,
   onAgentSelected,
   onBack,
   chatMode = "execution",
-  onChatModeChange = () => undefined,
+  onChatModeChange,
   showModelSelector = true,
+  modelParameterSettings,
+  modelSelectionScope = "agent",
+  fallbackAgentName = "Nexent Workbench",
+  selectedModelId,
+  onModelChange,
+  deepThinking,
+  onDeepThinkingChange,
+  thinkingEffort,
+  onThinkingEffortChange,
+  reasoningBudgetTokens,
+  onReasoningBudgetTokensChange,
   showConversationTitle = true,
-  isDictationConfigured = false,
+  composerTools,
   knowledgeScope = null,
   knowledgePreview = null,
   knowledgeCapabilities = null,
@@ -78,6 +118,14 @@ export const Chat: FC<ChatProps> = ({
   runtimeMetadata = {},
   onRuntimeMetadataChange,
   readOnly = false,
+  interactionContent,
+  readOnlyReason,
+  landingContent,
+  newChatDesign = false,
+  workbenchPresentation,
+  workbenchResources,
+  onRemoveWorkbenchSkill,
+  onOpenWorkbenchSkillPicker,
 }) => {
   const handleSelectAgent = useCallback(
     (agent: Agent) => {
@@ -85,10 +133,61 @@ export const Chat: FC<ChatProps> = ({
     },
     [onAgentSelected]
   );
+  const workbenchPlaceholderAgent = useMemo<Agent>(
+    () => ({
+      id: "__workbench_empty__",
+      name: fallbackAgentName,
+      display_name: fallbackAgentName,
+      description: "",
+      model: "",
+      max_step: 8,
+      provide_run_summary: false,
+      tools: [],
+    }),
+    [fallbackAgentName]
+  );
 
   if (!selectedAgent) {
     if (isLoadingAgents) {
       return <AgentsLoadingState />;
+    }
+    if (workbenchPresentation || landingContent) {
+      return (
+        <Thread
+          agent={workbenchPlaceholderAgent}
+          generatedTitle={generatedTitle}
+          conversationId={conversationId}
+          newChatDesign={newChatDesign}
+          welcomeContent={landingContent}
+          selectedModelId={selectedModelId}
+          onModelChange={onModelChange}
+          deepThinking={deepThinking}
+          onDeepThinkingChange={onDeepThinkingChange}
+          thinkingEffort={thinkingEffort}
+          onThinkingEffortChange={onThinkingEffortChange}
+          reasoningBudgetTokens={reasoningBudgetTokens}
+          onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
+          showModelSelector={showModelSelector}
+          modelParameterSettings={modelParameterSettings}
+          modelSelectionScope={modelSelectionScope}
+          chatMode={chatMode}
+          onChatModeChange={onChatModeChange}
+          composerTools={composerTools}
+          readOnly={readOnly}
+          readOnlyReason={readOnlyReason}
+          interactionContent={interactionContent}
+          showConversationTitle={showConversationTitle}
+          workbenchPresentation={workbenchPresentation}
+          workbenchResources={workbenchResources}
+          onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+          onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+          skillFiles={skillFiles}
+          knowledgeScope={knowledgeScope}
+          knowledgePreview={knowledgePreview}
+          knowledgeCapabilities={knowledgeCapabilities}
+          onKnowledgeScopeChange={onKnowledgeScopeChange}
+        />
+      );
     }
     return (
       <AgentLandingPage
@@ -101,13 +200,26 @@ export const Chat: FC<ChatProps> = ({
     <Thread
       agent={selectedAgent}
       generatedTitle={generatedTitle}
+      welcomeTitle={welcomeTitle}
+      welcomeSuggestions={welcomeSuggestions}
       conversationId={conversationId}
+      newChatDesign={newChatDesign}
       onBack={onBack}
       chatMode={chatMode}
       onChatModeChange={onChatModeChange}
       showModelSelector={showModelSelector}
+      modelParameterSettings={modelParameterSettings}
+      modelSelectionScope={modelSelectionScope}
+      selectedModelId={selectedModelId}
+      onModelChange={onModelChange}
+      deepThinking={deepThinking}
+      onDeepThinkingChange={onDeepThinkingChange}
+      thinkingEffort={thinkingEffort}
+      onThinkingEffortChange={onThinkingEffortChange}
+      reasoningBudgetTokens={reasoningBudgetTokens}
+      onReasoningBudgetTokensChange={onReasoningBudgetTokensChange}
       showConversationTitle={showConversationTitle}
-      isDictationConfigured={isDictationConfigured}
+      composerTools={composerTools}
       knowledgeScope={knowledgeScope}
       knowledgePreview={knowledgePreview}
       knowledgeCapabilities={knowledgeCapabilities}
@@ -118,6 +230,12 @@ export const Chat: FC<ChatProps> = ({
       runtimeMetadata={runtimeMetadata}
       onRuntimeMetadataChange={onRuntimeMetadataChange}
       readOnly={readOnly}
+      interactionContent={interactionContent}
+      readOnlyReason={readOnlyReason}
+      workbenchPresentation={workbenchPresentation}
+      workbenchResources={workbenchResources}
+      onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+      onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
     />
   );
 };

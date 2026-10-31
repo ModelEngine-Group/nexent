@@ -1,0 +1,11 @@
+secrets:
+  elasticPassword: "nexent@2025"
+  postgresPassword: "nexent@4321"
+  minio:
+    rootUser: "nexent"
+    rootPassword: "nexent@4321"
+    accessKey: ""
+    secretKey: ""
+
+sqlFiles:
+  init: ""

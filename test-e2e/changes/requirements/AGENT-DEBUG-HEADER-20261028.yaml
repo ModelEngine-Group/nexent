@@ -1,0 +1,62 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-DEBUG-HEADER-20261028
+  change_type: requirement
+  requirement_id: AGENT-DEBUG-HEADER-20261028
+  title: 智能体调试窗口标题栏操作
+  description: Replace the name dropdown with a static title, a comparison toggle beside the name, a new-conversation clear icon and a close-debug action.
+  affected_features:
+    existing:
+    - V5-PW-PROMPT-02
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - PW-PROMPT-02
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/workbench/AgentDebugHeader.test.tsx
+    - frontend/tests/workbench/AgentDebugWelcome.test.tsx
+    - frontend/tests/workbench/AgentDebugModelControls.test.ts
+    behaviors:
+    - AC-001 static, truncated agent name with no dropdown; comparison button immediately beside it.
+    - AC-002 comparison button exposes 切换对比模式, toggles both ways and announces its pressed state.
+    - AC-003 right-side close button exposes 关闭调试 and invokes the existing close callback.
+    - AC-004 clear uses the existing new-conversation icon and resets only the currently selected mode; fullscreen remains available.
+    - AC-005 missing agent and omitted callbacks remain safe; Chinese and English controls are localized.
+    reason: Existing AgentDebugWelcome tests prove greetings/questions and AgentDebugModelControls tests prove request serialization, but neither exercises header controls. Add focused frontend interaction UT; Python code is unaffected. No new D1 duplicates these isolated assertions.
+  notes: |
+    Baseline inspected 2026-10-28 on develop: agent-debug.tsx, AgentDebugWelcome.test.tsx,
+    AgentDebugModelControls.test.ts, PW-PROMPT-02 case/script and agent.page.ts.
+    PW-PROMPT-02 remains the unchanged real two-model journey regression; migrate its page-object
+    locator to the comparison button without weakening its assertions. Browser selector fixtures
+    prove page-object compatibility only, not deployed D4 acceptance.
+    D2/D3/D5 add no necessary evidence for these local header interactions; no protocol,
+    provider behavior, persistence or deployment changes. Preserve all existing formal Cases.
+    The configured sibling nexent-doc repository and ../docs/前端ui.md are absent.
+    The user confirmed the directory does not exist and authorized continuing this UI change.
+    Follow-up visual requirement: the close X uses the same 24px icon and button dimensions
+    as neighboring header actions, overriding the shared 14px close-icon default locally.
+    Do not invent a SPEC root inside the product repository.
+    Verification 2026-10-28: header UT 6/6 PASS; existing welcome/model controls UT 13/13 PASS.
+    Targeted ESLint and copyright checks PASS. Design formal validation with --generate and
+    --require-ut-change AGENT-DEBUG-HEADER-20261028 PASS.
+    Source-only tsc --noEmit PASS with an external temporary config excluding .next and node_modules.
+    Standard npm run type-check remains blocked by a stale .next/types reference to the absent
+    space/evaluators page. The initially detected test translation cast is corrected.
+    Prettier and git diff --check PASS.
+    Browser page-object fixture PASS using the bundled Playwright dependency and temporary
+    headless Edge outside the sandbox; repository d4/node_modules/playwright is absent.
+    The fixture keeps two comparison rounds distinct, returns to a single visible editor,
+    and verifies exact Agent selection. It does not execute the real Nexent application.
+    Implementation formal validation BLOCKED by the pre-existing CHAT-AGENT-DETAIL-20261026
+    UT selector referencing missing frontend/tests/workbench/ConversationResumeBranch.test.tsx.
+    Regeneration also exposed unrelated stale Feature navigation; leave those baseline files
+    unchanged instead of including unrelated generated updates in this change.
+    Real PW-PROMPT-02 D4 remains BLOCKED: no configured NEXENT_TEST_HOME/runtime/model assets.
+    Local UT is not evidence of real-model D4 execution or legacy acceptance completeness.

@@ -1,8 +1,11 @@
-import concurrent.futures
-import contextvars
+from concurrent.futures import TimeoutError as FutureTimeoutError
+from copy import deepcopy
+import threading
 from typing import Any, Dict
 
 from smolagents.tools import Tool
+
+from ..concurrency import ManagedTaskSpec, get_current_thread_manager
 
 
 class ParallelExecutorTool(Tool):
@@ -10,50 +13,37 @@ class ParallelExecutorTool(Tool):
     category = None
     tool_sign = None
     description = (
-        "Execute multiple independent agent/tool calls in parallel. "
-        "Each task is a 2-tuple (callable, kwargs_dict) or a 3-tuple "
-        "(callable, kwargs_dict, \"name\").  "
-        "All 2-tuples → returns a list (results in input order).  "
-        "All 3-tuples → returns a dict keyed by name.  "
-        "Only put calls that are independent of each other into one call; "
-        "if one task needs the output of another, call them serially.  "
-        "Timeout (default 120 s) and failures are captured as error strings.  "
-        "max_workers (default 4) limits the max number of threads used in "
-        "parallel; set higher when you have many independent tasks and want "
-        "to finish faster.  "
-        "kwargs values can be any Python object (strings, numbers, PIL Images, "
-        "file handles, audio, etc.) — just reference the variable name; no "
-        "serialization is needed.  "
-        "All results — whether from tools, assistants, timeouts, or errors — "
-        "are returned as plain strings.  Use print() to read them."
+        "Run independent available tools or sub-agents in parallel. "
+        "Dependent calls must run sequentially. Example:\n"
+        "<code>\n"
+        "# Search KB-A and KB-B concurrently\n"
+        'parallel_executor(tasks=[(knowledge_base_search, {"query": "test", "index_names": ["KB-A"]}, "kb_a"), '
+        '(knowledge_base_search, {"query": "test", "index_names": ["KB-B"]}, "kb_b")])\n'
+        "</code>"
     )
     description_zh = (
-        "并行执行多个互不依赖的助手或工具调用。"
-        "每个任务是一个二元组 (函数名, {\"参数\": 值}) 或三元组 (函数名, {\"参数\": 值}, \"名称\")。"
-        "全部用二元组 → 返回列表，按传入顺序排列。"
-        "全部用三元组 → 返回字典，key 是名称字符串。"
-        "只有互不依赖的调用才能放入同一个 parallel_executor；"
-        "如果后一个任务需要前一个任务的结果，必须分开串行调用。"
-        "单个任务超时（默认120秒）或失败不会影响其他任务，会以错误字符串形式返回。"
-        "max_workers（默认4）限制并行时使用的最大线程数；当有大量互不依赖的任务时可以提高该值以加快完成速度。"
-        "kwargs 值可以是任意 Python 对象（字符串、数字、PIL图片、文件句柄、音频等），"
-        "直接引用变量名即可，无需序列化。"
-        "所有返回结果——无论来自工具、助手、超时还是异常——均为纯字符串。"
-        "用 print() 读取即可。"
+        "并行执行多个互不依赖的可用工具或子智能体调用。有依赖的调用须串行执行。示例：\n"
+        "<code>\n"
+        "# 并发调用知识库工具检索知识库 KB-A 与 KB-B\n"
+        'parallel_executor(tasks=[(knowledge_base_search, {"query": "test", "index_names": ["KB-A"]}, "kb_a"), '
+        '(knowledge_base_search, {"query": "test", "index_names": ["KB-B"]}, "kb_b")])\n'
+        "</code>"
     )
     inputs = {
         "tasks": {
             "type": "array",
             "description": (
-                "A list of tasks where each task is a 2-tuple (callable, kwargs_dict) "
-                "or 3-tuple (callable, kwargs_dict, \"name\"). "
-                "kwargs values can be any Python object — just reference "
-                "the variable name, no serialization needed."
+                "Each task is (available_tool_or_agent, kwargs_dict) or "
+                "(available_tool_or_agent, kwargs_dict, result_key). "
+                "Use only listed resources and do not mix formats. "
+                "Two-tuples return a list in input order; three-tuples return a dict keyed by result_key. "
+                "Failures return error strings; successes retain their original types."
             ),
             "description_zh": (
-                "任务列表，每个任务是一个二元组 (函数名, 参数字典) "
-                "或三元组 (函数名, 参数字典, \"名称\")。"
-                "kwargs 值可以是任意 Python 对象，直接引用变量名即可，无需序列化。"
+                "每个任务是二元组（可用工具或子智能体对象，参数字典）或三元组"
+                "（可用工具或子智能体对象，参数字典，结果名称）。仅使用已列出的资源，"
+                "同次调用不得混用格式。二元组返回按输入顺序排列的列表，三元组返回"
+                "以结果名称为键的字典；失败返回错误字符串，成功结果保留原始类型。"
             ),
         },
         "timeout": {
@@ -76,15 +66,37 @@ class ParallelExecutorTool(Tool):
     }
     output_type = "any"
 
-    def forward(self, tasks, timeout: int = 120, max_workers: int = 4):
+    @classmethod
+    def inputs_for_timeout(cls, default_timeout_seconds: int) -> dict:
+        inputs = deepcopy(cls.inputs)
+        inputs["timeout"]["default"] = default_timeout_seconds
+        inputs["timeout"]["description"] = f"Per-task timeout in seconds (default {default_timeout_seconds})"
+        inputs["timeout"]["description_zh"] = f"单个任务超时秒数（默认{default_timeout_seconds}）"
+        return inputs
+
+    def __init__(self, default_timeout_seconds: int = 120):
+        if (
+            isinstance(default_timeout_seconds, bool)
+            or not isinstance(default_timeout_seconds, int)
+            or default_timeout_seconds <= 0
+        ):
+            raise ValueError("default_timeout_seconds must be a positive integer")
+        super().__init__()
+        self.default_timeout_seconds = default_timeout_seconds
+        self.inputs = self.inputs_for_timeout(default_timeout_seconds)
+        self.description_zh = self.description_zh.replace("默认120秒", f"默认{default_timeout_seconds}秒")
+
+    def forward(self, tasks, timeout: int | None = None, max_workers: int = 4):
         """Execute the tasks in parallel.
 
-        ``tasks`` is a list where each element is a 2-tuple ``(func, kwargs)``
-        or 3-tuple ``(func, kwargs, \"name\")``.
+        ``tasks`` is a list where each element is a 2-tuple
+        ``(tool_or_agent, kwargs)`` or 3-tuple
+        ``(tool_or_agent, kwargs, \"result_key\")``.
 
         Returns a list (all 2-tuples) or dict (all 3-tuples).
         """
-        return _parallel_executor(tasks, timeout=timeout, max_workers=max_workers)
+        effective_timeout = self.default_timeout_seconds if timeout is None else timeout
+        return _parallel_executor(tasks, timeout=effective_timeout, max_workers=max_workers)
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +122,8 @@ def _validate_tasks(tasks):
         if not all(len(t) == 2 for t in tasks):
             raise ValueError(
                 "parallel_executor: each task must be a 2-tuple "
-                "(callable, kwargs_dict) or 3-tuple (callable, kwargs_dict, name)."
+                "(tool_or_agent, kwargs_dict) or 3-tuple "
+                "(tool_or_agent, kwargs_dict, result_key)."
             )
         names = [None] * n
 
@@ -122,34 +135,57 @@ def _execute_tasks(tasks, names, timeout, max_workers):
     n = len(tasks)
     results = [None] * n
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-        future_to_idx: Dict[concurrent.futures.Future, int] = {}
-        for idx, t in enumerate(tasks):
-            func, kwargs = t[0], t[1]
-            label = names[idx] or f"task-{idx}"
-            if not isinstance(kwargs, dict):
-                results[idx] = (
-                    f"[{label}] Invalid: "
-                    f"kwargs must be a dict, got {type(kwargs).__name__}"
-                )
-                continue
-            if not callable(func):
-                results[idx] = (
-                    f"[{label}] Not callable: {type(func).__name__}"
-                )
-                continue
-            task_context = contextvars.copy_context()
-            future_to_idx[pool.submit(task_context.run, func, **kwargs)] = idx
+    manager = get_current_thread_manager()
+    if manager is None:
+        from ..agents.run_agent import _get_default_agent_thread_manager
 
-        for future, idx in future_to_idx.items():
-            label = names[idx] or f"task-{idx}"
-            try:
-                results[idx] = future.result(timeout=timeout)
-            except concurrent.futures.TimeoutError:
-                results[idx] = f"[{label}] Timed out after {timeout}s."
-            except Exception:
-                import traceback as _tb
-                results[idx] = f"[{label}] Failed: {_tb.format_exc(limit=1)}"
+        manager = _get_default_agent_thread_manager()
+    requested_limit = max(1, int(max_workers))
+    admission = threading.BoundedSemaphore(requested_limit)
+    executions: Dict[str, tuple[Any, int]] = {}
+
+    def run_admitted(func, kwargs):
+        with admission:
+            return func(**kwargs)
+
+    for idx, t in enumerate(tasks):
+        func, kwargs = t[0], t[1]
+        label = names[idx] or f"task-{idx}"
+        if not isinstance(kwargs, dict):
+            results[idx] = (
+                f"[{label}] Invalid: "
+                f"kwargs must be a dict, got {type(kwargs).__name__}"
+            )
+            continue
+        if not callable(func):
+            results[idx] = f"[{label}] Not callable: {type(func).__name__}"
+            continue
+        execution = manager.submit(
+            "model-tool-io",
+            ManagedTaskSpec(
+                task_name="parallel-tool-call",
+                owner="sdk-agent",
+            ),
+            run_admitted,
+            func,
+            kwargs,
+        )
+        executions[execution.execution_id] = (execution, idx)
+
+    for execution, idx in executions.values():
+        label = names[idx] or f"task-{idx}"
+        try:
+            results[idx] = execution.future.result(timeout=timeout)
+        except FutureTimeoutError:
+            manager.cancel(
+                execution.execution_id,
+                reason="parallel tool deadline exceeded",
+                wait_timeout=0,
+            )
+            results[idx] = f"[{label}] Timed out after {timeout}s."
+        except Exception:
+            import traceback as _tb
+            results[idx] = f"[{label}] Failed: {_tb.format_exc(limit=1)}"
 
     return results
 

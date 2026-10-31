@@ -7,6 +7,7 @@ metadata:
   annotations:
     "helm.sh/hook-weight": "-3"
 data:
+  TZ: {{ .Values.config.timezone | quote }}
   # Deployment version
   DEPLOYMENT_VERSION: {{ .Values.global.deploymentVersion | quote }}
 
@@ -50,6 +51,7 @@ data:
   RUNTIME_CANCEL_TTL_SECONDS: {{ .Values.config.runtimeState.cancelTtlSeconds | quote }}
   RUNTIME_COMPLETED_TTL_SECONDS: {{ .Values.config.runtimeState.completedTtlSeconds | quote }}
   RUNTIME_CANCEL_POLL_INTERVAL_SECONDS: {{ .Values.config.runtimeState.cancelPollIntervalSeconds | quote }}
+
   NORTHBOUND_IDEMPOTENCY_TTL_SECONDS: {{ .Values.config.northbound.idempotencyTtlSeconds | quote }}
   NORTHBOUND_RATE_LIMIT_ENABLED: {{ .Values.config.northbound.rateLimitEnabled | quote }}
   NORTHBOUND_RATE_LIMIT_PER_MINUTE: {{ .Values.config.northbound.rateLimitPerMinute | quote }}
@@ -73,43 +75,23 @@ data:
   # Terminal Tool SSH Config
   SSH_PRIVATE_KEY_PATH: {{ .Values.config.terminal.sshPrivateKeyPath | quote }}
 
-  # Supabase Config
-  DASHBOARD_USERNAME: {{ .Values.config.supabase.dashboardUsername | quote }}
-  DASHBOARD_PASSWORD: {{ .Values.config.supabase.dashboardPassword | quote }}
-  SITE_URL: {{ .Values.config.supabase.siteUrl | quote }}
-  SUPABASE_URL: {{ .Values.config.supabase.supabaseUrl | quote }}
-  API_EXTERNAL_URL: {{ .Values.config.supabase.apiExternalUrl | quote }}
-  DISABLE_SIGNUP: {{ .Values.config.supabase.disableSignup | quote }}
-  JWT_EXPIRY: {{ .Values.config.supabase.jwtExpiry | quote }}
-  DEBUG_JWT_EXPIRE_SECONDS: {{ .Values.config.supabase.debugJwtExpireSeconds | quote }}
-  ENABLE_EMAIL_SIGNUP: {{ .Values.config.supabase.enableEmailSignup | quote }}
-  ENABLE_EMAIL_AUTOCONFIRM: {{ .Values.config.supabase.enableEmailAutoconfirm | quote }}
-  ENABLE_ANONYMOUS_USERS: {{ .Values.config.supabase.enableAnonymousUsers | quote }}
-  ENABLE_PHONE_SIGNUP: {{ .Values.config.supabase.enablePhoneSignup | quote }}
-  ENABLE_PHONE_AUTOCONFIRM: {{ .Values.config.supabase.enablePhoneAutoconfirm | quote }}
-  INVITE_CODE: {{ .Values.config.supabase.inviteCode | quote }}
-  MAILER_URLPATHS_CONFIRMATION: {{ .Values.config.supabase.mailerUrlpathsConfirmation | quote }}
-  MAILER_URLPATHS_INVITE: {{ .Values.config.supabase.mailerUrlpathsInvite | quote }}
-  MAILER_URLPATHS_RECOVERY: {{ .Values.config.supabase.mailerUrlpathsRecovery | quote }}
-  MAILER_URLPATHS_EMAIL_CHANGE: {{ .Values.config.supabase.mailerUrlpathsEmailChange | quote }}
-  SUPABASE_POSTGRES_HOST: {{ .Values.config.supabase.postgresHost | quote }}
-  SUPABASE_POSTGRES_DB: {{ .Values.config.supabase.postgresDb | quote }}
-  SUPABASE_POSTGRES_PORT: {{ .Values.config.supabase.postgresPort | quote }}
-  ADDITIONAL_REDIRECT_URLS: {{ .Values.config.supabase.additionalRedirectUrls | quote }}
+  # Local authentication
+  JWT_ISSUER: {{ .Values.config.auth.jwtIssuer | quote }}
+  JWT_EXPIRY: {{ .Values.config.auth.jwtExpiry | quote }}
+  DEBUG_JWT_EXPIRE_SECONDS: {{ .Values.config.auth.debugJwtExpireSeconds | quote }}
+  INVITE_CODE: {{ .Values.config.auth.inviteCode | quote }}
 
   # Data Processing Service Configuration
   REDIS_PORT: {{ .Values.config.redis.port | quote }}
   FLOWER_PORT: {{ .Values.config.dataProcess.flowerPort | quote }}
-  RAY_DASHBOARD_PORT: {{ .Values.config.dataProcess.rayDashboardPort | quote }}
-  RAY_DASHBOARD_HOST: {{ .Values.config.dataProcess.rayDashboardHost | quote }}
-  RAY_ACTOR_NUM_CPUS: {{ .Values.config.dataProcess.rayActorNumCpus | quote }}
   DP_PART_PROCESSOR_COUNT: {{ .Values.config.dataProcess.partProcessorCount | quote }}
   DP_FILE_SPLIT_SIZE_MB: {{ .Values.config.dataProcess.fileSplitSizeMb | quote }}
-  RAY_NUM_CPUS: {{ default (mul (int .Values.config.dataProcess.partProcessorCount) (int .Values.config.dataProcess.rayActorNumCpus)) .Values.config.dataProcess.rayNumCpus | quote }}
-  RAY_OBJECT_STORE_MEMORY_GB: {{ .Values.config.dataProcess.rayObjectStoreMemoryGb | quote }}
-  RAY_TEMP_DIR: {{ .Values.config.dataProcess.rayTempDir | quote }}
-  RAY_LOG_LEVEL: {{ .Values.config.dataProcess.rayLogLevel | quote }}
-  DISABLE_RAY_DASHBOARD: {{ .Values.config.dataProcess.disableRayDashboard | quote }}
+  DP_PARSE_MAX_PROCESSES: {{ .Values.config.dataProcess.parseMaxProcesses | quote }}
+  DP_PARSE_MIN_PROCESSES: {{ .Values.config.dataProcess.parseMinProcesses | quote }}
+  DP_PARSE_THREADS_PER_PROCESS: {{ .Values.config.dataProcess.parseThreadsPerProcess | quote }}
+  DP_PARSE_MAX_TASKS_PER_CHILD: {{ .Values.config.dataProcess.parseMaxTasksPerChild | quote }}
+  DP_PRELOAD_MODELS: {{ .Values.config.dataProcess.preloadModels | quote }}
+  DP_PARSER_STARTUP_TIMEOUT_S: {{ .Values.config.dataProcess.parserStartupTimeout | quote }}
   DISABLE_CELERY_FLOWER: {{ .Values.config.dataProcess.disableCeleryFlower | quote }}
   DOCKER_ENVIRONMENT: {{ .Values.config.dataProcess.dockerEnvironment | quote }}
   ENABLE_UPLOAD_IMAGE: {{ .Values.config.dataProcess.enableUploadImage | quote }}
@@ -141,18 +123,21 @@ data:
   MONITORING_FASTAPI_EXCLUDED_URLS: {{ default .Values.config.telemetry.fastapiExcludedUrls $monitoring.fastapiExcludedUrls | quote }}
   MONITORING_FASTAPI_EXCLUDE_SPANS: {{ default .Values.config.telemetry.fastapiExcludeSpans $monitoring.fastapiExcludeSpans | quote }}
   MONITORING_DASHBOARD_URL: {{ default .Values.config.telemetry.dashboardUrl $monitoring.dashboardUrl | quote }}
+  MONITORING_DASHBOARD_ALLOWED_ROLES: {{ ternary (get $monitoring "dashboardAllowedRoles") .Values.config.telemetry.dashboardAllowedRoles (hasKey $monitoring "dashboardAllowedRoles") | quote }}
   TELEMETRY_SAMPLE_RATE: {{ default .Values.config.telemetry.telemetrySampleRate $monitoring.telemetrySampleRate | quote }}
   MONITORING_TRACE_CONTENT_MODE: {{ default .Values.config.telemetry.traceContentMode $monitoring.traceContentMode | quote }}
   MONITORING_TRACE_MAX_CHARS: {{ default .Values.config.telemetry.traceMaxChars $monitoring.traceMaxChars | quote }}
   MONITORING_TRACE_MAX_ITEMS: {{ default .Values.config.telemetry.traceMaxItems $monitoring.traceMaxItems | quote }}
 
-  # Market Backend Address
-  MARKET_BACKEND: {{ .Values.config.marketBackend | quote }}
-
   # Skip proxy
   skip_proxy: {{ .Values.config.skipProxy | quote }}
   UMASK: {{ .Values.config.umask | quote }}
   SKILLS_PATH: {{ .Values.config.skillsPath | quote }}
+  MEMORY_PROVIDER_PLUGINS_DIR: {{ .Values.config.memoryProviderPluginsDir | quote }}
+  LOG_DIR: {{ .Values.config.logDir | quote }}
+  MAX_SKILLS_PER_TENANT: {{ .Values.config.skill.maxSkillsPerTenant | quote }}
+  MAX_SKILL_UPLOAD_SIZE_MB: {{ .Values.config.skill.maxUploadSizeMb | quote }}
+  MAX_EVALUATION_SET_FILE_SIZE_MB: {{ .Values.config.evaluationSet.maxFileSizeMb | quote }}
 
   # MCP Container Image
   NEXENT_MCP_DOCKER_IMAGE: {{ printf "%s:%s" .Values.images.mcp.repository .Values.images.mcp.tag | quote }}

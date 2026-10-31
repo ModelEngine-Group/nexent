@@ -1,9 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 import asyncio
 
 import pytest
 
-from backend.services import runtime_state_service as runtime_state_module
-from backend.services.runtime_state_service import RuntimeStateService
+from management.services.agent import run_state as runtime_state_module
+from management.services.agent.run_state import RuntimeStateService
 
 
 class FakeRedisClient:
@@ -42,6 +43,9 @@ class FakeRedisClient:
         for key in keys:
             self.hashes.pop(key, None)
             self.values.pop(key, None)
+
+    def hdel(self, key, field):
+        self.hashes.get(key, {}).pop(field, None)
 
     def hgetall(self, key):
         self._maybe_fail("hgetall")
@@ -208,13 +212,17 @@ def test_client_property_lazily_creates_redis_client(monkeypatch):
     assert service.client is fake_client
 
 
-def test_reset_stream_deletes_stream_and_done_keys():
+def test_reset_stream_clears_previous_stop_before_new_run_preparation():
     client = FakeRedisClient()
     service = TestRuntimeStateService(client)
 
+    service.set_cancel_signal("user-1", 42)
+    service.mark_run_finished("user-1", 42, "stopped")
+    assert service.is_cancelled("user-1", 42)
     service.reset_stream("user-1", 42)
 
-    assert client.deletes == [("runtime:stream:user-1:42", "runtime:stream:done:user-1:42")]
+    assert not service.is_cancelled("user-1", 42)
+    assert client.deletes == [("runtime:stream:user-1:42", "runtime:stream:done:user-1:42", "runtime:cancel:user-1:42")]
 
 
 def test_reset_stream_swallows_redis_errors(caplog):
@@ -227,11 +235,13 @@ def test_reset_stream_swallows_redis_errors(caplog):
     assert "Failed to reset runtime stream state" in caplog.text
 
 
-def test_register_run_writes_owner_status_ttl_and_clears_cancel(monkeypatch):
+def test_register_run_preserves_stop_requested_during_preparation(monkeypatch):
     monkeypatch.setattr(runtime_state_module, "RUNTIME_RUN_TTL_SECONDS", 123)
     client = FakeRedisClient()
     service = TestRuntimeStateService(client)
 
+    service.reset_stream("user-1", 42)
+    service.set_cancel_signal("user-1", 42)
     service.register_run("user-1", 42, message_id=99)
 
     key, mapping = client.hsets[0]
@@ -239,7 +249,7 @@ def test_register_run_writes_owner_status_ttl_and_clears_cancel(monkeypatch):
     assert mapping["status"] == "running"
     assert mapping["message_id"] == "99"
     assert ("runtime:run:user-1:42", 123) in client.expires
-    assert ("runtime:cancel:user-1:42",) in client.deletes
+    assert service.is_cancelled("user-1", 42)
 
 
 def test_register_run_swallows_redis_errors(caplog):
@@ -400,10 +410,17 @@ def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
     client = FakeRedisClient()
     service = TestRuntimeStateService(client)
 
+    managed_calls = []
+
+    class FakeThreadManager:
+        async def run(self, lane, spec, func, *args, **kwargs):
+            managed_calls.append((lane, spec.task_name))
+            return func(*args, **kwargs)
+
+    service.set_thread_manager(FakeThreadManager())
+
     async def fake_to_thread(func, *args, **kwargs):
         return func(*args, **kwargs)
-
-    monkeypatch.setattr(runtime_state_module.asyncio, "to_thread", fake_to_thread)
     monkeypatch.setattr(
         service,
         "reset_stream",
@@ -442,3 +459,5 @@ def test_async_wrappers_delegate_to_sync_methods(monkeypatch):
         assert await service.consume_rate_limit_async("tenant-1", 2) == 1
 
     asyncio.run(run_checks())
+    assert len(managed_calls) == 11
+    assert {lane for lane, _ in managed_calls} == {"control-io"}

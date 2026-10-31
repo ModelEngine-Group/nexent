@@ -1,0 +1,16 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-003
+  name: 本地 JWT 身份查询与历史刷新令牌拒绝
+  status: active
+  description: 保留身份查询接口，普通 JWT 到期后重新登录。
+  business_rules:
+  - rule_id: F-003-RULE-01
+    description: 本地 JWT 支持 session/current_user 查询；历史 refresh token 返回 401，不延长登录。
+  required_test_stages:
+  - D2
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

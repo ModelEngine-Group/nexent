@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 # Ensure the script is executed with bash (required for arrays and [[ ]])
 if [ -z "$BASH_VERSION" ]; then
@@ -12,11 +13,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-CONST_FILE="$PROJECT_ROOT/backend/consts/const.py"
+CONST_FILE="$PROJECT_ROOT/backend/contracts/constants/environment.py"
 DEPLOY_OPTIONS_FILE="$SCRIPT_DIR/deploy.options"
 DEPLOYMENT_COMMON="$DEPLOY_ROOT/common/common.sh"
 VERSION_HELPER="$DEPLOY_ROOT/common/version.sh"
 ORIGINAL_ARGS=("$@")
+DEPLOYMENT_SANDBOX_MODE_SELECTION_ENABLED="true"
 ROOT_ENV_FILE="$DEPLOY_ROOT/env/.env"
 COMPOSE_DIR="$SCRIPT_DIR/compose"
 DOCKER_ASSETS_DIR="$SCRIPT_DIR/assets"
@@ -66,6 +68,7 @@ print_docker_deploy_usage() {
     echo "  --components LIST          要部署的组件列表"
     echo "  --port-policy POLICY       development 或 production"
     echo "  --image-source SOURCE      general、mainland 或 local-latest"
+    echo "  --sandbox-mode MODE        disabled、lightweight 或 full（默认 lightweight）"
     echo "  --registry-profile NAME    兼容旧参数，映射为 general/mainland 镜像源"
     echo "  --image-registry-prefix P  镜像仓库前缀，例如 registry.example.com/nexent"
     echo "  --monitoring-provider NAME 选中 monitoring 组件时使用的监控 provider"
@@ -89,6 +92,7 @@ print_docker_deploy_usage() {
   echo "  --components LIST          Components to deploy"
   echo "  --port-policy POLICY       development or production"
   echo "  --image-source SOURCE      general, mainland, or local-latest"
+  echo "  --sandbox-mode MODE        disabled, lightweight, or full (default: lightweight)"
   echo "  --registry-profile NAME    Legacy alias for image source general/mainland"
   echo "  --image-registry-prefix P  Image registry prefix, e.g. registry.example.com/nexent"
   echo "  --monitoring-provider NAME Monitoring provider when monitoring is selected"
@@ -480,6 +484,44 @@ persist_deploy_options() {
   } > "$DEPLOY_OPTIONS_FILE"
 }
 
+# Persist the LOG_DIR env var alongside ROOT_DIR.
+#
+# Containers running the backend service see ROOT_DIR mounted at
+# /mnt/nexent-data (see deploy/docker/compose/docker-compose.*.yml), so the
+# log directory inside the container must be /mnt/nexent-data/logs. Writing
+# logs there gives a stable path that survives container restarts and is
+# bind-mounted back to ${ROOT_DIR}/logs on the host.
+#
+# This always overrides any pre-existing LOG_DIR value for the Docker
+# deployment path: a previous value of "logs" (the local-dev default) or
+# any other host path would otherwise be written into the container's
+# ephemeral layer and silently lost on container recreate.
+persist_log_dir() {
+  local log_dir="/mnt/nexent-data/logs"
+  if grep -q "^LOG_DIR=" "$ROOT_ENV_FILE"; then
+    local current_value
+    current_value="$(grep -E '^LOG_DIR=' "$ROOT_ENV_FILE" | head -n1 | cut -d'=' -f2-)"
+    if [ "$current_value" = "$log_dir" ]; then
+      echo "   ✓ LOG_DIR already configured for Docker mount"
+      return 0
+    fi
+    echo "   ↻ LOG_DIR was \"$current_value\"; overriding to \"$log_dir\" for Docker mount"
+  else
+    echo "   + LOG_DIR missing; setting to \"$log_dir\""
+  fi
+  update_env_var "LOG_DIR" "$log_dir"
+}
+
+# Ensure the host-side log directory exists with the right ownership/permissions
+# so that the container's backend process (running as root inside the image) can
+# create category subdirectories on first write.
+prepare_log_dir_on_host() {
+  if [ -z "${ROOT_DIR:-}" ]; then
+    return 0
+  fi
+  create_dir_with_permission "$ROOT_DIR/logs" 775
+}
+
 generate_minio_ak_sk() {
   if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ] && [ -n "${MINIO_ACCESS_KEY:-}" ] && [ -n "${MINIO_SECRET_KEY:-}" ]; then
     echo "   MinIO credentials unchanged; reusing deploy/env/.env values"
@@ -521,72 +563,11 @@ generate_minio_ak_sk() {
   echo "   ✅ MinIO keys generated successfully"
 }
 
-generate_jwt() {
-  # Function to generate JWT token
-  local role=$1
-  local secret=$JWT_SECRET
-  local now=$(date +%s)
-  local exp=$((now + 157680000))
 
-  local header='{"alg":"HS256","typ":"JWT"}'
-  local header_base64=$(echo -n "$header" | base64 | tr -d '\n=' | tr '/+' '_-')
-
-  local payload="{\"role\":\"$role\",\"iss\":\"supabase\",\"iat\":$now,\"exp\":$exp}"
-  local payload_base64=$(echo -n "$payload" | base64 | tr -d '\n=' | tr '/+' '_-')
-
-  local signature=$(echo -n "$header_base64.$payload_base64" | openssl dgst -sha256 -hmac "$secret" -binary | base64 | tr -d '\n=' | tr '/+' '_-')
-
-  echo "$header_base64.$payload_base64.$signature"
-}
-
-generate_supabase_keys() {
-  if [ "$DEPLOYMENT_VERSION" != "full" ]; then
-    return 0
-  fi
-
-  echo "🔑 Checking Supabase keys..."
-
-  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" != "true" ] \
-    && [ -n "${JWT_SECRET:-}" ] \
-    && [ -n "${SECRET_KEY_BASE:-}" ] \
-    && [ -n "${VAULT_ENC_KEY:-}" ] \
-    && [ -n "${SUPABASE_KEY:-}" ] \
-    && [ -n "${SERVICE_ROLE_KEY:-}" ]; then
-    echo "   Supabase secrets unchanged; reusing deploy/env/.env values"
-    return 0
-  fi
-
+generate_auth_keys() {
   if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ] || [ -z "${JWT_SECRET:-}" ]; then
-    export JWT_SECRET=$(openssl rand -base64 32 | tr -d '[:space:]')
+    export JWT_SECRET="$(openssl rand -base64 32 | tr -d '[:space:]')"
     update_env_var "JWT_SECRET" "$JWT_SECRET"
-  fi
-  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ] || [ -z "${SECRET_KEY_BASE:-}" ]; then
-    export SECRET_KEY_BASE=$(openssl rand -base64 64 | tr -d '[:space:]')
-    update_env_var "SECRET_KEY_BASE" "$SECRET_KEY_BASE"
-  fi
-  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ] || [ -z "${VAULT_ENC_KEY:-}" ]; then
-    export VAULT_ENC_KEY=$(openssl rand -base64 32 | tr -d '[:space:]')
-    update_env_var "VAULT_ENC_KEY" "$VAULT_ENC_KEY"
-  fi
-
-  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ] || [ -z "${SUPABASE_KEY:-}" ]; then
-    SUPABASE_KEY=$(generate_jwt "anon")
-    export SUPABASE_KEY
-    update_env_var "SUPABASE_KEY" "$SUPABASE_KEY"
-  fi
-  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ] || [ -z "${SERVICE_ROLE_KEY:-}" ]; then
-    SERVICE_ROLE_KEY=$(generate_jwt "service_role")
-    export SERVICE_ROLE_KEY
-    update_env_var "SERVICE_ROLE_KEY" "$SERVICE_ROLE_KEY"
-  fi
-
-  set -a
-  source "$ROOT_ENV_FILE"
-  set +a
-  if [ "${DEPLOYMENT_ROTATE_SECRETS:-false}" = "true" ]; then
-    echo "   ✅ Supabase secrets rotated"
-  else
-    echo "   ✅ Missing Supabase secrets generated"
   fi
 }
 
@@ -690,7 +671,6 @@ get_compose_version() {
 }
 
 disable_dashboard() {
-  update_env_var "DISABLE_RAY_DASHBOARD" "true"
   update_env_var "DISABLE_CELERY_FLOWER" "true"
 }
 
@@ -833,6 +813,14 @@ pull_mcp_image() {
 }
 
 pull_sandbox_image() {
+  if [ "$DEPLOYMENT_SANDBOX_MODE" = "disabled" ]; then
+    echo "🔄 Sandbox is disabled; skipping sandbox image pull."
+    echo ""
+    echo "--------------------------------"
+    echo ""
+    return 0
+  fi
+
   if [ "$DEPLOYMENT_IMAGE_SOURCE" = "local-latest" ]; then
     echo "🔄 Skipping sandbox image pull because image source is local-latest."
     echo ""
@@ -863,6 +851,34 @@ pull_sandbox_image() {
   echo ""
   echo "--------------------------------"
   echo ""
+}
+
+reconcile_sandbox_container() {
+  local container_name="nexent-runtime-sandbox"
+  local current_image=""
+
+  if ! docker container inspect "$container_name" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  current_image="$(docker container inspect --format '{{.Config.Image}}' "$container_name" 2>/dev/null || true)"
+  if [ "$DEPLOYMENT_SANDBOX_MODE" != "disabled" ] && [ "$current_image" = "$NEXENT_SANDBOX_IMAGE" ]; then
+    return 0
+  fi
+
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🔄 沙箱模式或镜像已变更，正在重建固定沙箱容器（工作区卷会保留）..."
+  else
+    echo "🔄 Sandbox mode or image changed; recreating the fixed Sandbox container (workspace volume is preserved)..."
+  fi
+  docker rm -f "$container_name" >/dev/null || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ 无法移除旧的固定沙箱容器：$container_name"
+    else
+      echo "❌ Failed to remove the previous fixed Sandbox container: $container_name"
+    fi
+    return 1
+  }
 }
 
 select_deployment_mode() {
@@ -914,12 +930,14 @@ select_deployment_mode() {
       # Add new ROOT_DIR to .env
       update_env_var "ROOT_DIR" "$ROOT_DIR"
     fi
+    persist_log_dir
   elif grep -q "^ROOT_DIR=" "$ROOT_ENV_FILE"; then
   # Check if ROOT_DIR already exists in .env (second priority)
     # Extract existing ROOT_DIR value from .env
     env_root_dir=$(grep "^ROOT_DIR=" "$ROOT_ENV_FILE" | cut -d'=' -f2 | sed 's/^"//;s/"$//')
     ROOT_DIR="$env_root_dir"
     echo "   📁 Use existing ROOT_DIR path: $env_root_dir"
+    persist_log_dir
 
   else
   # Use default value and prompt user input (lowest priority)
@@ -928,6 +946,7 @@ select_deployment_mode() {
     ROOT_DIR="${user_root_dir:-$default_root_dir}"
 
     update_env_var "ROOT_DIR" "$ROOT_DIR"
+    persist_log_dir
   fi
   echo ""
   echo "--------------------------------"
@@ -982,6 +1001,74 @@ create_dir_with_permission() {
   fi
 }
 
+project_config_dir_is_empty() {
+  local target_dir="$1"
+  [ ! -d "$target_dir" ] || [ -z "$(find "$target_dir" -mindepth 1 -print -quit 2>/dev/null)" ]
+}
+
+prepare_project_config_dir() {
+  local target_dir="$ROOT_DIR/project-config"
+
+  if ! mkdir -p "$target_dir" || ! chmod 775 "$target_dir"; then
+    echo "   ❌ ERROR Failed to prepare project configuration directory $target_dir." >&2
+    return 1
+  fi
+  echo "   📁 Directory $target_dir has been created and permissions set to 775."
+}
+
+migrate_legacy_project_config() {
+  local target_dir="$ROOT_DIR/project-config"
+  local staging_dir
+  local relative_path
+  local project_config_files=(
+    "modelengine-logo.png"
+    "modelengine-logo2.png"
+    "locales/zh/custom.json"
+    "locales/en/custom.json"
+  )
+
+  if ! project_config_dir_is_empty "$target_dir"; then
+    echo "   ↺ Project configuration directory already contains data; legacy migration skipped."
+    return 0
+  fi
+
+  if ! docker inspect --type container nexent-web >/dev/null 2>&1; then
+    echo "   ↺ No legacy nexent-web container found; project configuration will use image defaults."
+    return 0
+  fi
+
+  staging_dir=$(mktemp -d "$ROOT_DIR/.project-config-migration.XXXXXX") || {
+    echo "   ❌ ERROR Failed to create a project configuration migration directory." >&2
+    return 1
+  }
+
+  for relative_path in "${project_config_files[@]}"; do
+    mkdir -p "$(dirname "$staging_dir/$relative_path")"
+    if ! docker cp \
+      "nexent-web:/opt/frontend-dist/public/$relative_path" \
+      "$staging_dir/$relative_path"; then
+      echo "   ❌ ERROR Failed to back up $relative_path from the legacy nexent-web container." >&2
+      echo "   Migration files were preserved at $staging_dir." >&2
+      return 1
+    fi
+    if [ ! -s "$staging_dir/$relative_path" ]; then
+      echo "   ❌ ERROR Legacy project configuration file is empty: $relative_path" >&2
+      echo "   Migration files were preserved at $staging_dir." >&2
+      return 1
+    fi
+  done
+
+  if ! rmdir "$target_dir" || ! mv "$staging_dir" "$target_dir"; then
+    echo "   ❌ ERROR Failed to activate migrated project configuration." >&2
+    echo "   Migration files were preserved at $staging_dir." >&2
+    return 1
+  fi
+
+  find "$target_dir" -type d -exec chmod 775 {} +
+  find "$target_dir" -type f -exec chmod 664 {} +
+  echo "   ✅ Legacy project configuration migrated to $target_dir."
+}
+
 sql_files_checksum() {
   local payload=""
   local file rel checksum
@@ -1017,21 +1104,18 @@ prepare_directory_and_data() {
   create_dir_with_permission "$ROOT_DIR/postgresql" 775
   create_dir_with_permission "$ROOT_DIR/minio/data" 775
   create_dir_with_permission "$ROOT_DIR/redis" 775
+  create_dir_with_permission "$ROOT_DIR/memory-provider-plugins" 775
+  prepare_project_config_dir || return 1
+  migrate_legacy_project_config || return 1
 
   cp -rn "$DOCKER_ASSETS_DIR/volumes" "$ROOT_DIR"
   chmod -R 775 $ROOT_DIR/volumes
   echo "   📁 Directory $ROOT_DIR/volumes has been created and permissions set to 775."
 
-  mkdir -p "$ROOT_DIR/volumes/db/data" "$ROOT_DIR/volumes/db/init"
-  if [ -f "$SQL_DIR/supabase/init/data.sql" ]; then
-    cp -f "$SQL_DIR/supabase/init/data.sql" "$ROOT_DIR/volumes/db/init/data.sql"
-  fi
-  chmod -R 775 "$ROOT_DIR/volumes/db"
-  echo "   Supabase data directory initialized; SQL files are mounted from $SQL_DIR/supabase."
 
-  # Copy sync_user_supabase2pg.py to ROOT_DIR for container access
+  # Copy maintenance scripts for container access
   cp -rn "$DOCKER_ASSETS_DIR/scripts" "$ROOT_DIR"
-  chmod 644 "$ROOT_DIR/scripts/sync_user_supabase2pg.py"
+  chmod 644 "$ROOT_DIR/scripts/"*.py
   echo "   📁 update scripts copied to $ROOT_DIR"
 
   # Create nexent user workspace directory
@@ -1039,11 +1123,12 @@ prepare_directory_and_data() {
   create_dir_with_permission "$NEXENT_USER_DIR" 775
   echo "   🖥️  Nexent user workspace: $NEXENT_USER_DIR"
 
-  # Copy official-skills-zip folder to /mnt/nexent
+  # Refresh bundled official skills while preserving additional target files.
   if [ -d "$DOCKER_ASSETS_DIR/official-skills-zip" ]; then
-    cp -rn "$DOCKER_ASSETS_DIR/official-skills-zip" "$NEXENT_USER_DIR/"
+    mkdir -p "$NEXENT_USER_DIR/official-skills-zip"
+    cp -rf "$DOCKER_ASSETS_DIR/official-skills-zip/." "$NEXENT_USER_DIR/official-skills-zip/"
     chmod -R 775 "$NEXENT_USER_DIR/official-skills-zip"
-    echo "   📦 Official skills copied to $NEXENT_USER_DIR/official-skills-zip"
+    echo "   📦 Official skills refreshed at $NEXENT_USER_DIR/official-skills-zip"
   else
     echo "   ⚠️ official-skills-zip directory not found, skipping skills copy"
   fi
@@ -1056,13 +1141,100 @@ prepare_directory_and_data() {
   echo ""
 }
 
+prepare_core_service_deployment() {
+  local service image
+  local prepared_images=" "
+  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" config --quiet; then
+    echo "Error: invalid Compose configuration; existing business services remain running." >&2
+    return 1
+  fi
+
+  for service in "$@"; do
+    case "$service" in
+      nexent-web) image="${NEXENT_WEB_IMAGE:-}" ;;
+      nexent-data-process) image="${NEXENT_DATA_PROCESS_IMAGE:-}" ;;
+      *) image="${NEXENT_IMAGE:-}" ;;
+    esac
+    if [ -z "$image" ]; then
+      echo "Error: no image configured for $service." >&2
+      return 1
+    fi
+    case "$prepared_images" in *" $image "*) continue ;; esac
+    if ! docker image inspect "$image" >/dev/null 2>&1; then
+      if [ "${DEPLOYMENT_IMAGE_SOURCE:-}" = "local-latest" ]; then
+        echo "Error: local image $image is missing; build it before deploying." >&2
+        return 1
+      fi
+      docker pull "$image" || return 1
+    fi
+    prepared_images="$prepared_images$image "
+  done
+
+  case " $* " in
+    *" nexent-config "*)
+      # Override the SQL entrypoint: this preflight must not modify the database.
+      if ! MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+$MSYS2_ARG_CONV_EXCL;}/opt/" \
+        ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
+        run --rm --no-deps --workdir /opt/backend --entrypoint sh nexent-config \
+        -c 'test -r management/services/agent/system_initialize.py && test -r management/services/agent/system_release.py'; then
+        echo "Error: the backend image cannot initialize/publish Workbench; rebuild the image before deploying." >&2
+        return 1
+      fi
+      ;;
+  esac
+}
+
+stop_old_business_services() {
+  local service matches container_id
+  local containers=()
+  if [ "$#" -eq 0 ]; then
+    set -- nexent-config nexent-runtime nexent-mcp nexent-northbound nexent-web nexent-data-process
+  fi
+  for service in "$@"; do
+    matches=$(docker ps -q \
+      --filter "label=com.docker.compose.project=nexent" \
+      --filter "label=com.docker.compose.service=$service") || return 1
+    while IFS= read -r container_id; do
+      [ -z "$container_id" ] || containers+=("$container_id")
+    done <<< "$matches"
+  done
+  if [ "${#containers[@]}" -eq 0 ]; then
+    echo "No old business services are running."
+    return 0
+  fi
+  echo "Stopping old business services; infrastructure remains running..."
+  if ! docker stop --time 60 "${containers[@]}"; then
+    echo "Error: old business services could not be stopped; migration will not run." >&2
+    return 1
+  fi
+}
+
+publish_shared_workbench() {
+  # The config image entrypoint applies SQL before either Python command runs.
+  case " $DEPLOYMENT_SELECTED_DOCKER_SERVICES " in
+    *" nexent-config "*) ;;
+    *) return 0 ;;
+  esac
+
+  echo "Initializing and publishing shared Workbench..."
+  # Keep container paths literal in Git Bash while retaining host-path conversion.
+  if ! MSYS2_ARG_CONV_EXCL="${MSYS2_ARG_CONV_EXCL:+$MSYS2_ARG_CONV_EXCL;}/opt/" \
+    ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" \
+    run --rm --no-deps --workdir /opt/backend \
+    --entrypoint /opt/nexent/scripts/start-backend.sh nexent-config \
+    sh -c 'python -m management.services.agent.system_initialize && python -m management.services.agent.system_release'; then
+    echo "Error: shared Workbench initialization or publication failed." >&2
+    return 1
+  fi
+}
+
 deploy_core_services() {
   # Function to deploy core services
   local core_services=()
   local service
   for service in $DEPLOYMENT_SELECTED_DOCKER_SERVICES; do
     case "$service" in
-      nexent-config|nexent-runtime|nexent-mcp|nexent-northbound|nexent-web|nexent-data-process)
+      nexent-config|nexent-runtime|nexent-mcp|nexent-northbound|nexent-web|nexent-data-process|nexent-ops)
         core_services+=("$service")
         ;;
     esac
@@ -1073,11 +1245,43 @@ deploy_core_services() {
     return 0
   fi
 
+  prepare_core_service_deployment "${core_services[@]}" || return 1
+  case " ${core_services[*]} " in
+    *" nexent-config "*) stop_old_business_services || return 1 ;;
+    *) stop_old_business_services "${core_services[@]}" || return 1 ;;
+  esac
+  publish_shared_workbench || return 1
+
   echo "👀 Starting core services: ${core_services[*]}"
   if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d "${core_services[@]}"; then
     echo "   ❌ ERROR Failed to start core services"
     return 1
   fi
+}
+
+deploy_https_nginx() {
+  # Start the Nginx HTTPS reverse proxy when HTTPS is enabled.
+  if [ "$DEPLOYMENT_HTTPS_MODE" = "disabled" ] || [ -z "$DEPLOYMENT_HTTPS_MODE" ]; then
+    # Stop and remove the HTTPS profile service when HTTPS is disabled so a
+    # previously enabled deployment does not keep the proxy running.
+    if ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" ps -q nexent-nginx 2>/dev/null | grep -q .; then
+      echo "Stopping Nginx HTTPS reverse proxy (HTTPS disabled)..."
+      if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" rm -sf nexent-nginx 2>/dev/null; then
+        docker rm -f nexent-nginx 2>/dev/null || true
+      fi
+    fi
+    export NEXENT_WEB_PORT="${NEXENT_WEB_PORT:-3000}"
+    return 0
+  fi
+
+  deployment_https_prepare || return 1
+
+  echo "🔒 Starting Nginx HTTPS reverse proxy (nexent-nginx)..."
+  if ! ${docker_compose_command} --env-file "$ROOT_ENV_FILE" -p nexent --profile https -f "$COMPOSE_DIR/docker-compose${COMPOSE_FILE_SUFFIX}" up -d nexent-nginx; then
+    echo "   ❌ ERROR Failed to start nexent-nginx"
+    return 1
+  fi
+  echo "   ✅ Nginx HTTPS reverse proxy started"
 }
 
 stop_unselected_data_process_service() {
@@ -1119,26 +1323,6 @@ deploy_infrastructure() {
     echo "🔧 Terminal tool container (openssh-server) is now available for AI agents"
   fi
 
-  # Deploy Supabase services based on selected components
-  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
-      echo ""
-      echo "🔧 Starting Supabase services..."
-      # Check if the supabase compose file exists
-      if [ ! -f "$COMPOSE_DIR/docker-compose-supabase${COMPOSE_FILE_SUFFIX}" ]; then
-          echo "   ❌ ERROR Supabase compose file not found: $COMPOSE_DIR/docker-compose-supabase${COMPOSE_FILE_SUFFIX}"
-          return 1
-      fi
-
-      # Start Supabase services
-      if ! $docker_compose_command --env-file "$ROOT_ENV_FILE" -p nexent -f "$COMPOSE_DIR/docker-compose-supabase${COMPOSE_FILE_SUFFIX}" up -d; then
-          echo "   ❌ ERROR Failed to start supabase services"
-          return 1
-      fi
-
-      echo "   ✅ Supabase services started successfully"
-  else
-      echo "   🚧 Skipping Supabase services..."
-  fi
 
   echo "   ✅ Infrastructure services started successfully"
 }
@@ -1179,9 +1363,11 @@ configure_root_dir_from_env() {
     ROOT_DIR="$ROOT_DIR_PARAM"
     echo "   📁 Using ROOT_DIR from parameter: $ROOT_DIR"
     update_env_var "ROOT_DIR" "$ROOT_DIR"
+    persist_log_dir
   elif grep -q "^ROOT_DIR=" "$ROOT_ENV_FILE"; then
     ROOT_DIR="$(grep "^ROOT_DIR=" "$ROOT_ENV_FILE" | cut -d'=' -f2 | sed 's/^"//;s/"$//')"
     echo "   📁 Use existing ROOT_DIR path: $ROOT_DIR"
+    persist_log_dir
   else
     local default_root_dir="$HOME/nexent-data"
     if deployment_should_prompt_root_dir && [ -t 0 ]; then
@@ -1192,7 +1378,9 @@ configure_root_dir_from_env() {
       ROOT_DIR="$default_root_dir"
     fi
     update_env_var "ROOT_DIR" "$ROOT_DIR"
+    persist_log_dir
   fi
+  prepare_log_dir_on_host
   export ROOT_DIR
   echo ""
   echo "--------------------------------"
@@ -1202,11 +1390,7 @@ configure_root_dir_from_env() {
 apply_deployment_common_config() {
   deployment_prepare_config "${ORIGINAL_ARGS[@]}" || return 1
 
-  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" "supabase"; then
-    export DEPLOYMENT_VERSION="full"
-  else
-    export DEPLOYMENT_VERSION="speed"
-  fi
+  export DEPLOYMENT_VERSION="${DEPLOYMENT_VERSION:-full}"
   update_env_var "DEPLOYMENT_VERSION" "$DEPLOYMENT_VERSION"
 
   if [ "$DEPLOYMENT_PORT_POLICY" = "production" ]; then
@@ -1426,43 +1610,7 @@ select_terminal_tool() {
 }
 
 check_super_admin_user_exists() {
-  # Check if super admin user exists in Supabase
-  local email="${1:-suadmin@nexent.com}"
-  local curl_container="nexent-config"
-
-  # Determine which container to use for curl command
-  if [ "$DEPLOYMENT_MODE" = "infrastructure" ] || ! docker ps | grep -q "nexent-config"; then
-    if docker ps | grep -q "supabase-db-mini"; then
-      curl_container="supabase-db-mini"
-    else
-      echo "   ⚠️  Warning: Cannot check user existence - no suitable container available"
-      return 2  # Unknown status
-    fi
-  fi
-
-  # Try to query Supabase auth.users table directly (most reliable)
-  if [ "$DEPLOYMENT_VERSION" = "full" ] && docker ps | grep -q "supabase-db-mini"; then
-    local user_exists
-    user_exists=$(docker exec supabase-db-mini psql -U postgres -d "$SUPABASE_POSTGRES_DB" -t -c "SELECT COUNT(*) FROM auth.users WHERE email = '${email}';" 2>/dev/null | tr -d '[:space:]')
-    if [ "$user_exists" = "1" ]; then
-      return 0  # User exists
-    elif [ "$user_exists" = "0" ]; then
-      return 1  # User does not exist
-    fi
-  fi
-
-  # Fallback: Try to sign in with a dummy password to check if user exists
-  # This is less reliable but works when database access is not available
-  local test_response
-  test_response=$(docker exec "$curl_container" bash -c "curl -s -X POST http://kong:8000/auth/v1/token?grant_type=password -H \"apikey: ${SUPABASE_KEY}\" -H \"Content-Type: application/json\" -d '{\"email\":\"${email}\",\"password\":\"dummy_password_check\"}'" 2>/dev/null)
-
-  if echo "$test_response" | grep -q '"error_code":"invalid_credentials"'; then
-    return 0  # User exists (wrong password means user exists)
-  elif echo "$test_response" | grep -q '"error_code":"email_not_confirmed"'; then
-    return 0  # User exists
-  else
-    return 1  # User likely does not exist
-  fi
+  MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' docker exec nexent-config python /opt/backend/account_admin.py bootstrap-su --check >/dev/null
 }
 
 prompt_super_admin_password() {
@@ -1534,11 +1682,9 @@ create_default_super_admin_user() {
   chmod +x "$script_path"
 
   # Export the database configuration before either the create or repair path.
-  export SUPABASE_KEY
   export POSTGRES_USER
   export POSTGRES_DB
   export DEPLOYMENT_VERSION
-  export SUPABASE_POSTGRES_DB
   export DEPLOYMENT_MODE
 
   # Check if super admin user already exists
@@ -1555,10 +1701,11 @@ create_default_super_admin_user() {
       return 0
     fi
     return 1
-  elif [ $check_result -eq 1 ]; then
+  elif [ $check_result -eq 3 ]; then
     echo "   ℹ️  Super admin user (${email}) does not exist. Proceeding with creation..."
   else
-    echo "   ⚠️  Warning: Could not determine if user exists. Proceeding with creation..."
+    echo "   Super administrator check failed. Inspect the command output above before retrying."
+    return 1
   fi
 
   local password
@@ -1622,9 +1769,9 @@ main_deploy() {
   APP_VERSION="$(get_app_version)"
   if [ -z "$APP_VERSION" ]; then
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-      echo "❌ 获取应用版本失败，请检查 VERSION 或 backend/consts/const.py"
+      echo "❌ 获取应用版本失败，请检查 VERSION 或 backend/contracts/constants/environment.py"
     else
-      echo "❌ Failed to get app version, please check VERSION or backend/consts/const.py"
+      echo "❌ Failed to get app version, please check VERSION or backend/contracts/constants/environment.py"
     fi
     exit 1
   fi
@@ -1634,7 +1781,7 @@ main_deploy() {
     echo "🌐 App version: $APP_VERSION"
   fi
 
-  # Select deployment components, port policy and image source via shared config.
+  # Select deployment components, port policy, image source, and Sandbox mode via shared config.
   apply_deployment_common_config || {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
       echo "❌ 部署配置失败"
@@ -1690,6 +1837,13 @@ main_deploy() {
     fi
   fi
 
+  update_env_var "NEXENT_SANDBOX_DEFAULT_LEVEL" "${NEXENT_SANDBOX_DEFAULT_LEVEL}"
+  if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+    echo "🔧 沙箱模式已设置为：${DEPLOYMENT_SANDBOX_MODE}（执行级别：${NEXENT_SANDBOX_DEFAULT_LEVEL}）"
+  else
+    echo "🔧 Sandbox mode set to: ${DEPLOYMENT_SANDBOX_MODE} (execution level: ${NEXENT_SANDBOX_DEFAULT_LEVEL})"
+  fi
+
   # Add permission
   prepare_directory_and_data || {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -1717,15 +1871,17 @@ main_deploy() {
   }
 
 
-  # Generate Supabase secrets
-  generate_supabase_keys || {
+  # Generate JWT signing key
+  generate_auth_keys || {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-      echo "❌ Supabase secrets 生成失败"
+      echo "❌ JWT signing key 生成失败"
     else
-      echo "❌ Supabase secrets generation failed"
+      echo "❌ JWT signing key generation failed"
     fi
     exit 1
   }
+
+  reconcile_sandbox_container || exit 1
 
   # Deploy infrastructure services
   deploy_infrastructure || {
@@ -1773,17 +1929,9 @@ main_deploy() {
       exit 1
     }
 
-    # Create default super admin user (only for full version)
-    if [ "$DEPLOYMENT_VERSION" = "full" ]; then
-      create_default_super_admin_user || {
-        if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
-          echo "❌ 默认超级管理员创建失败"
-        else
-          echo "❌ Default super admin user creation failed"
-        fi
-        exit 1
-      }
-    fi
+    # Bootstrap requires the application image and its completed migrations.
+    # Infrastructure-only deployments provision identities when the app is deployed.
+
 
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
       echo "🎉 基础设施部署完成！"
@@ -1808,6 +1956,22 @@ main_deploy() {
     return 0
   fi
 
+  # Capture historical identities before application replacement or SQL changes.
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
+    deployment_upgrade_local_accounts prepare docker || exit 1
+  fi
+
+  # Configure HTTPS state before core services start so nexent-web is created
+  # with the right port mapping on the first run (avoids a recreate cycle).
+  deploy_https_nginx || {
+    if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
+      echo "❌ HTTPS 反向代理部署失败"
+    else
+      echo "HTTPS reverse proxy deployment failed"
+    fi
+    exit 1
+  }
+
   # Start core services
   deploy_core_services || {
     if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
@@ -1818,6 +1982,7 @@ main_deploy() {
     exit 1
   }
 
+
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
     echo "   ✅ 核心服务启动成功"
   else
@@ -1826,6 +1991,10 @@ main_deploy() {
   echo ""
   echo "--------------------------------"
   echo ""
+
+  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
+    deployment_upgrade_local_accounts apply docker || exit 1
+  fi
 
   # Create default super admin user
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then
@@ -1850,10 +2019,10 @@ main_deploy() {
 
   if [ "$DEPLOYMENT_LANGUAGE" = "zh" ]; then
     echo "🎉  部署完成！"
-    echo "🌐  现在可以访问应用：http://localhost:3000"
+    echo "🌐  现在可以访问应用：http://localhost:${NEXENT_WEB_PORT:-3000}"
   else
     echo "🎉  Deployment completed successfully!"
-    echo "🌐  You can now access the application at http://localhost:3000"
+    echo "🌐  You can now access the application at http://localhost:${NEXENT_WEB_PORT:-3000}"
   fi
 }
 

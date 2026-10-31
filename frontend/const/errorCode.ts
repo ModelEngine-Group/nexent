@@ -91,6 +91,11 @@ export const ErrorCode = {
   KNOWLEDGE_SYNC_FAILED: "060103",
   INDEX_NOT_FOUND: "060104",
   KNOWLEDGE_SEARCH_FAILED: "060105",
+  KNOWLEDGE_INDEX_WRITE_BLOCKED: "060106",
+  KNOWLEDGE_STORAGE_COMMIT_FAILED: "060107",
+  KNOWLEDGE_TASK_SUBMIT_FAILED: "060108",
+  KNOWLEDGE_DELETE_BLOCKED: "060109",
+  KNOWLEDGE_RESOURCE_EXCEEDED: "060110",
 
   // ==================== 07 MCPTools / MCP 工具 ====================
   // 01 - Tool
@@ -167,6 +172,14 @@ export const ErrorCode = {
   // 03 - ME Service
   ME_CONNECTION_FAILED: "130301",
 
+  // 05 - AIDP Service
+  AIDP_SERVICE_ERROR: "130501",
+  AIDP_CONFIG_INVALID: "130502",
+  AIDP_CONNECTION_ERROR: "130503",
+  AIDP_AUTH_ERROR: "130504",
+  AIDP_RATE_LIMIT: "130505",
+  AIDP_RESPONSE_ERROR: "130506",
+
   // 06 - RAGFlow Service
   RAGFLOW_SERVICE_ERROR: "130507",
   RAGFLOW_CONFIG_INVALID: "130508",
@@ -203,7 +216,7 @@ export const ErrorCode = {
   SUCCESS: "0",
 } as const;
 
-export type ErrorCodeType = typeof ErrorCode[keyof typeof ErrorCode];
+export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode];
 
 /**
  * Check if an error code represents a success.

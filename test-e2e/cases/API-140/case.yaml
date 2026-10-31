@@ -1,0 +1,71 @@
+schema_version: '1.0'
+stage: D3
+module: V5-BASELINE
+case:
+  case_id: API-140
+  feature_id: F-138
+  business_rule_ids:
+  - F-138-RULE-01
+  title: cases pagination/sort/filter/stats｜核心流程
+  type: INTEGRATION
+  priority: P1
+  status: active
+  automation: automated
+  objective: cases pagination/sort/filter/stats｜核心流程
+  preconditions:
+  - Nexent 本地测试全栈已启动，health check 通过。
+  - 设置 NEXENT_TEST_HOME，目录不位于 Nexent Git 仓库内。
+  - 当次 run_id 已生成，所有新建资源名称带 run_id；测试基线固定为 develop 当前批次锁定的产品提交；执行时另记录实际被测commit。
+  - 所需本地资产存在且校验通过：${NEXENT_TEST_HOME}/config/auth-providers.yaml；${NEXENT_TEST_HOME}/config/secrets.env；${NEXENT_TEST_HOME}/assets/evaluation/；${NEXENT_TEST_HOME}/config/models.yaml
+  test_data:
+    legacy_asset_declaration: '- ${NEXENT_TEST_HOME}/config/auth-providers.yaml
+
+      - ${NEXENT_TEST_HOME}/config/secrets.env
+
+      - ${NEXENT_TEST_HOME}/assets/evaluation/
+
+      - ${NEXENT_TEST_HOME}/config/models.yaml'
+  steps:
+  - order: 1
+    action: 从 ${NEXENT_TEST_HOME}/assets/evaluation/ 读取固定评估集 Excel/JSON 与 Expected Oracle；准备真实被评 Agent 和真实 Judge/LLM 配置。
+    expected: 功能结果与代码契约一致，测试过程无未处理异常。
+  - order: 2
+    action: 通过实际 API 创建评估集并上传文件，检查解析后的 case 数、输入、reference_answer/metadata 与文件一致。
+    expected: 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - order: 3
+    action: 创建/选择 Evaluator，真实执行连通性检查并记录模型/provider。
+    expected: 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - order: 4
+    action: 发起“cases pagination/sort/filter/stats｜核心流程”对应 Evaluation Run，等待所有 case 完成；记录 run_id、case result、score、error。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 5
+    action: 对稳定样例检查关键答案/工具/引用存在；评分只检查合法范围、阈值和聚合一致性，不要求浮点值完全固定。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 6
+    action: 标注/报告类执行真实人工标注字段写入或报告生成，重新读取确认持久化。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 7
+    action: 失败 case 应独立记录，不得导致已完成 case 丢失；重试后状态可恢复。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  - order: 8
+    action: 导出/报告文件必须可解析且不包含 API Key/敏感配置；清理临时评估集和 run。
+    expected: 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  expected_results:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  forbidden_side_effects: []
+  source:
+    legacy_workbook_sha256: aa4b32414d30f12b3b64e14236268145e556bd7cfc5d3eb8df80731608ebc022
+    legacy_sheet: 02_测试用例基线
+    legacy_row: 268
+  integration_boundary:
+  - LOCAL_REAL_PROTOCOL：使用本地/测试环境 OAuth/CAS Provider 完成真实重定向与回调；不使用生产账号。
+  observations:
+  - 功能结果与代码契约一致，测试过程无未处理异常。
+  - 关键状态在 API 返回、数据库/存储和后续读取中保持一致。
+  - 失败路径返回明确错误，不出现半写入、重复副作用或跨租户泄露。
+  - 日志、Trace、报告中不出现明文 API Key/Token/Password/模型密钥。
+  cleanup:
+  - JUnit/XML、请求/响应摘要（脱敏）、服务日志、必要的DB/对象存储状态快照；协议场景保存wire capture。

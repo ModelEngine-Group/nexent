@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useState, useEffect } from "react";
@@ -15,7 +17,6 @@ import {
   App,
   Upload,
   Tabs,
-  Popconfirm,
   Tag,
 } from "antd";
 import {
@@ -603,23 +604,10 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                 disabled={actionsLocked}
               />
             </Tooltip>
-            <Popconfirm
-              title={t("mcpConfig.delete.confirmTitle")}
-              description={t("mcpConfig.delete.confirmContent", { name: record.service_name })}
-              onConfirm={() => onDeleteServer(record)}
-              okText={t("common.confirm")}
-              cancelText={t("common.cancel")}
-            >
-              <Tooltip title={t("mcpConfig.serverList.button.delete")}>
-                <Button
-                  type="text"
-                  danger
-                  icon={<Trash2 className="h-4 w-4" />}
-                  size="small"
-                  disabled={actionsLocked}
-                />
-              </Tooltip>
-            </Popconfirm>
+            <Tooltip title={t("mcpConfig.serverList.button.delete")}>
+              <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
+                onClick={() => confirm({ title: t("mcpConfig.delete.confirmTitle"), content: t("mcpConfig.delete.confirmContent", { name: record.service_name }), onOk: () => onDeleteServer(record) })} />
+            </Tooltip>
           </div>
         );
       },
@@ -697,23 +685,10 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
               disabled={updatingTools}
             />
           </Tooltip>
-          <Popconfirm
-            title={t("mcpConfig.deleteContainer.confirmTitle")}
-            description={t("mcpConfig.deleteContainer.confirmContent", { name: record.name || record.container_id })}
-            onConfirm={() => onDeleteContainer(record)}
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
-          >
-            <Tooltip title={t("mcpConfig.containerList.button.delete")}>
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
-                size="small"
-                disabled={actionsLocked}
-              />
-            </Tooltip>
-          </Popconfirm>
+          <Tooltip title={t("mcpConfig.containerList.button.delete")}>
+            <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
+              onClick={() => confirm({ title: t("mcpConfig.deleteContainer.confirmTitle"), content: t("mcpConfig.deleteContainer.confirmContent", { name: record.name || record.container_id }), onOk: () => onDeleteContainer(record) })} />
+          </Tooltip>
         </div>
       ),
     },
@@ -742,23 +717,10 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
       width: "20%",
       render: (_: any, record: any) => (
         <div className="flex items-center space-x-2">
-          <Popconfirm
-            title={t("mcpConfig.delete.confirmTitle")}
-            description={t("mcpConfig.delete.confirmContent", { name: record.mcp_service_name })}
-            onConfirm={() => onDeleteOpenapiService(record)}
-            okText={t("common.confirm")}
-            cancelText={t("common.cancel")}
-          >
-            <Tooltip title={t("mcpConfig.serverList.button.delete")}>
-              <Button
-                type="text"
-                danger
-                icon={<Trash2 className="h-4 w-4" />}
-                size="small"
-                disabled={actionsLocked}
-              />
-            </Tooltip>
-          </Popconfirm>
+          <Tooltip title={t("mcpConfig.serverList.button.delete")}>
+            <Button type="text" danger icon={<Trash2 className="h-4 w-4" />} size="small" disabled={actionsLocked}
+              onClick={() => confirm({ title: t("mcpConfig.delete.confirmTitle"), content: t("mcpConfig.delete.confirmContent", { name: record.mcp_service_name }), onOk: () => onDeleteOpenapiService(record) })} />
+          </Tooltip>
         </div>
       ),
     },
@@ -907,7 +869,11 @@ export default function McpList({ tenantId }: { tenantId: string | null }) {
                       onChange={(e) => setContainerConfigJson(e.target.value)}
                       rows={6}
                       disabled={actionsLocked}
-                      style={{ fontFamily: "monospace", fontSize: 12 }}
+                      style={{
+                        fontFamily:
+                          "'HarmonyOS Sans SC', 'Huawei Sans', sans-serif",
+                        fontSize: 12,
+                      }}
                     />
                     <div className="flex items-center gap-2">
                       <Text style={{ minWidth: 80 }}>{t("mcpConfig.addContainer.serviceName")}:</Text>

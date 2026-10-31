@@ -1,34 +1,30 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from datetime import datetime, timedelta, timezone
+import sys
+import types
+from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from services.agent_automation import facade as facade_module
-from services.agent_automation.errors import (
-    AutomationCapabilityBindingInvalidError,
-    AutomationCapabilityNotReadyError,
-    AutomationConversationAlreadyBoundError,
-    AutomationNotFoundError,
-    AutomationScheduleInvalidError,
-)
-from services.agent_automation.facade import AgentAutomationFacade
-from services.agent_automation.intent_analyzer import AutomationIntentContext
-from services.agent_automation.models import (
-    AutomationProposalCreateRequest,
-    AutomationProposalPatchRequest,
-    AutomationProposalConfirmRequest,
-    AutomationProposalStatus,
-    AutomationRunStatus,
-    AutomationTaskCreateRequest,
-    AutomationTaskPatchRequest,
-    CapabilityBinding,
-    CapabilityResolution,
-    CapabilityType,
-    ScheduleMode,
-    ScheduleRuleType,
-    ScheduleTrigger,
-)
-from services.agent_automation.prompt_generator import AutomationTaskContent
+from management.services.automation import service as facade_module
+from contracts.errors.exceptions import AutomationCapabilityBindingInvalidError, AutomationCapabilityNotReadyError, AutomationConversationAlreadyBoundError, AutomationNotFoundError, AutomationScheduleInvalidError
+from management.services.automation.service import AgentAutomationFacade
+from management.services.automation.intent import AutomationIntentContext
+from contracts.automation import AutomationProposalCreateRequest, AutomationProposalPatchRequest, AutomationProposalConfirmRequest, AutomationProposalStatus, AutomationRunStatus, AutomationTaskCreateRequest, AutomationTaskPatchRequest, CapabilityBinding, CapabilityResolution, CapabilityType, ScheduleMode, ScheduleRuleType, ScheduleTrigger
+from management.services.automation.prompt import AutomationTaskContent
+
+
+@pytest.fixture
+def automation_runner(monkeypatch):
+    """Isolate runner calls while testing facade orchestration and failures."""
+    from management.services import automation as automation_package
+
+    module = types.ModuleType("management.services.automation.runner")
+    module.agent_automation_runner = MagicMock()
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setattr(automation_package, "runner", module, raising=False)
+    return module.agent_automation_runner
 
 
 @pytest.mark.asyncio
@@ -760,48 +756,19 @@ async def test_confirm_proposal_rejects_and_marks_expired_proposal(monkeypatch):
 
 
 def test_cancel_run_marks_running_run_canceled(monkeypatch):
-    stopped = {}
-
-    def fake_stop(conversation_id, user_id):
-        stopped["conversation_id"] = conversation_id
-        stopped["user_id"] = user_id
-
-    monkeypatch.setattr(
-        facade_module.agent_automation_db,
-        "get_run",
-        lambda run_id, tenant_id, user_id: {
-            "run_id": run_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "task_id": 88,
-            "conversation_id": 99,
-            "status": AutomationRunStatus.RUNNING.value,
-        },
-    )
-    monkeypatch.setattr(
-        facade_module.agent_automation_db,
-        "cancel_run",
-        lambda run_id, tenant_id, user_id, reason: {
-            "run_id": run_id,
-            "tenant_id": tenant_id,
-            "user_id": user_id,
-            "status": AutomationRunStatus.CANCELED.value,
-            "error_message": reason,
-        },
-    )
-    monkeypatch.setattr(
-        facade_module.agent_automation_db,
-        "update_task",
-        lambda task_id, tenant_id, user_id, values: {"task_id": task_id, **values},
-    )
-
+    from management.services.automation import runner
+    from unittest.mock import Mock
+    active = dict(run_id=7, task_id=88, conversation_id=99, status="RUNNING")
+    monkeypatch.setattr(facade_module.agent_automation_db, "get_run", lambda *a: active)
+    finalizer = Mock(return_value=({**active, "status": "CANCELED"}, True))
+    monkeypatch.setattr(runner.agent_automation_runner, "cancel_run_by_user", finalizer)
     service = AgentAutomationFacade()
-    monkeypatch.setattr(service, "_request_conversation_stop", fake_stop)
-
-    canceled = service.cancel_run(7, "tenant", "user")
-
-    assert canceled["status"] == AutomationRunStatus.CANCELED.value
-    assert stopped == {"conversation_id": 99, "user_id": "user"}
+    monkeypatch.setattr(service, "get_task", lambda *a: {"task_id": 88})
+    stop = Mock()
+    monkeypatch.setattr(service, "_request_conversation_stop", stop)
+    assert service.cancel_run(7, "tenant", "user")["status"] == "CANCELED"
+    finalizer.assert_called_once_with(active, {"task_id": 88})
+    stop.assert_called_once_with(99, "user", 7)
 
 
 def test_delete_run_soft_deletes_terminal_record_and_refreshes_latest_result(monkeypatch):
@@ -1379,7 +1346,7 @@ async def test_patch_task_rejects_unready_capabilities_and_lost_update(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_task_management_methods_cover_successful_lifecycle(monkeypatch):
+async def test_task_management_methods_cover_successful_lifecycle(monkeypatch, automation_runner):
     service = AgentAutomationFacade()
     task = {
         "task_id": 1,
@@ -1447,7 +1414,7 @@ async def test_task_management_methods_cover_successful_lifecycle(monkeypatch):
         return {"run_id": 5, "trigger_type": trigger_type}
 
     monkeypatch.setattr(
-        "services.agent_automation.runner.agent_automation_runner.execute_task",
+        "management.services.automation.runner.agent_automation_runner.execute_task",
         fake_execute,
     )
 
@@ -1557,7 +1524,7 @@ async def test_create_task_rejects_invalid_context_capabilities_and_binding(monk
         await service.create_task(request, "tenant", "user")
 
 
-def test_enrichment_and_cancellation_tolerate_optional_failures(monkeypatch):
+def test_enrichment_and_cancellation_tolerate_optional_failures(monkeypatch, automation_runner):
     service = AgentAutomationFacade()
     assert facade_module._enrich_tasks_with_agent_names([], "tenant", "user") == []
     monkeypatch.setattr(
@@ -1579,7 +1546,7 @@ def test_enrichment_and_cancellation_tolerate_optional_failures(monkeypatch):
     assert enriched[0]["is_running"] is False
 
     monkeypatch.setattr(
-        "services.agent_automation.runner.agent_automation_runner.cancel_for_conversation",
+        "management.services.automation.runner.agent_automation_runner.cancel_for_conversation",
         lambda *args: (_ for _ in ()).throw(RuntimeError("runner unavailable")),
     )
     monkeypatch.setattr(

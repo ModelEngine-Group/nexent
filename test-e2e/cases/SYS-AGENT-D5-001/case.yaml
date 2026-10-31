@@ -1,0 +1,196 @@
+schema_version: '1.0'
+stage: D5
+module: CHAT-WORKBENCH
+case:
+  case_id: SYS-AGENT-D5-001
+  feature_id: SYS-AGENT-LIFECYCLE
+  requirement_ids:
+  - SYS-AGENT-SHARED-20261028
+  business_rule_ids:
+  - SYS-AGENT-LIFECYCLE-RULE-001
+  - SYS-AGENT-LIFECYCLE-RULE-002
+  - SYS-AGENT-LIFECYCLE-RULE-004
+  - SYS-AGENT-LIFECYCLE-RULE-005
+  title: Explicit shared release, legacy consolidation and identity-only creator are
+    atomic
+  type: RELIABILITY
+  priority: P1
+  status: active
+  automation: automated
+  objective: Exercise the real provider and PostgreSQL transaction/lock path in a
+    disposable schema.
+  preconditions:
+  - Local PostgreSQL is available through the maintained shared.postgres target helper.
+  - The database identity may create and drop a disposable test schema.
+  test_data:
+    profile: mock
+    boundary: Real PostgreSQL; optional Skill ZIP installation is substituted outside
+      the release transaction.
+  steps:
+  - order: 1
+    action: Initialize shared drafts directly on an empty installation, then run sixteen
+      concurrent Workbench release commands and release a newer product revision.
+      Register and rescan shared built-in search tools without tenant tag libraries.
+    expected: One shared identity and one new snapshot with persisted resource bindings
+      per successful product revision; NL2Agent and NL2Skill remain identity rows
+      only. Shared catalog registration does not require tenant tag libraries and
+      rescan retains the same tool identity.
+  - order: 2
+    action: Inject a version-metadata insert failure after draft/snapshot writes,
+      both during first publication and upgrade, then retry.
+    expected: Rollback leaves no partial first release and preserves the prior pointer/snapshot
+      during upgrade; retry publishes once.
+  - order: 3
+    action: Reject an older product publication, then select an earlier Workbench
+      current-version pointer.
+    expected: Old publication cannot overwrite newer definitions; runtime can read
+      the earlier published prompt and bindings.
+  - order: 4
+    action: Execute the versioned SQL migration on tenant system roots with identical
+      and sparse versions and full histories and resource dependencies; repeat including
+      forced replay and inject SQL deletion failure.
+    expected: Version numbers and bindings survive under one shared identity; all
+      old definitions and duplicate bindings are physically removed; history payloads
+      and owners survive; failure rolls back.
+  - order: 5
+    action: Migrate legacy creator histories to executor identities and typed targets,
+      replay and inject failure while preserving raw history and ownership.
+    expected: Agent targets are retained, unknown Skill targets remain null, executor
+      references are shared, no message copies exist and rollback/replay are safe.
+  - order: 6
+    action: Create and continue standalone creator conversations, restore executor
+      identity/target and classify list/pin routes without configuration writes.
+    expected: Standalone workbench_config stays null with version zero; configured
+      Workbench rows retain their exact config and revision; public creator histories
+      are owner-scoped and appear only in the appropriate list.
+  - order: 7
+    action: Initialize public creator identities using SQL on fresh/existing deployments;
+      replay concurrently, inject seed failure and execute history migration with
+      missing identities.
+    expected: Exactly two stable public v0 identities, reused existing IDs, unchanged
+      USER data; seed rollback leaves no partial state or marker; history migration
+      fails atomically without seeding Agents.
+  - order: 8
+    action: Query creator histories for one edited resource with mixed owners, tenants,
+      targets, executors, entrypoints and deleted rows; paginate the result.
+    expected: Only current-user histories for the exact public executor and tenant
+      target are counted and returned once; Workbench/standalone entries share results
+      and pagination preserves totals.
+  expected_results:
+  - Workbench has one platform identity and immutable versions/bindings; NL2Agent
+    has one identity-only draft and no persisted prompt/resources/versions.
+  - Failed publication has zero durable partial writes and retry recovers.
+  - Old product publication fails without writes; Workbench rollback pointer remains
+    readable.
+  - Legacy versions/bindings merge by version_no, histories remain readable and tenant-scoped,
+    redundant definitions are deleted, and migration is atomic/idempotent.
+  - Creator histories retain conversation/message identity and typed targets under
+    the shared executor; failed migration is atomic and retry/replay is safe.
+  - Standalone creator identity and target are sufficient for history routing and
+    continuation without synthesizing or changing Workbench configuration.
+  - SQL alone initializes code-backed creator identities on installation and upgrade;
+    Python only initializes/publishes Workbench and history migration uses existing
+    IDs.
+  - Creator history listing/counts enforce executor, typed target, owner and current-tenant
+    resource scope before pagination.
+  forbidden_side_effects:
+  - No existing product schema, tenant Agent or resource mutation; SQL one-shot completion
+    is transactional; all test transactions close and only the owned disposable schema
+    is dropped.
+  observations:
+  - Returned references and real persisted Agent draft/snapshot/version row counts,
+    revisions and ownership.
+  cleanup:
+  - Close connections and drop only the unique test schema even on failure.
+  execution:
+    profiles:
+    - name: mock
+      required_services: []
+  acceptance:
+  - id: AC-01
+    description: Concurrent release creates one shared Workbench version and an identity-only
+      NL2Agent.
+    steps:
+    - 1
+    expected_results:
+    - 1
+    forbidden_side_effects:
+    - 1
+  - id: AC-02
+    description: Initial and upgrade failures roll back atomically and retry succeeds.
+    steps:
+    - 2
+    expected_results:
+    - 2
+    forbidden_side_effects:
+    - 1
+  - id: AC-03
+    description: Old publication is rejected and a prior Workbench version remains
+      runnable.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
+  - id: AC-04
+    description: Legacy consolidation merges versions/bindings, preserves histories
+      and deletes redundant definitions transactionally.
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
+  - id: AC-05
+    description: Creator migration preserves histories and targets without duplicate
+      messages, including safe failure recovery and idempotent replay.
+    steps:
+    - 5
+    expected_results:
+    - 5
+    forbidden_side_effects:
+    - 1
+  - id: AC-06
+    description: Public creator histories restore independently of Workbench configuration
+      and preserve persisted configuration/revision on creation and continuation.
+    steps:
+    - 6
+    expected_results:
+    - 6
+    forbidden_side_effects:
+    - 1
+  - id: AC-07
+    description: Ordered SQL owns creator initialization with stable IDs, replay/concurrency
+      safety and atomic failure; history migration requires those IDs and Python never
+      creates them.
+    steps:
+    - 7
+    expected_results:
+    - 7
+    forbidden_side_effects:
+    - 1
+  - id: AC-08
+    description: Creator history counts and pages exclude other owners, targets, executor
+      identities and foreign-tenant resources while sharing both entrypoints.
+    steps:
+    - 8
+    expected_results:
+    - 8
+    forbidden_side_effects:
+    - 1
+  risk_type: RELIABILITY
+  risk: Duplicate release snapshots under concurrent deployment or partial durable
+    publication after failure.
+  condition:
+  - Sixteen independent real PostgreSQL sessions concurrently call the provider for
+    one system key.
+  metrics:
+  - Distinct Agent IDs and persisted snapshots/version counts; durable state after
+    injected failure.
+  thresholds:
+  - Exactly one identity and one version per successful release, zero partial writes,
+    futures complete within 30 seconds.
+  recovery_expectations:
+  - Retry succeeds after failure and cleanup removes the disposable schema without
+    affecting existing data.

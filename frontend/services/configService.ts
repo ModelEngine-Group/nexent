@@ -26,7 +26,10 @@ export class ConfigService {
    * Save config to backend API
    * @param config GlobalConfig to save
    */
-  async fetchRuntimeFrontendConfig(): Promise<{ shareBaseUrl?: string }> {
+  async fetchRuntimeFrontendConfig(): Promise<{
+    shareBaseUrl?: string;
+    northboundBaseUrl?: string;
+  }> {
     const response = await fetch(API_ENDPOINTS.config.frontend, { cache: "no-store" });
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status}`);
@@ -35,10 +38,14 @@ export class ConfigService {
   }
 
   async saveConfig(config: GlobalConfig): Promise<void> {
+    const app = { ...config.app } as Record<string, unknown>;
+    delete app.appName;
+    delete app.appDescription;
+
     await fetchWithErrorHandling(API_ENDPOINTS.config.save, {
       method: "POST",
       headers: getAuthHeaders(),
-      body: JSON.stringify(config),
+      body: JSON.stringify({ ...config, app }),
     });
   }
 }

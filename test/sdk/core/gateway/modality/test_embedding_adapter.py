@@ -121,6 +121,27 @@ def test_make_request_posts_and_parses():
     assert kwargs["verify"] is True
 
 
+def test_make_request_merges_json_custom_fields_without_overriding_protocol_data():
+    custom = {
+        "dimensions": 512,
+        "metadata": {"tenant": "demo"},
+        "flags": [True, False],
+        "nullable": None,
+        "model": "custom-model-must-not-win",
+    }
+    adapter = OpenAICompatibleEmbeddingAdapter(_ctx(extra_body=custom))
+    adapter._session.post = MagicMock(return_value=_json_response({"ok": True}))
+
+    adapter._make_request({"model": "embed-model", "input": ["text"]})
+
+    request_body = adapter._session.post.call_args.kwargs["json"]
+    assert request_body == {
+        **custom,
+        "model": "embed-model",
+        "input": ["text"],
+    }
+
+
 def test_make_request_raises_on_http_error():
     adapter = OpenAICompatibleEmbeddingAdapter(_ctx())
     resp = MagicMock()

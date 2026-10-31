@@ -1,0 +1,21 @@
+schema_version: '1.0'
+module:
+  id: V5-BASELINE
+  name: Migrated V5 baseline
+feature:
+  feature_id: F-184
+  name: 前端服务启动、反向代理、项目配置(Logo/自定义多语言)持久化与内置回退、仓库标签过滤与统计接口
+  status: active
+  description: '前端与全局UI / 构建与服务基础设施: 前端服务启动、反向代理、项目配置(Logo/自定义多语言)持久化与内置回退、仓库标签过滤与统计接口'
+  business_rules:
+  - rule_id: F-184-RULE-01
+    description: 前端服务启动、反向代理、项目配置(Logo/自定义多语言)持久化与内置回退、仓库标签过滤与统计接口；代理保持原始路径及查询参数、透传上游状态及JSON响应，上游不可达返回502；代理契约不要求未注册业务接口返回200。
+  - rule_id: F-184-RULE-02
+    description: 超级管理员可配置中英文首页标题与首页logo，页面左上角使用首页配置；初始化时未配置首页标题默认填入Nexent并兼容旧版标题，后续编辑为空保持空白，首页logo为空回退系统logo，无标题时logo适度放大并保持固定尺寸，侧边栏收拢时仅裁切右侧而不缩放；浏览器标签页始终使用系统名和系统logo，系统名未获取到时标题保持空白，系统logo加载前及加载失败时图标保持透明，登录和侧边栏跳转不得覆盖已加载的标题和图标。
+  required_test_stages:
+  - D1
+  - D2
+  - D3
+  - D4
+  source:
+    notes: Migrated from V5 01_代码功能清单 without changing the functional description.

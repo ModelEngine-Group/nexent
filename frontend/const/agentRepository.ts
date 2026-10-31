@@ -1,20 +1,7 @@
 /**
- * Agent repository listing presets (icons, preset tags).
+ * Agent repository listing preset tags.
  * Display labels are resolved via i18n in agentRepositoryLabels.ts.
  */
-
-export const AGENT_REPOSITORY_ICONS = [
-  "🤖",
-  "✍️",
-  "🔍",
-  "📊",
-  "💬",
-  "📝",
-  "🎨",
-  "⚡",
-  "🔧",
-  "📚",
-] as const;
 
 export const AGENT_REPOSITORY_PRESET_TAGS = [
   "marketing",
