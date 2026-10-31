@@ -47,7 +47,9 @@ data-process = [
     "huggingface_hub>=0.30.0,<1.0"
 ]
 test = [
-    "pytest",
+    "nexent[dev]",
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
     "pytest-cov",
     "coverage",
     "jsonschema>=4.25.0",
@@ -55,7 +57,6 @@ test = [
     "langfuse==2.60.10",
     "unittest2",
     "mock",
-    "pytest-asyncio",
     "pytest-mock",
     "httpx>=0.28.1",
     "selenium",
@@ -64,3 +65,17 @@ test = [
 
 [tool.setuptools]
 packages = []
+
+# Keep the test workflow's named CPU index and local SDK installation explicit.
+[tool.uv]
+required-version = ">=0.13.6"
+preview-features = ["index-by-name"]
+index-strategy = "unsafe-first-match"
+
+[tool.uv.sources]
+nexent = { path = "../sdk", editable = true }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

@@ -33,6 +33,7 @@ def stream_capture(monkeypatch):
 
         monkeypatch.setattr(service, "agent_run", source)
         info = SimpleNamespace(
+            observer=SimpleNamespace(),
             agent_config=SimpleNamespace(pre_run_tool_events=()), cancellation_scope=None,
             stop_event=asyncio.Event(), human_interaction=None,
             attempt_outcome=outcome, thread_future=None,
