@@ -394,3 +394,74 @@ def test_frozen_supplement_instruction_reference_is_materialized(sources):
         )
     )
     assert value.instruction_mapping["strategy_id"] == "system_only"
+
+
+def test_top_p_is_explicit_without_claiming_unknown_capability(sources):
+    from nexent.core.model_service.profiles.protocol_parameters import openai_chat_parameter_rules
+
+    value = compose(catalog(sources), protocol_parameter_rules=openai_chat_parameter_rules(),
+        registered_references={**{key: [REFERENCE] for key in BINDINGS},
+                               "parameter_transform": [VersionedReference(ref="identity_v1", version=1)]})
+    top_p = next(rule for rule in value.parameter_rules.declarations if rule["key"] == "top_p")
+    assert top_p["visible"] is True
+    assert top_p["allowed_scopes"] == ["outlet", "conversation"]
+    assert top_p["schema"]["minimum"] == 0
+    assert top_p["schema"]["maximum"] == 1
+    assert "top_p" not in value.parameter_values
+    assert value.capabilities["sampling"]["top_p"]["status"] == "unknown"
+
+
+@pytest.mark.parametrize("value", [0, 1, 0.85])
+def test_top_p_accepts_explicit_values(sources, value):
+    from nexent.core.model_service.profiles.protocol_parameters import openai_chat_parameter_rules
+
+    policy = compose(catalog(sources), protocol_parameter_rules=openai_chat_parameter_rules(),
+        registered_references={**{key: [REFERENCE] for key in BINDINGS},
+                               "parameter_transform": [VersionedReference(ref="identity_v1", version=1)]},
+                     submitted_values={"top_p": value})
+    assert policy.parameter_values["top_p"] == value
+
+
+@pytest.mark.parametrize("value", [-0.01, 1.01])
+def test_top_p_rejects_out_of_range_values(sources, value):
+    from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
+    from nexent.core.model_service.profiles.protocol_parameters import openai_chat_parameter_rules
+
+    with pytest.raises(ParameterValidationError):
+        compose(catalog(sources), protocol_parameter_rules=openai_chat_parameter_rules(),
+        registered_references={**{key: [REFERENCE] for key in BINDINGS},
+                               "parameter_transform": [VersionedReference(ref="identity_v1", version=1)]},
+                submitted_values={"top_p": value})
+
+
+def test_explicitly_unsupported_top_p_keeps_configuration(sources):
+    from nexent.core.model_service.profiles.protocol_parameters import openai_chat_parameter_rules
+
+    current = catalog(sources, combo={"capability_overrides": [{
+        "path": "/sampling/top_p", "value": {"status": "unsupported"},
+        "reason": "Service does not accept top_p", "evidence": "fixture",
+    }]})
+    value = compose(current, protocol_parameter_rules=openai_chat_parameter_rules(),
+        registered_references={**{key: [REFERENCE] for key in BINDINGS},
+                               "parameter_transform": [VersionedReference(ref="identity_v1", version=1)]})
+    assert any(rule["key"] == "top_p" for rule in value.parameter_rules.declarations)
+    assert value.capabilities["sampling"]["top_p"]["status"] == "unsupported"
+
+
+@pytest.mark.parametrize("provider", [None, "volcengine-coding-plan"])
+@pytest.mark.parametrize("submitted,expected", [({}, 0.95), ({"top_p": 0.8}, 0.8)])
+def test_kimi_sampling_preference_is_composed_without_fixing_user_values(provider, submitted, expected):
+    from nexent.core.model_service.profiles.resolver import load_profile_catalog
+    from nexent.core.model_service.registry import model_service_references
+    from nexent.core.model_service.profiles.protocol_parameters import openai_chat_parameter_rules
+
+    refs = model_service_references()
+    policy = compose_provider_model_policy(
+        load_profile_catalog(), provider_key=provider, request_model_id="kimi-k3",
+        model_profile_key="moonshotai/kimi-k3",
+        base_bindings={key: values[0].model_dump() for key, values in refs.items() if key != "parameter_transform"},
+        base_instruction=VersionedReference(ref="system_only_v1", version=1),
+        registered_references=refs, submitted_values=submitted,
+        protocol_parameter_rules=openai_chat_parameter_rules(),
+    )
+    assert policy.parameter_values["top_p"] == expected

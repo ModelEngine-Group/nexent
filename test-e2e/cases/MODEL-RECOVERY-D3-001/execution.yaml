@@ -9,6 +9,8 @@ acceptance_bindings:
   AC-RECOVERY:
   - test_recovery_preserves_wire_and_rolls_back_failed_attempt
   - test_terminal_bounds_and_private_diagnostics
+  AC-AGENT-REPAIR:
+  - test_agent_repairs_exhausted_empty_http_without_user_errors
   AC-PRIVACY:
   - test_terminal_bounds_and_private_diagnostics
 preparation:

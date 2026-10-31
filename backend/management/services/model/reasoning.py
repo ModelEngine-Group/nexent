@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Shared normalization for canonical reasoning settings."""
 
 import logging
@@ -133,6 +135,13 @@ COMMON_REASONING_DEFAULT = "auto"
 def _enrich_model_reasoning_capability(model: Dict[str, Any]) -> None:
     """Attach catalog-declared reasoning capability to an API model row."""
     if model.get("model_type") not in {"llm", "chat"}:
+        return
+    remainder = model.get("resolved_profile")
+    if model.get("profile_schema_version") is not None or (
+            isinstance(remainder, dict) and "migration_error" in remainder):
+        from management.services.model.outlet_projection import project_saved_outlet
+
+        model.update(project_saved_outlet(model))
         return
     model_name = add_repo_to_name(
         model.get("model_repo", ""), model.get("model_name", "")

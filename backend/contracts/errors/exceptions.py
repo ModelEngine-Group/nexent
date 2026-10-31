@@ -552,6 +552,29 @@ class RuntimeCapacityExceededError(RuntimeError):
     retry_after_seconds = 1
 
 
+class ModelOutletConflictError(ValueError):
+    """An absent, stale or unavailable outlet cannot be overwritten."""
+
+    def __init__(self):
+        super().__init__("MODEL_OUTLET_VERSION_CONFLICT")
+
+
+class ModelOutletValidationError(ValueError):
+    """Invalid storage input without parameter or credential details."""
+
+    def __init__(self, category="MODEL_OUTLET_INVALID", path=""):
+        super().__init__("MODEL_OUTLET_INVALID")
+        self.category = category
+        self.path = path
+
+
+class ModelOutletDatabaseError(RuntimeError):
+    """Safe database diagnostic excluding SQL bound values."""
+
+    def __init__(self):
+        super().__init__("MODEL_OUTLET_DATABASE_ERROR")
+
+
 class RuntimeQueueTimeoutError(RuntimeError):
     """Raised when an accepted Runtime agent request expires in the queue."""
 

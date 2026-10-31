@@ -447,3 +447,23 @@ def test_unsupported_or_invalid_content_is_not_silently_flattened(profile, part)
             ),
             profile,
         )
+
+
+@pytest.mark.parametrize("status", ["unknown", "unsupported", "supported"])
+@pytest.mark.parametrize("key,value", [("temperature", 0.7), ("top_p", 1)])
+def test_sampling_config_is_preserved_but_explicitly_unsupported_values_are_not_sent(profile, status, key, value):
+    from nexent.core.model_service.profiles.protocol_parameters import ensure_outlet_sampling_rules
+    from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+
+    data = ensure_outlet_sampling_rules(profile).model_dump(mode="json")
+    data["capabilities"]["sampling"][key]["status"] = status
+    data["parameter_values"][key] = value
+    current = ResolvedModelProfile.model_validate(data)
+    before = current.model_dump(mode="json")
+    body = OpenAIChatAdapter().prepare_http_request(request(current), current).json_body
+    if status == "unsupported":
+        assert key not in body
+    else:
+        assert body[key] == value
+    assert current.model_dump(mode="json") == before
+    assert current.parameter_values[key] == value
