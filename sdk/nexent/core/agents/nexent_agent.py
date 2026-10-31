@@ -1060,6 +1060,7 @@ class NexentAgent:
                     script_runner = None
                     with _sandbox_tree_context["initialization_lock"]:
                         try:
+                            from .context.execution_history import ExecutionHistory
                             from .sandbox import build_python_executor
                             self._check_sandbox_cancelled()
                             if deferred and self.workspace_path:
@@ -1075,7 +1076,7 @@ class NexentAgent:
                                 host_tools_exist=_has_host_tools([
                                     *tool_list,
                                     *worker_agents_list,
-                                ]),
+                                ]) or isinstance(getattr(self.observer, "execution_history", None), ExecutionHistory),
                                 session_container_group=_sandbox_tree_context.get(
                                     "session_container_group"
                                 ),

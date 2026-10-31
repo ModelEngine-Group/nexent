@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """
 Unit tests for docker_client.py
 Tests the DockerContainerClient class with comprehensive coverage
@@ -559,8 +560,6 @@ class TestStartContainer:
         docker_container_client.client.containers.get.side_effect = NotFound(
             "Container not found")
 
-        # Force the local path so find_free_port is actually reached even when
-        # the runner itself is a container and _is_running_in_docker() is True.
         with patch.object(DockerContainerClient, "_is_running_in_docker", return_value=False), \
                 patch.object(DockerContainerClient, "find_free_port", side_effect=ContainerError("No ports available")):
             with pytest.raises(ContainerError, match="No ports available"):
