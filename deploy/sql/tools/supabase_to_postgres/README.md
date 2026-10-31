@@ -125,6 +125,22 @@ the original source names to finish cleanup; repeating the importer is safe.
 
 ## Historical API-only identities
 
+The historical fixed `user_id` / `tenant_id` / `SPEED` demo identity is a system
+identity. Its untouched migration placeholder is marked `system_identity=speed`,
+kept disabled with password login off, and removed from credential-pending state.
+Speed-mode authentication retains its existing default context; full-mode
+authentication does not gain access. Replays preserve operator changes. Custom
+SPEED identities and unknown blank-email users are not automatically activated.
+Deployment preparation recognizes this repairable seed before Config reruns SQL,
+so an old pending seed alone does not require a Supabase database.
+
+CAS/OAuth provider bindings and CAS sessions already reside in application
+PostgreSQL and are retained. Historical registration code also created project
+identities in Supabase: these identity records still require import under their
+original UUIDs. Provider bindings alone do not prove account activation eligibility
+or reconstruct passwords/disabled status. CAS-created random passwords remain
+ineligible for password login; OAuth/password accounts retain their original rules.
+
 API-only users created by the batch endpoint have no Supabase `auth.users` row.
 The 2.9.0 SQL recognizes an active USER/DEV membership with an empty email and
 historical token evidence, retains the original UUID and API Key, and makes the

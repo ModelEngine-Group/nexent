@@ -71,6 +71,7 @@ def assert_automatic_upgrade(root, temporary):
         query("CREATE SCHEMA nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),tenant_id varchar(100),"
               "user_role varchar(30),user_email varchar(255),delete_flag varchar(1) DEFAULT 'N');"
               f"INSERT INTO nexent.user_tenant_t VALUES ('{user_id}','retained-tenant','SU','auto@example.com','N');")
+        query("INSERT INTO nexent.user_tenant_t VALUES ('user_id','tenant_id','SPEED',NULL,'N');")
         docker("stop", names["db"])
         assert phase("prepare")["source"] == 1
         snapshots = list((temporary / "state").glob("*.json"))
@@ -85,6 +86,17 @@ def assert_automatic_upgrade(root, temporary):
                        worker, "bash", "/tmp/run-auth-sql.sh", "--migrate"]
         docker(*sql_command)
         assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id='v2.9.0_001_local_user_accounts.sql'") == "1"
+        assert query("SELECT source_metadata->>'system_identity' FROM nexent.user_account_t WHERE user_id='user_id'") == "speed"
+        # A prior draft's system placeholder must not demand a Supabase source
+        # before Config has a chance to repair the schema again.
+        query("UPDATE nexent.user_account_t SET source_metadata='{\"credential_migration_pending\":true}' WHERE user_id='user_id'")
+        from argparse import Namespace
+
+        from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
+            deployment_status,
+        )
+        assert deployment_status(Namespace(deployment='docker', database_target=target), env)["pending"] == 1
+        query(sql_file.read_text(encoding='utf-8'))
         # An import failure after SQL completion must not create the data checkpoint.
         query(f"UPDATE nexent.user_account_t SET user_email='conflicting@example.com' WHERE user_id='{user_id}'")
         phase("apply", success=False)

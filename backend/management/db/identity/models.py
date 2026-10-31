@@ -262,7 +262,7 @@ class UserAccount(TableBase):
                            comment="Credential revision; password changes invalidate earlier JWTs")
     email_confirmed_at = Column(TIMESTAMP(timezone=False), comment="UTC email confirmation time, null if unconfirmed")
     source_metadata = Column(JSONB, nullable=False, server_default=text("'{}'::jsonb"),
-                             comment="Migration/provider provenance and API-only identity marker; never grants permissions")
+                             comment="Migration/provider provenance, API-only and system identity markers; never grants permissions")
 
 # Read projections preserve established association query/response contracts.
 # These expressions create no role/email columns on the association table.

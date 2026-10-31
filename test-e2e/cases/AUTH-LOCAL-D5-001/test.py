@@ -27,6 +27,39 @@ from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
 from infrastructure.security.passwords import verify_password
 
 
+def test_speed_seed_is_system_identity_and_replay_preserves_operator_changes():
+    import re
+
+    sql = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    historical = (ROOT / "deploy/sql/migrations/v1_merged_migrations.sql").read_text(encoding="utf-8")
+    seed = re.search(r"INSERT INTO nexent.user_tenant_t \(user_id, tenant_id, user_role, user_email, created_by, updated_by\).*?DO NOTHING;", historical, re.S).group()
+    with disposable_database() as dsn:
+        with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+            cursor.execute("CREATE SCHEMA nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),tenant_id varchar(100),user_role varchar(30),user_email varchar(255),created_by varchar(100),updated_by varchar(100),delete_flag varchar(1) DEFAULT 'N',PRIMARY KEY(user_id,tenant_id))")
+            cursor.execute(seed)
+            cursor.execute(sql)
+            cursor.execute(sql)
+            cursor.execute("SELECT user_id,user_role,account_status,password_login_enabled,password_hash,source_metadata FROM nexent.user_account_t")
+            assert cursor.fetchone() == ('user_id','SPEED','disabled',False,None,{'system_identity':'speed'})
+            cursor.execute("SELECT tenant_id FROM nexent.user_tenant_t WHERE user_id='user_id'")
+            assert cursor.fetchone() == ('tenant_id',)
+            # Repair a previously deployed pending placeholder, after columns were removed.
+            cursor.execute("UPDATE nexent.user_account_t SET source_metadata='{\"credential_migration_pending\":true}'")
+            cursor.execute(sql)
+            cursor.execute("SELECT source_metadata FROM nexent.user_account_t")
+            assert cursor.fetchone()[0] == {'system_identity':'speed'}
+            cursor.execute("UPDATE nexent.user_account_t SET updated_by='operator',source_metadata='{\"credential_migration_pending\":true}',token_version=3")
+            cursor.execute(sql)
+            cursor.execute("SELECT token_version,source_metadata FROM nexent.user_account_t")
+            assert cursor.fetchone() == (3,{'credential_migration_pending':True})
+            for uid, role in [(str(uuid4()), 'SPEED'), (str(uuid4()), 'USER')]:
+                cursor.execute("INSERT INTO nexent.user_account_t (user_id,user_role,account_status,source_metadata,updated_by) VALUES (%s,%s,'disabled','{\"credential_migration_pending\":true}','account-schema-migration')",(uid,role))
+                cursor.execute("INSERT INTO nexent.user_tenant_t (user_id,tenant_id) VALUES (%s,'tenant_id')",(uid,))
+                cursor.execute(sql)
+                cursor.execute("SELECT account_status,source_metadata FROM nexent.user_account_t WHERE user_id=%s",(uid,))
+                assert cursor.fetchone() == ('disabled',{'credential_migration_pending':True})
+
+
 def test_deployment_automatic_upgrade_retries_after_sql_success(tmp_path):
     import importlib.util
 
