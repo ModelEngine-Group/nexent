@@ -15,6 +15,7 @@ from ..ext_components.aidp.aidp_search_tool import AidpSearchTool
 from .send_email_tool import SendEmailTool
 from .tavily_search_tool import TavilySearchTool
 from .linkup_search_tool import LinkupSearchTool
+from .outcrawl_search_tool import OutcrawlSearchTool
 from .create_file_tool import CreateFileTool
 from .read_file_tool import ReadFileTool
 from .delete_file_tool import DeleteFileTool
@@ -52,6 +53,7 @@ __all__ = [
     "GetEmailTool",
     "TavilySearchTool",
     "LinkupSearchTool",
+    "OutcrawlSearchTool",
     "CreateFileTool",
     "ReadFileTool",
     "DeleteFileTool",
