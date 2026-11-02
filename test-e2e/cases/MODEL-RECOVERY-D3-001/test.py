@@ -141,7 +141,7 @@ def test_agent_keeps_empty_budget_and_repairs_nonempty_protocol(scenario, shared
     empty = "empty" in scenario
     persistent = scenario.startswith("persistent")
     rejected = {"role": "assistant", "reasoning_content": SECRET} if empty else {
-        "role": "assistant", "content": "Malformed protocol response.",
+        "role": "assistant", "content": "<code>final_answer(",
     }
     sequence = [(rejected, "stop")]
     if not persistent:
