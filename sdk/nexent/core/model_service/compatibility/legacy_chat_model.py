@@ -304,7 +304,7 @@ class LegacyChatModel(Model):
         )
         events = self._events(
             messages, options, tools_to_call_from, suppress_stream=_suppress_attempt_stream,
-            empty_response_policy="retry" if _retry_empty_response else "fail",
+            empty_response_policy="retry_uncommitted" if _retry_empty_response else "fail",
             context_rebuild=context_rebuild,
         )
         try:

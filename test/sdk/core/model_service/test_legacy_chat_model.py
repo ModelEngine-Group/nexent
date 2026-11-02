@@ -274,7 +274,7 @@ def test_invalid_attempt_controls_fail_before_request(setup, options):
     assert calls == [] and observer.message_query == []
 
 
-@pytest.mark.parametrize('enabled,policy', [(False, 'fail'), (True, 'retry')])
+@pytest.mark.parametrize('enabled,policy', [(False, 'fail'), (True, 'retry_uncommitted')])
 def test_empty_retry_control_is_not_a_model_parameter(setup, enabled, policy):
     model, _state, calls, _observer = setup
     result = model.generate([{'role': 'user', 'content': 'hello'}], _retry_empty_response=enabled)

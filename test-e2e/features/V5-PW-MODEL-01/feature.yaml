@@ -10,7 +10,10 @@ feature:
   business_rules:
   - rule_id: V5-PW-MODEL-01-RULE-01
     description: 模型 V2 从 Provider 导入/自定义接入→真实连通性→保存→Agent 使用
+  - rule_id: V5-PW-MODEL-01-RULE-02
+    description: A validation request owns its outbound probe; disconnect or cancellation reaps the task without writing connectivity or issuing a receipt.
   required_test_stages:
+  - D3
   - D4
   source:
     notes: 'Provisional migration owner: the V5 row has no stable Feature ID. Do not infer an F-ID.'

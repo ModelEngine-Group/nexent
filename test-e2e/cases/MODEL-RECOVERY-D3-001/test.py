@@ -20,7 +20,7 @@ HEADER_CANARY = "SYNTHETIC_UNAPPROVED_HEADER"
 
 
 @contextmanager
-def provider(sequence):
+def provider(sequence, *, shared=False):
     requests = []
 
     class Handler(BaseHTTPRequestHandler):
@@ -49,21 +49,31 @@ def provider(sequence):
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     observer = MessageObserver()
-    model = OpenAIModel(
-        observer=observer, model_id="verified-model", api_key="synthetic-key",
-        api_base=f"http://127.0.0.1:{server.server_port}/v1",
-        temperature=0.7, top_p=0.9, max_output_tokens=512,
-        extra_body={"enable_thinking": False},
-        reasoning_capability={"status": "supported", "control": "effort", "source": "models_dev",
-                              "provider_id": "OpenAI-API-Compatible", "wire_format": "reasoning_effort",
-                              "toggle_wire_format": "thinking_object"},
-        retry_config=ModelRetryConfig(max_attempts=5, backoff_base_seconds=0, jitter=False),
-        diagnostic_chunks_enabled=True,
-    )
+    if shared:
+        from nexent.core.model_service.compatibility.legacy_chat_model import LegacyChatModel
+        from shared.model_service_profiles import resolved_profile_for_test
+
+        model = LegacyChatModel.from_profile(
+            resolved_profile_for_test(f"http://127.0.0.1:{server.server_port}/v1"),
+            "synthetic-key", observer=observer,
+        )
+    else:
+        model = OpenAIModel(
+            observer=observer, model_id="verified-model", api_key="synthetic-key",
+            api_base=f"http://127.0.0.1:{server.server_port}/v1",
+            temperature=0.7, top_p=0.9, max_output_tokens=512,
+            extra_body={"enable_thinking": False},
+            reasoning_capability={"status": "supported", "control": "effort", "source": "models_dev",
+                                  "provider_id": "OpenAI-API-Compatible", "wire_format": "reasoning_effort",
+                                  "toggle_wire_format": "thinking_object"},
+            retry_config=ModelRetryConfig(max_attempts=5, backoff_base_seconds=0, jitter=False),
+            diagnostic_chunks_enabled=True,
+        )
     try:
         yield model, observer, requests
     finally:
-        model.client.close()
+        if getattr(model, "client", None) is not None:
+            model.client.close()
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
@@ -153,3 +163,15 @@ def test_agent_repairs_exhausted_empty_http_without_user_errors(persistent_empty
             assert phases(observer).count("commit") == 1
             assert phases(observer).count("rollback") == 2
             assert "protocol" in str(requests[2]["messages"]).lower()
+
+
+@pytest.mark.parametrize("empty", [{"reasoning_content": SECRET}, {"content": "   "}, {}])
+def test_shared_legacy_recovery_over_real_http(empty):
+    with provider([(empty, "stop"), ({"content": "RECOVERED"}, "stop")], shared=True) as (model, observer, requests):
+        assert model.generate([{"role": "user", "content": "Frozen input"}]).content == "RECOVERED"
+        assert len(requests) == 2 and requests[0] == requests[1]
+        assert model.last_retry_count == 1
+        assert phases(observer).count("rollback") == (1 if empty else 0)
+        assert phases(observer).count("commit") == 1
+        assert not any(SECRET in str(json.loads(raw).get("content", ""))
+                       for raw in observer.message_query if json.loads(raw).get("type") == "final_answer")

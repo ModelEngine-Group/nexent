@@ -12,6 +12,26 @@ from nexent.core.model_service.service import ModelRequestRetryPolicy, ModelServ
 from test.sdk.core.model_service.test_model_service import Sender, setup
 
 
+@pytest.mark.parametrize("delta", [{"reasoning_content": "uncommitted"}, {"content": "   "}, {}])
+def test_legacy_empty_stop_retains_one_speculative_retry(setup, delta):
+    """Legacy speculative output may roll back once; committed output may not replay."""
+    from nexent.core.model_service.compatibility.legacy_chat_model import LegacyChatModel
+    from nexent.core.model_service.sse import SSEEvent
+    from nexent.core.utils.observer import MessageObserver
+    from test.sdk.core.model_service.test_model_service import frame
+
+    profile, _request, limiter, factory = setup
+    sender = Sender([
+        [frame(delta), frame(finish="stop"), SSEEvent("[DONE]")],
+        [frame({"content": "recovered"}), frame(finish="stop"), SSEEvent("[DONE]")],
+    ])
+    model = LegacyChatModel(profile, factory(sender), observer=MessageObserver())
+    assert model.generate([{"role": "user", "content": "frozen"}]).content == "recovered"
+    assert len(sender.calls) == 2 and sender.closed == 2
+    assert sender.calls[0].body_bytes == sender.calls[1].body_bytes
+    assert model.last_retry_count == 1 and not limiter._entries
+
+
 @pytest.mark.parametrize("attempts", [0, -1, True, 1.5])
 def test_retry_policy_requires_a_positive_integer(attempts):
     with pytest.raises(ValueError, match="positive integer"):

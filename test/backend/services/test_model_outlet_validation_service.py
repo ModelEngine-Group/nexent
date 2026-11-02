@@ -17,6 +17,38 @@ from management.services.model.profiles import build_outlet_draft, validate_mode
 from test.backend.services.test_model_profile_service import draft_request, outlet_database  # noqa: F401
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["disconnect", "checker_error", "caller_cancel"])
+async def test_inflight_probe_is_owned_and_closed_before_disconnect_returns(probe, failure):
+    _, _, invoke, update = probe
+    started, closed = asyncio.Event(), asyncio.Event()
+
+    async def blocked(*_args):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            closed.set()
+
+    async def disconnected():
+        if started.is_set() and failure == "checker_error":
+            raise RuntimeError("checker unavailable")
+        return started.is_set() and failure == "disconnect"
+
+    invoke.side_effect = blocked
+    task = asyncio.create_task(validate_model_outlet(
+        ModelOutletValidationRequest(outlet_id=42), "tenant", is_disconnected=disconnected,
+    ))
+    await asyncio.wait_for(started.wait(), 1)
+    if failure == "caller_cancel":
+        task.cancel()
+    expected = RuntimeError if failure == "checker_error" else asyncio.CancelledError
+    with pytest.raises(expected):
+        await asyncio.wait_for(task, 1)
+    assert closed.is_set()
+    update.assert_not_called()
+
+
 @pytest.fixture
 def probe(monkeypatch, outlet_database):
     import nexent.core.concurrency as concurrency
@@ -265,3 +297,15 @@ def test_ecs04_edit_checks_require_one_consistent_saved_revision(payload):
     from pydantic import ValidationError
     with pytest.raises(ValidationError):
         ModelOutletValidationRequest(**payload)
+
+
+def test_receipt_signing_uses_shared_current_jwt_secret(monkeypatch):
+    from contracts.constants import environment
+    from management.services.model import profiles
+
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-shared-key")
+    first = profiles._receipt_signature("synthetic-receipt")
+    monkeypatch.setattr(profiles, "_PROCESS_RECEIPT_KEY", "other-worker-fallback")
+    assert profiles._receipt_signature("synthetic-receipt") == first
+    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-rotated-key")
+    assert profiles._receipt_signature("synthetic-receipt") != first

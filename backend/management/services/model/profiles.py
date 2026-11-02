@@ -22,10 +22,10 @@ _PROCESS_RECEIPT_KEY = secrets.token_hex(32)
 
 
 def _receipt_signature(body):
-    from contracts.constants.environment import SUPABASE_JWT_SECRET
+    from contracts.constants.environment import JWT_SECRET
     from infrastructure.security.signatures import calculate_hmac_signature
 
-    return calculate_hmac_signature(SUPABASE_JWT_SECRET or _PROCESS_RECEIPT_KEY,
+    return calculate_hmac_signature(JWT_SECRET or _PROCESS_RECEIPT_KEY,
         "model-connectivity-v1", "", body)
 
 
@@ -517,7 +517,7 @@ async def validate_model_outlet(request, tenant_id, *, is_disconnected=None):
     if is_disconnected is not None and await is_disconnected():
         import asyncio
         raise asyncio.CancelledError()
-    result = await probe_model_profile(profile, key, http_headers=headers)
+    result = await _probe_with_disconnect(profile, key, headers, is_disconnected)
     if is_disconnected is not None and await is_disconnected():
         import asyncio
         raise asyncio.CancelledError()
@@ -530,6 +530,30 @@ async def validate_model_outlet(request, tenant_id, *, is_disconnected=None):
     return {"ok": ok, "error": error, "check_scope": "connection_only",
             "check_receipt": _issue_check_receipt(profile, key, headers, ok),
             "model_id": profile.outlet_id, "config_revision": profile.config_revision}
+
+
+async def _probe_with_disconnect(profile, key, headers, is_disconnected):
+    """Own and reap the in-flight HTTP probe when its request disappears."""
+    import asyncio
+
+    if is_disconnected is None:
+        return await probe_model_profile(profile, key, http_headers=headers)
+    task = asyncio.create_task(
+        probe_model_profile(profile, key, http_headers=headers), name="model-outlet-connectivity",
+    )
+    try:
+        while not task.done():
+            await asyncio.wait({task}, timeout=0.05)
+            if not task.done() and await is_disconnected():
+                raise asyncio.CancelledError()
+        return await task
+    finally:
+        if not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
 
 async def probe_model_profile(profile, key, *, http_headers=None):

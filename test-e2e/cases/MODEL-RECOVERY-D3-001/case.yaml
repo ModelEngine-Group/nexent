@@ -45,10 +45,14 @@ case:
       then against persistent empty responses.
     expected: Corrected answer succeeds without user errors or repair instructions; persistent empty recovery terminates
       within the existing bound and never executes tools.
+  - order: 4
+    action: Exercise LegacyChatModel through the real ModelService, HTTP sender and loopback SSE endpoint with reasoning-only, whitespace and empty stop before a valid answer.
+    expected: Two identical wire requests occur and only the accepted answer commits; emitted speculative deltas roll back, while a truly empty first attempt creates no observer state. The shared path closes its resources.
   expected_results:
   - HTTP request controls remain immutable and successful recovery produces the expected answer exactly once.
   - Attempt bounds and structural diagnostics preserve privacy and excluded terminal outcomes.
   - Silent Agent semantic repair preserves the final answer and existing retry bound.
+  - Legacy shared-model empty recovery has the same single retry and immutable request boundary.
   forbidden_side_effects:
   - No external provider calls, database mutations, session snapshot rewrites, reasoning promotion or execution
     of returned tools.
@@ -65,9 +69,11 @@ case:
     steps:
     - 1
     - 2
+    - 4
     expected_results:
     - 1
     - 2
+    - 4
     forbidden_side_effects:
     - 1
   - id: AC-PRIVACY
@@ -93,3 +99,4 @@ case:
   - Identical outgoing bodies, rollback/commit events, response correlation and private structural diagnostics
   cleanup:
   - Close the model HTTP client and shut down/join the loopback server thread.
+  # The accepted Legacy facade is a distinct entry point into the shared transport.

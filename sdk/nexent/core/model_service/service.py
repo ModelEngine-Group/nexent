@@ -65,6 +65,7 @@ class _Call:
     rebuilds: int = 0
     rebuild_pending: bool = False
     empty_response_retries: int = 0
+    speculative_empty_retry: bool = False
 
     def check(self):
         if self.scope.cancelled:
@@ -139,7 +140,10 @@ class _Call:
         if self.rebuild_pending:
             normalized = normalized.model_copy(update={"retryable": True})
         delay = None
-        if normalized.retryable and not self.visible and self.attempt < self.policy.max_attempts:
+        replayable = not self.visible or (
+            self.speculative_empty_retry and normalized.category == "MODEL_EMPTY_RESPONSE"
+        )
+        if normalized.retryable and replayable and self.attempt < self.policy.max_attempts:
             delay = 0 if self.rebuild_pending else self.policy.calculate_backoff(self.attempt)
             if not isinstance(delay, (int, float)) or not math.isfinite(delay) or delay < 0:
                 raise ValueError("Retry backoff must be finite and nonnegative")
@@ -209,6 +213,13 @@ class _Call:
             self.check()
             self.scope.stop_event.wait(min(0.05, end - time.monotonic()))
         self.check()
+        self.begin_retry()
+
+    def begin_retry(self):
+        if self.speculative_empty_retry:
+            # Only the Legacy observer can roll back these uncommitted deltas.
+            self.visible = False
+            self.speculative_empty_retry = False
         self.attempt += 1
 
     async def await_retry(self, delay):
@@ -217,7 +228,7 @@ class _Call:
             self.check()
             await asyncio.sleep(min(0.05, end - time.monotonic()))
         self.check()
-        self.attempt += 1
+        self.begin_retry()
 
 
 class ModelService:
@@ -454,9 +465,13 @@ class ModelService:
             part.get("type") == "text" and part.get("text", "").strip() for part in message.content_parts
         ):
             return
-        retryable = policy == "retry" and message.finish_reason == "stop" and call.empty_response_retries < 1
+        retryable = (
+            policy in {"retry", "retry_uncommitted"}
+            and message.finish_reason == "stop" and call.empty_response_retries < 1
+        )
         if retryable:
             call.empty_response_retries += 1
+            call.speculative_empty_retry = policy == "retry_uncommitted"
         raise ModelServiceError(ModelError(
             category="MODEL_EMPTY_RESPONSE", scope="protocol",
             retryable=retryable,
@@ -467,7 +482,7 @@ class ModelService:
 
     @staticmethod
     def _validate_empty_policy(policy):
-        if policy not in ("accept", "fail", "retry"):
+        if policy not in ("accept", "fail", "retry", "retry_uncommitted"):
             raise ValueError("Unknown empty response policy")
 
     def _events(self, call, empty_response_policy):
@@ -524,6 +539,7 @@ class ModelService:
     def stream(
         self, request, profile, *, scope=None, deadline=None, empty_response_policy="accept", request_rebuild=None,
     ):
+        """Stream events; retry_uncommitted requires a caller that rolls back speculative deltas."""
         self._validate_rebuild(request_rebuild, asynchronous=False)
         self._validate_empty_policy(empty_response_policy)
         if not request.stream:
@@ -540,6 +556,7 @@ class ModelService:
     async def astream(
         self, request, profile, *, scope=None, deadline=None, empty_response_policy="accept", request_rebuild=None,
     ):
+        """Async stream with the same explicit speculative-rollback contract as stream."""
         self._validate_rebuild(request_rebuild, asynchronous=True)
         self._validate_empty_policy(empty_response_policy)
         if not request.stream:
