@@ -543,7 +543,7 @@ export function ModelOutletAddForm({
       onPendingChange(true);
     },
     onSettled: () => onPendingChange(false),
-    mutationFn: async () => {
+    mutationFn: async (connectStatus?: "available" | "unavailable") => {
       if (reviewOnly) {
         await confirmModelOutletMigration(
           editing!.model_id,
@@ -564,7 +564,7 @@ export function ModelOutletAddForm({
       if (editing) {
         const saved = await updateModelOutlet(editing.model_id, {
           ...makeEditPatch(draft),
-          connect_status: currentCheckResult?.connect_status,
+          connect_status: connectStatus,
         });
         if (reviewMigration) {
           try {
@@ -580,7 +580,7 @@ export function ModelOutletAddForm({
         return saved;
       }
       const saved = await createModelOutlet({
-        connect_status: currentCheckResult?.connect_status,
+        connect_status: connectStatus,
         ...draft,
         parameter_values: sampling,
         catalog_revision: preview.data.catalog_revision,
@@ -1096,7 +1096,7 @@ export function ModelOutletAddForm({
             disabled={!ready && !reviewOnly}
             className="disabled:opacity-50"
             loading={save.isPending}
-            onClick={() => save.mutate()}
+            onClick={() => save.mutate(currentCheckResult?.connect_status)}
           >
             {t(
               reviewOnly

@@ -10,7 +10,7 @@ from shared.factories.scratch_database import create_scratch, drop_scratch, scra
 from shared.postgres import postgres_sql
 
 pytestmark = [pytest.mark.case_id("CHAT-MODEL-CONTROLS-D5-001"), pytest.mark.stage("D5")]
-MIGRATION = Path(__file__).resolve().parents[3] / "deploy/sql/migrations/v2.9.0_007_unify_conversation_model_parameters.sql"
+MIGRATION = Path(__file__).resolve().parents[3] / "deploy/sql/migrations/v2.9.0_008_unify_conversation_model_parameters.sql"
 
 
 @pytest.fixture
@@ -23,7 +23,6 @@ def database():
                 conversation_id integer PRIMARY KEY, selected_model_id integer, workbench_config jsonb,
                 workbench_config_version integer NOT NULL DEFAULT 0,
                 model_parameter_preferences jsonb NOT NULL DEFAULT '{}',
-                model_parameter_preferences_version integer NOT NULL DEFAULT 0,
                 updated_by text, update_time timestamptz,
                 message_fixture jsonb NOT NULL DEFAULT '{"messages":["keep"]}');""", database=name)
         yield name

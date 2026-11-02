@@ -241,7 +241,7 @@ it("saves only explicitly adjusted values for the current conversation and outle
     expect(
       api.patchConversationModelPreferences
     ).toHaveBeenCalledExactlyOnceWith(11, 42, {
-      expected_version: 4,
+
       parameter_values: { temperature: 0 },
       delete_parameters: [],
     })
@@ -267,7 +267,7 @@ it("explicitly removes a preference without copying the outlet default", async (
     expect(
       api.patchConversationModelPreferences
     ).toHaveBeenCalledExactlyOnceWith(11, 42, {
-      expected_version: 5,
+
       parameter_values: {},
       delete_parameters: ["temperature"],
     })
