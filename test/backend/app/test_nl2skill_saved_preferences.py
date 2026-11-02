@@ -24,6 +24,15 @@ async def test_existing_skill_history_restores_preferences_before_stream(monkeyp
     from nexent.core import concurrency
     import importlib.util
     from pathlib import Path
+    repository = types.ModuleType("management.db.conversation.repository")
+    repository.get_conversation_history = Mock(return_value={"agent_id": 99})
+    monkeypatch.setitem(sys.modules, repository.__name__, repository)
+    system = types.ModuleType("management.services.agent.system")
+    system.system_agent_provider = SimpleNamespace(get_creator_ref=Mock(return_value=SimpleNamespace(agent_id=99)))
+    monkeypatch.setitem(sys.modules, system.__name__, system)
+    targets = types.ModuleType("management.services.conversation.creator_targets")
+    targets.authorize_target = lambda target, *_: target
+    monkeypatch.setitem(sys.modules, targets.__name__, targets)
     spec = importlib.util.spec_from_file_location("_skill_preferences_creation", Path(__file__).parents[3] / "backend/management/services/conversation/creator_execution.py")
     execution = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(execution)
@@ -42,7 +51,12 @@ async def test_existing_skill_history_restores_preferences_before_stream(monkeyp
     monkeypatch.setattr(execution, "prepare_creation_history", prepare)
     monkeypatch.setattr(execution, "persist_creation_stream", lambda value, **kwargs: value)
     from contracts.agent import NL2SkillRunRequest
-    request = NL2SkillRunRequest(query="fixture", conversation_id=11, model_id=explicit, persist_history=True)
+    from pydantic import Field
+    class SavedSkillRequest(NL2SkillRunRequest):
+        target: object = None
+        model_id: int | None = None
+        model_parameter_preferences: dict = Field(default_factory=dict)
+    request = SavedSkillRequest(query="fixture", conversation_id=11, model_id=explicit, persist_history=True)
     response = await module.nl2skill_run_api(request, authorization="token")
     assert [chunk async for chunk in response.body_iterator] == ["data: done\n\n"]
     service.read_model_preferences.assert_called_once_with(11, "owner")
