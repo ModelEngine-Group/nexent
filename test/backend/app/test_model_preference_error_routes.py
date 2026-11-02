@@ -18,7 +18,7 @@ def test_selection_error_routes_do_not_retry_writes(model_preference_client, kin
     errors = {"missing": module.ConversationNotFoundError("missing"),
               "conflict": module.ModelOutletConflictError(), "forbidden": ForbiddenError("denied")}
     service.patch_model_selection.side_effect = errors.get(kind) or RunModelControlsError(kind)
-    result = client.patch("/conversation/11/model_preferences", json={"expected_version": 2, "selected_model_id": 42})
+    result = client.patch("/conversation/11/model_preferences", json={"selected_model_id": 42})
     assert result.status_code == status
     detail = result.json()["detail"]
     assert (detail if isinstance(detail, str) else detail["code"]) == code

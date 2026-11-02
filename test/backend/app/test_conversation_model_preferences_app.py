@@ -42,7 +42,7 @@ def test_model_preference_routes_forward_owned_conversation_and_explicit_zero(mo
     assert client.get("/conversation/11/model_preferences/42").json()["data"]["parameter_values"] == {"temperature": 0}
     service.read_model_preference_view.assert_called_once_with(11, 42, "owner", "tenant")
     response = client.patch("/conversation/11/model_preferences/42", json={
-        "expected_version": 2, "parameter_values": {"temperature": 0}, "delete_parameters": [],
+        "parameter_values": {"temperature": 0}, "delete_parameters": [],
     })
     assert response.status_code == 200 and response.json()["data"]["version"] == 3
     args = service.patch_model_preferences.call_args.args
@@ -58,7 +58,7 @@ def test_model_preference_failure_status_and_no_second_write(model_preference_cl
               "conflict": module.ModelOutletConflictError(),
               "invalid": module.ModelOutletValidationError("PARAMETER_UNKNOWN", "/retired")}
     service.patch_model_preferences.side_effect = errors[kind]
-    response = client.patch("/conversation/11/model_preferences/42", json={"expected_version": 2})
+    response = client.patch("/conversation/11/model_preferences/42", json={})
     assert response.status_code == status
     detail = response.json()["detail"]
     assert (detail if isinstance(detail, str) else detail["code"]) == code
@@ -66,25 +66,25 @@ def test_model_preference_failure_status_and_no_second_write(model_preference_cl
 
 
 @pytest.mark.parametrize("version", [-1, True, "2", 2147483647])
-def test_model_preference_rejects_invalid_version_before_service(model_preference_client, version):
+def test_model_preference_rejects_obsolete_version_before_service(model_preference_client, version):
     client, service, _ = model_preference_client
     response = client.patch("/conversation/11/model_preferences/42", json={"expected_version": version})
     assert response.status_code == 422
     service.patch_model_preferences.assert_not_called()
 
 
-def test_su_ac_01_selection_endpoint_uses_shared_owner_tenant_and_cas(model_preference_client):
+def test_su_ac_01_selection_endpoint_uses_shared_owner_tenant_and_lock(model_preference_client):
     client, service, _ = model_preference_client
-    response = client.patch("/conversation/11/model_preferences", json={"expected_version": 2, "selected_model_id": 42})
+    response = client.patch("/conversation/11/model_preferences", json={"selected_model_id": 42})
     assert response.status_code == 200 and response.json()["data"]["selected_model_id"] == 42
     args = service.patch_model_selection.call_args.args
     assert args[0] == 11 and args[2:] == ("owner", "tenant")
-    assert args[1].expected_version == 2 and args[1].selected_model_id == 42
+    assert not hasattr(args[1], "expected_version") and args[1].selected_model_id == 42
 
 
 @pytest.mark.parametrize("model_id", [0, -1, True, "42", 1.5, None])
 def test_su_ac_05_invalid_selection_does_not_reach_service(model_preference_client, model_id):
     client, service, _ = model_preference_client
-    response = client.patch("/conversation/11/model_preferences", json={"expected_version": 2, "selected_model_id": model_id})
+    response = client.patch("/conversation/11/model_preferences", json={"selected_model_id": model_id})
     assert response.status_code == 422
     service.patch_model_selection.assert_not_called()
