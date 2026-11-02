@@ -1346,10 +1346,12 @@ cat > "$TMP_DIR/auto-auth-bin/python3" <<'PYTHON'
 #!/usr/bin/env bash
 if [ "${1:-}" = -c ]; then exit 0; fi
 printf '%s\n' "$@" > "$AUTH_HOOK_ARGUMENTS"
-printf '%s\n' "$MSYS_NO_PATHCONV/$MSYS2_ARG_CONV_EXCL" >> "$AUTH_HOOK_ARGUMENTS"
+printf '%s\n' "${MSYS_NO_PATHCONV:-unset}/${MSYS2_ARG_CONV_EXCL:-unset}" >> "$AUTH_HOOK_ARGUMENTS"
 PYTHON
 chmod +x "$TMP_DIR/auto-auth-bin/python3"
 export AUTH_HOOK_ARGUMENTS="$TMP_DIR/auth-hook-arguments"
+unset MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
+
 PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts prepare docker
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate_docker.py" "deployment must use the consolidated migration script"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "$DEPLOYMENT_ROOT_ENV" "deployment must pass its actual root environment path"
@@ -1358,6 +1360,7 @@ PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts apply kube
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate_k8s.py" "Kubernetes deployment must select its dedicated entry point"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "apply hook must commit the import"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "custom-namespace" "Kubernetes hook must preserve the namespace"
-assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "1/*" "Git Bash must not rewrite container paths"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "unset/unset" "host Python must allow Git Bash automatic path conversion"
+
 
 echo "All deployment common tests passed."

@@ -547,6 +547,7 @@ deployment_upgrade_local_accounts() {
   local namespace="${3:-nexent}"
   local interpreter=""
   local common_dir script candidate
+
   common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   script="$common_dir/../sql/tools/supabase_to_postgres/migrate_docker.py"
   if [ "$mode" = kubernetes ]; then
@@ -567,7 +568,8 @@ deployment_upgrade_local_accounts() {
   if [ "$phase" = apply ]; then
     arguments+=(--apply)
   fi
-  MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$interpreter" "$script" "${arguments[@]}"
+  "$interpreter" "$script" "${arguments[@]}"
+
 }
 
 deployment_env_dir() {
