@@ -51,9 +51,6 @@ SET selected_model_id = COALESCE(target.selected_model_id, converted.model_key::
                 ELSE converted.preferences END)
             || COALESCE(target.model_parameter_preferences->converted.model_key, '{}'::jsonb))
         ELSE target.model_parameter_preferences END,
-    model_parameter_preferences_version = target.model_parameter_preferences_version
-        + CASE WHEN converted.preferences <> '{}'::jsonb
-            OR (converted.model_key IS NOT NULL AND target.selected_model_id IS NULL) THEN 1 ELSE 0 END,
     workbench_config = (converted.config - 'generation_config' - 'model_parameters_source' - 'model_id')
         || jsonb_build_object('schema_version', 4)
         || CASE WHEN converted.generation->>'requested_output_tokens' IS NOT NULL
