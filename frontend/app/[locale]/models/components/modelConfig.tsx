@@ -99,6 +99,8 @@ export const ModelConfigSection = forwardRef<
 
   /* ------------------ State ------------------ */
   const [models, setModels] = useState<ModelOption[]>([]);
+  const modelsRef = useRef(models);
+  modelsRef.current = models;
   const [isAddModalV2Open, setIsAddModalV2Open] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [checkIssues, setCheckIssues] = useState<Record<string, ModelCheckIssue>>(
@@ -619,6 +621,10 @@ export const ModelConfigSection = forwardRef<
     let connected = false;
     let completed = false;
     const previousStatus = model?.connect_status ?? MODEL_STATUS.UNCHECKED;
+    const isCurrent = () => modelsRef.current.some((current) =>
+      current.id === model?.id && current.type === modelType &&
+      current.configRevision === model?.configRevision && current.displayName === modelName
+    );
     try {
       if (model?.type === "llm" && model.profileSchemaVersion) {
         const result = await validateModelOutlet(
@@ -636,12 +642,14 @@ export const ModelConfigSection = forwardRef<
       if (!connected && !issue)
         issue = { category: "MODEL_HTTP_ERROR", scope: "model" };
     } catch (error) {
+      if (!isCurrent()) return;
       if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) {
         updateModelStatus(modelName, modelType, previousStatus);
         return;
       }
       issue = modelCheckFailure(error);
     }
+    if (!isCurrent()) return;
     if (signal?.aborted) {
       updateModelStatus(modelName, modelType, previousStatus);
       return;

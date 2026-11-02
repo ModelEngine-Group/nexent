@@ -23,11 +23,11 @@ export async function prepareControls(page: Page, histories: Array<Record<string
     profile_schema_version: 1, connect_status: "available", extra_params: { enable_thinking: false, reasoning_effort: "low" }, reasoning_capability: capability,
   });
   const effort = { status: "supported", source: "catalog", levels, controls: [{ type: "effort", values: levels }] };
-  const snapshots = new Map<number, { version: number; selected_model_id: number | null; model_parameter_preferences: Record<string, any> }>();
+  const snapshots = new Map<number, { selected_model_id: number | null; model_parameter_preferences: Record<string, any> }>();
   const resources = new Map<number, any>();
   let nextConversation = 501;
   const snapshot = (id: number) => {
-    if (!snapshots.has(id)) snapshots.set(id, { version: 1, selected_model_id: id === 91 ? 999 : id === 92 ? 3 : null,
+    if (!snapshots.has(id)) snapshots.set(id, { selected_model_id: id === 91 ? 999 : id === 92 ? 3 : null,
       model_parameter_preferences: id === 92 ? { "3": { enable_thinking: true, reasoning_effort: "xhigh" } } : {} });
     return snapshots.get(id)!;
   };
@@ -56,18 +56,16 @@ export async function prepareControls(page: Page, histories: Array<Record<string
       const saved = snapshot(Number(match[1]));
       if (route.request().method() === "PATCH") {
         const patch = route.request().postDataJSON();
-        if (patch.expected_version !== saved.version) return json({ detail: { code: "MODEL_PREFERENCE_VERSION_CONFLICT" } }, 409);
         if (selectionMatch) saved.selected_model_id = patch.selected_model_id;
         else {
           const values = { ...saved.model_parameter_preferences[match[2]], ...patch.parameter_values };
           (patch.delete_parameters || []).forEach((key: string) => delete values[key]);
           saved.model_parameter_preferences[match[2]] = values;
         }
-        saved.version++;
       }
       if (selectionMatch) return json({ code: 0, data: saved });
       const id = Number(match[2]);
-      return json({ code: 0, data: { version: saved.version, config_revision: 1, parameter_values: saved.model_parameter_preferences[String(id)] || {},
+      return json({ code: 0, data: { config_revision: 1, parameter_values: saved.model_parameter_preferences[String(id)] || {},
         defaults: defaults(id), field_specs: rules(id), issues: [] } });
     }
     if (path === "/api/file/storage") return json({ success_count: 1, failed_count: 0, results: [{
@@ -93,7 +91,6 @@ export async function prepareControls(page: Page, histories: Array<Record<string
       if (saved && !body.conversation_id) {
         saved.selected_model_id = modelId;
         saved.model_parameter_preferences[String(modelId)] = { ...explicit };
-        saved.version++;
         if (body.workbench || body.workbench_config) resources.set(conversationId!, body.workbench || body.workbench_config);
       }
       if (state.delayed) await new Promise<void>(resolve => { state.release = resolve; });

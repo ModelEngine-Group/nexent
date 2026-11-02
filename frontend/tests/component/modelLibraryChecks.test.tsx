@@ -282,3 +282,25 @@ it("CS-03 cancelled check restores previous result", async () => {
   await waitFor(() => expect(mocks.validate).toHaveBeenCalledOnce());
   await screen.findByRole("button", { name: "check Kimi: available" });
 });
+
+
+it.each(["success", "conflict", "aborted"])("ignores an obsolete library check after a newer outlet revision: %s", async (outcome) => {
+  let finish!: (value: any) => void;
+  let fail!: (error: unknown) => void;
+  mocks.models.mockResolvedValue([{ id: 37, name: "kimi-k3", displayName: "Kimi", type: "llm",
+    profileSchemaVersion: 1, configRevision: 2, connect_status: "available" }]);
+  mocks.validate.mockImplementation(() => new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
+  setup();
+  fireEvent.click(await screen.findByRole("button", { name: "check Kimi: available" }));
+  await waitFor(() => expect(mocks.validate).toHaveBeenCalledOnce());
+  mocks.models.mockResolvedValue([{ id: 37, name: "kimi-k3", displayName: "Kimi", type: "llm",
+    profileSchemaVersion: 1, configRevision: 3, connect_status: "not_detected" }]);
+  fireEvent.click(screen.getByRole("button", { name: "saved model callback" }));
+  await screen.findByRole("button", { name: "check Kimi: not_detected" });
+  await act(async () => {
+    if (outcome === "success") finish({ ok: true, error: null });
+    else fail(outcome === "aborted" ? new DOMException("Cancelled", "AbortError") : { code: 409 });
+  });
+  expect(screen.getByRole("button", { name: "check Kimi: not_detected" })).toBeVisible();
+  expect(screen.queryByRole("button", { name: "modelProfile.checkIssues:1" })).not.toBeInTheDocument();
+});
