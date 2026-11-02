@@ -43,6 +43,7 @@ from management.services.memory.providers.service import (
     get_memory_external_provider_service,
 )
 from management.services.model.resolver import is_model_available
+from management.services.model.run_controls import select_configured_model_id
 from management.services.model.run_budget import (
     _TOKEN_THRESHOLD_LEGACY_FALLBACK,
     _resolve_context_budget,
@@ -762,10 +763,8 @@ def _select_agent_model_id(
     """Select the request override or the first configured available model."""
     if override_model_id is not None:
         return override_model_id
-    for model_id in agent_model_ids:
-        if is_model_available(get_model_by_model_id(model_id, tenant_id=tenant_id)):
-            return model_id
-    return agent_model_ids[0] if agent_model_ids else None
+    return select_configured_model_id(agent_model_ids,
+        lambda model_id: is_model_available(get_model_by_model_id(model_id, tenant_id=tenant_id)))
 
 
 def _resolve_prompt_runtime_flags(

@@ -152,3 +152,22 @@ def test_debug_selected_model_preferences_preserve_selection_exemption(monkeypat
         model_id=42, model_parameter_preferences={"42": {"temperature": 0}})
     run_controls.validate_agent_model_selection(request, "tenant", Mock())
     run_controls.preflight_turn_controls(request, "tenant", {"model_ids": [41]})
+
+
+@pytest.mark.parametrize("available,chosen", [(True, 42), (False, 41)])
+def test_saved_preferences_preflight_uses_the_runtime_available_model_fallback(monkeypatch, available, chosen):
+    from contracts.errors.exceptions import ModelOutletValidationError
+    from management.services.conversation import model_preferences
+
+    records = {41: {"connect_status": "unavailable"},
+        42: {"connect_status": "available" if available else "unavailable"}}
+    monkeypatch.setattr(run_controls, "get_model_by_model_id", lambda model_id, **_kwargs: records[model_id])
+    monkeypatch.setattr(run_controls, "validate_selected_model", Mock())
+    def validate(values, _tenant, *, allowed_model_ids):
+        assert allowed_model_ids == [41, 42]
+        if str(chosen) not in values:
+            raise ModelOutletValidationError("PARAMETER_DEPENDENCY")
+    monkeypatch.setattr(model_preferences, "validate_model_preferences", validate)
+    request = AgentRequest(agent_id=7, query="fixture")
+    request.__dict__["_runtime_model_parameter_preferences"] = {"41": {"temperature": 0}, "42": {"temperature": 0.3}}
+    run_controls.preflight_turn_controls(request, "tenant", {"model_ids": [41, 42]})

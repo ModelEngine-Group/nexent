@@ -62,6 +62,11 @@ def validate_selected_record(record: dict | None) -> dict[str, Any]:
     return record
 
 
+def select_configured_model_id(model_ids: list[int], available: Callable[[int], bool]) -> int | None:
+    """Share the runtime's first-available selection and legacy first-item fallback."""
+    return next((model_id for model_id in model_ids if available(model_id)), model_ids[0] if model_ids else None)
+
+
 def preflight_turn_controls(request, tenant_id: str, agent_record: dict | None = None) -> None:
     """Validate the single preference format before any conversation write."""
     from contracts.errors.exceptions import ModelOutletValidationError
@@ -71,7 +76,10 @@ def preflight_turn_controls(request, tenant_id: str, agent_record: dict | None =
     if model_id is None and getattr(request, "_runtime_model_parameter_preferences", {}):
         configured = (agent_record or {}).get("model_ids") or []
         if configured:
-            model_id = configured[0]
+            from management.services.model.resolver import is_model_available
+
+            model_id = select_configured_model_id(configured,
+                lambda candidate: is_model_available(get_model_by_model_id(candidate, tenant_id=tenant_id)))
         else:
             from contracts.constants.constants import MODEL_CONFIG_MAPPING
             from management.services.configuration.tenant.settings import tenant_config_manager
