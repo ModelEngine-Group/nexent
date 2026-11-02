@@ -44,8 +44,8 @@ case:
     action: Apply an import using an isolated stopped Supabase source DB and owned Auth/Kong containers; exercise failure and preview before a successful apply.
     expected: Preview/failure preserve the stack; successful committed apply removes its DB/Auth/Kong containers without deleting data volumes, backups or unrelated containers.
   - order: 7
-    action: Run deployment prepare and apply hooks around the normal versioned SQL runner, repeat deployment and retry a failed import using its retained private snapshot.
-    expected: Deployment imports only when SQL/data state requires it; API-only pending identities with valid evidence are repaired without a source even with old completion checkpoints, revoked keys stay revoked, and identities missing evidence still block. Fresh installs and completed upgrades skip source access and failures remain retryable.
+    action: Run deployment hooks around the normal SQL runner for initial installation, a recorded pre-2.9.0 version upgrading to 2.9.0, repeated 2.9.0 and later versions; retry a failed import within the captured version transition.
+    expected: Only the pre-2.9.0 to 2.9.0-or-later transition invokes account migration. Initial installation, same/later versions and checksum-only changes skip it regardless of pending rows. Schema SQL executes only in the normal runner; source absence stops a selected migration and failed imports remain retryable.
   - order: 8
     action: Execute the actual historical SPEED seed statement, migrate and replay against a prior pending placeholder and an operator-modified account.
     expected: The fixed demo identity retains its original ID/tenant and remains disabled for normal login, has system provenance without pending credentials, and replay preserves operator changes. Mixed-user deployment still imports human credentials.
@@ -58,7 +58,7 @@ case:
     are removed atomically and credential-pending rows are hydrated safely.
   - API-only account upgrades preserve existing keys, keep password login disabled and never reactivate explicitly disabled or deleted accounts on replay.
   - Source containers are reclaimed only after a successful local apply and all persistent data is retained.
-  - Deployment requires no manual Python invocation or host database packages; private snapshots survive incomplete upgrades and are removed only after committed import and successful cleanup.
+  - SQL version history alone selects migration; private snapshots and the captured transition survive incomplete upgrades, and schema SQL is never executed by the account importer.
   - Default SPEED system identity is never pending for Supabase import and receives no normal login access; operator changes are preserved.
   forbidden_side_effects:
   - No plaintext password/hash/token/DSN in returned errors or logs; no writes to

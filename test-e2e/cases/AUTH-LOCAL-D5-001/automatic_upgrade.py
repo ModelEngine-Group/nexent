@@ -4,7 +4,6 @@
 import json
 import os
 import subprocess
-import sys
 import time
 from uuid import uuid4
 
@@ -27,23 +26,27 @@ def assert_automatic_upgrade(root, temporary):
     password = "IsolatedAutoTest123"
     user_id = str(uuid4())
     encoded = bcrypt.hashpw(b"original-password", bcrypt.gensalt(rounds=4)).decode()
-    script = root / "deploy/sql/tools/supabase_to_postgres/migrate_docker.py"
     sql_file = root / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql"
     env = {**os.environ, "SUPABASE_MIGRATION_DB_CONTAINER": names["db"],
            "SUPABASE_MIGRATION_AUTH_CONTAINER": names["auth"], "SUPABASE_MIGRATION_KONG_CONTAINER": names["kong"],
            "SUPABASE_POSTGRES_USER": "postgres", "SUPABASE_POSTGRES_DB": "postgres",
-           "POSTGRES_USER": "postgres", "POSTGRES_DB": "postgres", "NEXENT_POSTGRES_PASSWORD": password}
+           "POSTGRES_USER": "postgres", "POSTGRES_DB": "postgres", "NEXENT_POSTGRES_PASSWORD": password, "APP_VERSION": "2.9.0"}
     # Automatic mode must recover the source password from the original container.
     env.pop("SUPABASE_POSTGRES_PASSWORD", None)
-    command = [sys.executable, "-S", str(script), "--database-target", target, "--config-target", worker,
-               "--state-dir", str(temporary / "state"), "--wait-timeout", "30"]
+    env_file = temporary / ".env"
+    env_file.write_text("")
+    bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else "bash"
 
     def phase(name, success=True):
-        result = subprocess.run([*command, "--deploy-phase", name, *(["--apply"] if name == "apply" else [])],
+        shell = 'source "$1/deploy/common/common.sh"; export DEPLOYMENT_ROOT_ENV="$2"; deployment_upgrade_local_accounts "$3" docker nexent "$4" "$5"'
+        result = subprocess.run([bash, "-c", shell, "case", root.as_posix(), env_file.as_posix(), name, target, worker],
                                 env=env, capture_output=True, text=True, check=False)
-        assert result.returncode == (0 if success else 1), result.stderr
+        assert result.returncode == (0 if success else 1), result.stdout + result.stderr
         assert encoded not in result.stdout + result.stderr
-        return json.loads(result.stdout) if success else result
+        if not success:
+            return result
+        output = (result.stdout.strip().splitlines() or [""])[-1]
+        return json.loads(output) if output.startswith("{") else {"skipped": True}
 
     def query(sql):
         return docker("exec", "-i", target, "psql", "-U", "postgres", "-qAt", "-v", "ON_ERROR_STOP=1", data=sql)
@@ -68,13 +71,25 @@ def assert_automatic_upgrade(root, temporary):
         docker("exec", "-i", names["db"], "psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1",
                data="CREATE SCHEMA auth; CREATE TABLE auth.users (id uuid,email text,encrypted_password text);"
                     f"INSERT INTO auth.users VALUES ('{user_id}','auto@example.com','{encoded}');")
+        assert phase("prepare")["skipped"]  # No prior SQL version is a fresh installation.
         query("CREATE SCHEMA nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),tenant_id varchar(100),"
               "user_role varchar(30),user_email varchar(255),delete_flag varchar(1) DEFAULT 'N');"
               f"INSERT INTO nexent.user_tenant_t VALUES ('{user_id}','retained-tenant','SU','auto@example.com','N');")
         query("INSERT INTO nexent.user_tenant_t VALUES ('user_id','tenant_id','SPEED',NULL,'N');")
+        query("CREATE TABLE nexent.schema_migrations (migration_id text PRIMARY KEY,checksum text NOT NULL,status text NOT NULL DEFAULT 'applied',executed_at timestamptz DEFAULT now(),app_version text,source_file text); "
+              "INSERT INTO nexent.schema_migrations (migration_id,checksum,app_version) VALUES ('v2.8.3_001_previous.sql','synthetic','2.8.3')")
+        env["APP_VERSION"] = "2.8.3"
+        assert phase("prepare")["skipped"]
+        env["APP_VERSION"] = "2.9.0"
+        query("UPDATE nexent.schema_migrations SET app_version='latest'")
+        phase("prepare", success=False)
+        query("UPDATE nexent.schema_migrations SET app_version='2.8.3'")
+        query("CREATE TABLE nexent.user_token_info_t (user_id varchar(100),delete_flag varchar(1)); "
+              "INSERT INTO nexent.user_tenant_t VALUES ('api-only','api-tenant','USER',NULL,'N'); "
+              "INSERT INTO nexent.user_token_info_t VALUES ('api-only','Y')")
         docker("stop", names["db"])
         assert phase("prepare")["source"] == 1
-        snapshots = list((temporary / "state").glob("*.json"))
+        snapshots = list((temporary / ".migration-state").glob("*.json"))
         assert len(snapshots) == 1
         assert json.loads(snapshots[0].read_text())["rows"][0]["encrypted_password"] == encoded
         docker("exec", worker, "mkdir", "-p", "/tmp/auth-migrations")
@@ -82,35 +97,18 @@ def assert_automatic_upgrade(root, temporary):
         runner = (root / "deploy/common/run-sql-migrations.sh").read_text(encoding="utf-8")
         docker("exec", "-i", worker, "sh", "-c", "cat > /tmp/run-auth-sql.sh", data=runner)
         docker("exec", "-i", worker, "sh", "-c", "cat > /tmp/init-auth.sql", data="CREATE SCHEMA IF NOT EXISTS nexent;\n")
-        sql_command = ["exec", "-e", "NEXENT_SQL_MIGRATION_DIR=/tmp/auth-migrations", "-e", "NEXENT_SQL_INIT_FILE=/tmp/init-auth.sql",
+        sql_command = ["exec", "-e", "NEXENT_APP_VERSION=2.9.0", "-e", "NEXENT_SQL_MIGRATION_DIR=/tmp/auth-migrations", "-e", "NEXENT_SQL_INIT_FILE=/tmp/init-auth.sql",
                        worker, "bash", "/tmp/run-auth-sql.sh", "--migrate"]
         docker(*sql_command)
         assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id='v2.9.0_001_local_user_accounts.sql'") == "1"
         assert query("SELECT source_metadata->>'system_identity' FROM nexent.user_account_t WHERE user_id='user_id'") == "speed"
-        # A prior draft's system placeholder must not demand a Supabase source
-        # before Config has a chance to repair the schema again.
-        query("UPDATE nexent.user_account_t SET source_metadata='{\"credential_migration_pending\":true}' WHERE user_id='user_id'")
-        from argparse import Namespace
-
-        from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
-            deployment_status,
-        )
-        assert deployment_status(Namespace(deployment='docker', database_target=target), env)["pending"] == 1
-        query(sql_file.read_text(encoding='utf-8'))
         # An import failure after SQL completion must not create the data checkpoint.
         query(f"UPDATE nexent.user_account_t SET user_email='conflicting@example.com' WHERE user_id='{user_id}'")
         phase("apply", success=False)
         assert snapshots[0].is_file()
-        assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id='__local_auth_data_2.9.0__'") == "0"
+        assert not json.loads(snapshots[0].read_text()).get("imported")
         assert all(name in docker("ps", "-a", "--format", "{{.Names}}").splitlines() for name in names.values())
         query(f"UPDATE nexent.user_account_t SET user_email='auto@example.com' WHERE user_id='{user_id}'")
-        missing_id = str(uuid4())
-        query("INSERT INTO nexent.user_account_t (user_id,user_email,user_role,account_status,source_metadata) "
-              f"VALUES ('{missing_id}','missing@example.com','USER','disabled','{{\"credential_migration_pending\":true}}')")
-        phase("apply", success=False)
-        assert query(f"SELECT password_hash IS NULL FROM nexent.user_account_t WHERE user_id='{user_id}'") == "t"
-        assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id='__local_auth_data_2.9.0__'") == "0"
-        query(f"DELETE FROM nexent.user_account_t WHERE user_id='{missing_id}'")
         assert phase("prepare")["retained"]
         assert phase("apply")["updated"] == 1
         assert not snapshots[0].exists()
@@ -118,38 +116,17 @@ def assert_automatic_upgrade(root, temporary):
         stored = query(f"SELECT password_hash FROM nexent.user_account_t WHERE user_id='{user_id}'")
         assert stored == encoded and bcrypt.checkpw(b"original-password", stored.encode())
         assert query(f"SELECT tenant_id FROM nexent.user_tenant_t WHERE user_id='{user_id}'") == "retained-tenant"
-        assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id IN ('__local_auth_data_2.9.0__','__local_auth_cleanup_2.9.0__')") == "2"
-        docker(*sql_command)
-        assert phase("prepare")["skipped"] and phase("apply")["skipped"]
-        # Reproduce retired source + prior API-only placeholders. Existing SQL
-        # and completion checkpoints must not hide a required local repair.
-        query("DELETE FROM nexent.user_account_t; DELETE FROM nexent.user_tenant_t; "
-              "CREATE TABLE nexent.user_token_info_t (user_id varchar(100),delete_flag varchar(1) DEFAULT 'N')")
-        for key in list(env):
-            if key.startswith("SUPABASE_"):
-                env.pop(key)
-        api_ids = [str(uuid4()) for _ in range(4)]
-        for index, uid in enumerate(api_ids):
-            role = 'USER' if index % 2 == 0 else 'DEV'
-            flag = 'N' if index < 2 else 'Y'
-            query(f"INSERT INTO nexent.user_account_t (user_id,user_role,account_status,source_metadata,updated_by) VALUES ('{uid}','{role}','disabled','{{\"credential_migration_pending\":true}}','account-schema-migration'); "
-                  f"INSERT INTO nexent.user_tenant_t (user_id,tenant_id) VALUES ('{uid}','api-tenant'); "
-                  f"INSERT INTO nexent.user_token_info_t VALUES ('{uid}','{flag}')")
-        for existing_checkpoints in [False, True]:
-            if not existing_checkpoints:
-                query("DELETE FROM nexent.schema_migrations WHERE migration_id IN ('__local_auth_data_2.9.0__','__local_auth_cleanup_2.9.0__')")
-            query("UPDATE nexent.user_account_t SET account_status='disabled',source_metadata='{\"credential_migration_pending\":true}',updated_by='account-schema-migration'")
-            assert phase("prepare")["source"] == 0
-            docker(*sql_command)  # The unchanged account SQL is skipped here.
-            assert phase("apply")["source"] == 0
-            assert query("SELECT count(*) FROM nexent.user_account_t WHERE account_status='active' AND NOT password_login_enabled AND password_hash IS NULL AND source_metadata->>'api_only'='true'") == '4'
-            assert query("SELECT count(*) FROM nexent.user_token_info_t WHERE delete_flag='Y'") == '2'
-            assert phase("prepare")["skipped"]
-        # An unknown identity with no token evidence still requires resolution.
-        query(f"DELETE FROM nexent.user_token_info_t WHERE user_id='{api_ids[0]}'; "
-              f"UPDATE nexent.user_account_t SET account_status='disabled',source_metadata='{{\"credential_migration_pending\":true}}' WHERE user_id='{api_ids[0]}'")
-        phase("prepare", success=False)
-        assert query("SELECT count(*) FROM nexent.user_account_t WHERE account_status='active'") == '3'
+        assert query("SELECT account_status FROM nexent.user_account_t WHERE user_id='api-only'") == 'active'
+        assert query("SELECT delete_flag FROM nexent.user_token_info_t WHERE user_id='api-only'") == 'Y'
+        # Same/later SQL versions must skip data migration regardless of account
+        # state or a schema checksum change. No source is rediscovered.
+        query("UPDATE nexent.user_account_t SET source_metadata='{\"credential_migration_pending\":true}'; "
+              "UPDATE nexent.schema_migrations SET checksum='different' WHERE migration_id='v2.9.0_001_local_user_accounts.sql'")
+        assert phase("prepare")["skipped"]
+        assert phase("apply")["skipped"]
+        query("INSERT INTO nexent.schema_migrations (migration_id,checksum,app_version) VALUES ('v3.0.0_001_future.sql','future','3.0.0')")
+        assert phase("prepare")["skipped"]
+
     finally:
         existing = docker("ps", "-a", "--format", "{{.Names}}").splitlines()
         for name in [*names.values(), target, worker]:

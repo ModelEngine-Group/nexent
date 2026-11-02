@@ -2,47 +2,49 @@
 
 ## Automatic deployment
 
-Run the normal `deploy.sh`. Docker invokes `migrate_docker.py`; Kubernetes invokes the
-dedicated `migrate_k8s.py`, sharing account import logic. Users do not run a separate migration
-command or install host database packages. The deployment host requires Python
-3.8+, Docker or kubectl, and access to the original source data.
+Docker and Kubernetes deploy.sh use the existing SQL runner's migration history
+in the application PostgreSQL database to select the 2.9.0 version transition.
+The runner exposes a read-only `--needs-version-upgrade 2.9.0` mode and reads
+its existing `schema_migrations.app_version` records plus the normal deployment
+target version. Only a recorded previous version below 2.9.0
+with a target version at/above 2.9.0 selects migration. A target below 2.9.0 or a
+recorded previous version at/above 2.9.0 skips it. No recorded prior version
+uses the normal initial-installation path and skips historical account transfer.
+Existing history with unreadable application versions stops with a version error;
+account data is never used to guess the version.
+Supabase contains credentials, not the Nexent application version.
 
-Before replacing the application, deployment checks the account SQL version and
-SHA-256 in `nexent.schema_migrations`, together with data-import and cleanup
-checkpoints. An incomplete upgrade snapshots only `auth.users` and
-`auth.identities` into a private file under `deploy/env/.migration-state/`.
-Stopped existing Docker source databases are started automatically. Exported
-`SUPABASE_POSTGRES_PASSWORD` takes precedence; otherwise the original source
-container's password is reused without prompting. Source reads are read-only.
+Neither pending accounts, account counts nor schema checksum changes trigger
+account migration. The deploy scripts contain no inline SQL. Only the SQL runner
+reads version metadata and executes schema migrations; the Python importer does
+not query version/account readiness or replay schema SQL.
 
-Config then runs the normal versioned SQL migration runner. After it records
-`v2.9.0_001_local_user_accounts.sql` at the expected checksum, deployment runs
-`migrate_docker.py` with `--apply` using Config's existing Python/database dependencies.
-Account import and its data checkpoint commit in one transaction. Deployment
-then removes the selected source DB/Auth/Kong containers and records cleanup,
-before creating/checking the super admin. Data volumes and backups remain.
-Kubernetes snapshots the source PVC/PV definitions and sets the PV reclaim
-policy to `Retain` before Helm replaces the legacy resources.
+For a selected transition, deployment snapshots auth.users/auth.identities before
+application replacement, lets the normal startup runner apply SQL, then imports
+credentials before SU bootstrap. A stopped existing source database is started.
+If no original source exists, deployment stops and asks for recovery from original
+data; it never initializes an empty Supabase source or reports an empty migration
+as success. Exported source credentials take priority over container settings.
 
-A fresh installation with no historical identities needs no source. A completed
-upgrade skips source access. An import failure leaves the source and private
-snapshot available; a cleanup failure retains the snapshot and committed data
-checkpoint. Fix the reported prerequisite and rerun `deploy.sh`. SQL completion
-alone never skips an unfinished credential import. The snapshot is deleted only
-after both import and cleanup succeed; protect retained files as credentials.
-Infrastructure-only and data-process-only deployments do not invoke this flow.
+The captured version transition and private snapshot live under
+`deploy/env/.migration-state/`. They resume the same interrupted upgrade even
+if startup SQL has already advanced the recorded schema version. Import commits
+in one target transaction. Cleanup failures retain the committed-result flag in
+the private snapshot so a retry only finishes cleanup. Success removes the source
+DB/Auth/Kong containers, retaining volumes/backups, and removes the transition
+and snapshot. Later 2.9.0+ deployments do not invoke the importer again.
 
-Back up both databases and freeze account/password/provider-binding writes
-during cutover. If the original source containers were deleted, recover them
-from their existing data using the manual recovery commands below; automatic
-deployment refuses to create an empty source for historical login identities.
+The host needs Python 3.8+ only when a transition selects migration; no host
+database packages are required. Docker uses migrate_docker.py; Kubernetes uses
+migrate_k8s.py and preserves its source PVC/PV before Helm replacement. Protect
+private snapshots as credentials and retain backups through acceptance.
 
 ## Manual recovery and preview
 
 ### Kubernetes entry point
 
 Kubernetes `deploy.sh` automatically uses `migrate_k8s.py`. It shares account
-mapping/import and checkpoints with `migrate_docker.py`, while handling Kubernetes
+mapping/import and private retry snapshots with `migrate_docker.py`, while handling Kubernetes
 source startup and actual PVC/PV bindings separately. A source Deployment scaled
 to zero is scaled to one and awaited. Custom existing claims are discovered from
 the pod template; every bound PV is archived and protected with `Retain` before
@@ -131,8 +133,8 @@ kept disabled with password login off, and removed from credential-pending state
 Speed-mode authentication retains its existing default context; full-mode
 authentication does not gain access. Replays preserve operator changes. Custom
 SPEED identities and unknown blank-email users are not automatically activated.
-Deployment preparation recognizes this repairable seed before Config reruns SQL,
-so an old pending seed alone does not require a Supabase database.
+SPEED and API-only profile repairs belong to the normal versioned SQL migration,
+not to the deployment trigger.
 
 CAS/OAuth provider bindings and CAS sessions already reside in application
 PostgreSQL and are retained. Historical registration code also created project
@@ -142,13 +144,6 @@ or reconstruct passwords/disabled status. CAS-created random passwords remain
 ineligible for password login; OAuth/password accounts retain their original rules.
 
 API-only users created by the batch endpoint have no Supabase `auth.users` row.
-Deployment preflight excludes only untouched pending identities that satisfy the
-same API-only evidence rules as the account SQL. It tracks raw pending separately
-so completion checkpoints cannot hide a required local repair. If SQL is already
-recorded, the worker replays the exact checksum-verified account SQL inside the
-import transaction before checking that no pending credentials remain. No source
-database is required for these local-only repairs. Unknown identities and operator
-changes are not automatically activated; revoked keys remain revoked.
 The 2.9.0 SQL recognizes an active USER/DEV membership with an empty email and
 historical token evidence, retains the original UUID and API Key, and makes the
 account active with password login disabled. A revoked key stays revoked. A

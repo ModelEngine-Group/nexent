@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -euo pipefail
 
@@ -68,7 +69,12 @@ for arg in "$@"; do
   esac
   prev="$arg"
 done
-cat >/dev/null
+if [ -n "${CAPTURE_VERSION:-}" ]; then
+  cat > "$CAPTURE_VERSION"
+  printf '%s\n' "${FAKE_VERSION_STATUS:-skip}"
+else
+  cat >/dev/null
+fi
 exit 0
 SH
   chmod +x "$BIN_DIR/psql"
@@ -208,6 +214,21 @@ fi
 if grep -R -n 'nexent-migration-' "$DEPLOY_ROOT/common/run-sql-migrations.sh" >/tmp/nexent-runner-marker-check.log; then
   cat /tmp/nexent-runner-marker-check.log
   fail "migration runner should not parse nexent-migration marker comments"
+fi
+
+for decision in required skip new; do
+  actual="$(PATH="$BIN_DIR:$PATH" NEXENT_APP_VERSION=2.9.0 CAPTURE_VERSION="$TMP_DIR/version.sql" FAKE_VERSION_STATUS="$decision" \
+    bash "$MIGRATION_SCRIPT" --needs-version-upgrade 2.9.0)"
+  [ "$actual" = "$decision" ] || fail "version mode must return the SQL history decision"
+done
+assert_file_contains "$TMP_DIR/version.sql" "schema_migrations" "version gate must reuse SQL migration history"
+assert_file_contains "$TMP_DIR/version.sql" "ARRAY[2,9,0]" "version gate must compare the 2.9.0 boundary"
+assert_file_not_contains "$TMP_DIR/version.sql" "user_account_t" "account contents must never select migration"
+assert_file_not_contains "$TMP_DIR/version.sql" "credential_migration_pending" "pending flags must never select migration"
+assert_file_not_contains "$TMP_DIR/version.sql" "checksum" "checksum changes must not retrigger data migration"
+assert_file_not_contains "$TMP_DIR/version.sql" "CREATE TABLE" "version inspection must be read-only"
+if PATH="$BIN_DIR:$PATH" bash "$MIGRATION_SCRIPT" --needs-version-upgrade invalid >/dev/null 2>&1; then
+  fail "invalid version boundaries must be rejected"
 fi
 
 echo "All SQL migration tests passed."
