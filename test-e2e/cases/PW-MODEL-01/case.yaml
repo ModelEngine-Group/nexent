@@ -37,7 +37,7 @@ case:
     action: 检查保存后的真实连通性结果为可用；刷新页面，比较完整参数值与容量，并选择该模型。
     expected: Agent 可选择并真实调用该模型。
   - order: 6
-    action: 重新进入统一出口编辑，API Key 保持空白并保存；捕获 PATCH /api/model/outlets/{id}，比较原参数和容量，并再次执行真实连通性检查。
+    action: 重新进入统一出口编辑，保留已存 API Key 的掩码占位且不输入替换值，然后保存；捕获 PATCH /api/model/outlets/{id}，比较原参数和容量，并再次执行真实连通性检查。
     expected: DOM、日志、trace 和报告不出现 API Key。
   - order: 7
     action: 创建 run_id Agent，选择该模型并保存，进入调试发起最小真实请求。
