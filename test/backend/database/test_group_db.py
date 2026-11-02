@@ -50,7 +50,7 @@ utils_mock.str_utils = str_utils_mock
 
 # Add the mocked utils module to sys.modules
 sys.modules['utils'] = utils_mock
-sys.modules['management.security.session'] = utils_mock.auth_utils
+sys.modules['management.services.permission.identity.session'] = utils_mock.auth_utils
 sys.modules['management.utils.serialization'] = str_utils_mock
 
 # Provide a stub for the `boto3` module so that it can be imported safely even

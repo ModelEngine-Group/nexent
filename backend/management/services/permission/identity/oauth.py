@@ -11,7 +11,6 @@ import urllib.request
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode, quote
 
-import jwt
 from pydantic import EmailStr, TypeAdapter, ValidationError as PydanticValidationError
 
 from contracts.constants.constants import ASSET_OWNER_INVITE_CODE_TYPE, ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
@@ -285,7 +284,9 @@ def generate_pending_oauth_token(
         "iat": now,
         "exp": now + expires_in,
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    from gateway.security.token_codec import encode_token
+
+    return encode_token(payload, key=JWT_SECRET)
 
 
 
@@ -342,7 +343,7 @@ async def complete_pending_oauth_account(
         use_invitation_code,
     )
     from management.services.tool.configuration import init_tool_list_for_tenant
-    from management.security.session import calculate_expires_at, generate_session_jwt
+    from management.services.permission.identity.session import calculate_expires_at, generate_session_jwt
 
     pending = pending_identity
     provider = pending["provider"]
@@ -367,7 +368,7 @@ async def complete_pending_oauth_account(
         raise OAuthLinkError("Invitation code is invalid or unavailable")
 
     from management.db.identity.account import create_account
-    from infrastructure.security.passwords import hash_password
+    from gateway.security.passwords import hash_password
     from management.db.client import get_db_session
     from management.services.permission.identity.authentication import validate_password_strength
 

@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""Backend session, account and provider authentication adapters."""
+"""Management account/session business and verified-principal adapters."""
 
 import hashlib
 import hmac
@@ -12,6 +12,7 @@ from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple
 
 import jwt
+from gateway.security import token_codec
 from contracts.constants.environment import DEBUG_JWT_EXPIRE_SECONDS, IS_SPEED_MODE, JWT_EXPIRY_SECONDS, JWT_SECRET, JWT_ISSUER
 from contracts.authentication import (
     AuthenticatedIdentity,
@@ -30,14 +31,14 @@ from contracts.errors.exceptions import (
 )
 from fastapi import Depends, Header, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from infrastructure.security.internal_tokens import (
+from infrastructure.service_identity.internal_tokens import (
     INTERNAL_RUNTIME_JWT_AUDIENCE,
     INTERNAL_RUNTIME_JWT_ISSUER,
     INTERNAL_RUNTIME_JWT_SCOPE,
     INTERNAL_RUNTIME_JWT_TTL_SECONDS,
     generate_internal_runtime_jwt,
 )
-from infrastructure.security.signatures import (
+from gateway.security.signatures import (
     TIMESTAMP_VALIDITY_WINDOW,
     calculate_hmac_signature,
     validate_timestamp,
@@ -53,10 +54,13 @@ from contracts.constants.constants import MOCK_JWT_SECRET_KEY
 
 
 def _gateway_identity(kind="session"):
-    from infrastructure.security.gateway_identity import IdentityError, trusted_identity
+    from infrastructure.service_identity.gateway import IdentityError, enabled, trusted_identity
 
     try:
-        return trusted_identity(kind)
+        identity = trusted_identity(kind)
+        if identity is None and enabled():
+            raise TokenExpiredError("Verified Gateway identity is required")
+        return identity
     except IdentityError as exc:
         raise TokenExpiredError("Invalid identity credential policy") from exc
 
@@ -148,12 +152,7 @@ def _decode_jwt_token_for_expiry(token: str) -> dict:
     if not JWT_SECRET:
         raise TokenExpiredError("JWT verification is not configured")
 
-    return jwt.decode(
-        token,
-        JWT_SECRET,
-        algorithms=["HS256"],
-        options={"verify_exp": False, "verify_aud": False},
-    )
+    return token_codec.decode_lifetime(token, key=JWT_SECRET)
 
 
 def require_active_account(user_id: str) -> dict:
@@ -186,10 +185,7 @@ def _decode_jwt_token(authorization: str) -> dict:
         # Format authorization header
         token = extract_bearer_token(authorization)
 
-        claims = jwt.decode(
-            token, JWT_SECRET, algorithms=["HS256"], audience="authenticated", issuer=JWT_ISSUER,
-            options={"require": ["sub", "exp", "iat", "ver"]},
-        )
+        claims = token_codec.decode_session(token, key=JWT_SECRET, issuer=JWT_ISSUER)
         account = require_active_account(claims["sub"])
         if claims.get("ver") != account["token_version"]:
             raise TokenExpiredError("Credentials have changed; please log in again")
@@ -235,9 +231,7 @@ def extract_session_id_from_authorization(
         return None
     try:
         token = extract_bearer_token(authorization)
-        decoded = jwt.decode(token, options={"verify_signature": False})
-        sid = decoded.get("sid")
-        return str(sid) if sid else None
+        return token_codec.logout_session_id(token)
     except Exception:
         return None
 
@@ -352,7 +346,7 @@ def generate_test_jwt(user_id: str, expires_in: Optional[int] = None) -> str:
         "ver": 0,
     }
     # Use a fixed test secret to avoid external dependencies in tests
-    return jwt.encode(payload, MOCK_JWT_SECRET_KEY, algorithm="HS256")
+    return token_codec.encode_token(payload, key=MOCK_JWT_SECRET_KEY)
 
 
 def generate_session_jwt(
@@ -377,7 +371,7 @@ def generate_session_jwt(
     }
     if session_id:
         payload["sid"] = session_id
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    return token_codec.encode_token(payload, key=JWT_SECRET)
 
 
 def get_current_user_info(
@@ -442,7 +436,7 @@ def get_current_user_id(authorization: Optional[str] = None) -> tuple[str, str]:
 
 def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
     """Translate the shared bearer syntax failure into the backend domain error."""
-    from infrastructure.security.gateway_identity import IdentityError, bearer_token
+    from infrastructure.service_identity.gateway import IdentityError, bearer_token
 
     try:
         return bearer_token(authorization)
@@ -452,7 +446,7 @@ def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
 
 def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]:
     """Compatibility export of the common service-token verifier."""
-    from infrastructure.security.internal_tokens import verify_internal_runtime_jwt as verify
+    from infrastructure.service_identity.internal_tokens import verify_internal_runtime_jwt as verify
 
     return verify(authorization, secret=JWT_SECRET)
 
@@ -464,12 +458,7 @@ def parse_pending_oauth_token(pending_token: str) -> PendingOAuthIdentity:
         raise OAuthProviderError("JWT verification is not configured")
 
     try:
-        payload = jwt.decode(
-            pending_token,
-            JWT_SECRET,
-            algorithms=["HS256"],
-            options={"verify_exp": True, "verify_aud": False},
-        )
+        payload = token_codec.decode_pending(pending_token, key=JWT_SECRET)
     except jwt.ExpiredSignatureError as exc:
         raise OAuthLinkError("OAuth account completion session has expired") from exc
     except jwt.InvalidTokenError as exc:
@@ -529,7 +518,7 @@ def authenticate_identity(
             kind=kind,
         )
     if kind == CredentialKind.API_KEY:
-        from management.security.api_key import authenticate_api_key
+        from management.services.permission.identity.northbound import authenticate_api_key
 
         return authenticate_api_key(authorization, request)
     if kind == CredentialKind.INTERNAL:

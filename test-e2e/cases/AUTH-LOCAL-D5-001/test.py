@@ -24,7 +24,7 @@ from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
     import_users,
     read_source_users,
 )
-from infrastructure.security.passwords import verify_password
+from gateway.security.passwords import verify_password
 
 
 def test_deployment_automatic_upgrade_retries_after_sql_success(tmp_path):
@@ -42,7 +42,7 @@ def test_legacy_api_only_keys_survive_upgrade_and_replay(monkeypatch):
     from sqlalchemy.orm import sessionmaker
     from management.db.client import db_client
     from management.db import models
-    from management.security import api_key as northbound_auth
+    from management.services.permission.identity import northbound as northbound_auth
 
     sql = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
     with disposable_database() as dsn:

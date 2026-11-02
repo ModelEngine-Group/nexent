@@ -41,8 +41,8 @@ def _profile(version: str = "2026-01") -> SimpleNamespace:
 @STAGE
 @pytest.mark.case_id("UT-BE-006")
 def test_auth_helpers_trust_only_validated_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    import management.security.session as auth_utils
-    import management.security.api_key as northbound_auth
+    import management.services.permission.identity.session as auth_utils
+    import management.services.permission.identity.northbound as northbound_auth
 
     # Account persistence is an external boundary of this credential-helper case.
     monkeypatch.setattr(northbound_auth, "require_active_account", lambda user_id: {"user_id": user_id})

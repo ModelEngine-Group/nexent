@@ -19,7 +19,7 @@ from contracts.constants.environment import ENABLE_TELEMETRY, MONITORING_DASHBOA
 from contracts.conversation import ConversationResponse
 from contracts.errors.exceptions import TokenExpiredError
 from management.db.client import get_monitoring_db_session
-from management.security.session import get_current_user_id
+from management.services.permission.identity.session import get_current_user_id
 
 logger = logging.getLogger("monitoring_app")
 

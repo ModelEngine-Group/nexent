@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from contracts.errors.exceptions import AccountConflictError
-from infrastructure.security.account_cli import bootstrap_super_admin
+from management.cli.account import bootstrap_super_admin
 
 
 @pytest.mark.parametrize("check_only", [True, False])

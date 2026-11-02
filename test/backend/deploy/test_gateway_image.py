@@ -14,6 +14,15 @@ ROOT = Path(__file__).resolve().parents[3]
 CHART = ROOT / "deploy/k8s/helm/nexent"
 
 
+def test_gateway_image_delegates_the_application_command_like_main():
+    for image in ("gateway", "main"):
+        source = (ROOT / "deploy/images/dockerfiles" / image / "Dockerfile").read_text(encoding="utf-8")
+        instructions = [line.strip().split(maxsplit=1)[0].upper() for line in source.splitlines()
+                        if line.strip() and not line.lstrip().startswith("#")]
+        assert "ENTRYPOINT" not in instructions
+        assert "CMD" not in instructions
+
+
 def bash_run(script):
     # Windows' system bash may launch WSL; these scripts also support Git Bash.
     git_bash = Path("C:/Program Files/Git/bin/bash.exe")
@@ -76,6 +85,9 @@ def test_compose_gateway_has_no_business_dependencies(filename):
     assert not {"env_file", "volumes", "user", "command"} & gateway.keys()
     assert set(gateway["depends_on"]) == {"nexent-config", "nexent-runtime"}
     assert gateway["healthcheck"]["test"] == ["CMD", "python", "-m", "gateway.healthcheck"]
+    mcp = compose["services"]["nexent-mcp"]
+    assert mcp["environment"]["GATEWAY_AUTH_ENABLED"] == "true"
+    assert mcp["environment"]["GATEWAY_SERVICE_URL"] == "http://nexent-northbound:5013"
 
 
 def test_helm_gateway_is_independent_and_scalable(tmp_path):
@@ -99,6 +111,7 @@ def test_helm_gateway_is_independent_and_scalable(tmp_path):
     config = next(item for item in documents if item.get("kind") == "ConfigMap" and item["metadata"]["name"] == "nexent-config")
     assert "GATEWAY_AUTH_ENABLED" not in config["metadata"]
     assert config["data"]["GATEWAY_AUTH_ENABLED"] == "true"
+    assert config["data"]["GATEWAY_SERVICE_URL"] == "http://nexent-northbound:5013"
     deployment = next(item for item in documents if item.get("kind") == "Deployment")
     assert deployment["spec"]["replicas"] == 2
     assert deployment["spec"]["strategy"]["type"] == "RollingUpdate"

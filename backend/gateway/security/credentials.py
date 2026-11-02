@@ -2,10 +2,11 @@
 """External credential verification without business or persistence imports."""
 
 import jwt
+from gateway.security.token_codec import decode_session
 
-from gateway.protocol.routes import canonical_path, is_public_request
-from gateway.protocol.identity import IdentityError, bearer_token
-from gateway.authentication.management_client import IdentityUnavailable, lookup_identity
+from gateway.security.policy import canonical_path, is_public_request
+from gateway.security.identity import IdentityError, bearer_token
+from gateway.security.management_client import IdentityUnavailable, lookup_identity
 
 
 def authorization_for(connection):
@@ -22,11 +23,22 @@ def authorization_for(connection):
 
 
 async def resolve_identity(connection, client, management_url, *, settings):
+    if connection.scope.get("method", "GET") == "POST" and canonical_path(connection.url.path) == "/user/logout":
+        # Verified logout identity is needed for CAS revocation; invalid logout
+        # credentials must retain the existing idempotent anonymous outcome.
+        try:
+            return await _resolve_identity(connection, client, management_url, settings=settings)
+        except (IdentityError, IdentityUnavailable):
+            return None
+    return await _resolve_identity(connection, client, management_url, settings=settings)
+
+
+async def _resolve_identity(connection, client, management_url, *, settings):
     method = connection.scope.get("method", "GET")
     path = canonical_path(connection.url.path)
     authorization = authorization_for(connection)
     # Bootstrap callbacks carry their own one-time tickets/pending tokens.
-    optional_session = path in {"/user/current_user_info", "/user/session"}
+    optional_session = path in {"/user/current_user_info", "/user/session", "/user/logout"}
     if is_public_request(method, path) and not (optional_session and authorization):
         return None
     language = connection.cookies.get("NEXT_LOCALE", "zh")
@@ -42,9 +54,7 @@ async def resolve_identity(connection, client, management_url, *, settings):
         if not settings.jwt_secret:
             raise IdentityUnavailable("Session verifier is not configured")
         try:
-            claims = jwt.decode(token, settings.jwt_secret, algorithms=["HS256"],
-                                issuer=settings.jwt_issuer, audience="authenticated",
-                                options={"require": ["sub", "iat", "exp", "ver"]})
+            claims = decode_session(token, key=settings.jwt_secret, issuer=settings.jwt_issuer)
             if claims.get("purpose") or claims.get("scope"):
                 raise IdentityError("Invalid session policy")
             if not isinstance(claims["sub"], str) or not claims["sub"].strip() or type(claims["ver"]) is not int:

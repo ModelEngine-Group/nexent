@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from infrastructure.security.gateway_identity import IdentityError
+from infrastructure.service_identity.gateway import IdentityError
 from management.services.permission.identity.gateway_lookup import resolve_gateway_identity
 
 

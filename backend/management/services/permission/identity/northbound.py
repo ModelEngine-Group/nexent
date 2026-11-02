@@ -20,8 +20,8 @@ from contracts.errors.exceptions import (
     UnauthorizedError,
 )
 from fastapi import HTTPException, Request
-from management.security.session import extract_bearer_token, require_active_account
-from infrastructure.security.signatures import (
+from management.services.permission.identity.session import extract_bearer_token, require_active_account
+from gateway.security.signatures import (
     calculate_hmac_signature,
     validate_timestamp,
 )
@@ -148,7 +148,7 @@ def get_user_and_tenant_by_access_key(access_key: str) -> Dict[str, str]:
 
 
 def authenticate_api_key(authorization: Optional[str], request=None) -> AuthenticatedIdentity:
-    from management.security.session import _gateway_identity
+    from management.services.permission.identity.session import _gateway_identity
 
     identity = _gateway_identity("api_key")
     if identity is not None:

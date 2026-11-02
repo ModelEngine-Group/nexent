@@ -30,13 +30,13 @@ from management.services.permission.identity.oauth import (
     list_linked_accounts,
     unlink_account,
 )
-from management.security.session import (
+from management.services.permission.identity.session import (
     calculate_expires_at,
     generate_session_jwt,
     require_active_account,
     get_current_user_id,
 )
-from management.security.session import parse_state, parse_pending_oauth_token
+from management.services.permission.identity.session import parse_state, parse_pending_oauth_token
 from management.services.monitor.audit import record_security_event
 
 logger = logging.getLogger(__name__)

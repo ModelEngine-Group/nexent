@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 
 from contracts.authentication import CredentialKind
 from contracts.errors.exceptions import TokenExpiredError
-from management.security import session as identity, session as internal, api_key as northbound
-from management.security.session import extract_bearer_token
-from management.security.session import authenticate_identity
+from management.services.permission.identity import session as identity, session as internal, northbound as northbound
+from management.services.permission.identity.session import extract_bearer_token
+from management.services.permission.identity.session import authenticate_identity
 
 
 @pytest.mark.parametrize(
@@ -151,7 +151,7 @@ def test_session_token_cannot_be_used_for_internal_runtime(session_policy, monke
 
 
 def test_gateway_authentication_maps_an_invalid_api_key_to_401(monkeypatch):
-    from management.security.api_key import get_northbound_context
+    from management.services.permission.identity.northbound import get_northbound_context
     from fastapi import Depends
 
     monkeypatch.setattr(northbound, "require_active_account", lambda uid: {})
@@ -184,7 +184,7 @@ def test_api_and_services_do_not_implement_credential_parsers():
                 if not isinstance(node, ast.Call):
                     continue
                 call = ast.unparse(node.func)
-                assert call != "jwt.decode", path
+                assert call not in {"jwt.decode", "jwt.encode"}, path
                 if isinstance(node.func, ast.Attribute) and node.func.attr in {
                     "replace",
                     "split",
@@ -194,7 +194,13 @@ def test_api_and_services_do_not_implement_credential_parsers():
                         isinstance(arg, ast.Constant) and arg.value == "Bearer "
                         for arg in node.args
                     ), path
-                if folder.endswith("services"):
+                # Account-domain adapters retain disabled-boundary compatibility;
+                # all cryptographic parsing above remains forbidden in every service.
+                identity_adapters = {
+                    root / "management/services/permission/identity/session.py",
+                    root / "management/services/permission/identity/northbound.py",
+                }
+                if folder.endswith("services") and path not in identity_adapters:
                     assert call.rsplit(".", 1)[-1] not in {
                         "get_current_user_id",
                         "get_current_user_info",
@@ -241,7 +247,7 @@ def test_pending_account_token_cannot_be_used_as_a_browser_session(session_polic
 def test_pending_oauth_identity_requires_signed_purpose_and_provider(
     session_policy, monkeypatch
 ):
-    from management.security import session as oauth
+    from management.services.permission.identity import session as oauth
     from contracts.constants.constants import OAUTH_PENDING_PURPOSE
     from contracts.errors.exceptions import OAuthLinkError
 
@@ -273,6 +279,18 @@ def test_pending_oauth_identity_requires_signed_purpose_and_provider(
                 exp=1,
             )
         )
+
+
+def test_account_pending_token_round_trip_uses_shared_security_codec(session_policy, monkeypatch):
+    from management.services.permission.identity import oauth as account_oauth
+
+    monkeypatch.setattr(account_oauth, "JWT_SECRET", identity.JWT_SECRET)
+    token = account_oauth.generate_pending_oauth_token("github", "provider-user", "fixture@example.test", "fixture-user")
+    pending = identity.parse_pending_oauth_token(token)
+    assert pending == {"provider": "github", "provider_user_id": "provider-user",
+                       "provider_email": "fixture@example.test", "provider_username": "fixture-user"}
+    with pytest.raises(TokenExpiredError):
+        authenticate_identity(token)
 
 
 @pytest.mark.parametrize("claims", [{"ver": 1}, {"iss": "other"}, {"aud": "other"}])

@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: MGWI-GATEWAY-LAUNCH-20261102
+  change_type: refactor
+  title: Delegate Gateway launch command to deployment definitions
+  description: Match the main Dockerfile by leaving the application launch command
+    out of the image; Compose and Helm explicitly invoke gateway_service.py.
+  affected_features:
+    existing: [GW-AUTH]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: [GW-AUTH-D3-001]
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Signed identity and HTTP contracts remain unchanged. Deployment
+    metadata and explicit image launch are verified with existing configuration tests
+    and temporary-container proof, without duplicating a formal Case.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Gateway Dockerfile defines no application ENTRYPOINT or CMD, like main.
+    - Compose and Helm retain an explicit Python service launch and matching health port.
+    - The image starts with an explicit command supplied by the deployment caller.
+    reason: Strengthen existing deployment metadata tests and actual-image startup checks.
+    test_selectors:
+    - test/backend/deploy/test_gateway_image.py

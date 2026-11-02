@@ -1,11 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """One authentication attempt uses one authoritative API-key record."""
 
-from management.security import api_key as northbound_auth
+from management.services.permission.identity import northbound as northbound_auth
 
 
 def test_api_key_authentication_queries_credential_and_account_once(monkeypatch):
-    from infrastructure.security.gateway_identity import identity_context
+    from infrastructure.service_identity.gateway import identity_context
 
     calls = []
 

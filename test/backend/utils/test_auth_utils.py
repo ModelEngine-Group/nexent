@@ -190,8 +190,8 @@ sys.modules['sqlalchemy'] = MagicMock()
 sys.modules['sqlalchemy.orm'] = MagicMock()
 
 # Now import the module under test
-import management.security.session as au
-import management.security.api_key as nb_auth
+import management.services.permission.identity.session as au
+import management.services.permission.identity.northbound as nb_auth
 
 # Ensure exceptions in module under test are real exception classes, not mocks
 au.UnauthorizedError = UnauthorizedError
@@ -1080,7 +1080,10 @@ def test_validate_aksk_authentication_unexpected_error(monkeypatch):
 @pytest.fixture(autouse=True)
 def active_local_account(monkeypatch):
     # Credential/account-state integration is proved separately by native auth tests.
+    # These legacy helpers are exercised with the deployed Gateway boundary disabled.
+    from infrastructure.service_identity import gateway as gateway_boundary
+    monkeypatch.setattr(gateway_boundary, "enabled", lambda: False)
     monkeypatch.setattr(au, "JWT_ISSUER", "nexent")
-    from management.security import api_key as northbound_auth
+    from management.services.permission.identity import northbound as northbound_auth
     monkeypatch.setattr(northbound_auth, "require_active_account", lambda uid: {})
     monkeypatch.setattr(au, "require_active_account", lambda user_id: {"user_id": user_id, "token_version": 0})

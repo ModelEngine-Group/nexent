@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from gateway.configuration import GatewaySettings, load_settings
-from gateway.protocol.identity import IdentityError, derive_signing_key, sign_identity, verify_identity
+from gateway.security.identity import IdentityError, derive_signing_key, sign_identity, verify_identity
 
 
 BACKEND = Path(__file__).resolve().parents[3] / "backend"
@@ -53,7 +53,7 @@ def test_invalid_configuration_fails_before_startup(name, value):
 
 def test_pure_protocol_has_no_implicit_key_and_derived_key_matches_backend(monkeypatch):
     from contracts.constants import environment
-    from infrastructure.security.gateway_identity import sign_identity as backend_sign, signing_key
+    from infrastructure.service_identity.gateway import sign_identity as backend_sign, signing_key
 
     identity = {"user_id": "u1", "tenant_id": "t1", "kind": "session"}
     key = derive_signing_key("master-fixture")
@@ -69,7 +69,7 @@ def test_pure_protocol_has_no_implicit_key_and_derived_key_matches_backend(monke
 
 
 def test_gateway_imports_only_its_package_and_declared_runtime_libraries():
-    allowed = set(sys.stdlib_module_names) | {"gateway", "fastapi", "starlette", "httpx", "jwt", "websockets"}
+    allowed = set(sys.stdlib_module_names) | {"gateway", "fastapi", "starlette", "httpx", "jwt", "websockets", "bcrypt"}
     for path in (BACKEND / "gateway").rglob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):

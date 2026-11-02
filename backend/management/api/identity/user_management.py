@@ -1,7 +1,7 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, AppException, UnauthorizedError, TenantResourceLimitError, ValidationError, tenant_resource_limit_error_payload
 from contracts.errors.codes import ErrorCode
-from management.security.session import extract_bearer_token
+from management.services.permission.identity.session import extract_bearer_token
 import logging
 
 from dotenv import load_dotenv
@@ -17,14 +17,14 @@ from contracts.identity import UserSignInRequest, UserSignUpRequest, UpdatePassw
 from contracts.errors.exceptions import NoInviteCodeException, IncorrectInviteCodeException, UserRegistrationException, AppException, UnauthorizedError, TenantResourceLimitError, ValidationError, tenant_resource_limit_error_payload
 from contracts.errors.codes import ErrorCode
 from management.services.permission.identity.cas import build_logout_url, CasAuthenticationError
-from management.security.session import validate_token, get_session_by_authorization
+from management.services.permission.identity.session import validate_token, get_session_by_authorization
 from management.services.permission.identity.authentication import \
     check_auth_service_health, signup_user_with_invitation, signin_user, refresh_user_token, \
     get_user_info, create_token, list_tokens_by_user, delete_token, \
     update_password, get_provider_username
 from management.services.permission.identity.users import delete_user_and_cleanup
 from management.services.monitor.audit import record_security_event
-from management.security.session import extract_session_id_from_authorization, get_current_user_context, get_current_user_id
+from management.services.permission.identity.session import extract_session_id_from_authorization, get_current_user_context, get_current_user_id
 
 
 load_dotenv()

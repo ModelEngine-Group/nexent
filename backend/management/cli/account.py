@@ -17,7 +17,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
         lock_account_keys,
     )
     from management.db.identity.user_tenant import insert_user_tenant
-    from infrastructure.security.passwords import hash_password
+    from gateway.security.passwords import hash_password
     from sqlalchemy import select
     from management.db.models import UserTenant, UserAccount
 

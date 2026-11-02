@@ -22,6 +22,8 @@ from nexent.core.concurrency import (
     set_default_thread_manager,
 )
 from infrastructure.concurrency import mcp_thread_manager
+from infrastructure.service_identity.gateway import enabled as gateway_identity_enabled
+from infrastructure.service_identity.mcp import TenantMCPRouter as _TenantMCPRouter
 from tool_collection.mcp.local_mcp_service import (
     LOCAL_MCP_TOOL_NAME_OVERRIDES,
     local_mcp_service,
@@ -442,65 +444,25 @@ def _build_tenant_mcp_app(mcp_server: FastMCP) -> Any:
     return mcp_server
 
 
-class TenantMCPRouter:
-    """Dispatch /mcp/{tenant_id}/... requests to the tenant's MCP app."""
-
-    async def __call__(self, scope: Dict[str, Any], receive: Callable, send: Callable) -> None:
-        path = scope.get("path", "")
-        match = re.match(r"^/mcp/([^/]+)(/.*)?$", path)
-        if not match:
-            await _send_not_found(send)
-            return
-
-        tenant_id = match.group(1)
-        request_headers = dict(scope.get("headers", []))
-        authorization = request_headers.get(b"authorization")
-        requested_tenant = request_headers.get(b"x-tenant-id", b"").decode()
-        internal_token = request_headers.get(b"x-nexent-internal-token", b"").decode()
-        if not authorization and (requested_tenant != tenant_id or not TOKEN or internal_token != TOKEN):
-            await _send_forbidden(send)
-            return
-        if authorization:
-            try:
-                from management.security.session import get_current_user_id
-
-                _, authenticated_tenant_id = get_current_user_id(authorization.decode())
-            except Exception:
-                await _send_forbidden(send)
-                return
-            if str(authenticated_tenant_id) != tenant_id:
-                await _send_forbidden(send)
-                return
-
-        with _tenant_mcp_lock:
-            app = _tenant_mcp_apps.get(tenant_id)
-        if app is None:
-            try:
-                refresh_openapi_services_by_tenant(tenant_id)
-            except Exception:
-                logger.exception("Failed to lazily initialize MCP tenant %s", tenant_id)
-                await _send_not_found(send)
-                return
-            with _tenant_mcp_lock:
-                app = _tenant_mcp_apps.get(tenant_id)
-        if app is None:
-            await _send_not_found(send)
-            return
-
-        delegated_scope = dict(scope)
-        delegated_scope["path"] = match.group(2) or "/"
-        delegated_scope["root_path"] = f"{scope.get('root_path', '')}/mcp/{tenant_id}"
-        await app(delegated_scope, receive, send)
+def _tenant_app(tenant_id):
+    with _tenant_mcp_lock:
+        return _tenant_mcp_apps.get(tenant_id)
 
 
-async def _send_not_found(send: Callable) -> None:
-    await send({"type": "http.response.start", "status": 404, "headers": []})
-    await send({"type": "http.response.body", "body": b"MCP tenant not found"})
+def _legacy_mcp_identity(authorization):
+    from management.services.permission.identity.session import get_current_user_id
+
+    return get_current_user_id(authorization)
 
 
-async def _send_forbidden(send: Callable) -> None:
-    await send({"type": "http.response.start", "status": 403, "headers": []})
-    await send({"type": "http.response.body", "body": b"MCP tenant access denied"})
+class TenantMCPRouter(_TenantMCPRouter):
+    """Bind the process registry and deployment trust policy to the MCP boundary."""
+
+    def __init__(self):
+        super().__init__(get_app=_tenant_app, refresh=refresh_openapi_services_by_tenant,
+                         internal_token=TOKEN, gateway_required=gateway_identity_enabled(),
+                         legacy_identity=_legacy_mcp_identity)
+
 
 
 def run_mcp_server_with_management():

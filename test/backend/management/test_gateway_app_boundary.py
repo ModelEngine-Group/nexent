@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 
 from contracts.constants import environment
 from contracts.errors.exceptions import TokenExpiredError
-from infrastructure.security import internal_tokens
-from infrastructure.security.gateway_identity import IDENTITY_HEADER, identity_context, sign_identity
+from infrastructure.service_identity import internal_tokens
+from infrastructure.service_identity.gateway import IDENTITY_HEADER, identity_context, sign_identity
 from management.utils.app_factory import create_app
 
 

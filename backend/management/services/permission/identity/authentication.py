@@ -15,7 +15,7 @@ from management.db.identity.token import (
 
 from pydantic import EmailStr
 
-from management.security.session import (
+from management.services.permission.identity.session import (
     get_current_user_id,
     generate_session_jwt,
     require_active_account,
@@ -43,7 +43,7 @@ from management.utils.orm import as_dict
 from management.db.client import get_db_session
 from management.db.models import RolePermission, UserAccount
 from management.db.identity.account import create_account, get_account_by_email, change_password
-from infrastructure.security.passwords import hash_password, verify_password
+from gateway.security.passwords import hash_password, verify_password
 from management.services.permission.identity.invitations import use_invitation_code, check_invitation_available, get_invitation_by_code
 from management.services.permission.identity.groups import add_user_to_groups
 from management.services.tool.configuration import init_tool_list_for_tenant

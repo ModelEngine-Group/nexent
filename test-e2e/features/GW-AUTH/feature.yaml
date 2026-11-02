@@ -15,6 +15,10 @@ feature:
   - rule_id: GW-AUTH-RULE-02
     description: Downstream accepts audience/request-bound Gateway identity for HTTP
       and WebSocket, rejects unsigned/spoofed requests, and isolates request context.
+  - rule_id: GW-AUTH-RULE-03
+    description: MCP delegates forwarded external sessions to Gateway through body-bound
+      service authentication, verifies the MCP audience and request binding, checks
+      tenant ownership and restores request context.
   required_test_stages:
   - D3
   source:

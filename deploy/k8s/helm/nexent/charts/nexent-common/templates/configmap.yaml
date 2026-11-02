@@ -8,6 +8,7 @@ metadata:
     "helm.sh/hook-weight": "-3"
 data:
   GATEWAY_AUTH_ENABLED: "true"
+  GATEWAY_SERVICE_URL: {{ .Values.config.services.gatewayUrl | quote }}
   TZ: {{ .Values.config.timezone | quote }}
   # Deployment version
   DEPLOYMENT_VERSION: {{ .Values.global.deploymentVersion | quote }}

@@ -7,7 +7,7 @@ from contracts.constants.environment import IS_SPEED_MODE
 from fastapi import Depends, HTTPException
 from permissions.models import CurrentUser
 from permissions.rbac import has_permission
-from management.security.session import authenticate
+from management.services.permission.identity.session import authenticate
 
 
 

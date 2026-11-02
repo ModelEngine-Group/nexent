@@ -9,6 +9,7 @@ case:
   business_rule_ids:
   - GW-AUTH-RULE-01
   - GW-AUTH-RULE-02
+  - GW-AUTH-RULE-03
   title: Gateway identity lookup and downstream HTTP/WS authentication across actual
     local services
   type: INTEGRATION
@@ -46,6 +47,12 @@ case:
       and manager.
     expected: Login remains reachable; WS sees the correct user; normal close and
       complete resource cleanup occur.
+  - order: 4
+    action: Send valid forwarded sessions through actual MCP routing and signed Gateway
+      delegation; submit cross-tenant, invalid and expired sessions, unsigned delegation
+      and tampered delegation body.
+    expected: MCP receives verified user context only for its tenant; invalid calls
+      never reach its handler and context is restored.
   expected_results:
   - Authoritative account and API-key identities cross real HTTP network hops without
     cross-user contamination.
@@ -53,14 +60,18 @@ case:
     handlers; service lookup body and private route are protected.
   - Anonymous bootstrap and authenticated WebSocket subprotocol/binary/close behavior
     work, with no residual identity or managed work.
+  - MCP uses Gateway authentication and retains tenant authorization; unsigned or
+    body-tampered delegation is rejected.
   forbidden_side_effects:
-  - Rejected credentials must never reach Runtime or Northbound business handlers.
+  - Rejected credentials must never reach Runtime, Northbound or MCP business handlers.
   - Fixture verification must not use production storage, model credentials or leave
     server/worker threads running.
   integration_boundary:
   - Actual Gateway -> actual Management identity endpoint and policy with synthetic
     persistence -> actual signed middleware in downstream HTTP/WS recording apps.
     Full Agent/model execution is excluded.
+  - Actual tenant MCP router -> signed Gateway credential delegation -> Management
+    authoritative identity lookup; tenant execution is a recording ASGI sink.
   observations:
   - HTTP status, signed principal, membership call count, business invocation list,
     WS user/subprotocol/binary payload/close code.
@@ -99,4 +110,14 @@ case:
     expected_results:
     - 3
     forbidden_side_effects:
+    - 2
+  - id: AC-04
+    description: MCP delegates authentication over real HTTP while enforcing tenant
+      ownership and cleaning request context.
+    steps:
+    - 4
+    expected_results:
+    - 4
+    forbidden_side_effects:
+    - 1
     - 2

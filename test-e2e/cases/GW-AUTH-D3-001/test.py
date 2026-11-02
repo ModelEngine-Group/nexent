@@ -26,8 +26,10 @@ from websockets.exceptions import InvalidStatus
 from contracts.constants import environment
 from gateway.application import create_gateway_app
 from gateway.configuration import GatewaySettings
-from infrastructure.security.gateway_identity import IDENTITY_HEADER, identity_context, sign_identity, sign_lookup
-from infrastructure.security.identity_middleware import GatewayIdentityMiddleware
+from infrastructure.service_identity.gateway import IDENTITY_HEADER, identity_context, sign_identity, sign_lookup
+from infrastructure.service_identity.middleware import GatewayIdentityMiddleware
+from infrastructure.service_identity.mcp import TenantMCPRouter
+from gateway.security.identity import sign_delegation
 from management.api.identity import gateway_identity as lookup_routes
 from nexent.core.concurrency import LanePolicy, ThreadManager
 
@@ -69,7 +71,7 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
 
     def membership(user):
         membership_queries.append(user)
-        return {"tenant_id": "t1", "user_role": "USER"}
+        return {"tenant_id": "t1" if user == "u1" else "t2", "user_role": "USER"}
 
     for name, values in {
         "account": {"get_account": accounts.get},
@@ -157,6 +159,39 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
         edge = create_gateway_app(authentication=True, settings=GatewaySettings(jwt_secret=secret, jwt_issuer=environment.JWT_ISSUER, signing_secret=secret), upstreams={
             "management": management_url, "northbound": management_url, "runtime": runtime_url})
         with serve(edge) as gateway_url:
+            monkeypatch.setattr(environment, "GATEWAY_SERVICE_URL", gateway_url)
+            mcp_reached = []
+
+            async def mcp_sink(scope, receive, send):
+                principal = identity_context.get()
+                mcp_reached.append((principal["user_id"], principal["tenant_id"], scope["path"]))
+                await send({"type": "http.response.start", "status": 200, "headers": []})
+                await send({"type": "http.response.body", "body": json.dumps(principal).encode()})
+
+            mcp_app = FastAPI()
+            mcp_app.mount("/", TenantMCPRouter(get_app=lambda tenant: mcp_sink, refresh=lambda tenant: None,
+                                               internal_token="fixture-internal", gateway_required=True))
+            mcp_app.add_middleware(ObserveContext)
+            with serve(mcp_app) as mcp_url:
+                async with httpx.AsyncClient(trust_env=False, timeout=10) as mcp_client:
+                    for user, tenant in (("u1", "t1"), ("u2", "t2")):
+                        response = await mcp_client.get(mcp_url + f"/mcp/{tenant}/sse?q=1", headers={
+                            "Authorization": "Bearer " + credential(user)})
+                        assert response.status_code == 200 and response.json()["user_id"] == user
+                    baseline_mcp = list(mcp_reached)
+                    for tenant, token in (("t2", credential()), ("t1", "invalid"),
+                                          ("t1", credential(exp=int(time.time()) - 1))):
+                        response = await mcp_client.get(mcp_url + f"/mcp/{tenant}/sse?q=1", headers={
+                            "Authorization": "Bearer " + token})
+                        assert response.status_code == 403 and mcp_reached == baseline_mcp
+                    body = json.dumps({"authorization": "Bearer " + credential(), "method": "GET",
+                                       "path": "/mcp/t1/sse", "query": ""}).encode()
+                    for headers in ({}, {"x-nexent-service-token": sign_delegation(b"{}", key=secret)}):
+                        response = await mcp_client.post(gateway_url + "/internal/credentials/mcp", content=body,
+                                                         headers=headers)
+                        assert response.status_code == 401 and mcp_reached == baseline_mcp
+                    assert mcp_reached == [("u1", "t1", "/sse"), ("u2", "t2", "/sse")]
+            membership_queries.clear()
             async with httpx.AsyncClient(trust_env=False, timeout=10) as client:
                 # Distinct users traverse actual lookup and audience-specific verification.
                 for user in ("u1", "u2"):
@@ -186,7 +221,7 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
                 key_record["delete_flag"] = "Y"
                 response = await client.get(gateway_url + "/nb/v1/agents", headers={"Authorization": "Bearer fixture-api-key"})
                 assert response.status_code == 401 and reached == baseline
-                from infrastructure.security import internal_tokens
+                from infrastructure.service_identity import internal_tokens
 
                 monkeypatch.setattr(internal_tokens, "JWT_SECRET", secret)
                 response = await client.post(runtime_url + "/api/agent/internal/northbound/run", headers={

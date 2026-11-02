@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from contracts.errors.exceptions import OAuthProviderError, UnauthorizedError
-from management.security import session as gateway
+from management.services.permission.identity import session as gateway
 from management.db.identity import user_tenant
 from management.services.permission.identity import authentication as auth
 

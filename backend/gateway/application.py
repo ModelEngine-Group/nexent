@@ -10,9 +10,10 @@ from fastapi import FastAPI, Request, WebSocket
 from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 
-from gateway.authentication.credentials import IdentityUnavailable, authorization_for, resolve_identity
+from gateway.security.credentials import IdentityUnavailable, authorization_for, resolve_identity
+from gateway.security.delegation import DELEGATION_PATH, delegate_mcp
 from gateway.configuration import load_settings
-from gateway.protocol.identity import IDENTITY_HEADER, IdentityError, sign_identity
+from gateway.security.identity import IDENTITY_HEADER, IdentityError, sign_identity
 from gateway.proxy.http import forward_http
 from gateway.proxy.websocket import forward_websocket
 from gateway.routing import filtered_headers, select_upstream
@@ -76,6 +77,16 @@ def create_gateway_app(*, settings=None, transport=None, upstreams=None, authent
             if connection.scope["type"] == "http" and not connection.headers.get("authorization") and authorization_for(connection):
                 headers.append(("authorization", authorization_for(connection)))
         return headers
+
+    @app.post(DELEGATION_PATH)
+    async def credential_delegation(request: Request):
+        try:
+            result = await delegate_mcp(request, request.app.state.client, targets["management"], settings=settings)
+        except IdentityError:
+            return JSONResponse({"message": "Invalid or missing credentials"}, status_code=401)
+        except IdentityUnavailable:
+            return JSONResponse({"message": "Identity service unavailable"}, status_code=503)
+        return JSONResponse(result)
 
     @app.api_route("/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
     async def proxy(request: Request, path: str):

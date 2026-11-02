@@ -1,9 +1,9 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 """Backend configuration adapter for the pure Gateway identity protocol."""
 
-from gateway.protocol import identity as protocol
-from gateway.protocol.identity import IDENTITY_HEADER, ISSUER, LOOKUP_PATH, TTL, IdentityError, bearer_token
-from infrastructure.security.request_identity import identity_context, trusted_identity
+from gateway.security import identity as protocol
+from gateway.security.identity import IDENTITY_HEADER, ISSUER, LOOKUP_PATH, TTL, IdentityError, bearer_token
+from infrastructure.service_identity.context import identity_context, trusted_identity
 
 
 def signing_key():
@@ -15,7 +15,7 @@ def signing_key():
 def enabled():
     from contracts.constants import environment
 
-    return environment.GATEWAY_AUTH_ENABLED
+    return getattr(environment, "GATEWAY_AUTH_ENABLED", False)
 
 
 def sign_identity(identity, audience, method, path, query, *, key=None):

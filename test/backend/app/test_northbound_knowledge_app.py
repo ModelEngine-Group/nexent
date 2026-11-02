@@ -196,10 +196,10 @@ consts_const_module.VectorDatabaseType = VectorDatabaseType
 sys.modules["contracts.constants.environment"] = consts_const_module
 install_business_constant_stubs(consts_const_module)
 
-utils_auth_module = types.ModuleType("management.security.session")
+utils_auth_module = types.ModuleType("management.services.permission.identity.session")
 utils_auth_module.get_user_language = lambda request: "en"
 utils_auth_module.generate_session_jwt = MagicMock(return_value="jwt-token")
-sys.modules["management.security.session"] = utils_auth_module
+sys.modules["management.services.permission.identity.session"] = utils_auth_module
 
 utils_fm_module = types.ModuleType("management.services.knowledge_base.ingestion")
 utils_fm_module.trigger_data_process = AsyncMock(return_value={"status": "ok"})
@@ -207,7 +207,7 @@ sys.modules["management.services.knowledge_base.ingestion"] = utils_fm_module
 
 northbound_app_module = types.ModuleType("management.api.northbound")
 northbound_app_module._get_northbound_context = AsyncMock()
-sys.modules["management.security.api_key"] = northbound_app_module
+sys.modules["management.services.permission.identity.northbound"] = northbound_app_module
 northbound_app_module.get_northbound_context = northbound_app_module._get_northbound_context
 
 file_management_app_module = types.ModuleType("management.utils.file_http")

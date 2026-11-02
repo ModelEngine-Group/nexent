@@ -58,7 +58,7 @@ def create_app(
         allow_headers=["*"],
     )
     if gateway_identity_audience:
-        from infrastructure.security.identity_middleware import GatewayIdentityMiddleware
+        from infrastructure.service_identity.middleware import GatewayIdentityMiddleware
 
         app.add_middleware(GatewayIdentityMiddleware, audience=gateway_identity_audience)
 

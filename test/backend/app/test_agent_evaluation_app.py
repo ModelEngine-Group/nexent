@@ -97,7 +97,7 @@ for _name in (
     "database",
     "management.db.evaluation.runs",
     "utils",
-    "management.security.session",
+    "management.services.permission.identity.session",
 ):
     _register_package(_name)
 sys.modules["management.services.evaluation.runs"] = MagicMock(name="agent_eval_svc")
@@ -108,7 +108,7 @@ sys.modules["management.db.evaluation.runs"] = MagicMock(name="agent_eval_db")
 # imports lazily; an unset attribute would make monkeypatch.setattr fail.
 _auth_utils_mock = MagicMock(name="auth_utils")
 _auth_utils_mock.parse_language_from_request = MagicMock(return_value="zh")
-sys.modules["management.security.session"] = _auth_utils_mock
+sys.modules["management.services.permission.identity.session"] = _auth_utils_mock
 
 # Load the target module via spec so its ``from X import Y`` lookups hit the
 # stubs above.
@@ -695,7 +695,7 @@ class TestSafeExtractors:
     def test_language_from_request(self, monkeypatch):
         request = MagicMock()
         monkeypatch.setattr(
-            sys.modules["management.security.session"],
+            sys.modules["management.services.permission.identity.session"],
             "parse_language_from_request",
             MagicMock(return_value="en"),
         )
@@ -704,7 +704,7 @@ class TestSafeExtractors:
     def test_language_fallback_on_error(self, monkeypatch):
         request = MagicMock()
         monkeypatch.setattr(
-            sys.modules["management.security.session"],
+            sys.modules["management.services.permission.identity.session"],
             "parse_language_from_request",
             MagicMock(side_effect=RuntimeError("boom")),
         )

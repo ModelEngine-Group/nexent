@@ -57,10 +57,10 @@ def stub_project_modules(monkeypatch, tmp_path):
     setattr(sys.modules["database"], "attachment_db", attach_mod)
     setattr(sys.modules["database"], "knowledge_db", knowledge_mod)
 
-    # management.security.session
-    auth_mod = types.ModuleType("management.security.session")
+    # management.services.permission.identity.session
+    auth_mod = types.ModuleType("management.services.permission.identity.session")
     setattr(auth_mod, "get_current_user_id", lambda authorization: ("user-1", "tenant-1"))
-    sys.modules["management.security.session"] = auth_mod
+    sys.modules["management.services.permission.identity.session"] = auth_mod
 
     # management.services.configuration.tenant.settings
     cfg_mod = types.ModuleType("management.services.configuration.tenant.settings")

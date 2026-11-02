@@ -14,12 +14,60 @@ from contracts.constants import environment
 from gateway import application
 from gateway.application import create_gateway_app
 from gateway.configuration import GatewaySettings
-from infrastructure.security.gateway_identity import (
+from infrastructure.service_identity.gateway import (
     IDENTITY_HEADER, IdentityError, identity_context, sign_identity, verify_identity, verify_lookup,
 )
-from infrastructure.security.identity_middleware import GatewayIdentityMiddleware
+from infrastructure.service_identity.middleware import GatewayIdentityMiddleware
 
 KEY = "local-central-auth-fixture-not-for-deployment"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("credential", ["missing", "expired", "wrong-signature", "valid", "revoked", "unavailable"])
+async def test_logout_transfers_verified_identity_and_preserves_idempotency(auth_config, monkeypatch, credential):
+    from management.services.permission.identity import session as account_session
+
+    monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
+    lookups, revocations = [], []
+
+    def forbidden(*args):
+        pytest.fail("Logout attempted downstream external credential verification")
+
+    monkeypatch.setattr(account_session, "_decode_jwt_token", forbidden)
+
+    async def upstream(request):
+        if request.url.path == "/api/internal/identity/resolve":
+            body = await request.aread()
+            verify_lookup(request.headers["x-nexent-service-token"], body)
+            lookups.append(json.loads(body))
+            if credential in {"revoked", "unavailable"}:
+                return httpx.Response(401 if credential == "revoked" else 503)
+            return httpx.Response(200, json={"user_id": "u1", "tenant_id": "t1", "kind": "session",
+                                            "role": "USER", "session_id": "active-session"})
+        principal = verify_identity(request.headers[IDENTITY_HEADER], "management", "POST", request.url.path, b"")
+        token = identity_context.set(principal)
+        try:
+            if principal:
+                user, _ = account_session.get_current_user_id(request.headers.get("authorization"))
+                sid = account_session.extract_session_id_from_authorization(request.headers.get("authorization"))
+                revocations.append((user, sid))
+        finally:
+            identity_context.reset(token)
+        return httpx.Response(200, stream=httpx.ByteStream(json.dumps(principal).encode()))
+
+    headers = {}
+    if credential != "missing":
+        kwargs = {"sid": "active-session"}
+        if credential == "expired": kwargs["exp"] = int(time.time()) - 1
+        headers["Authorization"] = "Bearer " + session(key=KEY + "bad" if credential == "wrong-signature" else KEY, **kwargs)
+    app = create_gateway_app(authentication=True, transport=httpx.MockTransport(upstream))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://edge") as client:
+            response = await client.post("/api/user/logout", headers=headers)
+    assert response.status_code == 200
+    assert revocations == ([("u1", "active-session")] if credential == "valid" else [])
+    assert len(lookups) == (1 if credential in {"valid", "revoked", "unavailable"} else 0)
+    assert (response.json() or {}).get("user_id") == ("u1" if credential == "valid" else None)
 
 
 @pytest.fixture
@@ -167,7 +215,7 @@ async def test_enabled_gateway_fails_startup_without_signing_configuration(monke
 def test_compatibility_identity_helpers_consume_context_without_credential_queries(monkeypatch):
     from contracts.authentication import CredentialKind
     from contracts.errors.exceptions import TokenExpiredError
-    from management.security import session as auth
+    from management.services.permission.identity import session as auth
 
     def forbidden(*args, **kwargs):
         raise AssertionError("Business helper revalidated external credentials")

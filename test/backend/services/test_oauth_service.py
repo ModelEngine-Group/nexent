@@ -262,7 +262,7 @@ sys.modules["management.utils.oauth_providers"] = oauth_providers_mock
 
 import management.services.permission.identity.oauth as oauth_service_module
 oauth_service_module.DEFAULT_TENANT_ID = "default-tenant-id"
-from management.security.session import parse_state, parse_pending_oauth_token
+from management.services.permission.identity.session import parse_state, parse_pending_oauth_token
 from management.services.permission.identity.oauth import (
     create_or_update_oauth_account,
     ensure_user_tenant_exists,

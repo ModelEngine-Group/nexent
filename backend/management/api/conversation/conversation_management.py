@@ -33,7 +33,7 @@ from management.services.conversation.agent_history import (
     list_agent_group_conversations,
     list_agent_groups,
 )
-from management.security.session import get_current_user_id, get_current_user_info
+from management.services.permission.identity.session import get_current_user_id, get_current_user_info
 
 router = APIRouter(prefix="/conversation")
 

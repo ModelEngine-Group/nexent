@@ -78,7 +78,7 @@ from ext_components.aidp.services.aidp_service import (
     update_aidp_kb_impl,
     upload_aidp_docs_impl,
 )
-import management.security.session as auth_utils_module
+import management.services.permission.identity.session as auth_utils_module
 
 
 aidp_mgmt_router = APIRouter(prefix="/aidp-mgmt")

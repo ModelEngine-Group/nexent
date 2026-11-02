@@ -17,7 +17,7 @@ from pydantic import (
 )
 
 from contracts.errors.exceptions import UnauthorizedError
-from management.security.session import get_current_user_id
+from management.services.permission.identity.session import get_current_user_id
 
 logger = logging.getLogger(__name__)
 

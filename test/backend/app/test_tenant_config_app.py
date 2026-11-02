@@ -49,7 +49,7 @@ const_mock.ENABLE_AGENT_WORKBENCH = False
 const_mock.HIDE_HOME_PAGE = False
 
 sys.modules['services.tenant_config_service'] = services_mock
-sys.modules['management.security.session'] = auth_mock
+sys.modules['management.services.permission.identity.session'] = auth_mock
 sys.modules['contracts.constants.environment'] = const_mock
 install_business_constant_stubs(const_mock)
 

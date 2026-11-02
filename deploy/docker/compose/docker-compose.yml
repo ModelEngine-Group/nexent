@@ -172,6 +172,8 @@ services:
       - ../../sql:/opt/nexent/sql:ro
       - ${ROOT_DIR}/openssh-server/ssh-keys:/opt/ssh-keys:ro
     environment:
+      GATEWAY_AUTH_ENABLED: "true"
+      GATEWAY_SERVICE_URL: "http://nexent-northbound:5013"
       TZ: "${TZ:-Asia/Shanghai}"
       <<: [*minio-vars, *es-vars]
       NEXENT_SQL_STARTUP_MODE: wait

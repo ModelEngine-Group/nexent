@@ -9,7 +9,7 @@ boundary; assertions describe user-visible policy, not implementation calls.
 
 from __future__ import annotations
 
-import management.security.session as depends_dependencies
+import management.services.permission.identity.session as depends_dependencies
 from types import SimpleNamespace
 
 import pytest

@@ -12,8 +12,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from contracts.errors.exceptions import AccountConflictError
-from infrastructure.security import account_cli as cli
-from infrastructure.security.passwords import verify_password
+from management.cli import account as cli
+from gateway.security.passwords import verify_password
 
 
 @pytest.fixture

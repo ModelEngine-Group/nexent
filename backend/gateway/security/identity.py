@@ -8,11 +8,12 @@ import uuid
 
 import jwt
 
-from gateway.protocol.routes import canonical_path, is_public_request
+from gateway.security.policy import canonical_path, is_public_request
 
 IDENTITY_HEADER = "x-nexent-identity"
 ISSUER = "nexent-gateway"
 LOOKUP_PATH = "/internal/identity/resolve"
+DELEGATION_PATH = "/internal/credentials/mcp"
 TTL = 30
 
 
@@ -58,7 +59,7 @@ def _binding(method, path, query):
 
 
 def sign_identity(identity, audience, method, path, query, *, key=None):
-    if audience not in {"management", "runtime"}:
+    if audience not in {"management", "runtime", "mcp"}:
         raise IdentityError("Unknown identity audience")
     if identity is None and not is_public_request(method, path):
         raise IdentityError("Identity is required")
@@ -96,6 +97,16 @@ def verify_lookup(token, body: bytes, *, key=None):
     claims = _decode(token, "management-identity", key)
     if claims["scope"] != "identity:lookup" or claims.get("body") != hashlib.sha256(body).hexdigest():
         raise IdentityError("Invalid lookup signature")
+
+
+def sign_delegation(body: bytes, *, key):
+    return _encode("credentials:delegate", "gateway-credentials", {"body": hashlib.sha256(body).hexdigest()}, key)
+
+
+def verify_delegation(token, body: bytes, *, key):
+    claims = _decode(token, "gateway-credentials", key)
+    if claims["scope"] != "credentials:delegate" or claims.get("body") != hashlib.sha256(body).hexdigest():
+        raise IdentityError("Invalid delegation signature")
 
 
 def require_key(key):

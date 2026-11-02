@@ -23,7 +23,7 @@ def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
     from management.db.identity.user_tenant import update_user_tenant_role
     from management.services.permission import api_keys
     from management.api import northbound as routes
-    from management.security import api_key as northbound_auth
+    from management.services.permission.identity import northbound as northbound_auth
 
     client, auth, helpers, models = runtime
     client.app.include_router(routes.router)
@@ -82,7 +82,7 @@ def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
 
 def test_native_http_identity_password_and_api_keys(runtime):
     client, auth, helpers, models = runtime
-    from management.security import api_key as northbound
+    from management.services.permission.identity import northbound as northbound
     assert client.get("/api/user/service_health").status_code == 200
     data = register(client)
     token = data["session"]["access_token"]
@@ -240,10 +240,10 @@ def test_native_http_cas_sid_revocation_remains_effective(runtime):
 
 def test_native_account_bootstrap_and_cas_provisioning(runtime):
     client, auth, helpers, models = runtime
-    from infrastructure.security.account_cli import bootstrap_super_admin
+    from management.cli.account import bootstrap_super_admin
     from contracts.errors.exceptions import AccountConflictError
     from management.db.identity.account import get_account_by_email
-    from infrastructure.security.passwords import verify_password
+    from gateway.security.passwords import verify_password
     from management.services.permission.identity.cas import (
         CasPrincipal,
         _resolve_project_user,
@@ -284,7 +284,7 @@ def test_native_account_bootstrap_and_cas_provisioning(runtime):
 
 def test_native_http_revoke_disables_credentials_and_api_keys(runtime):
     client, auth, helpers, models = runtime
-    from management.security import api_key as northbound
+    from management.services.permission.identity import northbound as northbound
     data = register(client)
     token = data["session"]["access_token"]
     issued_key = client.post("/api/user/tokens", headers=bearer(token))

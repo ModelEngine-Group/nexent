@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from management.services.agent.a2a.service import a2a_server_service, EndpointNotFoundError
-from management.security.session import get_current_user_info
+from management.services.permission.identity.session import get_current_user_info
 
 logger = logging.getLogger("a2a_server_app")
 

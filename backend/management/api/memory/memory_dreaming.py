@@ -29,7 +29,7 @@ from management.services.memory.dreaming.service import (
     DreamingRunError,
     get_memory_dreaming_service,
 )
-from management.security.session import get_current_user_id
+from management.services.permission.identity.session import get_current_user_id
 
 router = APIRouter(prefix="/memory/dreaming", tags=["memory-dreaming"])
 

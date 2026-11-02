@@ -13,6 +13,8 @@ acceptance_bindings:
   - test_gateway_authoritative_identity_and_signed_protocol_boundary
   AC-03:
   - test_gateway_authoritative_identity_and_signed_protocol_boundary
+  AC-04:
+  - test_gateway_authoritative_identity_and_signed_protocol_boundary
 preparation:
   families: []
   anchors: false

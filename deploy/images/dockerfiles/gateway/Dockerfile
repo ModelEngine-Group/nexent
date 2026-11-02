@@ -13,4 +13,3 @@ ENV PYTHONPATH=/opt/backend
 USER 65532:65532
 EXPOSE 5013
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD python -m gateway.healthcheck
-ENTRYPOINT ["python", "backend/gateway_service.py"]

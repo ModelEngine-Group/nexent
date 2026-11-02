@@ -30,7 +30,7 @@ from management.services.conversation.creation_history import (
 )
 from management.services.skill.service import SkillService, UnsupportedSkillFilePreview
 from management.services.skill.transfer import get_official_skills_with_status, install_skills_from_zip_for_tenant, update_skill_list
-from management.security.session import get_current_user_id, get_current_user_info
+from management.services.permission.identity.session import get_current_user_id, get_current_user_info
 
 
 logger = logging.getLogger(__name__)

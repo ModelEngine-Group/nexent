@@ -129,7 +129,7 @@ def mock_personal_auth():
         ):
             stack.enter_context(
                 patch(
-                    "management.security.session.get_current_user_context",
+                    "management.services.permission.identity.session.get_current_user_context",
                     return_value=(user_id, tenant_id, role),
                 )
             )
