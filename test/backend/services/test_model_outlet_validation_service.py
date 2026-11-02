@@ -210,42 +210,9 @@ def test_probe_and_agent_terminal_share_exact_bilingual_diagnostics():
             assert "新增正文" in probe["messages"]["zh"]
 
 
-@pytest.mark.parametrize("ok,status", [(True, "available"), (False, "unavailable")])
-def test_ecs02_receipt_matches_effective_request_and_never_reveals_credentials(probe, ok, status):
-    import management.services.model.profiles as service
-
-    profile = probe[0]
-    receipt = service._issue_check_receipt(profile, "private-key", {"X-Gateway": "private-header"}, ok)
-    assert "private-key" not in receipt and "private-header" not in receipt
-    assert service._checked_status(receipt, profile, "private-key", {"x-gateway": "private-header"}) == status
-    renamed = profile.model_copy(update={"identity": profile.identity.model_copy(update={"display_name": "Renamed"})})
-    assert service._checked_status(receipt, renamed, "private-key", {"x-gateway": "private-header"}) == status
-    assert service._checked_status(receipt, profile, "new-key", {"x-gateway": "private-header"}) is None
-    assert service._checked_status(receipt, profile, "private-key", {"x-gateway": "changed"}) is None
-    changed = profile.model_copy(update={"connection": profile.connection.model_copy(update={"timeout_seconds": 1})})
-    assert service._checked_status(receipt, changed, "private-key", {"x-gateway": "private-header"}) is None
-    other = profile.model_copy(update={"identity": profile.identity.model_copy(update={"tenant_id": "other"})})
-    assert service._checked_status(receipt, other, "private-key", {"x-gateway": "private-header"}) is None
-
-
-def test_ecs04_expired_tampered_and_stale_receipts_are_ignored(probe, monkeypatch):
-    import management.services.model.profiles as service
-
-    profile = probe[0]
-    receipt = service._issue_check_receipt(profile, "key", {}, True)
-    assert service._checked_status(receipt + "bad", profile, "key", {}) is None
-    assert service._checked_status("garbage", profile, "key", {}) is None
-    stale = profile.model_copy(update={"config_revision": 2})
-    assert service._checked_status(receipt, stale, "key", {}) is None
-    now = service.time.time()
-    monkeypatch.setattr(service.time, "time", lambda: now + 3601)
-    assert service._checked_status(receipt, profile, "key", {}) is None
-
-
 @pytest.mark.asyncio
 async def test_ecs01_edit_probe_checks_unsaved_patch_without_writing(probe):
     from contracts.model import ModelOutletPatchRequest
-    from management.services.model.profiles import _checked_status, apply_outlet_patch
 
     profile, _, invoke, update = probe
     patch = ModelOutletPatchRequest(expected_revision=1, connection={"timeout_seconds": 17},
@@ -254,24 +221,29 @@ async def test_ecs01_edit_probe_checks_unsaved_patch_without_writing(probe):
     assert result["ok"]
     update.assert_not_called()
     assert invoke.call_args.args[1].connection.timeout_seconds == 17
-    proposed = apply_outlet_patch(profile, patch)
-    assert _checked_status(result["check_receipt"], proposed, "controlled-key", {"x-gateway": "draft-header"}) == "available"
+    assert "check_receipt" not in result
+    assert "draft-header" not in str(result) and "controlled-key" not in str(result)
 
 
 @pytest.mark.asyncio
-async def test_ecs02_create_uses_backend_proof_without_repeating_inference(probe, outlet_database):
+@pytest.mark.parametrize("ok", [True, False])
+async def test_fd02_create_saves_draft_result_without_repeating_inference(probe, outlet_database, ok):
     from management.services.model.profiles import create_model_outlet, get_model_profile_catalog
 
     db, _ = outlet_database
     request = ModelOutletCreateRequest(**draft_request(parameter_values={"enable_thinking": False}).model_dump(), api_key="key")
     request.catalog_revision = get_model_profile_catalog().revision
+    if not ok:
+        probe[2].return_value = None
     checked = await validate_model_outlet(ModelOutletValidationRequest(draft=request), "tenant")
-    request.check_receipt = checked["check_receipt"]
+    probe[3].assert_not_called()
+    assert "check_receipt" not in checked
+    request.connect_status = "available" if checked["ok"] else "unavailable"
     request.display_name = "Renamed after check"
     create_model_outlet(request, "actor", "tenant")
-    assert db.create_resolved_model_record.call_args.kwargs["connect_status"] == "available"
+    assert db.create_resolved_model_record.call_args.kwargs["connect_status"] == request.connect_status
     assert probe[2].await_count == 1
-    request.api_key = "changed"
+    request.connect_status = None
     create_model_outlet(request, "actor", "tenant")
     assert db.create_resolved_model_record.call_args.kwargs["connect_status"] == "not_detected"
     assert probe[2].await_count == 1
@@ -299,13 +271,19 @@ def test_ecs04_edit_checks_require_one_consistent_saved_revision(payload):
         ModelOutletValidationRequest(**payload)
 
 
-def test_receipt_signing_uses_shared_current_jwt_secret(monkeypatch):
-    from contracts.constants import environment
-    from management.services.model import profiles
+@pytest.mark.parametrize("status", ["available", "unavailable", None])
+def test_fd04_draft_status_contract_accepts_only_completed_results(status):
+    from contracts.model import ModelOutletPatchRequest
+    assert ModelOutletPatchRequest(expected_revision=1, connect_status=status).connect_status == status
+    assert ModelOutletCreateRequest(**draft_request().model_dump(), connect_status=status).connect_status == status
 
-    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-shared-key")
-    first = profiles._receipt_signature("synthetic-receipt")
-    monkeypatch.setattr(profiles, "_PROCESS_RECEIPT_KEY", "other-worker-fallback")
-    assert profiles._receipt_signature("synthetic-receipt") == first
-    monkeypatch.setattr(environment, "JWT_SECRET", "synthetic-rotated-key")
-    assert profiles._receipt_signature("synthetic-receipt") != first
+
+@pytest.mark.parametrize("field,value", [("connect_status", "detecting"), ("connect_status", "not_detected"),
+                                        ("connect_status", True), ("check_receipt", "obsolete")])
+def test_fd04_draft_status_rejects_invalid_or_obsolete_fields(field, value):
+    from contracts.model import ModelOutletPatchRequest
+    from pydantic import ValidationError
+    for body, cls in [(dict(expected_revision=1), ModelOutletPatchRequest),
+                      (draft_request().model_dump(), ModelOutletCreateRequest)]:
+        with pytest.raises(ValidationError):
+            cls(**body, **{field: value})

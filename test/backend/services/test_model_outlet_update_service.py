@@ -86,3 +86,16 @@ def test_stale_or_missing_outlet_never_writes(outlet_database, saved_profile):
     with pytest.raises(LookupError):
         update_model_outlet(42, ModelOutletPatchRequest(expected_revision=1), "user", "other")
     db.update_resolved_model_record.assert_not_called()
+
+
+@pytest.mark.parametrize("status", ["available", "unavailable", None])
+def test_fd03_update_passes_completed_draft_status_in_same_cas_write(outlet_database, saved_profile, status):
+    db, _ = outlet_database
+    db.get_resolved_model_record.return_value = saved_profile
+    db.update_resolved_model_record = Mock(return_value=2)
+    result = update_model_outlet(42, ModelOutletPatchRequest(expected_revision=1,
+        connect_status=status, display_name="Renamed"), "user", "tenant")
+    assert result["config_revision"] == 2
+    kwargs = db.update_resolved_model_record.call_args.kwargs
+    assert kwargs.get("connect_status") == status
+    assert ("connect_status" in kwargs) == (status is not None)

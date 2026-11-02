@@ -3,65 +3,13 @@
 """Read-only profile discovery for LLM onboarding from the pinned local catalog."""
 
 from functools import lru_cache
-import hmac
-import json
 import re
-import secrets
-import time
 
 from contracts.errors.exceptions import DuplicateError, ModelOutletConflictError, ModelOutletValidationError
 
 from nexent.core.model_service.profiles.parameter_schema import _json_copy
 from nexent.core.model_service.profiles.resolver import load_profile_catalog
 from nexent.core.model_service.registry import model_service_references
-
-
-# Standalone development may have no shared auth secret. Such receipts are
-# intentionally invalid after process restart or across unconfigured workers.
-_PROCESS_RECEIPT_KEY = secrets.token_hex(32)
-
-
-def _receipt_signature(body):
-    from contracts.constants.environment import JWT_SECRET
-    from infrastructure.security.signatures import calculate_hmac_signature
-
-    return calculate_hmac_signature(JWT_SECRET or _PROCESS_RECEIPT_KEY,
-        "model-connectivity-v1", "", body)
-
-
-def _receipt_binding(profile, key, headers):
-    from nexent.core.model_service.profiles.protocol_parameters import connectivity_request
-    from nexent.core.model_service.connection_headers import connection_headers
-
-    material = [profile.identity.tenant_id, profile.outlet_id,
-        profile.config_revision if profile.outlet_id is not None else None,
-        connectivity_request(profile), key or "",
-        connection_headers(headers or {}, api_key=key)]
-    return _receipt_signature(json.dumps(_json_copy(material), sort_keys=True, separators=(",", ":"), ensure_ascii=False))
-
-
-def _issue_check_receipt(profile, key, headers, ok):
-    body = json.dumps([int(time.time()) + 3600, "available" if ok else "unavailable",
-        _receipt_binding(profile, key, headers)], separators=(",", ":"))
-    return body + "." + _receipt_signature(body)
-
-
-def _checked_status(receipt, profile, key, headers):
-    """Ignore stale/forged proof without preventing a valid configuration save."""
-    if not receipt:
-        return None
-    try:
-        body, signature = receipt.rsplit(".", 1)
-        if not hmac.compare_digest(_receipt_signature(body), signature):
-            return None
-        expires, status, binding = json.loads(body)
-        if expires <= time.time() or status not in ("available", "unavailable"):
-            return None
-        if hmac.compare_digest(binding, _receipt_binding(profile, key, headers)):
-            return status
-    except (ValueError, TypeError):
-        return None
-    return None
 
 
 def _patch_credentials(request, key, headers):
@@ -349,7 +297,7 @@ def create_model_outlet(request, user_id, tenant_id):
         raise DuplicateError()
     model_id = create_resolved_model_record(profile, user_id, tenant_id,
         registered_references=model_service_references(), api_key=request.api_key, http_headers=request.http_headers,
-        connect_status=_checked_status(request.check_receipt, profile, request.api_key, request.http_headers) or "not_detected")
+        connect_status=request.connect_status or "not_detected")
     data = profile.model_dump(mode="json")
     data["outlet_id"] = model_id
     data["connection"]["credential_ref"]["model_id"] = model_id
@@ -469,7 +417,7 @@ def update_model_outlet(model_id, request, user_id, tenant_id):
     key, headers = _patch_credentials(request, row.get("api_key"), row.get("http_headers") or {})
     if "http_headers" in request.model_fields_set or "api_key" in request.model_fields_set:
         credentials["http_headers"] = headers
-    status = _checked_status(request.check_receipt, proposed, key, headers)
+    status = request.connect_status
     if status is not None:
         credentials["connect_status"] = status
     revision = update_resolved_model_record(proposed, request.expected_revision, user_id, tenant_id,
@@ -528,7 +476,6 @@ async def validate_model_outlet(request, tenant_id, *, is_disconnected=None):
         await run_blocking("outlet-validation-status", update_model_outlet_connectivity,
             request.outlet_id, tenant_id, profile.config_revision, "available" if ok else "unavailable")
     return {"ok": ok, "error": error, "check_scope": "connection_only",
-            "check_receipt": _issue_check_receipt(profile, key, headers, ok),
             "model_id": profile.outlet_id, "config_revision": profile.config_revision}
 
 

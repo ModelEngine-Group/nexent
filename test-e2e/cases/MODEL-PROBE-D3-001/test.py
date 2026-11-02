@@ -49,9 +49,8 @@ async def test_abandoned_probe(monkeypatch, abandonment):
     monkeypatch.setattr(concurrency, "run_blocking", read_boundary)
     from management.db.model import outlets
 
-    write, receipt = Mock(), Mock()
+    write = Mock()
     monkeypatch.setattr(outlets, "update_model_outlet_connectivity", write)
-    monkeypatch.setattr(service, "_issue_check_receipt", receipt)
 
     async def disconnected():
         if received.is_set() and abandonment == "checker_error":
@@ -73,7 +72,6 @@ async def test_abandoned_probe(monkeypatch, abandonment):
             with pytest.raises(expected):
                 await task
         write.assert_not_called()
-        receipt.assert_not_called()
         assert not model_concurrency_limiter._entries
         assert not [t for t in asyncio.all_tasks() if t.get_name() == "model-outlet-connectivity" and not t.done()]
     finally:

@@ -67,7 +67,7 @@ class ModelProfilePreviewRequest(BaseModel):
 
 
 class ModelOutletCreateRequest(ModelProfilePreviewRequest):
-    check_receipt: Optional[str] = Field(default=None, max_length=1024, repr=False)
+    connect_status: Optional[Literal["available", "unavailable"]] = None
     api_key: Optional[str] = Field(default=None, max_length=500, repr=False)
 
 
@@ -80,7 +80,7 @@ class ModelOutletConnectionPatch(BaseModel):
 
 
 class ModelOutletPatchRequest(BaseModel):
-    check_receipt: Optional[str] = Field(default=None, max_length=1024, repr=False)
+    connect_status: Optional[Literal["available", "unavailable"]] = None
     model_config = ConfigDict(extra="forbid")
     expected_revision: int = Field(gt=0, lt=2**31, strict=True)
     parameter_values: Dict[str, Any] = Field(default_factory=dict)

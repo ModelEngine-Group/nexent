@@ -19,14 +19,14 @@ case:
     action: Start validation through the actual probe and shared HTTP transport; wait until the provider has received its request, then disconnect or raise in the disconnect checker or cancel the caller.
     expected: The expected cancellation or checker error propagates and the child probe is awaited.
   - order: 2
-    action: Inspect connectivity writes, receipt issuance, concurrency ownership and child tasks; release and close the owned provider and join its thread.
-    expected: No status write or receipt occurs, no named probe task or concurrency lease remains, and the server thread terminates.
+    action: Inspect connectivity writes, concurrency ownership and child tasks; release and close the owned provider and join its thread.
+    expected: No status write occurs, no named probe task or concurrency lease remains, and the server thread terminates.
   expected_results:
   - All three abandonment variants propagate their expected failure after the HTTP boundary was reached.
-  - No persisted status, receipt, orphan probe, lease or server thread remains.
+  - No persisted status, orphan probe, lease or server thread remains.
   forbidden_side_effects: [No external provider or database write, No synthetic credential in retained evidence]
   integration_boundary: [Validation service through actual ModelService and HTTP sender to an owned loopback server]
-  observations: [Provider request receipt, Task and lease lifecycle, Persistence and receipt spies]
+  observations: [Provider request receipt, Task and lease lifecycle, Persistence spies]
   cleanup: [Release handler gate, Close server and join thread]
   acceptance:
   - id: AC-CANCEL
