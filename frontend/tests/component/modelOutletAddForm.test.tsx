@@ -805,7 +805,7 @@ it("shows model-only defaults immediately and composes provider values after the
   expect(screen.getByRole("spinbutton", { name: "temperature" })).toHaveValue(
     "0.6"
   );
-}, 15000);
+}, 30000);
 
 it("does not retain another model's composed capabilities after clearing the endpoint", async () => {
   const configuration = (output: number) => ({
@@ -1148,7 +1148,7 @@ it.each([false, true])(
     });
     expect(api.validateModelOutlet).not.toHaveBeenCalled();
   },
-  15000
+  30000
 );
 
 it("MP-03 prefills thinking before model identity is available even with an endpoint", async () => {

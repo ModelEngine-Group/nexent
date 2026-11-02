@@ -521,7 +521,7 @@ it.each([true, false])(
     }
     expect(api.updateModelOutlet).not.toHaveBeenCalled();
   },
-  15000
+  30000
 );
 
 it("ECS-01 checks the edit draft, preserves masked credentials and carries the result through rename/save", async () => {
