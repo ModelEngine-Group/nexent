@@ -11,7 +11,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "next/navigation";
-import { App, Alert, Button, ConfigProvider, Form, Modal } from "antd";
+import { App, Alert, Button, ConfigProvider, Form } from "antd";
 import {
   Collapsible,
   CollapsibleContent,
@@ -59,6 +59,7 @@ import {
   ScrollText,
   RefreshCw,
   Settings2,
+  ShieldCheck,
 } from "lucide-react";
 
 type ConfigSectionKey =
@@ -739,6 +740,20 @@ export default function AgentConfig({
               <AgentDeployment highFidelity />
             </ConfigSection>
             <ConfigSection
+              testId="agent-config-card-guardrail"
+              title={t("agent.config.section.guardrail.title")}
+              description={t("agent.config.section.guardrail.description")}
+              icon={<ShieldCheck className="size-[18px] shrink-0" />}
+              open={openSections.guardrail}
+              onOpenChange={(open) =>
+                handleSectionOpenChange("guardrail", open)
+              }
+              containerRef={guardrailSectionRef}
+              headerActions={<GuardrailConfigActions />}
+            >
+              <GuardrailConfigContent />
+            </ConfigSection>
+            <ConfigSection
               testId="agent-config-card-advanced"
               title={t("agent.highFidelity.advancedTitle")}
               description=""
@@ -748,37 +763,9 @@ export default function AgentConfig({
                 handleSectionOpenChange("run_strategy", open)
               }
               containerRef={runStrategySectionRef}
-              headerActions={
-                <Button
-                  type="text"
-                  size="small"
-                  aria-label={t("agent.highFidelity.moreSettings")}
-                  icon={<Settings2 size={16} />}
-                  onClick={() => handleSectionOpenChange("guardrail", true)}
-                  className="!size-6 !p-0"
-                />
-              }
             >
               <AgentRunPolicy highFidelity />
             </ConfigSection>
-            <Modal
-              title={t("agent.highFidelity.moreSettings")}
-              open={openSections.guardrail}
-              onCancel={() => handleSectionOpenChange("guardrail", false)}
-              footer={null}
-              forceRender
-              width={800}
-            >
-              <div ref={guardrailSectionRef} className="flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-base font-medium">
-                    {t("agent.config.section.guardrail.title")}
-                  </span>
-                  <GuardrailConfigActions />
-                </div>
-                <GuardrailConfigContent />
-              </div>
-            </Modal>
           </div>
           <ConfigProvider componentDisabled={false}>
             {debugPanel}

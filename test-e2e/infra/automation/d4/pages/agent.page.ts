@@ -317,18 +317,13 @@ export class AgentPage {
   }
 
   async ensureGuardrailRule(pattern: string): Promise<void> {
-    await this.openAdvanced();
-    // Guardrail rules moved behind the 更多配置 icon action on the
-    // run-strategy card (aria-label 更多配置), which opens the modal.
-    await this.page.getByRole("button", { name: "更多配置", exact: true }).click();
-    const modal = this.page.getByRole("dialog").filter({ hasText: "安全护栏" });
-    await expect(modal).toBeVisible();
-    // The modal also carries the protocol-repair switch; the guardrail enable
-    // switch is the one sharing the 安全护栏 title row.
-    const guardrailSwitch = modal
-      .getByText("安全护栏", { exact: true })
-      .locator("xpath=ancestor::div[1]")
-      .getByRole("switch");
+    const section = this.page.getByTestId("agent-config-card-guardrail");
+    const toggle = section.getByRole("button", { name: /安全护栏/ });
+    if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+      await toggle.click();
+    }
+    await expect(section).toBeVisible();
+    const guardrailSwitch = section.getByRole("switch");
     if ((await guardrailSwitch.getAttribute("aria-checked")) !== "true") {
       const enabled = this.page.waitForResponse(
         (response) => response.request().method() === "POST" && response.url().includes("/api/agent/update"),
@@ -336,19 +331,15 @@ export class AgentPage {
       await guardrailSwitch.click();
       if (!(await enabled).ok()) throw new Error("guardrail enable autosave failed");
     }
-    await modal.getByRole("button", { name: "添加规则", exact: true }).last().click();
+    await section.getByRole("button", { name: "添加规则", exact: true }).last().click();
     const saved = this.page.waitForResponse(
       (response) => response.request().method() === "POST" && response.url().includes("/api/agent/update"),
     );
-    const patternInput = modal.getByPlaceholder("如 \\d{17}[\\dXx]").first();
+    const patternInput = section.getByPlaceholder("如 \\d{17}[\\dXx]").first();
     await patternInput.fill(pattern);
     await patternInput.blur();
     if (!(await saved).ok()) throw new Error("guardrail rule autosave failed");
     await expect(patternInput).toHaveValue(pattern);
-    // Close the modal so the header actions (e.g. the debug toggle) become
-    // clickable again. antd ignores Escape here, so use its close control.
-    await modal.locator(".ant-modal-close").click();
-    await expect(modal).toBeHidden();
   }
 
   async selectModel(displayName: string): Promise<void> {

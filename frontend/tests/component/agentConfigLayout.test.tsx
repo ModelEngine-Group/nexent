@@ -138,7 +138,7 @@ vi.mock(
   "../../app/[locale]/agents/[agentId]/components/advanced/GuardrailConfigContent",
   () => ({
     default: () => <div data-testid="guardrail-content" />,
-    GuardrailConfigActions: () => null,
+    GuardrailConfigActions: () => <div data-testid="guardrail-actions" />,
   })
 );
 vi.mock(
@@ -165,6 +165,7 @@ const orderedCards = [
   ["child-agents", "collaborative-agents-content"],
   ["welcome", "conversation-guide-content"],
   ["permissions", "publish-attributes-content"],
+  ["guardrail", "guardrail-content"],
   ["advanced", "run-strategy-content"],
 ] as const;
 
@@ -235,14 +236,28 @@ describe("configuration resource grouping and preserved workflow gates", () => {
     fireEvent.click(within(advanced).getByRole("button", { expanded: false }));
     expect(protocolRepair).toBeVisible();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByTestId("guardrail-content")).not.toBeVisible();
-    fireEvent.click(
-      screen.getByRole("button", { name: "agent.highFidelity.moreSettings" })
-    );
-    expect(screen.getByRole("dialog")).toContainElement(
-      screen.getByTestId("guardrail-content")
-    );
-    expect(screen.getByRole("dialog")).not.toContainElement(protocolRepair);
+    expect(
+      screen
+        .getByTestId("guardrail-content")
+        .closest("[data-slot=collapsible-content]")
+    ).toHaveAttribute("data-state", "closed");
+    expect(
+      screen.queryByRole("button", { name: "agent.highFidelity.moreSettings" })
+    ).not.toBeInTheDocument();
+    const guardrail = screen.getByTestId("agent-config-card-guardrail");
+    expect(guardrail).toContainElement(screen.getByTestId("guardrail-actions"));
+    expect(advanced).not.toContainElement(guardrail);
+    fireEvent.click(within(guardrail).getByRole("button", { expanded: false }));
+    expect(screen.getByTestId("guardrail-content")).toBeVisible();
+    expect(screen.getAllByTestId("guardrail-content")).toHaveLength(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(within(guardrail).getByRole("button", { expanded: true }));
+    expect(
+      screen
+        .getByTestId("guardrail-content")
+        .closest("[data-slot=collapsible-content]")
+    ).toHaveAttribute("data-state", "closed");
+    expect(guardrail).toContainElement(screen.getByTestId("guardrail-actions"));
     expect(screen.getAllByTestId("protocol-repair-content")).toHaveLength(1);
     expect(protocolRepair).toBeVisible();
     const header = screen.getByTestId("agent-config-header");
@@ -300,6 +315,12 @@ describe("configuration resource grouping and preserved workflow gates", () => {
       within(screen.getByTestId("agent-config-card-info")).getByRole("button", {
         expanded: true,
       })
+    );
+    fireEvent.click(
+      within(screen.getByTestId("agent-config-card-guardrail")).getByRole(
+        "button",
+        { expanded: false }
+      )
     );
     mocks.state.agentId = 43;
     view.rerender(agentConfigTree());
@@ -432,5 +453,8 @@ describe("configuration resource grouping and preserved workflow gates", () => {
     expect(
       screen.getByRole("textbox", { name: "display-name-validation-field" })
     ).toBeDisabled();
+    const guardrail = screen.getByTestId("agent-config-card-guardrail");
+    fireEvent.click(within(guardrail).getByRole("button", { expanded: false }));
+    expect(screen.getByTestId("guardrail-content")).toBeVisible();
   });
 });
