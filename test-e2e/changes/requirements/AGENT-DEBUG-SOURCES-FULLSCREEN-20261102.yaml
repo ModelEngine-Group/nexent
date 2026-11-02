@@ -1,0 +1,35 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-DEBUG-SOURCES-FULLSCREEN-20261102
+  change_type: requirement
+  requirement_id: AGENT-DEBUG-SOURCES-FULLSCREEN-20261102
+  title: Expand Agent debug when opening retrieval details
+  description: Opening retrieval details in ordinary or comparison debug requests the existing fullscreen layout without resetting conversation state.
+  affected_features:
+    existing: [V5-PW-PROMPT-02]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Opening retrieval details requests fullscreen only in compact debug, including comparison mode.
+    - Repeated opens and closing details preserve fullscreen; manual restore remains available.
+    - Missing callbacks are safe and opening details does not reset the runtime or draft.
+    - Restoring debug closes all mounted source drawers without resetting drafts or runtime; maximizing again leaves them closed and explicit retrieval opens still work.
+    test_selectors:
+    - frontend/tests/workbench/AgentDebugHeader.test.tsx
+    - frontend/tests/workbench/SourcesPanelState.test.tsx
+    reason: Local React callback and state behavior belongs in frontend UT. Existing PW-PROMPT-02 has no retrieval interaction and is unaffected. No new D1 duplicates unit proof; APIs, Python, runtime and deployment boundaries do not change.
+  notes: |
+    SPEC: nexent-doc/docs/Developing/dev-agent-config-visual-spacing/changes/dev-agent-retrieval-fullscreen/.
+    AC-001..003 are defined in proposal.md. Initial clean product revision 0134d2ba1.
+    Formal Feature ownership is reused; existing real-model comparison contracts are retained unchanged.
+    Follow-up AC-004: reference-source list whitespace is symmetric in debug despite
+    classic scrollbar width; use scoped scrollbar-gutter stable both-edges. Overlay
+    scrollbars require no reserved width. Ordinary conversation styling is unchanged.

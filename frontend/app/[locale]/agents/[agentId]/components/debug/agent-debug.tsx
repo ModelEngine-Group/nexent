@@ -73,6 +73,8 @@ interface AgentDebugChatProps {
   chatMode: ChatMode;
   onChatModeChange: (mode: ChatMode) => void;
   clearEpoch: number;
+  onSourcesPanelOpen?: () => void;
+  sourcesPanelCloseEpoch?: number;
 }
 
 function DebugConversation({
@@ -82,6 +84,8 @@ function DebugConversation({
   selectedModelId,
   onModelChange,
   dictationConfigured,
+  onSourcesPanelOpen,
+  sourcesPanelCloseEpoch,
 }: {
   agent: Agent;
   chatMode: ChatMode;
@@ -89,6 +93,8 @@ function DebugConversation({
   selectedModelId?: string;
   onModelChange: (id: string) => void;
   dictationConfigured: boolean;
+  onSourcesPanelOpen?: () => void;
+  sourcesPanelCloseEpoch?: number;
 }) {
   const aui = useAui();
   const isRunning = useAuiState((state) => state.thread.isRunning);
@@ -102,6 +108,8 @@ function DebugConversation({
       showModelSelector
       showConversationTitle={false}
       debugLayout
+      onSourcesPanelOpen={onSourcesPanelOpen}
+      sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
       composerTools={
         <>
           <ComposerAttachment />
@@ -125,6 +133,8 @@ const AgentDebugChat: FC<AgentDebugChatProps> = ({
   chatMode,
   onChatModeChange,
   clearEpoch,
+  onSourcesPanelOpen,
+  sourcesPanelCloseEpoch,
 }) => {
   const { modelConfig } = useConfig();
   const [selectedModelId, setSelectedModelId] = useState<string | undefined>(
@@ -169,6 +179,8 @@ const AgentDebugChat: FC<AgentDebugChatProps> = ({
             selectedModelId={effectiveModelId}
             onModelChange={setSelectedModelId}
             dictationConfigured={isDictationConfigured(modelConfig?.stt)}
+            onSourcesPanelOpen={onSourcesPanelOpen}
+            sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
           />
         </div>
       </TooltipProvider>
@@ -189,6 +201,15 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
   const [chatMode, setChatMode] = useState<ChatMode>("execution");
   const [clearEpoch, setClearEpoch] = useState(0);
   const [compareClearEpoch, setCompareClearEpoch] = useState(0);
+  const [sourcesPanelCloseEpoch, setSourcesPanelCloseEpoch] = useState(0);
+  const handleToggleFullscreen = () => {
+    if (!onToggleFullscreen) return;
+    if (isFullscreen) setSourcesPanelCloseEpoch((value) => value + 1);
+    onToggleFullscreen();
+  };
+  const handleSourcesPanelOpen = () => {
+    if (!isFullscreen) onToggleFullscreen?.();
+  };
   const debugAgent = useMemo(
     () =>
       agentId !== null && editedAgent
@@ -255,7 +276,7 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
                 isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />
               }
               className="!size-6 !p-0 !text-[#4d4d4d]"
-              onClick={onToggleFullscreen}
+              onClick={handleToggleFullscreen}
             />
           </Tooltip>
           <Tooltip title={t("agent.page.panel.debug.closeAria")}>
@@ -279,6 +300,8 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
             chatMode={chatMode}
             onChatModeChange={setChatMode}
             clearEpoch={clearEpoch}
+            onSourcesPanelOpen={handleSourcesPanelOpen}
+            sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
           />
         </div>
         <div
@@ -286,6 +309,8 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
         >
           <AgentDebugComparePanel
             clearEpoch={compareClearEpoch}
+            onSourcesPanelOpen={handleSourcesPanelOpen}
+            sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
             agentId={agentId}
             chatMode={chatMode}
             onChatModeChange={setChatMode}

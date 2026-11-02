@@ -37,3 +37,8 @@
   flex-shrink: 0;
   gap: 16px;
 }
+
+.agent-debug-panel .aui-sources-panel-scroll {
+  padding-block: 24px;
+  scrollbar-gutter: stable both-edges;
+}

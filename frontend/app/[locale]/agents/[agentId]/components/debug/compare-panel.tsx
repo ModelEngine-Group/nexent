@@ -45,6 +45,8 @@ const isDictationConfigured = (config: STTModelConfig | undefined): boolean => {
 };
 
 interface AgentDebugComparePanelProps {
+  sourcesPanelCloseEpoch?: number;
+  onSourcesPanelOpen?: () => void;
   agentId?: number | null;
   clearEpoch?: number;
   chatMode?: ChatMode;
@@ -82,6 +84,8 @@ const createSideAdapter = (
 });
 
 interface SideThreadProps {
+  sourcesPanelCloseEpoch?: number;
+  onSourcesPanelOpen?: () => void;
   clearEpoch: number;
   agent: Agent;
   modelId: number;
@@ -98,6 +102,8 @@ interface SideThreadProps {
 }
 
 const SideThread: FC<SideThreadProps> = ({
+  sourcesPanelCloseEpoch,
+  onSourcesPanelOpen,
   clearEpoch,
   agent,
   modelId,
@@ -205,6 +211,8 @@ const SideThread: FC<SideThreadProps> = ({
           </div>
           <div className="min-h-0 flex-1 overflow-hidden">
             <Thread
+              onSourcesPanelOpen={onSourcesPanelOpen}
+              sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
               agent={agent}
               chatMode={chatMode}
               onChatModeChange={onChatModeChange}
@@ -234,6 +242,8 @@ const SideThread: FC<SideThreadProps> = ({
 };
 
 export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
+  sourcesPanelCloseEpoch,
+  onSourcesPanelOpen,
   agentId,
   clearEpoch = 0,
   chatMode: controlledChatMode,
@@ -314,6 +324,8 @@ export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
           <div className="flex min-h-0 flex-1 flex-col border-r border-gray-200">
             {compareLeftModelId != null && (
               <SideThread
+                onSourcesPanelOpen={onSourcesPanelOpen}
+                sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
                 clearEpoch={clearEpoch}
                 agent={debugAgent}
                 modelId={compareLeftModelId}
@@ -333,6 +345,8 @@ export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
           <div className="flex min-h-0 flex-1 flex-col">
             {compareRightModelId != null && (
               <SideThread
+                onSourcesPanelOpen={onSourcesPanelOpen}
+                sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
                 clearEpoch={clearEpoch}
                 agent={debugAgent}
                 modelId={compareRightModelId}
