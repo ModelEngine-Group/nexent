@@ -2,4 +2,4 @@
 
 此页由结构化用例生成，不手工编辑。
 
-- D1 [MPN-D1-001](../../cases/MPN-D1-001/case.yaml) · active
+- D1 [MODEL-PROFILE-NORMALIZATION-D1-001](../../cases/MODEL-PROFILE-NORMALIZATION-D1-001/case.yaml) · active
