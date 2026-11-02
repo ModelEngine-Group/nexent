@@ -27,9 +27,10 @@ change:
     behaviors:
     - Reject conflicting exact-provider composition, saved values and conversation overlays.
     - Preserve each legal control wire mapping and disabling-thinking inheritance under composite conditions.
+    - Remove transitively dependent inherited values in compiled order while retaining explicitly contradictory submissions.
     reason: Finite local declaration and evaluator regressions are sufficient UT proof; no duplicate formal D1 is introduced. Existing higher-layer composition cases are reused when validating the final integrated stack.
     test_selectors:
     - test/sdk/core/model_service/test_reasoning_exclusion.py
     - test/sdk/core/model_service/test_parameter_rules.py
     - test/sdk/core/model_service/test_profile_submission.py
-  notes: Fresh private review of merged4118; smallest open-layer forward fix belongs to4083. Source files remain byte-for-byte unchanged; only the Nexent supplement and its manifest digest change. Frozen existing snapshots are not automatically recomposed, preserving the approved compatibility boundary. No new configuration or generic policy system.
+  notes: Fresh private review of merged4118; smallest open-layer forward fix belongs to4083. Source files remain byte-for-byte unchanged; only the Nexent supplement and its manifest digest change. Frozen existing snapshots are not automatically recomposed, preserving the approved compatibility boundary. No new configuration or generic policy system. A fresh second review exposed transitive conditions; the final correction reuses the existing compiled dependency order and updates the effective view after removal.

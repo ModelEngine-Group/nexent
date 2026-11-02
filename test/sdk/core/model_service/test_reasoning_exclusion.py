@@ -76,3 +76,33 @@ def test_disabling_thinking_drops_inherited_budget_with_composite_condition(reso
     assert saved.parameter_values == {"enable_thinking":True, "reasoning_budget_tokens":1024}
     with pytest.raises(ParameterValidationError, match="PARAMETER_DEPENDENCY"):
         overlay_profile_parameters(saved, {"enable_thinking":False, "reasoning_budget_tokens":1024}, scope="conversation")
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_disable_thinking_removes_transitive_inherited_values_in_dependency_order(openai_profile, reverse):
+    from copy import deepcopy
+
+    def declaration(key, schema, path, condition=None):
+        return {"key":key, "schema":schema, "visible":True, "editable":True, "required":False,
+            "allowed_scopes":["outlet","conversation"], "ui_group":"reasoning", "owner":"combination",
+            "source":{"ref":"controlled-chain"}, "condition":condition,
+            "api_binding":{"path":path,"transform_ref":"identity_v1","transform_version":1}}
+    rules = [
+        declaration("enable_thinking", {"type":"boolean"}, "/enable_thinking"),
+        declaration("reasoning_budget_tokens", {"type":"integer"}, "/thinking_budget",
+            {"key":"enable_thinking","op":"eq","value":True}),
+        declaration("vendor_detail", {"type":"string"}, "/vendor_detail",
+            {"key":"reasoning_budget_tokens","op":"exists","value":True}),
+    ]
+    data = openai_profile.model_dump()
+    data["parameter_rules"] = list(reversed(rules)) if reverse else rules
+    data["parameter_values"] = {"enable_thinking":True,"reasoning_budget_tokens":1024,"vendor_detail":"verbose"}
+    data["capabilities"]["reasoning"]["controls"] = [
+        {"mode":"toggle","parameter_key":"enable_thinking","values":[False,True]}]
+    saved = type(openai_profile).model_validate(data)
+    original = deepcopy(saved.parameter_values)
+    updated = overlay_profile_parameters(saved, {"enable_thinking":False}, scope="conversation")
+    assert updated.parameter_values == {"enable_thinking":False}
+    assert saved.parameter_values == original
+    with pytest.raises(ParameterValidationError, match="PARAMETER_DEPENDENCY"):
+        overlay_profile_parameters(saved, {"enable_thinking":False,"vendor_detail":"explicit"}, scope="conversation")
