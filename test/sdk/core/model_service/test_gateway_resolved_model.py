@@ -92,8 +92,9 @@ async def test_gateway_async_stream_closes_transport_on_early_exit_or_cancel(ope
 @pytest.mark.parametrize("adapter_type", [OpenAILLMAdapter, OpenAILongContextLLMAdapter])
 @pytest.mark.parametrize("output,expected", [(None, False), ([], False), (["image"], False), (["text"], True)])
 def test_gateway_handles_unknown_and_declared_output_modalities(openai_profile, adapter_type, output, expected):
-    profile = openai_profile.model_copy(deep=True)
-    profile.capabilities.modalities.output = output
+    values = openai_profile.model_dump()
+    values["capabilities"]["modalities"]["output"] = output
+    profile = type(openai_profile).model_validate(values)
     adapter = adapter_type(adapter_for(profile)._context)
     info = adapter.get_model_info()
     assert info.capabilities["text"] is expected

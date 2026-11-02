@@ -60,8 +60,9 @@ def test_deadline_interrupts_actual_http_and_releases_resources(mode):
     token = _set_current_thread_manager(manager)
     limiter, scope = ModelConcurrencyLimiter(), RunCancellationScope()
     profile = resolved_profile_for_test(f"http://127.0.0.1:{server.server_port}/v1")
-    profile.connection.concurrency_limit = 1
-    profile.connection.timeout_seconds = 3
+    values = profile.model_dump()
+    values["connection"].update(concurrency_limit=1, timeout_seconds=3)
+    profile = type(profile).model_validate(values)
     service = ModelService(lambda _: HttpRequestSender(lambda _: {}), limiter=limiter)
     request = ModelRequest(request_id="deadline-integration", config_revision=profile.config_revision,
                            stream=mode.startswith("sse"), messages=[ModelMessage(semantic_role="user",

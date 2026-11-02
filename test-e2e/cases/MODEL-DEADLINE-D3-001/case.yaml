@@ -27,7 +27,9 @@ case:
   - All four modes terminate within the total budget plus bounded cleanup tolerance, irrespective of fresh bytes.
   - No retry or response completion can be committed after the deadline.
   - No active model permit, scope closer or managed execution remains; the parent run is not cancelled.
-  forbidden_side_effects: [No external inference, credentials, database writes or application configuration changes]
+  forbidden_side_effects: ["No external inference, credentials, database writes or application configuration changes"]
+  integration_boundary: [Real ModelService and HttpRequestSender through HTTPX to a loopback TCP peer]
+  observations: [Elapsed duration, actual peer disconnect, request counts, normalized error and released resources]
   cleanup: [Close and join loopback server and managed deadline workers]
   failure_evidence: [Elapsed duration, normalized error, request count and resource assertions]
   execution:
