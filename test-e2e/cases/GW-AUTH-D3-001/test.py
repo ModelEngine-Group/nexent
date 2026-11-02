@@ -27,7 +27,7 @@ from contracts.constants import environment
 from gateway.application import create_gateway_app
 from gateway.configuration import GatewaySettings
 from infrastructure.service_identity.gateway import IDENTITY_HEADER, identity_context, sign_identity, sign_lookup
-from infrastructure.service_identity.middleware import GatewayIdentityMiddleware
+from infrastructure.web.application import create_app
 from infrastructure.service_identity.mcp import TenantMCPRouter
 from gateway.security.identity import sign_delegation
 from management.api.identity import gateway_identity as lookup_routes
@@ -64,6 +64,7 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
     monkeypatch.setattr(environment, "JWT_SECRET", secret)
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", secret)
     monkeypatch.setattr(environment, "IS_SPEED_MODE", False)
+    monkeypatch.setattr(environment, "GATEWAY_AUTH_ENABLED", True)
     accounts = {user: {"account_status": "active", "token_version": 3, "email": "fixture@example.test"}
                 for user in ("u1", "u2")}
     key_record = {"user_id": "u1", "token_id": 7, "delete_flag": "N"}
@@ -94,11 +95,10 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
             result = await manager.shutdown(timeout=2)
             assert result.stuck_execution_ids == ()
 
-    management = FastAPI(root_path="/api", lifespan=management_lifespan)
-    management.add_middleware(GatewayIdentityMiddleware, audience="management", required=True)
+    management = create_app(enable_monitoring=False, lifespan=management_lifespan,
+                            gateway_identity_audience="management")
     management.include_router(lookup_routes.router)
-    runtime = FastAPI(root_path="/api")
-    runtime.add_middleware(GatewayIdentityMiddleware, audience="runtime", required=True)
+    runtime = create_app(enable_monitoring=False, gateway_identity_audience="runtime")
     reached = []
     context_checks = []
 

@@ -15,7 +15,7 @@ from management.api.northbound import a2a_router
 from management.api.northbound import router as northbound_router
 from infrastructure.concurrency import config_thread_manager
 from management.services.agent.run_state import runtime_state_service
-from management.utils.app_factory import create_app
+from infrastructure.web.application import create_app
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagerState,

@@ -102,7 +102,7 @@ with patch('nexent.storage.storage_client_factory.create_storage_client_from_con
 
         # Now it's safe to import backend modules
         from management.api.knowledge_base.idata import router
-        from management.utils.app_factory import register_exception_handlers
+        from infrastructure.web.application import register_exception_handlers
         # Import ErrorCode and AppException the same way as the endpoint function does
         # The endpoint uses: from contracts.errors.codes import ErrorCode
         # The endpoint uses: from contracts.errors.exceptions import AppException

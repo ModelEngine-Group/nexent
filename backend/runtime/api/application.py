@@ -4,7 +4,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
-from management.utils.app_factory import create_app
+from infrastructure.web.application import create_app
 from runtime.api.agent.execution import agent_runtime_router as agent_router
 from management.api.automation.agent_automation import (
     conversation_automation_router,
