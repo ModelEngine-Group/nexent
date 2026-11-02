@@ -8,3 +8,8 @@ acceptance_bindings:
   AC-01: [test_su_ac_03_upgrade_is_exact_and_idempotent]
   AC-02: [test_su_ac_03_upgrade_is_exact_and_idempotent, test_su_ac_03_missing_model_identity_fails_without_discarding_settings]
 timeout_seconds: 120
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []
