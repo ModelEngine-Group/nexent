@@ -89,7 +89,7 @@ def test_source_mapping_preserves_identity_hash_times_and_separates_roles():
     ],
 )
 def test_inactive_source_users_stay_disabled(extra):
-    assert map_source_user(source_user(**extra))["account_status"] == "disabled"
+    assert map_source_user(source_user(**extra))["delete_flag"] == "Y"
 
 
 def test_cas_generated_password_does_not_enable_password_login():
@@ -123,7 +123,7 @@ def test_migration_cli_rejects_missing_password_without_connecting(monkeypatch, 
     connect = mocker.patch("psycopg2.connect")
     assert migrate.main() == 1
     connect.assert_not_called()
-    assert "SUPABASE_POSTGRES_PASSWORD" in capsys.readouterr().err
+    assert "NEXENT_POSTGRES_PASSWORD" in capsys.readouterr().err
 
 
 def test_migration_cli_hides_database_connection_details(monkeypatch, mocker, capsys):

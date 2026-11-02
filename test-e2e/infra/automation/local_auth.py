@@ -52,3 +52,5 @@ def initialize_target(dsn):
                 ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql"
             ).read_text(encoding="utf-8")
         )
+
+        cursor.execute((ROOT / "deploy/sql/migrations/v2.9.0_002_account_availability.sql").read_text(encoding="utf-8"))
