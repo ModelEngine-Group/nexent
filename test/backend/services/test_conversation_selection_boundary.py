@@ -28,23 +28,23 @@ def boundaries(monkeypatch, persistence):
 
 
 @pytest.mark.parametrize("workbench", [False, True])
-def test_selection_preserves_owner_and_version_in_both_chat_modes(boundaries, workbench):
+def test_selection_preserves_owner_and_selection_in_both_chat_modes(boundaries, workbench):
     store, _, lookup, controls = boundaries
     lookup.return_value = {"agent_id": 7, **({"workbench_config": {}} if workbench else {})}
-    body = SimpleNamespace(selected_model_id=42, expected_version=4)
+    body = SimpleNamespace(selected_model_id=42)
     assert service.patch_model_selection(8, body, "owner", "tenant") == store.return_value
     lookup.assert_called_once_with(8, "owner", "tenant")
     selected, tenant, _ = controls.validate_agent_model_selection.call_args.args
     assert selected.model_id == 42 and selected.agent_id == 7 and tenant == "tenant"
     assert selected.entrypoint == ("workbench" if workbench else None)
-    store.assert_called_once_with(8, "owner", expected_version=4, selected_model_id=42)
+    store.assert_called_once_with(8, "owner", selected_model_id=42)
 
 
 def test_missing_conversation_cannot_validate_or_write_selection(boundaries):
     store, getter, lookup, controls = boundaries
     lookup.return_value = None
     with pytest.raises(ConversationNotFoundError):
-        service.patch_model_selection(8, SimpleNamespace(selected_model_id=42, expected_version=4), "owner", "tenant")
+        service.patch_model_selection(8, SimpleNamespace(selected_model_id=42), "owner", "tenant")
     store.assert_not_called()
     getter.assert_not_called()
     controls.validate_agent_model_selection.assert_not_called()
