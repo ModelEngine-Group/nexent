@@ -315,6 +315,27 @@ export const conversationService = {
     throw new ApiError(data.code, data.message);
   },
 
+  // Branch a conversation into a new one up to and including the given turn
+  // (1-based). Returns the new conversation payload.
+  async branch(conversationId: number, turnIndex: number) {
+    const response = await fetch(API_ENDPOINTS.conversation.branch, {
+      method: "POST",
+      headers: getAuthHeaders(),
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        turn_index: turnIndex,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.code === 0) {
+      return data.data;
+    }
+
+    throw new ApiError(data.code, data.message);
+  },
+
   // Get conversation details
   async getDetail(
     conversationId: number,

@@ -21,7 +21,7 @@ from contracts.agent import AgentRequest
 from contracts.conversation import MessageRequest, MessageUnit
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError
 from contracts.constants.constants import CHAT_MODE_VALUES
-from management.db.conversation.repository import create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message, get_latest_assistant_message_id, get_latest_user_message_id, get_last_unit_for_message, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
+from management.db.conversation.repository import branch_conversation, create_conversation, create_conversation_message, create_message_unit, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, get_conversation, get_conversation_history, get_historical_context, get_latest_assistant_message, get_latest_assistant_message_id, get_latest_user_message_id, get_last_unit_for_message, get_message_id_by_index, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch as persist_assistant_run_batch_db, rename_conversation, save_history_summary, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, replace_conversation_workbench_config, replace_conversation_workbench_and_metadata, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
 from management.db.model.repository import get_model_by_model_id
 from management.services.model.adapter import get_llm_adapter_from_config
 from management.services.configuration.tenant.settings import tenant_config_manager
@@ -413,6 +413,43 @@ def create_new_conversation(
         raise
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
+        raise Exception(str(e))
+
+
+def branch_conversation_service(
+    conversation_id: int,
+    turn_index: int,
+    user_id: str,
+) -> Dict[str, Any]:
+    """
+    Branch a conversation into a new one up to and including the given turn
+
+    Args:
+        conversation_id: Source conversation ID
+        turn_index: 1-based Q&A turn (inclusive) marking the branch point
+        user_id: User ID that must own the source conversation
+
+    Returns:
+        Dict[str, Any]: New conversation data
+
+    Raises:
+        ConversationNotFoundError: When the source conversation does not exist
+    """
+    if turn_index < 1:
+        raise ValueError("turn_index must be a 1-based turn number")
+    try:
+        conversation_data = branch_conversation(
+            conversation_id, turn_index, user_id=user_id
+        )
+        if conversation_data is None:
+            raise ConversationNotFoundError(
+                "Conversation does not exist or has been deleted"
+            )
+        return conversation_data
+    except (AppException, ConversationNotFoundError, ValueError):
+        raise
+    except Exception as e:
+        logging.error(f"Failed to branch conversation: {str(e)}")
         raise Exception(str(e))
 
 

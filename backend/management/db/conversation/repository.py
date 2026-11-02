@@ -423,6 +423,320 @@ def create_message_units(message_units: List[Dict[str, Any]], message_id: int, c
         return unit_ids
 
 
+# Title suffix appended to branched conversations; also stripped before
+# re-appending so branching a branch does not stack suffixes.
+BRANCH_TITLE_SUFFIX = "（分支）"
+CONVERSATION_TITLE_MAX_LENGTH = 100
+
+
+def _build_branch_title(source_title: Optional[str]) -> str:
+    """Compose the branched conversation title within the column length."""
+    base = (source_title or "").strip()
+    if base.endswith(BRANCH_TITLE_SUFFIX):
+        base = base[: -len(BRANCH_TITLE_SUFFIX)]
+    keep = CONVERSATION_TITLE_MAX_LENGTH - len(BRANCH_TITLE_SUFFIX)
+    if len(base) > keep:
+        base = base[:keep]
+    return f"{base}{BRANCH_TITLE_SUFFIX}"
+
+
+def _select_active_branch_rows(rows: Sequence[ConversationMessage]) -> List[ConversationMessage]:
+    """Collapse rows sharing a message_index to the newest (active) row.
+
+    Refresh flows may re-insert a user row with the same index and regenerated
+    answers append new assistant rows with the index of the previous attempt;
+    in both cases the row with the highest message_id is the active one.
+    """
+    active_by_index: Dict[int, ConversationMessage] = {}
+    for row in rows:
+        active_by_index[int(row.message_index)] = row
+    return [active_by_index[index] for index in sorted(active_by_index)]
+
+
+def _select_branch_turn_rows(
+    active_rows: Sequence[ConversationMessage],
+    turn_index: int,
+) -> List[ConversationMessage]:
+    """Return the active rows up to and including the requested turn's answer.
+
+    ``turn_index`` is 1-based over the active user rows in message_index order.
+    The copied tail keeps rows that follow the boundary user row until the
+    first assistant row (inclusive), so system/tool rows inside the turn and
+    the current answer are carried over while later turns stay behind.
+    """
+    boundary_position = None
+    user_seen = 0
+    for position, row in enumerate(active_rows):
+        if row.message_role == MESSAGE_ROLE["USER"]:
+            user_seen += 1
+            if user_seen == turn_index:
+                boundary_position = position
+                break
+    if boundary_position is None:
+        raise ValueError(
+            f"turn_index {turn_index} exceeds the {user_seen} turns in the conversation"
+        )
+
+    branch_rows = list(active_rows[: boundary_position + 1])
+    for row in active_rows[boundary_position + 1:]:
+        if row.message_role == MESSAGE_ROLE["USER"]:
+            break
+        branch_rows.append(row)
+        if row.message_role == MESSAGE_ROLE["ASSISTANT"]:
+            break
+    return branch_rows
+
+
+def branch_conversation(
+    conversation_id: int,
+    turn_index: int,
+    user_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Branch a conversation into a new one up to and including the given turn.
+
+    Copies conversation-level configuration plus the active messages, units and
+    search/image sources of every turn up to and including ``turn_index``
+    (1-based over active user rows). MinIO file references inside
+    ``minio_files`` are shared, not copied; the original conversation and its
+    rows stay untouched.
+
+    Args:
+        conversation_id: Source conversation ID (integer)
+        turn_index: 1-based Q&A turn (inclusive) marking the branch point
+        user_id: User that must own the source conversation
+
+    Returns:
+        Optional[Dict[str, Any]]: New conversation data, or None when the
+        source conversation does not exist or is not accessible
+    """
+    conversation_id = int(conversation_id)
+    turn_index = int(turn_index)
+    if turn_index < 1:
+        raise ValueError("turn_index must be a 1-based turn number")
+
+    with get_db_session() as session:
+        # Take the user-quota advisory lock before any row lock so the lock
+        # ordering matches create_conversation (advisory -> row).
+        _enforce_user_conversation_limit(session, user_id)
+
+        conversation = session.scalars(
+            select(ConversationRecord)
+            .where(
+                ConversationRecord.conversation_id == conversation_id,
+                ConversationRecord.delete_flag == "N",
+                *([ConversationRecord.created_by == user_id] if user_id else []),
+            )
+            .with_for_update()
+        ).first()
+        if conversation is None:
+            return None
+
+        message_rows = session.scalars(
+            select(ConversationMessage)
+            .where(
+                ConversationMessage.conversation_id == conversation_id,
+                ConversationMessage.delete_flag == "N",
+            )
+            .order_by(asc(ConversationMessage.message_index), asc(ConversationMessage.message_id))
+            .with_for_update()
+        ).all()
+
+        active_rows = _select_active_branch_rows(message_rows)
+        branch_rows = _select_branch_turn_rows(active_rows, turn_index)
+
+        conversation_data = {
+            "conversation_title": _build_branch_title(conversation.conversation_title),
+            "delete_flag": "N",
+            "agent_id": conversation.agent_id,
+            "chat_mode": conversation.chat_mode,
+            "knowledge_scope": deepcopy(conversation.knowledge_scope),
+            "runtime_metadata": deepcopy(conversation.runtime_metadata) or {},
+            "runtime_metadata_version": 1,
+            "workbench_config": deepcopy(conversation.workbench_config),
+            "workbench_config_version": 1,
+        }
+        if user_id:
+            conversation_data = add_creation_tracking(conversation_data, user_id)
+
+        new_conversation = session.execute(
+            insert(ConversationRecord)
+            .values(**conversation_data)
+            .returning(
+                ConversationRecord.conversation_id,
+                ConversationRecord.conversation_title,
+                ConversationRecord.agent_id,
+                ConversationRecord.chat_mode,
+                ConversationRecord.knowledge_scope,
+                ConversationRecord.runtime_metadata,
+                ConversationRecord.runtime_metadata_version,
+                _optional_conversation_column("workbench_config", None),
+                _optional_conversation_column("workbench_config_version", 0),
+                (func.extract("epoch", ConversationRecord.create_time) * 1000).label("create_time"),
+                (func.extract("epoch", ConversationRecord.update_time) * 1000).label("update_time"),
+            )
+        ).fetchone()
+
+        new_conversation_id = int(new_conversation.conversation_id)
+        branch_message_ids = [int(row.message_id) for row in branch_rows]
+
+        units_by_message: Dict[int, List[ConversationMessageUnit]] = {}
+        searches_by_message: Dict[int, List[ConversationSourceSearch]] = {}
+        images_by_message: Dict[int, List[ConversationSourceImage]] = {}
+        if branch_message_ids:
+            for unit in session.scalars(
+                select(ConversationMessageUnit)
+                .where(
+                    ConversationMessageUnit.message_id.in_(branch_message_ids),
+                    ConversationMessageUnit.delete_flag == "N",
+                )
+                .order_by(asc(ConversationMessageUnit.message_id), asc(ConversationMessageUnit.unit_index))
+            ).all():
+                units_by_message.setdefault(int(unit.message_id), []).append(unit)
+
+            for search in session.scalars(
+                select(ConversationSourceSearch).where(
+                    ConversationSourceSearch.message_id.in_(branch_message_ids),
+                    ConversationSourceSearch.delete_flag == "N",
+                )
+            ).all():
+                searches_by_message.setdefault(int(search.message_id), []).append(search)
+
+            for image in session.scalars(
+                select(ConversationSourceImage).where(
+                    ConversationSourceImage.message_id.in_(branch_message_ids),
+                    ConversationSourceImage.delete_flag == "N",
+                )
+            ).all():
+                images_by_message.setdefault(int(image.message_id), []).append(image)
+
+        copied_unit_ids = {
+            int(unit.unit_id)
+            for units in units_by_message.values()
+            for unit in units
+        }
+
+        message_id_map: Dict[int, int] = {}
+        for row in branch_rows:
+            # opinion_flag is intentionally not copied: user feedback stays
+            # attached to the original conversation's messages.
+            message_data = {
+                "conversation_id": new_conversation_id,
+                "message_index": row.message_index,
+                "message_role": row.message_role,
+                "message_source": row.message_source or MessageSource.CHAT.value,
+                "message_content": row.message_content,
+                "minio_files": row.minio_files,
+                "status": row.status or "completed",
+                "delete_flag": "N",
+            }
+            if user_id:
+                message_data = add_creation_tracking(message_data, user_id)
+            message_id_map[int(row.message_id)] = int(
+                session.execute(
+                    insert(ConversationMessage)
+                    .values(**message_data)
+                    .returning(ConversationMessage.message_id)
+                ).scalar_one()
+            )
+
+        unit_id_map: Dict[int, int] = {}
+        for old_message_id, units in units_by_message.items():
+            for unit in units:
+                unit_data = {
+                    "message_id": message_id_map[old_message_id],
+                    "conversation_id": new_conversation_id,
+                    "unit_index": unit.unit_index,
+                    "unit_type": unit.unit_type,
+                    "unit_content": unit.unit_content,
+                    "unit_status": unit.unit_status or "completed",
+                    "tool_call_id": unit.tool_call_id,
+                    "invocation_id": unit.invocation_id,
+                    "delete_flag": "N",
+                }
+                if user_id:
+                    unit_data = add_creation_tracking(unit_data, user_id)
+                unit_id_map[int(unit.unit_id)] = int(
+                    session.execute(
+                        insert(ConversationMessageUnit)
+                        .values(**unit_data)
+                        .returning(ConversationMessageUnit.unit_id)
+                    ).scalar_one()
+                )
+
+        for old_message_id, searches in searches_by_message.items():
+            for search in searches:
+                search_data = {
+                    "message_id": message_id_map[old_message_id],
+                    "conversation_id": new_conversation_id,
+                    "unit_id": (
+                        unit_id_map.get(int(search.unit_id))
+                        if search.unit_id is not None and int(search.unit_id) in copied_unit_ids
+                        else None
+                    ),
+                    "source_type": search.source_type,
+                    "source_title": search.source_title,
+                    "source_location": search.source_location,
+                    "source_content": search.source_content,
+                    "score_overall": search.score_overall,
+                    "score_accuracy": search.score_accuracy,
+                    "score_semantic": search.score_semantic,
+                    "retrieval_highlight_terms": search.retrieval_highlight_terms,
+                    "aidp_metadata": search.aidp_metadata,
+                    "aidp_source_reference": search.aidp_source_reference,
+                    "published_date": search.published_date,
+                    "cite_index": search.cite_index,
+                    "search_type": search.search_type,
+                    "tool_sign": search.tool_sign,
+                    "delete_flag": "N",
+                }
+                if user_id:
+                    search_data = add_creation_tracking(search_data, user_id)
+                session.execute(insert(ConversationSourceSearch).values(**search_data))
+
+        for old_message_id, images in images_by_message.items():
+            for image in images:
+                image_data = {
+                    "message_id": message_id_map[old_message_id],
+                    "conversation_id": new_conversation_id,
+                    "unit_id": (
+                        unit_id_map.get(int(image.unit_id))
+                        if image.unit_id is not None and int(image.unit_id) in copied_unit_ids
+                        else None
+                    ),
+                    "image_url": image.image_url,
+                    "cite_index": image.cite_index,
+                    "search_type": image.search_type,
+                    "delete_flag": "N",
+                }
+                if user_id:
+                    image_data = add_creation_tracking(image_data, user_id)
+                session.execute(insert(ConversationSourceImage).values(**image_data))
+
+        return {
+            "conversation_id": new_conversation_id,
+            "conversation_title": new_conversation.conversation_title,
+            "agent_id": new_conversation.agent_id,
+            "chat_mode": new_conversation.chat_mode or "execution",
+            "knowledge_scope": new_conversation.knowledge_scope,
+            "runtime_metadata": new_conversation.runtime_metadata or {},
+            "runtime_metadata_version": new_conversation.runtime_metadata_version or 0,
+            "workbench_config": (
+                new_conversation.workbench_config
+                if isinstance(getattr(new_conversation, "workbench_config", None), dict)
+                else None
+            ),
+            "workbench_config_version": (
+                new_conversation.workbench_config_version
+                if isinstance(getattr(new_conversation, "workbench_config_version", None), int)
+                else 0
+            ),
+            "create_time": int(new_conversation.create_time),
+            "update_time": int(new_conversation.update_time),
+            "branched_message_count": len(branch_rows),
+        }
+
+
 def persist_assistant_run_batch(
     message_id: int,
     conversation_id: int,

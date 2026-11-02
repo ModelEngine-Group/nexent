@@ -199,6 +199,10 @@ import { useConversationShare } from "./use-conversation-share";
 import { ConversationShareContext } from "./conversation-share-context";
 import { ConversationShareFooter } from "./conversation-share-footer";
 import { ConversationShareMenuItem } from "./conversation-share-menu-item";
+import { ConversationBranchContext } from "./conversation-branch-context";
+import { ConversationBranchMenuItem } from "./conversation-branch-menu-item";
+import { computeBranchTurnIndex } from "../utils/conversation-branch";
+import { conversationService } from "@/services/conversationService";
 import type {
   ConversationKnowledgeScope,
   KnowledgeCapabilities,
@@ -398,6 +402,48 @@ export const Thread: FC<ThreadProps> = ({
     readOnly,
   });
 
+  const aui = useAui();
+  const [isBranching, setIsBranching] = useState(false);
+  const branchDisabled =
+    !conversationId || readOnly || isRunning || isLoading || isBranching;
+
+  // Branch the conversation into a new chat that keeps every turn up to and
+  // including the one the selected assistant message answers, then switch to
+  // the branched thread. The original conversation stays untouched.
+  const branchFromMessage = useCallback(
+    (assistantMessageId: string) => {
+      if (!conversationId || branchDisabled) return;
+      const turnIndex = computeBranchTurnIndex(messages, assistantMessageId);
+      if (turnIndex === null) {
+        message.error(t("chat.thread.branchConversationFailed"));
+        return;
+      }
+      setIsBranching(true);
+      conversationService
+        .branch(conversationId, turnIndex)
+        .then(async (data) => {
+          const newConversationId = Number(data?.conversation_id);
+          if (!Number.isInteger(newConversationId) || newConversationId <= 0) {
+            throw new Error("Invalid branch response");
+          }
+          await aui.threads.switchToThread(String(newConversationId));
+          await aui.threads.reload();
+          message.success(t("chat.thread.branchConversationSuccess"));
+        })
+        .catch((error) => {
+          log.error("[Thread] Failed to branch conversation:", error);
+          message.error(t("chat.thread.branchConversationFailed"));
+        })
+        .finally(() => setIsBranching(false));
+    },
+    [aui, branchDisabled, conversationId, messages, t]
+  );
+
+  const branchContextValue = useMemo(
+    () => ({ disabled: branchDisabled, branchFromMessage }),
+    [branchDisabled, branchFromMessage]
+  );
+
   // Sources panel state lives at the Thread level so the right-hand panel and
   // each `group-source` button share a single source of truth. The selection
   // carries the snapshot of sources/images for the group that opened it,
@@ -436,139 +482,141 @@ export const Thread: FC<ThreadProps> = ({
     <ConversationShareContext.Provider
       value={{ disabled: shareDisabled, shareTurn: enterShareMode }}
     >
-      <SourcesPanelProvider value={panelContextValue}>
-        <ThreadView
-          agent={agent}
-          welcomeTitle={welcomeTitle}
-          welcomeSuggestions={welcomeSuggestions}
-          welcomeContent={welcomeContent}
-          onBack={onBack}
-          models={models}
-          selectedModelId={modelIsValid ? effectiveSelectedModelId : ""}
-          onModelChange={handleModelChange}
-          deepThinking={deepThinking ?? controls.deepThinking}
-          onDeepThinkingChange={
-            onDeepThinkingChange ?? controls.onDeepThinkingChange
-          }
-          thinkingEffort={thinkingEffort ?? controls.thinkingEffort}
-          onThinkingEffortChange={
-            onThinkingEffortChange ?? controls.onThinkingEffortChange
-          }
-          reasoningBudgetTokens={
-            reasoningBudgetTokens ?? controls.reasoningBudgetTokens
-          }
-          onReasoningBudgetTokensChange={
-            onReasoningBudgetTokensChange ??
-            controls.onReasoningBudgetTokensChange
-          }
-          chatMode={chatMode}
-          onChatModeChange={onChatModeChange}
-          showModelSelector={showModelSelector}
-          modelParameterSettings={
-            modelParameterSettings ?? controls.modelParameterSettings
-          }
-          showConversationTitle={showConversationTitle}
-          composerTools={composerTools}
-          knowledgeScope={knowledgeScope}
-          knowledgePreview={knowledgePreview}
-          knowledgeCapabilities={knowledgeCapabilities}
-          onKnowledgeScopeChange={onKnowledgeScopeChange}
-          variant={variant}
-          skillFiles={skillFiles}
-          onSkillFileSelect={onSkillFileSelect}
-          runtimeMetadata={runtimeMetadata}
-          onRuntimeMetadataChange={onRuntimeMetadataChange}
-          readOnly={readOnly || (showModelSelector && !modelIsValid)}
-          modelSelectionDisabled={readOnly}
-          readOnlyReason={readOnlyReason}
-          showComposer={showComposer}
-          configurationLayout={configurationLayout}
-          debugLayout={debugLayout}
-          emptyFooterContent={emptyFooterContent}
-          footerContent={footerContent}
-          interactionContent={interactionContent}
-          workbenchPresentation={workbenchPresentation}
-          workbenchResources={workbenchResources}
-          onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
-          onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
-          hasMessages={hasMessages}
-          displayName={displayName}
-          conversationTitle={conversationTitle}
-          conversationId={conversationId}
-          newChatDesign={newChatDesign}
-          isRunning={isRunning}
-          isShareMode={isShareMode}
-          selectedShareMessageIds={selectedShareMessageIds}
-          backendMessageIdsByAuiId={backendMessageIdsByAuiId}
-          isCreatingShare={isCreatingShare}
-          onEnterShareMode={() => void enterShareMode()}
-          onLeaveShareMode={leaveShareMode}
-          onToggleShareAll={toggleShareAll}
-          onToggleShareMessage={toggleShareMessage}
-          onCreateShare={createShare}
-          selection={selection}
-          onPanelClose={close}
-          conversationArtifacts={conversationArtifacts}
-          artifactsOpen={artifactsOpen}
-          onArtifactsOpenChange={setArtifactsOpen}
-          questionDirectory={questionDirectory}
-        />
-        <Dialog
-          open={Boolean(manualShareUrl)}
-          onOpenChange={(open) => !open && setManualShareUrl(null)}
-        >
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>
-                {t("chatInterface.shareLinkReady", "分享链接已生成")}
-              </DialogTitle>
-              <DialogDescription>
-                {t(
-                  "chatInterface.shareCreatedCopyFailed",
-                  "分享链接已创建，但当前环境无法自动复制"
-                )}
-              </DialogDescription>
-            </DialogHeader>
-            <input
-              value={manualShareUrl ?? ""}
-              readOnly
-              onFocus={(event) => event.currentTarget.select()}
-              className="w-full rounded-md border bg-muted/30 px-3 py-2 text-sm"
-            />
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setManualShareUrl(null)}
-              >
-                {t("common.close", "关闭")}
-              </Button>
-              <Button
-                type="button"
-                onClick={async () => {
-                  if (!manualShareUrl) return;
-                  try {
-                    await copyToClipboard(manualShareUrl);
-                    message.success(
-                      t("chatInterface.shareLinkCopied", "分享链接已复制")
-                    );
-                    setManualShareUrl(null);
-                  } catch {
-                    message.warning(
-                      t(
-                        "chatInterface.shareManualCopyRequired",
-                        "请手动复制链接"
-                      )
-                    );
-                  }
-                }}
-              >
-                {t("chatInterface.copyShareLink", "复制链接")}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </SourcesPanelProvider>
+      <ConversationBranchContext.Provider value={branchContextValue}>
+        <SourcesPanelProvider value={panelContextValue}>
+          <ThreadView
+            agent={agent}
+            welcomeTitle={welcomeTitle}
+            welcomeSuggestions={welcomeSuggestions}
+            welcomeContent={welcomeContent}
+            onBack={onBack}
+            models={models}
+            selectedModelId={modelIsValid ? effectiveSelectedModelId : ""}
+            onModelChange={handleModelChange}
+            deepThinking={deepThinking ?? controls.deepThinking}
+            onDeepThinkingChange={
+              onDeepThinkingChange ?? controls.onDeepThinkingChange
+            }
+            thinkingEffort={thinkingEffort ?? controls.thinkingEffort}
+            onThinkingEffortChange={
+              onThinkingEffortChange ?? controls.onThinkingEffortChange
+            }
+            reasoningBudgetTokens={
+              reasoningBudgetTokens ?? controls.reasoningBudgetTokens
+            }
+            onReasoningBudgetTokensChange={
+              onReasoningBudgetTokensChange ??
+              controls.onReasoningBudgetTokensChange
+            }
+            chatMode={chatMode}
+            onChatModeChange={onChatModeChange}
+            showModelSelector={showModelSelector}
+            modelParameterSettings={
+              modelParameterSettings ?? controls.modelParameterSettings
+            }
+            showConversationTitle={showConversationTitle}
+            composerTools={composerTools}
+            knowledgeScope={knowledgeScope}
+            knowledgePreview={knowledgePreview}
+            knowledgeCapabilities={knowledgeCapabilities}
+            onKnowledgeScopeChange={onKnowledgeScopeChange}
+            variant={variant}
+            skillFiles={skillFiles}
+            onSkillFileSelect={onSkillFileSelect}
+            runtimeMetadata={runtimeMetadata}
+            onRuntimeMetadataChange={onRuntimeMetadataChange}
+            readOnly={readOnly || (showModelSelector && !modelIsValid)}
+            modelSelectionDisabled={readOnly}
+            readOnlyReason={readOnlyReason}
+            showComposer={showComposer}
+            configurationLayout={configurationLayout}
+            debugLayout={debugLayout}
+            emptyFooterContent={emptyFooterContent}
+            footerContent={footerContent}
+            interactionContent={interactionContent}
+            workbenchPresentation={workbenchPresentation}
+            workbenchResources={workbenchResources}
+            onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
+            onOpenWorkbenchSkillPicker={onOpenWorkbenchSkillPicker}
+            hasMessages={hasMessages}
+            displayName={displayName}
+            conversationTitle={conversationTitle}
+            conversationId={conversationId}
+            newChatDesign={newChatDesign}
+            isRunning={isRunning}
+            isShareMode={isShareMode}
+            selectedShareMessageIds={selectedShareMessageIds}
+            backendMessageIdsByAuiId={backendMessageIdsByAuiId}
+            isCreatingShare={isCreatingShare}
+            onEnterShareMode={() => void enterShareMode()}
+            onLeaveShareMode={leaveShareMode}
+            onToggleShareAll={toggleShareAll}
+            onToggleShareMessage={toggleShareMessage}
+            onCreateShare={createShare}
+            selection={selection}
+            onPanelClose={close}
+            conversationArtifacts={conversationArtifacts}
+            artifactsOpen={artifactsOpen}
+            onArtifactsOpenChange={setArtifactsOpen}
+            questionDirectory={questionDirectory}
+          />
+          <Dialog
+            open={Boolean(manualShareUrl)}
+            onOpenChange={(open) => !open && setManualShareUrl(null)}
+          >
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>
+                  {t("chatInterface.shareLinkReady", "分享链接已生成")}
+                </DialogTitle>
+                <DialogDescription>
+                  {t(
+                    "chatInterface.shareCreatedCopyFailed",
+                    "分享链接已创建，但当前环境无法自动复制"
+                  )}
+                </DialogDescription>
+              </DialogHeader>
+              <input
+                value={manualShareUrl ?? ""}
+                readOnly
+                onFocus={(event) => event.currentTarget.select()}
+                className="w-full rounded-md border bg-muted/30 px-3 py-2 text-sm"
+              />
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setManualShareUrl(null)}
+                >
+                  {t("common.close", "关闭")}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={async () => {
+                    if (!manualShareUrl) return;
+                    try {
+                      await copyToClipboard(manualShareUrl);
+                      message.success(
+                        t("chatInterface.shareLinkCopied", "分享链接已复制")
+                      );
+                      setManualShareUrl(null);
+                    } catch {
+                      message.warning(
+                        t(
+                          "chatInterface.shareManualCopyRequired",
+                          "请手动复制链接"
+                        )
+                      );
+                    }
+                  }}
+                >
+                  {t("chatInterface.copyShareLink", "复制链接")}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </SourcesPanelProvider>
+      </ConversationBranchContext.Provider>
     </ConversationShareContext.Provider>
   );
 };
@@ -1856,6 +1904,7 @@ const AssistantActionBar: FC = () => {
             className="aui-action-bar-more-content bg-popover/95 text-popover-foreground data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[state=open]:animate-in data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=closed]:animate-out data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 min-w-[8rem] overflow-hidden rounded-xl border p-1.5 shadow-lg backdrop-blur-sm"
           >
             <ConversationShareMenuItem />
+            <ConversationBranchMenuItem />
             <ActionBarPrimitive.ExportMarkdown asChild>
               <ActionBarMorePrimitive.Item className="aui-action-bar-more-item hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-sm outline-none select-none">
                 <DownloadIcon className="size-4" />

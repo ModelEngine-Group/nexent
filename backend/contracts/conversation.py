@@ -92,6 +92,12 @@ class RenameRequest(BaseModel):
     only_if_default_title: bool = False
 
 
+class BranchConversationRequest(BaseModel):
+    conversation_id: int
+    # 1-based Q&A turn (inclusive) that marks the branch point
+    turn_index: int
+
+
 class BatchDeleteConversationRequest(BaseModel):
     conversation_ids: List[int]
 

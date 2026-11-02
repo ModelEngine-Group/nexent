@@ -1,0 +1,73 @@
+schema_version: "1.0"
+change:
+  change_id: BRANCH-CONVERSATION-TO-NEW-CHAT-20261102
+  change_type: requirement
+  requirement_id: BRANCH-CONVERSATION-TO-NEW-CHAT-20261102
+  title: 会话分支到新聊天
+  description:
+    'Add a "branch to new chat" action on the assistant message "..." menu.
+    Branching creates a new conversation that copies the conversation-level
+    configuration (agent, chat mode, knowledge scope, runtime metadata,
+    workbench config) plus every message, message unit, search source, and
+    image source of all turns up to and including the selected answer (the
+    question is included). The new conversation title reuses the original
+    title suffixed with "（分支）" (suffix never stacks, truncated to the
+    100-char column). The original conversation and its MinIO file
+    references stay untouched (branch shares file references instead of
+    copying objects). After branching, the client switches to the new
+    conversation thread and refreshes the thread list. User feedback
+    (like/dislike) is not carried over. The action is unavailable while a
+    run streams, while loading, in read-only contexts, or before the
+    backend conversation id exists.'
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+      - test/backend/database/test_conversation_branch_db.py
+      - test/backend/services/test_conversation_management_service.py
+      - test/backend/app/test_conversation_management_app.py
+      - frontend/tests/component/conversationBranch.test.tsx
+    behaviors:
+      - repository branch_conversation takes the user-quota advisory lock
+        before row locks, rejects non-positive or out-of-range turn indexes,
+        collapses same-index rows to the newest (refresh duplicates and
+        regenerated answers), copies the active rows through the boundary
+        turn including its first assistant answer, remaps message/unit/search
+       /image foreign keys to the new rows, keeps opinion feedback and later
+        turns out, and never stacks or over-lengthens the title suffix.
+      - branch_conversation_service returns the repository payload, maps a
+        missing conversation to ConversationNotFoundError, rejects non-positive
+        turn indexes with ValueError, and wraps unexpected repository failures.
+      - POST /conversation/branch maps invalid turns to 400, missing
+        conversations to 404, expired sessions to 401, unexpected errors to
+        500, and returns the new conversation payload on success.
+      - computeBranchTurnIndex derives the 1-based turn number of the selected
+        answer (counting user messages up to its position) and returns null
+        for unknown ids or answers without a preceding question.
+      - ConversationBranchMenuItem renders the localized label, forwards the
+        aui message id to the branch handler, reflects the disabled state,
+        and renders nothing without the branch context.
+    reason: |-
+      The feature crosses app/service/database layers but each boundary is
+      already exercised through the existing conversation-management suites;
+      the targeted UT covers the new unit behavior (turn boundary selection,
+      dedup collapse, remapping, error mapping, menu wiring) at its owning
+      layer. No new external protocol or cross-component runtime contract is
+      introduced, so no formal Case is added.
+  notes: |
+    Core scope confirmed by the user (branch point includes the selected
+    Q&A pair, entry point is the assistant message "..." menu only, the
+    branched title keeps only a "（分支）" suffix, and the original
+    conversation is never modified). Turn counting aligns the frontend
+    (user messages up to the selected answer) with the backend (active
+    user rows in message_index order), so no message-id mapping request is
+    needed.

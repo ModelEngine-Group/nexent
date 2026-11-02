@@ -66,6 +66,7 @@ export const API_ENDPOINTS = {
     create: `${API_BASE_URL}/conversation/create`,
     save: `${API_BASE_URL}/conversation/save`,
     rename: `${API_BASE_URL}/conversation/rename`,
+    branch: `${API_BASE_URL}/conversation/branch`,
     detail: (id: number) => `${API_BASE_URL}/conversation/${id}`,
     knowledgeScope: (id: number) =>
       `${API_BASE_URL}/conversation/${id}/knowledge-scope`,
