@@ -42,4 +42,4 @@ owner = "combination"
 schema = {"type" = "integer", "minimum" = 0, "maximum" = 262144}
 source = {"ref" = "alibaba_cn_qwen3_8_max_controls_v1", "version" = 1, "evidence" = "https://help.aliyun.com/zh/model-studio/deep-thinking; pinned models.dev providers/alibaba-cn/models/qwen3.8-max.toml and provider.toml; reviewed 2026-10-16"}
 api_binding = {"path" = "/thinking_budget", "transform_ref" = "identity_v1", "transform_version" = 1}
-condition = {key = "enable_thinking", op = "eq", value = true}
+condition = {all = [{key = "enable_thinking", op = "eq", value = true}, {key = "reasoning_effort", op = "exists", value = false}]}
