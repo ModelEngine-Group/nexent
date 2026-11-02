@@ -1359,7 +1359,7 @@ assert_not_contains "$DEPLOYMENT_SELECTED_DOCKER_SERVICES" "kong" "legacy input 
 mkdir -p "$TMP_DIR/auto-auth-bin"
 cat > "$TMP_DIR/auto-auth-bin/python3" <<'PYTHON'
 #!/usr/bin/env bash
-if [ "${1:-}" = -c ]; then exit 0; fi
+if [ "${1:-}" = -c ]; then printf '%s\n' "${AUTH_TEST_PLATFORM:-linux}"; exit 0; fi
 printf '%s\n' "$@" > "$AUTH_HOOK_ARGUMENTS"
 printf '%s\n' "$MSYS_NO_PATHCONV/$MSYS2_ARG_CONV_EXCL" >> "$AUTH_HOOK_ARGUMENTS"
 PYTHON
@@ -1374,5 +1374,20 @@ assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate_k8s.py" "Kubernetes dep
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "apply hook must commit the import"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "custom-namespace" "Kubernetes hook must preserve the namespace"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "1/*" "Git Bash must not rewrite container paths"
+
+cat > "$TMP_DIR/auto-auth-bin/cygpath" <<'CYGPATH'
+#!/usr/bin/env bash
+[ "$1" = -m ] || exit 1
+printf 'C:%s\n' "$2"
+CYGPATH
+chmod +x "$TMP_DIR/auto-auth-bin/cygpath"
+export AUTH_TEST_PLATFORM=win32
+PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts prepare docker
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "C:$DEPLOYMENT_ROOT_ENV" "Windows Python must receive a native env-file path"
+assert_contains "$(head -n 1 "$AUTH_HOOK_ARGUMENTS")" "C:" "Windows Python must receive a native script path"
+PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts apply kubernetes custom-namespace
+assert_contains "$(head -n 1 "$AUTH_HOOK_ARGUMENTS")" "migrate_k8s.py" "Kubernetes host script must also use native path conversion"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "1/*" "native host conversion must preserve disabled automatic path rewriting"
+unset AUTH_TEST_PLATFORM
 
 echo "All deployment common tests passed."

@@ -546,14 +546,14 @@ deployment_upgrade_local_accounts() {
   local mode="$2"
   local namespace="${3:-nexent}"
   local interpreter=""
-  local common_dir script candidate
+  local common_dir script candidate interpreter_platform env_file
   common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   script="$common_dir/../sql/tools/supabase_to_postgres/migrate_docker.py"
   if [ "$mode" = kubernetes ]; then
     script="$common_dir/../sql/tools/supabase_to_postgres/migrate_k8s.py"
   fi
   for candidate in python3 python; do
-    if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+    if command -v "$candidate" >/dev/null 2>&1 && interpreter_platform="$("$candidate" -c 'import sys; sys.exit(1) if sys.version_info < (3, 8) else None; print(sys.platform)' 2>/dev/null)"; then
       interpreter="$candidate"
       break
     fi
@@ -562,8 +562,17 @@ deployment_upgrade_local_accounts() {
     echo "ERROR: Python 3.8+ is required on the deployment host for automatic account upgrade." >&2
     return 1
   fi
+  env_file="${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}"
+  if [ "$interpreter_platform" = win32 ]; then
+    if ! command -v cygpath >/dev/null 2>&1; then
+      echo "ERROR: cygpath is required to pass host paths to Windows Python." >&2
+      return 1
+    fi
+    script="$(cygpath -m "$script")" || return 1
+    env_file="$(cygpath -m "$env_file")" || return 1
+  fi
   local -a arguments=(--deploy-phase "$phase" --deployment "$mode" --namespace "$namespace"
-    --env-file "${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}" --wait-timeout 300)
+    --env-file "$env_file" --wait-timeout 300)
   if [ "$phase" = apply ]; then
     arguments+=(--apply)
   fi
