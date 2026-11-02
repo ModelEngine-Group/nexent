@@ -4,14 +4,14 @@
 
 from copy import deepcopy
 
-from contracts.errors.exceptions import ConversationNotFoundError, ModelOutletConflictError, ModelOutletValidationError
+from contracts.errors.exceptions import ConversationNotFoundError, ModelOutletValidationError
 from sqlalchemy import func, select
 
 from management.db.client import get_db_session
 from management.db.models import ConversationRecord
 
 
-def model_preferences(conversation_id, user_id, *, expected_version=None, outlet_id=None, resolve_values=None, selected_model_id=None):
+def model_preferences(conversation_id, user_id, *, outlet_id=None, resolve_values=None, selected_model_id=None):
     """Read or atomically patch user-owned preferences in the existing conversation row."""
     with get_db_session() as session:
         statement = select(ConversationRecord).where(ConversationRecord.conversation_id == conversation_id,
@@ -22,14 +22,11 @@ def model_preferences(conversation_id, user_id, *, expected_version=None, outlet
         record = session.scalars(statement).first()
         if record is None:
             raise ConversationNotFoundError("Conversation not found")
-        version = int(record.model_parameter_preferences_version or 0)
         preferences = deepcopy({} if record.model_parameter_preferences is None
                                else record.model_parameter_preferences)
         if not isinstance(preferences, dict):
             raise ModelOutletValidationError("CONVERSATION_PREFERENCES_INVALID")
         if updating:
-            if type(expected_version) is not int or expected_version != version:
-                raise ModelOutletConflictError()
             if selected_model_id is not None:
                 record.selected_model_id = selected_model_id
             else:
@@ -39,11 +36,9 @@ def model_preferences(conversation_id, user_id, *, expected_version=None, outlet
                     preferences[key] = values
                 else:
                     preferences.pop(key, None)
-            version += 1
             record.model_parameter_preferences = preferences
-            record.model_parameter_preferences_version = version
             record.updated_by = user_id
             record.update_time = func.current_timestamp()
             session.flush()
-        return {"model_parameter_preferences": preferences, "version": version,
+        return {"model_parameter_preferences": preferences,
                 "selected_model_id": getattr(record, "selected_model_id", None)}

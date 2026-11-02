@@ -67,8 +67,7 @@ def patch_model_preferences(conversation_id, outlet_id, request, user_id, tenant
         merge_model_preferences(profile, updated)
         return updated
 
-    return model_preferences(conversation_id, user_id, expected_version=request.expected_version,
-        outlet_id=outlet_id, resolve_values=resolve)
+    return model_preferences(conversation_id, user_id, outlet_id=outlet_id, resolve_values=resolve)
 
 
 def read_model_preference_view(conversation_id, outlet_id, user_id, tenant_id):
@@ -88,7 +87,7 @@ def read_model_preference_view(conversation_id, outlet_id, user_id, tenant_id):
         merge_model_preferences(profile, values)
     except ModelOutletValidationError as error:
         issues.append({"category": error.category, "field": error.path})
-    return {"version": saved["version"], "parameter_values": values, "defaults": profile.parameter_values,
+    return {"parameter_values": values, "defaults": profile.parameter_values,
             "output_limit": profile.capabilities.context.output_limit,
             "field_specs": profile.parameter_rules, "config_revision": profile.config_revision, "issues": issues}
 
@@ -121,7 +120,7 @@ def validate_model_preferences(preferences, tenant_id, *, allowed_model_ids=None
 
 
 def patch_model_selection(conversation_id, request, user_id, tenant_id):
-    """Both Agent chat modes save selection through the same ownership and CAS path."""
+    """Both Agent chat modes save selection through the same ownership and row-lock path."""
     from types import SimpleNamespace
     from contracts.errors.exceptions import ConversationNotFoundError
     from management.db.agent.repository import search_agent_info_by_agent_id
@@ -137,5 +136,4 @@ def patch_model_selection(conversation_id, request, user_id, tenant_id):
         entrypoint="workbench" if workbench else None, is_debug=False,
         agent_id=conversation.get("agent_id"), version_no=None)
     validate_agent_model_selection(selection, tenant_id, search_agent_info_by_agent_id)
-    return model_preferences(conversation_id, user_id, expected_version=request.expected_version,
-        selected_model_id=request.selected_model_id)
+    return model_preferences(conversation_id, user_id, selected_model_id=request.selected_model_id)

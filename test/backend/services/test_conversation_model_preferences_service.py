@@ -68,18 +68,17 @@ def persistence(monkeypatch, profile):
 
 def test_patch_updates_only_explicit_values_and_preserves_other_outlet_preferences(persistence):
     store, _ = persistence
-    request = ConversationModelPreferencePatch(expected_version=4, parameter_values={"temperature": 0})
+    request = ConversationModelPreferencePatch(parameter_values={"temperature": 0})
     service.patch_model_preferences(1, 42, request, "owner", "tenant")
     args = store.call_args
-    assert args.args == (1, "owner") and args.kwargs["expected_version"] == 4
+    assert args.args == (1, "owner") and "expected_version" not in args.kwargs
     assert args.kwargs["outlet_id"] == 42
     assert args.kwargs["resolve_values"]({"max_output_tokens": 100}) == {"temperature": 0}
 
 
 def test_explicit_delete_removes_an_invalid_old_key_without_modifying_outlet(persistence):
     store, _ = persistence
-    service.patch_model_preferences(1, 42, ConversationModelPreferencePatch(expected_version=4,
-        delete_parameters=["retired"]), "owner", "tenant")
+    service.patch_model_preferences(1, 42, ConversationModelPreferencePatch(delete_parameters=["retired"]), "owner", "tenant")
     assert store.call_args.kwargs["resolve_values"]({"retired": True}) == {}
 
 
@@ -88,7 +87,7 @@ def test_explicit_delete_removes_an_invalid_old_key_without_modifying_outlet(per
 def test_ambiguous_patch_is_rejected_before_update(persistence, body):
     store, _ = persistence
     with pytest.raises(ModelOutletValidationError):
-        service.patch_model_preferences(1, 42, ConversationModelPreferencePatch(expected_version=4, **body), "owner", "tenant")
+        service.patch_model_preferences(1, 42, ConversationModelPreferencePatch(**body), "owner", "tenant")
     assert store.call_count == 1
 
 
@@ -96,7 +95,7 @@ def test_other_tenant_or_missing_outlet_cannot_receive_preferences(persistence):
     store, outlet = persistence
     outlet.return_value = None
     with pytest.raises(ModelOutletValidationError):
-        service.patch_model_preferences(1, 42, ConversationModelPreferencePatch(expected_version=4), "owner", "other-tenant")
+        service.patch_model_preferences(1, 42, ConversationModelPreferencePatch(), "owner", "other-tenant")
     assert outlet.call_args.args == (42, "other-tenant") and store.call_count == 1
 
 
@@ -135,7 +134,7 @@ def test_scb03_read_filters_retired_length_values_without_mutating_history(persi
 def test_scb03_new_length_patches_are_rejected_before_persistence(persistence,key):
     store,_=persistence
     with pytest.raises(ModelOutletValidationError) as error:
-        service.patch_model_preferences(1,42,ConversationModelPreferencePatch(expected_version=4,parameter_values={key:100}),"owner","tenant")
+        service.patch_model_preferences(1,42,ConversationModelPreferencePatch(parameter_values={key:100}),"owner","tenant")
     assert error.value.category == "FIXED_PARAMETER" and error.value.path == "/"+key
     assert store.call_count == 1
 
