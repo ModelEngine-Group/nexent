@@ -20,11 +20,15 @@ change:
     behaviors:
     - Conversation ORM retains JSONB preferences and unrelated revisions but neither declares nor selects the retired preference revision.
     - Existing outlet column types, defaults and single-storage contracts remain valid.
+    - Preference and selection request schemas accept updates without expected_version and reject the retired field.
+    - Conversation creation saves a detached preference dictionary and selected model without initializing a retired revision.
     reason: ORM contract is unit-tested; actual fresh and previously deployed SQL transitions require the existing isolated PostgreSQL D5 boundary.
     test_selectors:
     - test/backend/database/test_model_outlet_schema.py
+    - test/backend/database/test_conversation_db_workbench_coverage.py
+    - test/backend/test_conversation_model_preference_contracts.py
   notes: >-
     Explicit user request on2026-11-02; updates the existing independent SPEC.
-    Only new PR SQL is renamed004 through007; merged SQL is immutable.
+    User explicitly allows renumbering only the four already-merged4082 scripts inPR4083.
     Existing D5 scratch databases are UUID-owned, schema-only, and removed in finally.
-    No preference version API or CAS implementation exists yet in this first-layer PR.
+    PR4083 has initial preference persistence but not the later preference PATCH runtime; remove its creation-time revision and both predeclared expected_version fields.

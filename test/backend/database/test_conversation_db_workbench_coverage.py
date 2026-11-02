@@ -51,16 +51,23 @@ def test_create_conversation_persists_initial_workbench_version(monkeypatch):
     )
     session.execute.return_value.fetchone.return_value = record
 
+    preferences = {"17": {"temperature": 0, "enable_thinking": False}}
     result = conversation_db.create_conversation(
         "Workbench",
         "user-a",
         agent_id=7,
         workbench_config={"schema_version": 4, "mode": "single_agent_chat"},
+        model_parameter_preferences=preferences,
+        selected_model_id=17,
     )
 
     assert result["workbench_config_version"] == 1
     assert result["workbench_config"]["mode"] == "single_agent_chat"
     assert insert_values["workbench_config_version"] == 1
+    assert insert_values["selected_model_id"] == 17
+    assert insert_values["model_parameter_preferences"] == preferences
+    assert insert_values["model_parameter_preferences"] is not preferences
+    assert "model_parameter_preferences_version" not in insert_values
     assert insert_values["workbench_config"] == {
         "schema_version": 4,
         "mode": "single_agent_chat",

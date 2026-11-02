@@ -230,7 +230,6 @@ def create_conversation(
             data["selected_model_id"] = selected_model_id
         if model_parameter_preferences:
             data["model_parameter_preferences"] = deepcopy(model_parameter_preferences)
-            data["model_parameter_preferences_version"] = 1
         if user_id:
             data = add_creation_tracking(data, user_id)
 
