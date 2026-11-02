@@ -119,3 +119,36 @@ def test_ac_fix_03_configured_model_rejects_missing_deleted_or_wrong_type(record
 def test_ac_fix_03_automatic_health_check_stays_strict(status):
     from management.services.model.resolver import is_model_available
     assert not is_model_available({"model_type": "llm", "connect_status": status})
+
+
+@pytest.mark.parametrize("debug,explicit,expected", [(True, None, 0), (True, 5, 5), (False, None, 3)])
+def test_preflight_matches_runtime_agent_version_and_debug_model_scope(monkeypatch, debug, explicit, expected):
+    from management.db.agent import repository
+    from management.services.conversation import model_preferences
+
+    monkeypatch.setattr(repository, "query_current_version_no", lambda *_args: 3)
+    lookup = Mock(side_effect=lambda **kwargs: {"model_ids": [42] if kwargs["version_no"] in (0, 5) else [41]})
+    selected = Mock()
+    monkeypatch.setattr(run_controls, "validate_selected_model", selected)
+    validate = Mock()
+    monkeypatch.setattr(model_preferences, "validate_model_preferences", validate)
+    request = AgentRequest(agent_id=7, query="fixture", is_debug=debug, version_no=explicit,
+        model_id=42, model_parameter_preferences={"42": {"temperature": 0}})
+    run_controls.preflight_agent_turn_controls(request, "tenant", lookup)
+    lookup.assert_called_once_with(agent_id=7, tenant_id="tenant", version_no=expected)
+    validate.assert_called_once_with(request.model_parameter_preferences, "tenant",
+        allowed_model_ids=None if debug else [41])
+
+
+def test_debug_selected_model_preferences_preserve_selection_exemption(monkeypatch):
+    from management.services.conversation import model_preferences
+
+    monkeypatch.setattr(run_controls, "validate_selected_model", Mock())
+    def validate(values, _tenant, *, allowed_model_ids):
+        if allowed_model_ids and any(int(key) not in allowed_model_ids for key in values):
+            raise ForbiddenError("The selected model is not configured for this Agent")
+    monkeypatch.setattr(model_preferences, "validate_model_preferences", validate)
+    request = AgentRequest(agent_id=7, query="fixture", is_debug=True,
+        model_id=42, model_parameter_preferences={"42": {"temperature": 0}})
+    run_controls.validate_agent_model_selection(request, "tenant", Mock())
+    run_controls.preflight_turn_controls(request, "tenant", {"model_ids": [41]})

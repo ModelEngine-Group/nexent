@@ -19,7 +19,7 @@ def _agent_record_for_run(request, tenant_id: str, lookup: Callable[..., dict]) 
         agent_id=request.agent_id,
         tenant_id=tenant_id,
         version_no=request.version_no if request.version_no is not None
-        else (query_current_version_no(request.agent_id, tenant_id) or 0),
+        else (0 if request.is_debug else query_current_version_no(request.agent_id, tenant_id) or 0),
     )
 
 
@@ -79,7 +79,7 @@ def preflight_turn_controls(request, tenant_id: str, agent_record: dict | None =
             model_id = (default or {}).get("model_id")
     if model_id is not None:
         validate_selected_model(model_id, tenant_id)
-    allowed = (agent_record or {}).get("model_ids") or None
+    allowed = None if getattr(request, "is_debug", False) else (agent_record or {}).get("model_ids") or None
     preferences = request.model_parameter_preferences
     if not preferences and model_id is not None:
         saved = getattr(request, "_runtime_model_parameter_preferences", {})

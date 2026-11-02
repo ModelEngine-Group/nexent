@@ -11,7 +11,7 @@ from contracts.constants.environment import (
     RUNTIME_PARALLEL_EXECUTOR_TIMEOUT_SECONDS,
 )
 from contracts.constants.constants import LANGUAGE
-from contracts.errors.exceptions import WorkbenchError
+from contracts.errors.exceptions import RunModelControlsError, WorkbenchError
 from contracts.tool import ToolParamsRequest
 from management.db.agent.repository import (
     query_sub_agent_relations,
@@ -60,7 +60,6 @@ from nexent.core.agents.context import (
 )
 from nexent.core.agents.nexent_agent import get_local_python_authorized_imports
 from nexent.core.agents.prompt import AgentPromptComposer
-from pydantic import ValidationError
 from nexent.core.concurrency import run_blocking
 from nexent.memory import models as memory_models
 
@@ -605,7 +604,7 @@ async def create_agent_config(
         model_info = (runtime_model_records.get(model_id_to_use) if runtime_model_records is not None
                       else get_model_by_model_id(model_id_to_use, tenant_id=tenant_id))
         if model_info is None and override_model_id is not None:
-            raise ValidationError("MODEL_OUTLET_NOT_AVAILABLE")
+            raise RunModelControlsError("model_not_available")
         model_name = model_info["display_name"] if model_info is not None else "main_model"
         # Capacity and output reserve come exclusively from the saved outlet.
         input_budget, capacity_snapshot, resolved_capacity_snapshot = (
