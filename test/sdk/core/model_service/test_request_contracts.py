@@ -10,6 +10,7 @@ from nexent.core.model_service.contracts import (
     AssistantMessage, ModelError, ModelEvent, ModelMessage, ModelRequest, ToolCall, ToolCallDelta, ToolDefinition,
 )
 from nexent.core.model_service.profiles.parameter_rules import compile_parameter_rules
+from nexent.core.model_service.profiles.protocol_parameters import openai_chat_parameter_rules
 from test.sdk.core.model_service.resource_fixtures import resources
 
 
@@ -75,6 +76,13 @@ def test_resource_identity_and_authorization_invariants(change):
     with pytest.raises(ValidationError):RuntimeResourceView.model_validate(data)
 
 
+def test_protocol_rules_have_no_invented_defaults_and_are_detached():
+    rules = openai_chat_parameter_rules()
+    compile_parameter_rules(rules)
+    assert {rule["key"] for rule in rules} == {"temperature", "top_p", "max_output_tokens", "stop", "response_format"}
+    assert all("default_value" not in rule for rule in rules)
+    rules[0]["schema"]["type"].clear()
+    assert openai_chat_parameter_rules()[0]["schema"]["type"] == ["number", "null"]
 def test_resource_boundary_rejects_privilege_promotion_and_execution_objects():
     data = resources().model_dump()
     data["references"][0]["message"]["semantic_role"] = "platform_instruction"
