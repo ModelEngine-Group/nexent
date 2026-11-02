@@ -330,7 +330,7 @@ export class ModelPage {
   ): Promise<Record<string, unknown>> {
     const editor = await this.openEditDialog(displayName, capability === "llm" ? "大语言模型" : "嵌入模型");
     const secret = editor.locator("input[type='password']");
-    await expect(secret).toHaveValue("");
+    await expect(secret).toHaveValue(capability === "llm" ? "********" : "");
     if (capability === "llm") await expect(editor.getByText(/留空保留原有密钥/)).toBeVisible();
     else await expect(secret).toHaveAttribute("placeholder", /留空|保持|existing/i);
     const saved = this.page.waitForResponse(

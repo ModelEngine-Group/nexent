@@ -405,3 +405,32 @@ it.each(["all", "partial", "stale"])(
   },
   15000
 );
+
+
+it.each([false, true])("drops row check results after rediscovery, pending=%s", async (pending) => {
+  let finish!: (value: { ok: boolean }) => void;
+  api.validateModelOutlet.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <App><ModelAddDialog isOpen initialTab="batch" onClose={vi.fn()} onSuccess={vi.fn()} /></App>
+  </QueryClientProvider>);
+  fireEvent.change(screen.getByPlaceholderText("https://api.example.com/v1"), {
+    target: { value: "https://models.invalid/v1" },
+  });
+  const fetchModels = screen.getByRole("button", { name: "modelConfig.addDialog.fetchModels" });
+  fireEvent.click(fetchModels);
+  await screen.findByText("model-a");
+  fireEvent.click(screen.getByRole("button", { name: "modelProfile.checkModel model-a" }));
+  await waitFor(() => expect(api.validateModelOutlet).toHaveBeenCalledOnce());
+  if (!pending) {
+    finish({ ok: true });
+    await waitFor(() => expect(screen.getByRole("button", { name: "modelProfile.checkModel model-a" })).toBeEnabled());
+  }
+  fireEvent.click(fetchModels);
+  await waitFor(() => expect(legacy.addProviderModel).toHaveBeenCalledTimes(2));
+  await screen.findByText("model-a");
+  if (pending) finish({ ok: true });
+  fireEvent.click(screen.getByText("modelConfig.addDialog.toggleAll"));
+  fireEvent.click(screen.getByRole("button", { name: "modelConfig.addDialog.addSelected" }));
+  await waitFor(() => expect(api.createModelOutlet).toHaveBeenCalledTimes(2));
+  expect(api.createModelOutlet.mock.calls.every(([body]) => body.connect_status === undefined)).toBe(true);
+}, 30000);

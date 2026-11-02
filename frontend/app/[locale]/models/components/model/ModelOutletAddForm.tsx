@@ -470,6 +470,7 @@ export function ModelOutletAddForm({
   );
   const checkFingerprint = JSON.stringify([
     checkDraftIdentity,
+    editing ? headers : undefined,
     sampling,
     apiKey,
     editing?.config_revision,

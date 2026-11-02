@@ -234,6 +234,8 @@ def _connectivity_changed(current, proposed, row, *, api_key, http_headers):
         return True
     if http_headers is not _UNSET and http_headers != connection_headers(row.get("http_headers") or {}):
         return True
+    if current.identity.request_model_id != proposed.identity.request_model_id:
+        return True
     # Avoid rendering unchanged profiles and metadata-only edits.
     fields = ("connection", "connection_rules", "bindings", "parameter_rules", "parameter_values",
               "extra_api_parameters")

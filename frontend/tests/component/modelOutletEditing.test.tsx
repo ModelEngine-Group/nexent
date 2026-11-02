@@ -621,3 +621,31 @@ it("AEU-04 restores parameters through the saved-rule preview without changing c
   expect(patch).not.toHaveProperty("profile_selection");
   expect(patch).not.toHaveProperty("api_key");
 });
+
+
+it.each([false, true])("invalidates a saved-header check when removing its placeholder, pending=%s", async (pending) => {
+  const saved = await api.getModelOutlet();
+  saved.http_header_names = ["x-auth"];
+  api.getModelOutlet.mockResolvedValue(saved);
+  let finish!: (value: { ok: boolean }) => void;
+  api.validateModelOutlet.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+  setup(<ModelOutletEditDialog modelId={42} onClose={vi.fn()} onSuccess={vi.fn()} />);
+  const check = await screen.findByRole("button", { name: "modelConfig.editDialog.checkConnectivity" });
+  await waitFor(() => expect(check).toBeEnabled(), { timeout: 5000 });
+  fireEvent.click(check);
+  await waitFor(() => expect(api.validateModelOutlet).toHaveBeenCalledOnce());
+  if (!pending) {
+    finish({ ok: true });
+    await screen.findByText("model.status.available");
+  }
+  fireEvent.click(screen.getByText("modelProfile.advanced"));
+  await screen.findByLabelText("modelProfile.headerValue");
+  fireEvent.click(screen.getByRole("button", { name: "common.delete" }));
+  if (pending) finish({ ok: true });
+  await waitFor(() => expect(screen.queryByText("model.status.available")).not.toBeInTheDocument());
+  await waitForEditSaveReady();
+  fireEvent.click(screen.getByRole("button", { name: "common.save" }));
+  await waitFor(() => expect(api.updateModelOutlet).toHaveBeenCalledOnce());
+  expect(api.updateModelOutlet.mock.calls[0][1].http_headers).toEqual({});
+  expect(api.updateModelOutlet.mock.calls[0][1].connect_status).toBeUndefined();
+}, 20000);

@@ -994,6 +994,7 @@ function BatchAddForm({
       );
       return;
     }
+    invalidateChecks();
     const generation = ++discoveryGeneration.current;
     setFetching(true);
     setFetched([]);
