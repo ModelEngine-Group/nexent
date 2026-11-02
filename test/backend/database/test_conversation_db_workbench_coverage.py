@@ -44,7 +44,7 @@ def test_create_conversation_persists_initial_workbench_version(monkeypatch):
         knowledge_scope=None,
         runtime_metadata={},
         runtime_metadata_version=0,
-        workbench_config={"schema_version": 4, "mode": "single_agent_chat"},
+        workbench_config={"schema_version": 3, "mode": "single_agent_chat"},
         workbench_config_version=1,
         create_time=1000,
         update_time=1000,
@@ -56,7 +56,7 @@ def test_create_conversation_persists_initial_workbench_version(monkeypatch):
         "Workbench",
         "user-a",
         agent_id=7,
-        workbench_config={"schema_version": 4, "mode": "single_agent_chat"},
+        workbench_config={"schema_version": 3, "mode": "single_agent_chat"},
         model_parameter_preferences=preferences,
         selected_model_id=17,
     )
@@ -69,7 +69,7 @@ def test_create_conversation_persists_initial_workbench_version(monkeypatch):
     assert insert_values["model_parameter_preferences"] is not preferences
     assert "model_parameter_preferences_version" not in insert_values
     assert insert_values["workbench_config"] == {
-        "schema_version": 4,
+        "schema_version": 3,
         "mode": "single_agent_chat",
     }
 
@@ -87,7 +87,7 @@ def test_workbench_replacement_requires_owned_conversation(
     common = {
         "conversation_id": 42,
         "user_id": "user-a",
-        "config": {"schema_version": 4, "mode": "generic_chat"},
+        "config": {"schema_version": 3, "mode": "generic_chat"},
     }
 
     with pytest.raises(conversation_db.ConversationNotFoundError):
@@ -104,11 +104,11 @@ def test_workbench_replacement_requires_owned_conversation(
 
 def test_creation_topology_accepts_same_creation_mode():
     record = SimpleNamespace(
-        workbench_config={"schema_version": 4, "mode": "skill_create"}
+        workbench_config={"schema_version": 3, "mode": "skill_create"}
     )
 
     conversation_db._assert_workbench_topology(
-        record, {"schema_version": 4, "mode": "skill_create"}
+        record, {"schema_version": 3, "mode": "skill_create"}
     )
 
 
@@ -130,3 +130,31 @@ def test_rebind_conversation_agent_id_reports_compare_and_swap_result(
         conversation_db.rebind_conversation_agent_id(42, 7, 8, "user-a")
         is expected
     )
+
+
+@pytest.mark.parametrize("joint", [False, True])
+@pytest.mark.parametrize("changed", [False, True])
+def test_persisted_workbench_contract_roundtrips_for_replacement(monkeypatch, joint, changed):
+    from copy import deepcopy
+    from contracts.agent import WorkbenchSessionConfig
+
+    current = WorkbenchSessionConfig(mode="generic_chat").model_dump(mode="json")
+    proposed = WorkbenchSessionConfig(mode="generic_chat", model_id=17 if changed else None).model_dump(mode="json")
+    assert current["schema_version"] == proposed["schema_version"] == 3
+    record = SimpleNamespace(workbench_config=deepcopy(current), workbench_config_version=2,
+                             runtime_metadata={"label": "old"}, runtime_metadata_version=5,
+                             agent_id=7, knowledge_scope=None)
+    session = _session(monkeypatch)
+    session.scalars.return_value.first.return_value = record
+    if joint:
+        result = conversation_db.replace_conversation_workbench_and_metadata(
+            42, "owner", proposed, 2, {"label": "new"}, 5,
+        )
+        assert result["runtime_metadata"] == {"label": "new"}
+        assert result["runtime_metadata_version"] == 6
+    else:
+        result = conversation_db.replace_conversation_workbench_config(42, "owner", proposed, 2, only_if_changed=True)
+        assert record.runtime_metadata_version == 5
+    assert result["workbench_config"] == proposed
+    assert result["workbench_config_version"] == 2 + int(changed)
+    assert session.flush.call_count == int(joint or changed)

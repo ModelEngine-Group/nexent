@@ -66,7 +66,7 @@ class ConversationRecord(TableBase):
     workbench_config = Column(
         JSONB,
         nullable=True,
-        doc="Canonical schema-v4 Workbench resource declaration",
+        doc="Canonical schema-v3 Workbench conversation declaration",
     )
     workbench_pinned_at = Column(
         TIMESTAMP(timezone=False), nullable=True,
