@@ -6,7 +6,7 @@ change:
   title: Preserve checked draft results and expose edit checks
   description: Share safe edit probes and verified check-result persistence across single, batch and editing.
   observed_behavior: Profile edit has no probe entry and draft checks are lost on creation.
-  expected_behavior: Explicit checks use current edit values; backend verified receipts persist matching success/failure atomically without rechecking.
+  expected_behavior: Explicit checks use current edit values; frontend draft results persist success/failure atomically without rechecking.
   escaped_stage: D4
   coverage_gap:
     type: missing_assertion
@@ -17,8 +17,8 @@ change:
     reason: Owning component tests cover button lifecycle and payload; existing queue/summary tests cover shared boundaries. No duplicate D1.
     behaviors:
     - Edit probes use the unsaved patch and resolve omitted credentials on the backend.
-    - Matching signed success/failure receipts survive create and edit; saves never invoke the provider.
-    - Effective request or credential changes invalidate receipts while display-only changes preserve them.
+    - Completed success/failure draft results survive create and edit; saves never invoke the provider.
+    - Effective request or credential changes invalidate frontend results while display-only changes preserve them.
     - Forged, expired, cross-tenant and stale-revision proof cannot write a checked status.
     test_selectors:
     - frontend/tests/component/modelOutletAddForm.test.tsx

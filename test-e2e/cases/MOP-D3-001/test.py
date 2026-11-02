@@ -171,7 +171,7 @@ def test_rollback_and_sanitized_actual_database_failure(database, caplog):
     assert read(db, identifier).config_revision == 1
 
 
-def test_conversation_preferences_commit_cas_ownership_and_outlet_independence(database):
+def test_conversation_preferences_commit_lock_ownership_and_outlet_independence(database):
     client, db, _, conflict, _ = database
     from management.db.conversation import model_preferences as preferences
     from management.db.conversation.models import ConversationRecord
@@ -186,26 +186,23 @@ def test_conversation_preferences_commit_cas_ownership_and_outlet_independence(d
         session.flush()
         conversation_id = row.conversation_id
     assert preferences.model_preferences(conversation_id, "owner") == {
-        "version": 0, "model_parameter_preferences": {}, "selected_model_id": None,
+        "model_parameter_preferences": {}, "selected_model_id": None,
     }
     explicit = {"temperature": 0, "custom_switch": False, "custom_null": None}
-    preferences.model_preferences(conversation_id, "owner", expected_version=0, outlet_id=first,
+    preferences.model_preferences(conversation_id, "owner", outlet_id=first,
                                   resolve_values=lambda saved: explicit)
-    current = preferences.model_preferences(conversation_id, "owner", expected_version=1, outlet_id=second,
+    current = preferences.model_preferences(conversation_id, "owner", outlet_id=second,
                                            resolve_values=lambda saved: {"temperature": 1})
-    assert current == {"version": 2, "selected_model_id": None, "model_parameter_preferences": {
+    assert current == {"selected_model_id": None, "model_parameter_preferences": {
         str(first): explicit, str(second): {"temperature": 1},
     }}
-    with pytest.raises(conflict):
-        preferences.model_preferences(conversation_id, "owner", expected_version=1, outlet_id=first,
-                                      resolve_values=lambda saved: {})
     with pytest.raises(ConversationNotFoundError):
-        preferences.model_preferences(conversation_id, "another-user", expected_version=2, outlet_id=first,
+        preferences.model_preferences(conversation_id, "another-user", outlet_id=first,
                                       resolve_values=lambda saved: pytest.fail("Must check ownership before callback"))
     assert preferences.model_preferences(conversation_id, "owner") == current
-    cleared = preferences.model_preferences(conversation_id, "owner", expected_version=2, outlet_id=first,
+    cleared = preferences.model_preferences(conversation_id, "owner", outlet_id=first,
                                            resolve_values=lambda saved: {})
-    assert cleared == {"version": 3, "selected_model_id": None, "model_parameter_preferences": {str(second): {"temperature": 1}}}
+    assert cleared == {"selected_model_id": None, "model_parameter_preferences": {str(second): {"temperature": 1}}}
     assert read(db, first) == outlet_before
     with client.get_db_session() as session:
         stored = session.get(ConversationRecord, conversation_id)
@@ -216,8 +213,8 @@ def test_conversation_preferences_commit_cas_ownership_and_outlet_independence(d
 
 
 @pytest.mark.parametrize("ok,status", [(True, "available"), (False, "unavailable")])
-def test_check_receipt_survives_actual_create_edit_and_request_change(database, monkeypatch, ok, status):
-    """AC-05: signed draft evidence and config CAS share the actual commit."""
+def test_draft_result_survives_actual_create_edit_and_request_change(database, monkeypatch, ok, status):
+    """AC-05: draft status and config CAS share the actual commit."""
     import asyncio
     from unittest.mock import AsyncMock
     from contracts.model import ModelOutletCreateRequest, ModelOutletPatchRequest, ModelOutletValidationRequest
@@ -231,7 +228,8 @@ def test_check_receipt_survives_actual_create_edit_and_request_change(database, 
     request = ModelOutletCreateRequest(provider_info={"base_url": "https://fixture.invalid/v1"},
         request_model_id="Exact/Model", api_key=DUMMY, http_headers={"x-gateway": DUMMY})
     checked = asyncio.run(service.validate_model_outlet(ModelOutletValidationRequest(draft=request), "db-tenant-a"))
-    request.check_receipt = checked["check_receipt"]
+    assert "check_receipt" not in checked
+    request.connect_status = "available" if checked["ok"] else "unavailable"
     created = service.create_model_outlet(request, "creator", "db-tenant-a")
     identifier = created["model_id"]
 
@@ -243,14 +241,15 @@ def test_check_receipt_survives_actual_create_edit_and_request_change(database, 
     patch = ModelOutletPatchRequest(expected_revision=1, connection={"timeout_seconds": 27})
     checked = asyncio.run(service.validate_model_outlet(ModelOutletValidationRequest(outlet_id=identifier, patch=patch), "db-tenant-a"))
     assert status_in_new_session() == status  # Unsaved edit checks do not rewrite storage.
-    patch.check_receipt = checked["check_receipt"]
+    assert "check_receipt" not in checked
+    patch.connect_status = "available" if checked["ok"] else "unavailable"
     patch.display_name = "Renamed after check"
     service.update_model_outlet(identifier, patch, "editor", "db-tenant-a")
     assert read(db, identifier).connection.timeout_seconds == 27
     assert status_in_new_session() == status
-    # The saved proof belongs to revision 1 and cannot mark changed revision 2 available.
+    # A changed request without a new draft result resets its saved status.
     service.update_model_outlet(identifier, ModelOutletPatchRequest(expected_revision=2,
-        connection={"timeout_seconds": 28}, check_receipt=checked["check_receipt"]), "editor", "db-tenant-a")
+        connection={"timeout_seconds": 28}), "editor", "db-tenant-a")
     assert status_in_new_session() == "not_detected"
     assert peer.await_count == 2  # Neither creation nor either save called the peer.
 

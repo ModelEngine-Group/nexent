@@ -30,9 +30,9 @@ case:
     expected: No partially committed row/configuration survives and public error/log text excludes the dummy credential.
   - order: 4
     action: Persist zero/false/null preferences for two outlets in an owned conversation; reject stale and other-user writes, clear one outlet, then soft-delete the conversation.
-    expected: Exact values and other outlets survive; preference revisions advance independently without changing outlet defaults or model-visible metadata.
+    expected: Exact values and other outlets survive; preference lockings advance independently without changing outlet defaults or model-visible metadata.
   - order: 5
-    action: Check a draft and an unsaved edit, then save through product services with the server receipt; alter the effective request afterward.
+    action: Check a draft and an unsaved edit, then save through product services with the frontend draft result; alter the effective request afterward.
     expected: Success/failure state commits with the matching configuration, unsaved checks do not mutate rows, stale proof cannot mark changed requests checked, and saves never invoke the provider.
   - order: 6
     action: Preview and explicitly reselect provider/model profiles through the product edit service, then commit and retry a stale writer; restore the saved parameter defaults.
@@ -42,7 +42,7 @@ case:
   - Tenant, active-row and revision constraints prevent unauthorized or stale writes, preserving the winner configuration.
   - Transaction rollback restores prior state and query failures have sanitized diagnostics.
   - Conversation preferences enforce ownership and active state, preserve exact values and other outlets, and never rewrite outlet defaults.
-  - Signed check results survive actual create/update commits and request changes invalidate old proof without additional provider calls.
+  - Draft check results survive actual create/update commits and request changes invalidate old proof without additional provider calls.
   - Explicit profile changes preserve identity and credentials with identical create/edit wire configuration.
   forbidden_side_effects:
   - No production connections, provider calls, source-file updates or real credentials in artifacts.
@@ -73,7 +73,7 @@ case:
     expected_results: [4]
     forbidden_side_effects: [1, 2]
   - id: AC-05
-    description: Matching signed detection results commit with create/edit and stale proof cannot survive an effective request change.
+    description: Completed draft detection results commit with create/edit; request changes without a new result reset connectivity.
     steps: [5]
     expected_results: [5]
     forbidden_side_effects: [1, 2]
