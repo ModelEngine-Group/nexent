@@ -288,6 +288,7 @@ async def generate_stream(
     reservation_token: Optional[str] = None,
     execution: Optional[ManagedExecution] = None,
     deferred_run: Optional[DeferredAgentRun] = None,
+    final_answer_mode: str = "delta",
     execution_state: Optional[BackgroundExecutionState] = None,
 ):
     """Unified streaming entry point.
@@ -369,6 +370,7 @@ async def generate_stream(
             channel=channel,
             execution=execution,
             deferred_run=deferred_run,
+            final_answer_mode=final_answer_mode,
             **background_kwargs,
         )) as chunks:
             async for data_chunk in chunks:
@@ -415,6 +417,7 @@ async def generate_stream(
                 reservation_token=reservation_token,
                 execution=execution,
                 deferred_run=deferred_run,
+                final_answer_mode=final_answer_mode,
                 **fallback_kwargs,
             )) as chunks:
                 async for data_chunk in chunks:

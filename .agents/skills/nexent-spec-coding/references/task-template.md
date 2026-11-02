@@ -2,62 +2,94 @@
 
 ## Usage guide
 
-Create or update `task.md` according to [SPEC maintenance guidance](spec-maintenance-guide.md). The dependency order is behavior/test-responsibility design, product and traditional UT implementation, applicable formal scripts/bindings, local verification of both suites, then source/view closeout. Use numbered groups and checkboxes. Keep traditional UT permanently maintained and outside formal D1-D5 coverage; do not require artificial edits to both suites or all five layers.
+Create or update task.md according to [SPEC maintenance guidance](spec-maintenance-guide.md). Preserve the existing filename, task IDs and factual execution records. A task document is an executable work plan: constraints, task list, per-task test work and implementation, actual test execution, and acceptance tracking.
 
-This template applies to full requirement/change sets and existing task documents. A bug without a usable SPEC keeps the same Acceptance Traceability columns in its lightweight design.md and does not require a separate task.md. Reuse correct existing contracts/scripts without artificial edits. A coverage inventory is broader than the current-fix verification selection.
+## Writing guidance
+
+- Keep the task list and task details consistent. Each task has a concrete outcome, affected ACs, dependencies and current status. Group related tasks without removing the per-task execution steps.
+- For behavior changes, make test-first work explicit: add, strengthen or demonstrate adequate existing unit/regression tests before implementing the change, and run them first where they can expose the missing behavior. Formal case design precedes product implementation; fixed formal scripts follow stable interfaces under the guides below. Reuse sufficient tests rather than requiring new tests for every task.
+- Distinguish test design, executable test files and test execution. A verification step must identify the tests to run and the expected assertions; document review, schema validation, file presence or a statement that behavior is correct does not replace running required tests.
+- Link the proposal, design and overall user flow instead of repeating them. Use current code and test paths when known; explicitly mark proposed files, and do not invent selectors, commands that supposedly ran, or passing results.
+- Keep unfinished work unchecked. Use pending, in progress or blocked in the task list, and explain blockers briefly. Check completion only after the task's implementation and required verification are complete. Adapt inapplicable steps with a reason; do not copy obsolete constraints or historical results into the current plan.
+
+## Required references
+
+The following requirements still apply in full; the template shows where to plan and record the work rather than repeating their detailed rules:
+
+- [Skill workflow](../SKILL.md#gated-workflow): lifecycle, validation and delivery requirements.
+- [Test design guide](test-design-guide.md): test responsibilities and case design.
+- [Test implementation guide](../../nexent-test-assets/references/test-implementation.md): scripts, bindings, preparation and cleanup.
+- [Verification guide](verification-guide.md): execution, evidence, result status and closeout.
 
 # Tasks — <Feature Name>
 
-## 1. Formal Test Asset Design
+<Reference proposal.md and design.md, identify the target repository and current baseline, and state what this plan covers. Remove template instructions from the output.>
 
-- [ ] 1.1 Confirm affected feature contracts and business rules; update only changed or missing contracts. [AC-001]
-- [ ] 1.2 Reuse, strengthen or add structured cases at necessary proving stages, with explicit assertions and impact reasons. Zero additions is valid. [AC-001]
-- [ ] 1.2a Assess traditional UT separately: success/boundary/error/regression intentions and reuse/strengthen/add; justify non-behavior exemptions. Preserve existing D1. [AC-001]
-- [ ] 1.2b Read existing UT/formal assertions; record remaining gaps and the distinct-component-proof rationale for each proposed new D1. No D1 additions is valid; do not duplicate UT or omit necessary higher-boundary proof. [AC-001]
-- [ ] 1.3 Run the design-phase unified validator with --require-ut-change for the current product Change and --require-acceptance-case for added/acceptance-modified automated Cases; regenerate Excel before product implementation. [AC-001]
+## Implementation constraints
 
-## 2. Product Implementation
+<List the constraints that affect this change's implementation, such as scope, preserved behavior, permission/data boundaries and interface compatibility. Reference the owning design or repository rule rather than copying general policy. Keep these visible before the task list.>
 
-- [ ] 2.1 Implement approved product behavior without changing the case contract to match implementation quirks. [AC-001]
-- [ ] 2.2 Implement or demonstrate adequate traditional UT; keep it outside formal Case bindings. For bugs, retain regression detection and pre-fix evidence where feasible. [AC-001]
+## Task list
 
-## 3. Fixed Test Implementation
+| ID | Outcome | ACs | Dependencies | Status |
+| --- | --- | --- | --- | --- |
+| TASK-001 | <Concrete implementation outcome> | AC-001 | <Task IDs or none> | Pending |
+| TASK-002 | <Necessary integration / delivery outcome> | <AC IDs> | TASK-001 | Pending |
 
-- [ ] 3.1 Implement new/strengthened D1-D5 scripts after stable interfaces exist; reuse correct existing scripts for regression. [AC-001]
-- [ ] 3.2 Add or update `execution.yaml` for only affected Case directories; regenerate derived hashes. [AC-001]
-- [ ] 3.2a Confirm primary responsibility routing and explicit preparation for each active automated D2-D5 binding. Record logical dependencies, owned resources, cleanup/recovery and the rationale for self-contained empty-family declarations. [AC-001]
-- [ ] 3.3 For a bug fix, retain a focused regression reproduction; an earlier reproduction script is allowed when it helps prove the defect. [AC-001]
-- [ ] 3.4 Check affected formal acceptance obligations against actual collected tests and assertions, not just script presence or hashes; record completeness gaps. [AC-001]
+## Task details
 
-## 4. Verification
+### TASK-001 — <Concrete implementation outcome>
 
-- [ ] 4.1 Run the smallest affected case selection and record exact results. [AC-001]
-- [ ] 4.1a Run relevant traditional UT locally before a product-code PR; record commands/results/blockers separately. CI reruns its configured set. [AC-001]
-- [ ] 4.2 Run selected regression Cases and required profiles; broaden only for evidenced caller or risk boundaries. [AC-001]
-- [ ] 4.3 Regenerate Excel and run the implementation validator with the same strict current-change flags; confirm actual UT selectors and formal test bindings. [AC-001]
-- [ ] 4.4 Reconcile the current target branch and repeat strict validation on the combined tree; record target/tested revisions and preparation-test-cleanup evidence, including resource release. Do not substitute earlier branch-only UT results or claim remote required checks from local evidence. [AC-001]
+**Goal / ACs:** <Observable outcome and affected AC IDs; link the relevant design section.>
 
-## 5. Acceptance Traceability
+**Dependencies:** <Prerequisite task IDs and any required inputs. For cross-layer work, identify the frontend/backend handoff.>
 
-| AC | Design | Code areas | Traditional UT | Formal case IDs | Evidence | Result |
-| --- | --- | --- | --- | --- | --- | --- |
-| AC-001 | <section / decision> | <actual paths> | <actual selectors or justified N/A> | <D1-D5 IDs or justified N/A> | <separate UT/formal results, artifact paths> | PENDING |
+**Affected files:** <Known product paths and test paths; label proposed files as new.>
 
-Use `PENDING`, `PASS`, `FAIL` or `BLOCKED`. `N/A` applies only to an irrelevant verification layer with a recorded reason. Preserve failed evidence and link reruns.
+**Test-first work**
 
-## 6. Completion Check
+- [ ] 001.1 <Add, strengthen or reuse specific tests for the affected behavior; state the input, expected result and relevant forbidden side effects. Complete the applicable formal case design under the guides.>
+- [ ] 001.2 <Run the relevant tests before implementation where applicable; record the actual baseline and the behavior failure they detect, or why existing passing tests are sufficient.>
 
-- [ ] 6.1 Every current required AC has appropriate UT and/or formal proof at its required boundary; no five-stage quota or mandatory edits to both suites.
-- [ ] 6.2 Every automated affected Case has a valid case-local binding and executable fixed script.
-- [ ] 6.3 No required P0/P1 case is missing, skipped, expected failure or unimplemented.
-- [ ] 6.4 The generated Excel view matches structured assets and was not manually maintained.
-- [ ] 6.5 Proposal, design, tasks, product behavior and formal assets agree; remaining risks are explicit.
-- [ ] 6.6 Relevant traditional UT passed locally or a justified non-behavior exemption is recorded; blockers are not passes. Formal execution and acceptance completeness are distinct. No GitHub required-check setup is claimed from local evidence.
+**Implementation**
 
-## 7. Deployment / Migration
+- [ ] 001.3 <Implement the change needed to meet the agreed behavior and tests, preserving the stated constraints.>
+- [ ] 001.4 <Once affected interfaces are stable, implement or reuse the required formal test scripts and bindings, plus affected documentation, under the guides.>
 
-<Conditional. Add approved rollout, compatibility and rollback tasks.>
+**Targeted verification**
 
-## 8. Execution Notes
+- [ ] 001.5 <Run the relevant test files/selectors or registered Cases after implementation, check actual assertions and record results. Add the applicable product checks separately; do not substitute them for test execution.>
 
-<Optional. Record blockers, deviations and sanitized evidence references.>
+<Give the actual runnable command when the test path is known. During planning, identify the intended test file / scenario and mark the final command as pending if necessary. For example, replace the placeholder before executing:>
+
+```text
+python -m pytest <actual-test-file> -q
+```
+
+**Completion:** <The requested behavior is implemented and the task's required tests pass; link actual execution evidence and record remaining blockers. Marking product code complete alone does not complete the task or its ACs.>
+
+<Repeat this structure for actual tasks. Use integration tasks for checks spanning several tasks; do not defer every task's tests to the final task. A test-only or documentation-only task omits inapplicable product work without inventing work to fill the template.>
+
+## Acceptance traceability
+
+<List every current AC and link its implementation tasks and verification. Do not duplicate detailed case steps.>
+
+| AC | Related tasks / design | Traditional UT | Formal Case IDs | Result | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| AC-001 | TASK-001 / <design section> | <Test references> | <Case IDs> | PENDING | <Actual results / evidence links> |
+
+Use PENDING, PASS, FAIL or BLOCKED under the verification guide. Keep UT and formal results separate. A task checkbox or passing document validator does not establish acceptance.
+
+## Execution notes
+
+<Record actual commands, tested revision/profile, results and evidence links under the verification guide. Separate a pre-implementation baseline from post-implementation verification. Keep failed evidence and link reruns; do not paste raw logs.>
+
+| Task | Command / test selection | Tested revision / profile | Result | Evidence / blocker |
+| --- | --- | --- | --- | --- |
+| TASK-001 | <Actual command once executed> | <Actual revision / profile> | PENDING | <Evidence link or blocker> |
+
+## Completion check
+
+- [ ] Implementation constraints and required task work are satisfied; relevant test files/Cases were executed and actual results recorded.
+- [ ] Every current AC has the required passing verification and linked evidence; unresolved failures or blockers remain explicit.
+- [ ] Required closeout checks are complete, documents agree with implementation and test assets, and remaining risks are stated.

@@ -1,6 +1,8 @@
 # Bugfix contract
 
-Every confirmed product bug needs a `test-e2e/changes/bugs/*.yaml` record. Follow `nexent-spec-coding` for document routing: reuse a usable SPEC and its associations, or create a lightweight design.md for the complete coherent capability's final behavior when no usable SPEC exists. Both use the same Feature/business-rule to D1-D5 Case matrix. Keep complete steps/assertions in Case YAML, and current-fix acceptance/evidence separate from the wider functional inventory.
+First classify `nexent-spec-coding`'s [Simple fix](../../nexent-spec-coding/references/spec-maintenance-guide.md#simple-fix). This category needs no SPEC, bug Change YAML, formal matrix or generated views solely for process compliance; report scope and actual verification in the PR description or delivery response. Traditional UT and necessary regression verification remain applicable. Maintain any actually affected formal assets under their own validation/traceability rules; test maintenance alone does not require a new SPEC or change the product modification's classification.
+
+Every other confirmed product bug needs a `test-e2e/changes/bugs/*.yaml` record and the workflow below. Follow `nexent-spec-coding` for document routing: reuse a usable SPEC and its associations, or create a lightweight design.md for the complete coherent capability's final behavior when no usable SPEC exists. Both use the same Feature/business-rule to D1-D5 Case matrix. Keep complete steps/assertions in Case YAML, and current-fix acceptance/evidence separate from the wider functional inventory.
 
 ## Determine impact before generating assets
 

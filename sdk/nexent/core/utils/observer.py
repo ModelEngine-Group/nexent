@@ -46,6 +46,7 @@ class ProcessType(Enum):
 
     STEP_COUNT = "step_count"  # current step of agent
     PARSE = "parse"  # code parsing result
+    EXECUTION_RESULT = "execution_result"  # internal canonical execution record
     EXECUTION_LOGS = "execution_logs"  # code execution result
     AGENT_NEW_RUN = "agent_new_run"  # Agent basic information
     AGENT_FINISH = "agent_finish"  # sub-agent end of run mark, mainly used for front-end display

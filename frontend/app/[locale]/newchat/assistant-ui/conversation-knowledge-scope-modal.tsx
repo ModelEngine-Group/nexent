@@ -22,7 +22,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type FC } from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "next/navigation";
-import { Alert, Button, Empty, Input, Modal, Spin, message } from "antd";
+import { Alert, Button, Empty, Input, Spin, message } from "antd";
 
 import { useAuthorizationContext } from "@/components/providers/AuthorizationProvider";
 import { useDeployment } from "@/components/providers/deploymentProvider";
@@ -39,13 +39,6 @@ import { ResourceCard } from "@/features/workbench";
 import { KnowledgeSelectionList } from "@/components/resource-picker/KnowledgeSelectionList";
 import { WorkbenchResourceDrawer } from "@/features/workbench/components/WorkbenchResourceDrawer";
 import { RESOURCE_PAGE_SIZE } from "@/features/workbench/components/ResourcePagination";
-import { useToolList } from "@/hooks/agent/useToolList";
-import { KnowledgeRetrievalParamsForm } from "@/components/tool-config/KnowledgeRetrievalParamsForm";
-import {
-  AIDP_NON_PERSISTED_PARAM_NAMES,
-  getSemanticToolName,
-} from "@/lib/managedKnowledgeTools";
-import type { ToolParam } from "@/types/agentConfig";
 import { RestoreDefaultsButton } from "@/features/workbench/components/RestoreDefaultsButton";
 
 interface ConversationKnowledgeScopeModalProps {
@@ -65,7 +58,11 @@ const copyScope = (
   value: ConversationKnowledgeScope | null
 ): ConversationKnowledgeScope =>
   JSON.parse(
-    JSON.stringify(value || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE)
+    JSON.stringify({
+      schema_version: 1,
+      local: (value || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE).local,
+      aidp: (value || DEFAULT_CONVERSATION_KNOWLEDGE_SCOPE).aidp,
+    })
   ) as ConversationKnowledgeScope;
 
 const normalizeScopeForSource = (
@@ -86,6 +83,7 @@ const normalizeScopeForSource = (
   }
   if (source === "aidp" && scope.aidp.mode === "inherit") {
     return {
+      ...scope,
       schema_version: 1,
       local: { mode: "disabled", knowledge_ids: [] },
       aidp: { mode: "inherit", kds_ids: [] },
@@ -159,23 +157,6 @@ export const ConversationKnowledgeScopeModal: FC<
   const [selectionTouched, setSelectionTouched] = useState(false);
   const [restoreDefaultClicked, setRestoreDefaultClicked] = useState(false);
   const [search, setSearch] = useState("");
-  const [retrievalOpen, setRetrievalOpen] = useState(false);
-  const [retrievalDraft, setRetrievalDraft] = useState<Record<string, unknown>>(
-    {}
-  );
-  const { availableTools, isLoading: toolsLoading } = useToolList({
-    enabled: open && retrievalOpen,
-  });
-  const retrievalTool = availableTools.find(
-    (tool) =>
-      getSemanticToolName(tool) ===
-      (enableAidpKnowledge ? "aidp_search" : "knowledge_base_search")
-  );
-  const retrievalParams = (retrievalTool?.initParams ?? []).filter(
-    (param: ToolParam) =>
-      !["index_names", "kds_list"].includes(param.name) &&
-      !AIDP_NON_PERSISTED_PARAM_NAMES.has(param.name)
-  );
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(RESOURCE_PAGE_SIZE);
   const tags = useResourceTags(
@@ -508,18 +489,6 @@ export const ConversationKnowledgeScopeModal: FC<
       nextScope = buildInheritScope(configuredSource);
     }
     if (!validateLocalEmbeddingModels()) return;
-    const incompatibleScope =
-      configuredSource === "aidp"
-        ? value?.local.mode === "override"
-        : value?.aidp.mode === "override";
-    const retrievalConfig = draft.retrieval_config || {};
-    if (
-      !restoreDefaultClicked &&
-      !incompatibleScope &&
-      Object.keys(retrievalConfig).length
-    )
-      nextScope.retrieval_config = structuredClone(retrievalConfig);
-    else delete nextScope.retrieval_config;
     const localNamesById = new Map(
       localOptions.map((option) => [String(option.value), String(option.label)])
     );
@@ -900,15 +869,6 @@ export const ConversationKnowledgeScopeModal: FC<
   );
   const drawerFooter = (
     <div className="flex items-center gap-3">
-      <Button
-        disabled={disabled || saving || loading}
-        onClick={() => {
-          setRetrievalDraft(structuredClone(draft.retrieval_config ?? {}));
-          setRetrievalOpen(true);
-        }}
-      >
-        {t("chat.knowledgeScope.retrievalSettings", "检索设置")}
-      </Button>
       <RestoreDefaultsButton
         disabled={loading || listError || saving || !configuredSource}
         onClick={() => {
@@ -1103,44 +1063,6 @@ export const ConversationKnowledgeScopeModal: FC<
           </Spin>
         </ResourcePickerPresentation>
       )}
-      <Modal
-        open={retrievalOpen && open}
-        title={t("agent.knowledge.configModal.title")}
-        onCancel={() => setRetrievalOpen(false)}
-        okText={t("common.confirm", "确定")}
-        cancelText={t("common.cancel", "取消")}
-        okButtonProps={{ disabled: toolsLoading || disabled }}
-        onOk={() => {
-          if (disabled) return;
-          setDraft((current) => ({
-            ...current,
-            retrieval_config: { ...retrievalDraft },
-          }));
-          setRetrievalOpen(false);
-        }}
-      >
-        <KnowledgeRetrievalParamsForm
-          params={retrievalParams}
-          values={Object.fromEntries(
-            retrievalParams.map((param: ToolParam) => [
-              param.name,
-              retrievalDraft[param.name] ??
-                capabilities?.sources[configuredSource ?? "local"]
-                  .default_retrieval_config?.[param.name] ??
-                param.value ??
-                param.default,
-            ])
-          )}
-          onChange={(name, next) =>
-            setRetrievalDraft((current) => {
-              const value = { ...current };
-              if (next == null) delete value[name];
-              else value[name] = next;
-              return value;
-            })
-          }
-        />
-      </Modal>
     </>
   );
 };

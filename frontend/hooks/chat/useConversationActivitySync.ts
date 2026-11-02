@@ -83,13 +83,6 @@ export function useConversationActivitySync(
     const refresh = () => {
       const active = document.visibilityState === "visible";
       setVisible(active);
-      if (
-        conversationType === "workbench" &&
-        scopeKey &&
-        active &&
-        navigator.onLine
-      )
-        void refetch({ cancelRefetch: false });
     };
     document.addEventListener("visibilitychange", refresh);
     return () => {

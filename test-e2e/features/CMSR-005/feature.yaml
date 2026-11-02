@@ -19,7 +19,7 @@ feature:
       card is removed.
   - rule_id: CMSR-RULE-016
     description: Valid semantic protocol-repair attempts stream and persist like other successful attempts, with
-      sanitized lifecycle logs.
+      sanitized lifecycle logs. Exhausted model empty responses hand off to the existing bounded semantic repair; successful repair emits no user error or repair notice.
   - rule_id: CMSR-RULE-017
     description: Historical late step labels are prepended to the matching existing reasoning without duplicate
       cards or cross-invocation mutation.

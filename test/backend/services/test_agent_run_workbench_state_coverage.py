@@ -20,7 +20,7 @@ def isolated_run_manager(monkeypatch):
 
 
 def _configure_early_workbench_run(monkeypatch, canonical, conversation):
-    plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99)))
+    plan = SimpleNamespace(root=SimpleNamespace(identity=SimpleNamespace(agent_id=99, version_no=5)))
     workbench_module = ModuleType("management.services.agent.workbench")
     workbench_module.assert_workbench_version = MagicMock()
     workbench_module.resolve_workbench_config = MagicMock(return_value=(canonical, plan))
@@ -36,7 +36,7 @@ def _configure_early_workbench_run(monkeypatch, canonical, conversation):
     monkeypatch.setattr(
         agent_run,
         "apply_workbench_runtime_plan",
-        lambda request, *_args: request.__dict__.update({"agent_id": 99, "version_no": 5}),
+        lambda request, *_args, **_kwargs: request.__dict__.update({"agent_id": 99, "version_no": 5}),
     )
     monkeypatch.setattr(agent_run, "update_conversation_chat_mode_service", MagicMock())
     monkeypatch.setattr(
@@ -94,3 +94,32 @@ async def test_workbench_run_requires_configuration_after_request_normalization(
     _configure_early_workbench_run(monkeypatch, canonical, None)
     with pytest.raises(agent_run.ValidationError, match='configuration is required'):
         await agent_run.run_agent_stream(request, Request(scope={'type': 'http', 'headers': []}), user_id='test_user', tenant_id='test_tenant')
+
+
+@pytest.mark.asyncio
+async def test_submitted_tool_policy_is_rejected_at_request_boundary(monkeypatch):
+    from fastapi import Request
+    from contracts.agent import WorkbenchSessionConfig
+    from contracts.errors.exceptions import ValidationError
+
+    canonical = WorkbenchSessionConfig.model_validate(
+        {"mode": "single_agent_chat", "agent_mounts": [{"agent_id": 7}]}
+    )
+    request = _request(
+        entrypoint="workbench", workbench=canonical, expected_workbench_config_version=2,
+        tool_params={"agents": {"root": {"tools": {"aidp_search": {"top_k": 0}}}}},
+    )
+    _configure_early_workbench_run(monkeypatch, canonical, {
+        "workbench_config": canonical.model_dump(mode="json"), "workbench_config_version": 2,
+    })
+    validate = MagicMock(side_effect=ValidationError("top_k: expected integer 1-100"))
+    monkeypatch.setattr(agent_run, "prepare_tool_retrieval_overrides", validate)
+    with pytest.raises(ValidationError, match="top_k"):
+        await agent_run.run_agent_stream(
+            request, Request(scope={"type": "http", "headers": []}),
+            user_id="test_user", tenant_id="test_tenant",
+        )
+    validate.assert_called_once_with(
+        "tenant-a", tool_params=request.tool_params, agent_id=99, version_no=5, is_debug=False,
+    )
+    agent_run.agent_run_manager.reserve_agent_capacity.assert_not_called()

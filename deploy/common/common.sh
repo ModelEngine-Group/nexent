@@ -546,7 +546,8 @@ deployment_upgrade_local_accounts() {
   local mode="$2"
   local namespace="${3:-nexent}"
   local interpreter=""
-  local common_dir script candidate env_file
+  local common_dir script candidate
+
   common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   script="$common_dir/../sql/tools/supabase_to_postgres/migrate_docker.py"
   if [ "$mode" = kubernetes ]; then
@@ -562,13 +563,13 @@ deployment_upgrade_local_accounts() {
     echo "ERROR: Python 3.8+ is required on the deployment host for automatic account upgrade." >&2
     return 1
   fi
-  env_file="${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}"
   local -a arguments=(--deploy-phase "$phase" --deployment "$mode" --namespace "$namespace"
-    --env-file "$env_file" --wait-timeout 300)
+    --env-file "${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}" --wait-timeout 300)
   if [ "$phase" = apply ]; then
     arguments+=(--apply)
   fi
   "$interpreter" "$script" "${arguments[@]}"
+
 }
 
 deployment_env_dir() {

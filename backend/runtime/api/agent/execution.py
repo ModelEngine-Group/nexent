@@ -3,7 +3,7 @@
 from contracts.authentication import AuthenticatedIdentity
 import logging
 from http import HTTPStatus
-from typing import Optional
+from typing import Optional, Literal
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from starlette.responses import JSONResponse, StreamingResponse
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
@@ -103,6 +103,7 @@ async def agent_run_api(
 async def northbound_agent_run_api(
     agent_request: AgentRequest,
     authorization: Optional[str] = Header(None),
+    final_answer_mode: Literal["complete", "delta"] = Query("complete"),
 ):
     """Run a northbound-prepared agent request inside the runtime service."""
     try:
@@ -113,6 +114,7 @@ async def northbound_agent_run_api(
             user_id=user_id,
             tenant_id=tenant_id,
             skip_user_save=True,
+            final_answer_mode=final_answer_mode,
         )
     except UnauthorizedError as exc:
         raise HTTPException(

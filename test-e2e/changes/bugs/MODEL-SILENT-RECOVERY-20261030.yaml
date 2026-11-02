@@ -1,0 +1,37 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-SILENT-RECOVERY-20261030
+  change_type: bugfix
+  bug_id: MODEL-SILENT-RECOVERY-20261030
+  title: Restore silent Agent protocol recovery after model empty exhaustion
+  description: Restore the develop CoreAgent handoff removed by the profile PR without changing bounded transport retries or permanent-error behavior.
+  observed_behavior: Empty-response exhaustion bypasses existing protocol repair and reaches the user as a terminal model error.
+  expected_behavior: Closed-protocol Agents silently repair recoverable empty output within the existing bound; legacy mode retains its original final fallback; cancellation and permanent errors remain terminal.
+  escaped_stage: D3
+  coverage_gap:
+    type: missing_boundary
+    description: Two existing unit assertions were changed to accept the regression; formal semantic repair lacked exhausted-empty input across the Agent boundary.
+  feature_contract_changed: true
+  affected_features:
+    existing: []
+    added: []
+    modified: [CMSR-005]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [CMSR-D1-003, MODEL-RECOVERY-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Empty model exhaustion hands off to protocol repair and preserves the originating cause.
+    - Legacy empty output retains the original final fallback without an uncaught model exception.
+    - Permanent errors, cancellation, length and the existing semantic-repair bound remain unchanged.
+    reason: Restore the existing regression expectations rather than create duplicate tests; D3 adds actual HTTP/model/Agent collaboration.
+    test_selectors:
+    - test/sdk/core/agents/test_core_agent.py
+    - test/sdk/core/models/test_openai_llm.py
+  notes: >-
+    User explicitly authorized restoring prior experience. Existing TECHNICAL-DESIGN.md records acceptance SR-01/SR-02 and separate schema-layering audit SC-04.
+    Keep all existing Cases, nine PR identities and the established protocol-repair opt-in default.

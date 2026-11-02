@@ -40,10 +40,10 @@ async def test_import_rejects_invalid_name_before_loading_dependencies(mocker, n
         provide_run_summary=False, enabled=True, tools=[], managed_agents=[],
     )
     bundle = ExportAndImportDataFormat(agent_id=1, agent_info={"1": agent}, mcp_info=[])
+    identity = AuthenticatedIdentity(user_id="owner", tenant_id="tenant", language="en")
     tools = mocker.patch.object(transfer, "query_all_tools")
     writes = mocker.patch.object(transfer, "create_agent")
     skills = mocker.patch.object(transfer.skill_db, "list_skills")
-    identity = AuthenticatedIdentity("owner", "tenant")
     with pytest.raises(ValueError, match="Python identifier"):
         if entry == "child":
             await transfer.import_agent_by_agent_id(agent, "tenant", "owner")
