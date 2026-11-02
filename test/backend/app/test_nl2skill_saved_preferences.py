@@ -22,7 +22,12 @@ async def test_existing_skill_history_restores_preferences_before_stream(monkeyp
     service.read_model_preferences = Mock(return_value={"selected_model_id": 42, "model_parameter_preferences": preferences})
     monkeypatch.setitem(sys.modules, service.__name__, service)
     from nexent.core import concurrency
-    from management.services.conversation import creator_execution as execution
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("_skill_preferences_creation", Path(__file__).parents[3] / "backend/management/services/conversation/creator_execution.py")
+    execution = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(execution)
+    monkeypatch.setattr(module, "start_creation_turn", execution.start_creation_turn)
     monkeypatch.setattr(concurrency, "run_blocking", AsyncMock(side_effect=lambda name, fn, *args: fn(*args)))
     monkeypatch.setattr(execution.system_agent_provider, "get_creator_ref", Mock(return_value=types.SimpleNamespace(agent_id=99)))
     monkeypatch.setattr(execution, "get_conversation_history", Mock(return_value={"agent_id": 99}))
