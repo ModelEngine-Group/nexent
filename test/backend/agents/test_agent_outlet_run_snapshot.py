@@ -135,14 +135,15 @@ async def test_failed_default_does_not_supply_legacy_aliases(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_missing_selected_snapshot_raises_domain_error_during_actual_config_compilation(monkeypatch):
+@pytest.mark.parametrize("explicit", [False, True])
+async def test_missing_selected_snapshot_raises_domain_error_during_actual_config_compilation(monkeypatch, explicit):
     from functools import partial
     import test_create_agent_info as legacy
     from contracts.errors.exceptions import RunModelControlsError
 
     original = legacy.create_agent_config
     monkeypatch.setattr(legacy, "create_agent_config", partial(original,
-        override_model_id=123, runtime_model_records={}))
+        override_model_id=123 if explicit else None, runtime_model_records={}))
     with pytest.raises(RunModelControlsError) as caught:
         await legacy.TestCreateAgentConfig()._run_context_manager_case(
             enable_context_manager=False, prepared_prompt="controlled prompt")

@@ -604,7 +604,7 @@ async def create_agent_config(
     if model_id_to_use is not None:
         model_info = (runtime_model_records.get(model_id_to_use) if runtime_model_records is not None
                       else get_model_by_model_id(model_id_to_use, tenant_id=tenant_id))
-        if model_info is None and override_model_id is not None:
+        if model_info is None:
             raise RunModelControlsError("model_not_available")
         model_name = model_info["display_name"] if model_info is not None else "main_model"
         # Capacity and output reserve come exclusively from the saved outlet.
