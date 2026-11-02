@@ -22,7 +22,7 @@ async def test_both_entrypoints_save_each_turn_once_with_executor_and_target(moc
     save = mocker.patch.object(creation_history, "save_message", side_effect=[10, 11])
     unit = mocker.patch.object(creation_history, "save_message_unit")
     target = {"type": kind, "id": 201}
-    config = {"schema_version": 3, "mode": f"{kind}_create", "agent_mounts": [], "skill_mounts": []} if workbench else None
+    config = {"schema_version": 4, "mode": f"{kind}_create", "agent_mounts": [], "skill_mounts": []} if workbench else None
     request = (NL2AgentRunRequest if kind == "agent" else NL2SkillRunRequest)(
         query="build", target=target, workbench_config=config, persist_history=False,
     )
