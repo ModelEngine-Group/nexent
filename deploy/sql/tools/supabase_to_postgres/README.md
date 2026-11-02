@@ -142,6 +142,13 @@ or reconstruct passwords/disabled status. CAS-created random passwords remain
 ineligible for password login; OAuth/password accounts retain their original rules.
 
 API-only users created by the batch endpoint have no Supabase `auth.users` row.
+Deployment preflight excludes only untouched pending identities that satisfy the
+same API-only evidence rules as the account SQL. It tracks raw pending separately
+so completion checkpoints cannot hide a required local repair. If SQL is already
+recorded, the worker replays the exact checksum-verified account SQL inside the
+import transaction before checking that no pending credentials remain. No source
+database is required for these local-only repairs. Unknown identities and operator
+changes are not automatically activated; revoked keys remain revoked.
 The 2.9.0 SQL recognizes an active USER/DEV membership with an empty email and
 historical token evidence, retains the original UUID and API Key, and makes the
 account active with password login disabled. A revoked key stays revoked. A
