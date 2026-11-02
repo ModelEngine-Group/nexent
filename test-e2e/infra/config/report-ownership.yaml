@@ -78,6 +78,8 @@ feature_overrides:
   AGENT-LIST-VIEWS: agent_repository
   AGENT-PUBLICATION: agent_config
   AGENT-REPO-SORT-MAIN-TAG: agent_repository
+  AIDP-RETRIEVAL: knowledge
+  AUTH-LOCAL: system
   CAS-USER-DISPLAY: system
   CHAT-AGENT-DISCOVERY: runtime
   CHAT-CLARIFICATION-HISTORY: runtime
@@ -93,9 +95,11 @@ feature_overrides:
   SAI-001: runtime
   SDK-SQL-ROWS: runtime
   SEARCH-DEEPSEEK: runtime
+  SYS-AGENT-LIFECYCLE: system
   TFP-001: sandbox
   TPC-001: runtime
   WB-CONTROLS: runtime
+  F-003: system
   F-046: context
   F-047: context
   F-048: context

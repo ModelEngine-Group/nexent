@@ -2,7 +2,7 @@ schema_version: '1.0'
 stage: D5
 module: AIDP-KNOWLEDGE
 case:
-  case_id: AIDP-RET-MIGRATION
+  case_id: AIDP-RET-MIGRATION-D5-001
   feature_id: AIDP-RETRIEVAL
   business_rule_ids: [AIDP-RETRIEVAL-RULE-01]
   title: AIDP policy migration preserves legacy numeric values and avoids unchanged writes

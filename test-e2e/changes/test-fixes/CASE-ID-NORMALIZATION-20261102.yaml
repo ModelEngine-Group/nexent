@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: CASE-ID-NORMALIZATION-20261102
+  change_type: test-fix
+  title: Normalize seven newly merged Case IDs with explicit traceability
+  description: >-
+    Apply the user-authorized ID-only correction to seven Cases. Preserve their
+    original proving stages, status, priorities, prerequisites, acceptance and
+    assertions. Update directories, contracts, bindings, Case markers, owned
+    resource labels, current change references and generated reading views.
+  affected_features:
+    existing: [AIDP-RETRIEVAL, F-146]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [AIDP-RET-CONFIG-API-D2-001, AIDP-RET-JOURNEY-D4-001,
+      AIDP-RET-MIGRATION-D5-001, AIDP-RET-PROTOCOL-D2-001,
+      AIDP-RET-REAL-D3-001, AIDP-RET-RUNTIME-D3-001, NB-CHAT-FINAL-ANSWER-D2-001]
+    retired: []
+  no_case_change_reason: >-
+    This is an identity correction, not seven new behaviors or retirements.
+    Contracts and scripts differ only in ID-derived strings. No product behavior,
+    business assertion or execution status is changed.
+  notes: >-
+    The old/new correspondence is infra/migration/case-id-renames-20261102.json,
+    anchored to source revision 651e98bf96b4ab8deecce1010f9ee67fb6788499. Historical
+    reports and evidence retain their original IDs; the mapping is audit-only,
+    not a runtime alias or a frozen naming exemption. Original blocked Cases stay
+    blocked. The protocol Case's missing preparation was recorded separately and
+    is resolved by ASSET-READINESS-REPAIR-20261102.
+    The earlier DAILY-NAMING-POLICY-20261102 correction still governs future Daily
+    style warnings. Migration verification compares source snapshots after only
+    applying this ID substitution, and checks references and collected metadata.
+    Verification stays local to Windows, with no full Daily, deployment,
+    notification or Ubuntu modification.

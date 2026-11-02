@@ -2,7 +2,7 @@ schema_version: '1.0'
 stage: D2
 module: V5-BASELINE
 case:
-  case_id: NB-CHAT-FINAL-ANSWER-001
+  case_id: NB-CHAT-FINAL-ANSWER-D2-001
   feature_id: F-146
   business_rule_ids: [F-146-RULE-02]
   title: Northbound complete and delta final-answer wire compatibility

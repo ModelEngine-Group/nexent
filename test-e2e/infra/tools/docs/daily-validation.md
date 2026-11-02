@@ -22,6 +22,14 @@ instead of `--generate`; it never rewrites repository assets or silently shrinks
   still rejects every unresolved route. Missing or malformed shared routing
   configuration, invalid domain references, placeholder contacts and invalid
   patterns remain fatal; unknown Case scopes are never downgraded.
+- `CASE_ID_FORMAT_INVALID` on a known Case is a metadata warning. The existing
+  ID, stage, binding and declared status remain unchanged, including Cases already
+  blocked for another reason. Strict design/implementation validation still rejects
+  nonstandard new IDs. Daily never renames Cases or extends the frozen legacy list.
+  Duplicate IDs, directory/ID mismatch, schema-invalid IDs or stages, script path
+  escape and unreadable/modified naming catalogs remain fatal. An embedded ID stage
+  contradicting the declared stage is a separate contract conflict, not this format
+  warning.
 - Shared missing helpers are inspected for every referring Case. Runtime preparation
   dependency failures retain the existing BLOCKED_BY_DEPENDENCY behavior; no
   dependency edges are inferred from titles, Change membership or failure keywords.

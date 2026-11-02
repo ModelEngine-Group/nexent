@@ -14,7 +14,7 @@ from shared.final_answers import final_answer_text
 from shared.http import MODEL_TIMEOUT, assert_status, client
 
 
-CASE_ID = "NB-CHAT-FINAL-ANSWER-001"
+CASE_ID = "NB-CHAT-FINAL-ANSWER-D2-001"
 pytestmark = [pytest.mark.case_id(CASE_ID), pytest.mark.stage("D2"), pytest.mark.asyncio]
 
 

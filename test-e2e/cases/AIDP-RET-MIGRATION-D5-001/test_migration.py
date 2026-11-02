@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = [pytest.mark.case_id("AIDP-RET-MIGRATION"), pytest.mark.stage("D5")]
+pytestmark = [pytest.mark.case_id("AIDP-RET-MIGRATION-D5-001"), pytest.mark.stage("D5")]
 
 ROOT = Path(__file__).resolve().parents[3]
 MIGRATION = ROOT / "deploy/sql/migrations/v2.8.0_aidp_fixed_retrieval_policy.sql"
@@ -108,7 +108,7 @@ def postgres():
     try:
         container_id = docker(
             "run", "--rm", "-d", "--name", name, "--network", "none",
-            "--tmpfs", "/var/lib/postgresql/data:rw", "--label", "nexent.case=AIDP-RET-MIGRATION",
+            "--tmpfs", "/var/lib/postgresql/data:rw", "--label", "nexent.case=AIDP-RET-MIGRATION-D5-001",
             "-e", "POSTGRES_PASSWORD=fixture-only", "postgres:15-alpine",
         ).stdout.strip()
         for _ in range(120):
