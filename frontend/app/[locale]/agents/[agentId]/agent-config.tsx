@@ -571,6 +571,9 @@ export default function AgentConfig({
             style={{
               containerType: "inline-size",
               containerName: "agent-config",
+              paddingRight: debugVisible
+                ? undefined
+                : Math.max(0, 24 - configScrollbarWidth),
             }}
             className={
               debugExpanded && debugVisible
