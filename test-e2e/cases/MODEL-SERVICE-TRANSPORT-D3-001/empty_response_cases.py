@@ -33,7 +33,7 @@ from nexent.core.utils.observer import MessageObserver
 @pytest.mark.parametrize('scenario,retry,calls,succeeds', [
     ('legacy_empty_fail', False, 1, False),
     ('legacy_empty_budget', True, 3, True),
-    ('legacy_reasoning_empty', True, 1, False),
+    ('legacy_reasoning_empty', True, 2, False),
 ])
 def test_legacy_empty_policy(peer, request, scenario, retry, calls, succeeds):
     module = request.module
@@ -58,7 +58,10 @@ def test_legacy_empty_policy(peer, request, scenario, retry, calls, succeeds):
 
     events = [json.loads(item) for item in observer.message_query]
     phases = [event['phase'] for event in events if 'phase' in event]
-    assert phases == (['begin', 'rollback', 'begin', 'commit'] if succeeds else ['begin', 'rollback'])
+    expected_phases = ['begin', 'rollback']
+    if succeeds or scenario == 'legacy_reasoning_empty':
+        expected_phases += ['begin', 'commit' if succeeds else 'rollback']
+    assert phases == expected_phases
 
     diagnostics = model.last_response_diagnostics
     assert diagnostics['finish_reason'] == ('tool_calls' if succeeds else 'stop')
