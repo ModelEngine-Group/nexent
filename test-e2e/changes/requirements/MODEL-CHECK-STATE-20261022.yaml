@@ -25,8 +25,8 @@ change:
     added: []
     retired: []
   affected_cases:
-    existing: [MOP-D3-001]
+    existing: [MODEL-OUTLET-PERSISTENCE-D3-001]
     modified: []
     added: []
     retired: []
-  notes: Approved CONNECTIVITY-STATE-PROPOSAL-20261022 CS-01 through CS-04. Existing MOP-D3-001 and PW-MODEL-01 retained; MOP-D3-001 persistence regression is rerun using executable adapter references; PW-MODEL-01 full Agent journey is not rerun. Targeted real dev API verifies persistence without changing Agent runtime. No container/image build or remote update per user scope. No new state table, digest layer or runtime periodic probing.
+  notes: Approved CONNECTIVITY-STATE-PROPOSAL-20261022 CS-01 through CS-04. Existing MODEL-OUTLET-PERSISTENCE-D3-001 and PW-MODEL-01 retained; MODEL-OUTLET-PERSISTENCE-D3-001 persistence regression is rerun using executable adapter references; PW-MODEL-01 full Agent journey is not rerun. Targeted real dev API verifies persistence without changing Agent runtime. No container/image build or remote update per user scope. No new state table, digest layer or runtime periodic probing.

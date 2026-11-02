@@ -37,7 +37,7 @@ change:
     retired: []
   affected_cases:
     existing: [PW-MODEL-01]
-    modified: [MOP-D3-001]
+    modified: [MODEL-OUTLET-PERSISTENCE-D3-001]
     added: []
     retired: []
-  notes: Approved CONNECTIVITY-SAVE-PROPOSAL-20261023 ECS-01 through ECS-04. Strengthen MOP-D3-001 with actual PostgreSQL commits and use targeted dev browser/controlled peer acceptance. Existing UT supplies component coverage; no duplicate D1. No image build or remote update.
+  notes: Approved CONNECTIVITY-SAVE-PROPOSAL-20261023 ECS-01 through ECS-04. Strengthen MODEL-OUTLET-PERSISTENCE-D3-001 with actual PostgreSQL commits and use targeted dev browser/controlled peer acceptance. Existing UT supplies component coverage; no duplicate D1. No image build or remote update.

@@ -14,9 +14,9 @@ change:
     retired: []
   affected_cases:
     existing:
-    - MPN-D1-001
+    - MODEL-PROFILE-NORMALIZATION-D1-001
     added:
-    - MPC-D1-001
+    - MODEL-PROFILE-COMPOSITION-D1-001
     modified: []
     retired: []
   traditional_ut:

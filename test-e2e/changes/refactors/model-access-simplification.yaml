@@ -10,9 +10,9 @@ change:
     modified: [SDK-MODEL-PROFILE-NORMALIZATION]
     retired: []
   affected_cases:
-    existing: [MPC-D1-001, MOP-D3-001]
+    existing: [MODEL-PROFILE-COMPOSITION-D1-001, MODEL-OUTLET-PERSISTENCE-D3-001]
     added: []
-    modified: [MPN-D1-001]
+    modified: [MODEL-PROFILE-NORMALIZATION-D1-001]
     retired: []
   feature_contract_changed: true
   traditional_ut:

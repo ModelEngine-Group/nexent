@@ -17,7 +17,7 @@ change:
   affected_cases:
     existing: []
     added:
-    - MPN-D1-001
+    - MODEL-PROFILE-NORMALIZATION-D1-001
     modified: []
     retired: []
   traditional_ut:

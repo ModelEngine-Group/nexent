@@ -18,7 +18,7 @@ change:
     modified: []
     retired: []
   affected_cases:
-    existing: [MOP-D3-001]
+    existing: [MODEL-OUTLET-PERSISTENCE-D3-001]
     added: []
     modified: []
     retired: []
@@ -38,7 +38,7 @@ change:
     reason: Strengthen existing component boundaries and reuse the existing backend revision and permission tests; no duplicate D1 is needed.
   notes: >-
     Existing sibling model-access-native-agent SPEC and MIGRATION-EDIT-20261027.md
-    contain ME-01 through ME-04 and the approved UX. MOP-D3-001 retains its
+    contain ME-01 through ME-04 and the approved UX. MODEL-OUTLET-PERSISTENCE-D3-001 retains its
     persistence contract; browser and API evidence proves the actual edit journey.
     Backend migration-review authorization and revision contracts are unchanged.
 

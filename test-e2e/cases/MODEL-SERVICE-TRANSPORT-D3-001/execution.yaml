@@ -1,10 +1,10 @@
 schema_version: '1.0'
-case_id: MST-D3-001
+case_id: MODEL-SERVICE-TRANSPORT-D3-001
 timeout_seconds: 120
 implementations:
 - framework: pytest
   file: test.py
-  selector: MST-D3-001
+  selector: MODEL-SERVICE-TRANSPORT-D3-001
   profiles: [mock]
 acceptance_bindings:
   # Auxiliary backend text flow preserves output and does not add an outer retry.

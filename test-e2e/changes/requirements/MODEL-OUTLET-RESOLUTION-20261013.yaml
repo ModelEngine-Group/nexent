@@ -14,7 +14,7 @@ change:
   affected_cases:
     existing: []
     added:
-    - MPR-D1-001
+    - MODEL-PROFILE-RESOLUTION-D1-001
     modified: []
     retired: []
   traditional_ut:

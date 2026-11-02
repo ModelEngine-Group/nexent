@@ -16,7 +16,7 @@ from shared.postgres import apply_product_postgres_env
 from sqlalchemy import select, text, update
 from sqlalchemy.exc import DBAPIError
 
-pytestmark = [pytest.mark.case_id("MOP-D3-001"), pytest.mark.stage("D3")]
+pytestmark = [pytest.mark.case_id("MODEL-OUTLET-PERSISTENCE-D3-001"), pytest.mark.stage("D3")]
 from nexent.core.model_service.registry import model_service_references
 from nexent.core.model_service.profiles.thinking_configuration import configure_outlet_policy
 

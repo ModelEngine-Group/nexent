@@ -32,7 +32,7 @@ change:
     added: []
     retired: []
   affected_cases:
-    existing: [MOP-D3-001, CHAT-MODEL-CONTROLS-D4-002]
+    existing: [MODEL-OUTLET-PERSISTENCE-D3-001, CHAT-MODEL-CONTROLS-D4-002]
     modified: [CHAT-MODEL-CONTROLS-D3-001, CHAT-MODEL-CONTROLS-D3-002]
     added: []
     retired: []

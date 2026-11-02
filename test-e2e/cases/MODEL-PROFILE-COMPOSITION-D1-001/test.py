@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""MPC-D1-001: real source, supplement and composed policy component contract."""
+"""MODEL-PROFILE-COMPOSITION-D1-001: real source, supplement and composed policy component contract."""
 
 import hashlib
 import os
@@ -26,7 +26,7 @@ COMBINATION = "rules/providers/alibaba-cn/qwen3.5-plus.toml"
 REFERENCE = VersionedReference(ref="component_boundary_v1", version=1)
 TRANSFORM = VersionedReference(ref="identity_v1", version=1)
 BINDING_NAMES = ("protocol", "auth", "adapter", "code_converter", "native_converter")
-pytestmark = [pytest.mark.case_id("MPC-D1-001"), pytest.mark.stage("D1")]
+pytestmark = [pytest.mark.case_id("MODEL-PROFILE-COMPOSITION-D1-001"), pytest.mark.stage("D1")]
 
 
 @pytest.fixture
@@ -276,7 +276,7 @@ def test_experience_layers_follow_source_baseline(no_external_access, tmp_path):
 path = "/context/output_limit"
 value = {output}
 reason = "Case-controlled experience correction"
-evidence = "MPC-D1-001 fixture"
+evidence = "MODEL-PROFILE-COMPOSITION-D1-001 fixture"
 
 [[parameters]]
 key = "temperature"

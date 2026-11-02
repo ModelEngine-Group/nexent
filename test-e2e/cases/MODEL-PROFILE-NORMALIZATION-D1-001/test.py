@@ -1,6 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-"""MPN-D1-001: complete catalog publication through real internal collaborators."""
+"""MODEL-PROFILE-NORMALIZATION-D1-001: complete catalog publication through real internal collaborators."""
 
 import hashlib
 import os
@@ -21,7 +21,7 @@ from nexent.core.model_service.profiles._models_dev.reader import SourceDocument
 from nexent.core.model_service.profiles._models_dev.validation import validate_source_document
 
 ROOT = Path(__file__).resolve().parents[3] / "sdk/nexent/core/model_service/profiles"
-pytestmark = [pytest.mark.case_id("MPN-D1-001"), pytest.mark.stage("D1")]
+pytestmark = [pytest.mark.case_id("MODEL-PROFILE-NORMALIZATION-D1-001"), pytest.mark.stage("D1")]
 
 
 @pytest.fixture

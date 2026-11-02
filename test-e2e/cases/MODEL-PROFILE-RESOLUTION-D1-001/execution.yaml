@@ -1,9 +1,9 @@
 schema_version: '1.0'
-case_id: MPR-D1-001
+case_id: MODEL-PROFILE-RESOLUTION-D1-001
 implementations:
 - framework: pytest
   file: test.py
-  selector: MPR-D1-001
+  selector: MODEL-PROFILE-RESOLUTION-D1-001
   profiles: [mock]
 acceptance_bindings:
   AC-01: [test_shipped_policy_constructs_and_restores_complete_outlet]

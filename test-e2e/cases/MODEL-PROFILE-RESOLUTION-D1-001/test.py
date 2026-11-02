@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[3] / "sdk/nexent/core/model_service/prof
 REFERENCE = VersionedReference(ref="component_available_v1", version=1)
 REGISTRY = {key: [REFERENCE] for key in ("protocol", "auth", "adapter", "code_converter", "native_converter")}
 REGISTRY["parameter_transform"] = [VersionedReference(ref="identity_v1", version=1)]
-pytestmark = [pytest.mark.case_id("MPR-D1-001"), pytest.mark.stage("D1")]
+pytestmark = [pytest.mark.case_id("MODEL-PROFILE-RESOLUTION-D1-001"), pytest.mark.stage("D1")]
 
 
 def source_hashes(root):

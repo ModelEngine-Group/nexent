@@ -52,7 +52,7 @@ from .prompt_generation_cases import test_saved_parameter_transform_reaches_actu
 
 from .prompt_generation_cases import test_migrated_legacy_configuration_reaches_shared_http_without_extra_defaults  # noqa: F401
 
-pytestmark = [pytest.mark.case_id("MST-D3-001"), pytest.mark.stage("D3")]
+pytestmark = [pytest.mark.case_id("MODEL-SERVICE-TRANSPORT-D3-001"), pytest.mark.stage("D3")]
 
 
 @pytest.fixture
@@ -472,7 +472,7 @@ def test_sync_cancellation_reclaims_blocked_managed_worker(peer, scenario):
         "agent-run",
         ManagedTaskSpec(
             task_name="blocked-model-stream",
-            owner="MST-D3-001",
+            owner="MODEL-SERVICE-TRANSPORT-D3-001",
             close_hook=scope.cancel,
         ),
         consume_blocked,

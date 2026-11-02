@@ -11,7 +11,7 @@ change:
     modified: []
     retired: []
   affected_cases:
-    existing: [MOP-D3-001]
+    existing: [MODEL-OUTLET-PERSISTENCE-D3-001]
     added: []
     modified: [PW-MODEL-01]
     retired: []

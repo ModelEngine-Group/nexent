@@ -38,9 +38,9 @@ change:
   affected_cases:
     existing: []
     modified:
-    - MST-D3-001
+    - MODEL-SERVICE-TRANSPORT-D3-001
     added: []
     retired: []
-  notes: SPEC VLLM-TAIL-I18N-20261022 AC-VT-01 through 04. Strengthen MST-D3-001,
+  notes: SPEC VLLM-TAIL-I18N-20261022 AC-VT-01 through 04. Strengthen MODEL-SERVICE-TRANSPORT-D3-001,
     no new D1; local/dev only. Original intranet service inaccessible; report replay
     versus original-service verification.

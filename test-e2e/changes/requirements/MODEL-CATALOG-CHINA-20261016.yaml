@@ -13,7 +13,7 @@ change:
   affected_cases:
     existing: []
     added: []
-    modified: [MPN-D1-001]
+    modified: [MODEL-PROFILE-NORMALIZATION-D1-001]
     retired: []
   traditional_ut:
     decision: strengthen
@@ -29,5 +29,5 @@ change:
     - test/sdk/core/model_service/test_source_reader.py
     - test/sdk/core/model_service/test_catalog_normalization.py
     - test/backend/services/test_model_profile_catalog_matrix.py
-  no_case_change_reason: Reuse MPN-D1-001 only for unchanged atomic normalization regression. New inventory/origin assertions belong to UT; dev API/browser inspection verifies visibility. No model execution or new adapter is introduced and live provider qualification remains separate.
+  no_case_change_reason: Reuse MODEL-PROFILE-NORMALIZATION-D1-001 only for unchanged atomic normalization regression. New inventory/origin assertions belong to UT; dev API/browser inspection verifies visibility. No model execution or new adapter is introduced and live provider qualification remains separate.
   notes: Existing resolved outlets and VLM behavior stay unchanged. Final container verification is pending before push.

@@ -11,9 +11,9 @@ change:
     modified: [SDK-MODEL-PROFILE-COMPOSITION]
     retired: []
   affected_cases:
-    existing: [MPC-D1-001, PW-MODEL-01]
+    existing: [MODEL-PROFILE-COMPOSITION-D1-001, PW-MODEL-01]
     added: []
-    modified: [MPC-D1-001]
+    modified: [MODEL-PROFILE-COMPOSITION-D1-001]
     retired: []
   traditional_ut:
     decision: strengthen

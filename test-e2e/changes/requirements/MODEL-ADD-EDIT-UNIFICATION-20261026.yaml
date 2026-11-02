@@ -27,7 +27,7 @@ change:
     retired: []
   affected_cases:
     existing: []
-    modified: [MOP-D3-001]
+    modified: [MODEL-OUTLET-PERSISTENCE-D3-001]
     added: []
     retired: []
   notes: Approved AEU-01 through AEU-06. Actual PostgreSQL reselection strengthens existing persistence Case; browser and real-service acceptance use workstation dev. No image build or remote update.

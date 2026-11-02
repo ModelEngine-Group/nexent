@@ -26,6 +26,6 @@ feature:
   source:
     requirement_ids:
     - MODEL-PROFILE-NORMALIZATION-20261013
-    notes: Isolated UT does not complete component acceptance. MPN-D1-001 was
+    notes: Isolated UT does not complete component acceptance. MODEL-PROFILE-NORMALIZATION-D1-001 was
       designed before connecting the catalog pipeline to prove complete publication,
       provenance and revision behavior. No provider/API/database/Agent acceptance claimed.

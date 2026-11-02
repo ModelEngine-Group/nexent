@@ -2,7 +2,7 @@ schema_version: '1.0'
 stage: D1
 module: SDK-MODEL-SERVICE
 case:
-  case_id: MPC-D1-001
+  case_id: MODEL-PROFILE-COMPOSITION-D1-001
   feature_id: SDK-MODEL-PROFILE-COMPOSITION
   business_rule_ids:
   - SDK-MODEL-PROFILE-COMPOSITION-RULE-01
@@ -54,7 +54,7 @@ case:
   - Repository TOML and previously returned snapshots remain unchanged.
   unit_boundary: Real collaboration across the existing source catalog, versioned
     supplement reader, instruction registry, parameter policy and draft composition.
-    Existing MPN-D1-001 proves source-only publication; existing parameter UT proves
+    Existing MODEL-PROFILE-NORMALIZATION-D1-001 proves source-only publication; existing parameter UT proves
     isolated values and permissions. Neither proves supplement/source conflicts, complete
     bound draft generation and supplement revision propagation. Local temporary files
     control only the filesystem boundary.

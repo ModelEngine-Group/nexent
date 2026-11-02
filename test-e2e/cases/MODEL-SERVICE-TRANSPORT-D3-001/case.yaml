@@ -2,7 +2,7 @@ schema_version: '1.0'
 stage: D3
 module: MODEL-SERVICE
 case:
-  case_id: MST-D3-001
+  case_id: MODEL-SERVICE-TRANSPORT-D3-001
   feature_id: SDK-MODEL-TRANSPORT
   business_rule_ids:
   - SDK-MODEL-TRANSPORT-RULE-01

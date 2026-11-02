@@ -18,7 +18,7 @@ change:
     - UT-SDK-AUTO-74430BEE8438F486
     - UT-SDK-AUTO-9B9B36B05DA14338
     added:
-    - MST-D3-001
+    - MODEL-SERVICE-TRANSPORT-D3-001
     modified:
     - UT-SDK-AUTO-9A76928E3A7B1ADF
     retired: []

@@ -1,5 +1,5 @@
 schema_version: '1.0'
-case_id: MPC-D1-001
+case_id: MODEL-PROFILE-COMPOSITION-D1-001
 implementations:
 - framework: pytest
   file: test.py

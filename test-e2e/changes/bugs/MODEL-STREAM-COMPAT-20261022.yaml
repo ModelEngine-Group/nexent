@@ -37,7 +37,7 @@ change:
     retired: []
   affected_cases:
     existing: []
-    modified: [MST-D3-001]
+    modified: [MODEL-SERVICE-TRANSPORT-D3-001]
     added: []
     retired: []
   notes: SPEC RC-01 through RC-05 and PROBE-COMPATIBILITY-20261022 record approval. User requests dev-only acceptance, no image build or remote update. Real gateway and Langfuse proof is recorded separately from controlled D3. Reuse the HTTP module and no new functional module or D1.

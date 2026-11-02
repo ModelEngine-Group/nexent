@@ -51,7 +51,7 @@ change:
     retired: []
   affected_cases:
     existing: [PW-MODEL-01]
-    modified: [MST-D3-001, MOP-D3-001]
+    modified: [MODEL-SERVICE-TRANSPORT-D3-001, MODEL-OUTLET-PERSISTENCE-D3-001]
     added: []
     retired: []
   notes: SPEC and TECHNICAL-DESIGN ONBOARDING-FIX-20261021 plus ONBOARDING-FIX-PROPOSAL define AC-FIX-01 through 10. Existing UT covers isolated matching/validation and frontend state; no duplicate D1 is added. Strengthen actual wire and real PostgreSQL credential/snapshot contracts. Execute real browser failure/layout scenarios separately under the approved AC matrix; do not describe unchanged PW-MODEL-01 as proving those new scenarios. Existing PW-MODEL-01 is successful onboarding/Agent regression. PW-MODEL-02 is embedding/KB indexing and is not evidence for LLM onboarding. Final container acceptance and dev restoration completed on 2026-10-22; evidence and layer limits are recorded in ONBOARDING-FIX-ACCEPTANCE-20261021.md. No remote PR updates authorized.
