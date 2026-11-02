@@ -112,6 +112,8 @@ def test_target_authorization_uses_current_tenant_and_edit_permission(mocker, ki
 
 @pytest.mark.asyncio
 async def test_resume_derives_target_from_owned_history(mocker):
+    mocker.patch("management.services.conversation.model_preferences.read_model_preferences",
+        return_value={"model_parameter_preferences": {}, "selected_model_id": None})
     ref = SystemAgentRef("shared", "nl2agent_main", 77, 0)
     mocker.patch.object(execution.system_agent_provider, "get_creator_ref", return_value=ref)
     mocker.patch.object(execution, "get_conversation_history", return_value={"agent_id": 77, "target": {"type": "agent", "id": 201}})

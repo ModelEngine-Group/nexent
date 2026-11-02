@@ -17,12 +17,16 @@ async def test_existing_skill_history_restores_preferences_before_stream(monkeyp
     module = legacy.skill_app_creation
     monkeypatch.setattr(module, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(module, "get_current_user_info", Mock(return_value=("owner", "tenant", "en")))
-    monkeypatch.setattr(module, "get_current_user_id", Mock(return_value=("owner", "tenant")))
     preferences = {"42": {"temperature": 0, "enable_thinking": False}}
     service = types.ModuleType("management.services.conversation.model_preferences")
     service.read_model_preferences = Mock(return_value={"selected_model_id": 42, "model_parameter_preferences": preferences})
     monkeypatch.setitem(sys.modules, service.__name__, service)
-    monkeypatch.setattr(module, "run_blocking", AsyncMock(side_effect=lambda name, fn, *args: fn(*args)))
+    from nexent.core import concurrency
+    from management.services.conversation import creator_execution as execution
+    monkeypatch.setattr(concurrency, "run_blocking", AsyncMock(side_effect=lambda name, fn, *args: fn(*args)))
+    monkeypatch.setattr(execution.system_agent_provider, "get_creator_ref", Mock(return_value=types.SimpleNamespace(agent_id=99)))
+    monkeypatch.setattr(execution, "get_conversation_history", Mock(return_value={"agent_id": 99}))
+    monkeypatch.setattr(execution, "authorize_target", lambda target, *_: target)
 
     async def events():
         yield "data: done\n\n"
@@ -30,17 +34,17 @@ async def test_existing_skill_history_restores_preferences_before_stream(monkeyp
     stream = AsyncMock(return_value=events())
     prepare = Mock(return_value=(11, 0))
     monkeypatch.setattr(module, "create_nl2skill_stream", stream)
-    monkeypatch.setattr(module, "prepare_creation_history", prepare)
-    monkeypatch.setattr(module, "persist_creation_stream", lambda value, **kwargs: value)
-    request = SimpleNamespace(query="fixture", conversation_id=11, model_id=explicit, persist_history=True,
-        workbench_config=None, language=None, minio_files=[], model_parameter_preferences={},
-        retry_user_message_id=None, retry_message_index=None)
+    monkeypatch.setattr(execution, "prepare_creation_history", prepare)
+    monkeypatch.setattr(execution, "persist_creation_stream", lambda value, **kwargs: value)
+    from contracts.agent import NL2SkillRunRequest
+    request = NL2SkillRunRequest(query="fixture", conversation_id=11, model_id=explicit, persist_history=True)
     response = await module.nl2skill_run_api(request, authorization="token")
     assert [chunk async for chunk in response.body_iterator] == ["data: done\n\n"]
     service.read_model_preferences.assert_called_once_with(11, "owner")
-    assert stream.call_args.kwargs["request"] is request
-    assert request.model_id == (42 if explicit is None else explicit)
-    assert request.__dict__["_runtime_model_parameter_preferences"] == preferences
-    assert prepare.call_args.kwargs["selected_model_id"] == request.model_id
-    assert prepare.call_args.kwargs["model_parameter_preferences"] == {}
+    effective = stream.call_args.kwargs["request"]
+    assert effective is not request
+    assert effective.model_id == (42 if explicit is None else explicit)
+    assert effective.__dict__["_runtime_model_parameter_preferences"] == preferences
+    assert prepare.call_args.kwargs["selected_model_id"] == effective.model_id
+    assert prepare.call_args.kwargs.get("model_parameter_preferences", {}) == {}
     assert response.headers["conversation_id"] == "11"
