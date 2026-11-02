@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 from management.api.knowledge_base import vectordatabase as local_app
 import ext_components.aidp.apps.aidp_mgmt_app as aidp_app
 import pytest
-from management.utils.app_factory import register_exception_handlers
+from infrastructure.web.application import register_exception_handlers
 from contracts.errors.exceptions import TokenExpiredError
 from ext_components.aidp.consts.aidp_exceptions import (
     AidpKbNotFoundError,

@@ -1,0 +1,53 @@
+schema_version: '1.0'
+change:
+  change_id: MR-WEB-FOUNDATION-20261102
+  change_type: refactor
+  title: Extract shared Web assembly before independent Management and Runtime images
+  description: First implementation slice stacked on the Gateway branch. Preserve
+    HTTP and signed identity contracts; keep evaluation composition in Management
+    and Agent/model capability execution in Runtime in the corrected plan.
+  affected_features:
+    existing:
+    - GW-AUTH
+    - F-131
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - GW-AUTH-D3-001
+    - API-AUTO-CD0683F112D04918
+    added: []
+    modified: []
+    retired: []
+  feature_contract_changed: false
+  no_case_change_reason: Preserve existing health and authentication acceptance; use
+    the actual shared factory in existing runtime regression scripts and update canonical
+    import sites.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Shared web assembly imports no Management or Runtime implementation.
+    - A minimal source-only deployment constructs and serves process health without
+      either business service.
+    - Legacy public factory imports resolve to the canonical functions.
+    - Exception status/body, CORS, lifespan, health readiness and signed downstream
+      audience enforcement remain unchanged.
+    reason: Reuse app_factory/health/caller regressions, add source-isolation and
+      dependency assertions; source-only checks do not require a duplicate formal
+      D1.
+    test_selectors:
+    - test/backend/app/test_agent_app.py
+    - test/backend/app/test_agent_automation_app.py
+    - test/backend/app/test_app_factory.py
+    - test/backend/app/test_config_app.py
+    - test/backend/app/test_health_app.py
+    - test/backend/app/test_idata_app.py
+    - test/backend/app/test_knowledge_base_bound_agents.py
+    - test/backend/app/test_northbound_base_app.py
+    - test/backend/app/test_quota_app.py
+    - test/backend/app/test_remote_mcp_app.py
+    - test/backend/management/test_gateway_app_boundary.py
+    - test/backend/management/test_northbound_lifecycle.py
+    - test/ext_components/aidp/test_aidp_mgmt_app.py
+    - test/backend/management/test_shared_web_boundary.py

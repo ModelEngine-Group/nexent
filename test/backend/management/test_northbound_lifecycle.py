@@ -34,7 +34,7 @@ def lifecycle(monkeypatch):
     monkeypatch.setitem(sys.modules, "nexent.core.concurrency", concurrency)
     monkeypatch.setitem(sys.modules, "management.services.agent.run_state", SimpleNamespace(runtime_state_service=state))
     monkeypatch.setitem(sys.modules, "management.api.northbound", SimpleNamespace(router=APIRouter(), a2a_router=APIRouter()))
-    monkeypatch.setitem(sys.modules, "management.utils.app_factory", SimpleNamespace(create_app=lambda **kw: FastAPI()))
+    monkeypatch.setitem(sys.modules, "infrastructure.web.application", SimpleNamespace(create_app=lambda **kw: FastAPI()))
     monkeypatch.setitem(sys.modules, "management.recovery", recovery)
     path = Path(__file__).resolve().parents[3] / "backend/management/api/northbound_application.py"
     spec = importlib.util.spec_from_file_location("isolated_management_northbound", path)

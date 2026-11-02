@@ -62,7 +62,7 @@ from fastapi import FastAPI
 from http import HTTPStatus
 
 from management.api.mcp.remote_mcp import router
-from management.utils.app_factory import register_exception_handlers
+from infrastructure.web.application import register_exception_handlers
 
 from management.api.mcp import remote_mcp as remote_app
 remote_app.MCPConnectionError = MCPConnectionError
