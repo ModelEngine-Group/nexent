@@ -1448,7 +1448,7 @@ apply() {
         SSH_PASSWORD="${SSH_PASSWORD:-nexent@2025}"
     fi
 
-    # Capture the source before replacing Secrets needed by a stopped old DB.
+    # Complete historical import before replacing source Secrets or starting application SQL.
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
         deployment_upgrade_local_accounts kubernetes "$NAMESPACE" || exit 1
     fi

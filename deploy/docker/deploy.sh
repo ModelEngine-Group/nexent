@@ -1956,7 +1956,7 @@ main_deploy() {
     return 0
   fi
 
-  # Capture historical identities before application replacement or SQL changes.
+  # Complete historical import before application startup can create its marker table.
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
     deployment_upgrade_local_accounts docker || exit 1
   fi
