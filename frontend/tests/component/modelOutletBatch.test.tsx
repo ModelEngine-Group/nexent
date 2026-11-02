@@ -203,7 +203,6 @@ it.each([false, true])(
   async (partialFailure) => {
     api.validateModelOutlet.mockResolvedValue({
       ok: false,
-      check_receipt: "batch-failed-proof",
       error: {
         category: "MODEL_NOT_FOUND",
         scope: "connection",
@@ -308,7 +307,7 @@ it.each([false, true])(
       display_name: "Configured A",
       api_key: "controlled-key",
       catalog_revision: "r1",
-      check_receipt: "batch-failed-proof",
+      connect_status: "unavailable",
     });
     expect(api.createModelOutlet.mock.calls[1][0].display_name).not.toBe(
       "Discarded B"

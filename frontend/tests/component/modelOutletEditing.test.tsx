@@ -527,7 +527,6 @@ it.each([true, false])(
 it("ECS-01 checks the edit draft, preserves masked credentials and carries the result through rename/save", async () => {
   api.validateModelOutlet.mockResolvedValue({
     ok: true,
-    check_receipt: "backend-proof",
   });
   setup(
     <ModelOutletEditDialog modelId={42} onClose={vi.fn()} onSuccess={vi.fn()} />
@@ -557,18 +556,17 @@ it("ECS-01 checks the edit draft, preserves masked credentials and carries the r
     expect(api.updateModelOutlet).toHaveBeenCalledWith(
       42,
       expect.objectContaining({
-        check_receipt: "backend-proof",
-        display_name: "renamed",
+        connect_status: "available",
+          display_name: "renamed",
       })
     )
   );
   expect(api.validateModelOutlet).toHaveBeenCalledTimes(1);
 });
 
-it("ECS-03 discards the edit proof when request parameters change", async () => {
+it("ECS-03 discards the edit result when request parameters change", async () => {
   api.validateModelOutlet.mockResolvedValue({
     ok: true,
-    check_receipt: "stale-proof",
   });
   setup(
     <ModelOutletEditDialog modelId={42} onClose={vi.fn()} onSuccess={vi.fn()} />
@@ -586,7 +584,7 @@ it("ECS-03 discards the edit proof when request parameters change", async () => 
   await waitForEditSaveReady();
   fireEvent.click(screen.getByRole("button", { name: "common.save" }));
   await waitFor(() => expect(api.updateModelOutlet).toHaveBeenCalled());
-  expect(api.updateModelOutlet.mock.calls[0][1].check_receipt).toBeUndefined();
+  expect(api.updateModelOutlet.mock.calls[0][1].connect_status).toBeUndefined();
 });
 
 it("AEU-04 restores parameters through the saved-rule preview without changing catalog references or credentials", async () => {

@@ -1238,7 +1238,6 @@ describe("single draft connectivity", () => {
   it("SDC-02 shows provider errors and permits saving after a failed explicit check", async () => {
     api.validateModelOutlet.mockResolvedValue({
       ok: false,
-      check_receipt: "failed-backend-proof",
       error: {
         category: "MODEL_REQUEST_INVALID",
         scope: "model",
@@ -1259,8 +1258,8 @@ describe("single draft connectivity", () => {
     fireEvent.click(saveButton());
     await waitFor(() => expect(callbacks.onDone).toHaveBeenCalledOnce());
     expect(api.createModelOutlet).toHaveBeenCalledOnce();
-    expect(api.createModelOutlet.mock.calls[0][0].check_receipt).toBe(
-      "failed-backend-proof"
+    expect(api.createModelOutlet.mock.calls[0][0].connect_status).toBe(
+      "unavailable"
     );
     expect(api.validateModelOutlet).toHaveBeenCalledOnce();
   });
@@ -1325,10 +1324,9 @@ it("SDC-05 reports management network failures and aborts checks on close", asyn
   expect(api.createModelOutlet).not.toHaveBeenCalled();
 });
 
-it("ECS-02 saves a successful explicit check receipt without a second probe", async () => {
+it("ECS-02 saves a successful explicit check result without a second probe", async () => {
   api.validateModelOutlet.mockResolvedValue({
     ok: true,
-    check_receipt: "successful-proof",
   });
   const callbacks = setup();
   fillIdentity();
@@ -1337,8 +1335,8 @@ it("ECS-02 saves a successful explicit check receipt without a second probe", as
   await screen.findByText("model.status.available");
   fireEvent.click(saveButton());
   await waitFor(() => expect(callbacks.onDone).toHaveBeenCalledOnce());
-  expect(api.createModelOutlet.mock.calls[0][0].check_receipt).toBe(
-    "successful-proof"
+  expect(api.createModelOutlet.mock.calls[0][0].connect_status).toBe(
+    "available"
   );
   expect(api.validateModelOutlet).toHaveBeenCalledTimes(1);
 });
@@ -1376,3 +1374,35 @@ it.each([
     expect(api.createModelOutlet).not.toHaveBeenCalled();
   }
 );
+
+
+it("FD-05 retains a tested draft after save failure and retries without another check", async () => {
+  api.validateModelOutlet.mockResolvedValue({ ok: true });
+  api.createModelOutlet.mockRejectedValueOnce(new Error("temporary save failure"));
+  const callbacks = setup();
+  fillIdentity();
+  await waitForSaveReady();
+  fireEvent.click(checkButton());
+  await screen.findByText("model.status.available");
+  fireEvent.click(saveButton());
+  await waitFor(() => expect(api.createModelOutlet).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(saveButton()).toBeEnabled());
+  expect(callbacks.onDone).not.toHaveBeenCalled();
+  expect(screen.getByText("model.status.available")).toBeInTheDocument();
+  fireEvent.click(saveButton());
+  await waitFor(() => expect(callbacks.onDone).toHaveBeenCalledOnce());
+  expect(api.createModelOutlet.mock.calls.map(([request]) => request.connect_status)).toEqual(["available", "available"]);
+  expect(api.validateModelOutlet).toHaveBeenCalledOnce();
+});
+
+it("FD-05 does not persist an unavailable result for a failed management request", async () => {
+  api.validateModelOutlet.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  const callbacks = setup();
+  fillIdentity();
+  await waitForSaveReady();
+  fireEvent.click(checkButton());
+  await screen.findByRole("button", { name: "modelProfile.checkIssues" });
+  fireEvent.click(saveButton());
+  await waitFor(() => expect(callbacks.onDone).toHaveBeenCalledOnce());
+  expect(api.createModelOutlet.mock.calls[0][0].connect_status).toBeUndefined();
+});

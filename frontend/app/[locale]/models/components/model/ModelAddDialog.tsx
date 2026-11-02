@@ -874,7 +874,7 @@ function BatchAddForm({
   });
   const [issues, setIssues] = useState<Record<string, ModelCheckIssue>>({});
   const generations = useRef<Record<string, number>>({});
-  const checkReceipts = useRef<Record<string, string>>({});
+  const checkStatuses = useRef<Record<string, "available" | "unavailable">>({});
   const discoveryGeneration = useRef(0);
   const [profileMatches, setProfileMatches] = useState<Record<string, boolean>>(
     {}
@@ -887,7 +887,7 @@ function BatchAddForm({
     const ids = id ? [id] : fetched.map((row) => row.id);
     ids.forEach((key) => {
       generations.current[key] = (generations.current[key] ?? 0) + 1;
-      delete checkReceipts.current[key];
+      delete checkStatuses.current[key];
     });
     setRowCheck((previous) => {
       const next = { ...previous };
@@ -1166,7 +1166,7 @@ function BatchAddForm({
         return next;
       });
     };
-    delete checkReceipts.current[row.id];
+    delete checkStatuses.current[row.id];
     setRowCheck((s) => ({ ...s, [row.id]: "checking" }));
     try {
       if (!tenantId && row.model_type === MODEL_TYPES.LLM) {
@@ -1180,8 +1180,8 @@ function BatchAddForm({
                 : apiKey.trim() || null,
           },
         });
-        if (generations.current[row.id] === generation && result.check_receipt)
-          checkReceipts.current[row.id] = result.check_receipt;
+        if (generations.current[row.id] === generation)
+          checkStatuses.current[row.id] = result.ok ? "available" : "unavailable";
         apply(result.ok, result.error);
         return;
       }
@@ -1237,7 +1237,7 @@ function BatchAddForm({
           const draft = await resolveOutletDraft(row);
           await createModelOutlet({
             ...draft,
-            check_receipt: checkReceipts.current[row.id],
+            connect_status: checkStatuses.current[row.id],
             api_key:
               draft.authentication_scheme === "no_auth_v1"
                 ? null

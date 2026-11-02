@@ -459,17 +459,24 @@ export function ModelOutletAddForm({
   const [checking, setChecking] = useState(false);
   const [checkResult, setCheckResult] =
     useState<
-      Pick<ModelOutletValidationResponse, "ok" | "error" | "check_receipt">
+      Pick<ModelOutletValidationResponse, "ok" | "error"> & {
+        fingerprint: string;
+        connect_status?: "available" | "unavailable";
+      }
     >();
   const checkGeneration = useRef(0);
   const checkController = useRef<AbortController | null>(null);
   const checkDraftIdentity = Object.fromEntries(
     Object.entries(draft).filter(([key]) => key !== "display_name")
   );
-  const checkFingerprint = JSON.stringify([checkDraftIdentity, sampling]);
+  const checkFingerprint = JSON.stringify([
+    checkDraftIdentity, sampling, apiKey, editing?.config_revision,
+  ]);
+  const currentCheckResult = checkResult?.fingerprint === checkFingerprint ? checkResult : undefined;
   useEffect(() => {
     checkGeneration.current += 1;
     checkController.current?.abort();
+    setCheckResult(undefined);
     return () => {
       checkController.current?.abort();
     };
@@ -510,12 +517,13 @@ export function ModelOutletAddForm({
       if (!controller.signal.aborted && generation === checkGeneration.current)
         setCheckResult({
           ok: result.ok,
-          check_receipt: result.check_receipt,
+          fingerprint: checkFingerprint,
+          connect_status: result.ok ? "available" : "unavailable",
           error: result.ok ? null : (result.error ?? modelCheckFailure(null)),
         });
     } catch (error) {
       if (!controller.signal.aborted && generation === checkGeneration.current)
-        setCheckResult({ ok: false, error: modelCheckFailure(error) });
+        setCheckResult({ ok: false, error: modelCheckFailure(error), fingerprint: checkFingerprint });
     } finally {
       if (!controller.signal.aborted && generation === checkGeneration.current)
         setChecking(false);
@@ -549,7 +557,7 @@ export function ModelOutletAddForm({
       if (editing) {
         const saved = await updateModelOutlet(editing.model_id, {
           ...makeEditPatch(draft),
-          check_receipt: checkResult?.check_receipt,
+          connect_status: currentCheckResult?.connect_status,
         });
         if (reviewMigration) {
           try {
@@ -565,7 +573,7 @@ export function ModelOutletAddForm({
         return saved;
       }
       const saved = await createModelOutlet({
-        check_receipt: checkResult?.check_receipt,
+        connect_status: currentCheckResult?.connect_status,
         ...draft,
         parameter_values: sampling,
         catalog_revision: preview.data.catalog_revision,
@@ -1050,13 +1058,13 @@ export function ModelOutletAddForm({
               >
                 {t("modelConfig.editDialog.checkConnectivity")}
               </StandardButton>
-              {checkResult?.ok && (
+              {currentCheckResult?.ok && (
                 <span role="status" className="text-xs text-emerald-600">
                   {t("model.status.available")}
                 </span>
               )}
               <ModelCheckSummary
-                issues={checkResult?.error ? { draft: checkResult.error } : {}}
+                issues={currentCheckResult?.error ? { draft: currentCheckResult.error } : {}}
                 modelNames={{ draft: name.trim() }}
                 onRetry={
                   !checking && ready ? () => void checkDraft() : undefined
