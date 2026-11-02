@@ -121,6 +121,35 @@ def assert_automatic_upgrade(root, temporary):
         assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id IN ('__local_auth_data_2.9.0__','__local_auth_cleanup_2.9.0__')") == "2"
         docker(*sql_command)
         assert phase("prepare")["skipped"] and phase("apply")["skipped"]
+        # Reproduce retired source + prior API-only placeholders. Existing SQL
+        # and completion checkpoints must not hide a required local repair.
+        query("DELETE FROM nexent.user_account_t; DELETE FROM nexent.user_tenant_t; "
+              "CREATE TABLE nexent.user_token_info_t (user_id varchar(100),delete_flag varchar(1) DEFAULT 'N')")
+        for key in list(env):
+            if key.startswith("SUPABASE_"):
+                env.pop(key)
+        api_ids = [str(uuid4()) for _ in range(4)]
+        for index, uid in enumerate(api_ids):
+            role = 'USER' if index % 2 == 0 else 'DEV'
+            flag = 'N' if index < 2 else 'Y'
+            query(f"INSERT INTO nexent.user_account_t (user_id,user_role,account_status,source_metadata,updated_by) VALUES ('{uid}','{role}','disabled','{{\"credential_migration_pending\":true}}','account-schema-migration'); "
+                  f"INSERT INTO nexent.user_tenant_t (user_id,tenant_id) VALUES ('{uid}','api-tenant'); "
+                  f"INSERT INTO nexent.user_token_info_t VALUES ('{uid}','{flag}')")
+        for existing_checkpoints in [False, True]:
+            if not existing_checkpoints:
+                query("DELETE FROM nexent.schema_migrations WHERE migration_id IN ('__local_auth_data_2.9.0__','__local_auth_cleanup_2.9.0__')")
+            query("UPDATE nexent.user_account_t SET account_status='disabled',source_metadata='{\"credential_migration_pending\":true}',updated_by='account-schema-migration'")
+            assert phase("prepare")["source"] == 0
+            docker(*sql_command)  # The unchanged account SQL is skipped here.
+            assert phase("apply")["source"] == 0
+            assert query("SELECT count(*) FROM nexent.user_account_t WHERE account_status='active' AND NOT password_login_enabled AND password_hash IS NULL AND source_metadata->>'api_only'='true'") == '4'
+            assert query("SELECT count(*) FROM nexent.user_token_info_t WHERE delete_flag='Y'") == '2'
+            assert phase("prepare")["skipped"]
+        # An unknown identity with no token evidence still requires resolution.
+        query(f"DELETE FROM nexent.user_token_info_t WHERE user_id='{api_ids[0]}'; "
+              f"UPDATE nexent.user_account_t SET account_status='disabled',source_metadata='{{\"credential_migration_pending\":true}}' WHERE user_id='{api_ids[0]}'")
+        phase("prepare", success=False)
+        assert query("SELECT count(*) FROM nexent.user_account_t WHERE account_status='active'") == '3'
     finally:
         existing = docker("ps", "-a", "--format", "{{.Names}}").splitlines()
         for name in [*names.values(), target, worker]:

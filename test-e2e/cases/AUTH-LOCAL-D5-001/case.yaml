@@ -45,7 +45,7 @@ case:
     expected: Preview/failure preserve the stack; successful committed apply removes its DB/Auth/Kong containers without deleting data volumes, backups or unrelated containers.
   - order: 7
     action: Run deployment prepare and apply hooks around the normal versioned SQL runner, repeat deployment and retry a failed import using its retained private snapshot.
-    expected: One standalone Python script automatically imports only when the account SQL/data checkpoint requires it; fresh installs and completed upgrades skip source access, failures remain retryable, and SQL success alone never marks credential migration complete.
+    expected: Deployment imports only when SQL/data state requires it; API-only pending identities with valid evidence are repaired without a source even with old completion checkpoints, revoked keys stay revoked, and identities missing evidence still block. Fresh installs and completed upgrades skip source access and failures remain retryable.
   - order: 8
     action: Execute the actual historical SPEED seed statement, migrate and replay against a prior pending placeholder and an operator-modified account.
     expected: The fixed demo identity retains its original ID/tenant and remains disabled for normal login, has system provenance without pending credentials, and replay preserves operator changes. Mixed-user deployment still imports human credentials.

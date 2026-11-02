@@ -462,6 +462,19 @@ def _history_table(values):
 def deployment_status(args, values):
     table = _history_table(values)
     plain = table.replace('"', '')
+    pending_filter = """delete_flag='N' AND source_metadata->>'credential_migration_pending'='true'
+AND NOT (a.user_id='user_id' AND coalesce(upper(a.user_role),'')='SPEED'
+    AND a.account_status='disabled' AND nullif(trim(a.user_email),'') IS NULL
+    AND a.password_hash IS NULL AND a.token_version=0 AND NOT a.password_login_enabled
+    AND coalesce(a.updated_by,'')='account-schema-migration'
+    AND EXISTS (SELECT 1 FROM nexent.user_tenant_t u WHERE u.user_id=a.user_id AND u.tenant_id='tenant_id' AND u.delete_flag='N')
+    AND NOT EXISTS (SELECT 1 FROM nexent.user_tenant_t u WHERE u.user_id=a.user_id AND u.delete_flag='N' AND u.tenant_id IS DISTINCT FROM 'tenant_id'))"""
+    api_only_filter = """a.account_status='disabled'
+        AND nullif(trim(a.user_email),'') IS NULL AND coalesce(upper(a.user_role),'') IN ('USER','DEV')
+        AND a.password_hash IS NULL AND a.token_version=0 AND NOT a.password_login_enabled
+        AND coalesce(a.updated_by,'')='account-schema-migration'
+        AND EXISTS (SELECT 1 FROM nexent.user_tenant_t u WHERE u.user_id=a.user_id AND u.delete_flag='N')
+        AND EXISTS (SELECT 1 FROM nexent.user_token_info_t t WHERE t.user_id=a.user_id)"""
     sql = rf"""
 SELECT to_regclass('{plain}') IS NOT NULL AS has_history \gset
 \if :has_history
@@ -472,14 +485,14 @@ SELECT '[]';
 \endif
 SELECT count(*)=2 AS has_accounts FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name IN ('source_metadata','user_role') \gset
 \if :has_accounts
-SELECT json_build_object('pending',count(*)) FROM nexent.user_account_t a
-WHERE delete_flag='N' AND source_metadata->>'credential_migration_pending'='true'
-AND NOT (a.user_id='user_id' AND coalesce(upper(a.user_role),'')='SPEED'
-    AND a.account_status='disabled' AND nullif(trim(a.user_email),'') IS NULL
-    AND a.password_hash IS NULL AND a.token_version=0 AND NOT a.password_login_enabled
-    AND coalesce(a.updated_by,'')='account-schema-migration'
-    AND EXISTS (SELECT 1 FROM nexent.user_tenant_t u WHERE u.user_id=a.user_id AND u.tenant_id='tenant_id' AND u.delete_flag='N')
-    AND NOT EXISTS (SELECT 1 FROM nexent.user_tenant_t u WHERE u.user_id=a.user_id AND u.delete_flag='N' AND u.tenant_id IS DISTINCT FROM 'tenant_id'));
+SELECT to_regclass('nexent.user_token_info_t') IS NOT NULL AS has_tokens \gset
+\if :has_tokens
+SELECT json_build_object('pending',count(*),'pending_total',(SELECT count(*) FROM nexent.user_account_t WHERE delete_flag='N' AND source_metadata->>'credential_migration_pending'='true')) FROM nexent.user_account_t a
+WHERE {pending_filter} AND NOT ({api_only_filter});
+\else
+SELECT json_build_object('pending',count(*),'pending_total',(SELECT count(*) FROM nexent.user_account_t WHERE delete_flag='N' AND source_metadata->>'credential_migration_pending'='true')) FROM nexent.user_account_t a
+WHERE {pending_filter};
+\endif
 \else
 SELECT '{{"pending":0}}';
 \endif
@@ -630,6 +643,13 @@ def _worker(job):
                 if recorded and recorded[0] == job["checksum"] and not pending:
                     result = {"automatic": True, "skipped": True}
                 else:
+                    if marker == DATA_MARKER and pending:
+                        account_sql = job.get("account_sql", "")
+                        if hashlib.sha256(account_sql.encode("utf-8")).hexdigest() != job["checksum"]:
+                            raise MigrationSetupError("Pending account repair requires the exact versioned account SQL")
+                        # The startup runner may have already recorded this SQL.
+                        # Replay its idempotent rules before credential import.
+                        cursor.execute(account_sql)
                     result = import_users(connection, job.get("rows", []), dry_run=False) if marker == DATA_MARKER else {"cleanup": True}
                     if marker == DATA_MARKER:
                         cursor.execute("SELECT count(*) FROM nexent.user_account_t WHERE delete_flag='N' AND source_metadata->>'credential_migration_pending'='true'")
@@ -667,7 +687,7 @@ def automatic_upgrade(args, *, source_resolver=None, storage_preserver=None):
     checksum = hashlib.sha256(sql_file.read_bytes()).hexdigest()
     path = (args.state_dir or args.env_file.parent / ".migration-state") / (args.deployment + "-" + args.namespace + "-" + AUTH_SQL + ".json")
     status = deployment_status(args, values)
-    complete = not status["pending"] and all(status["history"].get(marker, {}).get("checksum") == checksum for marker in [AUTH_SQL, DATA_MARKER, CLEANUP_MARKER])
+    complete = not status.get("pending_total", status["pending"]) and all(status["history"].get(marker, {}).get("checksum") == checksum for marker in [AUTH_SQL, DATA_MARKER, CLEANUP_MARKER])
     target = {"deployment": args.deployment, "namespace": args.namespace, "database": args.database_target,
               "dbname": values.get("POSTGRES_DB") or "nexent"}
     if getattr(args, "cluster_identity", None):
@@ -701,7 +721,8 @@ def automatic_upgrade(args, *, source_resolver=None, storage_preserver=None):
             raise MigrationSetupError("Waiting for the versioned account SQL timed out; snapshot was retained")
         time.sleep(1)
         status = deployment_status(args, values)
-    result = _run_worker(args, {"action": "apply", "checksum": checksum, "rows": snapshot["rows"]})
+    result = _run_worker(args, {"action": "apply", "checksum": checksum, "rows": snapshot["rows"],
+                                "account_sql": sql_file.read_bytes().decode("utf-8")})
     source = snapshot["source"]
     if source and not source.get("remote"):
         if args.deployment == "docker":
