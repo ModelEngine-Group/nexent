@@ -672,6 +672,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         newChatDesign && newChatStyles.font,
         configurationLayout && "!bg-transparent",
         debugLayout && "!bg-transparent",
+        debugLayout && selection !== null && "gap-6",
         variant === "embedded" &&
           "[&_.aui-assistant-action-bar-root]:hidden [&_.aui-user-action-bar-root]:hidden"
       )}
