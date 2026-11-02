@@ -75,6 +75,13 @@ import {
   type ArtifactAttachmentLike,
   type ConversationArtifact,
 } from "../utils/conversation-artifacts";
+import { MessageAnnotationBubble } from "./message-annotation-bubble";
+import {
+  createMessageAnnotation,
+  type MessageAnnotation,
+  type MessageAnnotationDraft,
+  type MessageAnnotationsControl,
+} from "../utils/message-annotations";
 import {
   scrollThreadToMessage,
   useQuestionDirectory,
@@ -444,6 +451,73 @@ export const Thread: FC<ThreadProps> = ({
     [branchDisabled, branchFromMessage]
   );
 
+  // Reply annotations ("add to chat") attach to the next outgoing message.
+  // State lives at the Thread level so the selection bubble, the composer
+  // chip and the send flow share one source of truth. The source excerpt is
+  // captured when the annotation is created so it keeps referencing the reply
+  // content the user saw when selecting.
+  const [messageAnnotations, setMessageAnnotations] = useState<
+    MessageAnnotation[]
+  >([]);
+  // Pending annotations belong to the active thread: switching threads resets
+  // them during render (the same keyed-state pattern the composer uses for
+  // the knowledge modal) so they never leak across conversations.
+  const [annotationThreadId, setAnnotationThreadId] = useState(threadId);
+  if (annotationThreadId !== threadId) {
+    setAnnotationThreadId(threadId);
+    setMessageAnnotations([]);
+  }
+
+  const addMessageAnnotation = useCallback(
+    (draft: MessageAnnotationDraft) => {
+      setMessageAnnotations((current) => [
+        ...current,
+        createMessageAnnotation(draft, messages, crypto.randomUUID()),
+      ]);
+    },
+    [messages]
+  );
+  const updateMessageAnnotationComment = useCallback(
+    (id: string, comment: string) => {
+      setMessageAnnotations((current) =>
+        current.map((annotation) =>
+          annotation.id === id
+            ? { ...annotation, comment: comment || undefined }
+            : annotation
+        )
+      );
+    },
+    []
+  );
+  const removeMessageAnnotation = useCallback((id: string) => {
+    setMessageAnnotations((current) =>
+      current.filter((annotation) => annotation.id !== id)
+    );
+  }, []);
+  const clearMessageAnnotations = useCallback(() => {
+    setMessageAnnotations([]);
+  }, []);
+
+  const messageAnnotationsControl = useMemo<MessageAnnotationsControl>(
+    () => ({
+      annotations: messageAnnotations,
+      addAnnotation: addMessageAnnotation,
+      updateAnnotationComment: updateMessageAnnotationComment,
+      removeAnnotation: removeMessageAnnotation,
+      clearAnnotations: clearMessageAnnotations,
+      // Consumed annotations attach to exactly one outgoing message; the
+      // composer invokes this once the run has accepted them.
+      consumeAnnotations: clearMessageAnnotations,
+    }),
+    [
+      messageAnnotations,
+      addMessageAnnotation,
+      updateMessageAnnotationComment,
+      removeMessageAnnotation,
+      clearMessageAnnotations,
+    ]
+  );
+
   // Sources panel state lives at the Thread level so the right-hand panel and
   // each `group-source` button share a single source of truth. The selection
   // carries the snapshot of sources/images for the group that opened it,
@@ -559,6 +633,7 @@ export const Thread: FC<ThreadProps> = ({
             artifactsOpen={artifactsOpen}
             onArtifactsOpenChange={setArtifactsOpen}
             questionDirectory={questionDirectory}
+            messageAnnotations={messageAnnotationsControl}
           />
           <Dialog
             open={Boolean(manualShareUrl)}
@@ -670,6 +745,7 @@ interface ThreadViewProps {
   artifactsOpen: boolean;
   onArtifactsOpenChange: (open: boolean) => void;
   questionDirectory: QuestionDirectoryEntry[];
+  messageAnnotations: MessageAnnotationsControl;
   variant: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
@@ -736,6 +812,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   artifactsOpen,
   onArtifactsOpenChange,
   questionDirectory,
+  messageAnnotations,
   variant,
   skillFiles,
   onSkillFileSelect,
@@ -758,6 +835,17 @@ const ThreadView: FC<ThreadViewProps> = ({
   const { t } = useTranslation();
   const workbenchLanding = Boolean(
     workbenchPresentation && !hasMessages && !isShareMode
+  );
+  // Reply annotations only make sense where the composer is live. They stay
+  // disabled for read-only threads, share mode, skill-file chats and the
+  // preview layouts, which either block sending or render no real replies.
+  const annotationsEnabled = Boolean(
+    showComposer &&
+    !isShareMode &&
+    !readOnly &&
+    !skillFiles &&
+    !configurationLayout &&
+    !debugLayout
   );
   const aui = useAui();
   const suggestions = deriveWelcomeSuggestions(
@@ -1056,6 +1144,7 @@ const ThreadView: FC<ThreadViewProps> = ({
               disabled={readOnly}
               modelSelectionDisabled={modelSelectionDisabled}
               disabledReason={readOnlyReason}
+              annotations={annotationsEnabled ? messageAnnotations : undefined}
               workbenchPresentation={workbenchPresentation}
               workbenchResources={workbenchResources}
               onRemoveWorkbenchSkill={onRemoveWorkbenchSkill}
@@ -1089,6 +1178,16 @@ const ThreadView: FC<ThreadViewProps> = ({
             : undefined
         }
       />
+
+      {/* Mounted only while quotable so the bubble state resets whenever the
+          thread turns read-only, enters share mode, or switches to a preview
+          layout. */}
+      {annotationsEnabled ? (
+        <MessageAnnotationBubble
+          enabled
+          onAdd={messageAnnotations.addAnnotation}
+        />
+      ) : null}
     </ThreadPrimitive.Root>
   );
 };

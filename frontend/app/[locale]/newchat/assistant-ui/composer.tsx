@@ -7,6 +7,7 @@ import { isReasoningEffort } from "@/lib/modelReasoning";
 
 import {
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type FC,
@@ -82,6 +83,11 @@ import {
   skillDirectiveIconMap,
 } from "../ui/skill-directives";
 import { ordinarySendError, protectOrdinarySend } from "../utils/ordinary-send";
+import { ComposerAnnotationChip } from "./annotation-chip";
+import {
+  formatAnnotationsIntoMessage,
+  type MessageAnnotationsControl,
+} from "../utils/message-annotations";
 import { RuntimeMetadataEditor } from "@/components/chat/RuntimeMetadataEditor";
 import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";
 
@@ -170,6 +176,8 @@ export interface ComposerProps {
   workbenchResources?: import("@/features/workbench/types").WorkbenchResourceControls;
   onRemoveWorkbenchSkill?: (skillId: number) => void;
   onOpenWorkbenchSkillPicker?: () => void;
+  /** Pending reply annotations attached to the next outgoing message. */
+  annotations?: MessageAnnotationsControl;
 }
 
 // Simple tooltip wrapper
@@ -320,6 +328,7 @@ export const Composer: FC<ComposerProps> = ({
   workbenchResources,
   onRemoveWorkbenchSkill,
   onOpenWorkbenchSkillPicker,
+  annotations,
 }) => {
   const conversationResources =
     !workbenchResources &&
@@ -329,14 +338,28 @@ export const Composer: FC<ComposerProps> = ({
   const aui = useAui();
   const runtime = aui.threads().__internal_getAssistantRuntime?.();
   const [sendError, setSendError] = useState("");
+  // Remembers the text produced by folding the pending annotations into the
+  // draft. The send button click and the form submit can both invoke
+  // prepareSend for one send; the guard keeps the fold idempotent.
+  const lastComposedAnnotationTextRef = useRef<string | null>(null);
   const prepareSend = () => {
     if (!runtime || runtime.thread.getState().isRunning) return;
     const threadId = runtime.threads.getState().mainThreadId;
     const thread = runtime.threads.getById(threadId);
     const config = thread.composer.getState().runConfig;
     setSendError("");
+    const pendingAnnotations = annotations?.annotations ?? [];
     const feedback = protectOrdinarySend(thread, {
       restoreDraft: true,
+      // Annotations attach to exactly one outgoing message: consume them
+      // once the run accepts them. A rejected send keeps them (together
+      // with the restored draft) so the user can retry.
+      onStarted: pendingAnnotations.length
+        ? () => {
+            lastComposedAnnotationTextRef.current = null;
+            annotations?.consumeAnnotations();
+          }
+        : undefined,
       onRejected: (error) => {
         if (runtime.threads.getState().mainThreadId === threadId) {
           setSendError(
@@ -347,6 +370,28 @@ export const Composer: FC<ComposerProps> = ({
         }
       },
     });
+    // Fold the pending annotations into the outgoing text. `protectOrdinarySend`
+    // snapshots the draft before the fold, so a rejected run still restores the
+    // user's original text.
+    if (pendingAnnotations.length) {
+      const currentText = thread.composer.getState().text;
+      if (currentText !== lastComposedAnnotationTextRef.current) {
+        const composed = formatAnnotationsIntoMessage(
+          currentText,
+          pendingAnnotations,
+          {
+            quoteLabel: t("chat.annotation.quoteLabel"),
+            sourceLabel: t("chat.annotation.sourceLabel"),
+            commentLabel: t("chat.annotation.commentLabel"),
+            colon: t("chat.annotation.colon"),
+          }
+        );
+        lastComposedAnnotationTextRef.current = composed;
+        thread.composer.setText(composed);
+      }
+    } else {
+      lastComposedAnnotationTextRef.current = null;
+    }
     thread.composer.setRunConfig({
       ...config,
       custom: { ...config.custom, ...feedback },
@@ -638,6 +683,15 @@ export const Composer: FC<ComposerProps> = ({
             }}
           >
             {hasAttachments && <ComposerAttachments className="px-0" />}
+            <ComposerAnnotationChip
+              annotations={annotations?.annotations ?? []}
+              disabled={isRunning || disabled}
+              onEditComment={(id, comment) =>
+                annotations?.updateAnnotationComment(id, comment)
+              }
+              onRemove={(id) => annotations?.removeAnnotation(id)}
+              onClear={() => annotations?.clearAnnotations()}
+            />
             {conversationResources &&
               (selectedSkillNames.length > 0 ||
                 (canSelectKnowledge &&
@@ -845,6 +899,7 @@ export const Composer: FC<ComposerProps> = ({
                 <ComposerSendOrCancel
                   onSend={prepareSend}
                   disabled={disabled || knowledgeSaving}
+                  hasAnnotations={(annotations?.annotations.length ?? 0) > 0}
                 />
               </div>
             </div>
@@ -962,7 +1017,8 @@ const WorkbenchPlanningMenu: FC<{
 const ComposerSendOrCancel: FC<{
   onSend: () => void;
   disabled?: boolean;
-}> = ({ onSend, disabled }) => {
+  hasAnnotations?: boolean;
+}> = ({ onSend, disabled, hasAnnotations = false }) => {
   const { t } = useTranslation();
   const hasText = useAuiState((state) => state.composer.text.trim().length > 0);
 
@@ -999,7 +1055,7 @@ const ComposerSendOrCancel: FC<{
             <Button
               size="icon"
               className="size-8 ml-0 rounded-md border-0 bg-transparent text-muted-foreground hover:bg-transparent hover:text-foreground disabled:bg-transparent disabled:text-muted-foreground disabled:opacity-50 aria-disabled:bg-transparent aria-disabled:text-muted-foreground [&_svg]:size-4"
-              disabled={disabled || !hasText}
+              disabled={disabled || (!hasText && !hasAnnotations)}
               aria-label={t("chat.composer.send")}
             >
               <Send />
