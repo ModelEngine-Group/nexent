@@ -184,6 +184,7 @@ feature_overrides:
   V5-UT-BE-023: system
   V5-UT-FE-039: runtime
 case_overrides:
+  MODEL-LEGACY-TOOLS-D3-001: model
   CHAT-MODEL-CONTROLS-D2-001: runtime
   CHAT-MODEL-CONTROLS-D3-001: runtime
   CHAT-MODEL-CONTROLS-D3-002: runtime
