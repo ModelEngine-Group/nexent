@@ -1,0 +1,30 @@
+schema_version: '1.0'
+change:
+  change_id: MODEL-PREFERENCES-NO-VERSION-20261102
+  change_type: requirement
+  requirement_id: MODEL-PREFERENCES-NO-VERSION-20261102
+  title: Remove conversation model preference revision management
+  description: Remove the preference revision ORM column and migrate existing deployments without losing preferences; number PR4082 additions consecutively after upstream003.
+  affected_features:
+    existing: []
+    added: []
+    modified: [BE-MODEL-OUTLET-SCHEMA]
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [MODEL-OUTLET-SCHEMA-D5-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Conversation ORM retains JSONB preferences and unrelated revisions but neither declares nor selects the retired preference revision.
+    - Existing outlet column types, defaults and single-storage contracts remain valid.
+    reason: ORM contract is unit-tested; actual fresh and previously deployed SQL transitions require the existing isolated PostgreSQL D5 boundary.
+    test_selectors:
+    - test/backend/database/test_model_outlet_schema.py
+  notes: >-
+    Explicit user request on2026-11-02; updates the existing independent SPEC.
+    Only new PR SQL is renamed004 through007; merged SQL is immutable.
+    Existing D5 scratch databases are UUID-owned, schema-only, and removed in finally.
+    No preference version API or CAS implementation exists yet in this first-layer PR.
