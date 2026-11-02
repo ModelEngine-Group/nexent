@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from pydantic import BaseModel, Field
 
+from contracts.annotations import MessageAnnotationItem
 from contracts.clarification import ClarificationResponse
 
 
@@ -72,6 +73,8 @@ class MessageRequest(BaseModel):
     role: str
     message: List[MessageUnit]
     clarification_response: Optional[ClarificationResponse] = None
+    # Reply annotations ("add to chat" quotes) attached to this user message
+    annotations: Optional[List[MessageAnnotationItem]] = None
     # Complete list of attachment information
     minio_files: Optional[List[Dict[str, Any]]] = None
 

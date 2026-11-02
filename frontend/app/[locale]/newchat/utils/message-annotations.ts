@@ -18,6 +18,11 @@ const SOURCE_EXCERPT_MAX_LENGTH = 40;
 /** Default truncation length for quoted text shown inside the chip list. */
 const LIST_QUOTE_MAX_LENGTH = 80;
 
+/** Defensive caps mirrored by the backend (see backend/contracts/annotations.py). */
+export const MESSAGE_ANNOTATION_QUOTED_TEXT_MAX = 1500;
+export const MESSAGE_ANNOTATION_COMMENT_MAX = 500;
+export const MESSAGE_ANNOTATION_MAX_COUNT = 10;
+
 /**
  * Loose shape of an assistant-ui thread message as consumed by the
  * annotation helpers. Only the fields actually read are declared, mirroring
@@ -76,16 +81,14 @@ export interface MessageAnnotationsControl {
   consumeAnnotations: () => void;
 }
 
-/** Localized labels used when folding annotations into the outgoing text. */
-export interface AnnotationMessageLabels {
-  /** "Quote" label opening each annotation header. */
-  quoteLabel: string;
-  /** Source template containing the `{{excerpt}}` placeholder. */
-  sourceLabel: string;
-  /** Label prefixing the user comment line. */
-  commentLabel: string;
-  /** Header terminator (full-width in Chinese, ": " in English). */
-  colon: string;
+/**
+ * Wire shape of one persisted reply annotation (snake_case, matching
+ * `backend/contracts/annotations.py::MessageAnnotationItem`).
+ */
+export interface MessageAnnotationWireItem {
+  quoted_text: string;
+  comment?: string | null;
+  source_excerpt?: string | null;
 }
 
 /**
@@ -204,54 +207,72 @@ export function createMessageAnnotation(
   return {
     id,
     ...draft,
-    comment: draft.comment?.trim() || undefined,
+    // Defensive caps keep the structured payload inside the backend limits.
+    quotedText: draft.quotedText.slice(0, MESSAGE_ANNOTATION_QUOTED_TEXT_MAX),
+    comment:
+      draft.comment?.trim().slice(0, MESSAGE_ANNOTATION_COMMENT_MAX) ||
+      undefined,
     sourceExcerpt: getAnnotationSourceExcerpt(messages, draft.sourceMessageId),
   };
 }
 
-function renderSourceLabel(template: string, excerpt: string): string {
-  return template.replace(/\{\{excerpt\}\}/g, excerpt);
+/**
+ * Maps pending annotations onto the structured wire payload sent with the
+ * outgoing request (the backend persists it and merges it into the
+ * model-facing text at request time).
+ *
+ * @param annotations Pending annotations in creation order.
+ * @returns The snake_case wire items (length-capped by the caller).
+ */
+export function toMessageAnnotationWireItems(
+  annotations: readonly MessageAnnotation[]
+): MessageAnnotationWireItem[] {
+  return annotations.slice(0, MESSAGE_ANNOTATION_MAX_COUNT).map((annotation) => ({
+    quoted_text: annotation.quotedText.slice(
+      0,
+      MESSAGE_ANNOTATION_QUOTED_TEXT_MAX
+    ),
+    comment: annotation.comment?.slice(0, MESSAGE_ANNOTATION_COMMENT_MAX) ?? null,
+    source_excerpt: annotation.sourceExcerpt || null,
+  }));
 }
 
 /**
- * Folds pending annotations into the outgoing message text.
+ * Normalizes annotation payloads read back from persisted messages.
  *
- * Each annotation becomes a numbered quote block; the user's own text follows
- * behind a `---` separator so the model receives both the quoted reply
- * excerpts (with the user's comments) and the follow-up question in one
- * message. With no annotations the text is returned unchanged.
+ * Invalid entries are dropped and the defensive caps are re-applied so the
+ * user bubble renders sane cards even for legacy or oversized payloads.
  *
- * @param text The user-typed composer text (may be empty).
- * @param annotations Pending annotations in creation order.
- * @param labels Localized labels for the composed blocks.
- * @returns The composed outgoing message text.
+ * @param raw Value of the message's `annotations` field.
+ * @returns Validated wire items; empty when nothing usable remains.
  */
-export function formatAnnotationsIntoMessage(
-  text: string,
-  annotations: readonly MessageAnnotation[],
-  labels: AnnotationMessageLabels
-): string {
-  if (annotations.length === 0) return text;
-
-  const blocks = annotations.map((annotation, index) => {
-    const source = annotation.sourceExcerpt
-      ? renderSourceLabel(labels.sourceLabel, annotation.sourceExcerpt)
-      : "";
-    const lines = [
-      // trimEnd drops the trailing blank of the English ": " colon.
-      `${index + 1}. ${labels.quoteLabel}${source}${labels.colon}`.trimEnd(),
-    ];
-    for (const line of annotation.quotedText.split("\n")) {
-      lines.push(`> ${line}`);
-    }
-    if (annotation.comment) {
-      lines.push(`${labels.commentLabel}${labels.colon}${annotation.comment}`);
-    }
-    return lines.join("\n");
-  });
-
-  const quoteBlock = blocks.join("\n\n");
-  return text ? `${quoteBlock}\n\n---\n\n${text}` : quoteBlock;
+export function fromMessageAnnotationWireItems(
+  raw: unknown
+): MessageAnnotationWireItem[] {
+  if (!Array.isArray(raw)) return [];
+  const items: MessageAnnotationWireItem[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const record = entry as Record<string, unknown>;
+    const quotedText =
+      typeof record.quoted_text === "string" ? record.quoted_text.trim() : "";
+    if (!quotedText) continue;
+    const comment =
+      typeof record.comment === "string" ? record.comment.trim() : "";
+    const sourceExcerpt =
+      typeof record.source_excerpt === "string"
+        ? record.source_excerpt.trim()
+        : "";
+    items.push({
+      quoted_text: quotedText.slice(0, MESSAGE_ANNOTATION_QUOTED_TEXT_MAX),
+      comment: comment ? comment.slice(0, MESSAGE_ANNOTATION_COMMENT_MAX) : null,
+      source_excerpt: sourceExcerpt
+        ? sourceExcerpt.slice(0, MESSAGE_ANNOTATION_QUOTED_TEXT_MAX)
+        : null,
+    });
+    if (items.length >= MESSAGE_ANNOTATION_MAX_COUNT) break;
+  }
+  return items;
 }
 
 /**

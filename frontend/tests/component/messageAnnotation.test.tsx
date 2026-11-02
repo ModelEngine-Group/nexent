@@ -11,14 +11,18 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   createMessageAnnotation,
-  formatAnnotationsIntoMessage,
+  fromMessageAnnotationWireItems,
   getAnnotationSourceExcerpt,
+  MESSAGE_ANNOTATION_COMMENT_MAX,
+  MESSAGE_ANNOTATION_MAX_COUNT,
+  MESSAGE_ANNOTATION_QUOTED_TEXT_MAX,
   resolveAnnotationSelection,
+  toMessageAnnotationWireItems,
   truncateAnnotationText,
-  type AnnotationMessageLabels,
   type MessageAnnotation,
 } from "@/app/newchat/utils/message-annotations";
 import { ComposerAnnotationChip } from "@/app/newchat/assistant-ui/annotation-chip";
+import { MessageAnnotationCards } from "@/app/newchat/assistant-ui/message-annotation-cards";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -26,12 +30,10 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-const LABELS: AnnotationMessageLabels = {
-  quoteLabel: "Quote",
-  sourceLabel: ' (from reply "{{excerpt}}")',
-  commentLabel: "Comment",
-  colon: ": ",
-};
+vi.mock("@assistant-ui/react", () => ({
+  useAuiState: (selector: (state: unknown) => unknown) =>
+    selector({ message: { role: "user" } }),
+}));
 
 const makeAnnotation = (
   overrides: Partial<MessageAnnotation> = {}
@@ -46,62 +48,78 @@ const makeAnnotation = (
 
 afterEach(cleanup);
 
-describe("formatAnnotationsIntoMessage", () => {
-  test("returns the text unchanged without annotations", () => {
-    expect(formatAnnotationsIntoMessage("why stop?", [], LABELS)).toBe(
-      "why stop?"
-    );
-    expect(formatAnnotationsIntoMessage("", [], LABELS)).toBe("");
+describe("toMessageAnnotationWireItems", () => {
+  test("maps camelCase annotations onto the snake_case wire shape", () => {
+    const items = toMessageAnnotationWireItems([
+      makeAnnotation({ comment: "note", sourceExcerpt: "reply intro" }),
+      makeAnnotation({ id: "a2", quotedText: "second", comment: undefined, sourceExcerpt: "" }),
+    ]);
+
+    expect(items).toEqual([
+      {
+        quoted_text: "quoted reply text",
+        comment: "note",
+        source_excerpt: "reply intro",
+      },
+      { quoted_text: "second", comment: null, source_excerpt: null },
+    ]);
   });
 
-  test("composes a single annotation with comment and source excerpt", () => {
-    const result = formatAnnotationsIntoMessage(
-      "why stop?",
-      [
-        makeAnnotation({
-          quotedText: "line one\nline two",
-          comment: "skip this",
-          sourceExcerpt: "reply intro",
-        }),
-      ],
-      LABELS
+  test("caps the list length and truncates oversized fields", () => {
+    const many = Array.from({ length: MESSAGE_ANNOTATION_MAX_COUNT + 3 }, (_, i) =>
+      makeAnnotation({ id: `a${i}`, quotedText: `${i}` })
     );
+    const items = toMessageAnnotationWireItems(many);
+    expect(items).toHaveLength(MESSAGE_ANNOTATION_MAX_COUNT);
 
-    expect(result).toBe(
-      '1. Quote (from reply "reply intro"):\n> line one\n> line two\nComment: skip this\n\n---\n\nwhy stop?'
-    );
+    const oversized = toMessageAnnotationWireItems([
+      makeAnnotation({
+        quotedText: "q".repeat(MESSAGE_ANNOTATION_QUOTED_TEXT_MAX + 10),
+        comment: "c".repeat(MESSAGE_ANNOTATION_COMMENT_MAX + 10),
+      }),
+    ]);
+    expect(oversized[0].quoted_text).toHaveLength(MESSAGE_ANNOTATION_QUOTED_TEXT_MAX);
+    expect(oversized[0].comment).toHaveLength(MESSAGE_ANNOTATION_COMMENT_MAX);
+  });
+});
+
+describe("fromMessageAnnotationWireItems", () => {
+  test("validates entries and drops unusable ones", () => {
+    const items = fromMessageAnnotationWireItems([
+      { quoted_text: "one", comment: "note", source_excerpt: "intro" },
+      { quoted_text: "   " },
+      { quoted_text: "" },
+      { comment: "no quote" },
+      "not-an-object",
+    ]);
+
+    expect(items).toEqual([
+      { quoted_text: "one", comment: "note", source_excerpt: "intro" },
+    ]);
   });
 
-  test("composes multiple annotations, skipping empty comments and excerpts", () => {
-    const result = formatAnnotationsIntoMessage(
-      "follow-up",
-      [
-        makeAnnotation({ id: "a1", comment: "note" }),
-        makeAnnotation({
-          id: "a2",
-          quotedText: "second",
-          comment: undefined,
-          sourceExcerpt: "",
-        }),
-      ],
-      LABELS
-    );
-
-    expect(result).toBe(
-      '1. Quote (from reply "reply intro"):\n> quoted reply text\nComment: note\n\n2. Quote:\n> second\n\n---\n\nfollow-up'
-    );
+  test("returns an empty list for non-array payloads", () => {
+    expect(fromMessageAnnotationWireItems(undefined)).toEqual([]);
+    expect(fromMessageAnnotationWireItems(null)).toEqual([]);
+    expect(fromMessageAnnotationWireItems({ quoted_text: "x" })).toEqual([]);
   });
 
-  test("composes annotation-only sends without the user separator", () => {
-    const result = formatAnnotationsIntoMessage(
-      "",
-      [makeAnnotation({ comment: undefined })],
-      LABELS
-    );
+  test("re-applies the defensive caps for oversized persisted payloads", () => {
+    const items = fromMessageAnnotationWireItems([
+      {
+        quoted_text: "q".repeat(MESSAGE_ANNOTATION_QUOTED_TEXT_MAX + 5),
+        comment: null,
+        source_excerpt: null,
+      },
+    ]);
+    expect(items[0].quoted_text).toHaveLength(MESSAGE_ANNOTATION_QUOTED_TEXT_MAX);
+  });
 
-    expect(result).toBe(
-      '1. Quote (from reply "reply intro"):\n> quoted reply text'
-    );
+  test("round-trips payloads produced by the outgoing mapping", () => {
+    const outgoing = toMessageAnnotationWireItems([
+      makeAnnotation({ comment: "note" }),
+    ]);
+    expect(fromMessageAnnotationWireItems(outgoing)).toEqual(outgoing);
   });
 });
 
@@ -208,6 +226,21 @@ describe("createMessageAnnotation", () => {
     );
 
     expect(annotation.comment).toBeUndefined();
+  });
+
+  test("applies the defensive caps to oversized quotes and comments", () => {
+    const annotation = createMessageAnnotation(
+      {
+        quotedText: "q".repeat(MESSAGE_ANNOTATION_QUOTED_TEXT_MAX + 5),
+        comment: "c".repeat(MESSAGE_ANNOTATION_COMMENT_MAX + 5),
+        sourceMessageId: "assistant-1",
+      },
+      [],
+      "generated-id"
+    );
+
+    expect(annotation.quotedText).toHaveLength(MESSAGE_ANNOTATION_QUOTED_TEXT_MAX);
+    expect(annotation.comment).toHaveLength(MESSAGE_ANNOTATION_COMMENT_MAX);
   });
 });
 
@@ -468,5 +501,47 @@ describe("ComposerAnnotationChip", () => {
       screen.getAllByRole("button", { name: "chat.annotation.editComment" })
         .length
     ).toBeGreaterThan(0);
+  });
+});
+
+describe("MessageAnnotationCards", () => {
+  test("renders nothing without annotations", () => {
+    const { container } = render(
+      <MessageAnnotationCards annotations={undefined} />
+    );
+    expect(container.firstChild).toBeNull();
+  });
+
+  test("renders one card per annotation with quote, comment and source", () => {
+    const { container } = render(
+      <MessageAnnotationCards
+        annotations={[
+          { quoted_text: "first quote", comment: "first note", source_excerpt: "intro" },
+          { quoted_text: "second quote", comment: null, source_excerpt: null },
+        ]}
+      />
+    );
+
+    const cards = container.querySelectorAll(
+      "[data-slot='aui_message-annotation-card']"
+    );
+    expect(cards).toHaveLength(2);
+    expect(screen.getByText("first quote")).toBeTruthy();
+    expect(screen.getByText(/first note/)).toBeTruthy();
+    expect(screen.getByText(/chat.annotation.cardSourceLabel/)).toBeTruthy();
+    expect(screen.getByText("second quote")).toBeTruthy();
+  });
+
+  test("drops invalid entries instead of rendering broken cards", () => {
+    const { container } = render(
+      <MessageAnnotationCards
+        annotations={[{ quoted_text: "   " }, { quoted_text: "valid" }]}
+      />
+    );
+
+    expect(
+      container.querySelectorAll("[data-slot='aui_message-annotation-card']")
+    ).toHaveLength(1);
+    expect(screen.getByText("valid")).toBeTruthy();
   });
 });

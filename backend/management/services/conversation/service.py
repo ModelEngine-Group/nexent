@@ -3,6 +3,11 @@
 import json
 import logging
 
+from contracts.annotations import (
+    MESSAGE_ANNOTATIONS_UNIT_TYPE,
+    normalize_message_annotations,
+    parse_message_annotation_unit,
+)
 from contracts.conversation import MessageSource
 
 from management.services.agent.context import (
@@ -86,6 +91,8 @@ def save_message(request: MessageRequest, user_id: str, tenant_id: str,
     }
     if message_data.get('clarification_response') is not None:
         message_data_copy['clarification_response'] = message_data['clarification_response']
+    if message_data.get('annotations') is not None:
+        message_data_copy['annotations'] = message_data['annotations']
     return create_conversation_message(
         message_data_copy, user_id, status=status, message_source=message_source,
     )
@@ -258,6 +265,10 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
     # run_agent_stream for the LLM call only.
     raw_query = strip_current_time_prefix(request.query)
 
+    # Normalize annotations (defensive caps) before persistence; None skips
+    # the structured unit entirely.
+    annotations = normalize_message_annotations(getattr(request, "annotations", None))
+
     conversation_req = MessageRequest(
         conversation_id=request.conversation_id,
         message_idx=user_role_count * 2,
@@ -266,6 +277,7 @@ def save_conversation_user(request: AgentRequest, user_id: str, tenant_id: str) 
         minio_files=request.minio_files,
         **({'clarification_response': request.clarification_response}
            if getattr(request, 'clarification_response', None) is not None else {}),
+        **({'annotations': annotations} if annotations is not None else {}),
     )
     save_message(
         conversation_req, user_id=user_id, tenant_id=tenant_id,
@@ -906,6 +918,12 @@ def get_conversation_history_service(conversation_id: int, user_id: str) -> List
                                 message_item['clarification_response'] = response
                         except (ValueError, TypeError):
                             logger.warning("Skipping invalid clarification response message_id=%s", message_id)
+                    elif unit.get('unit_type') == MESSAGE_ANNOTATIONS_UNIT_TYPE:
+                        annotations = parse_message_annotation_unit(unit.get('unit_content'))
+                        if annotations is not None:
+                            message_item['annotations'] = [
+                                item.model_dump(mode="json") for item in annotations
+                            ]
 
                 # Add minio_files field (if any)
                 if 'minio_files' in msg and msg['minio_files']:

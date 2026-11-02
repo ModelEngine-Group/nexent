@@ -76,8 +76,11 @@ import {
   type ConversationArtifact,
 } from "../utils/conversation-artifacts";
 import { MessageAnnotationBubble } from "./message-annotation-bubble";
+import { MessageAnnotationCards } from "./message-annotation-cards";
 import {
   createMessageAnnotation,
+  MESSAGE_ANNOTATION_COMMENT_MAX,
+  MESSAGE_ANNOTATION_MAX_COUNT,
   type MessageAnnotation,
   type MessageAnnotationDraft,
   type MessageAnnotationsControl,
@@ -470,19 +473,37 @@ export const Thread: FC<ThreadProps> = ({
 
   const addMessageAnnotation = useCallback(
     (draft: MessageAnnotationDraft) => {
-      setMessageAnnotations((current) => [
-        ...current,
-        createMessageAnnotation(draft, messages, crypto.randomUUID()),
-      ]);
+      setMessageAnnotations((current) => {
+        // Cap matches the backend limit; the excess annotation would be
+        // silently dropped by the request-time normalization anyway.
+        if (current.length >= MESSAGE_ANNOTATION_MAX_COUNT) {
+          message.warning(
+            t("chat.annotation.maxCountReached", {
+              maxCount: MESSAGE_ANNOTATION_MAX_COUNT,
+            })
+          );
+          return current;
+        }
+        return [
+          ...current,
+          createMessageAnnotation(draft, messages, crypto.randomUUID()),
+        ];
+      });
     },
-    [messages]
+    // `message` is a module-level antd import, not a reactive value.
+    [messages, t]
   );
   const updateMessageAnnotationComment = useCallback(
     (id: string, comment: string) => {
       setMessageAnnotations((current) =>
         current.map((annotation) =>
           annotation.id === id
-            ? { ...annotation, comment: comment || undefined }
+            ? {
+                ...annotation,
+                comment:
+                  comment.trim().slice(0, MESSAGE_ANNOTATION_COMMENT_MAX) ||
+                  undefined,
+              }
             : annotation
         )
       );
@@ -2037,6 +2058,9 @@ const UserMessage: FC<{
 
         <div className="aui-user-message-content-wrapper relative self-end inline-block min-w-0">
           <UserMessageBubble>
+            {/* Reply annotations ("add to chat") render as cards above the
+                message text; data rides the structured message metadata. */}
+            <MessageAnnotationCards />
             <MessagePrimitive.Quote>
               {(quote) => <QuoteBlock {...quote} />}
             </MessagePrimitive.Quote>

@@ -45,6 +45,7 @@ import { collapseRefreshUserMessages } from "./history-branching";
 import log from "@/lib/logger";
 import { createAssistantStream } from "assistant-stream";
 import type { AttachmentType } from "../utils/attachment-type";
+import { fromMessageAnnotationWireItems } from "../utils/message-annotations";
 import {
   attachExecutionLogsToTool,
   collapseSubAgentParts,
@@ -1414,6 +1415,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
             : {}),
           ...(historicalNl2a ? { nl2a: historicalNl2a } : {}),
           ...(stepTokenCounts.length > 0 ? { stepTokenCounts } : {}),
+          ...(msg.role === "user" && msg.annotations?.length
+            ? { annotations: fromMessageAnnotationWireItems(msg.annotations) }
+            : {}),
           ...(msg.role === "user" && typeof msg.message_index === "number"
             ? { historicalMessageIndex: msg.message_index }
             : {}),

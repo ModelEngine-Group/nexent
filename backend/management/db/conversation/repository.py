@@ -1,5 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from contracts.annotations import (
+    MESSAGE_ANNOTATIONS_UNIT_TYPE,
+    format_annotations_for_llm,
+    normalize_message_annotations,
+    parse_message_annotation_unit,
+)
 from contracts.constants.constants import CHAT_MODE_VALUES, HISTORY_SUMMARY_UNIT_TYPE
 from contracts.conversation import ConversationHistory, ImageRecord, MessageRecord, SearchRecord
 from contracts.errors.exceptions import HistorySummaryPersistenceError
@@ -290,6 +296,9 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             response = _resolve_clarification_response(
                 session, conversation_id, user_id, message_role, message_data['clarification_response'],
             )
+        annotations = None
+        if message_data.get('annotations') is not None:
+            annotations = normalize_message_annotations(message_data['annotations'])
 
         minio_files = message_data.get('minio_files')
         # Convert minio_files to JSON string for storage
@@ -319,6 +328,22 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
             if user_id:
                 unit_data = add_creation_tracking(unit_data, user_id)
             session.execute(insert(ConversationMessageUnit).values(**unit_data))
+        if annotations is not None and message_role == MESSAGE_ROLE["USER"]:
+            # Reply annotations ride as a structured unit so the stored
+            # message_content stays clean; the unit drives history rendering
+            # and the model-facing merge for later turns.
+            annotation_unit = {
+                'conversation_id': conversation_id, 'message_id': message_id,
+                'unit_index': 0, 'unit_type': MESSAGE_ANNOTATIONS_UNIT_TYPE,
+                'unit_content': json.dumps(
+                    [item.model_dump(mode="json") for item in annotations],
+                    ensure_ascii=False,
+                ),
+                'unit_status': 'completed', 'delete_flag': 'N',
+            }
+            if user_id:
+                annotation_unit = add_creation_tracking(annotation_unit, user_id)
+            session.execute(insert(ConversationMessageUnit).values(**annotation_unit))
         if message_role == MESSAGE_ROLE["USER"] or (
             message_role == MESSAGE_ROLE["ASSISTANT"] and message_data["content"] and status != "streaming"
         ):
@@ -2871,9 +2896,15 @@ def _stopped_history_text(message, session, conversation_id: int) -> str:
     return _STOPPED_CONTEXT_NOTE + ("\n" + body if body else "")
 
 
-def _history_turn(user, assistant_text: str, assistant_id=None) -> Dict[str, Any]:
+def _history_turn(user, assistant_text: str, assistant_id=None,
+                  annotations=None) -> Dict[str, Any]:
+    # Annotations merge into the model-facing user text only; the stored
+    # message_content stays clean.
+    user_message = user.message_content or ""
+    if annotations:
+        user_message = format_annotations_for_llm(user_message, annotations)
     return {
-        "user_message": user.message_content or "",
+        "user_message": user_message,
         "assistant_final_answer": assistant_text,
         "attachments": user.minio_files,
         "user_message_id": user.message_id,
@@ -2983,12 +3014,45 @@ def get_historical_context(
             .order_by(asc(ConversationMessage.message_index))
         ).all()
 
+        # Fetch reply-annotation units for the historical user messages so the
+        # model keeps seeing quoted excerpts on later turns while the stored
+        # message_content stays clean.
+        user_message_ids = [
+            message.message_id
+            for message in messages
+            if message.message_role == "user"
+        ]
+        annotations_by_message: Dict[int, Any] = {}
+        if user_message_ids:
+            annotation_rows = session.execute(
+                select(
+                    ConversationMessageUnit.message_id,
+                    ConversationMessageUnit.unit_content,
+                ).where(
+                    ConversationMessageUnit.conversation_id == conversation_id,
+                    ConversationMessageUnit.message_id.in_(user_message_ids),
+                    ConversationMessageUnit.unit_type == MESSAGE_ANNOTATIONS_UNIT_TYPE,
+                    ConversationMessageUnit.unit_status == "completed",
+                    ConversationMessageUnit.delete_flag == "N",
+                )
+            ).all()
+            for row in annotation_rows:
+                items = parse_message_annotation_unit(row.unit_content)
+                if items is not None:
+                    annotations_by_message[int(row.message_id)] = items
+
         turns: List[Dict[str, Any]] = []
         pending_user = None
         for message in messages:
             if message.message_role == "user":
                 if pending_user is not None:
-                    turns.append(_history_turn(pending_user, _UNANSWERED_CONTEXT_NOTE))
+                    turns.append(
+                        _history_turn(
+                            pending_user,
+                            _UNANSWERED_CONTEXT_NOTE,
+                            annotations=annotations_by_message.get(pending_user.message_id),
+                        )
+                    )
                 pending_user = message
             elif pending_user is not None:
                 answer = (
@@ -2996,10 +3060,23 @@ def get_historical_context(
                     if message.status == "stopped"
                     else message.message_content or ""
                 )
-                turns.append(_history_turn(pending_user, answer, message.message_id))
+                turns.append(
+                    _history_turn(
+                        pending_user,
+                        answer,
+                        message.message_id,
+                        annotations=annotations_by_message.get(pending_user.message_id),
+                    )
+                )
                 pending_user = None
         if pending_user is not None:
-            turns.append(_history_turn(pending_user, _UNANSWERED_CONTEXT_NOTE))
+            turns.append(
+                _history_turn(
+                    pending_user,
+                    _UNANSWERED_CONTEXT_NOTE,
+                    annotations=annotations_by_message.get(pending_user.message_id),
+                )
+            )
 
         summary_result = None
         if summary_record and summary_payload:

@@ -7,6 +7,7 @@ import { API_ENDPOINTS, ApiError } from "./api";
 
 import { chatConfig } from "@/const/chatConfig";
 import type {
+  ApiMessageAnnotation,
   ConversationListResponse,
   ConversationListPage,
   ConversationListParams,
@@ -1177,6 +1178,7 @@ export const conversationService = {
     params: {
       query: string;
       clarification_response?: ClarificationResponse;
+      annotations?: ApiMessageAnnotation[];
       conversation_id?: number;
       history: Array<{ role: string; content: string }>;
       files?: File[];
@@ -1244,6 +1246,13 @@ export const conversationService = {
         params.clarification_response
       ) {
         requestParams.clarification_response = params.clarification_response;
+      }
+      if (
+        !params.is_resume &&
+        !params.runtime_mode &&
+        params.annotations?.length
+      ) {
+        requestParams.annotations = params.annotations;
       }
       if (params.runtime_mode === "nl2skill") {
         requestParams.draft_snapshot = params.draft_snapshot;

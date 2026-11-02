@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 from typing import Optional as Opt
 
+from contracts.annotations import MessageAnnotationItem
 from contracts.clarification import ClarificationResponse
 from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
 from contracts.conversation import HistoryItem
@@ -213,6 +214,10 @@ class AgentRequest(BaseModel):
     _message_source: str = PrivateAttr(default="CHAT")
     query: str
     clarification_response: Optional[ClarificationResponse] = None
+    # Reply annotations ("add to chat" quotes) attached to this turn's user
+    # message; persisted as a structured unit and merged into the model-facing
+    # text at request time.
+    annotations: Optional[List[MessageAnnotationItem]] = None
     conversation_id: Optional[int] = None
     history: Optional[List[HistoryItem]] = None
     # Complete list of attachment information

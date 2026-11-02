@@ -82,7 +82,16 @@ export function ClarificationMessageCard({
             },
           },
         },
-        runConfig: { ...config, custom: { ...config.custom, ...feedback } },
+        runConfig: {
+          ...config,
+          custom: {
+            ...config.custom,
+            ...feedback,
+            // Clarification answers are their own message: reply annotations
+            // stay pending on the composer and must not ride this run.
+            messageAnnotations: undefined,
+          },
+        },
       });
     });
   };
