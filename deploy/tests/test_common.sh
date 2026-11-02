@@ -406,7 +406,7 @@ assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-runtime/templates/deplo
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-mcp/templates/deployment.yaml")" "checksum/nexent-backend-image" "mcp deployment should include backend image rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-mcp/templates/deployment.yaml")" "checksum/nexent-env" "mcp deployment should include env rollout annotation"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-mcp/templates/deployment.yaml")" "checksum/nexent-backend:" "mcp deployment should not keep removed backend rollout annotation"
-assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-northbound/templates/deployment.yaml")" "checksum/nexent-backend-image" "northbound deployment should include backend image rollout annotation"
+assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-northbound/templates/deployment.yaml")" "checksum/nexent-gateway-image" "northbound deployment should include gateway image rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-northbound/templates/deployment.yaml")" "checksum/nexent-env" "northbound deployment should include env rollout annotation"
 assert_not_contains "$(cat "$K8S_CHART_DIR/charts/nexent-northbound/templates/deployment.yaml")" "checksum/nexent-backend:" "northbound deployment should not keep removed backend rollout annotation"
 assert_contains "$(cat "$K8S_CHART_DIR/charts/nexent-web/templates/deployment.yaml")" "checksum/nexent-web-image" "web deployment should include web image rollout annotation"
