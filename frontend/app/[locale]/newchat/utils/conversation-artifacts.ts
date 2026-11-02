@@ -4,6 +4,7 @@
 
 import { useMemo } from "react";
 import type { CompleteAttachment } from "@assistant-ui/react";
+import { API_ENDPOINTS } from "@/services/api";
 import { skillFileUploadsRegistry } from "../adapter/remote-chat-model-adapter";
 
 /**
@@ -114,4 +115,61 @@ export function useConversationArtifacts(
   messages: readonly ArtifactMessageLike[]
 ): ConversationArtifact[] {
   return useMemo(() => collectConversationArtifacts(messages), [messages]);
+}
+
+/** Raw URL stashed on a file attachment content part, if any. */
+const readAttachmentPartUrl = (
+  attachment: ArtifactAttachmentLike
+): string | undefined => {
+  const part = attachment.content?.[0] as { data?: string } | undefined;
+  return part?.data;
+};
+
+/**
+ * Downloads an artifact's bytes so it can be attached to the composer.
+ *
+ * Prefers the backend stream endpoint for the artifact's `object_name` (same
+ * origin, no CORS concerns) and falls back to the attachment's own URLs when
+ * no object name is available.
+ */
+export async function fetchArtifactFile(
+  attachment: ArtifactAttachmentLike
+): Promise<File> {
+  const name = attachment.name || "Generated file";
+  const contentType = attachment.contentType || "application/octet-stream";
+  const sources: string[] = [];
+  if (attachment.object_name) {
+    sources.push(
+      API_ENDPOINTS.storage.file(attachment.object_name, "stream", name)
+    );
+  }
+  for (const url of [
+    attachment.download_url,
+    attachment.preview_url,
+    attachment.presigned_url,
+    attachment.url,
+    readAttachmentPartUrl(attachment),
+  ]) {
+    if (url) sources.push(url);
+  }
+  if (sources.length === 0) {
+    throw new Error(`No downloadable source for artifact: ${name}`);
+  }
+
+  let lastError: unknown;
+  for (const url of sources) {
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error(`Fetch failed with status ${response.status}`);
+      }
+      const blob = await response.blob();
+      return new File([blob], name, { type: contentType });
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Failed to fetch artifact: ${name}`);
 }

@@ -67,8 +67,11 @@ import {
   ConversationArtifactsButton,
   ConversationArtifactsPanel,
 } from "../ui/artifacts-panel";
+import { markFileWithExistingUpload } from "../adapter/attachment-adapter";
 import {
+  fetchArtifactFile,
   useConversationArtifacts,
+  type ArtifactAttachmentLike,
   type ConversationArtifact,
 } from "../utils/conversation-artifacts";
 import {
@@ -94,6 +97,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { message } from "antd";
+import log from "@/lib/logger";
 import type { Agent, PublishedAgent } from "@/types/agentConfig";
 import { getConversationResourceLimitMessage } from "@/const/errorMessageI18n";
 import { getAgentIcon } from "@/lib/chat/agentIconUtils";
@@ -701,6 +705,51 @@ const ThreadView: FC<ThreadViewProps> = ({
     agent.example_questions
   );
 
+  // "Add to chat": re-attach an agent-generated artifact into the composer so
+  // the next outgoing message references the already-stored object instead of
+  // uploading its bytes a second time.
+  const handleArtifactToComposer = useCallback(
+    async (attachment: ArtifactAttachmentLike) => {
+      const name = attachment.name || "Generated file";
+      try {
+        const file = await fetchArtifactFile(attachment);
+        const objectName = attachment.object_name ?? "";
+        // Artifacts with a known MinIO object carry their storage metadata so
+        // the attachment adapter skips the redundant upload; the rest fall
+        // back to the regular upload path.
+        const enriched = objectName
+          ? markFileWithExistingUpload(file, {
+              object_name: objectName,
+              url:
+                attachment.preview_url ??
+                attachment.presigned_url ??
+                attachment.url ??
+                "",
+              presigned_url: attachment.presigned_url,
+              type: attachment.contentType ?? file.type,
+              size: attachment.size ?? file.size,
+            })
+          : file;
+        const runtime = aui.threads().__internal_getAssistantRuntime?.();
+        const threadId = runtime?.threads.getState().mainThreadId;
+        const thread = threadId
+          ? runtime?.threads.getById(threadId)
+          : undefined;
+        if (!thread) {
+          log.error("[Artifacts] Composer runtime unavailable");
+          message.error(t("chat.artifacts.addToChatFailed"));
+          return;
+        }
+        await thread.composer.addAttachment(enriched);
+        message.success(t("chat.artifacts.addedToChat", { name }));
+      } catch (error) {
+        log.error("Failed to add conversation artifact to composer:", error);
+        message.error(t("chat.artifacts.addToChatFailed"));
+      }
+    },
+    [aui, t]
+  );
+
   return (
     <ThreadPrimitive.Root
       className={cn(
@@ -942,6 +991,11 @@ const ThreadView: FC<ThreadViewProps> = ({
         open={artifactsOpen}
         artifacts={conversationArtifacts}
         onClose={() => onArtifactsOpenChange(false)}
+        onAddToComposer={
+          showComposer && !isShareMode && !readOnly
+            ? handleArtifactToComposer
+            : undefined
+        }
       />
     </ThreadPrimitive.Root>
   );

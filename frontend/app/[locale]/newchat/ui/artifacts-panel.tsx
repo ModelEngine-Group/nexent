@@ -8,6 +8,7 @@ import {
   EyeIcon,
   FolderOutputIcon,
   ImageIcon,
+  MessageSquarePlusIcon,
   XIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,14 @@ export interface ConversationArtifactsPanelProps {
   /** All agent-generated files collected across the conversation. */
   artifacts: ConversationArtifact[];
   onClose: () => void;
+  /**
+   * Adds an artifact back into the composer as an attachment ("add to chat").
+   * When omitted the per-entry action is hidden, e.g. in read-only or shared
+   * conversations where there is no composer to add to.
+   */
+  onAddToComposer?: (
+    attachment: ArtifactAttachmentLike
+  ) => Promise<void> | void;
   className?: string;
 }
 
@@ -46,18 +55,36 @@ const formatGeneratedAt = (value: Date | undefined): string => {
 /**
  * Side panel listing every file the agent generated during the conversation.
  * Mirrors the SourcesPanel layout (right-hand column, header + scrollable
- * list) so the two panels read as one family. Each entry supports preview,
- * through the shared {@link FilePreviewDrawer}, and download.
+ * list) so the two panels read as one family. Each entry supports preview
+ * through the shared {@link FilePreviewDrawer}, download, and re-attaching
+ * the file to the composer when {@link ConversationArtifactsPanelProps.onAddToComposer}
+ * is provided.
  */
 export const ConversationArtifactsPanel: FC<
   ConversationArtifactsPanelProps
-> = ({ open, artifacts, onClose, className }) => {
+> = ({ open, artifacts, onClose, onAddToComposer, className }) => {
   const { t } = useTranslation();
   const [previewing, setPreviewing] = useState<ArtifactAttachmentLike | null>(
     null
   );
+  // Key of the entry currently being added to the composer; guards against
+  // double-activating the fetch-and-attach flow while it is in flight.
+  const [addingKey, setAddingKey] = useState<string | null>(null);
 
   if (!open) return null;
+
+  const handleAddToComposer = async (
+    key: string,
+    attachment: ArtifactAttachmentLike
+  ) => {
+    if (!onAddToComposer || addingKey === key) return;
+    setAddingKey(key);
+    try {
+      await onAddToComposer(attachment);
+    } finally {
+      setAddingKey(null);
+    }
+  };
 
   const handleDownload = async (attachment: ArtifactAttachmentLike) => {
     const name = attachment.name || "Generated file";
@@ -171,6 +198,18 @@ export const ConversationArtifactsPanel: FC<
                       >
                         <DownloadIcon className="size-4" />
                       </TooltipIconButton>
+                      {onAddToComposer && (
+                        <TooltipIconButton
+                          tooltip={t("chat.artifacts.addToChat")}
+                          type="button"
+                          disabled={addingKey === artifact.key}
+                          onClick={() =>
+                            void handleAddToComposer(artifact.key, attachment)
+                          }
+                        >
+                          <MessageSquarePlusIcon className="size-4" />
+                        </TooltipIconButton>
+                      )}
                     </div>
                   </div>
                 </li>

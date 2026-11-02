@@ -1,16 +1,27 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
-import { fireEvent, render, screen, cleanup } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  cleanup,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import {
   collectConversationArtifacts,
+  fetchArtifactFile,
   type ArtifactMessageLike,
 } from "@/app/newchat/utils/conversation-artifacts";
 import {
   ConversationArtifactsButton,
   ConversationArtifactsPanel,
 } from "@/app/newchat/ui/artifacts-panel";
+import {
+  compositeAttachmentAdapter,
+  markFileWithExistingUpload,
+} from "@/app/newchat/adapter/attachment-adapter";
 import { skillFileUploadsRegistry } from "@/app/newchat/adapter/remote-chat-model-adapter";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { CompleteAttachment } from "@assistant-ui/react";
@@ -55,6 +66,7 @@ vi.mock("@/components/common/filePreviewDrawer", () => ({
 const storageServiceMock = vi.hoisted(() => ({
   downloadFile: vi.fn(),
   getPreviewUrl: vi.fn(() => "blob:preview"),
+  uploadFiles: vi.fn(),
 }));
 vi.mock("@/services/storageService", () => ({
   storageService: storageServiceMock,
@@ -407,4 +419,197 @@ test("ConversationArtifactsButton opens the panel on click", () => {
   fireEvent.click(button);
 
   expect(onClick).toHaveBeenCalledTimes(1);
+});
+
+const renderArtifactsPanel = (
+  panelProps: Partial<Parameters<typeof ConversationArtifactsPanel>[0]> = {}
+) => {
+  const artifacts = collectConversationArtifacts([
+    {
+      id: "m-add",
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          skillFileAttachments: [makeAttachment("a1", "summary.pptx")],
+        },
+      ],
+    },
+  ]);
+  return render(
+    <TooltipProvider>
+      <ConversationArtifactsPanel
+        open
+        artifacts={artifacts}
+        onClose={() => {}}
+        {...panelProps}
+      />
+    </TooltipProvider>
+  );
+};
+
+test("ConversationArtifactsPanel offers add-to-chat when a handler is provided", async () => {
+  const onAddToComposer = vi.fn();
+  renderArtifactsPanel({ onAddToComposer });
+
+  const addButton = screen.getByRole("button", {
+    name: "chat.artifacts.addToChat",
+  });
+  fireEvent.click(addButton);
+
+  expect(onAddToComposer).toHaveBeenCalledTimes(1);
+  expect(onAddToComposer).toHaveBeenCalledWith(
+    expect.objectContaining({ name: "summary.pptx" })
+  );
+  // The in-flight guard releases once the handler settles.
+  await waitFor(() => expect(addButton).not.toBeDisabled());
+});
+
+test("ConversationArtifactsPanel hides add-to-chat without a handler", () => {
+  renderArtifactsPanel();
+
+  expect(
+    screen.queryByRole("button", { name: "chat.artifacts.addToChat" })
+  ).toBeNull();
+});
+
+test("ConversationArtifactsPanel ignores repeat clicks while adding", () => {
+  const onAddToComposer = vi.fn(
+    () => new Promise<void>(() => {}) // never settles
+  );
+  renderArtifactsPanel({ onAddToComposer });
+
+  const addButton = screen.getByRole("button", {
+    name: "chat.artifacts.addToChat",
+  });
+  fireEvent.click(addButton);
+  fireEvent.click(addButton);
+
+  expect(onAddToComposer).toHaveBeenCalledTimes(1);
+});
+
+test("fetchArtifactFile prefers the object storage stream endpoint", async () => {
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    blob: async () => new Blob(["bytes"]),
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  try {
+    const file = await fetchArtifactFile(makeAttachment("a1", "report.pptx"));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/file/download/runs/a1/report.pptx"
+    );
+    expect(file.name).toBe("report.pptx");
+    expect(file.size).toBeGreaterThan(0);
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test("fetchArtifactFile falls back to the attachment download url", async () => {
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    status: 200,
+    blob: async () => new Blob(["bytes"]),
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  try {
+    const attachment = makeAttachment("a2", "notes.md", {
+      object_name: undefined,
+      contentType: "text/markdown",
+    });
+    const file = await fetchArtifactFile(attachment);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/storage/download/a2");
+    expect(file.name).toBe("notes.md");
+    expect(file.type).toBe("text/markdown");
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+test("fetchArtifactFile rejects when no source is available", async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+
+  try {
+    const attachment = makeAttachment("a3", "lost.bin", {
+      object_name: undefined,
+      preview_url: undefined,
+      download_url: undefined,
+    });
+
+    await expect(fetchArtifactFile(attachment)).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+const makePendingAttachment = (file: File, name: string) =>
+  ({
+    id: `att-${name}`,
+    status: { type: "running", reason: "composer-send" },
+    type: "file",
+    name,
+    contentType: "application/vnd.api+json",
+    file,
+  }) as unknown as Parameters<typeof compositeAttachmentAdapter.send>[0];
+
+test("compositeAttachmentAdapter reuses stored objects for marked files", async () => {
+  const meta = {
+    object_name: "runs/a1/report.pptx",
+    url: "blob:preview-a1",
+    type: "application/vnd.api+json",
+    size: 2048,
+  };
+  const file = markFileWithExistingUpload(
+    new File(["bytes"], "report.pptx"),
+    meta
+  );
+
+  const result = await compositeAttachmentAdapter.send(
+    makePendingAttachment(file, "report.pptx")
+  );
+
+  // The already-stored object must not be uploaded a second time.
+  expect(storageServiceMock.uploadFiles).not.toHaveBeenCalled();
+  expect(result.status.type).toBe("complete");
+  expect(result.content[0]).toMatchObject({
+    type: "file",
+    data: "blob:preview-a1",
+  });
+  expect(result).toMatchObject({ object_name: meta.object_name });
+});
+
+test("compositeAttachmentAdapter still uploads unmarked files", async () => {
+  storageServiceMock.uploadFiles.mockResolvedValue({
+    success_count: 1,
+    results: [
+      {
+        success: true,
+        object_name: "attachments/report.pptx",
+        url: "blob:url",
+        presigned_url: "blob:presigned",
+        file_size: 2048,
+      },
+    ],
+  });
+
+  const result = await compositeAttachmentAdapter.send(
+    makePendingAttachment(new File(["bytes"], "report.pptx"), "report.pptx")
+  );
+
+  expect(storageServiceMock.uploadFiles).toHaveBeenCalledTimes(1);
+  expect(result.status.type).toBe("complete");
+  expect(result).toMatchObject({ object_name: "attachments/report.pptx" });
+  expect(result.content[0]).toMatchObject({
+    type: "file",
+    data: "blob:presigned",
+  });
 });

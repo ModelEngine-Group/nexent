@@ -8,7 +8,8 @@ change:
     'Collect every agent-generated file across a conversation and expose
     it through a persistent entry above the composer ("view all artifacts") that
     opens a side panel listing each artifact with preview (shared FilePreviewDrawer)
-    and download. Aggregation covers both the streaming path (marker text parts
+    and download, plus an "add to chat" action that re-attaches the artifact into
+    the composer. Aggregation covers both the streaming path (marker text parts
     carrying skillFileAttachments) and the history-restore path (skillFileUploadsRegistry).'
   affected_features:
     existing: []
@@ -31,7 +32,15 @@ change:
         skips user messages, and tolerates invalid createdAt values.
       - ConversationArtifactsPanel renders each artifact with icon, size and generated-at
         metadata, opens the shared FilePreviewDrawer for preview, prefers download_url
-        and falls back to object storage or raw preview URLs, and hides when closed.
+        and falls back to object storage or raw preview URLs, hides when closed, and
+        offers the add-to-chat action only when an onAddToComposer handler is provided
+        (read-only/share contexts omit the prop), with a per-entry in-flight guard.
+      - fetchArtifactFile downloads the artifact bytes via the backend stream endpoint
+        for object_name, falls back to the attachment's own URLs, and rejects when no
+        source exists.
+      - compositeAttachmentAdapter.send reuses the stored MinIO object for files marked
+        with markFileWithExistingUpload (no second upload, minio_files metadata intact)
+        and keeps uploading unmarked files through storageService.
       - ConversationArtifactsButton stays hidden without artifacts and opens the panel
         on click.
     reason: |-
