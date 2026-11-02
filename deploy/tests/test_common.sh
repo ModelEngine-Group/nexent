@@ -1347,6 +1347,7 @@ cat > "$TMP_DIR/auto-auth-bin/python3" <<'PYTHON'
 if [ "${1:-}" = -c ]; then exit 0; fi
 printf '%s\n' "$@" > "$AUTH_HOOK_ARGUMENTS"
 printf '%s\n' "${MSYS_NO_PATHCONV:-unset}/${MSYS2_ARG_CONV_EXCL:-unset}" >> "$AUTH_HOOK_ARGUMENTS"
+exit "${AUTH_HOOK_EXIT:-0}"
 PYTHON
 chmod +x "$TMP_DIR/auto-auth-bin/python3"
 export AUTH_HOOK_ARGUMENTS="$TMP_DIR/auth-hook-arguments"
@@ -1360,5 +1361,50 @@ assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate_k8s.py" "Kubernetes dep
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--deploy" "host entry must select deployment mode"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "custom-namespace" "Kubernetes hook must preserve the namespace"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "unset/unset" "host Python must allow Git Bash automatic path conversion"
+
+# Guard the real deployment call sites, including HTTPS and bootstrap paths
+# which can start Config and execute SQL indirectly.
+assert_call_before() {
+  local script="$1" first="$2" second="$3"
+  local content before_first before_second
+  content="$(cat "$script")"
+  assert_contains "$content" "$first" "required deployment call is missing"
+  assert_contains "$content" "$second" "required deployment boundary is missing"
+  before_first="${content%%"$first"*}"
+  before_second="${content%%"$second"*}"
+  [ "${#before_first}" -lt "${#before_second}" ] || {
+    echo "FAIL: $first must run before $second"
+    exit 1
+  }
+}
+DOCKER_ACCOUNT_CALL='deployment_upgrade_local_accounts docker || exit 1'
+K8S_ACCOUNT_CALL='deployment_upgrade_local_accounts kubernetes "$NAMESPACE" || exit 1'
+assert_call_before "$SCRIPT_DIR/../docker/deploy.sh" '  deploy_infrastructure ||' "$DOCKER_ACCOUNT_CALL"
+assert_call_before "$SCRIPT_DIR/../docker/deploy.sh" "$DOCKER_ACCOUNT_CALL" '  deploy_https_nginx ||'
+assert_call_before "$SCRIPT_DIR/../docker/deploy.sh" "$DOCKER_ACCOUNT_CALL" '  deploy_core_services ||'
+assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" $'\n    render_runtime_secret_values\n'
+if grep -Fq 'deploy_application_release()' "$SCRIPT_DIR/../k8s/deploy.sh"; then
+  assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" '    if ! deploy_application_release; then'
+  assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" '        helm_upgrade_application_release true ||' '        run_system_agent_bootstrap ||'
+else
+  assert_call_before "$SCRIPT_DIR/../k8s/deploy.sh" "$K8S_ACCOUNT_CALL" '    helm_upgrade_application_release'
+fi
+assert_not_contains "$(cat "$SCRIPT_DIR/../sql/init.sql")" 'user_account_t' "database bootstrap must not pre-create the account completion marker"
+assert_not_contains "$(cat "$SCRIPT_DIR/../k8s/helm/nexent-infrastructure/charts/nexent-infrastructure-common/templates/init-sql-configmap.yaml")" '.Values.sqlFiles.migrations' "infrastructure bootstrap must not run account migrations"
+for renderer in yaml_quote render_yaml_literal_file render_infrastructure_runtime_values; do
+  eval "$(awk "/^${renderer}\\(\\)/,/^}/" "$SCRIPT_DIR/../k8s/deploy.sh")"
+done
+SQL_INIT_FILE="$SCRIPT_DIR/../sql/init.sql"
+render_infrastructure_runtime_values "$TMP_DIR/account-bootstrap-values.yaml"
+assert_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'init: |' "infrastructure must render the real baseline"
+assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'user_account_t' "rendered infrastructure SQL must not pre-create the completion marker"
+assert_not_contains "$(cat "$TMP_DIR/account-bootstrap-values.yaml")" 'migrations:' "rendered infrastructure must exclude versioned account SQL"
+
+export AUTH_HOOK_EXIT=17
+if PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts docker; then
+  echo "FAIL: a migration error must propagate to the deployment caller"
+  exit 1
+fi
+unset AUTH_HOOK_EXIT
 
 echo "All deployment common tests passed."

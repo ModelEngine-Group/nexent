@@ -71,8 +71,15 @@ def assert_automatic_upgrade(root, temporary):
         docker("exec", "-i", names["db"], "psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1",
                data="CREATE SCHEMA auth; CREATE TABLE auth.users (id uuid,email text,encrypted_password text);"
                     f"INSERT INTO auth.users VALUES ('{user_id}','auto@example.com','{encoded}');")
+        # Infrastructure executes only this baseline, before Python inspects the
+        # target. It must not create the account completion marker prematurely.
+        # Production POSTGRES_USER creates this baseline owner at initialization;
+        # the disposable fixture uses postgres instead and must provide it here.
+        query("CREATE ROLE root")
+        query((root / "deploy/sql/init.sql").read_text(encoding="utf-8"))
+        assert query("SELECT to_regclass('nexent.user_account_t') IS NULL") == "t"
         assert phase("prepare")["new"]
-        query("CREATE SCHEMA nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),tenant_id varchar(100),"
+        query("CREATE SCHEMA IF NOT EXISTS nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),tenant_id varchar(100),"
               "user_role varchar(30),user_email varchar(255),delete_flag varchar(1) DEFAULT 'N');"
               f"INSERT INTO nexent.user_tenant_t VALUES ('{user_id}','retained-tenant','SU','auto@example.com','N');")
         query("INSERT INTO nexent.user_tenant_t VALUES ('user_id','tenant_id','SPEED',NULL,'N');")
