@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -euo pipefail
 
@@ -16,6 +17,10 @@ POSTGRES_PASSWORD="${NEXENT_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:-}}"
 
 MODE="${NEXENT_SQL_STARTUP_MODE:-migrate}"
 case "${1:-}" in
+  --needs-version-upgrade)
+    MODE="version-upgrade"
+    UPGRADE_TARGET_VERSION="${2:-}"
+    ;;
   --migrate)
     MODE="migrate"
     shift
@@ -32,6 +37,46 @@ esac
 
 log() {
   printf '[sql-migrations] %s\n' "$*"
+}
+
+run_version_upgrade_mode() {
+  local version="${UPGRADE_TARGET_VERSION#v}"
+  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    log "ERROR: a numeric target migration version is required"
+    return 1
+  fi
+  local major minor patch
+  IFS=. read -r major minor patch <<< "$version"
+  local target
+  target="$(detect_app_version)"
+  if [[ ! "$target" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    log "ERROR: the target application version must be numeric"
+    return 1
+  fi
+  target="${target#v}"
+  local target_major target_minor target_patch
+  IFS=. read -r target_major target_minor target_patch <<< "$target"
+  # This is a read-only version query, independent of account contents and file
+  # checksums. An interrupted transition is resumed by deploy.sh's saved plan.
+  psql_base -qAt <<SQL
+SELECT to_regclass('"$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME"') IS NOT NULL AS has_history \gset
+\if :has_history
+WITH versions AS (
+  SELECT regexp_match(app_version, '^v?([0-9]+)\.([0-9]+)\.([0-9]+)') AS value
+  FROM "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME"
+  WHERE status IN ('applied','baselined')
+)
+SELECT CASE
+  WHEN ARRAY[$target_major,$target_minor,$target_patch] < ARRAY[$major,$minor,$patch] THEN 'skip'
+  WHEN EXISTS (SELECT 1 FROM versions WHERE value::int[] >= ARRAY[$major,$minor,$patch]) THEN 'skip'
+  WHEN EXISTS (SELECT 1 FROM versions WHERE value IS NOT NULL) THEN 'required'
+  WHEN EXISTS (SELECT 1 FROM versions) THEN 'unknown'
+  ELSE 'new'
+END;
+\else
+SELECT CASE WHEN ARRAY[$target_major,$target_minor,$target_patch] < ARRAY[$major,$minor,$patch] THEN 'skip' ELSE 'new' END;
+\endif
+SQL
 }
 
 sha256_file() {
@@ -375,7 +420,7 @@ main() {
       log "SQL migration startup mode is off"
       return 0
       ;;
-    migrate|wait)
+    migrate|wait|version-upgrade)
       ;;
     *)
       log "ERROR: unsupported NEXENT_SQL_STARTUP_MODE: $MODE"
@@ -385,6 +430,10 @@ main() {
 
   wait_for_postgres
   split_migration_table
+  if [ "$MODE" = version-upgrade ]; then
+    run_version_upgrade_mode
+    return
+  fi
   APP_VERSION_VALUE="$(detect_app_version)"
   collect_manifest
   trap cleanup EXIT

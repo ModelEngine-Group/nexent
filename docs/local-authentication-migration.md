@@ -33,22 +33,22 @@ metadata are never returned by identity APIs.
 
 ## Upgrade sequence
 
-Normal Docker/Kubernetes `deploy.sh` now completes this upgrade automatically.
-The host needs Python 3.8+ but no database Python packages. Before application
-replacement it checks the versioned account SQL and data/cleanup checkpoints,
-captures a private read-only source snapshot, then lets Config execute SQL in
-normal migration order. Deployment applies credentials after the expected SQL
-checksum is recorded and before SU bootstrap, then removes the source DB/Auth/Kong
-containers while retaining persistent data and backups. Fresh installations need
-no source; completed upgrades skip source access.
+Docker/Kubernetes deploy.sh select historical account transfer only when recorded
+application versions cross from below 2.9.0 to 2.9.0 or later. Version detection reuses
+run-sql-migrations.sh, its schema_migrations.app_version records and the selected
+deployment target version. Targets below 2.9.0 never select account transfer. Initial
+installation and recorded 2.9.0+ versions skip account transfer, including when
+pending rows exist or schema checksums change. Supabase never determines the
+application version. Deployment scripts contain no inline account inspection SQL.
 
-The snapshot remains under `deploy/env/.migration-state/` on failure. Rerun
-`deploy.sh` after fixing the prerequisite; a committed SQL migration never hides
-an unfinished data import. Import and its checkpoint commit atomically. A failed
-cleanup retries without overwriting newer account credentials. Source passwords
-come from the exported deployment environment first, then the original container
-environment; automatic deployment never prompts. Kubernetes preserves source
-storage through a `Retain` PV policy and private PVC/PV definition backup.
+A selected upgrade saves a private source snapshot before replacing the app.
+Normal startup executes schema SQL; the importer only transfers credentials.
+Missing original source data stops migration. A private captured-transition file
+allows the same interrupted upgrade to resume after schema startup. Snapshot and
+transition state are removed after import/cleanup succeed; source volumes and
+backups are retained. The host needs Python 3.8+ when migration is selected and
+needs no database Python packages. Kubernetes preserves source PV data before
+Helm replaces legacy resources.
 
 Backups and a freeze on account/password/provider-binding writes remain required
 during cutover. The following sequence is the optional manual recovery path.
