@@ -13,7 +13,7 @@ from nexent.core.ext_components.aidp.retrieval_config import SEARCH_METHODS, val
 from nexent.core.tools.ind_aidp_search_tool import IndependentAidpSearchError, IndependentAidpSearchTool
 from nexent.core.utils.observer import MessageObserver
 
-CASE_ID = "AIDP-RET-PROTOCOL"
+CASE_ID = "AIDP-RET-PROTOCOL-D2-001"
 
 
 @pytest.fixture

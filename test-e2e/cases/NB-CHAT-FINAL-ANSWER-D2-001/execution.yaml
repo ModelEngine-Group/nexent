@@ -1,9 +1,9 @@
 schema_version: '1.0'
-case_id: NB-CHAT-FINAL-ANSWER-001
+case_id: NB-CHAT-FINAL-ANSWER-D2-001
 implementations:
 - framework: pytest
   file: test.py
-  selector: NB-CHAT-FINAL-ANSWER-001
+  selector: NB-CHAT-FINAL-ANSWER-D2-001
 acceptance_bindings:
   AC-COMPLETE: [test_northbound_answer_modes_match_finalized_history]
   AC-DELTA: [test_northbound_answer_modes_match_finalized_history]

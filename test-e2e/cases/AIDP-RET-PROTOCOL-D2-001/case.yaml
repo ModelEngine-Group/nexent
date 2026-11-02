@@ -3,7 +3,7 @@
   "stage": "D2",
   "module": "AIDP-KNOWLEDGE",
   "case": {
-    "case_id": "AIDP-RET-PROTOCOL",
+    "case_id": "AIDP-RET-PROTOCOL-D2-001",
     "feature_id": "AIDP-RETRIEVAL",
     "business_rule_ids": [
       "AIDP-RETRIEVAL-RULE-01"
