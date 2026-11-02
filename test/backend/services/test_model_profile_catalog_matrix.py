@@ -24,25 +24,29 @@ def test_selected_combination_resolves_and_renders_declared_reasoning_controls(k
     profile, _ = build_outlet_draft(request, "catalog-test-tenant")
     assert profile.identity.request_model_id == model
     assert profile.provider_key == provider
-    parameters = {}
+    toggles = {}
+    degrees = []
     for control in profile.capabilities.reasoning.controls or []:
         if control.mode == "toggle":
-            parameters[control.parameter_key] = True
+            toggles[control.parameter_key] = True
         elif control.mode == "effort":
-            parameters[control.parameter_key] = control.values[-1]
+            degrees.append({control.parameter_key: control.values[-1]})
         else:
-            parameters[control.parameter_key] = control.min if control.min is not None else 1
-    configured = LegacyInvocationOptions(parameters).resolve(profile)
-    message = ModelRequest(
-        request_id="catalog-wire-check", outlet_id=profile.outlet_id, config_revision=profile.config_revision,
-        messages=[ModelMessage(semantic_role="user", content_parts=[{"type": "text", "text": "test"}])],
-    )
-    body = OpenAIChatAdapter().prepare_http_request(message, configured).json_body
-    assert body["model"] == model
-    rules = {rule["key"]: rule for rule in profile.parameter_rules}
-    for name, value in parameters.items():
-        binding = rules[name]["api_binding"]
-        actual = body
-        for part in binding["path"].strip("/").split("/"):
-            actual = actual[part]
-        assert actual == ("enabled" if binding["transform_ref"] == "thinking_toggle_v1" else value)
+            degrees.append({control.parameter_key: control.min if control.min is not None else 1})
+    # Each advertised degree is executable; providers may forbid combining degrees.
+    for degree in degrees or [{}]:
+        parameters = {**toggles, **degree}
+        configured = LegacyInvocationOptions(parameters).resolve(profile)
+        message = ModelRequest(
+            request_id="catalog-wire-check", outlet_id=profile.outlet_id, config_revision=profile.config_revision,
+            messages=[ModelMessage(semantic_role="user", content_parts=[{"type": "text", "text": "test"}])],
+        )
+        body = OpenAIChatAdapter().prepare_http_request(message, configured).json_body
+        assert body["model"] == model
+        rules = {rule["key"]: rule for rule in profile.parameter_rules}
+        for name, value in parameters.items():
+            binding = rules[name]["api_binding"]
+            actual = body
+            for part in binding["path"].strip("/").split("/"):
+                actual = actual[part]
+            assert actual == ("enabled" if binding["transform_ref"] == "thinking_toggle_v1" else value)
