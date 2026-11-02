@@ -1181,7 +1181,9 @@ function BatchAddForm({
           },
         });
         if (generations.current[row.id] === generation)
-          checkStatuses.current[row.id] = result.ok ? "available" : "unavailable";
+          checkStatuses.current[row.id] = result.ok
+            ? "available"
+            : "unavailable";
         apply(result.ok, result.error);
         return;
       }

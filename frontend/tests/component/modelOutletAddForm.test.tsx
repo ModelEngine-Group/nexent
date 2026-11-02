@@ -1375,10 +1375,11 @@ it.each([
   }
 );
 
-
 it("FD-05 retains a tested draft after save failure and retries without another check", async () => {
   api.validateModelOutlet.mockResolvedValue({ ok: true });
-  api.createModelOutlet.mockRejectedValueOnce(new Error("temporary save failure"));
+  api.createModelOutlet.mockRejectedValueOnce(
+    new Error("temporary save failure")
+  );
   const callbacks = setup();
   fillIdentity();
   await waitForSaveReady();
@@ -1391,12 +1392,16 @@ it("FD-05 retains a tested draft after save failure and retries without another 
   expect(screen.getByText("model.status.available")).toBeInTheDocument();
   fireEvent.click(saveButton());
   await waitFor(() => expect(callbacks.onDone).toHaveBeenCalledOnce());
-  expect(api.createModelOutlet.mock.calls.map(([request]) => request.connect_status)).toEqual(["available", "available"]);
+  expect(
+    api.createModelOutlet.mock.calls.map(([request]) => request.connect_status)
+  ).toEqual(["available", "available"]);
   expect(api.validateModelOutlet).toHaveBeenCalledOnce();
 });
 
 it("FD-05 does not persist an unavailable result for a failed management request", async () => {
-  api.validateModelOutlet.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+  api.validateModelOutlet.mockRejectedValueOnce(
+    new TypeError("Failed to fetch")
+  );
   const callbacks = setup();
   fillIdentity();
   await waitForSaveReady();

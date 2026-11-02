@@ -29,11 +29,11 @@ case:
     action: Create/update inside a transaction that fails later, roll it back and read through another session; provoke an actual SQL error with a dummy private value.
     expected: No partially committed row/configuration survives and public error/log text excludes the dummy credential.
   - order: 4
-    action: Persist zero/false/null preferences for two outlets in an owned conversation; reject stale and other-user writes, clear one outlet, then soft-delete the conversation.
-    expected: Exact values and other outlets survive; preference lockings advance independently without changing outlet defaults or model-visible metadata.
+    action: Persist zero/false/null preferences for two outlets in an owned conversation; reject other-user writes under row locking, clear one outlet, then soft-delete the conversation.
+    expected: Exact values and other outlets survive; preference updates share an owned row lock without changing outlet defaults or model-visible metadata.
   - order: 5
     action: Check a draft and an unsaved edit, then save through product services with the frontend draft result; alter the effective request afterward.
-    expected: Success/failure state commits with the matching configuration, unsaved checks do not mutate rows, stale proof cannot mark changed requests checked, and saves never invoke the provider.
+    expected: Success/failure state commits with the matching configuration, unsaved checks do not mutate rows, changes without a new result reset connectivity, and saves never invoke the provider.
   - order: 6
     action: Preview and explicitly reselect provider/model profiles through the product edit service, then commit and retry a stale writer; restore the saved parameter defaults.
     expected: The same outlet ID and credentials survive, create/edit render the same request, request changes invalidate prior status, stale saves do not overwrite, and parameter reset retains the saved profile references.
@@ -42,7 +42,7 @@ case:
   - Tenant, active-row and revision constraints prevent unauthorized or stale writes, preserving the winner configuration.
   - Transaction rollback restores prior state and query failures have sanitized diagnostics.
   - Conversation preferences enforce ownership and active state, preserve exact values and other outlets, and never rewrite outlet defaults.
-  - Draft check results survive actual create/update commits and request changes invalidate old proof without additional provider calls.
+  - Draft check results survive actual create/update commits and request changes reset the saved status without additional provider calls.
   - Explicit profile changes preserve identity and credentials with identical create/edit wire configuration.
   forbidden_side_effects:
   - No production connections, provider calls, source-file updates or real credentials in artifacts.
@@ -68,7 +68,7 @@ case:
     expected_results: [3]
     forbidden_side_effects: [1, 2]
   - id: AC-04
-    description: Real conversation preference storage preserves explicit values, ownership, revision and outlet independence.
+    description: Real conversation preference storage preserves explicit values, ownership, row locking and outlet independence.
     steps: [4]
     expected_results: [4]
     forbidden_side_effects: [1, 2]

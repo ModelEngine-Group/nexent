@@ -14,7 +14,7 @@ change:
   affected_cases:
     existing: []
     added: []
-    modified: [MODEL-PROBE-D3-001]
+    modified: [MODEL-PROBE-D3-001, MOP-D3-001]
     retired: []
   traditional_ut:
     decision: strengthen

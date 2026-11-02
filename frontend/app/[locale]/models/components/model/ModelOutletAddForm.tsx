@@ -457,22 +457,25 @@ export function ModelOutletAddForm({
     !preview.isError &&
     parsedExtras !== null;
   const [checking, setChecking] = useState(false);
-  const [checkResult, setCheckResult] =
-    useState<
-      Pick<ModelOutletValidationResponse, "ok" | "error"> & {
-        fingerprint: string;
-        connect_status?: "available" | "unavailable";
-      }
-    >();
+  const [checkResult, setCheckResult] = useState<
+    Pick<ModelOutletValidationResponse, "ok" | "error"> & {
+      fingerprint: string;
+      connect_status?: "available" | "unavailable";
+    }
+  >();
   const checkGeneration = useRef(0);
   const checkController = useRef<AbortController | null>(null);
   const checkDraftIdentity = Object.fromEntries(
     Object.entries(draft).filter(([key]) => key !== "display_name")
   );
   const checkFingerprint = JSON.stringify([
-    checkDraftIdentity, sampling, apiKey, editing?.config_revision,
+    checkDraftIdentity,
+    sampling,
+    apiKey,
+    editing?.config_revision,
   ]);
-  const currentCheckResult = checkResult?.fingerprint === checkFingerprint ? checkResult : undefined;
+  const currentCheckResult =
+    checkResult?.fingerprint === checkFingerprint ? checkResult : undefined;
   useEffect(() => {
     checkGeneration.current += 1;
     checkController.current?.abort();
@@ -523,7 +526,11 @@ export function ModelOutletAddForm({
         });
     } catch (error) {
       if (!controller.signal.aborted && generation === checkGeneration.current)
-        setCheckResult({ ok: false, error: modelCheckFailure(error), fingerprint: checkFingerprint });
+        setCheckResult({
+          ok: false,
+          error: modelCheckFailure(error),
+          fingerprint: checkFingerprint,
+        });
     } finally {
       if (!controller.signal.aborted && generation === checkGeneration.current)
         setChecking(false);
@@ -1064,7 +1071,11 @@ export function ModelOutletAddForm({
                 </span>
               )}
               <ModelCheckSummary
-                issues={currentCheckResult?.error ? { draft: currentCheckResult.error } : {}}
+                issues={
+                  currentCheckResult?.error
+                    ? { draft: currentCheckResult.error }
+                    : {}
+                }
                 modelNames={{ draft: name.trim() }}
                 onRetry={
                   !checking && ready ? () => void checkDraft() : undefined

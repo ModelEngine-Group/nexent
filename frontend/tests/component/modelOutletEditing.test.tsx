@@ -557,7 +557,7 @@ it("ECS-01 checks the edit draft, preserves masked credentials and carries the r
       42,
       expect.objectContaining({
         connect_status: "available",
-          display_name: "renamed",
+        display_name: "renamed",
       })
     )
   );
