@@ -1,5 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -134,7 +135,7 @@ def list_tasks_paginated(
         }
 
 
-def update_task(task_id: int, tenant_id: str, user_id: str, values: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def update_task(task_id: int, tenant_id: str, user_id: str, values: Dict[str, Any], db_session=None) -> Optional[Dict[str, Any]]:
     data = add_update_tracking(
         {
             **values,
@@ -142,7 +143,7 @@ def update_task(task_id: int, tenant_id: str, user_id: str, values: Dict[str, An
         },
         user_id,
     )
-    with get_db_session() as session:
+    with get_db_session(db_session) as session:
         task = session.execute(
             update(AgentAutomationTask)
             .where(
@@ -357,9 +358,9 @@ def update_proposal(
         return bool(result.rowcount)
 
 
-def create_run(run_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+def create_run(run_data: Dict[str, Any], user_id: str, db_session=None) -> Dict[str, Any]:
     data = add_creation_tracking({**run_data, "delete_flag": "N"}, user_id)
-    with get_db_session() as session:
+    with get_db_session(db_session) as session:
         stmt = insert(AgentAutomationRun).values(**data).returning(AgentAutomationRun)
         run = session.execute(stmt).scalar_one()
         return as_dict(run)
@@ -370,6 +371,7 @@ def update_run(
     values: Dict[str, Any],
     user_id: Optional[str] = None,
     expected_statuses: Optional[List[str]] = None,
+    db_session=None,
 ) -> Optional[Dict[str, Any]]:
     data = {
         **values,
@@ -377,7 +379,7 @@ def update_run(
     }
     if user_id:
         data = add_update_tracking(data, user_id)
-    with get_db_session() as session:
+    with get_db_session(db_session) as session:
         conditions = [
             AgentAutomationRun.run_id == run_id,
             AgentAutomationRun.delete_flag == "N",
@@ -475,6 +477,36 @@ def cancel_runs_by_conversation(conversation_id: int, user_id: str, reason: str)
         return result.rowcount or 0
 
 
+@contextmanager
+def task_run_transaction(task_id: int, tenant_id: str, user_id: str, run_id=None):
+    """Serialize admission/finalization with task-before-run row locks."""
+    with get_db_session() as session:
+        task = session.execute(select(AgentAutomationTask).where(
+            AgentAutomationTask.task_id == task_id,
+            AgentAutomationTask.tenant_id == tenant_id,
+            AgentAutomationTask.user_id == user_id,
+            AgentAutomationTask.delete_flag == "N",
+        ).with_for_update()).scalar_one_or_none()
+        run = None
+        if task is not None and run_id is not None:
+            run = session.execute(select(AgentAutomationRun).where(
+                AgentAutomationRun.run_id == run_id,
+                AgentAutomationRun.task_id == task_id,
+                AgentAutomationRun.tenant_id == tenant_id,
+                AgentAutomationRun.user_id == user_id,
+                AgentAutomationRun.delete_flag == "N",
+            ).with_for_update()).scalar_one_or_none()
+        yield session, as_dict(task) if task else None, as_dict(run) if run else None
+
+
+def _run_history_order():
+    return (
+        func.coalesce(AgentAutomationRun.actual_fire_at, AgentAutomationRun.started_at,
+                      AgentAutomationRun.create_time).desc(),
+        AgentAutomationRun.run_id.desc(),
+    )
+
+
 def list_runs(task_id: int, tenant_id: str, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
     with get_db_session() as session:
         rows = (
@@ -486,7 +518,7 @@ def list_runs(task_id: int, tenant_id: str, user_id: str, limit: int = 50) -> Li
                     AgentAutomationRun.user_id == user_id,
                     AgentAutomationRun.delete_flag == "N",
                 )
-                .order_by(desc(AgentAutomationRun.scheduled_fire_at))
+                .order_by(*_run_history_order())
                 .limit(limit)
             )
             .scalars()
@@ -514,7 +546,7 @@ def list_runs_paginated(
             session.execute(
                 select(AgentAutomationRun)
                 .where(*conditions)
-                .order_by(desc(AgentAutomationRun.scheduled_fire_at))
+                .order_by(*_run_history_order())
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )

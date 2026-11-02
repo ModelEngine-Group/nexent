@@ -16,9 +16,8 @@ from datetime import datetime, timedelta
 from http import HTTPStatus
 from typing import Any, Dict, List, Optional, Tuple
 
-import httpx
 import jwt
-from contracts.constants.environment import DEBUG_JWT_EXPIRE_SECONDS, IS_SPEED_MODE, JWT_EXPIRY_SECONDS, SERVICE_ROLE_KEY, SUPABASE_JWT_SECRET, SUPABASE_KEY, SUPABASE_URL
+from contracts.constants.environment import DEBUG_JWT_EXPIRE_SECONDS, IS_SPEED_MODE, JWT_EXPIRY_SECONDS, JWT_SECRET, JWT_ISSUER
 from contracts.authentication import (
     AuthenticatedIdentity,
     CredentialKind,
@@ -49,15 +48,8 @@ from infrastructure.security.signatures import (
     validate_timestamp,
 )
 from management.db.identity.user_tenant import get_user_tenant_by_user_id
-from management.services.permission.identity.provider import (
-    delete_supabase_user,
-    get_supabase_admin_client,
-    get_supabase_client,
-)
 from management.utils.request_context import get_user_language
 from permissions.models import CurrentUser
-from supabase import Client, create_client
-from supabase.lib.client_options import SyncClientOptions
 
 # Module logger
 logger = logging.getLogger(__name__)
@@ -126,7 +118,7 @@ def get_jwt_expiry_seconds(token: str) -> int:
 
 def calculate_expires_at(token: Optional[str] = None) -> int:
     """
-    Calculate session expiration time (consistent with Supabase JWT expiration time)
+    Calculate session expiration time (consistent with the signed JWT expiration time)
 
     Args:
         token: Optional JWT token to get actual expiration time
@@ -149,15 +141,25 @@ def _decode_jwt_token_for_expiry(token: str) -> dict:
     Expiration validation is intentionally disabled so callers can compute the
     original token lifetime even when the token is already expired.
     """
-    if not SUPABASE_JWT_SECRET:
+    if not JWT_SECRET:
         raise TokenExpiredError("JWT verification is not configured")
 
     return jwt.decode(
         token,
-        SUPABASE_JWT_SECRET,
+        JWT_SECRET,
         algorithms=["HS256"],
         options={"verify_exp": False, "verify_aud": False},
     )
+
+
+def require_active_account(user_id: str) -> dict:
+    """Reject deleted/disabled identities before any business authorization."""
+    from management.db.identity.account import get_account
+
+    account = get_account(user_id)
+    if not account or account["account_status"] != "active":
+        raise TokenExpiredError("Account is unavailable")
+    return account
 
 
 def _decode_jwt_token(authorization: str) -> dict:
@@ -170,9 +172,9 @@ def _decode_jwt_token(authorization: str) -> dict:
     Raises:
         UnauthorizedError: If token is invalid, expired, or signature verification fails
     """
-    if not SUPABASE_JWT_SECRET:
+    if not JWT_SECRET:
         logging.error(
-            "SUPABASE_JWT_SECRET (or JWT_SECRET) is not configured; cannot verify JWT"
+            "JWT_SECRET is not configured; cannot verify JWT"
         )
         raise TokenExpiredError("JWT verification is not configured")
 
@@ -180,14 +182,13 @@ def _decode_jwt_token(authorization: str) -> dict:
         # Format authorization header
         token = extract_bearer_token(authorization)
 
-        # Decode and verify JWT (signature + expiration)
-        # verify_aud=False: allow tokens with aud claim (e.g. test JWT, Supabase) without strict audience check
         claims = jwt.decode(
-            token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            options={"verify_exp": True, "verify_aud": False},
+            token, JWT_SECRET, algorithms=["HS256"], audience="authenticated", issuer=JWT_ISSUER,
+            options={"require": ["sub", "exp", "iat", "ver"]},
         )
+        account = require_active_account(claims["sub"])
+        if claims.get("ver") != account["token_version"]:
+            raise TokenExpiredError("Credentials have changed; please log in again")
         audience = claims.get("aud")
         audiences = audience if isinstance(audience, list) else [audience]
         if (
@@ -283,10 +284,9 @@ def _resolve_session_user(authorization: Optional[str] = None) -> tuple[str, str
             tenant_id = user_tenant_record["tenant_id"]
             logging.debug(f"Found tenant ID for user {user_id}: {tenant_id}")
         else:
-            tenant_id = DEFAULT_TENANT_ID
-            logging.warning(
-                f"No tenant relationship found for user {user_id}, using default tenant"
-            )
+            if not user_tenant_record:
+                raise TokenExpiredError("No active tenant relationship")
+            tenant_id = resolve_tenant_id_from_user_tenant_record(user_tenant_record)
 
         return user_id, tenant_id
 
@@ -337,8 +337,9 @@ def generate_test_jwt(user_id: str, expires_in: Optional[int] = None) -> str:
         "sub": user_id,
         "iat": now,
         "exp": now + expires_in,
-        "iss": "nexent-test",
-        "aud": "nexent-api",
+        "iss": JWT_ISSUER,
+        "aud": "authenticated",
+        "ver": 0,
     }
     # Use a fixed test secret to avoid external dependencies in tests
     return jwt.encode(payload, MOCK_JWT_SECRET_KEY, algorithm="HS256")
@@ -351,18 +352,22 @@ def generate_session_jwt(
     if expires_in is None:
         expires_in = JWT_EXPIRY_SECONDS
 
+    if not JWT_SECRET:
+        raise TokenExpiredError("JWT signing is not configured")
+    account = require_active_account(user_id)
     now = int(time.time())
     payload = {
         "sub": user_id,
+        "ver": account["token_version"],
         "role": "authenticated",
         "aud": "authenticated",
         "iat": now,
         "exp": now + expires_in,
-        "iss": SUPABASE_URL,
+        "iss": JWT_ISSUER,
     }
     if session_id:
         payload["sid"] = session_id
-    return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm="HS256")
+    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
 def get_current_user_info(
@@ -383,58 +388,18 @@ def get_current_user_info(
     return user_id, tenant_id, language
 
 
-def set_auth_token_to_client(client: Client, token: str) -> None:
-    """Set token to client"""
-    jwt_token = extract_bearer_token(token)
-
-    try:
-        # Only set access_token
-        client.auth.access_token = jwt_token
-    except Exception as e:
-        logging.error(f"Set access token failed: {str(e)}")
-
-
-def get_authorized_client(authorization: Optional[str] = Header(None)) -> Client:
-    """Get token from authorization header and create authorized supabase client"""
-    client = get_supabase_client()
-    if authorization:
-        token = extract_bearer_token(authorization)
-        set_auth_token_to_client(client, token)
-    return client
-
-
-def get_current_user_from_client(
-    client: Client, token: Optional[str] = None
-) -> Optional[Any]:
-    """Get current user from client using provided JWT, return user object or None"""
-    try:
-        # Prefer explicitly passing the JWT to avoid relying on client-side session state
-        if token:
-            jwt_token = extract_bearer_token(token)
-            user_response = client.auth.get_user(jwt_token)
-        else:
-            user_response = client.auth.get_user()
-
-        if user_response and getattr(user_response, "user", None):
-            return user_response.user
-        return None
-    except Exception as e:
-        logging.error(f"Get current user failed: {str(e)}")
-        return None
-
-
 def validate_token(token: str) -> Tuple[bool, Optional[Any]]:
-    """Validate token function, return (is valid, user object)"""
-    client = get_supabase_client()
-    set_auth_token_to_client(client, token)
+    """Apply gateway identity policy and return the existing user response shape."""
+    from types import SimpleNamespace
+
     try:
-        user = get_current_user_from_client(client, token)
-        if user:
-            ensure_cas_session_active_from_authorization(token)
-            return True, user
-        return False, None
-    except Exception as e:
-        logging.error(f"Token validation failed: {str(e)}")
+        user_id, _ = get_current_user_id(token)
+        account = require_active_account(user_id)
+        membership = get_user_tenant_by_user_id(user_id)
+        return True, SimpleNamespace(
+            id=user_id, email=account["email"], user_metadata={"role": membership["user_role"]}
+        )
+    except UnauthorizedError:
         return False, None
 
 
@@ -478,7 +443,7 @@ def extract_bearer_token(authorization: Optional[str]) -> Optional[str]:
 
 def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]:
     """Verify a northbound runtime token and return its user and tenant."""
-    if not SUPABASE_JWT_SECRET:
+    if not JWT_SECRET:
         raise TokenExpiredError("JWT verification is not configured")
     if not authorization or not authorization.strip():
         raise TokenExpiredError("No authorization header provided")
@@ -487,7 +452,7 @@ def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]
     try:
         claims = jwt.decode(
             token,
-            SUPABASE_JWT_SECRET,
+            JWT_SECRET,
             algorithms=["HS256"],
             audience=INTERNAL_RUNTIME_JWT_AUDIENCE,
             issuer=INTERNAL_RUNTIME_JWT_ISSUER,
@@ -513,13 +478,13 @@ def verify_internal_runtime_jwt(authorization: Optional[str]) -> tuple[str, str]
 def parse_pending_oauth_token(pending_token: str) -> PendingOAuthIdentity:
     if not pending_token:
         raise OAuthLinkError("OAuth account completion session is missing")
-    if not SUPABASE_JWT_SECRET:
+    if not JWT_SECRET:
         raise OAuthProviderError("JWT verification is not configured")
 
     try:
         payload = jwt.decode(
             pending_token,
-            SUPABASE_JWT_SECRET,
+            JWT_SECRET,
             algorithms=["HS256"],
             options={"verify_exp": True, "verify_aud": False},
         )

@@ -3,7 +3,7 @@
 Kubernetes deployment uses two independent releases with disjoint resource ownership:
 
 - `nexent-infrastructure`: Elasticsearch, PostgreSQL, Redis, MinIO, infrastructure credentials, and PostgreSQL bootstrap SQL.
-- `nexent`: Config, Runtime, MCP, Northbound, Web, Data Process, Supabase, Terminal, Monitoring, and application-owned shared resources.
+- `nexent`: Config, Runtime, MCP, Northbound, Web, Data Process, Terminal, Monitoring, and application-owned shared resources.
 
 Fresh installations are supported. If the deployment script detects a legacy `nexent` release that still owns infrastructure resources, it stops instead of attempting an in-place migration.
 
@@ -59,7 +59,7 @@ bash deploy.sh k8s --defaults \
   --existing-claim-prefix <claim-prefix>
 
 # Add terminal to the default component set
-bash deploy.sh k8s --components infrastructure,application,data-process,supabase,terminal
+bash deploy.sh k8s --components infrastructure,application,data-process,terminal
 
 # Use mainland China image sources
 bash deploy.sh k8s --image-source mainland
@@ -113,7 +113,7 @@ Config, Runtime, Northbound, and Data Process are intentionally single-replica w
 | Option | Description | Values |
 |--------|-------------|--------|
 | `--release-scope` | Helm release scope | `all` (default), `infrastructure`, or `nexent` |
-| `--components` | Comma-separated deployment components | `infrastructure`, `application`, `data-process`, `supabase`, `terminal`, `monitoring` |
+| `--components` | Comma-separated deployment components | `infrastructure`, `application`, `data-process`, `terminal`, `monitoring` |
 | `--port-policy` | Host exposure policy | `development` or `production` |
 | `--image-source` | Image reference source | `general`, `mainland`, or `local-latest` |
 | `--registry-profile` | Legacy registry profile option | `general` or `mainland`; maps to `--image-source` |
@@ -123,7 +123,7 @@ Config, Runtime, Northbound, and Data Process are intentionally single-replica w
 | `--config` | Open the interactive deployment configuration | Flag |
 | `--is-mainland` | Legacy network location option | `Y` maps to `--image-source mainland`; `N` maps to `general` |
 | `--version` | Application version | Version tag (auto-detected from `backend/contracts/constants/environment.py` if not set) |
-| `--deployment-version` | Legacy deployment version | `speed` maps to `infrastructure,application`; `full` adds `supabase` |
+| `--deployment-version` | Legacy deployment version | Both versions use `infrastructure,application`; `full` enables local authentication |
 | `--persistence-mode` | Persistent volume mode | `local`, `dynamic`, or `existing`; default `local` |
 | `--storage-class` | StorageClass for PV/PVC binding | StorageClass name; aliases `--storageclass`, `--storage-class-name`, `--sc` |
 | `--local-path` | Base host path for local PVs except workspace | Path; default `/var/lib/nexent-data` |
@@ -156,7 +156,7 @@ bash deploy/offline/build_offline_package.sh \
   --target k8s \
   --version v2.2.1 \
   --platform amd64 \
-  --components infrastructure,application,data-process,supabase \
+  --components infrastructure,application,data-process \
   --image-source general \
   --compress true \
   --output-dir offline-package/k8s
@@ -170,7 +170,7 @@ On a target host with access to the cluster, load images before deployment:
 cd offline-package/k8s
 bash deploy.sh --load-images k8s \
   --version v2.2.1 \
-  --components infrastructure,application,data-process,supabase \
+  --components infrastructure,application,data-process \
   --image-source general
 ```
 
@@ -178,18 +178,17 @@ For multi-node clusters, run `load-images.sh` on every node that may schedule Ne
 
 ## Deployment Components
 
-The deployment script uses Bash TUI menus when running interactively. It first shows a component multi-select menu, then single-select menus for port policy and image source. Use `b`/Backspace to return to the previous TUI step and `q` to quit. `infrastructure` is required and is added automatically if omitted; `application`, `data-process`, and `supabase` are selected by default and can be disabled for smaller deployments.
+The deployment script uses Bash TUI menus when running interactively. It first shows a component multi-select menu, then single-select menus for port policy and image source. Use `b`/Backspace to return to the previous TUI step and `q` to quit. `infrastructure` is required and is added automatically if omitted; `application` and `data-process` are selected by default and can be disabled for smaller deployments.
 
 | Component | Services |
 |-----------|----------|
 | `infrastructure` | Elasticsearch, PostgreSQL, Redis, MinIO |
 | `application` | config, runtime, mcp, northbound, web |
 | `data-process` | nexent-data-process |
-| `supabase` | Supabase Kong, GoTrue Auth, Supabase PostgreSQL, related initialization |
 | `terminal` | OpenSSH terminal tool |
 | `monitoring` | Optional monitoring chart; selecting it prompts for provider unless `--monitoring-provider` is passed |
 
-`application` does not include `data-process`; it is a separate component even though it is selected by default. User and tenant features are enabled by selecting `supabase`; there is no separate user/tenant switch.
+`application` does not include `data-process`; it is a separate component even though it is selected by default. User and tenant features use the existing PostgreSQL service; full mode enables authentication independently of optional components.
 
 ## Port Policy
 
@@ -212,7 +211,7 @@ The `apply` command performs the following steps:
 8. **Deploy Nexent** - Install or upgrade `nexent` exactly once
 9. **Wait for selected workloads** - Verify all selected application Deployments
 10. **Synchronize official skills** - Verify and copy the bundled archives to the shared workspace PVC
-11. **Create super admin user** - Initialize the admin account when Supabase is selected
+11. **Create super admin user** - Initialize the admin account after local account migrations complete
 
 If infrastructure readiness or Elasticsearch initialization fails, the infrastructure release is retained for retry and the Nexent release is not installed or upgraded.
 
@@ -275,7 +274,6 @@ The following local PersistentVolumes can preserve data:
 - `nexent-postgresql-pv` - Relational database data
 - `nexent-redis-pv` - Cache data
 - `nexent-minio-pv` - Object storage data
-- `nexent-supabase-db-pv` - Supabase database (full version only)
 - Monitoring PVs such as Phoenix, Grafana, Tempo, and Langfuse data when monitoring is enabled
 
 ### Deleted Data
@@ -303,14 +301,6 @@ Use `--delete-local-data true` or `--remove-local-data` to delete known Nexent l
 | nexent-postgresql | Relational database |
 | nexent-redis | Caching layer |
 | nexent-minio | S3-compatible object storage |
-
-### Supabase Services (Full Version Only)
-
-| Service | Description |
-|---------|-------------|
-| nexent-supabase-kong | API Gateway |
-| nexent-supabase-auth | Authentication service |
-| nexent-supabase-db | Database service |
 
 ### Optional Services
 
@@ -420,10 +410,6 @@ helm upgrade --install nexent nexent \
 |-----------|-------------|
 | `secrets.ssh.username` | SSH username (for Terminal tool) |
 | `secrets.ssh.password` | SSH password (for Terminal tool) |
-| `secrets.supabase.jwtSecret` | Supabase JWT secret |
-| `secrets.supabase.secretKeyBase` | Supabase secret key base |
-| `secrets.supabase.anonKey` | Supabase anonymous key |
-| `secrets.supabase.serviceRoleKey` | Supabase service role key |
 
 #### MinIO
 
@@ -474,3 +460,5 @@ Released PVs are automatically cleaned during deployment. To manually clean:
 ```bash
 kubectl delete pv nexent-workspace-pv nexent-skills-pv nexent-project-config-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv
 ```
+
+Local authentication requires `nexent-common.secrets.jwtSecret`. The deploy script generates or reuses it. [Migration runbook](../../../../docs/local-authentication-migration.md) covers historical credentials and cutover.

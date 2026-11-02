@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Pinned authored base_model inheritance with per-field source ownership."""
 
 from dataclasses import dataclass

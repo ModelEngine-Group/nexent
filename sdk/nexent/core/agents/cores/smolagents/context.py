@@ -221,12 +221,25 @@ class SmolagentsMemoryAdapter:
 
     def _neutral_action_content(self, step: ActionStep, action_index: int) -> dict[str, Any]:
         """Preserve completed-action evidence without upstream protocol labels."""
+        fields = getattr(step, "execution_fields", None)
+        if not isinstance(fields, dict):
+            fields = {}
+            observation = getattr(step, "observations", None)
+            output = getattr(step, "action_output", None)
+            if observation is not None:
+                fields["OUTPUT"] = str(observation)
+            if output is not None and str(output) != str(observation or ""):
+                fields["RETURN_VALUE"] = str(output)
+            if getattr(step, "error", None):
+                fields["ERROR"] = str(step.error)
+            if not fields:
+                fields["STDOUT"] = ""
         return {
-            "step_number": getattr(step, "step_number", action_index + 1),
+            "assistant_output": getattr(step, "model_output", None) or "",
             "tool_calls": self._to_json_value(getattr(step, "tool_calls", None)),
-            "observations": self._to_json_value(getattr(step, "observations", None)),
-            "error": str(getattr(step, "error", "")) if getattr(step, "error", None) else None,
-            "result": self._to_json_value(getattr(step, "action_output", None)),
+            "execution_fields": dict(fields),
+            "execution_key": getattr(step, "execution_key", None),
+            "loaded_result": getattr(step, "execution_loaded", False),
         }
 
     def _project_current_run(self, memory: AgentMemory, start: int) -> list[ContextItem]:

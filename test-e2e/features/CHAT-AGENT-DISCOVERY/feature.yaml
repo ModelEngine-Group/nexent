@@ -1,0 +1,17 @@
+schema_version: '1.0'
+module:
+  id: CHAT-DISCOVERY
+  name: Agent discovery
+feature:
+  feature_id: CHAT-AGENT-DISCOVERY
+  name: Agent discovery pagination
+  status: active
+  description: Local pagination of published agents on the Agent-chat discovery page.
+  business_rules:
+  - rule_id: CHAT-AGENT-DISCOVERY-RULE-001
+    description: Discovery defaults to 12 cards per page with 10/12/20/50 options, matching Agent configuration. Local slicing honors the selected size; size, search and tab changes reset to page one without selecting an agent.
+  required_test_stages: []
+  source:
+    requirement_ids: [CHAT-DISCOVERY-PAGE-SIZE-20261026]
+    spec_path: ../nexent-doc/docs/Developing/chat-discovery-page-size/proposal.md
+    notes: Isolated display configuration and pagination are proved by traditional frontend UT; no additional formal boundary is required for this change.

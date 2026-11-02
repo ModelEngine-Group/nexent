@@ -111,7 +111,7 @@ content_sha256 = "a1d815dc34328bd0719fc557794d696205a7506a06515f8e2d84c24f3bce1b
 [[sources]]
 kind = "provider"
 path = "providers/alibaba-cn/provider.toml"
-content_sha256 = "21ba23ae62bf3ac0755c6760458b9212cc95ee32b761bd2e51bcd988178525a7"
+content_sha256 = "0060172cf93a8db8b8427021030a3ad5c388c919f7fc47df9723ba8b08d5f54b"
 
 [[sources]]
 kind = "provider"
@@ -227,3 +227,116 @@ content_sha256 = "8ca9644166cb0cdc479049a0f7467a6cebded93cd0d3bef00a66e462b77111
 kind = "provider_model"
 path = "providers/volcengine-coding-plan/models/minimax-m3.toml"
 content_sha256 = "c2998f64873231e71f62be2da7983afd4c1af76e7a129f232007e65a58c24e24"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3.7-max.toml"
+content_sha256 = "45e9afba10e6b6164914fff61758d748643d2b64a4be0bb54afc4fc33e91cb86"
+
+[[sources]]
+kind = "model"
+path = "models/alibaba/qwen3.7-plus.toml"
+content_sha256 = "a6929b11d1652ee69c1c43dbe81f83beb959bcef9366deb4bc92118e8fca6fa2"
+
+[[sources]]
+kind = "model"
+path = "models/bytedance-seed/seed-2.1-pro.toml"
+content_sha256 = "e617184014aea6221241eb84ed1cabda001564c3dd8e7a3878fded7915433915"
+
+[[sources]]
+kind = "model"
+path = "models/moonshotai/kimi-k3.toml"
+content_sha256 = "6391cda163821bd0f6ae07b8ad26baa0d9c356da5e0584c37dd64b721a1a5513"
+
+[[sources]]
+kind = "model"
+path = "models/zhipuai/glm-5.toml"
+content_sha256 = "efce81254124e5a529f9dc59fb8969fcb3b26189e0f292a17c03f8b60712f881"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/glm-5.toml"
+content_sha256 = "f422ddc5053de0db7134e21b4dc1491004b787dc660b95c81ef84c83bff79d63"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/kimi-k3.toml"
+content_sha256 = "d2622cbdc17360a200a292468ae8c4192a97b1e6191a4f811014511e23ba57a3"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/qwen3.7-max.toml"
+content_sha256 = "b9cec088349a5b29fefb61d6cc471495f7f1a9a9c7b82747abfb94425c1f1610"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/alibaba-cn/models/qwen3.7-plus.toml"
+content_sha256 = "d0c2a5b15e0bd7ac8c140a142063558c9fa43ead040fe99513f3851f532e0203"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/deepseek/models/deepseek-flash.toml"
+content_sha256 = "d5e811b4af967dd239b008c62b55c7924de2bdb36cd53c75324c98a42796db8d"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/deepseek/models/deepseek-v4-flash.toml"
+content_sha256 = "b1910724c0240130f4676a90719ee321aa16d73ee354dbefb2ade27ce2e0c917"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/deepseek/models/deepseek-v4-pro.toml"
+content_sha256 = "0e4d752d27934327150916fbf5b62fa17b21a3fa6857a460988f89a16c7072a5"
+
+[[sources]]
+kind = "provider"
+path = "providers/deepseek/provider.toml"
+content_sha256 = "3f2fbc840041ce2d9dc1a44cf9a7b82011e312bc8e71d973b3a3113f601817c2"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/siliconflow-cn/models/Pro/zai-org/GLM-5.1.toml"
+content_sha256 = "eca714ad1e4ca589ab5a065e10b1dbf0ded78241a8cf2d3614127f971731a963"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/siliconflow-cn/models/Pro/zai-org/GLM-5.toml"
+content_sha256 = "5947afc8c482ae9582875efb8bcbea2245eec898f92838e03ae36bfa192c206e"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/siliconflow-cn/models/deepseek-ai/DeepSeek-V4-Flash.toml"
+content_sha256 = "925beb91bea20c55ecc4752e3e2e712785ec1e11468853587f1d5fe688b55b4c"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/siliconflow-cn/models/deepseek-ai/DeepSeek-V4-Pro.toml"
+content_sha256 = "59f2b4a5da97e4daf237ce295908258487ca592d1428158937e0b657981a43bf"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/siliconflow-cn/models/zai-org/GLM-5.2.toml"
+content_sha256 = "4967aa9c9948ce58b52d65599cb54ee7288ca80932f86b59b6bdae0842ab873d"
+
+[[sources]]
+kind = "provider"
+path = "providers/siliconflow-cn/provider.toml"
+content_sha256 = "805d38042cf90ca3d94f944d3e218dde1b3f5babdf657d677d3ef4df566bae36"
+
+[[sources]]
+kind = "provider"
+path = "providers/tokenpony/provider.toml"
+content_sha256 = "6eb8ed0f1b8d5af7887edaa983ade429d872e10ca495487d45cbda49ae4c8fd0"
+origin = "nexent"
+source_revision = "nexent_tokenpony_provider_v1"
+source_url = "https://docs.tokenpony.cn/"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/volcengine-coding-plan/models/kimi-k3.toml"
+content_sha256 = "dd4ea5240577cfe3a6dfc7860eb1e6cf558349ec562aa83bcd82519831368e0c"
+
+[[sources]]
+kind = "provider_model"
+path = "providers/volcengine/models/doubao-seed-2-1-pro-260628.toml"
+content_sha256 = "4a9deef53960bd716d4b6078adfcc05719b9ef3491c1c41363ee31a3e4173bf4"

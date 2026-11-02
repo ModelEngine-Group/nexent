@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Construct complete outlet snapshots from trusted save-time composition."""
 
 from collections.abc import Mapping, Sequence

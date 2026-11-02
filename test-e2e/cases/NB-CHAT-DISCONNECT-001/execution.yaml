@@ -1,0 +1,15 @@
+schema_version: '1.0'
+case_id: NB-CHAT-DISCONNECT-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: NB-CHAT-DISCONNECT-001
+acceptance_bindings:
+  AC-HEADERS: [test_headers_only_disconnect_persists_one_answer]
+  AC-PERSIST: [test_headers_only_disconnect_persists_one_answer]
+preparation:
+  families: [basic_agent]
+  anchors: true
+  special_assets: false
+  d4_groups: []
+timeout_seconds: 720

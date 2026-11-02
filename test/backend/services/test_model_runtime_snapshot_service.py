@@ -34,3 +34,27 @@ def test_corrupt_saved_record_does_not_fall_back(mocker):
                  side_effect=ValueError("PROFILE_STORAGE_INVALID"))
     with pytest.raises(ValueError, match="PROFILE_STORAGE_INVALID"):
         restore_runtime_model_snapshot({"profile_schema_version": 1, "tenant_id": "tenant"}, "tenant")
+
+
+def test_canonical_columns_supersede_stale_transitional_snapshot(mocker):
+    profile = Mock()
+    decoder = mocker.patch("nexent.core.model_service.profiles.outlet_storage.decode_resolved_model_profile",
+                           return_value=profile)
+    record = {"profile_schema_version": 1, "tenant_id": "tenant", "model_id": 7,
+              "runtime_outlet_snapshot": {"version": 1, "source_fingerprint": "stale", "row": {}}}
+    assert restore_runtime_model_snapshot(record, "tenant") is profile
+    assert decoder.call_args.args == (record,)
+
+
+@pytest.mark.parametrize("strict", [True, False])
+def test_invalid_canonical_columns_never_restore_a_transitional_profile(mocker, strict):
+    decoder = mocker.patch("nexent.core.model_service.profiles.outlet_storage.decode_resolved_model_profile",
+                           side_effect=ValueError("PROFILE_STORAGE_INVALID"))
+    record = {"profile_schema_version": 1, "tenant_id": "tenant",
+              "runtime_outlet_snapshot": {"version": 1, "row": {"model_id": 7}}}
+    if strict:
+        with pytest.raises(ValueError, match="PROFILE_STORAGE_INVALID"):
+            restore_runtime_model_snapshot(record, "tenant", strict=strict)
+    else:
+        assert restore_runtime_model_snapshot(record, "tenant", strict=strict) is None
+    assert decoder.call_count == 1 and decoder.call_args.args == (record,)

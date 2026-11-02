@@ -77,6 +77,7 @@ def oauth_callback_stub(mocker):
     mocker.patch.object(oauth_app_module, "get_provider_user_info",
                         return_value={"id": "12345", "email": "octocat@github.com",
                                       "username": "octocat"})
+    mocker.patch.object(oauth_app_module, "require_active_account", return_value={"account_status":"active"})
     mocker.patch.object(oauth_app_module, "ensure_user_tenant_exists")
     mocker.patch.object(oauth_app_module, "create_or_update_oauth_account")
     mocker.patch.object(oauth_app_module, "generate_session_jwt", return_value="eyJ.mock.token")

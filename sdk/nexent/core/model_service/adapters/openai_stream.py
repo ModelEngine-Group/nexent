@@ -20,7 +20,7 @@ class OpenAIStreamDecoder:
         request: ModelRequest,
         profile: ResolvedModelProfile,
         *,
-        require_done: bool = True,
+        require_done: bool = False,
         max_message_bytes: int = 32 * 1024 * 1024,
         max_tool_calls: int = 128,
     ):
@@ -110,7 +110,7 @@ class OpenAIStreamDecoder:
             body = parse_json(frame.data)
             if isinstance(body, dict) and body.get("error") is not None:
                 raise ModelAdapterError(
-                    "MODEL_PROVIDER_ERROR", response=RawHttpResponse(200, {}, frame.data.encode("utf-8"))
+                    "MODEL_PROVIDER_ERROR", response=RawHttpResponse(200, {}, frame.data.encode("utf-8"), frame.sensitive_values)
                 )
             if not isinstance(body, dict) or not isinstance(body.get("choices"), list):
                 self._fail("MODEL_RESPONSE_INVALID")
@@ -128,10 +128,9 @@ class OpenAIStreamDecoder:
             events = []
             if body.get("usage") is not None:
                 usage = _usage(body["usage"], self._profile.capabilities.usage.semantics_id)
-                if self._usage_raw is not None:
-                    if self._usage_raw != body["usage"]:
-                        self._fail("MODEL_USAGE_CONFLICT")
-                else:
+                if self._usage_raw is not None and self._usage_raw != body["usage"]:
+                    self._fail("MODEL_USAGE_CONFLICT")
+                if self._usage_raw is None:
                     self._usage_raw = body["usage"]
                     events.append(self._event("usage", usage=usage))
             choices = body["choices"]
@@ -148,7 +147,23 @@ class OpenAIStreamDecoder:
             if not isinstance(delta, dict) or delta.get("role", "assistant") != "assistant":
                 self._fail("MODEL_RESPONSE_INVALID")
             if self._finish is not None:
-                self._fail("MODEL_STREAM_AFTER_FINISH")
+                # A generation boundary can precede an empty usage/metadata trailer.
+                for key in ("content", "reasoning_content", "refusal"):
+                    value = delta.get(key)
+                    if value is not None and not isinstance(value, str):
+                        self._fail("MODEL_RESPONSE_INVALID")
+                calls = delta.get("tool_calls")
+                if calls is not None and not isinstance(calls, list):
+                    self._fail("MODEL_TOOL_CALL_INVALID")
+                if any(delta.get(key) for key in ("content", "reasoning_content", "refusal", "tool_calls")):
+                    self._fail("MODEL_STREAM_AFTER_FINISH")
+                finish = choice.get("finish_reason")
+                if finish is not None:
+                    if not isinstance(finish, str) or not finish.strip():
+                        self._fail("MODEL_RESPONSE_INVALID")
+                    if finish != self._finish:
+                        self._fail("MODEL_STREAM_FINISH_CONFLICT")
+                return events
             for key, target, kind in (
                 ("reasoning_content", self._reasoning, "reasoning_delta"),
                 ("content", self._content, "text_delta"),

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Legacy aliases preserve declared bindings without changing persisted defaults."""
 
 import pytest

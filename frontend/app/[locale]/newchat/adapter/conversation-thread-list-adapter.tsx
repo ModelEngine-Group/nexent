@@ -5,6 +5,7 @@
 import { normalizeNexentHistory } from "@/lib/nexentOutputAdapter";
 import type { NexentOutputStatus } from "@/types/nexentOutput";
 
+import { getCreatorMode } from "@/lib/creatorConversation";
 import type { FC, MutableRefObject, PropsWithChildren } from "react";
 import { useMemo } from "react";
 import { getSourceAttributes } from "@/lib/source";
@@ -346,9 +347,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
     >
   ) {}
 
-  async load(): Promise<
-    ExportedMessageRepository & { unstable_resume?: boolean }
-  > {
+  async load(): Promise<ExportedMessageRepository> {
     const loadGeneration = ++this.loadGeneration;
     // Historical threads may be cached by assistant-ui, so plan state is
     // cached independently by backend conversation ID. Parsing below updates
@@ -715,7 +714,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         for (const [partIndex, part] of normalized.events.entries()) {
           if (
             part.type === "model_attempt_control" &&
-            detail.workbench_config?.mode === "skill_create"
+            getCreatorMode(detail) === "skill_create"
           ) {
             try {
               const control = JSON.parse(part.content) as {
@@ -777,7 +776,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (part.type === "nl2a_state") {
             const state = parseNl2AgentState(part.content);
             if (
-              detail.workbench_config?.mode === "agent_create" &&
+              getCreatorMode(detail) === "agent_create" &&
               state?.event === "agent_generation_completed"
             ) {
               content.push({
@@ -791,7 +790,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (part.type === "done") continue;
           if (part.type === "summary") {
             if (!part.content) continue;
-            if (detail.workbench_config?.mode === "skill_create") {
+            if (getCreatorMode(detail) === "skill_create") {
               // The live NL2Skill adapter appends fragments to one text part.
               // Defer insertion until replay ends so a persisted summary is
               // shown after the generated answer and file cards, not before.
@@ -1057,7 +1056,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           if (part.type === "step_count") {
             // Match live NL2Skill rendering: a bare step marker is not
             // reasoning, and must not restore an empty Reasoning card.
-            if (detail.workbench_config?.mode === "skill_create") continue;
+            if (getCreatorMode(detail) === "skill_create") continue;
             flushReasoning(part.invocation_id);
             if (part.content) {
               const top = currentSubAgent(part.invocation_id);
@@ -1235,9 +1234,10 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         // Older creation turns may have returned a final answer without the
         // trusted completion event. Show the saved draft, not a false success.
         if (
-          detail.workbench_config?.mode === "agent_create" &&
-          Number.isInteger(Number(detail.agent_id)) &&
-          Number(detail.agent_id) > 0 &&
+          getCreatorMode(detail) === "agent_create" &&
+          detail.target?.type === "agent" &&
+          Number.isInteger(detail.target.id) &&
+          detail.target.id > 0 &&
           messageParts.some(
             (part) =>
               part.type === "final_answer" && Boolean(part.content?.trim())
@@ -1249,7 +1249,7 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
           content.push({
             type: "data",
             name: "nl2agent-created",
-            data: { agentId: Number(detail.agent_id), completed: false },
+            data: { agentId: detail.target.id, completed: false },
           });
         }
 
@@ -1396,6 +1396,15 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
         content.push({ type: "text", text: "" });
       }
 
+      // Preserve the running answer boundary before its first visible token.
+      if (
+        msg.role === "assistant" &&
+        detail.streaming_message?.status === "streaming" &&
+        msg.message_id === detail.streaming_message.message_id &&
+        content.length === 0
+      ) {
+        content.push({ type: "text", text: "" });
+      }
       if (content.length === 0 && attachments.length === 0) {
         // Still track assistant index even if no content (for registry alignment)
         if (msg.role === "assistant") assistantIdx++;
@@ -1467,6 +1476,9 @@ export class RemoteConversationHistoryAdapter implements ThreadHistoryAdapter {
     return {
       ...repository,
     };
+    // The shared hook reconnects after loading; automatic resume appends
+    // another assistant below the head and breaks the retry branch.
+    return repository;
   }
 
   // `append` is intentionally a no-op: in the remote-thread-list flow, message
@@ -1751,6 +1763,10 @@ export const createConversationThreadListAdapter = (
 
     async list({ after } = {}): Promise<RemoteThreadListResponse> {
       const currentGeneration = after === undefined ? ++generation : generation;
+      if (conversationType === "agent_chat") {
+        // Agent-chat history is fetched by Agent group and per-group cursors.
+        return { threads: [] };
+      }
       const { todayStartMs, weekStartMs } = getConversationDateBoundaries();
       const keyset = after?.startsWith("activity:")
         ? after.slice(9)
@@ -1925,6 +1941,10 @@ export const createConversationThreadListAdapter = (
       const detail = await (detailLoader?.load ?? conversationService.getById)(
         threadId
       );
+      const lastActivityTime =
+        conversationType === "agent_chat"
+          ? detail.last_activity_time
+          : undefined;
 
       return toRemoteThreadMetadata({
         conversation_id: Number(detail.conversation_id),
@@ -1932,7 +1952,10 @@ export const createConversationThreadListAdapter = (
           detail.conversation_title ?? "Untitled conversation",
         agent_id: detail.agent_id,
         create_time: detail.create_time,
-        update_time: detail.create_time,
+        update_time: lastActivityTime ?? detail.create_time,
+        ...(lastActivityTime === undefined
+          ? {}
+          : { last_activity_time: lastActivityTime }),
       });
     },
 

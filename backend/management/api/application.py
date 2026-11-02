@@ -52,7 +52,7 @@ from management.api.memory.memory_dreaming import router as memory_dreaming_rout
 from management.api.memory.memory_provider import router as memory_provider_router
 from management.api.tag.tag_management import router as tag_management_router
 from management.api.knowledge_base.quota import tenant_quota_router, platform_quota_router, personal_quota_router
-from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, ENABLE_AIDP_KNOWLEDGE, ENABLE_AGENT_WORKBENCH, IS_SPEED_MODE, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
+from contracts.constants.environment import AIDP_API_KEY, AIDP_SERVER_URL, ENABLE_AIDP_KNOWLEDGE, IS_SPEED_MODE, RUNTIME_THREAD_SHUTDOWN_GRACE_SECONDS
 from nexent.core.concurrency import (
     ManagedTaskSpec,
     ManagerState,
@@ -70,7 +70,6 @@ async def recover_config_tasks_on_startup():
     from management.recovery import (
         recover_config_tasks,
         schedule_interrupted_upload_cleanup,
-        schedule_workbench_main_backfill,
     )
 
     await config_thread_manager.run(
@@ -83,8 +82,6 @@ async def recover_config_tasks_on_startup():
     )
     start_eval_maintenance(config_thread_manager)
     await schedule_interrupted_upload_cleanup(CONFIG_SERVICE_NAME)
-    if ENABLE_AGENT_WORKBENCH:
-        schedule_workbench_main_backfill()
 
 
 async def validate_external_service_configuration():

@@ -29,6 +29,47 @@ from management.db.models import (
     ConversationSourceSearch,
 )
 from management.utils.audit_fields import add_creation_tracking, add_update_tracking
+from management.db.conversation.classification import executor_system_key, is_workbench_history
+
+
+def load_execution_result_content(
+    user_id: str, tenant_id: str, conversation_id: int, message_id: int, unit_index: int,
+) -> str:
+    """Load one execution unit in the caller's current conversation scope."""
+    from management.db.models import UserTenant
+
+    membership = select(UserTenant.user_id).where(
+        UserTenant.user_id == user_id,
+        UserTenant.tenant_id == tenant_id,
+        UserTenant.delete_flag == "N",
+    ).exists()
+    statement = (
+        select(ConversationMessageUnit.unit_content)
+        .join(ConversationMessage, ConversationMessage.message_id == ConversationMessageUnit.message_id)
+        .join(ConversationRecord, ConversationRecord.conversation_id == ConversationMessage.conversation_id)
+        .where(
+            membership,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.delete_flag == "N",
+            ConversationMessage.message_id == message_id,
+            ConversationMessage.delete_flag == "N",
+            ConversationMessageUnit.conversation_id == conversation_id,
+            ConversationMessageUnit.unit_index == unit_index,
+            ConversationMessageUnit.unit_type == "execution_result",
+            ConversationMessageUnit.delete_flag == "N",
+        )
+    )
+    with get_db_session() as session:
+        rows = session.execute(statement).scalars().all()
+    if not rows:
+        raise PermissionError("Execution result is unavailable or not authorized")
+    if len(rows) != 1:
+        raise ValueError("Ambiguous execution result reference")
+    payload = json.loads(rows[0])
+    if not isinstance(payload, dict) or not isinstance(payload.get("content"), str):
+        raise ValueError("Invalid persisted execution content")
+    return payload["content"]
 
 
 def _serialize_unit_content(content: Any) -> str:
@@ -150,6 +191,7 @@ def create_conversation(
     knowledge_scope: Optional[Dict[str, Any]] = None,
     runtime_metadata: Optional[Dict[str, Any]] = None,
     workbench_config: Optional[Dict[str, Any]] = None,
+    target: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Create a new conversation record
@@ -169,6 +211,8 @@ def create_conversation(
 
         # Prepare data dictionary
         data = {"conversation_title": conversation_title, "delete_flag": "N"}
+        if target is not None:
+            data["target"] = deepcopy(target)
         if agent_id is not None:
             data["agent_id"] = agent_id
         if chat_mode is not None:
@@ -191,6 +235,7 @@ def create_conversation(
                 ConversationRecord.conversation_id,
                 ConversationRecord.conversation_title,
                 ConversationRecord.agent_id,
+                _optional_conversation_column("target", None),
                 ConversationRecord.chat_mode,
                 ConversationRecord.knowledge_scope,
                 ConversationRecord.runtime_metadata,
@@ -209,6 +254,7 @@ def create_conversation(
             "conversation_id": record.conversation_id,
             "conversation_title": record.conversation_title,
             "agent_id": record.agent_id,
+            "target": record.target if isinstance(getattr(record, "target", None), dict) else None,
             "chat_mode": record.chat_mode or "execution",
             "knowledge_scope": record.knowledge_scope,
             "runtime_metadata": record.runtime_metadata or {},
@@ -254,7 +300,8 @@ def _touch_conversation_activity(session, conversation_id: int, user_id: Optiona
 
 def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[str] = None,
                                  status: str = 'completed', *, _session=None,
-                                 message_source: MessageSource = MessageSource.CHAT) -> int:
+                                 message_source: MessageSource = MessageSource.CHAT,
+                                 db_session=None) -> int:
     """
     Create a conversation message record
 
@@ -272,7 +319,8 @@ def create_conversation_message(message_data: Dict[str, Any], user_id: Optional[
         int: Newly created message ID (auto-increment ID)
     """
     message_source = MessageSource(message_source)
-    with (nullcontext(_session) if _session is not None else get_db_session()) as session:
+    with (nullcontext(_session) if _session is not None else
+          get_db_session() if db_session is None else get_db_session(db_session)) as session:
         # Ensure conversation_id is integer type
         conversation_id = int(message_data["conversation_id"])
         message_idx = int(message_data["message_idx"])
@@ -696,6 +744,8 @@ def create_message_unit(
     unit_status: str = "completed",
     tool_call_id: Optional[str] = None,
     invocation_id: Optional[str] = None,
+    *,
+    db_session=None,
 ) -> int:
     """
     Insert a single ConversationMessageUnit row.
@@ -718,7 +768,7 @@ def create_message_unit(
     Returns:
         int: Newly created unit ID (auto-increment ID)
     """
-    with get_db_session() as session:
+    with (get_db_session() if db_session is None else get_db_session(db_session)) as session:
         message_id = int(message_id)
         conversation_id = int(conversation_id)
         unit_index = int(unit_index)
@@ -1221,6 +1271,8 @@ def get_conversation_list_page(
     offset: int = 0,
     conversation_type: Optional[str] = None,
     cursor: Optional[str] = None,
+    creator_agent_id: Optional[int] = None,
+    creator_target: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Return activity-ordered histories with full-scope bucket counts.
 
@@ -1231,6 +1283,8 @@ def get_conversation_list_page(
         raise ValueError("Invalid conversation type")
     if cursor is not None and offset:
         raise ValueError("Conversation cursor cannot be combined with offset")
+    if (creator_agent_id is None) != (creator_target is None):
+        raise ValueError("Creator executor and target must be supplied together")
     boundary = decode_activity_cursor(cursor) if cursor is not None else None
     with get_db_session() as session:
         activity = _activity_time_expression()
@@ -1253,9 +1307,14 @@ def get_conversation_list_page(
             ConversationRecord.created_by == user_id,
         )
         if conversation_type == "workbench":
-            scope = scope.where(ConversationRecord.workbench_config.is_not(None))
+            scope = scope.where(is_workbench_history())
         elif conversation_type == "agent_chat":
-            scope = scope.where(ConversationRecord.workbench_config.is_(None))
+            scope = scope.where(~is_workbench_history())
+        if creator_agent_id is not None:
+            scope = scope.where(
+                ConversationRecord.agent_id == creator_agent_id,
+                ConversationRecord.target == creator_target,
+            )
         rows = scope.subquery()
         statement = select(rows).order_by(rows.c.activity_time.desc(), rows.c.conversation_id.desc())
         if boundary:
@@ -1314,7 +1373,10 @@ def update_conversation_agent_id(conversation_id: int, agent_id: int, user_id: O
     """
     with get_db_session() as session:
         conversation_id = int(conversation_id)
-        update_data = {"agent_id": int(agent_id), "update_time": func.current_timestamp()}
+        update_data = {
+            "agent_id": int(agent_id),
+            "update_time": func.current_timestamp(),
+        }
         if user_id:
             update_data = add_update_tracking(update_data, user_id)
 
@@ -1734,6 +1796,8 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             ConversationRecord.conversation_id,
             ConversationRecord.conversation_title,
             ConversationRecord.agent_id,
+            executor_system_key().label("agent_system_key"),
+            _optional_conversation_column("target", None),
             ConversationRecord.chat_mode,
             ConversationRecord.knowledge_scope,
             ConversationRecord.runtime_metadata,
@@ -1741,6 +1805,7 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             _optional_conversation_column("workbench_config", None),
             _optional_conversation_column("workbench_config_version", 0),
             (func.extract("epoch", ConversationRecord.create_time) * 1000).label("create_time"),
+            (func.extract("epoch", _activity_time_expression()) * 1000).label("last_activity_time"),
         ).where(ConversationRecord.conversation_id == conversation_id, ConversationRecord.delete_flag == "N")
         if user_id:
             check_stmt = check_stmt.where(ConversationRecord.created_by == user_id)
@@ -1845,10 +1910,12 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
 
             message_list.append(message_data)
 
-        return {
+        history = {
             "conversation_id": conversation["conversation_id"],
             "conversation_title": conversation.get("conversation_title"),
             "agent_id": conversation.get("agent_id"),
+            "target": conversation.get("target"),
+            "agent_system_key": conversation.get("agent_system_key"),
             "chat_mode": conversation.get("chat_mode") or "execution",
             "knowledge_scope": conversation.get("knowledge_scope"),
             "runtime_metadata": conversation.get("runtime_metadata") or {},
@@ -1860,6 +1927,11 @@ def get_conversation_history(conversation_id: int, user_id: Optional[str] = None
             "search_records": [as_dict(record) for record in search_records],
             "image_records": [as_dict(record) for record in image_records],
         }
+        if conversation.get('workbench_config') is None:
+            history['last_activity_time'] = int(
+                conversation.get('last_activity_time') or conversation['create_time']
+            )
+        return history
 
 
 def _image_exists(session, message_id: int, image_url: str) -> bool:
@@ -2844,3 +2916,16 @@ def remove_conversation_knowledge_bindings(
             record.workbench_config = workbench
             record.workbench_config_version += 1
         record.update_time = func.current_timestamp()
+
+
+def bind_creation_conversation_target(conversation_id, executor_id, expected_target, target, user_id):
+    """Compare-and-set a resource target without changing the executor or messages."""
+    with get_db_session() as session:
+        predicate = ConversationRecord.target.is_(None) if expected_target is None else ConversationRecord.target == expected_target
+        result = session.execute(update(ConversationRecord).where(
+            ConversationRecord.conversation_id == conversation_id,
+            ConversationRecord.created_by == user_id,
+            ConversationRecord.agent_id == executor_id,
+            ConversationRecord.delete_flag == "N", predicate,
+        ).values(target=target, updated_by=user_id))
+        return result.rowcount == 1

@@ -568,6 +568,13 @@ class ModelOutletValidationError(ValueError):
         self.path = path
 
 
+class ModelOutletDatabaseError(RuntimeError):
+    """Safe database diagnostic excluding SQL bound values."""
+
+    def __init__(self):
+        super().__init__("MODEL_OUTLET_DATABASE_ERROR")
+
+
 class RuntimeQueueTimeoutError(RuntimeError):
     """Raised when an accepted Runtime agent request expires in the queue."""
 
@@ -638,3 +645,7 @@ class HistorySummaryPersistenceError(ValueError):
 
 class StorageObjectConflictError(ValueError):
     """Raised when an object identity is already bound to different accounting data."""
+
+
+class AccountConflictError(Exception):
+    """An account email or stable identity conflicts with an existing record."""

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """One-attempt sync/async HTTP sender with owned resource lifetime."""
 
 import asyncio
@@ -6,6 +8,7 @@ import ssl
 import threading
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
+from dataclasses import replace
 
 import httpx
 
@@ -92,7 +95,18 @@ class HttpRequestSender:
 
     @staticmethod
     def _metadata(response: httpx.Response, body: bytes) -> RawHttpResponse:
-        return RawHttpResponse(response.status_code, dict(response.headers), body)
+        try:
+            headers = response.request.headers
+        except RuntimeError:
+            headers = {}
+        public_headers = {"host", "accept", "accept-encoding", "connection", "content-length", "content-type", "user-agent"}
+        secrets = []
+        for name, value in headers.items():
+            if name.lower() not in public_headers:
+                secrets.append(value)
+                if name.lower() == "authorization" and " " in value:
+                    secrets.append(value.split(" ", 1)[1])
+        return RawHttpResponse(response.status_code, dict(response.headers), body, tuple(secrets))
 
     def _read(self, response: httpx.Response, limit: int) -> bytes:
         parts, size = [], 0
@@ -119,6 +133,7 @@ class HttpRequestSender:
         client = httpx.Client(verify=request.ssl_verify, timeout=request.timeout_seconds, trust_env=False)
         lock = threading.Lock()
         closed = False
+        aborted = False
         streams = []
 
         def shutdown_stream(stream):
@@ -136,7 +151,7 @@ class HttpRequestSender:
             if stream is None:
                 return
             with lock:
-                already_closed = closed
+                already_closed = aborted
                 if not already_closed:
                     streams.append(stream)
             if already_closed:
@@ -144,18 +159,27 @@ class HttpRequestSender:
                 stream.close()
                 _check_cancelled(scope)
 
+        def abort_once():
+            nonlocal aborted
+            with lock:
+                if aborted:
+                    return
+                aborted = True
+                owned_streams = tuple(streams)
+            for stream in owned_streams:
+                shutdown_stream(stream)
+
         def close_once():
             nonlocal closed
+            abort_once()
             with lock:
                 if closed:
                     return
                 closed = True
-                owned_streams = tuple(streams)
-            for stream in owned_streams:
-                shutdown_stream(stream)
+            # Only the reader closes the client after its socket read unwinds.
             client.close()
 
-        token = scope.register_closer(close_once) if scope else None
+        token = scope.register_closer(abort_once) if scope else None
         try:
             _check_cancelled(scope)
             with client.stream(
@@ -250,6 +274,7 @@ class HttpRequestSender:
                     "HTTP_STATUS_ERROR", response=self._metadata(response, self._read(response, self._error_limit))
                 )
             decoder = self._stream_decoder(response, request)
+            secrets = self._metadata(response, b"").sensitive_values
 
             def events():
                 try:
@@ -257,7 +282,7 @@ class HttpRequestSender:
                         _check_cancelled(scope)
                         for event in decoder.feed(text):
                             _check_cancelled(scope)
-                            yield event
+                            yield replace(event, sensitive_values=secrets)
                     decoder.finish()
                 except SSEDecodeError as error:
                     raise ModelTransportError(error.category) from None
@@ -277,6 +302,7 @@ class HttpRequestSender:
                 body = await self._aread(response, self._error_limit)
                 raise ModelTransportError("HTTP_STATUS_ERROR", response=self._metadata(response, body))
             decoder = self._stream_decoder(response, request)
+            secrets = self._metadata(response, b"").sensitive_values
 
             async def events():
                 try:
@@ -284,7 +310,7 @@ class HttpRequestSender:
                         _check_cancelled(scope)
                         for event in decoder.feed(text):
                             _check_cancelled(scope)
-                            yield event
+                            yield replace(event, sensitive_values=secrets)
                     decoder.finish()
                 except SSEDecodeError as error:
                     raise ModelTransportError(error.category) from None

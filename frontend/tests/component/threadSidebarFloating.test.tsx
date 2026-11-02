@@ -39,6 +39,9 @@ vi.mock("@/app/newchat/assistant-ui/thread-list", () => ({
   BatchSidebarFooter: () => null,
   ThreadList: () => null,
 }));
+vi.mock("@/app/newchat/assistant-ui/workbench-pin-history-sync", () => ({
+  WorkbenchPinHistorySync: () => null,
+}));
 vi.mock("@/app/newchat/assistant-ui/agent-selector-dropdown", () => ({
   AgentSelectorDropdown: () => (
     <select aria-label="Agent selector">
@@ -101,6 +104,19 @@ test("floating Agent-chat collapse renders one expand action with no rail, heade
   fireEvent.click(expand);
   expect(sidebar.toggleSidebar).toHaveBeenCalledTimes(1);
   expect(create).not.toHaveBeenCalled();
+});
+
+test("keeps the discovery sidebar hidden while a saved Agent view is restoring", () => {
+  sidebar.state = "expanded";
+  const { container } = render(
+    <TooltipProvider>
+      <ThreadListSidebar newChatDesign isRestoringView />
+    </TooltipProvider>
+  );
+
+  expect(container.querySelector(".animate-pulse")).toBeInTheDocument();
+  expect(screen.queryByText("sidebar.startChat")).toBeNull();
+  expect(screen.queryByRole("combobox", { name: "Agent selector" })).toBeNull();
 });
 
 test("collapsed Agent chat shows compact conversation actions and a truncated agent name", () => {

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Executable versioned parameter conversions shared by validation and adapters."""
 
 from types import MappingProxyType

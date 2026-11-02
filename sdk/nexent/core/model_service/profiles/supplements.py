@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Read explicit Nexent supplement declarations separately from upstream TOML."""
 
 import hashlib

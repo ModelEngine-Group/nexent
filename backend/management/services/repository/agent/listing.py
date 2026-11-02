@@ -206,12 +206,7 @@ def list_agent_repository_listings_impl(
         for record in paged_records
         if record.get("agent_id") is not None
     ]
-    main_flags = _get_agent_main_flags(paged_agent_ids)
-    for record in paged_records:
-        agent_id = record.get("agent_id")
-        record["is_main_agent"] = (
-            main_flags.get(int(agent_id), True) if agent_id is not None else True
-        )
+    _apply_agent_main_flags(paged_records)
     download_totals = _get_agent_download_totals(paged_agent_ids)
     return {
         "items": [
@@ -609,7 +604,7 @@ def get_agent_repository_listing_detail_impl(
             int(agent_id),
             0,
         )
-    main_flags = _get_agent_main_flags([int(agent_id)]) if agent_id is not None else {}
+    _apply_agent_main_flags([record])
 
     return {
         "agent_repository_id": record.get("agent_repository_id"),
@@ -630,9 +625,7 @@ def get_agent_repository_listing_detail_impl(
         "prompt": root_agent.get("prompt"),
         "tools": _extract_tool_names(root_agent),
         "is_official": record.get("publisher_tenant_id") == SYSTEM_TENANT_ID,
-        "is_main_agent": (
-            main_flags.get(int(agent_id), True) if agent_id is not None else True
-        ),
+        "is_main_agent": record.get("is_main_agent", True),
     }
 
 
@@ -673,23 +666,40 @@ from management.services.repository.agent.publishing import (
 )
 
 
-def _get_agent_main_flags(agent_ids: Collection[int]) -> Dict[int, bool]:
-    """Return the main-agent flag per agent_id, degrading to no flags on error.
+def _apply_agent_main_flags(records: List[Dict[str, Any]]) -> None:
+    """Attach each listing's main-agent flag from its published agent version.
 
-    The flag is presentational only; when the lookup is unavailable the caller
-    falls back to the main-agent default instead of failing the listing request.
+    A repository row freezes the version it published, so the flag must follow
+    that version row rather than the editable draft (``version_no = 0``);
+    otherwise toggling the draft option changes an already-published card.  The
+    flag is presentational only, so an unavailable lookup degrades to the
+    main-agent default instead of failing the listing request.
     """
-    normalized_ids = {int(agent_id) for agent_id in agent_ids if agent_id is not None}
-    if not normalized_ids:
-        return {}
-    try:
-        return batch_get_agent_main_flags(list(normalized_ids))
-    except Exception as error:  # noqa: BLE001 - degrade to the default flag
-        logger.warning(
-            "Failed to resolve agent main-agent flags; defaulting to main: %s",
-            error,
-        )
-        return {}
+    record_keys: List[Optional[Tuple[int, int]]] = []
+    for record in records:
+        agent_id = record.get("agent_id")
+        version_no = record.get("version_no")
+        key: Optional[Tuple[int, int]] = None
+        if agent_id is not None and version_no is not None:
+            try:
+                key = (int(agent_id), int(version_no))
+            except (TypeError, ValueError):
+                key = None
+        record_keys.append(key)
+    pairs = [key for key in record_keys if key is not None]
+    flags: Dict[Tuple[int, int], bool] = {}
+    if pairs:
+        try:
+            flags = batch_get_agent_version_main_flags(pairs)
+        except Exception as error:  # noqa: BLE001 - degrade to the default flag
+            logger.warning(
+                "Failed to resolve agent version main-agent flags; "
+                "defaulting to main: %s",
+                error,
+            )
+            flags = {}
+    for record, key in zip(records, record_keys):
+        record["is_main_agent"] = flags.get(key, True) if key is not None else True
 
 
 def _repository_id_sort_key(record: Dict[str, Any]) -> int:
@@ -735,4 +745,4 @@ def _order_listings_by_publish_time(
 
 from datetime import datetime
 
-from management.db.agent.repository import batch_get_agent_main_flags
+from management.db.agent.repository import batch_get_agent_version_main_flags

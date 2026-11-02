@@ -1,0 +1,33 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-DEFAULT-MODEL-20261026
+  change_type: bugfix
+  bug_id: AGENT-DEFAULT-MODEL-20261026
+  title: Initialize Agent model selection from user configuration
+  description: Connect the Agent configuration editor to the shared default LLM configuration and synchronize initial selection through existing autosave.
+  observed_behavior: The active Agent store default is never populated, so empty Agents have no default model selection.
+  expected_behavior: Initially empty editable Agents select the available configured default without overwriting existing selections or subsequent manual changes.
+  escaped_stage: D1
+  coverage_gap:
+    type: missing_assertion
+    description: Existing D1 injects the store default and does not check the actual shared configuration source. Add focused frontend UT for asynchronous initialization and guards.
+  feature_contract_changed: false
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Initialize form and autosave with the available configured default after asynchronous loading.
+    - Preserve existing model order, read-only state and manual clearing; reset initialization on Agent switch.
+    - Do not choose invalid or arbitrary models when the configured default is unavailable or configuration fails.
+    test_selectors: [frontend/tests/component/agentSinglePrompt.test.tsx]
+    reason: Frontend state and form initialization are proved by targeted UT; no Python behavior changes or new formal boundary.
+  affected_features:
+    existing: [F-054]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: [UT-FE-AUTO-A2A0CB86E6D3E2F3, UT-FE-AUTO-A60EF4DAA250E60E]
+    retired: []
+  notes: Design at nexent-doc/docs/Developing/chat-agent-default-model/design.md. Existing formal scripts only need their configuration mock adapted; contracts remain unchanged. No new D1 and no API/runtime/deployment changes.

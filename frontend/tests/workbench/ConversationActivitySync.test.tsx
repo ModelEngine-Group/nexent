@@ -129,6 +129,23 @@ it("does not reload an already-current list on mount or after remount", async ()
   expect(state.reload).not.toHaveBeenCalled();
 });
 
+it("does not load the global conversation page for Agent-chat history", () => {
+  const get = vi.spyOn(conversationService, "getList");
+  const query = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: Infinity } },
+  });
+  clients.push(query);
+  renderHook(() => useConversationActivitySync("owner", "agent_chat"), {
+    wrapper: ({ children }: PropsWithChildren) => (
+      <QueryClientProvider client={query}>{children}</QueryClientProvider>
+    ),
+  });
+
+  act(() => state.runEnd?.());
+  expect(get).not.toHaveBeenCalled();
+  expect(state.reload).not.toHaveBeenCalled();
+});
+
 it("coalesces focus/reconnect while a request is pending and stops after unmount", async () => {
   let resolve!: (value: typeof data) => void;
   const get = vi.spyOn(conversationService, "getList").mockReturnValue(

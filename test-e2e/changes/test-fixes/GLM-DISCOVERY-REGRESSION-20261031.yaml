@@ -1,0 +1,32 @@
+schema_version: '1.0'
+change:
+  change_id: GLM-DISCOVERY-REGRESSION-20261031
+  change_type: test-fix
+  title: Cover GLM discovery version and visual markers in the production classifier
+  description: >-
+    Backfill AC-FIX-01 from ONBOARDING-FIX-PROPOSAL.md while validating PR4082
+    rebased onto develop a25602447e. Preserve product behavior; correct stale
+    classifier docstrings and exercise the actual production function.
+  affected_features:
+    existing: [V5-PW-MODEL-01]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    This is isolated name classification and request-contract proof, owned by
+    traditional UT. No new component or browser boundary is introduced; preserve
+    existing formal Cases and rerun PR4082 schema/recovery integration separately.
+  notes: >-
+    Gap: test_model_management_service.py substitutes a copied legacy classifier
+    containing the old glm-v prefix, and test_model_consts.py lacks direct GLM
+    classification assertions. New test/backend/test_model_type_inference.py
+    imports contracts.model and covers version prefixes, actual visual suffixes,
+    repository-qualified IDs, other model types and explicit request types.
+    The version-prefix regression must fail against pre-PR develop. This does not
+    prove visual inference or change the allowed onboarding scope; name inference
+    remains a fallback rather than authoritative capability discovery.

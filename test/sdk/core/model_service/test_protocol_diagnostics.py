@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Protocol diagnostics retain fixed categories without exposing provider material."""
 
 import pytest
@@ -7,11 +9,16 @@ from nexent.core.model_service.errors import normalize_model_error
 from nexent.core.model_service.http_contracts import ModelTransportError, RawHttpResponse
 
 
-@pytest.mark.parametrize("code", ["MODEL_TOOL_CALL_INVALID", "MODEL_USAGE_CONFLICT", "MODEL_RESPONSE_INCOMPLETE"])
-def test_known_protocol_category_is_logged_without_changing_public_contract(caplog, code):
+@pytest.mark.parametrize("code, message", [
+    ("MODEL_TOOL_CALL_INVALID", "The model response contains an invalid or incomplete tool call."),
+    ("MODEL_USAGE_CONFLICT", "The model service returned conflicting token usage statistics."),
+    ("MODEL_RESPONSE_INCOMPLETE", "The response ended without a generation completion marker."),
+])
+def test_known_protocol_category_is_logged_without_changing_retry_contract(caplog, code, message):
     result = normalize_model_error(ModelAdapterError(code), request_id="internal-request")
     assert result.category == "MODEL_PROTOCOL_ERROR"
-    assert result.safe_message == "The model response could not be processed."
+    assert result.safe_message == message
+    assert result.diagnostic_code == code
     assert not result.retryable and not result.will_retry
     records = [r for r in caplog.records if "model_protocol_error" in r.message]
     assert len(records) == 1

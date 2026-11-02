@@ -1,0 +1,40 @@
+schema_version: '1.0'
+change:
+  change_id: DOCKER-QUIESCE-MIGRATION-20261030
+  change_type: bugfix
+  bug_id: DOCKER-QUIESCE-MIGRATION-20261030
+  title: Stop old Docker business writers before system Agent migration
+  description: Preflight release inputs, stop old project business containers, migrate/initialize/publish, then start selected new services.
+  observed_behavior: A one-shot migration container starts before Compose up replaces old business services, allowing old code to write during one-shot consolidation.
+  expected_behavior: Config deployment stops old managed business services before any migration command, retains infrastructure and never starts business services after migration/publication failure.
+  escaped_stage: unknown
+  coverage_gap:
+    type: missing_assertion
+    description: Existing deployment UT checks publication before startup but not old-writer shutdown or failed-preflight/failed-stop ordering.
+  feature_contract_changed: false
+  affected_features:
+    existing: [SYS-AGENT-LIFECYCLE]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    test_selectors:
+      - test/backend/deploy/test_workbench_publication.py
+    behaviors:
+      - Validate Compose, selected images and initialization files without SQL before stopping old writers.
+      - Stop only existing business containers with the exact nexent Compose project and service labels, retaining infrastructure and unrelated containers.
+      - First install and already-stopped services continue without stop errors; partial non-config deployment stops only selected services without publication.
+      - Stop failure prevents migration and migration/publication failure prevents startup without restarting old writers.
+      - Windows native path conversion remains correct for both preflight and publication with both Compose command forms.
+    reason: Exercise real Bash orchestration and guard ordering with controlled Docker/Compose collaborators; database migration/publication code is unchanged.
+  notes: >-
+    SPEC ../nexent-doc/docs/Developing/chat-shared-system-agents/design.md, Docker migration quiescence follow-up.
+    Four order regressions fail before the fix. Existing SYS-AGENT-D5-001 proves database transactions, not live Docker shutdown, and is unaffected.
+    No new D1 duplicates shell orchestration UT; no live deployment/process shutdown acceptance is inferred.
+    Scope is the user's current Docker deployment; K8s rollout is unchanged. No SQL edits or Skill target compensation.

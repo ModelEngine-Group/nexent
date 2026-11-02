@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Pure interpretation of pre-profile model parameters, shared with one-time migration."""
 
 from typing import Any, Dict, Optional
@@ -21,12 +23,7 @@ def legacy_thinking_enabled(extra_params: Optional[Dict[str, Any]]) -> bool:
 
 
 def legacy_extra_body(extra_params: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Build extra_body for ModelConfig from model_record_t.extra_params.
-
-    Merges __custom__ user-defined params into the top level so they flow
-    into OpenAI chat.completions.create request body. Returns None when
-    there is nothing to pass through so production behaviour is unchanged.
-    """
+    """Flatten historical custom fields, excluding dedicated reasoning values."""
     if not extra_params or not isinstance(extra_params, dict):
         return None
     extra_body = dict(extra_params)
@@ -48,15 +45,10 @@ def legacy_reasoning_effort(
         return None
     if extra_params.get("reasoning_effort") == "auto":
         return None
-    if isinstance(capability, dict) and capability.get("status") == "supported":
-        levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
-        default = capability.get("default")
-        if default not in levels:
-            default = COMMON_REASONING_DEFAULT
-    else:
-        # Unknown/custom model IDs still use the common generic profile. The
-        # provider remains the source of truth when a concrete value is sent.
-        levels = list(COMMON_REASONING_LEVELS)
+    capability = capability if isinstance(capability, dict) and capability.get("status") == "supported" else {}
+    levels = capability.get("levels") or list(COMMON_REASONING_LEVELS)
+    default = capability.get("default")
+    if default not in levels:
         default = COMMON_REASONING_DEFAULT
     saved = extra_params.get("reasoning_effort")
     if saved in levels:
@@ -88,7 +80,6 @@ def legacy_reasoning_budget(
         if isinstance(minimum, int) and isinstance(maximum, int):
             return min(maximum, max(minimum, value))
     return value
-
 
 
 def legacy_agent_request_parameters(record, *, model_id, capability):

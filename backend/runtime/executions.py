@@ -180,9 +180,11 @@ class LocalExecutionRegistry:
         with self._lock:
             return len(self.agent_runs)
 
-    def stop_agent_run(self, conversation_id: Union[int, str], user_id: str) -> bool:
+    def stop_agent_run(self, conversation_id: Union[int, str], user_id: str, expected_run_info=None) -> bool:
         """stop agent run for specified conversation_id and user_id"""
         agent_run_info = self.get_agent_run_info(conversation_id, user_id)
+        if expected_run_info is not None and agent_run_info is not expected_run_info:
+            return False
         if agent_run_info is not None:
             agent_run_info.stop_event.set()
             cancellation_scope = getattr(agent_run_info, "cancellation_scope", None)

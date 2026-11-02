@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Logical call policy with controlled transport failures and real adapter contracts."""
 
 import asyncio
@@ -164,7 +166,8 @@ def test_nonretryable_provider_error_is_safe_and_releases_permit(setup, status):
                 response=RawHttpResponse(
                     status,
                     {},
-                    b'{"error":{"message":"private-key-123"}}',
+                    b'{"error":{"message":"Provider rejected credential private-key-123"}}',
+                    sensitive_values=("private-key-123",),
                 ),
             )
         ]
@@ -173,6 +176,7 @@ def test_nonretryable_provider_error_is_safe_and_releases_permit(setup, status):
         service(sender).invoke(request, profile)
     assert caught.value.error.attempt == 1 and not caught.value.error.will_retry
     assert "private-key" not in str(caught.value) + caught.value.error.model_dump_json()
+    assert "Provider rejected credential [redacted]" in caught.value.error.safe_message
     assert len(sender.calls) == 1 and not limiter._entries
 
 

@@ -197,13 +197,22 @@ vi.mock("@/features/workbench/knowledgeDisplay", () => ({
   restoreKnowledgeDisplay: async (scope: unknown) =>
     scope ? { label: "restored" } : null,
 }));
-vi.mock("@/features/workbench/conversationRestore", () => ({
-  resolveRestoredWorkbench: async (conversation: ApiConversationDetail) => ({
-    config: conversation.workbench_config,
-    version: conversation.workbench_config_version,
-    skillNames: {},
-  }),
-}));
+vi.mock("@/features/workbench/conversationRestore", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/features/workbench/conversationRestore")
+    >();
+  return {
+    resolveRestoredWorkbench: async (conversation: ApiConversationDetail) =>
+      conversation.workbench_config == null
+        ? actual.resolveRestoredWorkbench(conversation)
+        : {
+            config: conversation.workbench_config,
+            version: conversation.workbench_config_version,
+            skillNames: {},
+          },
+  };
+});
 vi.mock("@/features/workbench", async () => {
   const state = await import("@/features/workbench/state");
   return {
@@ -553,12 +562,40 @@ it("restores generated local Skill files after visiting another creation thread"
   expect(view.props?.skillFiles).toEqual([
     { path: "SKILL.md", content: "saved skill file" },
   ]);
-  expect(runConfig().draftSnapshot.files).toEqual([
+  expect(runConfig().getDraftSnapshot().files).toEqual([
     { path: "SKILL.md", content: "saved skill file" },
   ]);
   expect(runConfig().creationWorkbenchConfig.generation_config).toEqual(
     config.generation_config
   );
+});
+
+it("keeps streaming Skill drafts out of composer configuration updates", async () => {
+  view.threadId = "local";
+  view.items = [{ id: "local", remoteId: "" }];
+  const page = render(<WorkbenchPage />);
+  await act(async () => {
+    (
+      view.props!.workbenchPresentation!.actions as React.ReactElement<{
+        onSelect: (mode: string) => void;
+      }>
+    ).props.onSelect("skill_create");
+  });
+  page.rerender(<WorkbenchPage />);
+  const input = screen.getByRole("textbox", { name: "workbench draft" });
+  const configured = view.setRunConfig.mock.calls.length;
+  const onEvent = runConfig().onNl2SkillEvent;
+  for (let index = 0; index < 100; index++) {
+    await act(async () => onEvent({ type: "skill_body", content: "x" }));
+  }
+  expect(view.props?.skillFiles).toEqual([
+    { path: "SKILL.md", content: "x".repeat(100) },
+  ]);
+  expect(screen.getByRole("textbox", { name: "workbench draft" })).toBe(input);
+  expect(view.setRunConfig.mock.calls.length).toBe(configured);
+  expect(runConfig().getDraftSnapshot().files).toEqual([
+    { path: "SKILL.md", content: "x".repeat(100) },
+  ]);
 });
 
 it("clears unavailable capabilities and ignores a removed Agent's delayed response", async () => {
@@ -734,4 +771,25 @@ it("serializes creator snapshot reads so delayed policy saves cannot overwrite t
     replace.mock.calls.map((args) => args[1].enable_protocol_repair_retry)
   ).toEqual([true, false]);
   expect(view.markGenerationCompleted).not.toHaveBeenCalled();
+});
+
+it("restores standalone Skill history and keeps changed controls out of workbench_config", async () => {
+  vi.mocked(conversationService.getById).mockResolvedValue({
+    ...detail(101),
+    agent_id: 77,
+    agent_system_key: "nl2skill_main",
+    target: { type: "skill", id: 201 },
+    workbench_config: null,
+    workbench_config_version: 0,
+  });
+  render(<WorkbenchPage />);
+  await waitFor(() => expect(runConfig().runtimeMode).toBe("nl2skill"));
+  expect(runConfig().creationTarget).toEqual({ type: "skill", id: 201 });
+  await act(async () => {
+    view.props!.onDeepThinkingChange!(true);
+  });
+  expect(conversationService.updateWorkbenchConfig).not.toHaveBeenCalled();
+  expect(
+    runConfig().creationWorkbenchConfig.generation_config.deep_thinking
+  ).toBe(true);
 });

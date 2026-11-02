@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Read the complete declared source inventory before semantic normalization."""
 
 import hashlib
@@ -7,7 +9,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, Mapping
 
-from pydantic import Field, ValidationError
+from pydantic import Field, HttpUrl, ValidationError, model_validator
 
 from nexent.core.model_service.profiles.contracts import AtomicProfileReference, NonBlankString, ProfileContract
 
@@ -21,6 +23,18 @@ class SourceEntry(ProfileContract):
     kind: SourceKind
     path: NonBlankString
     content_sha256: NonBlankString
+    origin: Literal["models_dev", "nexent"] = "models_dev"
+    source_revision: NonBlankString | None = None
+    source_url: HttpUrl | None = None
+
+    @model_validator(mode="after")
+    def validate_origin(self):
+        if self.origin == "nexent":
+            if self.source_revision is None or self.source_url is None:
+                raise ValueError("Local sources require a revision and documentation URL")
+        elif self.source_revision is not None or self.source_url is not None:
+            raise ValueError("Upstream sources use the pinned upstream provenance")
+        return self
 
 
 class SourceManifest(ProfileContract):
@@ -54,6 +68,9 @@ class SourceDocument:
     file_path: str
     content_sha256: str
     data: Mapping[str, object]
+    origin: str = "models_dev"
+    source_revision: str | None = None
+    source_url: str | None = None
 
 
 def _freeze(value: object) -> object:
@@ -141,7 +158,8 @@ def read_inventory(root: Path) -> SourceInventory:
         if hashlib.sha256(data).hexdigest() != entry.content_sha256:
             raise SourceReadError("SOURCE_DIGEST_MISMATCH", entry.path, entry.kind)
         parsed = _parse(data, entry.path, entry.kind)
-        documents.append(SourceDocument(entry.kind, key, entry.path, entry.content_sha256, _freeze(parsed)))
+        documents.append(SourceDocument(entry.kind, key, entry.path, entry.content_sha256, _freeze(parsed),
+            entry.origin, entry.source_revision, str(entry.source_url) if entry.source_url is not None else None))
     return SourceInventory(
         manifest.upstream_revision,
         manifest.source_schema_ref,

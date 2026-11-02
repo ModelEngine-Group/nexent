@@ -21,6 +21,7 @@ import { StandardButton } from "@/components/common/StandardButton";
 import { StandardInput } from "@/components/common/StandardInput";
 import { StandardPaginator } from "@/components/common/StandardPaginator";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
+import { useGuidePreference } from "@/hooks/useGuidePreference";
 import { useAgentList } from "@/hooks/agent/useAgentList";
 import { useTagDefinitions, useTagLibraries } from "@/hooks/useTagManagement";
 import {
@@ -64,8 +65,11 @@ export default function AgentsPage() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [importData, setImportData] = useState<ImportAgentData | null>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
-  const [isGuideExpanded, setIsGuideExpanded] = useState(true);
-  const [isGuideMounted, setIsGuideMounted] = useState(true);
+  const { dismissed, ready, dismiss, reset } = useGuidePreference(
+    "agent-configuration"
+  );
+  const isGuideExpanded = ready && !dismissed;
+  const [isGuideMounted, setIsGuideMounted] = useState(false);
   const guideCollapseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
@@ -85,11 +89,11 @@ export default function AgentsPage() {
 
     if (expanded) {
       setIsGuideMounted(true);
-      setIsGuideExpanded(true);
+      reset();
       return;
     }
 
-    setIsGuideExpanded(false);
+    dismiss();
     guideCollapseTimer.current = setTimeout(() => {
       setIsGuideMounted(false);
       guideCollapseTimer.current = null;
@@ -237,7 +241,9 @@ export default function AgentsPage() {
           }
           aria-hidden={!isGuideExpanded}
         >
-          {isGuideMounted ? <AgentConfigurationGuide /> : null}
+          {isGuideExpanded || isGuideMounted ? (
+            <AgentConfigurationGuide />
+          ) : null}
         </div>
 
         <div className="relative mt-3 flex min-h-[300px] flex-1 flex-col pb-5">

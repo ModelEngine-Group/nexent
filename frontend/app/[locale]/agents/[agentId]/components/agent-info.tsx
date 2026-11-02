@@ -24,6 +24,7 @@ import { Upload } from "lucide-react";
 import { useAgentStore, type AgentDraftPatch } from "@/stores/agentStore";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
+  AGENT_DISPLAY_NAME_MAX_LENGTH,
   AGENT_NAME_MAX_LENGTH,
   createAgentNameConflictValidator,
   isValidAgentName,
@@ -217,9 +218,9 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
                 message: t("agent.validation.displayNameRequired"),
               },
               {
-                max: AGENT_NAME_MAX_LENGTH,
+                max: AGENT_DISPLAY_NAME_MAX_LENGTH,
                 message: t("agent.validation.displayNameMaxLength", {
-                  max: AGENT_NAME_MAX_LENGTH,
+                  max: AGENT_DISPLAY_NAME_MAX_LENGTH,
                 }),
               },
               {
@@ -235,7 +236,7 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
             <Input
               disabled={isReadOnly}
               placeholder={t("agent.displayNamePlaceholder")}
-              maxLength={AGENT_NAME_MAX_LENGTH}
+              maxLength={AGENT_DISPLAY_NAME_MAX_LENGTH}
               showCount
               onChange={(event) =>
                 updateDraftValue("display_name", event.target.value)
@@ -263,12 +264,6 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
                 message: t("agent.validation.nameRequired"),
               },
               {
-                max: AGENT_NAME_MAX_LENGTH,
-                message: t("agent.validation.nameMaxLength", {
-                  max: AGENT_NAME_MAX_LENGTH,
-                }),
-              },
-              {
                 validator: (_, value: string) =>
                   !value || isValidAgentName(value)
                     ? Promise.resolve()
@@ -290,7 +285,10 @@ export default function AgentInfo({ highFidelity = false }: AgentInfoProps) {
               data-testid="agent-variable-name-input"
               disabled={isReadOnly}
               placeholder={t("agent.namePlaceholder")}
-              maxLength={AGENT_NAME_MAX_LENGTH}
+              count={{
+                max: AGENT_NAME_MAX_LENGTH,
+                strategy: (value) => Array.from(value).length,
+              }}
               showCount
               onChange={(event) => updateDraftValue("name", event.target.value)}
             />

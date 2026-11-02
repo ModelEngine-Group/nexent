@@ -83,6 +83,7 @@ from management.services.conversation.service import (
 )
 from management.services.knowledge_base.scope import (
     build_runtime_knowledge_resources,
+    prepare_tool_retrieval_overrides,
     resolve_knowledge_scope,
 )
 from management.services.agent.run_state import (
@@ -194,6 +195,7 @@ async def run_agent_stream(
     tenant_id: str = None,
     skip_user_save: bool = False,
     resume: bool = False,
+    final_answer_mode: str = "delta",
 ):
     """
     Start an agent run and stream responses.
@@ -293,14 +295,34 @@ async def run_agent_stream(
             is_debug=bool(agent_request.is_debug),
             user_id=resolved_user_id,
         )
-        apply_workbench_runtime_plan(
-            agent_request, canonical_workbench, resolved_tree, resolved_tenant_id
-        )
         if conversation is not None:
             assert_workbench_version(
                 conversation,
                 agent_request.expected_workbench_config_version,
             )
+
+    raw_request_scope = (
+        None if resume else getattr(agent_request, "knowledge_scope", None)
+    )
+    if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
+        request_scope = raw_request_scope
+    elif isinstance(raw_request_scope, dict):
+        request_scope = ConversationKnowledgeScopeRequest.model_validate(
+            raw_request_scope
+        )
+    else:
+        request_scope = None
+    if not resume:
+        if canonical_workbench is not None:
+            apply_workbench_runtime_plan(
+                agent_request, canonical_workbench, resolved_tree, resolved_tenant_id,
+            )
+            request_scope = canonical_workbench.knowledge_scope
+        prepare_tool_retrieval_overrides(
+            resolved_tenant_id, tool_params=agent_request.tool_params,
+            agent_id=agent_request.agent_id, version_no=agent_request.version_no,
+            is_debug=bool(agent_request.is_debug),
+        )
 
     if not resume:
         run_controls.preflight_agent_turn_controls(
@@ -334,17 +356,6 @@ async def run_agent_stream(
         if not bool(agent_record.get("allow_chat_metadata", False)):
             raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
 
-    raw_request_scope = (
-        None if resume else getattr(agent_request, "knowledge_scope", None)
-    )
-    if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
-        request_scope = raw_request_scope
-    elif isinstance(raw_request_scope, dict):
-        request_scope = ConversationKnowledgeScopeRequest.model_validate(
-            raw_request_scope
-        )
-    else:
-        request_scope = None
     stored_scope = (
         conversation.get("knowledge_scope")
         if conversation and canonical_workbench is None
@@ -771,9 +782,15 @@ async def run_agent_stream(
     run_identifier = _agent_run_identifier(agent_request)
     execution = None
     agent_capacity_token = None
+    # Workbench shares its definition across tenants, but not its admission budget.
+    capacity_key = (
+        f"{resolved_tenant_id}:workbench_main"
+        if agent_request.entrypoint == "workbench"
+        else agent_request.agent_id
+    )
     try:
         agent_capacity_token = agent_run_manager.reserve_agent_capacity(
-            agent_request.agent_id,
+            capacity_key,
             RUNTIME_AGENT_ID_MAX_CONCURRENT_RUNS,
         )
         execution = runtime_thread_manager.submit(
@@ -915,26 +932,14 @@ async def run_agent_stream(
         "execution": execution,
         "deferred_run": deferred_run,
     }
+    if final_answer_mode != "delta":
+        stream_kwargs["final_answer_mode"] = final_answer_mode
     if channel is not None:
         stream_kwargs["channel"] = channel
     stream_gen = generate_stream(agent_request, **stream_kwargs)
 
     async def stream_with_agent_context():
         try:
-            producer_task = None
-            if channel is not None:
-                producer_task = asyncio.create_task(
-                    _consume_agent_stream_producer(
-                        stream_gen=stream_gen,
-                        channel=channel,
-                        agent_metadata=agent_metadata,
-                        conversation_id=agent_request.conversation_id,
-                        user_id=resolved_user_id,
-                    )
-                )
-                _agent_stream_producer_tasks.add(producer_task)
-                producer_task.add_done_callback(_agent_stream_producer_tasks.discard)
-
             # Emit conversation_created event for new conversations
             if is_new_conversation:
                 yield (
@@ -1011,11 +1016,12 @@ async def run_agent_stream(
                     wait_timeout=0,
                     mark_stuck_on_timeout=False,
                 )
-            agent_run_manager.release_agent_run_reservation(
-                _agent_run_identifier(agent_request),
-                resolved_user_id,
-                reservation_token,
-            )
+            if channel is None:
+                agent_run_manager.release_agent_run_reservation(
+                    _agent_run_identifier(agent_request),
+                    resolved_user_id,
+                    reservation_token,
+                )
 
     headers = {
         "Cache-Control": "no-cache",
@@ -1039,8 +1045,46 @@ async def run_agent_stream(
     if workbench_config_version is not None:
         headers["X-Workbench-Config-Version"] = str(workbench_config_version)
 
-    return StreamingResponse(
+    response = StreamingResponse(
         stream_with_agent_context(),
         media_type="text/event-stream",
         headers=headers,
     )
+
+    if channel is not None:
+        def release_producer_resources(task: asyncio.Task) -> None:
+            """Retain preparation ownership until the detached producer exits."""
+            _agent_stream_producer_tasks.discard(task)
+            reservation_released = agent_run_manager.release_agent_run_reservation(
+                run_identifier,
+                resolved_user_id,
+                reservation_token,
+            )
+            # A task cancelled before its first iteration cannot run the
+            # generator's finally block to release the deferred worker.
+            # A consumed/released reservation belongs to generate_stream;
+            # let its bound worker finish its own cleanup.
+            if reservation_released and not execution.future.done():
+                deferred_run.cancel()
+                runtime_thread_manager.cancel(
+                    execution.execution_id,
+                    reason="agent stream producer finished",
+                    wait_timeout=0,
+                    mark_stuck_on_timeout=False,
+                )
+
+        # Start independently of response-body iteration so clients may close
+        # the connection as soon as they receive the conversation ID header.
+        producer_task = asyncio.create_task(
+            _consume_agent_stream_producer(
+                stream_gen=stream_gen,
+                channel=channel,
+                agent_metadata=agent_metadata,
+                conversation_id=agent_request.conversation_id,
+                user_id=resolved_user_id,
+            )
+        )
+        _agent_stream_producer_tasks.add(producer_task)
+        producer_task.add_done_callback(release_producer_resources)
+
+    return response

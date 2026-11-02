@@ -13,7 +13,6 @@ monitoringProvider: "otlp"
 #   - infrastructure
 #   - application
 #   - data-process
-#   - supabase
 #   - terminal
 #   - monitoring
 # monitoringProvider: "phoenix"

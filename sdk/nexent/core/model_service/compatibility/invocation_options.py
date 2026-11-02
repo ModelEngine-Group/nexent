@@ -1,9 +1,11 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Legacy call options validated against the saved outlet's declarations."""
 
 from dataclasses import dataclass
 from typing import Mapping
 
-from nexent.core.model_service.profiles.parameter_rules import compile_parameter_rules, overlay_saved_parameter_values
+from nexent.core.model_service.profiles.parameter_rules import overlay_profile_parameters
 from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, json_values_equal
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
 from nexent.core.models.capacity_budget import (
@@ -33,19 +35,12 @@ class LegacyInvocationOptions:
             if key in submitted and not json_values_equal(submitted[key], value):
                 raise ParameterValidationError("LEGACY_PARAMETER_CONFLICT", "/" + key)
             submitted[key] = value
-        snapshot = profile.model_dump()
         declared = {rule["key"] for rule in profile.parameter_rules}
         # Old clients use these values to express omission, not new API fields.
         if submitted.get("enable_thinking") is False and "enable_thinking" not in declared:
             submitted.pop("enable_thinking")
         if submitted.get("reasoning_effort") == "auto" and "reasoning_effort" not in declared:
             submitted.pop("reasoning_effort")
-        if submitted.get("enable_thinking") is False:
-            for rule in profile.parameter_rules:
-                condition = rule.get("condition")
-                if (condition == {"key": "enable_thinking", "op": "eq", "value": True}
-                        and rule["key"] not in submitted):
-                    snapshot["parameter_values"].pop(rule["key"], None)
         output_keys = {rule["key"] for rule in profile.parameter_rules if rule.get("api_binding")} & {
             "max_tokens", "max_output_tokens",
         }
@@ -70,26 +65,10 @@ class LegacyInvocationOptions:
                     snapshot_value=budget.requested_output_tokens, caller_value=submitted[key],
                 )
             submitted[key] = budget.requested_output_tokens
-        if submitted:
-            snapshot["parameter_values"] = overlay_saved_parameter_values(
-                compile_parameter_rules(profile.parameter_rules), submitted,
-                scope="outlet", saved_values=snapshot["parameter_values"],
-            )
+        resolved = overlay_profile_parameters(profile, submitted, scope="outlet") if submitted else profile
         if self.custom_overrides is not None:
-            from nexent.core.model_service.profiles.request_parameters import apply_extra_api_parameters
-
-            if not isinstance(self.custom_overrides, Mapping) or any(
-                not isinstance(key, str) or not key for key in self.custom_overrides
-            ):
-                raise ParameterValidationError("LEGACY_CUSTOM_PARAMETERS_INVALID")
-            extras = snapshot["extra_api_parameters"]
-            for key, value in self.custom_overrides.items():
-                path = "/" + key.replace("~", "~0").replace("/", "~1")
-                extras = [entry for entry in extras if entry["path"] != path and not entry["path"].startswith(path + "/")]
-                if value is not None:
-                    extras.append({"path": path, "value": value})
-            apply_extra_api_parameters({}, extras,
-                parameter_paths=[rule["api_binding"]["path"] for rule in profile.parameter_rules if rule.get("api_binding")],
-                protected_paths=("/api_key", "/authorization", "/headers", "/credentials", "/base_url"))
-            snapshot["extra_api_parameters"] = extras
-        return ResolvedModelProfile.model_validate(snapshot)
+            from nexent.core.model_service.profiles.request_parameters import overlay_extra_api_parameters
+            snapshot = resolved.model_dump(mode="json")
+            snapshot["extra_api_parameters"] = overlay_extra_api_parameters(resolved, self.custom_overrides)
+            return ResolvedModelProfile.model_validate(snapshot)
+        return resolved

@@ -12,8 +12,8 @@ When OpenTelemetry dependencies are not available, the module gracefully degrade
 and disables monitoring functionality without breaking the application.
 
 Installation:
-- Basic: pip install nexent
-- With monitoring: pip install nexent[performance]
+- Basic: uv pip install nexent
+- With monitoring: uv pip install nexent[performance]
 """
 
 # Optional OpenTelemetry imports - gracefully handle missing dependencies
@@ -481,7 +481,7 @@ class MonitoringConfig:
         if self.enable_telemetry and not OPENTELEMETRY_AVAILABLE:
             logger.warning(
                 "OpenTelemetry dependencies not available. Disabling telemetry. "
-                "Install with: pip install nexent[performance]"
+                "Install with: uv pip install nexent[performance]"
             )
             self.enable_telemetry = False
 
@@ -575,7 +575,7 @@ class MonitoringManager:
         if not OPENTELEMETRY_AVAILABLE:
             logger.warning(
                 "OpenTelemetry dependencies not available. Telemetry initialization skipped. "
-                "Install with: pip install nexent[performance]"
+                "Install with: uv pip install nexent[performance]"
             )
             return
 
@@ -755,7 +755,7 @@ class MonitoringManager:
             elif not OPENTELEMETRY_AVAILABLE:
                 logger.warning(
                     "OpenTelemetry not available. FastAPI monitoring skipped. "
-                    "Install with: pip install nexent[performance]"
+                    "Install with: uv pip install nexent[performance]"
                 )
             return False
         except Exception as e:
@@ -1979,13 +1979,8 @@ class LLMTokenTracker:
                 "token_length": len(token)
             })
 
-    def record_completion(
-        self, input_tokens: int = 0, output_tokens: int = 0, *, total_tokens: Optional[int] = None,
-    ) -> None:
-        """Record completion metrics, preserving a supplied provider total."""
-        if total_tokens is not None and (type(total_tokens) is not int or total_tokens < 0):
-            raise ValueError("Reported total tokens must be a non-negative integer")
-        reported_total = input_tokens + output_tokens if total_tokens is None else total_tokens
+    def record_completion(self, input_tokens: int = 0, output_tokens: int = 0, *, total_tokens: Any = ...) -> None:
+        """Preserve legacy inferred totals; explicit None means the provider did not report one."""
         if not self.manager.is_enabled:
             return
 
@@ -2012,18 +2007,22 @@ class LLMTokenTracker:
             usage_details = {
                 "input": input_tokens,
                 "output": output_tokens,
-                "total": reported_total,
             }
-            self.span.set_attributes({
+            total = input_tokens + output_tokens if total_tokens is ... else total_tokens
+            if total is not None:
+                usage_details["total"] = total
+            attributes = {
                 "llm.token_count.prompt": input_tokens,
                 "llm.token_count.completion": output_tokens,
-                "llm.token_count.total": reported_total,
                 "llm.usage_details": json.dumps(
                     usage_details, ensure_ascii=False),
                 "llm.generation_rate": generation_rate,
                 "llm.duration.total": total_duration,
                 "llm.time_to_first_token": self.first_token_time - self.start_time if self.first_token_time else 0
-            })
+            }
+            if total is not None:
+                attributes["llm.token_count.total"] = total
+            self.span.set_attributes(attributes)
 
 
 # ---------------------------------------------------------------------------

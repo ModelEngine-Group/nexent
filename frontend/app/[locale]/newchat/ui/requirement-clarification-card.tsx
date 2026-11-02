@@ -1,3 +1,5 @@
+// Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 "use client";
 
 import { useEffect, useId, type FC } from "react";
@@ -26,8 +28,8 @@ export const RequirementClarificationCard: FC<{
   const { registerCard, submitCard, isCardInteractive } = useNl2AgentFlow();
 
   useEffect(() => {
-    registerCard(cardKey, payload.subtype);
-  }, [cardKey, payload.subtype, registerCard]);
+    if (!disabled) registerCard(cardKey, payload.subtype);
+  }, [cardKey, disabled, payload.subtype, registerCard]);
 
   const submit = (answers: ClarificationAnswer[]) => {
     submitCard(cardKey);

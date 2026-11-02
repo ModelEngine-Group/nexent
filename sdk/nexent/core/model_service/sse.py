@@ -1,8 +1,10 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Bounded incremental SSE framing shared by sync and async HTTP senders."""
 
 import codecs
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 class SSEDecodeError(ValueError):
@@ -20,6 +22,7 @@ class SSEEvent:
     data: str
     event: str = "message"
     event_id: str = ""
+    sensitive_values: tuple[str, ...] = field(default=(), repr=False, compare=False)
 
 
 class SSEDecoder:

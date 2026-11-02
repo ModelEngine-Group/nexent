@@ -26,7 +26,7 @@ def test_ordinary_publish_preserves_last_a2a_version(mocker):
     assert first["version_no"] == 1
     assert registration["version"] == "1"
     draft["is_a2a"] = False
-    draft["name"] = "Ordinary Agent"
+    draft["name"] = "Ordinary_Agent"
     second = module.publish_version_impl(7, "tenant", "owner")
     assert second["version_no"] == 2
     assert "a2a_agent" not in second

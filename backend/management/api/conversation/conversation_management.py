@@ -1,19 +1,15 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from contracts.conversation import BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
+from contracts.conversation import ConversationTarget, BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
 from contracts.knowledge import ConversationKnowledgeScopeUpdateRequest
 from contracts.agent import WorkbenchConfigUpdateRequest
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError, TokenExpiredError, WorkbenchConfigVersionConflict, WorkbenchError
+from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError, TokenExpiredError, AgentDraftEditError, WorkbenchConfigVersionConflict, WorkbenchError
 import logging
 from http import HTTPStatus
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, Dict, Literal, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Header, HTTPException, Path, Query, Request
 from contracts.constants.environment import ENABLE_AGENT_WORKBENCH
 
-from contracts.conversation import BatchDeleteConversationRequest, ConversationRequest, ConversationResponse, GenerateTitleRequest, MessageIdRequest, OpinionRequest, RenameRequest
-from contracts.knowledge import ConversationKnowledgeScopeUpdateRequest
-from contracts.agent import WorkbenchConfigUpdateRequest
-from contracts.errors.exceptions import AppException, ConversationNotFoundError, ValidationError, TokenExpiredError, WorkbenchConfigVersionConflict, WorkbenchError
 from management.db.conversation.repository import get_conversation_list_page
 from management.services.conversation.service import (
     create_new_conversation,
@@ -28,9 +24,106 @@ from management.services.conversation.service import (
     update_message_opinion_service,
     get_message_id_by_index_impl,
 )
+from management.services.conversation.agent_history import (
+    list_agent_group_conversation_ids,
+    list_agent_group_conversations,
+    list_agent_groups,
+)
 from gateway.authentication.auth import get_current_user_id, get_current_user_info
 
 router = APIRouter(prefix="/conversation")
+
+
+@router.get("/agent_groups", response_model=ConversationResponse)
+async def list_agent_groups_endpoint(
+    authorization: Optional[str] = Header(None),
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
+    cursor: Annotated[Optional[str], Query(max_length=512)] = None,
+    search: Annotated[str, Query(max_length=200)] = "",
+    include_agent_id: list[int] = Query(default=[]),
+    include_other: bool = False,
+):
+    """Return paginated Agent-chat groups and pinned groups outside the page."""
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        if len(include_agent_id) > 100 or any(agent_id <= 0 for agent_id in include_agent_id):
+            raise ValueError("Invalid included Agent groups")
+        data = list_agent_groups(
+            user_id,
+            tenant_id,
+            limit,
+            cursor,
+            search,
+            include_agent_id,
+            include_other,
+        )
+        return ConversationResponse(code=0, message="success", data=data)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except TokenExpiredError as exc:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.exception("Failed to list Agent conversation groups")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to list Agent conversation groups",
+        ) from exc
+
+
+@router.get("/agent_groups/{group_key}/conversations", response_model=ConversationResponse)
+async def list_agent_group_conversations_endpoint(
+    group_key: str,
+    authorization: Optional[str] = Header(None),
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
+    cursor: Annotated[Optional[str], Query(max_length=512)] = None,
+    search: Annotated[str, Query(max_length=200)] = "",
+):
+    """Return a paginated Agent-chat history group without message bodies."""
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        data = list_agent_group_conversations(user_id, group_key, limit, cursor, search)
+        return ConversationResponse(code=0, message="success", data=data)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except TokenExpiredError as exc:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.exception("Failed to list Agent group conversations")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to list Agent group conversations",
+        ) from exc
+
+
+@router.get("/agent_groups/{agent_id}/conversation_ids", response_model=ConversationResponse)
+async def list_agent_group_conversation_ids_endpoint(
+    agent_id: Annotated[int, Path(gt=0, le=2147483647)],
+    authorization: Optional[str] = Header(None),
+):
+    """Return all active conversation IDs for one Agent, scoped to its owner."""
+    try:
+        user_id, _ = get_current_user_id(authorization)
+        data = list_agent_group_conversation_ids(user_id, agent_id)
+        return ConversationResponse(code=0, message="success", data=data)
+    except ValueError as exc:
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail=str(exc)) from exc
+    except TokenExpiredError as exc:
+        logging.warning("Session expired")
+        raise HTTPException(status_code=HTTPStatus.UNAUTHORIZED, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logging.exception("Failed to list Agent conversation IDs")
+        raise HTTPException(
+            status_code=HTTPStatus.INTERNAL_SERVER_ERROR,
+            detail="Failed to list Agent conversation IDs",
+        ) from exc
 
 
 @router.put("/create", response_model=ConversationResponse)
@@ -62,6 +155,31 @@ async def create_new_conversation_endpoint(request: ConversationRequest, authori
     except Exception as e:
         logging.error(f"Failed to create conversation: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get("/creator_histories", response_model=ConversationResponse)
+async def list_creator_histories_endpoint(
+    kind: Literal["agent", "skill"],
+    target_id: Annotated[int, Query(gt=0, le=2147483647)],
+    authorization: Optional[str] = Header(None),
+    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+):
+    """List the current user's creation conversations for one tenant-owned target."""
+    from management.services.conversation.creator_histories import list_creator_histories
+    try:
+        user_id, tenant_id = get_current_user_id(authorization)
+        data = list_creator_histories(kind=kind, target_id=target_id, user_id=user_id,
+                                     tenant_id=tenant_id, offset=offset, limit=limit)
+        return ConversationResponse(code=0, message="success", data=data)
+    except TokenExpiredError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except WorkbenchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/list", response_model=ConversationResponse)
@@ -291,7 +409,7 @@ async def update_conversation_workbench_config_endpoint(
         ) from exc
     except WorkbenchError as exc:
         raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
-    except ValueError as exc:
+    except (ValueError, ValidationError) as exc:
         raise HTTPException(
             status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail={"code": "WORKBENCH_CONFIG_INVALID"}
         ) from exc
@@ -413,3 +531,22 @@ async def get_message_id_endpoint(request: MessageIdRequest):
     except Exception as e:
         logging.error(f"Failed to get message ID: {str(e)}")
         raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.patch("/{conversation_id}/target")
+async def bind_creation_target_endpoint(conversation_id: int, target: ConversationTarget, authorization: Optional[str] = Header(None)):
+    """Bind a saved creator resource without changing executor identity or history."""
+    from management.services.conversation.creator_targets import bind_creator_target
+    user_id, tenant_id = get_current_user_id(authorization)
+    try:
+        result = bind_creator_target(conversation_id, target.model_dump(), user_id, tenant_id)
+        return {"code": 0, "data": {"target": result}, "message": "success"}
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except AgentDraftEditError as exc:
+        status = 404 if exc.code == "agent_not_found" else 403
+        raise HTTPException(status_code=status, detail={"code": exc.code}) from exc
+    except WorkbenchError as exc:
+        raise HTTPException(status_code=exc.status_code, detail={"code": exc.code}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

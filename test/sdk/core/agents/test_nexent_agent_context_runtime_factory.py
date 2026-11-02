@@ -50,8 +50,13 @@ def test_ut_sdk_dpr_004_factory_filters_prompt_and_execution_tools_by_run_policy
         captured_runs.append(kwargs)
         return MagicMock(enable_planning=False)
 
+    def fake_tool(config):
+        tool = MagicMock()
+        tool.name = config.name
+        return tool
+
     with patch.object(factory, "create_model", return_value=MagicMock()), \
-            patch.object(factory, "create_tool", side_effect=lambda tool: MagicMock(name=tool.name)), \
+            patch.object(factory, "create_tool", side_effect=fake_tool), \
             patch("nexent.core.agents.cores.smolagents.agent.CoreAgent", side_effect=fake_core_agent):
         factory.create_single_agent(config)
         factory.create_single_agent(second_config)
@@ -197,8 +202,8 @@ def test_create_single_agent_preserves_explicit_empty_authorized_snapshot():
 
 def test_each_managed_agent_runtime_owns_one_distinct_context_manager():
     factory = _factory()
-    child_a = AgentConfig(name="child-a", description="a", model_name="main", tools=[])
-    child_b = AgentConfig(name="child-b", description="b", model_name="main", tools=[])
+    child_a = AgentConfig(name="child_a", description="a", model_name="main", tools=[])
+    child_b = AgentConfig(name="child_b", description="b", model_name="main", tools=[])
     root = AgentConfig(
         name="root",
         description="root",

@@ -23,6 +23,7 @@ import { getTagSearchPredicates } from "@/lib/systemTagLabels";
 
 import { REPOSITORY_PAGE_SIZE } from "@/const/resource";
 import ResourceCardGrid from "@/components/resource/ResourceCardGrid";
+import { AgentCardTags } from "./components/AgentCardTags";
 import ResourceCard from "@/components/resource/ResourceCard";
 import { AgentDetail } from "@/components/agent/agent-detail";
 import TagFilterPopover from "@/components/tag/TagFilterPopover";
@@ -226,21 +227,18 @@ export function AgentSpace({ active }: { active: boolean }) {
         }
         tags={
           tags.length > 0 || toolCount > 0 ? (
-            <>
-              {tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-md bg-slate-100 px-2 py-0.5 font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                >
-                  {getAgentRepositoryTagLabel(tag, t)}
-                </span>
-              ))}
+            <div className="flex w-full min-w-0 items-center gap-2">
+              {tags.length > 0 ? (
+                <AgentCardTags
+                  labels={tags.map((tag) => getAgentRepositoryTagLabel(tag, t))}
+                />
+              ) : null}
               {toolCount > 0 ? (
-                <span className="rounded-md border border-slate-200 px-2 py-0.5 text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                <span className="shrink-0 whitespace-nowrap rounded-md border border-slate-200 px-2 py-0.5 text-slate-500 dark:border-slate-700 dark:text-slate-400">
                   {t("agentRepository.card.toolCount", { count: toolCount })}
                 </span>
               ) : null}
-            </>
+            </div>
           ) : undefined
         }
         footerLayout="inline"

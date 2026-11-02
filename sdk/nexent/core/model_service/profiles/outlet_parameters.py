@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Single-location parameter storage, independent of database sessions and TOML."""
 
 import math

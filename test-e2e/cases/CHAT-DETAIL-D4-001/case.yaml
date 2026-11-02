@@ -1,0 +1,54 @@
+schema_version: '1.0'
+stage: D4
+module: CHAT-SIDEBAR
+case:
+  case_id: CHAT-DETAIL-D4-001
+  feature_id: CHAT-SIDEBAR
+  requirement_ids: [CHAT-AGENT-DETAIL-20261026]
+  business_rule_ids: [CHAT-SIDEBAR-RULE-010]
+  title: Agent-chat restoration shares one detail request per activation
+  type: E2E
+  priority: P1
+  status: active
+  automation: automated
+  objective: Restore actual Agent-chat histories while counting HTTP detail requests through all frontend consumers.
+  preconditions:
+  - Running frontend and controlled authenticated APIs expose two saved Agent-chat histories with distinct text and runtime metadata.
+  test_data:
+    profile: mock
+    histories: [saved-a, saved-b]
+  steps:
+  - order: 1
+    action: Open a direct conversation link for A and wait for history and composer readiness.
+    expected: A messages, Agent and composer are visible, runtime metadata is restored and exactly one detail GET has occurred.
+  - order: 2
+    action: Select B, return to A, then select active A again; wait for network settling after each action.
+    expected: Each changed selection restores matching messages and metadata with one new detail GET. Active reselection issues none.
+  - order: 3
+    action: Reload while viewing A and wait for restored history and composer readiness.
+    expected: A is restored with exactly one new detail GET.
+  - order: 4
+    action: Simulate the document becoming visible after backgrounding while viewing A.
+    expected: One explicit fresh detail GET occurs; the active conversation remains usable.
+  expected_results:
+  - Entry, changed selection, re-entry and reload each issue exactly one detail GET; active reselection issues none.
+  - Matching Agent, messages and runtime metadata are restored and the composer remains usable.
+  - Visibility resync obtains one fresh snapshot without changing the selected conversation.
+  forbidden_side_effects:
+  - No generation, deletion, pin write or persisted conversation/configuration write is issued by these read-only actions.
+  actor: Authenticated Agent-chat user
+  journey: [Open A, Select B, Return to A, Reselect A, Reload A, Restore visibility]
+  final_business_result:
+  - Saved Agent conversations restore correctly without duplicate detail requests.
+  failure_evidence: [Browser assertion screenshot and controlled detail request log]
+  acceptance:
+  - id: AC-01
+    description: Navigation and reload share exactly one read per activation with zero active-reselection reads.
+    steps: [1, 2, 3]
+    expected_results: [1, 2]
+    forbidden_side_effects: [1]
+  - id: AC-02
+    description: Visibility requests one fresh snapshot and retains usable selected history.
+    steps: [4]
+    expected_results: [2, 3]
+    forbidden_side_effects: [1]

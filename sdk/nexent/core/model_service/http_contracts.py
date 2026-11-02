@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """HTTP boundary contracts; credentials are resolved only by the sender."""
 
 import json
@@ -114,6 +116,36 @@ class RawHttpResponse:
     status_code: int
     headers: dict[str, str] = field(repr=False)
     body: bytes = field(repr=False)
+    sensitive_values: tuple[str, ...] = field(default=(), repr=False)
+
+    def error_details(self) -> dict:
+        """Extract display details at the shared HTTP boundary, never retry policy."""
+        text = self.body.decode("utf-8", errors="replace")
+        try:
+            body = json.loads(text)
+        except (ValueError, RecursionError):
+            body = None
+        detail = body.get("error", body) if isinstance(body, dict) else body
+        if isinstance(detail, dict):
+            message = detail.get("message") or detail.get("detail")
+            if isinstance(message, list):
+                message = "; ".join(item["msg"] for item in message
+                                    if isinstance(item, dict) and isinstance(item.get("msg"), str))
+            if not isinstance(message, str):
+                message = text
+            code, parameter = detail.get("code"), detail.get("param")
+        else:
+            message = detail if isinstance(detail, str) else text
+            code, parameter = None, None
+        # Strip known request credentials before bounding or publishing the detail.
+        for value in sorted(set(self.sensitive_values), key=len, reverse=True):
+            if value:
+                message = message.replace(value, "[redacted]")
+        message = re.sub(r"(?i)\bBearer\s+[^\s\"'<>]+", "Bearer [redacted]", message)
+        message = re.sub(r"\bsk-[A-Za-z0-9_-]+", "[redacted]", message)
+        message = " ".join(re.sub(r"[\x00-\x1f\x7f]", " ", message).split())[:2048]
+        return {"message": message, "code": code if isinstance(code, str) else None,
+                "parameter": parameter if isinstance(parameter, str) else None}
 
 
 class ModelTransportError(Exception):

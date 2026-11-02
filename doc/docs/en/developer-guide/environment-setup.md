@@ -39,10 +39,33 @@ System-scoped runtime sandboxes are enabled by default. Keep Docker running when
 ```bash
 cd backend
 uv sync --extra data-process --extra test
-uv pip install -e "../sdk[dev]"
 ```
 
 These commands create or update `backend/.venv`, install the backend dependencies, and install the local SDK in editable mode. Changes under `sdk/nexent/` do not require copying the package files again.
+
+The `data-process` extra (and SDK `dev`) installs CPU PyTorch and Torchvision by default. Use uv 0.13.6, matching CI and image builds. Python remains 3.11; CI pins 3.11.15. The backend test extra installs the complete local `nexent[dev]` extra, including its parsing requirements; document processing uses the SDK parsing/performance extras. Torch/Torchvision remain transitive dependencies. The SDK package and Python import names remain `nexent`.
+
+CPU and NVIDIA use the same dependencies and differ only in the selected preset index:
+
+```bash
+# From backend/: CPU is the default
+uv sync --extra data-process --extra test
+# Explicit CPU selection
+uv sync --extra data-process --extra test --index pytorch-cpu --upgrade-package torch --upgrade-package torchvision
+# NVIDIA CUDA 13.0
+uv sync --extra data-process --extra test --index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision
+```
+
+The project enables uv's `index-by-name` preview feature. The CPU index is first by default; `--index` promotes the selected preset. The NVIDIA index is explicit and only participates when selected. Active indexes participate in `unsafe-first-match` resolution, including dependencies other than Torch: the first source with compatible versions wins; incompatible old shared dependencies fall through to the next source. `--default-index` changes the fallback package mirror and does not override the selected PyTorch index. Base installations without document-processing extras do not install PyTorch. An existing lockfile can retain its previous Torch build despite a different index priority. The explicit commands above re-resolve Torch and Torchvision with `--upgrade-package`; do not use `--frozen` to switch variants. `uv sync` removes obsolete dependencies. CUDA installation does not verify GPU hardware or driver compatibility.
+
+For standalone SDK development, run `uv sync --python 3.11 --extra dev` from `sdk/` for CPU, or add `--index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision` for NVIDIA. Use `--index pytorch-cpu` with the same upgrade flags to switch back. There is no separate `nvidia` extra.
+
+For SDK packages installed from a registry, wheel metadata does not carry the checkout's uv index configuration. Select the backend explicitly:
+
+```bash
+uv pip install "nexent[data-process]" --torch-backend cpu
+uv pip install "nexent[data-process]" --torch-backend cu130
+```
 
 #### Optional: Use Package Mirrors
 
@@ -50,16 +73,13 @@ When network access is limited, specify a package mirror for uv. For example:
 
 ```bash
 # Tsinghua mirror
-uv sync --all-extras --default-index https://pypi.tuna.tsinghua.edu.cn/simple
-uv pip install -e "../sdk[dev]" --default-index https://pypi.tuna.tsinghua.edu.cn/simple
+uv sync --extra data-process --extra test --default-index https://pypi.tuna.tsinghua.edu.cn/simple
 
 # Alibaba Cloud mirror
-uv sync --all-extras --default-index https://mirrors.aliyun.com/pypi/simple/
-uv pip install -e "../sdk[dev]" --default-index https://mirrors.aliyun.com/pypi/simple/
+uv sync --extra data-process --extra test --default-index https://mirrors.aliyun.com/pypi/simple/
 
 # Multiple sources (recommended)
-uv sync --all-extras --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
-uv pip install -e "../sdk[dev]" --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
+uv sync --extra data-process --extra test --index pytorch-cpu --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/ --upgrade-package torch --upgrade-package torchvision
 ```
 
 :::: info Mirror References

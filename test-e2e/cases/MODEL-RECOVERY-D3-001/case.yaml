@@ -15,11 +15,11 @@ case:
   priority: P0
   status: active
   automation: automated
-  objective: Prove the real model adapter, OpenAI client and observer across an HTTP
-    SSE boundary with controlled provider responses.
+  objective: Prove the real model adapter, OpenAI client and observer across an HTTP SSE boundary with controlled
+    provider responses.
   preconditions:
-  - Installed product SDK and OpenAI client; loopback HTTP server available; no external
-    provider or database credentials required.
+  - Installed product SDK and OpenAI client; loopback HTTP server available; no external provider or database credentials
+    required.
   test_data:
     profile: mock
     provider_sequences:
@@ -27,29 +27,31 @@ case:
     - two reasoning-only stops
     - tool-only stop
     - length
-    sensitive_fixture: A synthetic secret appears only in rejected reasoning and tool
-      arguments.
+    - exhausted empty then valid Agent final answer
+    - persistent empty across bounded Agent protocol repair
+    sensitive_fixture: A synthetic secret appears only in rejected reasoning and tool arguments.
   steps:
   - order: 1
-    action: Start a loopback SSE provider, invoke the real adapter with frozen reasoning/sampling/output
-      settings and explicit thinking-object capability; return reasoning-only stop
-      then a visible response.
-    expected: Exactly two HTTP requests have identical bodies; thinking is correctly
-      serialized, the first attempt rolls back and only the second commits.
+    action: Start a loopback SSE provider, invoke the real adapter with frozen reasoning/sampling/output settings
+      and explicit thinking-object capability; return reasoning-only stop then a visible response.
+    expected: Exactly two HTTP requests have identical bodies; thinking is correctly serialized, the first attempt
+      rolls back and only the second commits.
   - order: 2
-    action: Repeat with persistent empty, tool-only, length and diagnostic opt-in
-      fixtures.
-    expected: Empty recovery is bounded; excluded responses are not retried as empty
-      recovery. Failure logs retain correlation and fingerprints but disclose no content,
-      credentials or arguments.
+    action: Repeat with persistent empty, tool-only, length and diagnostic opt-in fixtures.
+    expected: Empty recovery is bounded; excluded responses are not retried as empty recovery. Failure logs retain
+      correlation and fingerprints but disclose no content, credentials or arguments.
+  - order: 3
+    action: Run real CoreAgent with repair enabled against empty HTTP responses followed by a valid final answer,
+      then against persistent empty responses.
+    expected: Corrected answer succeeds without user errors or repair instructions; persistent empty recovery terminates
+      within the existing bound and never executes tools.
   expected_results:
-  - HTTP request controls remain immutable and successful recovery produces the expected
-    answer exactly once.
-  - Attempt bounds and structural diagnostics preserve privacy and excluded terminal
-    outcomes.
+  - HTTP request controls remain immutable and successful recovery produces the expected answer exactly once.
+  - Attempt bounds and structural diagnostics preserve privacy and excluded terminal outcomes.
+  - Silent Agent semantic repair preserves the final answer and existing retry bound.
   forbidden_side_effects:
-  - No external provider calls, database mutations, session snapshot rewrites, reasoning
-    promotion or execution of returned tools.
+  - No external provider calls, database mutations, session snapshot rewrites, reasoning promotion or execution
+    of returned tools.
   failure_evidence:
   - Sanitized provider request counts and captured observer lifecycle
   - Structured diagnostics and assertion failure output
@@ -59,8 +61,7 @@ case:
       required_services: []
   acceptance:
   - id: AC-RECOVERY
-    description: A single retry preserves wire settings and failed-attempt isolation,
-      with strict terminal bounds.
+    description: A single retry preserves wire settings and failed-attempt isolation, with strict terminal bounds.
     steps:
     - 1
     - 2
@@ -77,10 +78,18 @@ case:
     - 2
     forbidden_side_effects:
     - 1
+  - id: AC-AGENT-REPAIR
+    description: Real Agent silently repairs exhausted empty HTTP output and retains the existing bound on persistent
+      empty responses.
+    steps:
+    - 3
+    expected_results:
+    - 3
+    forbidden_side_effects:
+    - 1
   integration_boundary:
   - Real SDK model adapter through OpenAI client to a loopback HTTP SSE provider
   observations:
-  - Identical outgoing bodies, rollback/commit events, response correlation and private
-    structural diagnostics
+  - Identical outgoing bodies, rollback/commit events, response correlation and private structural diagnostics
   cleanup:
   - Close the model HTTP client and shut down/join the loopback server thread.

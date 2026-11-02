@@ -7,7 +7,8 @@ import json
 
 def restore_runtime_model_snapshot(record, tenant_id, *, strict=True):
     """Leave unmigrated records to legacy consumers; fail closed on corrupt saved profiles."""
-    envelope = record.get("runtime_outlet_snapshot")
+    # Canonical dedicated columns supersede the transitional envelope after migration.
+    envelope = record.get("runtime_outlet_snapshot") if record.get("profile_schema_version") is None else None
     if envelope is None and record.get("profile_schema_version") is None:
         return None
     from nexent.core.model_service.profiles.outlet_storage import (

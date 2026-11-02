@@ -48,7 +48,6 @@ import {
 import {
   isNewAgentPaddingItem,
   type AgentRepositoryListingCreatePayload,
-  type MineOwnershipFilter,
   type MyAgentRepositoryInfoItem,
   type MyEditableAgentItem,
 } from "@/types/agentRepository";
@@ -66,11 +65,6 @@ import { mapMyAgentDetail } from "@/lib/myAgentDetail";
 import { AgentDetail } from "@/components/agent/agent-detail";
 import { MyAgentIcon } from "./components/MyAgentIcon";
 
-const MINE_OWNERSHIP_FILTERS: MineOwnershipFilter[] = [
-  "all",
-  "created",
-  "others",
-];
 type MineSortOrder = "default" | "latest";
 
 export function MyAgent({
@@ -89,7 +83,6 @@ export function MyAgent({
   const queryClient = useQueryClient();
   const params = useParams<{ locale: string }>();
   const locale = params.locale || "en";
-  const [ownership, setOwnership] = useState<MineOwnershipFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOrder, setSortOrder] = useState<MineSortOrder>("default");
   const [tagPredicates, setTagPredicates] = useState<TagResourcePredicate[]>(
@@ -119,15 +112,11 @@ export function MyAgent({
       search: searchQuery.trim() || undefined,
       tagPredicates,
       searchTagPredicates,
-      createdBy: ownership === "created" ? user?.id : undefined,
-      createdByNot: ownership === "others" ? user?.id : undefined,
       sortByUpdateTime: sortOrder === "latest" || undefined,
     }),
     [
       active,
       user?.tenantId,
-      user?.id,
-      ownership,
       page,
       pageSize,
       searchQuery,
@@ -149,7 +138,6 @@ export function MyAgent({
     () => listedAgents.map(toMyAgentItem),
     [listedAgents]
   );
-  const counts = creatorCounts ?? { all: 0, created: 0, others: 0 };
   const total = pagination?.total ?? 0;
   useEffect(() => {
     if (active && creatorCounts && tagPredicates.length === 0) {
@@ -192,10 +180,6 @@ export function MyAgent({
       `/${locale}/agent-space?tab=mine&agent_id=${usageGuideTarget.agentId}`
     );
   }, [locale, router, usageGuideTarget]);
-  const onOwnershipChange = (value: MineOwnershipFilter) => {
-    setOwnership(value);
-    setPage(1);
-  };
   const onSortOrderChange = (value: MineSortOrder) => {
     setSortOrder(value);
     setPage(1);
@@ -608,16 +592,8 @@ export function MyAgent({
     }
   };
 
-  const ownershipLabelKey: Record<MineOwnershipFilter, string> = {
-    all: "repository.mine.filter.all",
-    created: "repository.mine.filter.created",
-    others: "repository.mine.filter.others",
-  };
-
   const hasActiveFilter =
-    ownership !== "all" ||
-    normalizedQuery.length > 0 ||
-    tagPredicates.length > 0;
+    normalizedQuery.length > 0 || tagPredicates.length > 0;
   const showFilteredEmpty =
     !isLoading && !isError && agents.length === 0 && hasActiveFilter;
   return (
@@ -648,24 +624,6 @@ export function MyAgent({
             { value: "latest", label: t("agentRepository.sort.latest") },
           ]}
         />
-      </div>
-
-      <div className="flex flex-wrap items-center gap-1.5">
-        {MINE_OWNERSHIP_FILTERS.map((filter) => (
-          <button
-            key={filter}
-            type="button"
-            onClick={() => onOwnershipChange(filter)}
-            className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors ${
-              ownership === filter
-                ? "bg-primary text-white"
-                : "bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-            }`}
-          >
-            {t(ownershipLabelKey[filter])}
-            <span className="text-xs opacity-80">{counts[filter]}</span>
-          </button>
-        ))}
       </div>
 
       <div className="min-h-0">

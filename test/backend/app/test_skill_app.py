@@ -336,6 +336,13 @@ nexent_storage_minio_config_mock.MinIOStorageConfig = MockMinIOStorageConfig
 # Skip redundant patches - mocks are already set up via sys.modules
 # These patches would fail because the modules are already mocked
 
+# The HTTP suite controls orchestration; persistence is exercised in creator service UT and D5.
+creator_execution_mock = types.ModuleType("management.services.conversation.creator_execution")
+async def start_creation_turn_boundary(request, *, stream_factory, **kwargs):
+    return await stream_factory(request, None), 42
+creator_execution_mock.start_creation_turn = start_creation_turn_boundary
+sys.modules["management.services.conversation.creator_execution"] = creator_execution_mock
+
 # Now import the app module
 from management.api.skill import skill as skill_app
 from contracts.constants import constants as skill_app_management_skill_skill

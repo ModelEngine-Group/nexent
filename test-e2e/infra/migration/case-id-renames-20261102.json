@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "change_id": "CASE-ID-NORMALIZATION-20261102",
+  "source_head": "651e98bf96b4ab8deecce1010f9ee67fb6788499",
+  "purpose": "Audit-only identity correspondence for a user-authorized naming correction; not a runtime alias or a naming exemption.",
+  "historical_results_rewritten": false,
+  "renames": [
+    {"old_case_id": "AIDP-RET-CONFIG-API", "new_case_id": "AIDP-RET-CONFIG-API-D2-001", "stage": "D2"},
+    {"old_case_id": "AIDP-RET-JOURNEY", "new_case_id": "AIDP-RET-JOURNEY-D4-001", "stage": "D4"},
+    {"old_case_id": "AIDP-RET-MIGRATION", "new_case_id": "AIDP-RET-MIGRATION-D5-001", "stage": "D5"},
+    {"old_case_id": "AIDP-RET-PROTOCOL", "new_case_id": "AIDP-RET-PROTOCOL-D2-001", "stage": "D2"},
+    {"old_case_id": "AIDP-RET-REAL", "new_case_id": "AIDP-RET-REAL-D3-001", "stage": "D3"},
+    {"old_case_id": "AIDP-RET-RUNTIME", "new_case_id": "AIDP-RET-RUNTIME-D3-001", "stage": "D3"},
+    {"old_case_id": "NB-CHAT-FINAL-ANSWER-001", "new_case_id": "NB-CHAT-FINAL-ANSWER-D2-001", "stage": "D2"}
+  ]
+}

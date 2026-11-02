@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Provider-independent model messages, requests and complete responses."""
 
 from typing import Annotated, Literal, Self
@@ -97,6 +99,10 @@ class ToolCallDelta(ProfileContract):
 
 
 class ModelError(ProfileContract):
+    diagnostic_code: NonBlankString | None = None
+    message_source: Literal["system", "provider"] = "system"
+    http_status: int | None = Field(default=None, exclude=True)
+    parameter_name: str | None = Field(default=None, exclude=True)
     category: NonBlankString
     scope: Literal["transport", "provider", "protocol"]
     retryable: bool

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Registered traditional instruction metadata, independent of prompt rendering."""
 
 from nexent.core.model_service.profiles.contracts import InstructionMappingDefinition, VersionedReference

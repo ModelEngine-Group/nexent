@@ -69,7 +69,11 @@ import {
   buildSkillSavePayload,
   initialSkillCreationDraft,
 } from "./creationRuntime";
-import { createSkill, searchAgentInfo } from "@/services/agentConfigService";
+import {
+  createSkill,
+  updateSkillById,
+  searchAgentInfo,
+} from "@/services/agentConfigService";
 import { prepareWorkbenchAgentDraft } from "./agentCreationDraft";
 import {
   isAgentCreationAwaitingDraft,
@@ -170,6 +174,7 @@ const HomeContent: FC = () => {
   >(new Set());
   const modelSavePending = useRef(false);
   const skillDraftRef = useRef(initialSkillCreationDraft);
+  const skillTargets = useRef<Record<string, number>>({});
   const [skillDraft, setSkillDraft] = useState(initialSkillCreationDraft);
   const [savedSkillName, setSavedSkillName] = useState<string | null>(null);
   const creationReturnRef = useRef<string | null>(null);
@@ -187,6 +192,7 @@ const HomeContent: FC = () => {
     >()
   );
   const resumedConversationIdsRef = useRef(new Set<number>());
+  const standaloneCreatorIds = useRef(new Set<number>());
   const [knowledgeCache, setKnowledgeCache] = useState(
     new Map<
       string,
@@ -436,6 +442,20 @@ const HomeContent: FC = () => {
     }
   }, []);
 
+  // Read files at request time without notifying the runtime for every token.
+  const getSkillDraftSnapshot = useCallback(
+    () => ({
+      ...(buildSkillSavePayload(skillDraftRef.current) ?? {}),
+      files: Object.entries(skillDraftRef.current.files).map(
+        ([path, content]) => ({
+          path,
+          content,
+        })
+      ),
+    }),
+    []
+  );
+
   const nl2AgentSnapshotRefresh = useRef<Promise<void>>(Promise.resolve());
   const handleNl2AgentState = useCallback(
     (event: Nl2AgentStateEvent) => {
@@ -536,6 +556,9 @@ const HomeContent: FC = () => {
         if (cancelled) return;
         const restored = await resolveRestoredWorkbench(conversation);
         if (cancelled) return;
+        if (conversation.workbench_config == null)
+          standaloneCreatorIds.current.add(numericConversationId);
+        else standaloneCreatorIds.current.delete(numericConversationId);
         dispatchWorkbench({
           type: "set-skill-names",
           names: restored.skillNames,
@@ -548,15 +571,18 @@ const HomeContent: FC = () => {
         if (!serverConversationIdsRef.current.has(activeThreadId)) {
           const artifacts = restoreCreationHistory(conversation);
           if (restored.config.mode === "skill_create") {
+            if (conversation.target?.type === "skill")
+              skillTargets.current[activeThreadId] = conversation.target.id;
             skillDraftRef.current = artifacts.skillDraft;
             setSkillDraft(artifacts.skillDraft);
             setSavedSkillName(null);
           } else if (
             restored.config.mode === "agent_create" &&
-            Number.isInteger(Number(conversation.agent_id)) &&
-            Number(conversation.agent_id) > 0
+            conversation.target?.type === "agent" &&
+            Number.isInteger(conversation.target.id) &&
+            conversation.target.id > 0
           ) {
-            const agentId = Number(conversation.agent_id);
+            const agentId = conversation.target.id;
             const result = await searchAgentInfo(agentId, undefined, 0);
             if (cancelled) return;
             if (!result.success || !result.data) {
@@ -734,6 +760,18 @@ const HomeContent: FC = () => {
       config: import("@/features/workbench").WorkbenchSessionConfig
     ) => {
       try {
+        if (standaloneCreatorIds.current.has(conversationId)) {
+          // Standalone creator controls are local UI state, not persisted Workbench configuration.
+          dispatchWorkbench({
+            type: "restore",
+            config,
+            version: workbenchState.configVersion,
+          });
+          return {
+            workbench_config: config,
+            workbench_config_version: workbenchState.configVersion,
+          };
+        }
         const result = await conversationService.updateWorkbenchConfig(
           conversationId,
           config,
@@ -1159,6 +1197,13 @@ const HomeContent: FC = () => {
         : workbenchState.config.mode === "skill_create"
           ? {
               runtimeMode: "nl2skill" as const,
+              creationTarget:
+                activeThreadId && skillTargets.current[activeThreadId]
+                  ? {
+                      type: "skill" as const,
+                      id: skillTargets.current[activeThreadId],
+                    }
+                  : undefined,
               persistCreationHistory: true,
               creationWorkbenchConfig: effectiveWorkbenchConfig,
               complexity: "complicated" as const,
@@ -1166,12 +1211,7 @@ const HomeContent: FC = () => {
                 ? ("en" as const)
                 : ("zh" as const),
               modelId: effectiveWorkbenchConfig.model_id,
-              draftSnapshot: {
-                ...(buildSkillSavePayload(skillDraftRef.current) ?? {}),
-                files: Object.entries(skillDraftRef.current.files).map(
-                  ([path, content]) => ({ path, content })
-                ),
-              },
+              getDraftSnapshot: getSkillDraftSnapshot,
               onNl2SkillEvent: handleNl2SkillEvent,
             }
           : {}),
@@ -1208,7 +1248,7 @@ const HomeContent: FC = () => {
     resetNl2AgentFlow,
     i18n.language,
     user?.email,
-    skillDraft,
+    getSkillDraftSnapshot,
     knowledgeScope,
     runtimeMetadata,
     runtimeMetadataDirty,
@@ -1441,10 +1481,22 @@ const HomeContent: FC = () => {
   const handleSaveSkill = async (
     payload: NonNullable<ReturnType<typeof buildSkillSavePayload>>
   ) => {
-    const result = await createSkill(payload);
+    const thread = activeThreadId;
+    const previous = thread ? skillTargets.current[thread] : undefined;
+    const result = previous
+      ? await updateSkillById(previous, payload)
+      : await createSkill(payload);
     if (!result.success) {
       message.error(result.message || t("ui.localization.skillSaveFailed"));
       return;
+    }
+    const id = Number(result.data?.skill_id ?? previous);
+    if (thread && id > 0) {
+      skillTargets.current[thread] = id;
+      await conversationService.bindTarget(Number(activeConversationId), {
+        type: "skill",
+        id,
+      });
     }
     setSavedSkillName(payload.name);
     message.success(t("ui.localization.skillSaved"));

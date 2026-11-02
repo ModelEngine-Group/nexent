@@ -1,0 +1,90 @@
+{{- $global := default dict .Values.global -}}
+{{- $logs := dig "sharedStorage" "logs" (dict) $global -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexent-ops
+  namespace: {{ default .Release.Namespace $global.namespace }}
+  labels:
+    app: nexent-ops
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: nexent-ops
+  template:
+    metadata:
+      labels:
+        app: nexent-ops
+      annotations:
+        checksum/nexent-backend-image: {{ dig "rolloutChecksums" "backendImage" "" $global | quote }}
+        checksum/nexent-env: {{ dig "rolloutChecksums" "env" "" $global | quote }}
+        checksum/ops-config: {{ dict "port" .Values.service.port | toJson | sha256sum | quote }}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: nexent-ops
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          command:
+            - /opt/nexent/scripts/start-backend.sh
+            - python
+            - backend/ops_service.py
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: LOG_DIR
+              value: "/mnt/nexent-data/logs/$(POD_NAME)"
+            - name: OPS_PORT
+              value: {{ .Values.service.port | quote }}
+            {{- range list "LOG_LEVEL" "IS_DEBUG" "LOG_MAX_BYTES" "LOG_ROTATION_INTERVAL" "LOG_BACKUP_COUNT" }}
+            - name: {{ . }}
+              valueFrom:
+                secretKeyRef:
+                  name: nexent-env
+                  key: {{ . }}
+                  optional: true
+            {{- end }}
+            - name: NEXENT_SQL_STARTUP_MODE
+              value: "off"
+            - name: PYTHON_DOTENV_DISABLED
+              value: "1"
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+          resources:
+{{ toYaml .Values.resources | indent 12 }}
+          volumeMounts:
+            - name: ops-logs
+              mountPath: /mnt/nexent-data/logs
+      volumes:
+        - name: ops-logs
+          persistentVolumeClaim:
+            claimName: {{ default .Values.logs.existingClaim $logs.existingClaim }}

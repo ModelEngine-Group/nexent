@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Store rule constraints as explicit references to same-row control domains."""
 
 import json

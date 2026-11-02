@@ -36,6 +36,7 @@ import { useAgentStore } from "@/stores/agentStore";
 import { ModelDrawer } from "@/components/resource-picker/ModelDrawer";
 import { ModelParamsModal } from "@/components/resource-picker/ModelParamsModal";
 import { useModelList } from "@/hooks/model/useModelList";
+import { useConfig } from "@/hooks/useConfig";
 import { useInferenceFieldSpecs } from "@/hooks/model/useInferenceFieldSpecs";
 import type { ModelOption } from "@/types/modelConfig";
 import { MODEL_PROVIDER_LOGOS } from "@/const/modelConfig";
@@ -54,7 +55,7 @@ import { useAuthorizationContext } from "@/components/providers/AuthorizationPro
 import { useDeployment } from "@/components/providers/deploymentProvider";
 import { useNl2AgentFlow } from "@/contexts/nl2AgentFlow";
 import { useAgentReadOnly } from "@/hooks/agent/useAgentReadOnly";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ExpandEditModal from "@/components/common/ExpandEditModal";
 import {
   reorderModelIds,
@@ -379,10 +380,14 @@ export default function AgentPrompt({
     (state) => state.reconcileUnavailableModels
   );
   const agentId = useAgentStore((state) => state.agentId);
-  const defaultLlmConfig = useAgentStore((state) => state.defaultLlmConfig);
+  const { defaultLlmModelConfig, isSuccess: configLoaded } = useConfig();
+  const defaultModelId = defaultLlmModelConfig?.id;
+  const modelInitialization = useRef({ agentId, complete: false });
   const { configFocusRequest } = useNl2AgentFlow();
 
-  const [expandedPrompt, setExpandedPrompt] = useState<PromptField | null>(null);
+  const [expandedPrompt, setExpandedPrompt] = useState<PromptField | null>(
+    null
+  );
   const [isModelPriorityOpen, setIsModelPriorityOpen] = useState(false);
   const [isModelSelectionOpen, setIsModelSelectionOpen] = useState(false);
   useEffect(() => {
@@ -416,13 +421,47 @@ export default function AgentPrompt({
     if (configuredModelIds.length > 0) {
       return configuredModelIds.filter((id) => availableModelIds.has(id));
     }
-    const defaultModelId = defaultLlmConfig?.id
-      ? Number(defaultLlmConfig.id)
-      : null;
-    return defaultModelId !== null && availableModelIds.has(defaultModelId)
-      ? [defaultModelId]
-      : [];
-  }, [availableModelIds, defaultLlmConfig?.id, editedAgent.model_ids]);
+    return [];
+  }, [availableModelIds, editedAgent.model_ids]);
+
+  useEffect(() => {
+    if (modelInitialization.current.agentId !== agentId) {
+      modelInitialization.current = { agentId, complete: false };
+    }
+    if (
+      agentId === null ||
+      modelInitialization.current.complete ||
+      isReadOnly ||
+      (!canManageModels(user?.role ?? "") && !isSpeedMode)
+    )
+      return;
+
+    // An existing selection completes initialization even while queries load.
+    if (editedAgent.model_ids?.length) {
+      modelInitialization.current.complete = true;
+      return;
+    }
+    if (!modelListLoaded || !configLoaded) return;
+    modelInitialization.current.complete = true;
+    if (!defaultModelId || !availableModelIds.has(defaultModelId)) return;
+
+    const modelIds = [defaultModelId];
+    form.setFieldValue("model_ids", modelIds);
+    updateAgent(resolveModelSelection(modelIds, modelOptions));
+  }, [
+    agentId,
+    availableModelIds,
+    configLoaded,
+    defaultModelId,
+    editedAgent.model_ids,
+    form,
+    isReadOnly,
+    isSpeedMode,
+    modelListLoaded,
+    modelOptions,
+    updateAgent,
+    user?.role,
+  ]);
 
   useEffect(() => {
     if (!modelListLoaded || !editedAgent.model_ids?.length) return;
@@ -821,9 +860,7 @@ export default function AgentPrompt({
                 count:
                   "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
               }}
-              onChange={(event) =>
-                updateDraft({ prompt: event.target.value })
-              }
+              onChange={(event) => updateDraft({ prompt: event.target.value })}
             />
           ) : (
             <TextArea
@@ -837,9 +874,7 @@ export default function AgentPrompt({
                 paddingLeft: 12,
                 paddingRight: 20,
               }}
-              onChange={(event) =>
-                updateDraft({ prompt: event.target.value })
-              }
+              onChange={(event) => updateDraft({ prompt: event.target.value })}
             />
           )}
           <div className="absolute right-1 top-2 z-10">
@@ -915,9 +950,7 @@ export default function AgentPrompt({
                 count:
                   "!bottom-2 !right-3 !text-xs !leading-[22px] !text-[#808080]",
               }}
-              onChange={(event) =>
-                updateDraft({ prompt: event.target.value })
-              }
+              onChange={(event) => updateDraft({ prompt: event.target.value })}
             />
           </div>
           <ModelDrawer

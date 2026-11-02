@@ -11,9 +11,15 @@ feature:
   - rule_id: F-173-RULE-01
     description: Docker/K8s/Helm/离线部署与卸载：编排、镜像、持久卷、备份恢复、沙箱模式与离线资产
   - rule_id: F-173-RULE-02
-    description: K8s 的五个后端服务通过独立 Secret 加载完整部署 .env；仅 Config、Runtime 叠加 monitoring.env。文件配置覆盖 Chart 默认值，最终凭据和容器显式参数优先；更新部署后新增、修改及删除的变量均生效，Web 和基础设施不引用完整 env Secret。
+    description: K8s 的五个后端服务通过独立 Secret 加载完整部署 .env；仅 Config、Runtime 叠加 monitoring.env。文件配置覆盖 Chart 默认值，最终凭据和容器显式参数优先；更新部署后新增、修改及删除的变量均生效，Web
+      和基础设施不引用完整 env Secret。
   - rule_id: F-173-RULE-03
-    description: All eight repository-built runtime images provide vim, ps, top, curl, wget and less, including data-process CPU/GPU and terminal slim/conda variants. Sandbox users can execute these tools without root privileges.
+    description: All eight repository-built runtime images provide vim, ps, top, curl, wget and less, including data-process CPU/GPU and terminal
+      slim/conda variants. Sandbox users can execute these tools without root privileges.
+  - rule_id: F-173-RULE-04
+    description: Document-processing and developer installations use CPU PyTorch by default; the preset pytorch-nvidia index selects CUDA PyTorch with the same extra.
+      The SDK distribution is nexent with the nexent import namespace; Torch remains transitive and test installations retain the complete SDK dev extra. Development, CI and image build installations use uv and share the dependency profiles; sandbox dynamic package-installation security behavior
+      remains unchanged.
   required_test_stages: []
   source:
     notes: Migrated from V5 01_代码功能清单 without changing the functional description.

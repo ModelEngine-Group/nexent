@@ -93,9 +93,19 @@ class JiuwenAdapter(AgentCoreAdapter):
         self._tool_executions = []
         self.text_protocol = False
         config = getattr(run_info, "agent_config", None)
+        from nexent.core.agent_names import resolve_external_agent_configs
+
+        reserved_names = [
+            *(tool.name or tool.class_name for tool in getattr(config, "tools", ()) or ()),
+            *(child.invocation_name or child.name for child in getattr(config, "worker_agents", ()) or ()),
+            "nexent_execute_python", "nexent_execute_block",
+        ]
+        self.external_agents = resolve_external_agent_configs(
+            getattr(config, "external_a2a_agents", None) or [], reserved_names,
+        )
         self.delegation = DelegationPolicy(getattr(run_info, "query", ""), [
             *(getattr(config, "worker_agents", None) or []),
-            *(getattr(config, "external_a2a_agents", None) or []),
+            *self.external_agents,
         ])
 
     @classmethod
@@ -160,7 +170,7 @@ class JiuwenAdapter(AgentCoreAdapter):
             self.tool_configs = list(effective.execution_tools.values())
             self.visible_tool_names = set(effective.tools)
         collaborator_names = [child.invocation_name or child.name for child in config.worker_agents]
-        collaborator_names.extend(child.name for child in config.external_a2a_agents)
+        collaborator_names.extend(child.invocation_name for child in self.external_agents)
         all_names = [*registry, *collaborator_names]
         if len(all_names) != len(set(all_names)) or reserved.intersection(collaborator_names):
             raise UnsupportedAgentCoreConfig("Duplicate or reserved collaboration tool name")
@@ -240,11 +250,11 @@ class JiuwenAdapter(AgentCoreAdapter):
                 ToolCard(name=tool.name, description=tool.description, input_params=_tool_schema(tool.inputs)),
                 self._business_handler(tool.name, tool, lane="control-io"),
             ))
-        for external in info.agent_config.external_a2a_agents:
+        for external in self.external_agents:
             from nexent.core.agents.resources.a2a import ExternalA2AAgentWrapper
             from nexent.core.agents.resources.subagents import SubAgentDefinition
 
-            definition = SubAgentDefinition(external.name, external.description or external.name)
+            definition = SubAgentDefinition(external.invocation_name, external.description or external.name)
 
             def invoke_remote(task, _config=external):
                 # A proxy owns a single call; parallel siblings never share client/task state.
@@ -392,7 +402,8 @@ class JiuwenAdapter(AgentCoreAdapter):
                 return credential
 
             auth = AuthenticationRegistry()
-            service = ModelService(lambda snapshot: auth.sender_for(snapshot, lookup))
+            headers = dict(config.http_headers)
+            service = ModelService(lambda snapshot: auth.sender_for(snapshot, lookup, http_headers=headers))
         step = 0
 
         def on_step(_request):

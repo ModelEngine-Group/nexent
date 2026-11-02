@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Explicit versioned adapter registration, independent of persisted import strings."""
 
 from types import MappingProxyType
@@ -78,7 +80,7 @@ class AuthenticationRegistry:
     def references(self) -> tuple[VersionedReference, ...]:
         return tuple(VersionedReference(ref=key, version=version) for key, version in self._entries)
 
-    def sender_for(self, profile, lookup) -> HttpRequestSender:
+    def sender_for(self, profile, lookup, *, http_headers=None) -> HttpRequestSender:
         reference = profile.bindings.auth
         scheme = self._entries.get((reference.ref, reference.version))
         if scheme is None:
@@ -90,7 +92,13 @@ class AuthenticationRegistry:
             if submitted_reference != credential:
                 raise ModelTransportError("CREDENTIAL_REFERENCE_MISMATCH")
             try:
-                return scheme(lookup, tenant_id, credential)
+                from nexent.core.model_service.connection_headers import connection_headers
+
+                headers = connection_headers(http_headers or {})
+                generated = scheme(lookup, tenant_id, credential)
+                if headers.keys() & generated.keys():
+                    raise ModelTransportError("CREDENTIAL_HEADER_CONFLICT")
+                return {**headers, **generated}
             except Exception:
                 raise ModelTransportError("CREDENTIAL_RESOLUTION_FAILED") from None
 

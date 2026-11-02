@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from nexent.core.agents.contracts.context import ContextItemInput
+from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
 from nexent.core.models.capacity_budget import ContextBudgetSnapshot
 from nexent.core.models.sampling import DEFAULT_TEMPERATURE, DEFAULT_TOP_P, resolve_sampling
 
@@ -51,9 +52,8 @@ PROTOCOL_GRPC = "GRPC"
 
 
 class ModelConfig(BaseModel):
-    resolved_profile: Optional[Any] = Field(
-        default=None, repr=False, description="Trusted outlet snapshot, validated by the selected runtime adapter",
-    )
+    http_headers: Dict[str, str] = Field(default_factory=dict, repr=False, exclude=True)
+    resolved_profile: Optional[ResolvedModelProfile] = Field(default=None, repr=False)
     diagnostic_chunks_enabled: bool = Field(
         default=False, description="Capture bounded content-free response chunk structure"
     )
@@ -459,13 +459,14 @@ class ExternalA2AAgentConfig(BaseModel):
 
     agent_id: str = Field(description="External agent ID")
     name: str = Field(description="Agent display name")
+    invocation_name: Optional[str] = Field(default=None, description="Resolved runtime callable; original name is preserved")
     description: str = Field(description="Agent description for prompt", default="")
     url: str = Field(description="A2A endpoint URL")
     api_key: Optional[str] = Field(description="API key for authentication", default=None)
     transport_type: str = Field(description="Transport type: http-streaming or http-polling", default="http-streaming")
     protocol_version: str = Field(description="A2A protocol version", default="1.0")
     protocol_type: str = Field(description="Protocol type: JSONRPC, HTTP+JSON, or GRPC", default=PROTOCOL_JSONRPC)
-    timeout: float = Field(description="Request timeout in seconds", default=300.0)
+    timeout: float = Field(description="Request timeout in seconds", default=900.0)
     ssl_verify: bool = Field(description="Verify the peer TLS certificate", default=True)
     raw_card: Optional[Dict[str, Any]] = Field(
         description="Raw Agent Card containing skills and capabilities", default=None
@@ -520,6 +521,7 @@ class ExternalA2AAgentConfig(BaseModel):
         return A2AAgentInfo(
             agent_id=self.agent_id,
             name=self.name,
+            invocation_name=self.invocation_name,
             url=self.url,
             api_key=self.api_key,
             transport_type=self.transport_type,

@@ -17,7 +17,9 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence
 from smolagents import ActionStep, AgentText, TaskStep, Timing
 from smolagents.tools import Tool
 
-from nexent.consts.mcp_errors import is_mcp_timeout_error
+from nexent.consts.mcp_errors import (
+    classify_mcp_failure, find_mcp_server_url, is_mcp_timeout_error, mcp_failure_message,
+)
 from nexent.core.agents.contracts.clarification import choose_clarification_tool_name
 from nexent.core.agents.contracts.config import AgentConfig
 from nexent.core.agents.contracts.run import AgentHistory
@@ -218,10 +220,19 @@ class NexentAgent(AgentResources):
 
             # Create wrapper agents for external A2A agents in the worker-agent call set.
             # so model can call them like: external_agent_name(task="...")
+            from nexent.core.agent_names import resolve_external_agent_configs, validate_callable_names
+
+            validate_callable_names(
+                ["final_answer"] + [tool.name for tool in tool_list] + [agent.name for agent in worker_agents_list]
+            )
+            external_a2a_agents = resolve_external_agent_configs(
+                agent_config.external_a2a_agents,
+                [tool.name for tool in tool_list] + [agent.name for agent in worker_agents_list],
+            )
             if agent_config.external_a2a_agents:
                 try:
                     from nexent.core.agents.resources.a2a import ExternalA2AAgentWrapper
-                    for ext_agent_config in agent_config.external_a2a_agents:
+                    for ext_agent_config in external_a2a_agents:
                         a2a_agent_info = ext_agent_config.to_a2a_agent_info()
                         wrapper = ExternalA2AAgentWrapper(
                             agent_info=a2a_agent_info,
@@ -261,6 +272,19 @@ class NexentAgent(AgentResources):
                 else list(getattr(agent_config, "context_items", None) or []),
                 tool_list,
             )
+            resolved_external = {agent.agent_id: agent for agent in external_a2a_agents}
+            for index, item in enumerate(context_items):
+                item_type = getattr(item, "type", None)
+                if getattr(item_type, "value", item_type) != "external_agent":
+                    continue
+                config = resolved_external.get(str(item.content.get("agent_id", "")))
+                if config is not None:
+                    context_items[index] = item.model_copy(update={"content": {
+                        **item.content,
+                        "name": config.invocation_name,
+                        "invocation_name": config.invocation_name,
+                        "display_name": config.name,
+                    }})
             from nexent.core.agents.context import ContextItemInput, ContextItemType
 
             enable_clarification = (
@@ -323,6 +347,7 @@ class NexentAgent(AgentResources):
                     script_runner = None
                     with _sandbox_tree_context["initialization_lock"]:
                         try:
+                            from nexent.core.agents.context.execution_history import ExecutionHistory
                             from nexent.core.agents.sandbox.execution import build_python_executor
                             self._check_sandbox_cancelled()
                             if deferred and self.workspace_path:
@@ -338,7 +363,7 @@ class NexentAgent(AgentResources):
                                 host_tools_exist=_has_host_tools([
                                     *tool_list,
                                     *worker_agents_list,
-                                ]),
+                                ]) or isinstance(getattr(self.observer, "execution_history", None), ExecutionHistory),
                                 session_container_group=_sandbox_tree_context.get(
                                     "session_container_group"
                                 ),
@@ -538,7 +563,7 @@ class NexentAgent(AgentResources):
             )
             agent.stop_event = self.stop_event
             agent._delegation_collaborators = [
-                *agent_config.worker_agents, *(agent_config.external_a2a_agents or []),
+                *agent_config.worker_agents, *external_a2a_agents,
             ]
 
             # Wire plan tool deps if the plan tools are present in agent_config.tools.
@@ -841,6 +866,30 @@ class NexentAgent(AgentResources):
                 except Exception as e:
                     if is_mcp_timeout_error(e):
                         raise
+                    category, leaf = classify_mcp_failure(e)
+                    if category:
+                        # Keep the ReAct loop alive: the model receives the
+                        # friendly text and can switch tools or tell the user.
+                        content = mcp_failure_message(
+                            category,
+                            getattr(observer, "lang", "en"),
+                            server=find_mcp_server_url(e),
+                            leaf=leaf,
+                        )
+                        logger.error(
+                            "event=agent_step_mcp_failure agent=%s category=%s",
+                            self.agent.agent_name,
+                            category,
+                            exc_info=True,
+                        )
+                        observer.add_message(
+                            agent_name=self.agent.agent_name,
+                            process_type=ProcessType.ERROR,
+                            content=content,
+                            error_code=f"mcp_{category}",
+                            retryable=True,
+                        )
+                        raise ValueError(f"Error in interaction: {content}")
                     observer.add_message(agent_name=self.agent.agent_name, process_type=ProcessType.ERROR,
                                          content=f"Error in interaction: {str(e)}")
                     raise ValueError(f"Error in interaction: {str(e)}")

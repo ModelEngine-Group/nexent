@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Isolated transport branches; actual network collaboration is a formal D3."""
 
 import asyncio
@@ -393,3 +395,105 @@ async def test_tls_cause_is_classified_without_message_matching_or_reducing_veri
     with pytest.raises(ModelTransportError, match="^HTTP_TLS_ERROR$"):
         await sender.ainvoke(request())
     assert all(client.is_closed for client in owned)
+
+
+def test_sync_cancel_wakes_reader_but_owner_thread_closes_client(clients):
+    """Keep the socket descriptor valid until its blocking reader has unwound."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    ready, release, shutdown = Event(), Event(), Event()
+    scope = RunCancellationScope()
+    connection = Mock(spec=socket.socket)
+    connection.shutdown.side_effect = lambda _: shutdown.set()
+    stream = SimpleNamespace(get_extra_info=lambda _: connection, close=Mock())
+
+    class BlockingBody(httpx.SyncByteStream):
+        def __iter__(self):
+            ready.set()
+            assert release.wait(3)
+            yield b'{}'
+
+    def handler(wire):
+        wire.extensions['trace']('connection.connect_tcp.complete', {'return_value': stream})
+        return httpx.Response(200, stream=BlockingBody())
+
+    owned = clients(handler)
+
+    def invoke():
+        try:
+            HttpRequestSender(lambda _: {}).invoke(request(), scope=scope)
+        except RunTerminated:
+            return 'cancelled'
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(invoke)
+        assert ready.wait(3)
+        try:
+            scope.cancel()
+            assert shutdown.is_set()
+            assert not owned[0].is_closed
+        finally:
+            release.set()
+            assert future.result(timeout=3) == 'cancelled'
+    assert owned[0].is_closed
+    connection.shutdown.assert_called_once_with(socket.SHUT_RDWR)
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize("structured", [False, True])
+@pytest.mark.asyncio
+async def test_http_error_details_are_shared_and_redact_request_credentials(clients, asynchronous, streaming, structured):
+    from nexent.core.model_service.errors import normalize_model_error
+
+    reason = "invalid top_p 1; expected 0.95; secret-key; header-secret"
+    def handler(wire):
+        if structured:
+            return httpx.Response(400, json={"error": {"message": reason, "param": "top_p"}})
+        return httpx.Response(400, text=reason)
+
+    clients(handler)
+    sender = HttpRequestSender(lambda _: {"authorization": "Bearer secret-key"})
+    wire = request(headers={"x-private": "header-secret"}, stream_protocol="sse" if streaming else None)
+    with pytest.raises(ModelTransportError) as caught:
+        if asynchronous:
+            if streaming:
+                async with sender.astream(wire):
+                    pytest.fail("HTTP failure must raise before yielding")
+            else:
+                await sender.ainvoke(wire)
+        elif streaming:
+            with sender.stream(wire):
+                pytest.fail("HTTP failure must raise before yielding")
+        else:
+            sender.invoke(wire)
+    error = normalize_model_error(caught.value, request_id="r1")
+    assert error.safe_message.startswith("(400) invalid top_p 1; expected 0.95;")
+    assert "secret-key" not in error.safe_message and "header-secret" not in error.safe_message
+    assert error.category == "MODEL_REQUEST_INVALID" and not error.retryable
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.asyncio
+async def test_stream_error_frame_retains_credential_redaction_context(clients, asynchronous, openai_profile):
+    from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter, ModelAdapterError
+    from nexent.core.model_service.errors import normalize_model_error
+
+    from nexent.core.model_service.contracts import ModelMessage, ModelRequest
+    stream_request = ModelRequest(request_id="r1", outlet_id=openai_profile.outlet_id,
+                                  config_revision=openai_profile.config_revision, stream=True, messages=[ModelMessage(semantic_role="user")])
+    payload = b'data: {"error":{"message":"invalid header-secret"}}\n\n'
+    clients(lambda _: httpx.Response(200, headers={"content-type": "text/event-stream"}, content=payload))
+    sender = HttpRequestSender(lambda _: {"x-api-key": "header-secret"})
+    wire = request(stream_protocol="sse")
+    adapter = OpenAIChatAdapter()
+    with pytest.raises(ModelAdapterError) as caught:
+        if asynchronous:
+            async with sender.astream(wire) as frames:
+                async for _ in adapter.adecode_stream(frames, stream_request, openai_profile):
+                    pass
+        else:
+            with sender.stream(wire) as frames:
+                list(adapter.decode_stream(frames, stream_request, openai_profile))
+    assert normalize_model_error(caught.value, request_id="r1").safe_message == "invalid [redacted]"

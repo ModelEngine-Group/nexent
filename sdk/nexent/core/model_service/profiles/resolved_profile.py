@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Strict complete outlet snapshot, with safe credential references only."""
 
 import json

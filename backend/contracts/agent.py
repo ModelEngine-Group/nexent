@@ -6,13 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Literal, Optional
 from typing import Optional as Opt
 
-from contracts.clarification import ClarificationResponse
-from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
-from contracts.conversation import HistoryItem
-from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
-from contracts.skill import SkillResolution, SkillZipEntry
-from contracts.tool import ToolParamsRequest
-from infrastructure.agent_prompt import normalize_imported_agent_bundle
+from nexent.core.agent_names import validate_agent_name
 from nexent.core.agents.contracts.config import AgentVerificationConfig, ToolConfig
 from pydantic import (
     BaseModel,
@@ -24,6 +18,14 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from contracts.clarification import ClarificationResponse
+from contracts.constants.constants import WORKBENCH_OFFICIAL_SKILL_NAMES
+from contracts.conversation import ConversationTarget, HistoryItem
+from contracts.knowledge import ConversationKnowledgeScopeRequest, WorkbenchMode
+from contracts.skill import SkillResolution, SkillZipEntry
+from contracts.tool import ToolParamsRequest
+from infrastructure.agent_prompt import normalize_imported_agent_bundle
 
 
 @dataclass(frozen=True)
@@ -401,29 +403,31 @@ class NL2ModelControlsRequest(BaseModel):
 
 
 class NL2AgentRunRequest(NL2ModelControlsRequest):
-    """Request payload for an NL2Agent turn, optionally persisted by Workbench."""
+    """Request payload for an NL2Agent turn, persisted through the common creator history path."""
 
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
-    agent_id: int = Field(gt=0)
+    agent_id: Optional[int] = Field(default=None, gt=0)
+    target: Optional[ConversationTarget] = None
     conversation_id: Optional[int] = Field(default=None, gt=0)
     retry_user_message_id: Optional[int] = Field(default=None, gt=0)
     retry_message_index: Optional[int] = Field(default=None, ge=0)
-    persist_history: bool = False
+    persist_history: bool = True
     workbench_config: Optional[Dict[str, Any]] = None
 
 
 class NL2SkillRunRequest(NL2ModelControlsRequest):
-    """Request payload for an NL2Skill turn, optionally persisted by Workbench."""
+    """Request payload for an NL2Skill turn, persisted through the common creator history path."""
 
     query: str = Field(min_length=1)
     history: Optional[List[HistoryItem]] = None
     minio_files: Optional[List[Dict[str, Any]]] = None
+    target: Optional[ConversationTarget] = None
     conversation_id: Optional[int] = Field(default=None, gt=0)
     retry_user_message_id: Optional[int] = Field(default=None, gt=0)
     retry_message_index: Optional[int] = Field(default=None, ge=0)
-    persist_history: bool = False
+    persist_history: bool = True
     workbench_config: Optional[Dict[str, Any]] = None
     draft_snapshot: Optional[Dict[str, Any]] = None
     language: Optional[Literal["zh", "en"]] = None
@@ -548,6 +552,11 @@ class AgentInfoRequest(BaseModel):
     example_questions: Optional[List[str]] = None
     icon_url: Optional[str] = None
     version_no: int = 0
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: Optional[str]) -> Optional[str]:
+        return validate_agent_name(value) if value is not None else None
 
     @field_validator("verification_config", mode="before")
     @classmethod

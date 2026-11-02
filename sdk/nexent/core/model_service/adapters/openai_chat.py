@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """OpenAI-compatible chat framing; runtime execution and retries stay outside."""
 
 import json
@@ -201,6 +203,8 @@ class OpenAIChatAdapter:
             validate_saved_parameter_values(rules, profile.parameter_values)
             bindings = validate_parameter_bindings(rules, parameter_transform_references())
             for key, binding in bindings.items():
+                if key in {"temperature", "top_p"} and getattr(profile.capabilities.sampling, key).status == "unsupported":
+                    continue
                 if key in profile.parameter_values:
                     _set(body, _tokens(binding["path"]), transform_parameter(binding, profile.parameter_values[key]),
                          binding["path"])

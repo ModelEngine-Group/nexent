@@ -226,6 +226,10 @@ prompt_mod.AgentPromptComposer = MagicMock()
 budget_mod = _sdk_pkg("nexent.core.agents.context.budget")
 budget_mod.message_role = lambda message: getattr(message, "role", "")
 
+# Execution history is not configured in this planning-only fixture.
+execution_history_mod = _sdk_pkg("sdk.nexent.core.agents.context.execution_history")
+execution_history_mod.ExecutionHistory = type("ExecutionHistory", (), {})
+
 # verification stub
 verification_mod = _sdk_pkg("nexent.core.agents.cores.smolagents.verification")
 

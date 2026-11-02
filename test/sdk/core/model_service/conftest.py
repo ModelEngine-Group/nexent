@@ -1,22 +1,26 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Shared controlled outlet fixture for provider adapter unit boundaries."""
 
 import pytest
-from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
-from nexent.core.model_service.profiles.composition import compose_provider_model_policy
-from nexent.core.model_service.profiles.contracts import VersionedReference
-from nexent.core.model_service.profiles.outlet_resolution import (
-    construct_resolved_model_profile,
-)
-from nexent.core.model_service.profiles.resolved_profile import (
-    ConnectionRules,
-    ContextConfiguration,
-    OutletConnection,
-)
-from nexent.core.model_service.profiles.resolver import load_profile_catalog
 
 
 @pytest.fixture(scope="module")
 def openai_profile():
+    # Keep unrelated contract tests collectible before adapter-specific fixtures are used.
+    from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
+    from nexent.core.model_service.profiles.composition import compose_provider_model_policy
+    from nexent.core.model_service.profiles.contracts import VersionedReference
+    from nexent.core.model_service.profiles.outlet_resolution import (
+        construct_resolved_model_profile,
+    )
+    from nexent.core.model_service.profiles.resolved_profile import (
+        ConnectionRules,
+        ContextConfiguration,
+        OutletConnection,
+    )
+    from nexent.core.model_service.profiles.resolver import load_profile_catalog
+
     catalog = load_profile_catalog()
     ref = VersionedReference(ref="adapter_fixture_v1", version=1)
     registry = {
@@ -68,3 +72,13 @@ def openai_profile():
         ),
         registered_references=registry,
     )
+
+
+@pytest.fixture(scope="module")
+def protocol_profile():
+    """Validated protocol input independent of the later outlet storage layer."""
+    from pathlib import Path
+    from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
+
+    sample = Path(__file__).parent / "fixtures" / "openai_protocol_profile.json"
+    return ResolvedModelProfile.model_validate_json(sample.read_text())

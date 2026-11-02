@@ -3,14 +3,18 @@
 import { t as translate } from "i18next";
 import type { RuntimeGenerationOverrides } from "@/features/model-controls/turnControls";
 import type { ClarificationResponse } from "@/types/clarification";
-import { API_ENDPOINTS, ApiError } from "./api";
+import { API_ENDPOINTS, ApiError, fetchWithErrorHandling } from "./api";
 
 import { chatConfig } from "@/const/chatConfig";
 import type {
   ConversationListResponse,
   ConversationListPage,
   ConversationListParams,
+  AgentConversationGroupPage,
+  AgentGroupConversationPage,
   ApiConversationDetail,
+  ConversationTarget,
+  CreatorHistoryPage,
   ApiConversationResponse,
   WorkbenchPins,
 } from "@/types/conversation";
@@ -38,6 +42,102 @@ const getWebSocketUrl = (endpoint: string): string => {
 };
 
 export const conversationService = {
+  async getCreatorHistories(
+    kind: ConversationTarget["type"],
+    targetId: number,
+    offset = 0
+  ): Promise<CreatorHistoryPage> {
+    const query = new URLSearchParams({
+      kind,
+      target_id: String(targetId),
+      offset: String(offset),
+      limit: "20",
+    });
+    const response = await fetchWithErrorHandling(
+      `${API_ENDPOINTS.conversation.creatorHistories}?${query}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
+    const payload = await response.json();
+    if (payload.code !== 0) throw new ApiError(payload.code, payload.message);
+    return payload.data;
+  },
+  async bindTarget(id: number, target: ConversationTarget): Promise<void> {
+    const response = await fetch(API_ENDPOINTS.conversation.target(id), {
+      method: "PATCH",
+      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify(target),
+    });
+    if (!response.ok) throw new Error("Failed to bind conversation target");
+  },
+  async getAgentGroups(
+    params: {
+      limit?: number;
+      cursor?: string | null;
+      search?: string;
+      includeAgentIds?: readonly number[];
+      includeOther?: boolean;
+    } = {}
+  ): Promise<AgentConversationGroupPage> {
+    const query = new URLSearchParams({ limit: String(params.limit ?? 10) });
+    if (params.cursor) query.set("cursor", params.cursor);
+    if (params.search?.trim()) query.set("search", params.search.trim());
+    for (const agentId of params.includeAgentIds ?? []) {
+      query.append("include_agent_id", String(agentId));
+    }
+    if (params.includeOther) query.set("include_other", "true");
+    const response = await fetch(
+      `${API_ENDPOINTS.conversation.agentGroups}?${query.toString()}`
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data as AgentConversationGroupPage;
+  },
+
+  async getAgentGroupConversations(params: {
+    groupKey: string;
+    limit?: number;
+    cursor?: string | null;
+    search?: string;
+  }): Promise<AgentGroupConversationPage> {
+    const query = new URLSearchParams({ limit: String(params.limit ?? 10) });
+    if (params.cursor) query.set("cursor", params.cursor);
+    if (params.search?.trim()) query.set("search", params.search.trim());
+    const response = await fetch(
+      `${API_ENDPOINTS.conversation.agentGroupConversations(params.groupKey)}?${query.toString()}`
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return data.data as AgentGroupConversationPage;
+  },
+
+  async getAgentConversationIds(agentId: number): Promise<string[]> {
+    const response = await fetch(
+      API_ENDPOINTS.conversation.agentGroupConversationIds(agentId)
+    );
+    const data = await response.json();
+    if (!response.ok || data.code !== 0) {
+      throw new ApiError(
+        data.code || response.status,
+        data.message || data.detail
+      );
+    }
+    return Array.isArray(data.data?.items)
+      ? data.data.items.map((id: number | string) => String(id))
+      : [];
+  },
+
   async getWorkbenchPins(): Promise<WorkbenchPins> {
     const response = await fetch(API_ENDPOINTS.conversation.workbenchPins);
     const data = await response.json();
@@ -1100,6 +1200,7 @@ export const conversationService = {
         description?: string;
       }>;
       agent_id?: number; // Add agent_id parameter
+      target?: ConversationTarget;
       model_id?: number; // Optional model override
       generation_config?: RuntimeGenerationOverrides;
       reasoning_effort?:
@@ -1160,7 +1261,7 @@ export const conversationService = {
         requestParams.draft_snapshot = params.draft_snapshot;
         requestParams.language = params.language;
       }
-      if (params.persist_history && params.runtime_mode) {
+      if (params.runtime_mode) {
         requestParams.persist_history = true;
         requestParams.workbench_config = params.workbench_config;
       }
@@ -1177,6 +1278,8 @@ export const conversationService = {
       ) {
         requestParams.conversation_id = params.conversation_id;
       }
+
+      if (params.target) requestParams.target = params.target;
 
       // Only include agent_id if it has a value
       if (params.agent_id !== undefined && params.agent_id !== null) {

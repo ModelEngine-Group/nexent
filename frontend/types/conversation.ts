@@ -1,12 +1,50 @@
 // Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+export interface ConversationTarget {
+  type: "agent" | "skill";
+  id: number;
+}
+
+export interface CreatorHistoryPage {
+  items: ConversationListItem[];
+  total: number;
+}
+
 export interface ConversationListItem {
   conversation_id: number;
   conversation_title: string;
   agent_id?: number | null;
+  target?: ConversationTarget | null;
+  agent_system_key?: string | null;
   create_time: number;
   update_time: number;
   last_activity_time?: number;
+}
+
+export interface AgentConversationGroup {
+  group_key: string;
+  agent_id: number | null;
+  agent_name: string | null;
+  agent_available: boolean;
+  last_activity_time: number;
+  matched_conversation: boolean;
+}
+
+export interface AgentConversationGroupPage {
+  /** Regular group page; pinned groups are returned separately. */
+  items: AgentConversationGroup[];
+  pinned_items: AgentConversationGroup[];
+  /** Active thread groups that are outside the regular group page. */
+  included_items: AgentConversationGroup[];
+  next_cursor?: string | null;
+}
+
+export interface AgentGroupConversationPage {
+  /** Activity-ordered conversation page. */
+  items: Array<ConversationListItem & { pinned_at?: string | null }>;
+  /** Full pin snapshot for this group, independent of the activity cursor. */
+  pinned_items: Array<ConversationListItem & { pinned_at?: string | null }>;
+  next_cursor?: string | null;
 }
 
 export type ConversationDetailReader = (
@@ -111,11 +149,14 @@ export interface StreamingMessage {
 
 export interface ApiConversationDetail {
   create_time: number;
+  last_activity_time?: number;
   // The history endpoint currently serializes this id as a string, while
   // other conversation endpoints return a number.
   conversation_id: number | string;
   conversation_title?: string;
   agent_id?: number | null;
+  target?: ConversationTarget | null;
+  agent_system_key?: string | null;
   chat_mode?: "planning" | "execution";
   knowledge_scope?:
     import("./knowledgeScope").ConversationKnowledgeScope | null;

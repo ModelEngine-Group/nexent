@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Controlled body-only extra parameter validation and JSON Pointer application."""
 
 import json
@@ -6,6 +8,8 @@ from typing import Mapping, Sequence
 
 from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError, _json_copy
 
+
+PROTECTED_CONNECTION_PATHS = ("/api_key", "/authorization", "/headers", "/credentials", "/base_url")
 
 _CONTROLLED_PATHS = ("/model", "/messages", "/tools", "/tool_choice", "/stream", "/stream_options")
 _MAX_BYTES, _MAX_DEPTH, _MAX_LEAVES = 64 * 1024, 16, 128
@@ -107,3 +111,20 @@ def apply_extra_api_parameters(
     for tokens, entry in accepted:
         _set(copied_body, tokens, entry["value"], entry["path"])
     return copied_body
+
+
+
+def overlay_extra_api_parameters(profile, overrides):
+    """Apply historical explicit custom replacements/removals at a boundary."""
+    if not isinstance(overrides, Mapping) or any(not isinstance(key, str) or not key for key in overrides):
+        raise ParameterValidationError("LEGACY_CUSTOM_PARAMETERS_INVALID")
+    extras = list(profile.extra_api_parameters)
+    for key, value in overrides.items():
+        path = "/" + key.replace("~", "~0").replace("/", "~1")
+        extras = [entry for entry in extras if entry["path"] != path and not entry["path"].startswith(path + "/")]
+        if value is not None:
+            extras.append({"path": path, "value": value})
+    apply_extra_api_parameters({}, extras,
+        parameter_paths=[rule["api_binding"]["path"] for rule in profile.parameter_rules if rule.get("api_binding")],
+        protected_paths=PROTECTED_CONNECTION_PATHS)
+    return extras

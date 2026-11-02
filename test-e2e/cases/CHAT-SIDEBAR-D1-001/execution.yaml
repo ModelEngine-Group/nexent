@@ -13,8 +13,8 @@ acceptance_bindings:
   - '[CHAT-SIDEBAR-D1-001] batch deletion resolves server IDs and resets the deleted
     active conversation'
   AC-02:
-  - '[CHAT-SIDEBAR-D1-001] selecting an agent group loads all pages and deletes only its conversations'
+  - "[CHAT-SIDEBAR-D1-001] selecting an Agent resolves and deletes all only that Agent's conversations"
   AC-03:
-  - '[CHAT-SIDEBAR-D1-001] agent-group page failures do not partially select or delete conversations'
+  - '[CHAT-SIDEBAR-D1-001] Agent ID query failures do not partially select or delete conversations'
   AC-04:
-  - '[CHAT-SIDEBAR-D1-001] history search expands matching Agent groups and restores manual expansion'
+  - '[CHAT-SIDEBAR-D1-001] server search expands matching Agent groups and preserves manual expansion'

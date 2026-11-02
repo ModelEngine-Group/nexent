@@ -1,0 +1,42 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-HISTORY-20261030
+  change_type: requirement
+  requirement_id: AGENT-HISTORY-20261030
+  title: Deduplicate execution history and compact with cached summaries and result
+    recall
+  description: Use accepted code and one execution result; selected finalized results
+    receive cached summaries and authorized message/unit-index recall.
+  affected_features:
+    existing:
+    - F-171
+    - F-183
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+    - UT-SDK-AUTO-FD74C47E39BAE2FC
+    added:
+    - AGENT-HISTORY-D3-001
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+    - Final provider messages contain code once and result once, preserving false
+      values, failures and guardrail output.
+    - Only selected records generate a summary once; original text is recalled by
+      authorized message and unit index.
+    - Summary is preserved in unit JSON and loading does not immediately recompact.
+    reason: Existing UT lacks summary/recall and final-message regression assertions;
+      add focused unit tests without duplicating them as D1.
+    test_selectors:
+    - test/sdk/core/agents/test_execution_history_compaction.py
+    - test/sdk/core/agents/test_context_manager_assembly.py
+    - test/sdk/core/agents/test_history_context_runtime.py
+    - test/sdk/core/agents/test_context_helper_contracts.py
+    - test/sdk/core/agents/test_guardrail_checkpoints.py
+    - test/backend/services/test_execution_result_units.py
+    - test/backend/services/test_agent_execution_history_stream.py
+    - test/backend/database/test_execution_result_read_db.py

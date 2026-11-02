@@ -1,4 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Convert already-authorized resources; execution and prompt policy stay in Runtime."""
 
 import json

@@ -315,7 +315,7 @@ class TestConfigAppRouterConfiguration:
             config_app,
             "validate_external_service_configuration",
             new=validate_external,
-        ), patch.object(config_app, "ENABLE_AGENT_WORKBENCH", True):
+        ):
             asyncio.run(exercise_lifespan())
 
         assert config_app.app.lifespan is config_app.config_lifespan
@@ -324,7 +324,7 @@ class TestConfigAppRouterConfiguration:
             config_app.config_thread_manager
         )
         schedule_upload_cleanup.assert_awaited_once_with("nexent-config")
-        schedule_workbench_main_backfill.assert_called_once_with()
+        schedule_workbench_main_backfill.assert_not_called()
         validate_external.assert_awaited_once_with()
         dreaming_scheduler.start.assert_awaited_once_with()
         dreaming_scheduler.stop.assert_awaited_once_with()

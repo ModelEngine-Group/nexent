@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Old persisted values are interpreted by the same pure functions used by Agent construction."""
 
 from copy import deepcopy

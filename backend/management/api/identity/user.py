@@ -164,7 +164,7 @@ async def delete_user_endpoint(
     - Soft-delete user-tenant relationship and groups
     - Soft-delete memory configs and conversations
     - Clear user-level memories
-    - Permanently delete user from Supabase
+    - Permanently delete user from local account store
 
     Args:
         user_id: User identifier

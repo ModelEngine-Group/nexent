@@ -443,6 +443,7 @@ function AgentSetupContent({
                 onStopped={handleGenerationStopped}
                 onRunStart={markRunStarted}
                 onRunEnd={markRunFinished}
+                onConversationChange={handleGenerationStopped}
               />
             </div>
           </PanelCard>

@@ -673,15 +673,15 @@ export class AgentPage {
     return id;
   }
 
-  /** Switch the debug pane between single and compare modes via its header menu. */
+  /** Switch the debug pane between single and compare modes via its header toggle. */
   private async setDebugCompareMode(enabled: boolean): Promise<void> {
     const debugPanel = this.debugPanel();
-    await debugPanel.getByRole("button", { name: "调试选项", exact: true }).click();
-    const item = this.page
-      .getByRole("menuitem", { name: enabled ? "对比模式" : "默认模式", exact: true })
-      .last();
-    await expect(item).toBeVisible();
-    await item.click();
+    const toggle = debugPanel.getByRole("button", { name: "切换对比模式", exact: true });
+    await expect(toggle).toBeVisible();
+    if ((await toggle.getAttribute("aria-pressed")) !== String(enabled)) {
+      await toggle.click();
+    }
+    await expect(toggle).toHaveAttribute("aria-pressed", String(enabled));
   }
 
   async openDebugCompare(): Promise<void> {

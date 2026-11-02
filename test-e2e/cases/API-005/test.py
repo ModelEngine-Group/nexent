@@ -1,80 +1,23 @@
-"""D2 identity, session, token and external-login boundary contracts."""
-
-from __future__ import annotations
-
-import uuid
-
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+"""Local JWT compatibility contract against the real router and PostgreSQL."""
+import sys
+from pathlib import Path
 import pytest
+sys.path.insert(0,str(Path(__file__).resolve().parents[2]/"infra/automation"))
+from local_auth_http import native_runtime, runtime, register, bearer
+pytestmark=[pytest.mark.case_id("API-005"),pytest.mark.stage("D2")]
 
-from shared.auth import sign_in
-from shared.http import assert_status, client
-from shared.resource_ids import absent_numeric_id
-
-
-STAGE = pytest.mark.stage("D2")
-
-
-def _data(response):
-    payload = response.json()
-    return payload.get("data") if isinstance(payload, dict) else None
-
-
-
-
-
-
-
-
-
-
-@STAGE
-@pytest.mark.case_id("API-005")
-@pytest.mark.asyncio
-async def test_refresh_token_returns_valid_session_for_same_user() -> None:
-    identity = await sign_in("tenant_a_user")
-    if not identity.refresh_token:
-        pytest.skip("signin response did not provide the refresh-token asset required by API-005")
-    async with client("config", token=identity.access_token) as api:
-        response = await api.post("/user/refresh_token", json={"refresh_token": identity.refresh_token})
-    assert_status(response, 200)
-    from shared.auth import _find_string
-    new_access = _find_string(response.json(), {"access_token", "accesstoken", "token"})
-    # Rotation is an auth-provider policy, not an API contract. Providers may
-    # return the same still-valid JWT when refreshed within the same second.
-    assert new_access
-    async with client("config", token=new_access.removeprefix("Bearer ")) as refreshed:
-        current = await refreshed.get("/user/current_user_id")
-    assert_status(current, 200)
-    assert str(_data(current)["user_id"]) == identity.user_id
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+def test_local_jwt_identity_and_session_without_refresh(runtime):
+    client, auth, helpers, models = runtime
+    data = register(client)
+    token = data["session"]["access_token"]
+    assert data["session"]["refresh_token"] == ""
+    session = client.get("/api/user/session", headers=bearer(token))
+    assert session.status_code == 200
+    assert session.json()["data"]["user"]["id"] == data["user"]["id"]
+    current = client.get("/api/user/current_user_info", headers=bearer(token))
+    assert current.status_code == 200
+    assert current.json()["data"]["user"]["tenant_id"] == "tenant-native"
+    refresh = client.post("/api/user/refresh_token", headers=bearer(token),json={"refresh_token":"retired-refresh"})
+    assert refresh.status_code == 401
+    assert "access_token" not in refresh.text

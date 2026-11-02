@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 from __future__ import annotations
 
 import hashlib
@@ -559,7 +561,8 @@ def verify_context_budget_capacity(
             expected=w1_fingerprint,
             actual=budget_snapshot.w1_fingerprint,
         )
-    if provider and provider != budget_snapshot.provider:
+    # Provider IDs are normalized when legacy records become resolved outlets.
+    if provider and str(provider).casefold() != budget_snapshot.provider.casefold():
         raise ContextBudgetCapacityMismatch(
             field="provider",
             expected=provider,

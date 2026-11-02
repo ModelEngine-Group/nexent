@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Whole-row outlet codec validates ownership, versions and saved configuration."""
 
 from copy import deepcopy
@@ -126,6 +128,19 @@ def encode(document):
 
 def decode(row):
     return decode_resolved_model_profile(row, registered_references=REGISTRY)
+
+
+def test_output_cap_and_request_default_have_independent_single_locations(document):
+    document["capabilities"] = {"context": {"output_limit": 32000}}
+    document["parameter_rules"].append(rule("max_output_tokens"))
+    document["parameter_values"]["max_output_tokens"] = 4096
+    row = encode(document)
+    assert row["max_output_tokens"] == 32000
+    assert row["default_max_output_tokens"] == 4096
+    assert "max_output_tokens" not in row["extra_params"]["parameter_values"]
+    restored = decode(row)
+    assert restored.capabilities.context.output_limit == 32000
+    assert restored.parameter_values["max_output_tokens"] == 4096
 
 
 def test_complete_snapshot_round_trip_without_duplicate_values_or_credentials(document):

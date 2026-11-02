@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, Union
 
 import httpx
 
-from nexent.consts.mcp_errors import MCPConnectionTimeoutError, MCPToolTimeoutError
+from nexent.consts.mcp_errors import MCPConnectionFailure, MCPConnectionTimeoutError, MCPToolTimeoutError
 from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.concurrency import ManagedExecution, ManagedTaskSpec, RunCancellationScope, ThreadManager
 
@@ -134,9 +134,18 @@ class ManagedMCPToolCollection:
                         ),
                         timeout=self.connect_timeout_seconds,
                     )
+                except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+                    raise
                 except asyncio.TimeoutError as exc:
                     raise MCPConnectionTimeoutError(
                         f"MCP connection timed out after {self.connect_timeout_seconds:g} seconds"
+                    ) from exc
+                except Exception as exc:
+                    # Attribute the failure to this server so terminal messages
+                    # can name it; the original error stays on __cause__.
+                    raise MCPConnectionFailure(
+                        url=str(parameters.get("url", "unknown")),
+                        transport=str(parameters.get("transport", "unknown")),
                     ) from exc
                 connections.append(connection)
 

@@ -307,6 +307,62 @@ def test_request_output_budget_cannot_be_silently_ignored(saved_profile):
         adapter._create_model()
 
 
+def test_adapter_freezes_connection_headers_and_credential_scope(saved_profile, mocker):
+    from threading import Event
+
+    from nexent.core.agents.contracts.config import AgentConfig, ModelConfig
+    from nexent.core.agents.contracts.run import AgentRunInfo
+    from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+
+    authentication = mocker.patch("nexent.core.model_service.registry.AuthenticationRegistry").return_value
+    service = mocker.patch("nexent.core.model_service.service.ModelService")
+    model = ModelConfig(cite_name="fixture", model_name="qwen3.5-plus", url="http://fixture/v1",
+                        resolved_profile=saved_profile, api_key="original-credential",
+                        http_headers={"X-Gateway-Route": "original-route"})
+    info = AgentRunInfo(query="Request", observer=Mock(spec=MessageObserver), stop_event=Event(),
+                        tenant_id="tenant", model_config_list=[model],
+                        agent_config=AgentConfig(name="fixture", description="Fixture", model_name="fixture", tools=[]))
+    adapter = JiuwenAdapter(info)
+    adapter.model_config = model
+    adapter.scope = RunCancellationScope(info.stop_event)
+    adapter._create_model()
+    model.http_headers["X-Gateway-Route"] = "later-route"
+    model.api_key = "later-credential"
+    service.call_args.args[0](saved_profile)
+    profile, lookup = authentication.sender_for.call_args.args
+    assert profile is saved_profile
+    assert authentication.sender_for.call_args.kwargs["http_headers"] == {"X-Gateway-Route": "original-route"}
+    assert lookup("tenant", saved_profile.connection.credential_ref) == "original-credential"
+    with pytest.raises(PermissionError, match="scope mismatch"):
+        lookup("other-tenant", saved_profile.connection.credential_ref)
+    assert "http_headers" not in model.model_dump()
+
+
+def test_adapter_uses_resolved_a2a_callables_for_authorization_and_delegation(saved_profile):
+    from threading import Event
+
+    from nexent.core.agent_names import resolve_external_agent_configs
+    from nexent.core.agents.contracts.config import AgentConfig, ExternalA2AAgentConfig, ModelConfig
+    from nexent.core.agents.contracts.run import AgentRunInfo
+    from nexent.core.agents.cores.jiuwen.adapter import JiuwenAdapter
+
+    external = [ExternalA2AAgentConfig(agent_id=str(index), name=name, url="https://unused.invalid")
+                for index, name in enumerate(["file-helper", "file-helper"], 1)]
+    model = ModelConfig(cite_name="fixture", model_name="qwen3.5-plus", url="http://fixture/v1",
+                        resolved_profile=saved_profile)
+    info = AgentRunInfo(query="Invoke a sub-agent to create a document", observer=Mock(spec=MessageObserver),
+                        stop_event=Event(), tenant_id="tenant", model_config_list=[model],
+                        agent_config=AgentConfig(name="fixture", description="Fixture", model_name="fixture",
+                                                 tools=[], external_a2a_agents=external))
+    adapter = JiuwenAdapter(info)
+    adapter.validate()
+    expected = {item.invocation_name for item in resolve_external_agent_configs(external)}
+    assert {item.invocation_name for item in adapter.external_agents} == expected
+    assert adapter.visible_tool_names == expected
+    assert adapter.delegation.pending and adapter.delegation.names == expected
+    assert all(item.invocation_name is None for item in info.agent_config.external_a2a_agents)
+
+
 @pytest.mark.parametrize("invalid", [None, "tools", "refusal", "nontext"])
 def test_context_summary_accepts_shared_chat_messages_and_validates_completion(saved_profile, invalid):
     from nexent.core.agents.cores.jiuwen.context import SummaryModel

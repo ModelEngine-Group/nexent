@@ -8,7 +8,10 @@ from concurrent.futures import CancelledError
 from contextvars import Context, copy_context
 from dataclasses import replace
 
-from nexent.consts.mcp_errors import is_mcp_connection_timeout_error, is_mcp_timeout_error
+from nexent.consts.mcp_errors import (
+    classify_mcp_failure, describe_exception_leaf, find_mcp_server_url,
+    is_mcp_connection_timeout_error, is_mcp_timeout_error, mcp_failure_message,
+)
 from nexent.core.agents.contracts.adapter import ModelOutputProtocolExhaustedError
 from nexent.core.agents.contracts.run import AgentRunInfo
 from nexent.core.agents.orchestration.execution import (
@@ -77,6 +80,38 @@ def _is_mcp_timeout_error(error: BaseException) -> bool:
     return is_mcp_timeout_error(error)
 
 
+def _resolve_mcp_server_url(error: BaseException, mcp_host: list | None) -> str | None:
+    """Best-effort server URL for user-facing messages: per-server attribution
+    first, then the single configured MCP host when there is exactly one."""
+    attributed = find_mcp_server_url(error)
+    if attributed:
+        return attributed
+    urls = []
+    for item in mcp_host or []:
+        url = item.get("url") if isinstance(item, dict) else item
+        if isinstance(url, str) and url:
+            urls.append(url)
+    return urls[0] if len(urls) == 1 else None
+
+
+
+def _mcp_failure_message(
+    agent_run_info: AgentRunInfo,
+    mcp_host: list | None,
+    error: BaseException,
+    category: str,
+    leaf: BaseException | None,
+) -> str:
+    """Return a localized friendly message for a classified MCP failure."""
+    return mcp_failure_message(
+        category,
+        getattr(agent_run_info.observer, "lang", "en"),
+        server=_resolve_mcp_server_url(error, mcp_host),
+        leaf=leaf,
+    )
+
+
+
 def _agent_run_error_message(
     agent_run_info: AgentRunInfo,
     mcp_host: list | None,
@@ -93,6 +128,12 @@ def _agent_run_error_message(
             if agent_run_info.observer.lang == "zh"
             else "Couldn't connect to the MCP server."
         )
+    if mcp_host:
+        category, leaf = classify_mcp_failure(error)
+        if category:
+            return _mcp_failure_message(agent_run_info, mcp_host, error, category, leaf)
+        if isinstance(error, BaseExceptionGroup) and leaf is not None:
+            return f"Run Agent Error: {describe_exception_leaf(leaf)}"
     return f"Run Agent Error: {error}"
 
 
@@ -199,6 +240,10 @@ def _agent_run_thread(agent_run_info: AgentRunInfo):
         raise
     except Exception as e:
         agent_run_info.attempt_outcome = "failed"
+        logger.error(
+            "event=agent_run_failed conversation_id=%s error=%r",
+            getattr(agent_run_info, "conversation_id", None), e, exc_info=True,
+        )
         if getattr(agent_run_info, "run_result", None) is None:
             agent_run_info.observer.add_message(
                 "", ProcessType.FINAL_ANSWER, _agent_run_error_message(agent_run_info, mcp_host, e),

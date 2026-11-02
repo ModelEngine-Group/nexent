@@ -38,6 +38,7 @@ sa_mod.text = MagicMock(name="text")
 sa_mod.String = MagicMock(name="String")
 sa_mod.cast = MagicMock(name="cast")
 sa_mod.or_ = MagicMock(name="or_")
+sa_mod.exists = MagicMock(name="exists")
 orm_mod = types.ModuleType("sqlalchemy.orm")
 orm_mod.Session = MagicMock(name="Session")
 sys.modules["sqlalchemy.orm"] = orm_mod
@@ -195,6 +196,7 @@ db_models_mod.ConversationSourceSearch = ConversationSourceSearch
 db_models_mod.ConversationSourceImage = ConversationSourceImage
 db_models_mod.AgentAutomationProposal = AgentAutomationProposal
 db_models_mod.KnowledgeRecord = MagicMock(name="KnowledgeRecord")
+db_models_mod.AgentInfo = MagicMock(name="AgentInfo")
 
 sys.modules["management.db.models"] = db_models_mod
 sys.modules["management.db.models"] = db_models_mod
@@ -224,6 +226,7 @@ sys.modules["management.utils.audit_fields"] = utils_mod
 
 
 # Import module under test after stubbing
+
 from contracts.errors.exceptions import HistorySummaryPersistenceError
 from management.db.conversation.repository import _parse_history_summary_content, create_conversation, create_conversation_message, create_message_unit, create_message_units, create_source_image, create_source_search, delete_conversation, delete_conversations_batch, delete_source_image, delete_source_search, fail_streaming_assistant_messages, get_conversation, get_conversation_history, get_historical_context, get_conversation_list, get_conversation_list_page, get_conversation_messages, get_last_unit_for_message, get_latest_assistant_message, get_latest_assistant_message_id, get_message, get_message_id_by_index, get_message_units, get_source_images_by_conversation, get_source_images_by_message, get_source_searches_by_conversation, get_source_searches_by_message, persist_assistant_run_batch, rename_conversation, resolve_conversation_runtime_metadata, save_history_summary, soft_delete_all_conversations_by_user, update_conversation_agent_id, update_conversation_chat_mode, update_conversation_knowledge_scope, update_conversation_message_content, update_conversation_message_status, update_message_minio_files, update_message_opinion, update_message_unit_content, update_message_unit_status
 from contracts.errors.exceptions import AppException, ConversationNotFoundError, RuntimeMetadataVersionConflict
@@ -1979,7 +1982,7 @@ def test_get_conversation_list_page_supports_unpaginated_empty_result(
 
 
 @pytest.mark.parametrize("conversation_type, predicate", [
-    ("agent_chat", "is_"),
+    ("agent_chat", "is_not"),
     ("workbench", "is_not"),
 ])
 def test_conversation_page_filters_origin_before_pagination(

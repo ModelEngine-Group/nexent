@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Immutable atomic views and exact provider-model policy composition."""
 
 import json
@@ -26,7 +28,7 @@ from nexent.core.model_service.profiles.resolver import SourceCatalog, SourceCat
 from nexent.core.model_service.profiles.supplements import SupplementCatalog
 
 
-COMPOSER_REF = "profile_policy_composer_v4"
+COMPOSER_REF = "profile_policy_composer_v6"
 _CAPABILITY_PATHS = frozenset(
     f"/{group}/{field}"
     for group, fields in {
@@ -136,17 +138,10 @@ def _merge_capability_facts(target: dict, facts: Mapping) -> None:
             target[key] = _json_copy(value)
 
 
-def _compose_declarations(base: Mapping, model: Mapping, provider: Mapping, combination: Mapping, path: str) -> dict:
-    """Equal-priority atom conflicts require an explicit combination declaration."""
-    conflicts = {
-        key
-        for key in model.keys() & provider.keys()
-        if not json_values_equal(model[key], provider[key]) and key not in combination
-    }
-    if conflicts:
-        raise ProfileCompositionError("PROFILE_CONFLICT", path + "/" + min(conflicts))
+def _compose_declarations(base: Mapping, *layers: Mapping) -> dict:
+    """Overlay complete declarations in explicit model/provider/combination order."""
     result = _json_copy(base)
-    for declarations in (model, provider, combination):
+    for declarations in layers:
         result.update(_json_copy(declarations))
     return result
 
@@ -243,54 +238,36 @@ def compose_provider_model_policy(
     model = catalog.models.get(model_profile_key) if model_profile_key is not None else None
     if model_profile_key is not None and model is None:
         raise ProfileCompositionError("MODEL_PROFILE_NOT_FOUND")
-    capabilities = _json_copy(model.capabilities) if model else _capabilities({})
-    overrides = list(model.overrides) if model else []
-    # Provider rules precede exact hosted-model facts and combination overrides.
-    for atom in (provider, combo):
+    # Complete the upstream baseline before applying any Nexent experience rule.
+    capabilities = _capabilities({})
+    for atom in (model, provider, combo):
+        if atom is not None:
+            _merge_capability_facts(capabilities, atom.source.capabilities)
+    overrides = []
+    parameters = {}
+    for atom in (model, provider, combo):
         if atom is None:
             continue
-        if atom is combo:
-            _merge_capability_facts(capabilities, atom.source.capabilities)
         for override in atom.overrides:
             group, field = override["path"][1:].split("/")
             overrides.append(
                 _apply_override(
                     capabilities,
-                    {
-                        **override,
-                        "value": atom.capabilities[group][field],
-                    },
+                    {**override, "value": atom.capabilities[group][field]},
                     override["source"],
                 )
             )
+        for parameter in atom.parameters:
+            parameters[parameter["key"]] = _json_copy(parameter)
     capabilities = _capabilities(capabilities)
-    parameters, conflicts = {}, set()
-    for atom in (model, provider):
-        for parameter in atom.parameters if atom else ():
-            key = parameter["key"]
-            if key in parameters and not json_values_equal(parameters[key], parameter):
-                conflicts.add(key)
-            else:
-                parameters[key] = _json_copy(parameter)
-    for parameter in combo.parameters if combo else ():
-        parameters[parameter["key"]] = _json_copy(parameter)
-        conflicts.discard(parameter["key"])
-    if conflicts:
-        raise ProfileCompositionError("PROFILE_CONFLICT", "/parameter_rules/" + min(conflicts))
     for rule in protocol_parameter_rules:
         declaration = _json_copy(rule)
-        if rule["key"] in {"temperature", "top_p"}:
-            status = capabilities["sampling"][rule["key"]]["status"]
-            if status == "unsupported":
-                continue
-            if status == "unknown":
-                declaration.update(visible=False, allowed_scopes=["outlet"], ui_group="runtime")
         parameters.setdefault(rule["key"], declaration)
     compiled = compile_parameter_rules(list(parameters.values()))
     values = apply_parameter_values(compiled, submitted_values, scope="outlet", saved_values={})
     atomic_bindings = [atom.bindings if atom else {} for atom in (model, provider)]
     explicit_bindings = combo.bindings if combo else {}
-    bindings = _compose_declarations(base_bindings, *atomic_bindings, explicit_bindings, "/bindings")
+    bindings = _compose_declarations(base_bindings, *atomic_bindings, explicit_bindings)
     instruction_declarations = [
         {"strategy": atom.instruction_reference.model_dump(mode="json")} if atom and atom.instruction_reference else {}
         for atom in (model, provider, combo)
@@ -299,7 +276,6 @@ def compose_provider_model_policy(
         _compose_declarations(
             {"strategy": base_instruction.model_dump(mode="json")},
             *instruction_declarations,
-            "/instruction_mapping",
         )["strategy"]
     )
     for name in ("protocol", "auth", "adapter", "code_converter", "native_converter"):

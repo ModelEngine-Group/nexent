@@ -1,0 +1,38 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-TAG-LAYOUT-20261027
+  change_type: bugfix
+  bug_id: AGENT-TAG-LAYOUT-20261027
+  title: Keep agent card tags on one line and remove mine ownership tabs
+  description: Compact repository and mine tags by measured width and remove the extra mine ownership toolbar.
+  observed_behavior: Wrapping tags and the mine ownership toolbar consume extra vertical space.
+  expected_behavior: Tags occupy one line with truncated full-name hints and a +N hover/click popover. Mine always lists all accessible agents without ownership controls.
+  escaped_stage: D1
+  coverage_gap:
+    type: missing_assertion
+    description: Existing pagination and main-agent badge UT do not check measured tag overflow or the mine ownership toolbar.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-069]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+      - frontend/tests/component/agentCardTags.test.tsx
+      - frontend/tests/component/myAgentOwnershipRemoval.test.tsx
+      - frontend/tests/component/repositoryPagination.test.tsx
+      - frontend/tests/component/myAgentMainBadge.test.tsx
+    behaviors:
+      - Fit tags on one line and recalculate overflow on resize and label changes.
+      - Show complete long labels and all tags without triggering card navigation.
+      - Remove mine ownership controls and ownership query filters while retaining search and pagination.
+      - Keep the mine main-agent badge and optional version together in one subtitle row, retaining status rows.
+    reason: Frontend DOM and local layout calculation use component UT. No backend or Python behavior changes; existing F-069 API and runtime cases do not prove this layout. No duplicate formal D1 needed.
+  notes: Design and verification in nexent-doc/nexent/agent-tag-layout/design.md. Browser pixel layout remains separately unverified if no local browser is available.

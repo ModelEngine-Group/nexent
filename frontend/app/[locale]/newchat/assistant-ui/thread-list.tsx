@@ -71,6 +71,7 @@ import { setPendingThreadOperationId } from "../adapter/conversation-thread-list
 import { getVisibleThreadIds } from "./visible-thread-ids";
 import { getVisibleAgentThreads } from "./thread-list-visibility";
 import { hoistPinnedThreads, usePinnedThreads } from "./thread-pins";
+import { AgentHistoryList, AgentHistoryViewport } from "./agent-history-list";
 export { PinnedThreadsProvider } from "./thread-pins";
 
 // Conversation status indicator component
@@ -110,6 +111,7 @@ interface BatchSelectionValue {
   toggle: (id: string) => void;
   isSelected: (id: string) => boolean;
   selectAllVisible: () => void;
+  setVisibleConversationIds: (ids?: readonly string[]) => void;
   toggleAgentGroup: (
     agentId: number,
     visibleThreadIds: readonly string[]
@@ -161,6 +163,8 @@ export const BatchSelectionProvider: FC<{
   const threadAgentOverrides = useThreadAgentOverrides();
   const [batchMode, setBatchMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [externalVisibleConversationIds, setExternalVisibleConversationIds] =
+    useState<readonly string[] | undefined>(undefined);
   const [agentConversationIds, setAgentConversationIds] = useState<
     ReadonlyMap<number, readonly string[]>
   >(() => new Map());
@@ -184,13 +188,15 @@ export const BatchSelectionProvider: FC<{
   const resolveRemoteId = useCallback(
     (id: string): string | undefined => {
       const rawId =
-        serverConversationIds?.get(id) || itemsById.get(id)?.remoteId;
+        serverConversationIds?.get(id) ||
+        itemsById.get(id)?.remoteId ||
+        (conversationType === "agent_chat" ? id : undefined);
       const numericId = Number(rawId);
       return Number.isSafeInteger(numericId) && numericId > 0
         ? String(numericId)
         : undefined;
     },
-    [itemsById, serverConversationIds]
+    [conversationType, itemsById, serverConversationIds]
   );
   const scopedVisibleThreadIds = useMemo(() => {
     const ids = getVisibleThreadIds(
@@ -214,13 +220,22 @@ export const BatchSelectionProvider: FC<{
     threadIds,
     threadItems,
   ]);
-  const visibleConversationIds = useMemo(
-    () =>
-      scopedVisibleThreadIds
-        .map(resolveRemoteId)
-        .filter((id): id is string => Boolean(id)),
-    [scopedVisibleThreadIds, resolveRemoteId]
-  );
+  const visibleConversationIds = useMemo(() => {
+    if (
+      conversationType === "agent_chat" &&
+      externalVisibleConversationIds !== undefined
+    ) {
+      return [...new Set(externalVisibleConversationIds)];
+    }
+    return scopedVisibleThreadIds
+      .map(resolveRemoteId)
+      .filter((id): id is string => Boolean(id));
+  }, [
+    conversationType,
+    externalVisibleConversationIds,
+    scopedVisibleThreadIds,
+    resolveRemoteId,
+  ]);
 
   const toggle = useCallback(
     (id: string) => {
@@ -253,6 +268,12 @@ export const BatchSelectionProvider: FC<{
     });
   }, [setSelectedIds, visibleConversationIds]);
 
+  const setVisibleConversationIds = useCallback(
+    (ids?: readonly string[]) =>
+      setExternalVisibleConversationIds(ids ? [...ids] : undefined),
+    []
+  );
+
   const getAgentGroupSelection = useCallback(
     (agentId: number, visibleIds: readonly string[]) => {
       const completeIds = agentConversationIds.get(agentId);
@@ -284,33 +305,47 @@ export const BatchSelectionProvider: FC<{
       const visibleConversationIds = visibleThreadIds
         .map(resolveRemoteId)
         .filter((id): id is string => Boolean(id));
-      const shouldSelect =
+      const shouldSelectVisible =
         visibleConversationIds.length === 0 ||
         !visibleConversationIds.every((id) => selectedIds.has(id));
 
       loadingAgentIdsRef.current.add(agentId);
       setLoadingAgentIds((previous) => new Set(previous).add(agentId));
       try {
-        const boundaries = getConversationDateBoundaries();
-        const conversationIds = await fetchAgentConversationIds(
-          agentId,
-          (offset, limit) =>
-            conversationService.getList({
-              offset,
-              limit,
-              ...boundaries,
-              conversationType,
-            }),
-          100
-        );
+        let conversationIds: string[];
+        if (conversationType === "agent_chat") {
+          conversationIds =
+            await conversationService.getAgentConversationIds(agentId);
+        } else {
+          const boundaries = getConversationDateBoundaries();
+          conversationIds = await fetchAgentConversationIds(
+            agentId,
+            (offset, limit) =>
+              conversationService.getList({
+                offset,
+                limit,
+                ...boundaries,
+                conversationType,
+              }),
+            100
+          );
+        }
         setAgentConversationIds((previous) => {
           const next = new Map(previous);
           next.set(agentId, conversationIds);
           return next;
         });
-        setSelectedIds((previous) =>
-          setAgentConversationSelection(previous, conversationIds, shouldSelect)
-        );
+        setSelectedIds((previous) => {
+          const shouldSelect =
+            conversationType === "agent_chat"
+              ? !conversationIds.every((id) => previous.has(id))
+              : shouldSelectVisible;
+          return setAgentConversationSelection(
+            previous,
+            conversationIds,
+            shouldSelect
+          );
+        });
       } catch (error) {
         log.error(
           `[ThreadList] Failed to load conversations for agent ${agentId}:`,
@@ -385,6 +420,17 @@ export const BatchSelectionProvider: FC<{
             );
           }
           await aui.threads.reload();
+          if (conversationType === "agent_chat") {
+            void queryClient.invalidateQueries({
+              queryKey: ["agentConversationGroups"],
+            });
+            void queryClient.invalidateQueries({
+              queryKey: ["agentConversationGroupConversations"],
+            });
+            void queryClient.invalidateQueries({
+              queryKey: ["workbench-pins"],
+            });
+          }
           setAgentConversationIds(new Map());
           if (result?.failed_ids?.length) {
             message.warning(
@@ -433,6 +479,7 @@ export const BatchSelectionProvider: FC<{
       toggle,
       isSelected,
       selectAllVisible,
+      setVisibleConversationIds,
       toggleAgentGroup,
       getAgentGroupSelection,
       clear,
@@ -448,6 +495,7 @@ export const BatchSelectionProvider: FC<{
       toggle,
       isSelected,
       selectAllVisible,
+      setVisibleConversationIds,
       toggleAgentGroup,
       getAgentGroupSelection,
       clear,
@@ -566,19 +614,22 @@ interface ThreadListProps {
   searchQuery?: string;
   newChatDesign?: boolean;
   selectedAgentId?: number;
+  onNewConversation?: () => void | Promise<void>;
 }
 
 export const ThreadList: FC<ThreadListProps> = ({
-  activeThreadId,
   generatedTitles,
   serverConversationIds,
   onHistoryAgentSelected,
+  activeThreadId,
   onRenameSuccess,
   searchQuery = "",
   newChatDesign = false,
   selectedAgentId,
+  onNewConversation,
 }) => {
   const { t } = useTranslation();
+  const batchSelection = useBatchSelection();
   const [completedConversations, setCompletedConversations] = useState(
     () => new Set<string>()
   );
@@ -625,10 +676,11 @@ export const ThreadList: FC<ThreadListProps> = ({
   }, []);
 
   return (
-    <div className="flex flex-col p-2">
+    <div className={cn("flex flex-col p-2", newChatDesign && "min-h-0 flex-1")}>
       <div
         className={cn(
           "mb-1 flex h-8 items-center justify-between py-1",
+          newChatDesign && "shrink-0",
           newChatDesign ? "px-1" : "px-3"
         )}
       >
@@ -646,43 +698,63 @@ export const ThreadList: FC<ThreadListProps> = ({
         </p>
         <BatchManageButton newChatDesign={newChatDesign} />
       </div>
-      <AuiIf condition={(s) => s.threads.isLoading}>
-        <ThreadListSkeleton />
-      </AuiIf>
-      <AuiIf
-        condition={(s) => !s.threads.isLoading && visibleThreadIds.length === 0}
-      >
-        <ThreadListEmpty />
-      </AuiIf>
-      <AuiIf
-        condition={(s) => !s.threads.isLoading && visibleThreadIds.length > 0}
-      >
-        <ThreadListItems
-          activeThreadId={activeThreadId}
-          visibleThreadIds={visibleThreadIds}
-          completedConversations={completedConversations}
-          generatedTitles={generatedTitles}
-          onHistoryAgentSelected={onHistoryAgentSelected}
-          onRenameSuccess={onRenameSuccess}
-          searchQuery={searchQuery}
-          newChatDesign={newChatDesign}
-          selectedAgentId={selectedAgentId}
-          expandedAgentKeys={expandedAgentKeys}
-          onToggleAgentExpanded={toggleAgentExpanded}
-        />
-      </AuiIf>
-      {hasMore && !isLoading && (
-        <ThreadListPrimitive.LoadMore
-          disabled={isLoadingMore}
-          className="mt-1 flex h-8 w-full items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted-foreground hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {isLoadingMore ? <ArrowDownIcon className="size-3.5" /> : null}
-          <span>
-            {isLoadingMore
-              ? t("chat.threadList.loadingMore")
-              : t("chat.threadList.loadMore")}
-          </span>
-        </ThreadListPrimitive.LoadMore>
+      {newChatDesign ? (
+        <AgentHistoryViewport enabled={selectedAgentId === undefined}>
+          <AgentHistoryList
+            searchQuery={searchQuery}
+            selectedAgentId={selectedAgentId}
+            generatedTitles={generatedTitles}
+            onHistoryAgentSelected={onHistoryAgentSelected}
+            onRenameSuccess={onRenameSuccess}
+            onNewConversation={onNewConversation}
+            batch={batchSelection}
+          />
+        </AgentHistoryViewport>
+      ) : (
+        <>
+          <AuiIf condition={(s) => s.threads.isLoading}>
+            <ThreadListSkeleton />
+          </AuiIf>
+          <AuiIf
+            condition={(s) =>
+              !s.threads.isLoading && visibleThreadIds.length === 0
+            }
+          >
+            <ThreadListEmpty />
+          </AuiIf>
+          <AuiIf
+            condition={(s) =>
+              !s.threads.isLoading && visibleThreadIds.length > 0
+            }
+          >
+            <ThreadListItems
+              activeThreadId={activeThreadId}
+              visibleThreadIds={visibleThreadIds}
+              completedConversations={completedConversations}
+              generatedTitles={generatedTitles}
+              onHistoryAgentSelected={onHistoryAgentSelected}
+              onRenameSuccess={onRenameSuccess}
+              searchQuery={searchQuery}
+              newChatDesign={newChatDesign}
+              selectedAgentId={selectedAgentId}
+              expandedAgentKeys={expandedAgentKeys}
+              onToggleAgentExpanded={toggleAgentExpanded}
+            />
+          </AuiIf>
+          {hasMore && !isLoading && (
+            <ThreadListPrimitive.LoadMore
+              disabled={isLoadingMore}
+              className="mt-1 flex h-8 w-full items-center justify-center gap-2 rounded-lg px-3 text-xs text-muted-foreground hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isLoadingMore ? <ArrowDownIcon className="size-3.5" /> : null}
+              <span>
+                {isLoadingMore
+                  ? t("chat.threadList.loadingMore")
+                  : t("chat.threadList.loadMore")}
+              </span>
+            </ThreadListPrimitive.LoadMore>
+          )}
+        </>
       )}
     </div>
   );

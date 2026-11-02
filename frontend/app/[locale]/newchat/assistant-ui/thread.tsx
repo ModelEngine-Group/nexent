@@ -215,6 +215,7 @@ export interface ThreadProps {
   modelParameterSettings?: ModelParameterSettingsControl;
   modelSelectionScope?: ModelSelectionScope;
   showConversationTitle?: boolean;
+  showAgentCreationResult?: boolean;
   composerTools?: ReactNode;
   knowledgeScope?: ConversationKnowledgeScope | null;
   knowledgePreview?: KnowledgeScopeEffectivePreview | null;
@@ -281,6 +282,7 @@ export const Thread: FC<ThreadProps> = ({
   modelParameterSettings,
   modelSelectionScope = "agent",
   showConversationTitle = true,
+  showAgentCreationResult = true,
   composerTools,
   knowledgeScope = null,
   knowledgePreview = null,
@@ -443,6 +445,7 @@ export const Thread: FC<ThreadProps> = ({
             modelParameterSettings ?? controls.modelParameterSettings
           }
           showConversationTitle={showConversationTitle}
+          showAgentCreationResult={showAgentCreationResult}
           composerTools={composerTools}
           knowledgeScope={knowledgeScope}
           knowledgePreview={knowledgePreview}
@@ -564,6 +567,7 @@ interface ThreadViewProps {
   showModelSelector: boolean;
   modelParameterSettings?: ModelParameterSettingsControl;
   showConversationTitle: boolean;
+  showAgentCreationResult: boolean;
   composerTools?: ReactNode;
   knowledgeScope: ConversationKnowledgeScope | null;
   knowledgePreview: KnowledgeScopeEffectivePreview | null;
@@ -629,6 +633,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   showModelSelector,
   modelParameterSettings,
   showConversationTitle,
+  showAgentCreationResult,
   composerTools,
   knowledgeScope,
   knowledgePreview,
@@ -794,6 +799,7 @@ const ThreadView: FC<ThreadViewProps> = ({
           {hasMessages ? (
             <ThreadMessages
               agent={agent}
+              showAgentCreationResult={showAgentCreationResult}
               readOnly={readOnly || isShareMode}
               enableSkillDirectives={Boolean(skillFiles)}
               onSkillFileSelect={onSkillFileSelect}
@@ -977,6 +983,7 @@ export const ReadOnlyConversation: FC<{
 
 export const ThreadMessages: FC<{
   agent: Agent | PublishedAgent;
+  showAgentCreationResult?: boolean;
   readOnly?: boolean;
   modelSelectionDisabled?: boolean;
   shareMode?: boolean;
@@ -988,6 +995,7 @@ export const ThreadMessages: FC<{
   onSkillFileSelect?: (path: string) => void;
 }> = ({
   agent,
+  showAgentCreationResult = true,
   readOnly = false,
   shareMode = false,
   shareSelectionDisabled = false,
@@ -1033,6 +1041,7 @@ export const ThreadMessages: FC<{
   );
   const renderState = {
     agent,
+    showAgentCreationResult,
     readOnly,
     enableSkillDirectives,
     onSkillFileSelect,
@@ -1233,9 +1242,15 @@ const MessageDateSeparator: FC = () => {
 
 const AssistantMessage: FC<{
   agent: Agent | PublishedAgent;
+  showAgentCreationResult?: boolean;
   readOnly?: boolean;
   onSkillFileSelect?: (path: string) => void;
-}> = ({ agent, readOnly = false, onSkillFileSelect }) => {
+}> = ({
+  agent,
+  readOnly = false,
+  onSkillFileSelect,
+  showAgentCreationResult = true,
+}) => {
   // Reserves space for the action bar; `-mb` compensates so the action bar's
   // hover-revealed position does not shift the message spacing. For pt-[n]
   // use `-mb-[n + 6]` and `min-h-[n + 6]` to preserve the compensation.
@@ -1602,7 +1617,8 @@ const AssistantMessage: FC<{
         {skillFileAttachments?.length ? (
           <AssistantMessageAttachments attachments={skillFileAttachments} />
         ) : null}
-        {typeof createdAgent?.agentId === "number" &&
+        {showAgentCreationResult &&
+        typeof createdAgent?.agentId === "number" &&
         createdAgent.agentId > 0 ? (
           <AgentCreationResultCard
             agentId={createdAgent.agentId}

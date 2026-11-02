@@ -1,38 +1,17 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Authorized resources cross a stable conversion boundary without execution."""
 
 import json
 
 import pytest
-from nexent.core.agents.contracts.resources import ResourceItem, RuntimeResourceView
+from nexent.core.agents.contracts.resources import RuntimeResourceView
 from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
-from nexent.core.model_service.contracts import ModelMessage, ToolCall, ToolDefinition
 from nexent.core.model_service.resource_conversion import (
     ResourceConverterRegistry,
     ResourceRequestConverter,
 )
-from pydantic import ValidationError
-
-
-def item(role, text, order, source="history", **kwargs):
-    return ResourceItem(message=ModelMessage(
-        semantic_role=role, content_parts=[{"type": "text", "text": text}], **kwargs,
-    ), source=source, order=order)
-
-
-def resources():
-    return RuntimeResourceView(
-        instructions=[item("application_instruction", "skill", 2, "activated_skill_instruction"),
-                      item("platform_instruction", "platform", 1, "platform_instruction")],
-        references=[item("reference_data", "knowledge", 3, "knowledge")],
-        history=[item("assistant_history", "progress", 4, tool_calls=[ToolCall(
-            provider_call_id="call-1", index=0, name="lookup", raw_arguments='{"q":"x"}',
-        )])],
-        tool_observations=[item("tool_result", "result", 5, "tool", tool_call_id="call-1")],
-        authorized_metadata=[item("reference_data", "approved metadata", 6, "metadata")],
-        current_user_input=item("user_input", "continue", 7, "current_input"),
-        tool_definitions=[ToolDefinition(name="lookup", description="Find data", input_schema={"type": "object"})],
-    )
+from test.sdk.core.model_service.resource_fixtures import resources
 
 
 def test_native_conversion_preserves_every_resource_and_tool_association(openai_profile):
@@ -79,21 +58,6 @@ def test_text_protocol_is_selected_before_request_without_changing_resources(ope
         assert {"historical_tool_result": "call-1"} in blocks
         assert {"available_tools": [tool.model_dump() for tool in view.tool_definitions]} in blocks
     assert view.model_dump() == before
-
-
-def test_resource_boundary_rejects_privilege_promotion_and_execution_objects():
-    data = resources().model_dump()
-    data["references"][0]["message"]["semantic_role"] = "platform_instruction"
-    with pytest.raises(ValidationError, match="authorized group"):
-        RuntimeResourceView.model_validate(data)
-    data = resources().model_dump()
-    data["executor"] = object()
-    with pytest.raises(ValidationError):
-        RuntimeResourceView.model_validate(data)
-    data = resources().model_dump()
-    data["current_user_input"]["order"] = data["history"][0]["order"]
-    with pytest.raises(ValidationError, match="ordering"):
-        RuntimeResourceView.model_validate(data)
 
 
 def test_converter_registry_rejects_unknown_versions():

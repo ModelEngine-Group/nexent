@@ -116,7 +116,6 @@ def test_signin_success_records_audit_entry(caplog, mocker):
 
 def test_logout_success_records_audit_entry(caplog, mocker):
     """Successful logout records the resolved operator and tenant."""
-    mocker.patch("management.api.identity.user_management.get_authorized_client", return_value=MagicMock())
     mocker.patch("management.api.identity.user_management.get_current_user_id", return_value=("u-3", "t-3"))
 
     with caplog.at_level(logging.INFO, logger=AUDIT_LOGGER):

@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Finite parameter schema validation without evaluation or remote resolution."""
 
 import json

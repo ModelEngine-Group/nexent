@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Explicit parameter policy shared by outlet and conversation configuration."""
 
 import json
@@ -238,3 +240,26 @@ def validate_saved_parameter_values(
         elif rule["required"] and key not in values:
             raise ParameterValidationError("PARAMETER_VALUE_REQUIRED", _pointer(key))
     return values
+
+
+def overlay_profile_parameters(profile, submitted, *, scope):
+    """Exclude inactive inherited thinking values, never contradictory explicit input."""
+    inherited = dict(profile.parameter_values)
+    if submitted.get("enable_thinking") is False:
+        for rule in profile.parameter_rules:
+            if (rule.get("condition") == {"key": "enable_thinking", "op": "eq", "value": True}
+                    and rule["key"] not in submitted):
+                inherited.pop(rule["key"], None)
+    values = overlay_saved_parameter_values(
+        compile_parameter_rules(profile.parameter_rules), submitted, scope=scope, saved_values=inherited,
+    )
+    data = profile.model_dump(mode="json")
+    data["parameter_values"] = values
+    return profile.__class__.model_validate(data)
+
+
+def patch_parameter_values(saved, submitted, deleted):
+    """Apply explicit deletions without copying defaults into persistent overrides."""
+    if len(set(deleted)) != len(deleted) or set(deleted) & submitted.keys():
+        raise ParameterValidationError("PARAMETER_UPDATE_CONFLICT")
+    return {**{key: value for key, value in saved.items() if key not in deleted}, **submitted}

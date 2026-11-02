@@ -1,5 +1,5 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-"""Persist Workbench creation runs without changing the editor's ephemeral NL2 flows."""
+"""One history persistence path for all creator entrypoints."""
 
 import json
 import logging
@@ -8,8 +8,8 @@ from typing import Any
 
 from contracts.conversation import MessageRequest, MessageUnit
 from contracts.agent import WorkbenchSessionConfig
-from management.db.agent.repository import query_agent_records_for_nl2agent
-from management.db.conversation.repository import get_conversation_history, rebind_conversation_agent_id
+from management.db.conversation.repository import get_conversation_history
+from management.services.conversation.creator_targets import bind_creator_target
 from management.services.conversation.service import (
     create_new_conversation,
     save_message,
@@ -39,6 +39,7 @@ def prepare_creation_history(
     agent_id: int | None,
     user_id: str,
     tenant_id: str,
+    target: dict[str, Any] | None = None,
     retry_user_message_id: int | None = None,
     retry_message_index: int | None = None,
 ) -> tuple[int, int]:
@@ -48,46 +49,29 @@ def prepare_creation_history(
     if conversation_id is None:
         if retry_user_message_id is not None or retry_message_index is not None:
             raise ValueError("Cannot retry without a creation conversation")
-        if not isinstance(workbench_config, dict):
-            raise ValueError("Invalid Workbench creation configuration")
-        normalized_config = WorkbenchSessionConfig.model_validate(
-            workbench_config
-        ).model_dump(mode="json")
-        if normalized_config["mode"] != mode:
-            raise ValueError("Invalid Workbench creation configuration")
+        normalized_config = None
+        if workbench_config is not None:
+            normalized_config = WorkbenchSessionConfig.model_validate(workbench_config).model_dump(mode="json")
+            if normalized_config["mode"] != mode:
+                raise ValueError("Invalid creation configuration")
         created = create_new_conversation(
-            title="新对话",
+            title="新对话" if normalized_config is not None else (" ".join(query.split()) or "新对话")[:100],
             user_id=user_id,
-            agent_id=agent_id if mode == "agent_create" else None,
+            agent_id=agent_id,
+            target=target,
             workbench_config=normalized_config,
         )
         resolved_id = int(created["conversation_id"])
         next_index = 0
     else:
         history = get_conversation_history(conversation_id, user_id)
-        if not history or (history.get("workbench_config") or {}).get("mode") != mode:
+        stored_mode = (history.get("workbench_config") or {}).get("mode") if history else None
+        if not history or history.get("agent_id") != agent_id or (stored_mode and stored_mode != mode):
             raise ValueError("Conversation is not an accessible creation session")
-        if mode == "agent_create" and history.get("agent_id") != agent_id:
-            old_agent_id = history.get("agent_id")
-            old_records = (
-                query_agent_records_for_nl2agent(old_agent_id, tenant_id)
-                if isinstance(old_agent_id, int) and old_agent_id > 0
-                else []
-            )
-            # An inaccessible or still-live Agent must never be silently replaced.
-            # Soft-deleted tenant-owned records are the only recoverable case.
-            if (
-                retry_user_message_id is not None
-                or retry_message_index is not None
-                or not isinstance(agent_id, int)
-                or agent_id <= 0
-                or not old_records
-                or any(record.get("delete_flag") != "Y" for record in old_records)
-                or not rebind_conversation_agent_id(
-                    conversation_id, old_agent_id, agent_id, user_id
-                )
-            ):
-                raise ValueError("Agent does not match the creation session")
+        if target is not None and history.get("target") != target:
+            if retry_user_message_id is not None or retry_message_index is not None:
+                raise ValueError("Cannot change a creation retry target")
+            bind_creator_target(conversation_id, target, user_id, tenant_id)
         resolved_id = conversation_id
         if retry_user_message_id is not None or retry_message_index is not None:
             user_record = next(

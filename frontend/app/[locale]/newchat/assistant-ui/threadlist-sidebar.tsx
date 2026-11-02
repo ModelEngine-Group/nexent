@@ -49,6 +49,7 @@ type RenameSuccessHandler = (
 
 interface ThreadListSidebarProps extends SidebarProps {
   selectedAgent?: Agent | null;
+  isRestoringView?: boolean;
   activeThreadId?: string;
   className?: string;
   generatedTitles?: ReadonlyMap<string, string>;
@@ -69,6 +70,7 @@ interface ThreadListSidebarProps extends SidebarProps {
 
 export function ThreadListSidebar({
   selectedAgent,
+  isRestoringView = false,
   activeThreadId,
   generatedTitles,
   serverConversationIds,
@@ -98,7 +100,9 @@ export function ThreadListSidebar({
   const { t } = useTranslation();
   const isMobile = useIsMobile();
   const compactCollapse = collapseToHeader || collapseToFloatingButton;
-  const isDiscoveringAgents = newChatDesign && !selectedAgent;
+  const isRestoringSidebar = newChatDesign && isRestoringView && !selectedAgent;
+  const isDiscoveringAgents =
+    newChatDesign && !selectedAgent && !isRestoringSidebar;
   const selectedAgentId = selectedAgent ? Number(selectedAgent.id) : undefined;
   const isCollapsed =
     compactCollapse && isMobile
@@ -288,47 +292,62 @@ export function ThreadListSidebar({
                 <div className="flex flex-col gap-2 px-1">
                   {newChatDesign ? (
                     <div className="flex items-center gap-1">
-                      {/* Back chevron: returns to the discover-agents landing
-                          page (same handler the old filled button used). */}
-                      {onPrepareNewConversation && !isDiscoveringAgents && (
-                        <TooltipIconButton
-                          tooltip={t("chat.sidebar.discoverAgents")}
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 shrink-0"
-                          onClick={onPrepareNewConversation}
-                        >
-                          <ChevronLeftIcon className="size-4" />
-                        </TooltipIconButton>
-                      )}
-                      {isDiscoveringAgents ? (
-                        <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-                          {t("sidebar.startChat")}
-                        </span>
-                      ) : onAgentSelected ? (
-                        <div className="min-w-0 flex-1">
-                          <AgentSelectorDropdown
-                            selectedAgent={selectedAgent}
-                            onAgentSelected={onAgentSelected}
+                      {isRestoringSidebar ? (
+                        <>
+                          <div
+                            aria-hidden
+                            className="h-8 min-w-0 flex-1 animate-pulse rounded-lg bg-[#e5e7eb]"
                           />
-                        </div>
-                      ) : null}
-                      <TooltipIconButton
-                        tooltip={t("chat.sidebar.search")}
-                        variant="ghost"
-                        size="icon"
-                        className="relative left-3 size-8 shrink-0"
-                        onClick={() => {
-                          setSearchOpen((open) => !open);
-                          setConversationSearch("");
-                        }}
-                      >
-                        <SearchIcon className="size-4" />
-                      </TooltipIconButton>
-                      <SidebarTrigger
-                        aria-label={t("chatLeftSidebar.collapseSidebar")}
-                        className="relative left-2 size-8 shrink-0 hover:bg-[#e5e7eb] hover:text-[#243447]"
-                      />
+                          <SidebarTrigger
+                            aria-label={t("chatLeftSidebar.collapseSidebar")}
+                            className="relative left-2 size-8 shrink-0 hover:bg-[#e5e7eb] hover:text-[#243447]"
+                          />
+                        </>
+                      ) : (
+                        <>
+                          {/* Back chevron: returns to the discover-agents landing
+                          page (same handler the old filled button used). */}
+                          {onPrepareNewConversation && !isDiscoveringAgents && (
+                            <TooltipIconButton
+                              tooltip={t("chat.sidebar.discoverAgents")}
+                              variant="ghost"
+                              size="icon"
+                              className="size-8 shrink-0"
+                              onClick={onPrepareNewConversation}
+                            >
+                              <ChevronLeftIcon className="size-4" />
+                            </TooltipIconButton>
+                          )}
+                          {isDiscoveringAgents ? (
+                            <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+                              {t("sidebar.startChat")}
+                            </span>
+                          ) : onAgentSelected ? (
+                            <div className="min-w-0 flex-1">
+                              <AgentSelectorDropdown
+                                selectedAgent={selectedAgent}
+                                onAgentSelected={onAgentSelected}
+                              />
+                            </div>
+                          ) : null}
+                          <TooltipIconButton
+                            tooltip={t("chat.sidebar.search")}
+                            variant="ghost"
+                            size="icon"
+                            className="relative left-3 size-8 shrink-0"
+                            onClick={() => {
+                              setSearchOpen((open) => !open);
+                              setConversationSearch("");
+                            }}
+                          >
+                            <SearchIcon className="size-4" />
+                          </TooltipIconButton>
+                          <SidebarTrigger
+                            aria-label={t("chatLeftSidebar.collapseSidebar")}
+                            className="relative left-2 size-8 shrink-0 hover:bg-[#e5e7eb] hover:text-[#243447]"
+                          />
+                        </>
+                      )}
                     </div>
                   ) : (
                     <>
@@ -410,6 +429,7 @@ export function ThreadListSidebar({
                     </>
                   )}
                   {newChatDesign &&
+                    !isRestoringSidebar &&
                     !isDiscoveringAgents &&
                     onNewConversation && (
                       // Prominent pill per the design reference: white fill on
@@ -456,21 +476,29 @@ export function ThreadListSidebar({
               <SidebarContent
                 className={cn(
                   "focus:outline-none",
+                  newChatDesign && "overflow-hidden",
                   isDiscoveringAgents && toolbarStyles.discovery
                 )}
               >
-                <ThreadList
-                  onHistoryAgentSelected={onHistoryAgentSelected}
-                  activeThreadId={activeThreadId}
-                  generatedTitles={generatedTitles}
-                  serverConversationIds={serverConversationIds}
-                  onRenameSuccess={onRenameSuccess}
-                  searchQuery={
-                    newChatDesign ? conversationSearch : legacySearchQuery
-                  }
-                  newChatDesign={newChatDesign}
-                  selectedAgentId={selectedAgentId}
-                />
+                {isRestoringSidebar ? (
+                  <AgentHistorySidebarSkeleton
+                    label={t("chat.threadList.loading")}
+                  />
+                ) : (
+                  <ThreadList
+                    onHistoryAgentSelected={onHistoryAgentSelected}
+                    activeThreadId={activeThreadId}
+                    generatedTitles={generatedTitles}
+                    serverConversationIds={serverConversationIds}
+                    onRenameSuccess={onRenameSuccess}
+                    onNewConversation={onNewConversation}
+                    searchQuery={
+                      newChatDesign ? conversationSearch : legacySearchQuery
+                    }
+                    newChatDesign={newChatDesign}
+                    selectedAgentId={selectedAgentId}
+                  />
+                )}
               </SidebarContent>
               <SidebarFooter className="mt-auto p-0 empty:hidden">
                 <BatchSidebarFooter />
@@ -480,5 +508,19 @@ export function ThreadListSidebar({
         </PinnedThreadsProvider>
       </div>
     </ThreadListPrimitive.Root>
+  );
+}
+
+function AgentHistorySidebarSkeleton({ label }: { label: string }) {
+  return (
+    <div role="status" aria-label={label} className="flex flex-col gap-1.5 p-2">
+      {Array.from({ length: 8 }, (_, index) => (
+        <div
+          key={index}
+          aria-hidden
+          className="h-10 w-full animate-pulse rounded-lg bg-[#e5e7eb]"
+        />
+      ))}
+    </div>
   );
 }

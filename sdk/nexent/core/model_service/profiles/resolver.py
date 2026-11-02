@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Atomic loading of pinned source profiles before Nexent supplements and API bindings."""
 
 import hashlib
@@ -12,16 +14,15 @@ from nexent.core.model_service.profiles._models_dev.inheritance import Effective
 from nexent.core.model_service.profiles._models_dev.mapping import (
     MappedFieldOrigin,
     map_source_fields,
-    parse_mapping_rules,
+    SOURCE_MAPPING,
+    mapping_fingerprint,
 )
 from nexent.core.model_service.profiles._models_dev.reader import (
     SourceDocument,
     SourceReadError,
     _freeze,
-    _read,
     read_inventory,
 )
-from nexent.core.model_service.profiles._models_dev.validation import validate_source_document
 from nexent.core.model_service.profiles.contracts import (
     AtomicProfileReference,
     ContextCapabilities,
@@ -29,9 +30,8 @@ from nexent.core.model_service.profiles.contracts import (
 )
 
 
-PARSER_REF = "models_dev_source_catalog_v1"
+PARSER_REF = "models_dev_source_catalog_v3"
 SUPPORTED_UPSTREAM_REVISION = "e69e1844210e5cfe7c7e7f68d57328bc7451a51c"
-MAPPING_PATH = "rules/mappings/models_dev/v1.toml"
 
 
 @dataclass(frozen=True)
@@ -209,17 +209,22 @@ def _entry(
         refs.append(
             AtomicProfileReference(
                 key=dependency.key,
-                catalog_revision=revision,
+                catalog_revision=dependency.source_revision or revision,
                 file_path=dependency.file_path,
                 content_sha256=dependency.content_sha256,
             )
         )
+    metadata = dict(tree.get("reference_metadata", {}))
+    if document.origin == "nexent":
+        origin = {"kind": document.origin, "revision": document.source_revision, "url": document.source_url}
+        metadata["source_origin"] = origin
+        profile_parts.update({"origin_" + key: value for key, value in origin.items()})
     return SourceCatalogEntry(
         document.kind,
         document.key,
         _freeze(tree.get("identity", {})),
         _freeze(capabilities),
-        _freeze(tree.get("reference_metadata", {})),
+        _freeze(metadata),
         _freeze(tree.get("connection_suggestions", {})),
         _freeze(_normalized_origins(mapped, controls)),
         tuple(refs),
@@ -228,7 +233,7 @@ def _entry(
 
 
 def load_source_catalog(root: Path | None = None) -> SourceCatalog:
-    """Publish only a fully validated immutable source catalog, without caching partial results."""
+    """Convert the submission-checked immutable source catalog without repeating source validation."""
     root = (root if root is not None else Path(__file__).parent).resolve()
     inventory = read_inventory(root)
     if inventory.upstream_revision != SUPPORTED_UPSTREAM_REVISION:
@@ -236,14 +241,13 @@ def load_source_catalog(root: Path | None = None) -> SourceCatalog:
         error.source_path = "upstream_revision"
         error.rule_id = PARSER_REF
         raise error
-    rule_bytes = _read(root, MAPPING_PATH, "mapping")
-    registry = parse_mapping_rules(rule_bytes, MAPPING_PATH)
+    registry = SOURCE_MAPPING
     version_parts = {
         "parser_ref": PARSER_REF,
         "source_schema_ref": inventory.source_schema_ref,
         "mapping_ref": registry.mapping_id,
         "mapping_version": str(registry.mapping_version),
-        "mapping_sha256": hashlib.sha256(rule_bytes).hexdigest(),
+        "mapping_sha256": mapping_fingerprint(registry),
         "upstream_revision": inventory.upstream_revision,
     }
     catalog_parts = {
@@ -255,15 +259,9 @@ def load_source_catalog(root: Path | None = None) -> SourceCatalog:
     providers = {document.key: document for document in inventory.documents if document.kind == "provider"}
     entries = {"model": {}, "provider": {}, "provider_model": {}}
     for document in inventory.documents:
-        validate_source_document(document)
-    for document in inventory.documents:
         source = document
         if document.kind != "provider":
             source = resolve_source_model(document, inventory.documents)
-            effective = SourceDocument(
-                document.kind, document.key, document.file_path, document.content_sha256, source.data
-            )
-            validate_source_document(effective, effective=True)
         entries[document.kind][document.key] = _entry(document, source, registry, providers, revision, version_parts)
     return SourceCatalog(
         revision,

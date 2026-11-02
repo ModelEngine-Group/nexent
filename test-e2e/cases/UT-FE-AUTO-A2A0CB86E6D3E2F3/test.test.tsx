@@ -64,6 +64,10 @@ vi.mock('@/hooks/model/useModelList', () => ({
   }),
 }));
 
+vi.mock('@/hooks/useConfig', () => ({
+  useConfig: () => ({ defaultLlmModelConfig: store.state.defaultLlmConfig, isSuccess: true }),
+}));
+
 vi.mock('@/hooks/model/useInferenceFieldSpecs', () => ({
   useInferenceFieldSpecs: () => ({ data: [], isLoading: false }),
 }));

@@ -39,10 +39,33 @@ bash deploy.sh docker --components infrastructure --port-policy development
 ```bash
 cd backend
 uv sync --extra data-process --extra test
-uv pip install -e "../sdk[dev]"
 ```
 
 以上命令会创建或更新 `backend/.venv`，安装后端依赖，并以可编辑模式安装本地 SDK。修改 `sdk/nexent/` 后无需重复复制包文件。
+
+`data-process` extra（以及 SDK `dev`）默认安装 CPU 版 PyTorch 和 Torchvision。请使用与 CI、镜像构建一致的 uv 0.13.6。Python 保持 3.11，CI 仍固定为 3.11.15。backend 的 test extra 安装完整的本地 `nexent[dev]`；文档处理安装 SDK 的解析及监控 extras。Torch/Torchvision 保持为传递依赖，不在项目中新增直接声明。SDK 包名和 Python 导入名均保持为 `nexent`。
+
+CPU 和 NVIDIA 共用依赖列表，仅通过预置 index 区分：
+
+```bash
+# 在 backend/ 中执行：默认 CPU
+uv sync --extra data-process --extra test
+# 显式选择 CPU
+uv sync --extra data-process --extra test --index pytorch-cpu --upgrade-package torch --upgrade-package torchvision
+# NVIDIA CUDA 13.0
+uv sync --extra data-process --extra test --index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision
+```
+
+项目启用了 uv 的 `index-by-name` 预览功能。默认优先使用 CPU index；`--index` 将选中的预置源提升至最高优先级。NVIDIA index 设为 explicit，仅在显式选择后参与解析。启用的源参与`unsafe-first-match` 解析，包括 Torch 以外的依赖：优先选择首个包含兼容版本的源，遇到不满足约束的旧版通用依赖时继续查找下一源。`--default-index` 仅设置后备镜像源，不会覆盖所选 PyTorch index。未选择文档处理 extra 的基础安装不引入 PyTorch。已有锁文件可能保留之前的 Torch 构建，即使 index 优先级已改变。上面的显式命令通过 `--upgrade-package` 重新解析 Torch 和 Torchvision；不要使用 `--frozen` 切换配置；`uv sync` 会移除不再需要的依赖。安装 CUDA 依赖不代表已验证 GPU 硬件或驱动兼容性。
+
+独立开发 SDK 时，在 `sdk/` 下执行 `uv sync --python 3.11 --extra dev` 使用 CPU，添加 `--index pytorch-nvidia --upgrade-package torch --upgrade-package torchvision` 使用 NVIDIA。切回 CPU 时使用 `--index pytorch-cpu` 并保留这两个 upgrade 参数。不再提供单独的 `nvidia` extra。
+
+从包仓库安装 SDK 时，wheel 元数据不包含本地项目的 uv index 配置，需要显式指定后端：
+
+```bash
+uv pip install "nexent[data-process]" --torch-backend cpu
+uv pip install "nexent[data-process]" --torch-backend cu130
+```
 
 #### 可选：镜像加速
 
@@ -50,16 +73,13 @@ uv pip install -e "../sdk[dev]"
 
 ```bash
 # 清华源
-uv sync --all-extras --default-index https://pypi.tuna.tsinghua.edu.cn/simple
-uv pip install -e "../sdk[dev]" --default-index https://pypi.tuna.tsinghua.edu.cn/simple
+uv sync --extra data-process --extra test --default-index https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 阿里云
-uv sync --all-extras --default-index https://mirrors.aliyun.com/pypi/simple/
-uv pip install -e "../sdk[dev]" --default-index https://mirrors.aliyun.com/pypi/simple/
+uv sync --extra data-process --extra test --default-index https://mirrors.aliyun.com/pypi/simple/
 
 # 多源（推荐）
-uv sync --all-extras --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
-uv pip install -e "../sdk[dev]" --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/
+uv sync --extra data-process --extra test --index pytorch-cpu --index https://pypi.tuna.tsinghua.edu.cn/simple --index https://mirrors.aliyun.com/pypi/simple/ --upgrade-package torch --upgrade-package torchvision
 ```
 
 :::: info 镜像参考

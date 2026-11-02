@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Controlled stream state without network, retry or tool execution."""
 
 import json
@@ -10,6 +12,11 @@ from nexent.core.model_service.adapters.openai_chat import (
 from nexent.core.model_service.adapters.openai_stream import OpenAIStreamDecoder
 from nexent.core.model_service.contracts import ModelMessage, ModelRequest
 from nexent.core.model_service.sse import SSEEvent
+
+
+@pytest.fixture
+def openai_profile(protocol_profile):
+    return protocol_profile
 
 
 @pytest.fixture
@@ -45,6 +52,27 @@ def tool(index, name=None, arguments=None, call_id=None):
     if call_id is not None:
         raw["id"] = call_id
     return raw
+
+
+@pytest.mark.parametrize("continuation_id", [None, ""])
+def test_tool_id_placeholder_preserves_established_call(openai_profile, stream_request, continuation_id):
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile)
+    decoder.push(frame({"tool_calls": [tool(0, "lookup", '{"q":', "call-1")]}))
+    decoder.push(frame({"tool_calls": [tool(0, arguments='"value"}', call_id=continuation_id)]}, finish="tool_calls"))
+    completed = decoder.push(SSEEvent("[DONE]"))[-1].message
+    assert completed.tool_calls[0].provider_call_id == "call-1"
+    assert completed.tool_calls[0].raw_arguments == '{"q":"value"}'
+
+
+def test_identical_terminal_usage_is_idempotent(openai_profile, stream_request):
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile)
+    usage = {"prompt_tokens": 0, "completion_tokens": 2, "total_tokens": 2}
+    first = decoder.push(frame({"content": "OK"}, finish="stop", usage=usage))
+    repeated = decoder.push(SSEEvent(json.dumps({"choices": [], "usage": usage})))
+    assert sum(event.type == "usage" for event in first + repeated) == 1
+    completed = decoder.push(SSEEvent("[DONE]"))
+    assert completed[-1].message.usage.input_tokens == 0
+    assert completed[-1].message.usage.output_tokens == 2
 
 
 def test_interleaved_reasoning_text_and_tools_complete_with_stable_ids(
@@ -148,7 +176,6 @@ def test_refusal_and_unknown_delta_do_not_become_body_or_tool_calls(
     "mode",
     [
         "no_finish",
-        "no_done",
         "only_done",
         "tool_missing_name",
         "tool_missing_id",
@@ -161,8 +188,6 @@ def test_incomplete_stream_never_promotes_tools_to_completion(
     decoder = OpenAIStreamDecoder(stream_request, openai_profile)
     if mode == "no_finish":
         assert decoder.push(frame({"content": "partial"}))[0].type == "text_delta"
-    elif mode == "no_done":
-        decoder.push(frame({"content": "body"}, finish="stop"))
     elif mode.startswith("tool_missing"):
         decoder.push(
             frame(
@@ -182,7 +207,7 @@ def test_incomplete_stream_never_promotes_tools_to_completion(
     elif mode == "tool_finish_without_calls":
         decoder.push(frame({}, finish="tool_calls"))
     with pytest.raises(ModelAdapterError):
-        if mode in {"no_finish", "no_done"}:
+        if mode == "no_finish":
             decoder.finish()
         else:
             decoder.push(SSEEvent("[DONE]"))
@@ -353,13 +378,62 @@ async def test_both_adapter_interfaces_report_truncated_stream(
         ]
 
 
-
-def test_identical_terminal_usage_is_idempotent(openai_profile, stream_request):
+def test_duplicate_usage_and_normal_eof_complete_once(openai_profile, stream_request):
     decoder = OpenAIStreamDecoder(stream_request, openai_profile)
-    usage = {"prompt_tokens": 0, "completion_tokens": 2, "total_tokens": 2}
-    first = decoder.push(frame({"content": "OK"}, finish="stop", usage=usage))
-    repeated = decoder.push(SSEEvent(json.dumps({"choices": [], "usage": usage})))
-    assert sum(event.type == "usage" for event in first + repeated) == 1
-    completed = decoder.push(SSEEvent("[DONE]"))
-    assert completed[-1].message.usage.input_tokens == 0
-    assert completed[-1].message.usage.output_tokens == 2
+    usage = {"prompt_tokens": 2, "completion_tokens": 3, "total_tokens": 5}
+    events = decoder.push(frame({"content": "answer"}, finish="stop", usage=usage))
+    events += decoder.push(SSEEvent(json.dumps({"choices": [], "usage": usage})))
+    events += decoder.finish()
+    assert [event.type for event in events].count("usage") == 1
+    assert [event.type for event in events].count("message_completed") == 1
+    assert events[-1].message.usage.total_tokens == 5
+
+
+def test_explicit_strict_done_still_rejects_eof(openai_profile, stream_request):
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile, require_done=True)
+    decoder.push(frame({"content": "answer"}, finish="stop"))
+    with pytest.raises(ModelAdapterError, match="MODEL_RESPONSE_INCOMPLETE"):
+        decoder.finish()
+
+
+def test_vllm_023_user_sample_accepts_empty_delta_usage_trailer(openai_profile, stream_request):
+    from pathlib import Path
+
+    sample = Path(__file__).resolve().parents[3] / "fixtures/model_service/vllm_023_glm_tail.sse"
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile)
+    events = []
+    for packet in sample.read_text(encoding="utf-8").strip().split("\n\n"):
+        events += decoder.push(SSEEvent(packet.removeprefix("data: ")))
+    assert [e.type for e in events].count("usage") == 1
+    complete = [e.message for e in events if e.type == "message_completed"]
+    assert len(complete) == 1
+    assert complete[0].content_parts == [{"type": "text", "text": "上的疑问，还是日常生活中的好奇，我都很乐意为你提供帮助。"}]
+    assert complete[0].usage.input_tokens == 13
+    assert complete[0].usage.output_tokens == 231
+    assert complete[0].usage.total_tokens == 244
+    assert complete[0].usage.reasoning_tokens == 182
+    assert complete[0].finish_reason == "stop"
+
+
+@pytest.mark.parametrize("delta", [{"content": "late"}, {"reasoning_content": "late"},
+    {"refusal": "late"}, {"tool_calls": [tool(0, "late", "{}", "call-late")]}])
+def test_post_finish_actual_generation_remains_rejected(openai_profile, stream_request, delta):
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile)
+    decoder.push(frame({}, finish="stop"))
+    with pytest.raises(ModelAdapterError, match="^MODEL_STREAM_AFTER_FINISH$"):
+        decoder.push(frame(delta))
+
+
+@pytest.mark.parametrize("finish", [None, "stop"])
+def test_empty_finish_trailer_is_idempotent(openai_profile, stream_request, finish):
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile)
+    decoder.push(frame({"content": "ok"}, finish="stop"))
+    assert decoder.push(frame({"content": "", "tool_calls": []}, finish=finish)) == []
+    assert len(decoder.push(SSEEvent("[DONE]"))) == 1
+
+
+def test_conflicting_finish_trailer_has_precise_error(openai_profile, stream_request):
+    decoder = OpenAIStreamDecoder(stream_request, openai_profile)
+    decoder.push(frame({"content": "ok"}, finish="stop"))
+    with pytest.raises(ModelAdapterError, match="^MODEL_STREAM_FINISH_CONFLICT$"):
+        decoder.push(frame({}, finish="length"))

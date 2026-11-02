@@ -55,6 +55,23 @@ from tool_collection.mcp.nl2agent_mcp_tools import (
 from infrastructure.http.client import create_httpx_client
 
 
+@pytest.fixture(autouse=True)
+def shared_creator_definition(mocker):
+    """Keep external release persistence isolated from creator runtime unit tests."""
+    from contracts.agent import SystemAgentRef
+    from contracts.constants.constants import ASSET_OWNER_TENANT_ID
+    from management.services.agent.creation import build_nl2agent_system_prompt
+
+    mocker.patch(
+        'services.nl2agent_service.system_agent_provider.get_nl2agent_main_ref',
+        return_value=SystemAgentRef(ASSET_OWNER_TENANT_ID, 'nl2agent_main', 77, 0),
+    )
+    mocker.patch('services.nl2agent_service.search_agent_info_by_agent_id', return_value={
+        'agent_id': 77, 'version_no': 0, 'agent_origin': 'SYSTEM', 'max_steps': 8,
+        'prompt': json.dumps({lang: build_nl2agent_system_prompt(lang) for lang in ('zh', 'en')}),
+    })
+
+
 def _context_budget_snapshot() -> ContextBudgetSnapshot:
     values = {
         "resolver_version": "2.0.0",
@@ -1678,7 +1695,9 @@ async def test_build_run_info_is_ephemeral(mocker, query, clarification_required
     request = NL2AgentRunRequest(query=query, agent_id=42, history=[HistoryItem(role='user', content='Build an agent that summarizes weather risks.'), HistoryItem(role='assistant', content='I found matching weather tools.')])
     run_info = await build_nl2agent_run_info(request, 'tenant-a', 'en', 'Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
     assert run_info.query == 'final query'
-    assert run_info.agent_config.name == '__nl2agent_runtime__'
+    assert run_info.agent_config.name == 'nl2agent_main'
+    assert run_info.agent_config.agent_id == 77
+    assert run_info.agent_config.version_no == 0
     assert run_info.agent_config.context_manager_config.token_threshold == 24000
     assert run_info.agent_config.context_manager_config.effective_input_limit_tokens == 30000
     assert run_info.agent_config.context_manager_config.compaction_target_tokens == 18000
@@ -1789,7 +1808,7 @@ async def test_create_stream_wraps_sdk_chunks_and_stops_run(mocker):
     request = NL2AgentRunRequest(query='Build a weather agent', agent_id=42)
     stream = await create_nl2agent_stream(request, 'tenant-a', 'en', 'Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
     chunks = [chunk async for chunk in stream]
-    build_run_info.assert_awaited_once_with(request=request, tenant_id='tenant-a', language='en', authorization='Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'))
+    build_run_info.assert_awaited_once_with(request=request, tenant_id='tenant-a', language='en', authorization='Bearer tenant-token', identity=AuthenticatedIdentity('user-a', 'tenant-a'), system_ref=None)
     assert chunks == ['data: {"type": "tool", "content": "call"}\n\n', 'data: {"type": "nl2a", "content": "{\\"status\\": \\"success\\", \\"recommendation_count\\": 0, \\"recommendations\\": []}"}\n\n']
     run_info.stop_event.set.assert_called_once_with()
 

@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from contracts.errors.exceptions import ForbiddenError, NotFoundException, ValidationError
 from management.db.client import get_db_session
+from management.db.identity.account import create_account
 from management.db.identity.group import add_user_to_group, query_groups
 from management.db.identity.token import create_token, generate_access_key, list_active_tokens_by_tenant, soft_delete_tokens_by_user
 from management.db.identity.user_tenant import get_user_tenant_by_email, get_user_tenant_in_tenant, insert_user_tenant
@@ -73,6 +74,8 @@ def create_api_users_batch(
     with get_db_session() as session:
         for _ in range(count):
             user_id = str(uuid.uuid4())
+            create_account(None, user_id=user_id, api_only=True,
+                           created_by=actor_user_id, db_session=session)
             insert_user_tenant(
                 user_id=user_id,
                 tenant_id=actor_tenant_id,
@@ -85,6 +88,7 @@ def create_api_users_batch(
                 group_id=group["group_id"],
                 user_id=user_id,
                 created_by=actor_user_id,
+                db_session=session,
             )
             token = create_token(
                 generate_access_key(),

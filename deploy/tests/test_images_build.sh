@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -euo pipefail
 
@@ -124,7 +125,7 @@ output="$(bash "$BUILD_SCRIPT" --image web --version v1.2.3 --registry general -
 assert_contains "$output" "nexent/nexent-web:v1.2.3" "explicit image build should keep supporting selected versions"
 assert_not_contains "$output" "nexent/nexent:v1.2.3" "single image build should not build main image"
 
-output="$(bash "$BUILD_SCRIPT" --components infrastructure,supabase,monitoring --version latest --dry-run)"
+output="$(bash "$BUILD_SCRIPT" --components infrastructure,monitoring --version latest --dry-run)"
 assert_contains "$output" "No Nexent images selected for build." "legacy non-application components should produce no Nexent image builds"
 
 if bash "$BUILD_SCRIPT" --images main,unknown --dry-run >/tmp/nexent-image-build-invalid.log 2>&1; then
@@ -158,5 +159,11 @@ assert_contains "$output" "nexent/nexent-web:latest" "interactive default image 
 assert_not_contains "$output" "nexent/nexent-mcp:latest" "interactive default image selection should not include mcp image"
 assert_not_contains "$output" "nexent/nexent-data-process:latest" "interactive default image selection should not include data-process image"
 assert_not_contains "$output" "nexent/nexent-ubuntu-terminal:latest" "interactive default image selection should not include terminal image"
+
+assert_contains "$(cat "$PROJECT_ROOT/deploy/images/dockerfiles/main/Dockerfile")" \
+  "COPY deploy/sql/tools/supabase_to_postgres /opt/deploy/sql/tools/supabase_to_postgres" \
+  "main image must package the standalone account migration tools"
+[ -f "$PROJECT_ROOT/deploy/sql/tools/supabase_to_postgres/migrate_docker.py" ] || fail "Docker migration entry point is missing"
+[ -f "$PROJECT_ROOT/deploy/sql/tools/supabase_to_postgres/migrate_k8s.py" ] || fail "Kubernetes migration entry point is missing"
 
 echo "All image build tests passed."

@@ -1,39 +1,85 @@
-"""Versioned source dispositions, separate from runtime API field bindings."""
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
+"""Code-owned source conversion; submission checks live outside the runtime path."""
+
+import hashlib
+import json
 import re
-import tomllib
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Literal, Mapping
-
-from pydantic import Field, ValidationError
+from dataclasses import asdict, dataclass
+from typing import Mapping
 
 from nexent.core.model_service.profiles._models_dev.inheritance import EffectiveSourceModel, FieldOrigin
-from nexent.core.model_service.profiles._models_dev.reader import SourceDocument, SourceReadError, _freeze
-from nexent.core.model_service.profiles.contracts import NonBlankString, ProfileContract
+from nexent.core.model_service.profiles._models_dev.reader import SourceDocument, _freeze
 
 
-class SourceMappingRule(ProfileContract):
-    """One explicitly scoped authored field disposition."""
+@dataclass(frozen=True)
+class SourceMappingRule:
+    source_kind: str
+    source_path: str
+    target_path: str
+    transform_ref: str = "identity_v1"
+    missing_policy: str = "omit"
 
-    rule_id: NonBlankString
-    rule_version: int = Field(ge=1, le=1)
-    source_schema_ref: Literal["models_dev_authored_v1"]
-    source_kind: Literal["model", "provider", "provider_model"]
-    source_path: NonBlankString
-    source_type: Literal["boolean", "string", "integer", "number", "number_or_string", "object", "array"]
-    target_path: NonBlankString
-    transform_ref: Literal["identity_v1", "boolean_capability_v1", "zero_unknown_tokens_v1"]
-    missing_policy: Literal["omit", "unknown"]
-    special_value_policy: Literal["preserve", "zero_is_unknown", "strict_boolean"]
-    disposition: Literal["map", "reference"]
-    evidence: NonBlankString
+    @property
+    def rule_id(self):
+        return self.source_kind + "." + self.source_path
+
+    rule_version = 1
 
 
-class SourceMappingRegistry(ProfileContract):
-    mapping_id: Literal["models_dev_source_v1"]
-    mapping_version: int = Field(ge=1, le=1)
-    rules: tuple[SourceMappingRule, ...] = Field(min_length=1)
+@dataclass(frozen=True)
+class SourceMappingRegistry:
+    rules: tuple[SourceMappingRule, ...]
+    mapping_id: str = "models_dev_source_v1"
+    mapping_version: int = 1
+
+
+# Common model facts are shared by base and hosted model definitions.
+_COMMON = (
+    ('name', '/identity/name'),
+    ('description', '/identity/description'),
+    ('family', '/identity/family'),
+    ('attachment', '/reference_metadata/attachment'),
+    ('reasoning', '/reasoning/status', 'boolean_capability_v1', 'unknown'),
+    ('tool_call', '/tools/status', 'boolean_capability_v1', 'unknown'),
+    ('structured_output', '/structured_output/status', 'boolean_capability_v1', 'unknown'),
+    ('temperature', '/sampling/temperature/status', 'boolean_capability_v1', 'unknown'),
+    ('open_weights', '/reference_metadata/open_weights'),
+    ('knowledge', '/reference_metadata/knowledge'),
+    ('release_date', '/reference_metadata/release_date'),
+    ('last_updated', '/reference_metadata/last_updated'),
+    ('modalities', '/modalities'),
+    ('modalities.input', '/modalities/input'),
+    ('modalities.input[]', '/modalities/input[]'),
+    ('modalities.output', '/modalities/output'),
+    ('modalities.output[]', '/modalities/output[]'),
+    ('limit', '/reference_metadata/limit'),
+    ('limit.context', '/context/combined_window', 'zero_unknown_tokens_v1', 'unknown'),
+    ('limit.input', '/context/input_limit', 'zero_unknown_tokens_v1', 'unknown'),
+    ('limit.output', '/context/output_limit', 'zero_unknown_tokens_v1', 'unknown'),
+)
+
+
+def _rules():
+    for kind in ("model", "provider_model"):
+        for fields in _COMMON:
+            yield SourceMappingRule(kind, *fields)
+    yield SourceMappingRule('provider', 'name', '/identity/name')
+    yield SourceMappingRule('provider', 'api', '/connection_suggestions/base_url')
+    yield SourceMappingRule('provider_model', 'reasoning_options', '/reasoning/control_candidates')
+    yield SourceMappingRule('provider_model', 'reasoning_options[]', '/reasoning/control_candidates[]')
+    yield SourceMappingRule('provider_model', 'reasoning_options[].type', '/reasoning/control_candidates[]/type')
+    yield SourceMappingRule('provider_model', 'reasoning_options[].values', '/reasoning/control_candidates[]/values')
+    yield SourceMappingRule('provider_model', 'reasoning_options[].values[]', '/reasoning/control_candidates[]/values[]')
+    yield SourceMappingRule('provider_model', 'reasoning_options[].min', '/reasoning/control_candidates[]/min')
+    yield SourceMappingRule('provider_model', 'reasoning_options[].max', '/reasoning/control_candidates[]/max')
+
+
+SOURCE_MAPPING = SourceMappingRegistry(tuple(_rules()))
+
+
+def mapping_fingerprint(registry):
+    return hashlib.sha256(json.dumps(asdict(registry), sort_keys=True).encode()).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -55,80 +101,6 @@ class MappedSourceFields:
     field_origins: Mapping[str, MappedFieldOrigin]
 
 
-def _error(category: str, file_path: str, kind: str, path: str = "") -> SourceReadError:
-    error = SourceReadError(category, file_path, kind)
-    error.source_path = path
-    error.rule_id = "models_dev_source_v1"
-    return error
-
-
-def load_mapping_rules(path: Path) -> SourceMappingRegistry:
-    """Load the explicitly selected local registry; unknown rules fail closed."""
-    try:
-        data = path.read_bytes()
-    except OSError:
-        raise _error("SOURCE_MAPPING_INVALID", path.name, "mapping") from None
-    return parse_mapping_rules(data, path.name)
-
-
-def parse_mapping_rules(data: bytes, file_path: str) -> SourceMappingRegistry:
-    """Parse a captured rule snapshot; revision hashing uses these same bytes."""
-    try:
-        raw = tomllib.loads(data.decode("utf-8"))
-        if isinstance(raw.get("rules"), list):
-            raw["rules"] = tuple(raw["rules"])
-        registry = SourceMappingRegistry.model_validate(raw)
-    except (UnicodeDecodeError, tomllib.TOMLDecodeError, ValidationError):
-        raise _error("SOURCE_MAPPING_INVALID", file_path, "mapping") from None
-    identities = set()
-    rule_ids = set()
-    targets = set()
-    for rule in registry.rules:
-        identity = (rule.source_kind, rule.source_path)
-        if identity in identities or rule.rule_id in rule_ids:
-            raise _error("SOURCE_MAPPING_DUPLICATE", file_path, "mapping", rule.source_path)
-        identities.add(identity)
-        rule_ids.add(rule.rule_id)
-        target_identity = (rule.source_kind, rule.target_path)
-        if target_identity in targets:
-            raise _error("SOURCE_TARGET_CONFLICT", file_path, "mapping", rule.source_path)
-        targets.add(target_identity)
-        if (
-            not re.fullmatch(
-                r"/[a-zA-Z_][a-zA-Z0-9_]*(?:\[\])?(?:/[a-zA-Z_][a-zA-Z0-9_]*(?:\[\])?)*", rule.target_path
-            )
-            or not re.fullmatch(
-                r"[a-zA-Z_][a-zA-Z0-9_]*(?:\[\])?(?:\.[a-zA-Z_][a-zA-Z0-9_]*(?:\[\])?)*", rule.source_path
-            )
-            or rule.source_path.count("[]") != rule.target_path.count("[]")
-        ):
-            raise _error("SOURCE_MAPPING_INVALID", file_path, "mapping", rule.source_path)
-        if (rule.transform_ref == "boolean_capability_v1" and rule.source_type != "boolean") or (
-            rule.transform_ref == "zero_unknown_tokens_v1" and rule.source_type != "integer"
-        ):
-            raise _error("SOURCE_MAPPING_INVALID", file_path, "mapping", rule.source_path)
-        expected_policy = {
-            "identity_v1": "preserve",
-            "boolean_capability_v1": "strict_boolean",
-            "zero_unknown_tokens_v1": "zero_is_unknown",
-        }[rule.transform_ref]
-        if rule.special_value_policy != expected_policy:
-            raise _error("SOURCE_MAPPING_INVALID", file_path, "mapping", rule.source_path)
-    for parent in registry.rules:
-        if parent.source_type in ("object", "array"):
-            continue
-        for child in registry.rules:
-            if (
-                parent.source_kind == "provider_model"
-                and parent.source_path == "interleaved"
-                and child.source_kind == parent.source_kind
-                and child.source_path == "interleaved.field"
-            ):
-                continue
-            if child.source_kind == parent.source_kind and child.target_path.startswith(parent.target_path + "/"):
-                raise _error("SOURCE_TARGET_CONFLICT", file_path, "mapping", child.source_path)
-    return registry
-
 
 def _leaves(value: object, path: str = ""):
     if isinstance(value, Mapping) and value:
@@ -141,51 +113,31 @@ def _leaves(value: object, path: str = ""):
         yield path, value
 
 
-def _typed(value: object, source_type: str) -> bool:
-    return {
-        "boolean": type(value) is bool,
-        "string": isinstance(value, str),
-        "integer": type(value) is int,
-        "number": type(value) in (int, float),
-        "number_or_string": type(value) in (int, float) or isinstance(value, str),
-        "object": isinstance(value, Mapping),
-        "array": isinstance(value, (tuple, list)),
-    }[source_type]
 
-
-def map_source_fields(
-    source: EffectiveSourceModel | SourceDocument, registry: SourceMappingRegistry
-) -> MappedSourceFields:
-    """Map every validated leaf explicitly; no field-name aliases or API paths."""
+def map_source_fields(source, registry=SOURCE_MAPPING) -> MappedSourceFields:
+    """Convert checked source facts; unconsumed fields stay isolated as reference data."""
     document = source.document if isinstance(source, EffectiveSourceModel) else source
     rules = {rule.source_path: rule for rule in registry.rules if rule.source_kind == document.kind}
-    values = {}
-    origins = {}
+    values, origins = {}, {}
     for path, value in _leaves(source.data):
         pattern = re.sub(r"\[\d+\]", "[]", path)
         rule = rules.get(pattern)
         if rule is None:
-            raise _error("SOURCE_FIELD_UNHANDLED", document.file_path, document.kind, path)
-        if not _typed(value, rule.source_type):
-            raise _error("SOURCE_VALUE_INVALID", document.file_path, document.kind, path)
+            target = "/reference_metadata/" + re.sub(r"\[(\d+)\]", r"/\1", path).replace(".", "/")
+            rule = SourceMappingRule(document.kind, pattern, target)
         indexes = iter(re.findall(r"\[(\d+)\]", path))
         target = re.sub(r"\[\]", lambda _: "/" + next(indexes), rule.target_path)
-        if target in values:
-            raise _error("SOURCE_TARGET_CONFLICT", document.file_path, document.kind, path)
         if rule.transform_ref == "boolean_capability_v1":
             value = "supported" if value else "unsupported"
         elif rule.transform_ref == "zero_unknown_tokens_v1" and value == 0:
             value = None
         values[target] = value
         origins[target] = MappedFieldOrigin(
-            source.field_origins[path]
-            if isinstance(source, EffectiveSourceModel)
+            source.field_origins[path] if isinstance(source, EffectiveSourceModel)
             else FieldOrigin(document.kind, document.file_path, path, document.content_sha256),
-            rule.rule_id,
-            rule.rule_version,
-            target,
+            rule.rule_id, rule.rule_version, target,
         )
-    for path, rule in rules.items():
-        if "[]" not in path and rule.missing_policy == "unknown" and rule.target_path not in values:
+    for rule in rules.values():
+        if "[]" not in rule.source_path and rule.missing_policy == "unknown" and rule.target_path not in values:
             values[rule.target_path] = "unknown" if rule.transform_ref == "boolean_capability_v1" else None
     return MappedSourceFields(source, registry.mapping_id, registry.mapping_version, _freeze(values), _freeze(origins))

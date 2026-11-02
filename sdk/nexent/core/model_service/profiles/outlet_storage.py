@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """Fixed single-row storage codec; never loads source catalogs or credentials."""
 
 from typing import Mapping, Sequence

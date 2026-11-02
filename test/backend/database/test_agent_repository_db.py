@@ -160,6 +160,7 @@ class MockSummaryRow:
         defaults = {
             "agent_repository_id": 1,
             "agent_id": 10,
+            "version_no": 1,
             "author": "author",
             "submitted_by": None,
             "name": "test-agent",
@@ -506,10 +507,12 @@ def test_list_agent_repository_summaries_returns_expected_shape(monkeypatch, moc
     assert len(result) == 1
     assert result[0]["agent_repository_id"] == 2
     assert result[0]["agent_id"] == 20
+    assert result[0]["version_no"] == 1
     assert result[0]["create_time"] == datetime(2024, 1, 1)
     assert set(result[0].keys()) == {
         "agent_repository_id",
         "agent_id",
+        "version_no",
         "author",
         "submitted_by",
         "name",

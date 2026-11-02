@@ -178,7 +178,11 @@ def test_create_model_record(monkeypatch):
     monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
 
     # Mock clean_string_values and add_creation_tracking
-    monkeypatch.setattr("management.db.model.repository.db_client.clean_string_values", lambda x: x)
+    # Patch the class attribute: ``db_client`` is an instance and the helper is a
+    # @staticmethod, so patching the instance does not shadow it on every pytest.
+    monkeypatch.setattr(
+        "management.db.client.PostgresClient.clean_string_values", lambda x: x
+    )
     monkeypatch.setattr("management.db.model.repository.add_creation_tracking", lambda x, uid: x)
     monkeypatch.setattr("management.db.model.repository.func.current_timestamp", MagicMock())
 
@@ -210,7 +214,11 @@ def test_update_model_record(monkeypatch):
     monkeypatch.setattr("management.db.model.repository.get_db_session", lambda: mock_ctx)
 
     # Mock clean_string_values and add_update_tracking
-    monkeypatch.setattr("management.db.model.repository.db_client.clean_string_values", lambda x: x)
+    # Patch the class attribute: ``db_client`` is an instance and the helper is a
+    # @staticmethod, so patching the instance does not shadow it on every pytest.
+    monkeypatch.setattr(
+        "management.db.client.PostgresClient.clean_string_values", lambda x: x
+    )
     monkeypatch.setattr("management.db.model.repository.add_update_tracking", lambda x, uid: x)
     monkeypatch.setattr("management.db.model.repository.func.current_timestamp", MagicMock())
 

@@ -9,6 +9,7 @@ import importlib.util
 from pathlib import Path
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch, Mock, PropertyMock, ANY
+import nexent.core.agent_names  # noqa: F401 - Load before dependency namespace stubs.
 
 from test.common.test_mocks import bootstrap_test_env
 
@@ -363,6 +364,11 @@ sys.modules['nexent.memory'].models = sys.modules['nexent.memory.models']
 
 # Create nested modules for nexent.core to satisfy imports safely
 sys.modules['nexent.core'] = _create_stub_module("nexent.core")
+# Keep the real package path so submodules added after this stub (for example
+# the AIDP retrieval policy) can still be imported.
+sys.modules['nexent.core'].__path__ = [
+    str(Path(__file__).parents[3] / "sdk" / "nexent" / "core")
+]
 _concurrency_mod = _create_stub_module("nexent.core.concurrency")
 
 
@@ -6158,7 +6164,7 @@ class TestBuildExternalAgentConfig:
                 transport_type="http-streaming",
                 protocol_version="1.0",
                 protocol_type="JSONRPC",
-                timeout=300.0,
+                timeout=consts_const.A2A_AGENT_INVOCATION_TIMEOUT_SECONDS,
                 ssl_verify=True,
                 raw_card=None,
                 custom_headers=None,
@@ -6184,7 +6190,7 @@ class TestBuildExternalAgentConfig:
                 transport_type="http-streaming",
                 protocol_version="1.0",
                 protocol_type="JSONRPC",
-                timeout=300.0,
+                timeout=consts_const.A2A_AGENT_INVOCATION_TIMEOUT_SECONDS,
                 ssl_verify=True,
                 raw_card=None,
                 custom_headers=None,
