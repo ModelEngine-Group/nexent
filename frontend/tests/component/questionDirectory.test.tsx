@@ -197,3 +197,67 @@ test("QuestionDirectoryButton lists questions and jumps on click", async () => {
   // Clicking an entry closes the popover.
   await waitFor(() => expect(screen.queryByText("第一问是什么")).toBeNull());
 });
+
+test("QuestionDirectoryButton filters questions by keyword", async () => {
+  renderDirectoryButton();
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
+  );
+  const searchBox = await screen.findByRole("textbox", {
+    name: "chat.questions.search",
+  });
+
+  fireEvent.change(searchBox, { target: { value: "第一问" } });
+  await waitFor(() => expect(screen.getByText("第一问是什么")).toBeTruthy());
+  expect(screen.queryByText("data.csv")).toBeNull();
+
+  // Filtering is case-insensitive and matches attachment turns.
+  fireEvent.change(searchBox, { target: { value: "DATA" } });
+  await waitFor(() => expect(screen.getByText("data.csv")).toBeTruthy());
+  expect(screen.queryByText("第一问是什么")).toBeNull();
+});
+
+test("QuestionDirectoryButton shows an empty state for unmatched keywords", async () => {
+  renderDirectoryButton();
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
+  );
+  const searchBox = await screen.findByRole("textbox", {
+    name: "chat.questions.search",
+  });
+
+  fireEvent.change(searchBox, { target: { value: "不存在的关键词" } });
+
+  await waitFor(() =>
+    expect(screen.getByTestId("question-directory-no-matches")).toBeTruthy()
+  );
+  expect(screen.queryByText("第一问是什么")).toBeNull();
+  expect(screen.queryByText("data.csv")).toBeNull();
+});
+
+test("QuestionDirectoryButton resets the keyword when the popover closes", async () => {
+  renderDirectoryButton();
+
+  fireEvent.click(
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
+  );
+  const searchBox = await screen.findByRole("textbox", {
+    name: "chat.questions.search",
+  });
+  fireEvent.change(searchBox, { target: { value: "data" } });
+  await waitFor(() => expect(screen.getByText("data.csv")).toBeTruthy());
+
+  // Close via the trigger; reopening must show the unfiltered directory again.
+  fireEvent.click(
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
+  );
+  await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
+  fireEvent.click(
+    screen.getByRole("button", { name: "chat.questions.viewAll:2" })
+  );
+
+  await waitFor(() => expect(screen.getByText("第一问是什么")).toBeTruthy());
+  expect(screen.getByText("data.csv")).toBeTruthy();
+});

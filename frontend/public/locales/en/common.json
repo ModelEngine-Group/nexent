@@ -483,6 +483,8 @@
   "chat.questions.title": "Question directory",
   "chat.questions.total": "{{count}} questions in total",
   "chat.questions.jump": "Jump to question {{index}}",
+  "chat.questions.search": "Search questions…",
+  "chat.questions.noMatches": "No matching questions",
   "chat.artifacts.generatedAt": "Generated {{time}}",
   "chat.tokenUsage.used": "used",
   "chat.tokenUsage.turn": "this turn",

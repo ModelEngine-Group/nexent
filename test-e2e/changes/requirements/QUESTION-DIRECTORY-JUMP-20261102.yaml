@@ -7,13 +7,14 @@ change:
   description:
     'List every user question asked during a single agent conversation in a
     directory popover ("问题目录") and jump the message viewport to the
-    selected turn. The entry renders as a floating chip when the surface has
-    no persistent header (main newchat flow) and as a header icon button on
-    surfaces that have one (workbench presentation, share mode, read-only
-    conversation page). Jumping locates the message root via its
-    data-message-id attribute, smooth-scrolls the viewport, and briefly
-    highlights the target. Navigation stays available while a run streams and
-    in read-only/share contexts.'
+    selected turn. The popover offers a keyword filter over the full question
+    text (case-insensitive, resets when it closes). The entry renders as a
+    floating chip when the surface has no persistent header (main newchat
+    flow) and as a header icon button on surfaces that have one (workbench
+    presentation, share mode, read-only conversation page). Jumping locates
+    the message root via its data-message-id attribute, smooth-scrolls the
+    viewport, and briefly highlights the target. Navigation stays available
+    while a run streams and in read-only/share contexts.'
   affected_features:
     existing: []
     added: []
@@ -39,8 +40,10 @@ change:
         highlight, and reports missing or empty targets as false.
       - QuestionDirectoryButton hides without questions, opens the directory
         popover from the trigger, lists each question with its jump affordance,
-        invokes onJump with the target message id, and closes the popover after
-        an entry is clicked.
+        invokes onJump with the target message id, closes the popover after an
+        entry is clicked, filters entries by a case-insensitive keyword over the
+        full question text (attachment turns included), shows an empty state
+        for unmatched keywords, and resets the keyword when the popover closes.
     reason: |-
       The feature is a frontend navigation layer over already-proven contracts:
       thread message state comes from the existing runtime subscription, the

@@ -2,8 +2,8 @@
 
 "use client";
 
-import { useState, type FC } from "react";
-import { ListTreeIcon, PaperclipIcon } from "lucide-react";
+import { useMemo, useState, type FC } from "react";
+import { ListTreeIcon, PaperclipIcon, SearchIcon } from "lucide-react";
 import {
   Popover,
   PopoverContent,
@@ -31,7 +31,8 @@ export interface QuestionDirectoryButtonProps {
  * Entry point for the in-conversation question directory: lists every question
  * asked so far and jumps the message viewport to the selected turn. Rendered
  * as a floating chip when the surface has no persistent header, and as a
- * header icon button otherwise; the popover list is shared by both.
+ * header icon button otherwise; the popover list is shared by both and offers
+ * a keyword filter over the full question text.
  */
 export const QuestionDirectoryButton: FC<QuestionDirectoryButtonProps> = ({
   questions,
@@ -41,13 +42,32 @@ export const QuestionDirectoryButton: FC<QuestionDirectoryButtonProps> = ({
 }) => {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
+  // Match against the full text (not the truncated summary) so keywords from
+  // any line of the question still find the entry; case-insensitive.
+  const filteredQuestions = useMemo(() => {
+    const keyword = search.trim().toLowerCase();
+    if (!keyword) return questions;
+    return questions.filter((question) =>
+      question.fullText.toLowerCase().includes(keyword)
+    );
+  }, [questions, search]);
 
   if (questions.length === 0) return null;
 
   const label = t("chat.questions.viewAll", { count: questions.length });
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        // Reset the filter between sessions so reopening starts from the
+        // full directory.
+        if (!nextOpen) setSearch("");
+      }}
+    >
       <PopoverTrigger asChild>
         {variant === "header" ? (
           <Button
@@ -81,11 +101,22 @@ export const QuestionDirectoryButton: FC<QuestionDirectoryButtonProps> = ({
             {t("chat.questions.total", { count: questions.length })}
           </span>
         </div>
+        <div className="flex items-center gap-2 rounded-md border border-slate-200 px-2 py-1.5 dark:border-slate-700">
+          <SearchIcon className="size-3.5 shrink-0 text-muted-foreground" />
+          <input
+            type="text"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder={t("chat.questions.search")}
+            aria-label={t("chat.questions.search")}
+            className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-muted-foreground"
+          />
+        </div>
         <ul
-          className="flex max-h-80 flex-col gap-0.5 overflow-y-auto"
+          className="flex max-h-80 flex-col gap-0.5 overflow-y-auto pt-1"
           aria-label={t("chat.questions.title")}
         >
-          {questions.map((question) => (
+          {filteredQuestions.map((question) => (
             <li key={question.key}>
               <button
                 type="button"
@@ -111,6 +142,14 @@ export const QuestionDirectoryButton: FC<QuestionDirectoryButtonProps> = ({
               </button>
             </li>
           ))}
+          {filteredQuestions.length === 0 && (
+            <li
+              className="px-2 py-6 text-center text-xs text-muted-foreground"
+              data-testid="question-directory-no-matches"
+            >
+              {t("chat.questions.noMatches")}
+            </li>
+          )}
         </ul>
       </PopoverContent>
     </Popover>

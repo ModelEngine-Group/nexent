@@ -481,6 +481,8 @@
   "chat.questions.title": "问题目录",
   "chat.questions.total": "共 {{count}} 个问题",
   "chat.questions.jump": "跳转到问题 {{index}}",
+  "chat.questions.search": "搜索问题…",
+  "chat.questions.noMatches": "没有匹配的问题",
   "chat.artifacts.generatedAt": "生成于 {{time}}",
   "chat.tokenUsage.used": "已使用",
   "chat.tokenUsage.turn": "本轮",
