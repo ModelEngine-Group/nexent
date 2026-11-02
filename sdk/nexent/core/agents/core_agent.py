@@ -1441,12 +1441,6 @@ Additional Args:
                 raise RuntimeFinalAnswer(
                     self._empty_model_response_hint(), "empty_model_output"
                 ) from terminal_error
-            if terminal_error.error_code == ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED and not legacy_code_action:
-                raise ModelOutputProtocolError(
-                    reason=ProtocolErrorReason.EMPTY_VISIBLE_CONTENT,
-                    protocol=getattr(self, "output_protocol", "code_action"),
-                    logger=self.logger,
-                ) from terminal_error
             raise
         except Exception as e:
             if self.stop_event.is_set():
