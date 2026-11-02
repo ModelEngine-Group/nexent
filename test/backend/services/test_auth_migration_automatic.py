@@ -59,6 +59,34 @@ def test_completed_upgrade_skips_source_and_removes_stale_snapshot(upgrade):
     assert not list(args.state_dir.glob("*.json"))
 
 
+def test_locally_repairable_pending_is_not_mistaken_for_completed_upgrade(upgrade):
+    args, checksum, status, _, worker, _ = upgrade
+    status["pending_total"] = 4
+    checkpoint(status, checksum, migration.AUTH_SQL, migration.DATA_MARKER, migration.CLEANUP_MARKER)
+    assert migration.automatic_upgrade(args)["prepared"]
+    args.deploy_phase = "apply"
+    migration.automatic_upgrade(args)
+    job = worker.call_args_list[0].args[1]
+    assert job["rows"] == []
+    assert hashlib.sha256(job["account_sql"].encode()).hexdigest() == checksum
+
+
+@pytest.mark.parametrize("sql", [None, "changed SQL"])
+def test_worker_rejects_missing_or_changed_repair_sql(mocker, sql):
+    checksum = hashlib.sha256(b"expected SQL").hexdigest()
+    connect = mocker.patch("psycopg2.connect")
+    cursor = connect.return_value.cursor.return_value.__enter__.return_value
+    cursor.fetchone.side_effect = [(checksum,), None, (4,)]
+    importer = mocker.patch.object(migration, "import_users")
+    job = {"action": "apply", "checksum": checksum}
+    if sql is not None:
+        job["account_sql"] = sql
+    with pytest.raises(migration.MigrationSetupError, match="exact versioned account SQL"):
+        migration._worker(job)
+    importer.assert_not_called()
+    connect.return_value.close.assert_called_once()
+
+
 @pytest.mark.parametrize("field", ["pending", "legacy_logins"])
 def test_missing_historical_source_fails_before_replacement(upgrade, field):
     args, _, status, _, worker, _ = upgrade
