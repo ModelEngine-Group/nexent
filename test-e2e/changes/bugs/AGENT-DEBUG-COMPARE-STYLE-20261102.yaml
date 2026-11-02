@@ -1,0 +1,52 @@
+schema_version: '1.0'
+change:
+  change_id: AGENT-DEBUG-COMPARE-STYLE-20261102
+  change_type: bugfix
+  bug_id: AGENT-DEBUG-COMPARE-STYLE-20261102
+  observed_behavior: Comparison uses default chat avatars and opaque backgrounds plus bordered model inputs.
+  expected_behavior: Both modes share debug presentation and comparison uses composer-style model pickers.
+  escaped_stage: D4
+  coverage_gap:
+    type: missing_assertion
+    description: Header UT mocks comparison and the existing real-model journey does not assert shared presentation or picker styling.
+  feature_contract_changed: false
+  title: Unify comparison and ordinary agent debug presentation
+  description: Share debug conversation presentation and replace comparison model inputs with composer model selector primitives.
+  affected_features:
+    existing: [V5-PW-PROMPT-02]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+    - frontend/tests/workbench/AgentDebugCompare.test.tsx
+    - frontend/tests/workbench/AgentDebugHeader.test.tsx
+    - frontend/tests/workbench/AgentDebugWelcome.test.tsx
+    behaviors:
+    - Both modes use the same debug Thread layout and welcome content.
+    - Comparison selectors retain independent model selection and exclude the opposite model.
+    - Both selectors occupy a fixed two-column row above the shared composer, outside the scrolling result columns.
+    - Suggestions from either column populate the shared composer; comparison keeps its single composer without model selection.
+    reason: Existing header tests mock the entire comparison panel and welcome tests only exercise the welcome component. Add focused frontend regression coverage. Python is unaffected; no additional D1 boundary is needed.
+  notes: |
+    SPEC: nexent-doc/docs/Developing/dev-agent-config-visual-spacing/changes/dev-agent-debug-compare-style/design.md.
+    Existing V5-PW-PROMPT-02 owns the two-model prompt journey; its runtime/protocol contract is unchanged.
+    PW-PROMPT-02 has no visual assertions and is not selected as proof of this presentation fix.
+    No new D1-D5 Cases: local composition and selection contracts are tested in frontend UT.
+    D2/D3/D5 are unaffected (no API, runtime protocol, persistence or deployment change).
+    D4 real-model journey is unchanged; local presentation verification does not certify that journey.
+    Verification 2026-11-02: 32/32 targeted frontend UT PASS; original comparison source fails
+    two new regressions. TypeScript, format, copyright and whitespace checks PASS.
+    Design and implementation formal validation PASS with --require-ut-change for this change.
+    One baseline ESLint set-state-in-effect issue remains; HEAD reproduces it.
+    No browser screenshot or real-model journey execution is claimed.
+    Follow-up shadow parity: remove overflow-hidden from the two comparison outer containers
+    so the shared composer's shadow is not clipped; retain clipping on result threads.
+    Reverted the interim shadow-opacity override after user clarification. Non-behavior CSS
+    adjustment; no additional UT or formal Case required. Shared shadow values are unchanged.

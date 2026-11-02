@@ -2,10 +2,6 @@
 
 "use client";
 
-import {
-  ComposerAttachment,
-  ComposerDictation,
-} from "@/app/newchat/assistant-ui/composer-tools";
 import { useEffect, useMemo, useState, type FC } from "react";
 import { Button, Tooltip } from "antd";
 import { Columns2, Maximize2, Minimize2, SquarePen, X } from "lucide-react";
@@ -13,8 +9,6 @@ import { useTranslation } from "react-i18next";
 import {
   AssistantRuntimeProvider,
   useLocalRuntime,
-  useAui,
-  useAuiState,
   type ChatModelAdapter,
 } from "@assistant-ui/react";
 
@@ -26,10 +20,9 @@ import type { STTModelConfig } from "@/types/modelConfig";
 import { compositeAttachmentAdapter } from "../../../../newchat/adapter/attachment-adapter";
 import { ServerDictationAdapter } from "../../../../newchat/adapter/server-dictation-adapter";
 import { remoteChatModelAdapter } from "../../../../newchat/adapter/remote-chat-model-adapter";
-import { Thread } from "../../../../newchat/assistant-ui/thread";
 import type { ChatMode } from "../../../../newchat/assistant-ui/composer";
 import { AgentDebugComparePanel } from "./compare-panel";
-import { AgentDebugWelcome } from "./agent-debug-welcome";
+import { DebugConversation } from "./debug-conversation";
 import "./agent-debug.css";
 
 interface AgentDebugPanelProps {
@@ -75,56 +68,6 @@ interface AgentDebugChatProps {
   clearEpoch: number;
   onSourcesPanelOpen?: () => void;
   sourcesPanelCloseEpoch?: number;
-}
-
-function DebugConversation({
-  agent,
-  chatMode,
-  onChatModeChange,
-  selectedModelId,
-  onModelChange,
-  dictationConfigured,
-  onSourcesPanelOpen,
-  sourcesPanelCloseEpoch,
-}: {
-  agent: Agent;
-  chatMode: ChatMode;
-  onChatModeChange: (mode: ChatMode) => void;
-  selectedModelId?: string;
-  onModelChange: (id: string) => void;
-  dictationConfigured: boolean;
-  onSourcesPanelOpen?: () => void;
-  sourcesPanelCloseEpoch?: number;
-}) {
-  const aui = useAui();
-  const isRunning = useAuiState((state) => state.thread.isRunning);
-  return (
-    <Thread
-      agent={agent}
-      chatMode={chatMode}
-      onChatModeChange={onChatModeChange}
-      selectedModelId={selectedModelId}
-      onModelChange={onModelChange}
-      showModelSelector
-      showConversationTitle={false}
-      debugLayout
-      onSourcesPanelOpen={onSourcesPanelOpen}
-      sourcesPanelCloseEpoch={sourcesPanelCloseEpoch}
-      composerTools={
-        <>
-          <ComposerAttachment />
-          <ComposerDictation configured={dictationConfigured} />
-        </>
-      }
-      welcomeContent={
-        <AgentDebugWelcome
-          agent={agent}
-          disabled={isRunning}
-          onSelectQuestion={(question) => aui.composer().setText(question)}
-        />
-      }
-    />
-  );
 }
 
 const AgentDebugChat: FC<AgentDebugChatProps> = ({
