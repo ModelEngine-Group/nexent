@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock
 import pytest
 from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
 from nexent.core.gateway.modality.llm.llm_adapter import LLMRequest
-from nexent.core.gateway.modality.llm.openai import OpenAILLMAdapter
+from nexent.core.gateway.modality.llm.openai import OpenAILLMAdapter, OpenAILongContextLLMAdapter
 from nexent.core.gateway.model_context import LLMContext
 from nexent.core.model_service.compatibility.legacy_chat_model import LegacyChatModel
 from nexent.core.model_service.contracts import TokenUsage
@@ -87,3 +87,15 @@ async def test_gateway_async_stream_closes_transport_on_early_exit_or_cancel(ope
     assert closed == [True] and len(opened) == 1
     assert opened[0][2] is adapter._context.cancellation_scope
     assert opened[0][0].stream is True
+
+
+@pytest.mark.parametrize("adapter_type", [OpenAILLMAdapter, OpenAILongContextLLMAdapter])
+@pytest.mark.parametrize("output,expected", [(None, False), ([], False), (["image"], False), (["text"], True)])
+def test_gateway_handles_unknown_and_declared_output_modalities(openai_profile, adapter_type, output, expected):
+    profile = openai_profile.model_copy(deep=True)
+    profile.capabilities.modalities.output = output
+    adapter = adapter_type(adapter_for(profile)._context)
+    info = adapter.get_model_info()
+    assert info.capabilities["text"] is expected
+    assert info.capabilities["long_context"] is (adapter_type is OpenAILongContextLLMAdapter)
+    assert info.capabilities["tool_calling"] == (profile.capabilities.tools.status == "supported")

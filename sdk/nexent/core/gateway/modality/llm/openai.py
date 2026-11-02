@@ -124,7 +124,7 @@ class OpenAILLMAdapter(LLMAdapter, HttpTransportMixin):
                 display_name=profile.identity.display_name,
                 provider=profile.identity.provider_id,
                 capabilities={
-                    "text": "text" in profile.capabilities.modalities.output,
+                    "text": "text" in (profile.capabilities.modalities.output or []),
                     "tool_calling": profile.capabilities.tools.status == "supported",
                     "long_context": False,
                 },

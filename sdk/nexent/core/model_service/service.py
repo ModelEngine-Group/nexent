@@ -10,10 +10,16 @@ import math
 import random
 import time
 import uuid
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, replace
+from threading import Event
 
 from nexent.core.concurrency.cancellation import RunCancellationScope, RunTerminated
+from nexent.core.concurrency.context import get_current_thread_manager, get_default_thread_manager
+from nexent.core.concurrency.errors import ThreadCapacityExceeded, ThreadManagerDraining, ThreadManagerNotRunning
+from nexent.core.concurrency.helpers import get_fallback_thread_manager
+from nexent.core.concurrency.models import ManagedTaskSpec
 from nexent.core.model_service.concurrency import ModelConcurrencyExceeded, model_concurrency_limiter
 from nexent.core.model_service.contracts import ModelError, ModelEvent, ModelRequest
 from nexent.core.model_service.errors import normalize_model_error
@@ -360,6 +366,58 @@ class ModelService:
         }
 
     @contextmanager
+    def _sync_deadline(self, call):
+        """Abort only this HTTP attempt at the absolute deadline, using a bounded managed lane."""
+        if call.deadline is None:
+            yield call.scope
+            return
+        scope = RunCancellationScope(parent_stop_event=call.scope.stop_event)
+        ready, finished = Event(), Event()
+        manager = get_current_thread_manager() or get_default_thread_manager() or get_fallback_thread_manager()
+        execution = None
+
+        def stop():
+            scope.cancel()
+            finished.set()
+
+        token = call.scope.register_closer(stop)
+
+        def watch():
+            ready.set()
+            if not finished.wait(max(0, call.deadline - time.monotonic())):
+                scope.cancel()
+
+        try:
+            try:
+                execution = manager.submit(
+                    "control-io",
+                    ManagedTaskSpec(task_name="model-request-deadline", owner="model-service",
+                                    run_id=call.request.request_id, attempt_id=str(call.attempt),
+                                    deadline_monotonic=call.deadline, close_hook=stop),
+                    watch,
+                )
+            except (ThreadCapacityExceeded, ThreadManagerDraining, ThreadManagerNotRunning):
+                raise ModelTransportError("HTTP_CONCURRENCY_TIMEOUT") from None
+            while not ready.wait(min(0.05, max(0, call.deadline - time.monotonic()))):
+                call.check()
+            call.check()
+            yield scope
+            call.check()
+        except (Exception, RunTerminated):
+            # A deadline abort must not cancel the caller's run or become RunTerminated.
+            call.check()
+            raise
+        finally:
+            finished.set()
+            call.scope.unregister_closer(token)
+            if execution is not None:
+                if not execution.future.cancel():
+                    try:
+                        execution.future.result(timeout=1)
+                    except FutureTimeoutError:
+                        manager.cancel(execution.execution_id, reason="model deadline watcher did not exit", wait_timeout=0)
+
+    @contextmanager
     def _permit(self, call):
         call.check()
         permit = None
@@ -370,7 +428,8 @@ class ModelService:
                 except ModelConcurrencyExceeded:
                     raise ModelTransportError("HTTP_CONCURRENCY_TIMEOUT") from None
             call.check()
-            yield
+            with self._sync_deadline(call) as scope:
+                yield scope
         finally:
             if permit is not None:
                 permit.release()
@@ -406,8 +465,8 @@ class ModelService:
         with self._trace(call):
             while True:
                 try:
-                    with self._permit(call):
-                        raw = call.sender.invoke(call.wire_request(), scope=call.scope)
+                    with self._permit(call) as scope:
+                        raw = call.sender.invoke(call.wire_request(), scope=scope)
                         result = call.adapter.decode_response(raw, call.request, call.profile)
                         call.check()
                         call.observe_completion(result)
@@ -492,7 +551,7 @@ class ModelService:
             try:
                 if pending_delay is not None:
                     call.wait(pending_delay)
-                with self._permit(call), call.sender.stream(call.wire_request(), scope=call.scope) as frames:
+                with self._permit(call) as scope, call.sender.stream(call.wire_request(), scope=scope) as frames:
                     for event in call.adapter.decode_stream(frames, call.request, call.profile):
                         message_id = event.message_id
                         self._check_empty_response(call, event, empty_response_policy)
