@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0",
+  "stage": "D3",
+  "module": "AIDP-KNOWLEDGE",
+  "case": {
+    "case_id": "AIDP-RET-RUNTIME",
+    "feature_id": "AIDP-RETRIEVAL",
+    "business_rule_ids": [
+      "AIDP-RETRIEVAL-RULE-01"
+    ],
+    "title": "Historical conversation and configured Agent runtime retrieval",
+    "type": "INTEGRATION",
+    "priority": "P1",
+    "status": "blocked",
+    "automation": "manual",
+    "objective": "Historical conversation and configured Agent runtime retrieval",
+    "preconditions": [
+      "SDK/frontend dependencies available; use isolated run-owned resources.",
+      "Real provider and browser journeys require an authorized matching source environment."
+    ],
+    "test_data": {
+      "methods": "vector, full text, graph, all pairs and hybrid",
+      "legacy": "Migrated fixed tool values, explicit false/zero and inert legacy conversation retrieval_config; no new conversation policy editor."
+    },
+    "steps": [
+      {
+        "order": 1,
+        "action": "Continue upgraded conversations and run Workbench with a stored legacy retrieval_config; observe actual Agent construction and provider requests.",
+        "expected": "Legacy conversation policy is ignored; instance fixed values/defaults and selected knowledge permissions govern execution with no configuration writes."
+      },
+      {
+        "order": 2,
+        "action": "Run managed northbound overrides against the actual root/child/version and compare independent tools with distinct connections.",
+        "expected": "Valid managed overrides affect only that run; invalid raw overrides fail before provider HTTP; independent instances, provenance, images and citations remain isolated."
+      }
+    ],
+    "expected_results": [
+      "Legacy conversation policy is ignored; instance fixed values/defaults and selected knowledge permissions govern execution with no configuration writes.",
+      "Valid managed overrides affect only that run; invalid raw overrides fail before provider HTTP; independent instances, provenance, images and citations remain isolated."
+    ],
+    "forbidden_side_effects": [
+      "Do not mutate other configurations, expand managed scope, expose credentials or issue HTTP for invalid settings."
+    ],
+    "acceptance": [
+      {
+        "id": "AC-01",
+        "description": "Legacy conversation policy is ignored; instance fixed values/defaults and selected knowledge permissions govern execution with no configuration writes.; Valid managed overrides affect only that run; invalid raw overrides fail before provider HTTP; independent instances, provenance, images and citations remain isolated.",
+        "steps": [
+          1,
+          2
+        ],
+        "expected_results": [
+          1,
+          2
+        ],
+        "forbidden_side_effects": [
+          1
+        ]
+      }
+    ],
+    "integration_boundary": [
+      "Actual Nexent mount, Agent construction and provider HTTP runtime; real configured model for decision trace"
+    ],
+    "observations": [
+      "Legacy conversation policy is ignored; instance fixed values/defaults and selected knowledge permissions govern execution with no configuration writes.",
+      "Valid managed overrides affect only that run; invalid raw overrides fail before provider HTTP; independent instances, provenance, images and citations remain isolated."
+    ],
+    "cleanup": [
+      "Remove only run-owned resources."
+    ]
+  }
+}

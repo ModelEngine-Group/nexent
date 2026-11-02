@@ -1,3 +1,5 @@
+# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
+
 """CMSR-D1-003: semantic repair uses the same streamed attempt lifecycle."""
 
 import json
@@ -19,7 +21,8 @@ def _events(observer):
     return [json.loads(raw) for raw in observer.get_cached_message()]
 
 
-def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog):
+@pytest.mark.parametrize("first_failure", ["invalid_content", "empty_exhausted"])
+def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog, first_failure):
     caplog.set_level(logging.INFO, logger=agent_module.logger.name)
     observer = MessageObserver(lang="en")
     first_repair_chunk = threading.Event()
@@ -37,6 +40,11 @@ def test_cmsr_d1_003_step_one_semantic_repair_streams_and_commits(caplog):
             calls.append(attempt)
             attempt_id = f"semantic-{attempt}"
             observer.begin_model_attempt(attempt_id, attempt)
+            if attempt == 1 and first_failure == "empty_exhausted":
+                observer.rollback_model_attempt(attempt_id, attempt)
+                raise agent_module.ModelInvocationTerminalError(
+                    agent_module.ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED, 2
+                )
             if attempt == 1:
                 content = "<code></code>"
                 observer.add_model_new_token(content)

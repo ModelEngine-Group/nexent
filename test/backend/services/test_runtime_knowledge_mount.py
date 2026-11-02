@@ -35,7 +35,7 @@ def test_mount_is_request_local_and_replaces_other_source(mocker, aidp, existing
     assert records == before
     assert catalog[0]["params"][0]["default"] == 5
     assert [t["class_name"] for t in mounted] == ["OtherTool", kind]
-    assert mounted[-1]["params"][0]["default"] == 8
+    assert mounted[-1]["params"][0]["default"] == 5
     assert query.call_count == int(not existing)
     second = service.mount_knowledge_records(records, scope("aidp" if aidp else "local"), "tenant")
     assert second[-1]["params"][0]["default"] == 5
@@ -47,13 +47,6 @@ def test_no_selection_never_creates_unrestricted_tool(mocker, mode):
     query = mocker.patch.object(service, "query_all_tools")
     assert service.mount_knowledge_records([], scope(mode=mode), "tenant") == []
     query.assert_not_called()
-
-
-@pytest.mark.parametrize("params", [{"api_key": "secret"}, {"index_names": ["other"]}, {"top_k": "8"}])
-def test_rejects_connection_range_and_invalid_parameters(mocker, params):
-    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", False)
-    with pytest.raises(service.ValidationError):
-        service.mount_knowledge_records([tool()], scope(params=params), "tenant")
 
 
 def test_selected_range_replaces_defaults_before_tool_construction(mocker):
@@ -77,13 +70,26 @@ def test_selected_range_replaces_defaults_before_tool_construction(mocker):
         runtime_agent_tree=[{"agent_name": "root", "tools": mounted}],
     )
     assert resolved.tool_params.agents["root"].tools["knowledge_base_search"]["index_names"] == ["new-index"]
-    assert mounted[0]["params"][0]["default"] == 8
+    assert mounted[0]["params"][0]["default"] == 5
     assert original["params"][0]["default"] == 5
     assert original["params"][1]["default"] == ["old-index"]
 
 
-def test_connection_credentials_cannot_be_saved_as_session_parameters():
-    from contracts.knowledge import ConversationKnowledgeScopeRequest
-
-    with pytest.raises(ValueError):
-        ConversationKnowledgeScopeRequest.model_validate({"retrieval_config": {"api_key": "secret"}})
+@pytest.mark.parametrize("aidp", [False, True])
+@pytest.mark.parametrize("legacy", [
+    {"top_k": 99}, {"api_key": "unused"}, {"index_names": ["other"]},
+    {"search_method": "graph_search", "reranking_mode": "jargon_coverage"},
+])
+def test_mount_ignores_retired_policy_and_preserves_instance_parameters(mocker, aidp, legacy):
+    mocker.patch.object(service, "ENABLE_AIDP_KNOWLEDGE", aidp)
+    original = tool("AidpSearchTool" if aidp else "KnowledgeBaseSearchTool")
+    original["params"] += [{"name": "vector_candidates", "default": 30},
+                           {"name": "reranking_enable", "default": False}]
+    before = deepcopy(original)
+    mounted = service.mount_knowledge_records(
+        [original], scope("aidp" if aidp else "local", params=legacy), "tenant",
+    )
+    assert mounted == [before]
+    assert mounted[0] is not original
+    assert original == before
+    assert service.mount_knowledge_records([original], None, "tenant") == [before]

@@ -83,6 +83,7 @@ from management.services.conversation.service import (
 )
 from management.services.knowledge_base.scope import (
     build_runtime_knowledge_resources,
+    prepare_tool_retrieval_overrides,
     resolve_knowledge_scope,
 )
 from management.services.agent.run_state import (
@@ -294,14 +295,34 @@ async def run_agent_stream(
             is_debug=bool(agent_request.is_debug),
             user_id=resolved_user_id,
         )
-        apply_workbench_runtime_plan(
-            agent_request, canonical_workbench, resolved_tree, resolved_tenant_id
-        )
         if conversation is not None:
             assert_workbench_version(
                 conversation,
                 agent_request.expected_workbench_config_version,
             )
+
+    raw_request_scope = (
+        None if resume else getattr(agent_request, "knowledge_scope", None)
+    )
+    if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
+        request_scope = raw_request_scope
+    elif isinstance(raw_request_scope, dict):
+        request_scope = ConversationKnowledgeScopeRequest.model_validate(
+            raw_request_scope
+        )
+    else:
+        request_scope = None
+    if not resume:
+        if canonical_workbench is not None:
+            apply_workbench_runtime_plan(
+                agent_request, canonical_workbench, resolved_tree, resolved_tenant_id,
+            )
+            request_scope = canonical_workbench.knowledge_scope
+        prepare_tool_retrieval_overrides(
+            resolved_tenant_id, tool_params=agent_request.tool_params,
+            agent_id=agent_request.agent_id, version_no=agent_request.version_no,
+            is_debug=bool(agent_request.is_debug),
+        )
 
     if not resume:
         run_controls.preflight_agent_turn_controls(
@@ -335,17 +356,6 @@ async def run_agent_stream(
         if not bool(agent_record.get("allow_chat_metadata", False)):
             raise AppException(ErrorCode.CHAT_METADATA_NOT_ALLOWED)
 
-    raw_request_scope = (
-        None if resume else getattr(agent_request, "knowledge_scope", None)
-    )
-    if isinstance(raw_request_scope, ConversationKnowledgeScopeRequest):
-        request_scope = raw_request_scope
-    elif isinstance(raw_request_scope, dict):
-        request_scope = ConversationKnowledgeScopeRequest.model_validate(
-            raw_request_scope
-        )
-    else:
-        request_scope = None
     stored_scope = (
         conversation.get("knowledge_scope")
         if conversation and canonical_workbench is None

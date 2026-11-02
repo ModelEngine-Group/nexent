@@ -1,0 +1,8 @@
+schema_version: '1.0'
+case_id: AIDP-RET-PROTOCOL
+implementations:
+  - framework: pytest
+    file: test.py
+    selector: AIDP-RET-PROTOCOL
+acceptance_bindings:
+  AC-01: [test_wire_channels_and_sources, test_wire_retry_errors_and_no_invalid_http]

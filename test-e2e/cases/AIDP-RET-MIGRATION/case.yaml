@@ -1,0 +1,63 @@
+schema_version: '1.0'
+stage: D5
+module: AIDP-KNOWLEDGE
+case:
+  case_id: AIDP-RET-MIGRATION
+  feature_id: AIDP-RETRIEVAL
+  business_rule_ids: [AIDP-RETRIEVAL-RULE-01]
+  title: AIDP policy migration preserves legacy numeric values and avoids unchanged writes
+  type: DEPLOYMENT
+  priority: P1
+  status: active
+  automation: automated
+  objective: Execute the actual migration SQL against synthetic tool tables in disposable PostgreSQL; prove accepted legacy numeric representations, version isolation and repeatability without claiming runner or complete old-product upgrade acceptance.
+  preconditions:
+    - Docker is available with postgres:15-alpine already present.
+    - Only uniquely named disposable containers without published ports or existing volumes may be used.
+  test_data:
+    legacy_top_k: [7, 7.0, '7']
+    policies: Missing defaults, explicit fixed candidates, zero caps, false booleans and untouched connection/scope fields.
+    rows: Both AIDP tools, multiple tenants, shared instance ID across versions, disabled and deleted rows, and a non-AIDP control.
+  steps:
+    - order: 1
+      action: Create isolated PostgreSQL fixture tables and execute the actual AIDP migration SQL with psql.
+      expected: All three legacy representations migrate to integer total/candidates 7; missing totals retain sparse storage and candidates 10.
+    - order: 2
+      action: Compare tool identities, versions, tenant/enabled/deleted flags and explicit policy/connection/scope values after migration.
+      expected: Every AIDP version migrates independently; unrelated values and non-AIDP rows are preserved.
+    - order: 3
+      action: Check the nine canonical directory definitions and execute the same SQL again to exercise replay without a checksum skip.
+      expected: Replay reports zero updated rows and changes neither tool row values nor xmin; only fixture containers are removed.
+  expected_results:
+    - Numeric and numeric-string legacy totals retain value 7 and produce integer candidates 7; missing fields receive the documented defaults.
+    - Existing policies, connections, scopes and row identities survive across all fixture tenants and versions; non-AIDP data remains unchanged.
+    - Canonical directory fields occur once and repeated execution does not rewrite unchanged tool rows.
+  forbidden_side_effects:
+    - Never access product databases, fixed historical data directories, shared containers or existing data volumes.
+    - Do not introduce transaction-boundary changes or present synthetic SQL fixtures as UI-created historical upgrade acceptance.
+  acceptance:
+    - id: AC-01
+      description: Accepted legacy numeric representations migrate without errors or candidate drift.
+      steps: [1]
+      expected_results: [1]
+      forbidden_side_effects: [1, 2]
+    - id: AC-02
+      description: Tool policies and identities remain isolated across versions and tenants.
+      steps: [2]
+      expected_results: [2]
+      forbidden_side_effects: [1, 2]
+    - id: AC-03
+      description: Directory replacement and SQL replay are idempotent without rewriting unchanged tool rows.
+      steps: [3]
+      expected_results: [3]
+      forbidden_side_effects: [1, 2]
+  risk_type: DEPLOYMENT
+  risk: One valid old numeric representation can abort startup or silently change fixed candidate values.
+  condition:
+    - Minimal production-shaped JSON tool tables in isolated PostgreSQL, executing the actual migration SQL.
+  metrics:
+    - Migration exit status, exact policy/identity values, directory multiplicity and row xmin before/after replay.
+  thresholds:
+    - Zero migration failures, semantic value drift, identity changes or unchanged-row rewrites.
+  recovery_expectations:
+    - Stop and remove only each uniquely named fixture container in finally, including on assertion failure.

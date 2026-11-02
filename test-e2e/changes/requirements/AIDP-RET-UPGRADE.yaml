@@ -1,0 +1,178 @@
+schema_version: '1.0'
+change:
+  change_id: AIDP-RET-UPGRADE
+  change_type: requirement
+  requirement_id: AIDP-RET
+  title: AIDP graph and combined retrieval configuration and upgrade
+  description: >-
+    Configure fixed retrieval policies on managed aidp_search and independent
+    ind_aidp_search Agent tools, support graph and combined retrieval, preserve
+    existing northbound overrides and migrate historical tool definitions and
+    instances. Conversation and Workbench knowledge selection retain resource
+    scopes only; their retrieval parameter editors and overlays are retired.
+    This is the single change record for the complete PR, including review fixes.
+  affected_features:
+    existing: [F-096]
+    added: [AIDP-RETRIEVAL]
+    modified: []
+    retired: []
+  affected_cases:
+    existing:
+      - PW-KB-AIDP-01
+      - AGT-AUTO-7A2120E630C381C7
+      - API-AUTO-19E0779FED1B649A
+    added:
+      - AIDP-RET-CONFIG-API
+      - AIDP-RET-PROTOCOL
+      - AIDP-RET-REAL
+      - AIDP-RET-RUNTIME
+      - AIDP-RET-JOURNEY
+      - AIDP-RET-MIGRATION
+    modified: [AGENT-CALLABLE-D3-001]
+    retired: []
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Validate raw submitted policies at tool save, external import, test and northbound input boundaries; preserve sparse storage and trust persisted snapshots during internal transfer and construction.
+      - Support seven explicit channel combinations, strict numeric and dependency checks, fixed candidates and documented legacy method defaults.
+      - Ignore retired retrieval_config during conversation and Workbench parsing and canonical persistence; knowledge selection must not replace saved tool policies.
+      - Resolve northbound overrides against the actual root, child, draft or published context without leaking values across runs or changing independent tool configuration.
+      - Preserve FusionSearch payloads and provenance for both wrappers; share transport, JSON and response errors, bounded retries and sanitized retry logs.
+      - Maintain affected existing frontend UT normally; do not add frontend UT. Numeric draft linkage, cancellation and English labels require the browser journey.
+    reason: >-
+      Strengthen existing backend and SDK input, permission, runtime and transport
+      coverage and maintain the affected existing Workbench tests. UT remains
+      separate from formal acceptance. HTTP protocol, authenticated persistence,
+      real provider behavior, Agent execution, browser interaction and PostgreSQL
+      migration each require their declared Case boundary; no duplicate D1 or
+      per-stage quota is introduced. The two newly introduced frontend component
+      UT files are removed under the user's instruction.
+    test_selectors:
+      - test/sdk/test_aidp_retrieval_config.py
+      - test/sdk/test_ind_aidp_search_tool.py
+      - test/sdk/test_aidp_retrieval_client.py
+      - test/ext_components/aidp/test_aidp_search_tool.py
+      - test/ext_components/aidp/test_aidp_mgmt_mock_server.py
+      - test/backend/services/test_runtime_knowledge_mount.py
+      - test/backend/database/test_tool_db.py
+      - test/backend/services/test_tool_configuration_service.py
+      - test/backend/services/test_agent_transfer_utils.py
+      - test/backend/services/test_agent_service.py
+      - test/backend/services/test_agent_subscription_lifecycle.py
+      - test/backend/app/test_agent_app.py
+      - test/backend/database/test_conversation_agent_history_db.py
+      - test/backend/management/test_api_db_directory_architecture.py
+      - test/backend/management/test_agent_runtime_boundaries.py
+      - test/backend/services/test_agent_name_contract.py
+      - test/backend/services/test_prompt_service.py
+      - test/backend/app/test_agent_evaluation_app.py
+      - test/backend/database/test_model_managment_db.py
+      - test/backend/services/test_agent_evaluation_service.py
+      - test/backend/services/test_evaluation_set_service.py
+      - test/backend/services/test_memory_retrieval_service.py
+      - test/sdk/core/agents/test_context_item.py
+      - test/backend/services/test_agent_export_skills.py
+      - test/backend/services/test_clarification_response.py
+      - test/backend/agents/test_create_agent_info.py::TestMergeToolParams
+      - test/backend/agents/test_create_agent_info_retrieval_isolation.py
+      - test/backend/services/test_knowledge_scope_service.py
+      - test/backend/services/test_conversation_knowledge_scope_update_service.py
+      - test/backend/services/test_conversation_workbench_service_coverage.py
+      - test/backend/app/test_conversation_workbench_coverage.py
+      - test/backend/services/test_agent_run_workbench_coverage.py
+      - test/backend/services/test_agent_run_workbench_state_coverage.py
+      - test/backend/services/test_knowledge_scope_retrieval_input.py
+      - test/backend/services/test_workbench_knowledge_projection.py
+      - frontend/tests/workbench/Composer.test.tsx
+      - frontend/tests/workbench/KnowledgePicker.test.tsx
+  notes: |
+    Scope and ownership: managed aidp_search is used in the AIDP scene; independent
+    ind_aidp_search is selected from the tool list in the ES knowledge-base scene.
+    Agent knowledge settings, independent tool settings and northbound tool_params
+    are the active policy paths. Conversation/Workbench selection changes resource
+    scope only. Legacy retrieval_config is ignored and absent from canonical scope
+    persistence. Internal mounting and snapshot transfer do not revalidate policies
+    or carry skip flags; ordinary imports remain module-level. Existing tool-test
+    exception classification and sparse database storage are preserved.
+
+    Form regression: temporarily clearing top_k previously propagated invalid
+    candidate values and lost equal-value linkage; clearing a positive hybrid cap
+    hid its input; English channel summaries exposed untranslated keys. The final
+    behavior keeps numeric drafts repairable, preserves independently configured
+    candidates, blocks invalid confirmation and discards cancellation. These
+    missing interaction assertions belong to AIDP-RET-JOURNEY, not new frontend UT.
+
+    Migration regression: accepted legacy top_k=7.0 previously failed text-to-int
+    conversion; top_k="7" incorrectly produced candidates 10. Preserve their
+    integer meaning, normalize the stored total, and keep absent totals sparse.
+    Preserve explicit policy, connection and scope values across all versions and
+    tenants. Use the existing versioned primary key and skip unchanged row writes.
+    AIDP-RET-MIGRATION executes the actual SQL in disposable PostgreSQL because
+    backend/SDK UT and the other Cases do not prove casts or physical row replay.
+    Its synthetic fixtures do not establish old-UI upgrade or production-runner
+    integration acceptance. The existing SQL runner has separate regression
+    coverage in deploy/tests/test_sql_migrations.sh. The user defers the two-table
+    transaction issue; no transaction-boundary change is included.
+
+    Runtime evidence: distinguish system workbench_main from mounted child Agents
+    and observe the actual configured version and provider request. NB-05 total
+    topk and hybrid_top_k are distinct fields and need separate assertions; their
+    different values alone do not establish a propagation defect. Existing parent,
+    child and request-isolation UT remains associated with the complete PR.
+
+    Coverage ownership: CONFIG-API proves authenticated persistence and rejection;
+    PROTOCOL proves actual SDK consumer HTTP with controlled provider responses;
+    REAL proves authorized provider retrieval semantics; RUNTIME proves actual
+    Agent/version mounting and execution; JOURNEY proves rendered UI interactions;
+    MIGRATION proves actual PostgreSQL upgrade transformation and replay. All six
+    Cases are additions relative to the PR base, with no duplicate added/modified
+    classification. Preserve historical D1 assets and use no new D1 quota.
+
+    Requirement and review design reuse local-docs/aidp-graph-retrieval, including
+    handoffs/requirement-bugs-fix-handoff-20261023.md and reviews/sql-review-20261026.md.
+    Official historical sources establish legacy hybrid_search and absent advanced
+    fields; arbitrary malformed database values are not assumed. This record owns
+    the PR's final scope rather than separate dated repair batches. Run evidence
+    stays outside Git; UT and formal results are reported separately. Existing
+    blocked/manual Cases remain required and must not be counted as passed from
+    lower-boundary evidence. Shared Syncthing documents remain read-only.
+
+    Deployment integration follows the upstream native PostgreSQL account bootstrap.
+    The superseded Supabase signup parser and its no-jq fallback are removed
+    upstream. Reuse deploy/tests/test_super_admin_init.sh to verify native
+    check/create transport, failure handling and credential display; keep the
+    upstream account semantics without restoring the retired signup path.
+
+    Develop integration: update stale test imports, patch targets and transfer
+    identity arguments to their canonical owners. Apply the existing shared
+    identifier rule to AgentInfoRequest; invalid names must fail before writes, while
+    omitted/null names remain valid partial drafts. Reuse the existing name and
+    HTTP validation regressions without relaxing their assertions. The callable
+    D3 probe imports model bindings from their current owner; its live Docker/A2A
+    execution remains a separate prerequisite and is not proved by architecture UT.
+    The prompt-service UT's SDK namespace mock retains the core package path so
+    contracts can load the real shared name validator, and restores that imported
+    module with its other patched modules; no validator stub replaces the rule.
+    Overlapping develop repairs keep the typed nullable name validator with a
+    module-level SDK import; package-aware test stubs provide import compatibility
+    without moving product imports into methods. Reuse the existing identity
+    fixtures and lifecycle path when resolving equivalent upstream test changes.
+    Keep the test runner reproducible at pytest 9.1.1: pytest 9.2 changes
+    monkeypatch attribute restoration and leaves shared dynamic Mock children
+    deleted between tests. The same model repository suite passes on 9.1.1
+    and reproduces CI's missing attribute on 9.2. No tests or assertions are
+    removed; rerun the complete failed-file selection and remote CI.
+    Retain develop's CPU-default uv indexes, local SDK source and pinned test
+    dependencies when merging installation changes; add only this PR's SQLite
+    test driver to the upstream test extra without duplicating framework pins.
+
+    Clarification UT retains real inserts, RETURNING, rollback and stored-answer
+    assertions. Older Linux x86_64 test runners use the test-only bundled SQLite
+    driver when their stdlib SQLite predates RETURNING support; production database
+    code and runtime dependencies are unchanged. Do not skip transaction tests or
+    rewrite their SQL to hide an unsupported test-engine capability.
+
+    The unreleased AIDP migration uses the version-and-description filename
+    v2.8.0_aidp_fixed_retrieval_policy.sql, without a numeric sequence. Its SQL
+    contents and version-sorted position remain unchanged. The migration Case
+    follows this rename; released SQL and database migration ledgers are untouched.
