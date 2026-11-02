@@ -9,7 +9,7 @@ from threading import Thread
 
 import pytest
 
-from nexent.core.model_errors import ModelInvocationTerminalError
+from nexent.core.model_errors import ModelErrorCode, ModelInvocationTerminalError
 from nexent.core.models.openai_llm import OpenAIModel
 from nexent.core.models.retry import ModelRetryConfig
 from nexent.core.utils.observer import MessageObserver
@@ -157,7 +157,7 @@ def test_agent_keeps_empty_budget_and_repairs_nonempty_protocol(scenario, shared
             with pytest.raises(expected) as caught:
                 agent.run("Return a final answer without tools.")
             if empty:
-                assert caught.value.error_code == "EMPTY_RESPONSE_EXHAUSTED"
+                assert caught.value.error_code == ModelErrorCode.EMPTY_RESPONSE_EXHAUSTED
             assert len(requests) == (2 if empty else 3)
         else:
             assert str(agent.run("Return a final answer without tools.")) == "RECOVERED"
