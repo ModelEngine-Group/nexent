@@ -130,39 +130,49 @@ def test_terminal_bounds_and_private_diagnostics(caplog, finish, tools, expected
         assert '"chunks"' in caplog.text
 
 
-@pytest.mark.parametrize("persistent_empty", [False, True])
-def test_agent_repairs_exhausted_empty_http_without_user_errors(persistent_empty):
-    """Exercise real CoreAgent, context assembly, model retries and observer over HTTP."""
+@pytest.mark.parametrize("shared", [False, True])
+@pytest.mark.parametrize("scenario", ["recover_empty", "persistent_empty", "recover_malformed", "persistent_malformed"])
+def test_agent_keeps_empty_budget_and_repairs_nonempty_protocol(scenario, shared):
+    """Exercise strict Agent recovery over real HTTP for both compatibility entry points."""
     from nexent.core.agents.core_agent import CoreAgent
     from nexent.core.agents.context import ContextManager, ContextManagerConfig, ManagedContextRuntime
     from nexent.core.agents.output_protocol import ModelOutputProtocolExhaustedError
 
-    sequence = [({"role": "assistant", "reasoning_content": SECRET}, "stop")] * 2
-    if not persistent_empty:
+    empty = "empty" in scenario
+    persistent = scenario.startswith("persistent")
+    rejected = {"role": "assistant", "reasoning_content": SECRET} if empty else {
+        "role": "assistant", "content": "Malformed protocol response.",
+    }
+    sequence = [(rejected, "stop")]
+    if not persistent:
         sequence.append(({"role": "assistant", "content": "<final_answer>RECOVERED</final_answer>"}, "stop"))
-    with provider(sequence) as (model, observer, requests):
+    with provider(sequence, shared=shared) as (model, observer, requests):
         agent = CoreAgent(
             observer=observer, model=model, tools=[], name="silent_recovery",
             enable_protocol_repair_retry=True, max_steps=3,
             context_runtime=ManagedContextRuntime(ContextManager(ContextManagerConfig(), max_steps=3)),
         )
-        if persistent_empty:
-            with pytest.raises(ModelOutputProtocolExhaustedError):
+        if persistent:
+            expected = ModelInvocationTerminalError if empty else ModelOutputProtocolExhaustedError
+            with pytest.raises(expected) as caught:
                 agent.run("Return a final answer without tools.")
-            assert len(requests) == 6
+            if empty:
+                assert caught.value.error_code == "EMPTY_RESPONSE_EXHAUSTED"
+            assert len(requests) == (2 if empty else 3)
         else:
-            result = agent.run("Return a final answer without tools.")
-            assert str(result) == "RECOVERED"
-            assert len(requests) == 3
-            assert len(agent.memory.steps) == 2  # Task plus the accepted action, without failed repairs.
+            assert str(agent.run("Return a final answer without tools.")) == "RECOVERED"
+            assert len(requests) == 2
+            assert len(agent.memory.steps) == 2  # Task plus the accepted action.
+        if empty:
+            assert requests[0] == requests[1]
+        else:
+            assert requests[0]["messages"] != requests[1]["messages"]
         events = [json.loads(raw) for raw in observer.message_query]
         assert not any(event.get("type") in {"error", "model_error", "warning"} for event in events)
         assert not any(SECRET in str(event.get("content", "")) for event in events if event.get("type") == "final_answer")
         assert not any(getattr(step, "tool_calls", None) for step in agent.memory.steps)
-        if not persistent_empty:
-            assert phases(observer).count("commit") == 1
-            assert phases(observer).count("rollback") == 2
-            assert "protocol" in str(requests[2]["messages"]).lower()
+        assert phases(observer).count("commit") == (0 if persistent else 1)
+        assert phases(observer).count("rollback") == (len(requests) if persistent else 1)
 
 
 @pytest.mark.parametrize("empty", [{"reasoning_content": SECRET}, {"content": "   "}, {}])

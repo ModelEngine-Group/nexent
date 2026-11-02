@@ -11,7 +11,7 @@ acceptance_bindings:
   - test_shared_legacy_recovery_over_real_http
   - test_terminal_bounds_and_private_diagnostics
   AC-AGENT-REPAIR:
-  - test_agent_repairs_exhausted_empty_http_without_user_errors
+  - test_agent_keeps_empty_budget_and_repairs_nonempty_protocol
   AC-PRIVACY:
   - test_terminal_bounds_and_private_diagnostics
 preparation:
