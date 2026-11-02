@@ -60,10 +60,16 @@ def test_saved_preferences_inherit_agent_or_tenant_selection(monkeypatch, config
     default = Mock(return_value={"model_id": 42})
     monkeypatch.setattr(tenant_config_manager, "get_model_config", default)
     selected, validate = Mock(), Mock()
+    model_lookup = Mock(return_value={"model_id": 42, "connect_status": "available"})
+    monkeypatch.setattr(run_controls, "get_model_by_model_id", model_lookup)
     monkeypatch.setattr(run_controls, "validate_selected_model", selected)
     monkeypatch.setattr(model_preferences, "validate_model_preferences", validate)
     run_controls.preflight_turn_controls(value, "tenant", {"model_ids": configured})
     selected.assert_called_once_with(42, "tenant")
+    if configured:
+        model_lookup.assert_called_once_with(42, tenant_id="tenant")
+    else:
+        model_lookup.assert_not_called()
     validate.assert_called_once_with({"42": {"temperature": 0}}, "tenant", allowed_model_ids=configured or None)
     assert default.call_count == (0 if configured else 1)
     assert value.model_parameter_preferences == {} and value.model_id is None
