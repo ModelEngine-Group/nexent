@@ -42,19 +42,6 @@ def test_empty_installation_check_still_reports_absent(mocker):
     assert bootstrap_super_admin("suadmin@nexent.com", "", check_only=True) == {"exists": False}
 
 
-@pytest.mark.parametrize("check_only", [True, False])
-def test_pending_account_requires_credentials_before_bootstrap(mocker, check_only):
-    mocker.patch("management.db.client.get_db_session", return_value=MagicMock())
-    mocker.patch("management.db.identity.account.lock_account_keys")
-    mocker.patch("management.db.identity.account.get_account_by_email", return_value={
-        "source_metadata": {"credential_migration_pending": True}, "account_status": "disabled",
-    })
-    create = mocker.patch("management.db.identity.account.create_account")
-    with pytest.raises(AccountConflictError, match="migrate_docker.py --apply"):
-        bootstrap_super_admin("suadmin@nexent.com", "", check_only=check_only)
-    create.assert_not_called()
-
-
 def test_orphaned_membership_cannot_be_replaced_by_new_default_su(mocker):
     session = MagicMock()
     session.execute.return_value.first.side_effect = [None, ("original-identity",)]

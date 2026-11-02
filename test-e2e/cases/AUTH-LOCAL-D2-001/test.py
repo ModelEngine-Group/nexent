@@ -44,7 +44,7 @@ def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
         assert northbound_auth.validate_bearer_token(user["api_key"])[0]
         with get_db_session() as session:
             account = session.execute(select(models.UserAccount).where(models.UserAccount.user_id == user["user_id"])).scalar_one()
-            assert account.account_status == "active" and account.user_role == "DEV"
+            assert account.delete_flag == "N" and account.user_role == "DEV"
             assert account.user_email is account.password_hash is account.email_confirmed_at is None
             assert not account.password_login_enabled
             assert session.query(models.TenantGroupUser).filter_by(user_id=user["user_id"], group_id=group_id).count() == 1
@@ -75,8 +75,7 @@ def test_api_only_batch_http_and_atomic_rollback(runtime, monkeypatch):
     for state in ["disabled", "deleted"]:
         with get_db_session() as session:
             account = session.execute(select(models.UserAccount).where(models.UserAccount.user_id == users[0]["user_id"])).scalar_one()
-            account.account_status = "disabled" if state == "disabled" else "active"
-            account.delete_flag = "Y" if state == "deleted" else "N"
+            account.delete_flag = "Y"
         assert not northbound_auth.validate_bearer_token(current_key)[0]
 
 
@@ -188,7 +187,7 @@ def test_native_http_invalid_duplicate_disabled_and_refresh(runtime):
 
     with get_db_session() as session:
         session.execute(
-            models.UserAccount.__table__.update().values(account_status="disabled")
+            models.UserAccount.__table__.update().values(delete_flag="Y")
         )
     assert (
         client.get("/api/user/current_user_info", headers=bearer(token)).status_code

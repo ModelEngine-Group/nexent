@@ -25,7 +25,7 @@ def resolve_gateway_identity(query: dict) -> dict:
     if not isinstance(user_id, str) or not user_id:
         raise IdentityError("Missing account")
     account = get_account(user_id)
-    if not account or account.get("account_status") != "active":
+    if not account or account.get("delete_flag") != "N":
         raise IdentityError("Account is unavailable")
     if kind == "session":
         if type(query.get("token_version")) is not int or query["token_version"] != account.get("token_version"):

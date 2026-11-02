@@ -1351,30 +1351,14 @@ PYTHON
 chmod +x "$TMP_DIR/auto-auth-bin/python3"
 export AUTH_HOOK_ARGUMENTS="$TMP_DIR/auth-hook-arguments"
 unset MSYS_NO_PATHCONV MSYS2_ARG_CONV_EXCL
-deployment_account_version_transition() { printf 'required\n'; }
-
-PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts prepare docker
+PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts docker
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate_docker.py" "deployment must use the consolidated migration script"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "$DEPLOYMENT_ROOT_ENV" "deployment must pass its actual root environment path"
-assert_not_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "prepare must not import accounts"
-PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts prepare kubernetes custom-namespace
-PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts apply kubernetes custom-namespace
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "deployment must complete the migration before rollout"
+PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts kubernetes custom-namespace
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "migrate_k8s.py" "Kubernetes deployment must select its dedicated entry point"
-assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--apply" "apply hook must commit the import"
+assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "--deploy" "host entry must select deployment mode"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "custom-namespace" "Kubernetes hook must preserve the namespace"
 assert_contains "$(cat "$AUTH_HOOK_ARGUMENTS")" "unset/unset" "host Python must allow Git Bash automatic path conversion"
-
-for version_decision in skip new; do
-  deployment_account_version_transition() { printf '%s\n' "$version_decision"; }
-  : > "$AUTH_HOOK_ARGUMENTS"
-  PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts prepare docker no-transition
-  [ ! -s "$AUTH_HOOK_ARGUMENTS" ] || { echo "Version history must skip the Python migration"; exit 1; }
-done
-deployment_account_version_transition() { printf 'unknown\n'; }
-if PATH="$TMP_DIR/auto-auth-bin:$PATH" deployment_upgrade_local_accounts prepare docker invalid-version 2>/dev/null; then
-  echo "Missing historical version must not be inferred from account data"
-  exit 1
-fi
-
 
 echo "All deployment common tests passed."

@@ -23,7 +23,7 @@ CAS continues to use its existing dedicated session table and `sid` revocation.
 ## New persistence
 
 - `nexent.user_account_t` stores stable user IDs, normalized email, password hash
-  and scheme, password-login eligibility, account status, email confirmation,
+  and scheme, password-login eligibility, delete_flag availability, email confirmation,
   credential revision and bounded historical provider metadata.
 
 Application transactions serialize email/ID creation with advisory locks. New
@@ -33,22 +33,24 @@ metadata are never returned by identity APIs.
 
 ## Upgrade sequence
 
-Docker/Kubernetes deploy.sh select historical account transfer only when recorded
-application versions cross from below 2.9.0 to 2.9.0 or later. Version detection reuses
-run-sql-migrations.sh, its schema_migrations.app_version records and the selected
-deployment target version. Targets below 2.9.0 never select account transfer. Initial
-installation and recorded 2.9.0+ versions skip account transfer, including when
-pending rows exist or schema checksums change. Supabase never determines the
-application version. Deployment scripts contain no inline account inspection SQL.
+Docker/Kubernetes deploy.sh checks for `nexent.user_account_t` before replacing
+the application. An existing table is complete, including an empty table; no
+version, checksum, pending-row or private-file checks select credential migration.
+A target without the legacy membership relation uses normal initialization.
+An existing legacy target without the account table requires its original source.
 
-A selected upgrade saves a private source snapshot before replacing the app.
-Normal startup executes schema SQL; the importer only transfers credentials.
-Missing original source data stops migration. A private captured-transition file
-allows the same interrupted upgrade to resume after schema startup. Snapshot and
-transition state are removed after import/cleanup succeed; source volumes and
-backups are retained. The host needs Python 3.8+ when migration is selected and
-needs no database Python packages. Kubernetes preserves source PV data before
-Helm replaces legacy resources.
+The host Python importer reads source identities into memory and commits schema
+creation, membership email/role transfer and credentials in one target transaction.
+Failure or preview leaves no account table or credential process files and restores
+the original membership fields/data. Retry starts from the source again. Successful
+apply reclaims source DB/Auth/Kong containers while retaining persistent data and
+intentional storage backups. A post-commit cleanup error preserves imported accounts
+and reports remaining manual cleanup separately.
+
+001 remains immutable. New `v2.9.0_002_account_availability.sql` converts disabled
+legacy rows to `delete_flag=Y`, removes `account_status` and clears pending metadata.
+Authentication uses `delete_flag` alone. The SQL runner's account-pair transaction
+supplies 001's legacy input column during replay and removes it before commit.
 
 Backups and a freeze on account/password/provider-binding writes remain required
 during cutover. The following sequence is the optional manual recovery path.
@@ -56,9 +58,9 @@ during cutover. The following sequence is the optional manual recovery path.
 1. Back up both the original Supabase database and business PostgreSQL. Retain
    those backups until account, provider-binding and ownership checks finish.
    Freeze registration, password changes and provider binding during cutover.
-2. Apply `deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql` using the normal
-   migration runner, or apply this additive migration to the target manually.
-   Do not alter the historical initialization/merged SQL files.
+2. Keep the original membership profile columns intact. The importer executes
+   schema creation and credential transfer atomically. Do not pre-apply account
+   SQL to a legacy database; an existing account table is the completion marker.
 3. Run the migration on the deployment host with Python 3.11 and the backend
    virtual environment, or install the tool's `requirements.txt`. The tool reads
    `deploy/env/.env` by default; exported variables take precedence. Source defaults
@@ -181,35 +183,32 @@ is stored on the same account. `user_tenant_t` keeps only user/tenant associatio
 and standard record/audit fields. Existing HTTP payloads keep their `email` keys;
 association query results project role/email from the account for compatibility.
 
-All schema upgrade steps are integrated into
+Profile transfer remains in immutable
 `deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql` as one atomic DO block.
 It upgrades an older account `email` column, adds missing profile columns, checks
 conflicting IDs/emails/roles, transfers old association metadata, and only then
 drops the old association role/email columns. Original active association values
 are preferred; deleted-only identities stay deleted. Ambiguous old identities
-cause rollback instead of arbitrary role selection.
+cause rollback instead of arbitrary role selection. New 002 then consolidates
+availability into delete_flag and removes the old status column.
 
-Except for recognized API-only users, if a legacy association has no account, the SQL creates a disabled account with
-the original UUID, role/email and a credential-pending marker. The host importer
-then fills its original credentials. Its `updated` counter reports these hydrated
-accounts; `inserted` counts genuinely new records, and `skipped` counts accounts
-already migrated. A placeholder is never allowed to sign in before credential
-migration. Provider metadata never supplies a role.
+The importer runs 001 and 002 in its credential transaction. Source credentials
+hydrate matching membership profiles before commit. IDs, roles and tenancy stay
+unchanged. Provider metadata never supplies an application role. Orphan/banned/
+deleted source identities remain unavailable through `delete_flag=Y`.
 
-The SQL can be rerun: existing passwords, credential versions, completed profile
-edits and deletion state are retained. The importer also never overwrites a live
-password. Keep the original data/backup until both SQL and account import finish.
-Deleting account rows after the old columns have been removed also deletes that
-identity's canonical role/email; SQL replay cannot recover intentionally removed
-metadata from an association-only table.
+Existing account tables skip import entirely, preserving passwords and operator
+changes. If an older tool left an incomplete account table, recover the target
+from its pre-migration backup before retrying. Deleting accounts after profile
+columns were removed loses their canonical email/role data.
 
 ## API-only identities and source cleanup
 
 API-only users do not need Supabase credentials. The 2.9.0 migration recognizes
 active empty-email USER/DEV memberships with historical token evidence and keeps
-their original keys usable through active, passwordless local accounts. Untouched
-pending placeholders from the earlier draft are repaired on replay; explicit
-disablement/deletion and revoked keys remain effective. New API-only batches
+their original keys usable through active, passwordless local accounts. Explicit
+disablement/deletion and revoked keys remain effective. 002 removes obsolete
+pending metadata without selecting another source import. New API-only batches
 create accounts, memberships, group links and keys in one transaction.
 
 For local sources, a successful host-side `migrate_docker.py --apply` also stops and

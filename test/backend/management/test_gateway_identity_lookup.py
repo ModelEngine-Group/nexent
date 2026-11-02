@@ -13,7 +13,7 @@ from management.services.permission.identity.gateway_lookup import resolve_gatew
 
 @pytest.fixture
 def store(monkeypatch):
-    account = {"account_status": "active", "token_version": 3, "email": "fixture@example.test"}
+    account = {"delete_flag": "N", "token_version": 3, "email": "fixture@example.test"}
     membership = {"tenant_id": "tenant-1", "user_role": "admin", "delete_flag": "N"}
     key = {"user_id": "user-1", "token_id": 17, "delete_flag": "N"}
     get_account, get_membership, get_key = MagicMock(return_value=account), MagicMock(return_value=membership), MagicMock(return_value=key)
@@ -40,7 +40,7 @@ def test_session_and_api_key_identity_return_only_public_identity_fields(store):
 @pytest.mark.parametrize("failure", ["disabled", "missing-account", "version", "cas", "membership", "tenant", "role", "deleted-membership"])
 def test_session_revocation_and_missing_relationships_are_rejected(store, failure):
     query = {"kind": "session", "user_id": "user-1", "token_version": 3, "session_id": "sid"}
-    if failure == "disabled": store.account["account_status"] = "disabled"
+    if failure == "disabled": store.account["delete_flag"] = "Y"
     if failure == "missing-account": store.get_account.return_value = None
     if failure == "version": query["token_version"] = 2
     if failure == "cas": store.cas.return_value = False
@@ -57,6 +57,6 @@ def test_api_key_rejection_checks_active_owner(store, failure):
     if failure == "revoked": store.key["delete_flag"] = "Y"
     if failure == "missing": store.get_key.return_value = None
     if failure == "no-user": store.key["user_id"] = None
-    if failure == "disabled": store.account["account_status"] = "disabled"
+    if failure == "disabled": store.account["delete_flag"] = "Y"
     with pytest.raises(IdentityError):
         resolve_gateway_identity({"kind": "api_key", "access_key": "fixture"})

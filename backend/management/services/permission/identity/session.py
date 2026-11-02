@@ -156,11 +156,11 @@ def _decode_jwt_token_for_expiry(token: str) -> dict:
 
 
 def require_active_account(user_id: str) -> dict:
-    """Reject deleted/disabled identities before any business authorization."""
+    """Reject deleted identities before any business authorization."""
     from management.db.identity.account import get_account
 
     account = get_account(user_id)
-    if not account or account["account_status"] != "active":
+    if not account or account["delete_flag"] != "N":
         raise TokenExpiredError("Account is unavailable")
     return account
 

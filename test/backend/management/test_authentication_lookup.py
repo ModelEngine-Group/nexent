@@ -15,7 +15,7 @@ def test_api_key_authentication_queries_credential_and_account_once(monkeypatch)
 
     def account(user):
         calls.append(("account", user))
-        return {"account_status": "active"}
+        return {"delete_flag": "N"}
 
     monkeypatch.setattr(northbound_auth, "get_token_by_access_key", key_record)
     monkeypatch.setattr(northbound_auth, "require_active_account", account)

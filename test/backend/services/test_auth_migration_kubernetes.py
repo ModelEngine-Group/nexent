@@ -54,16 +54,14 @@ def test_ephemeral_source_storage_blocks_upgrade(args, tmp_path):
         migrate_k8s.preserve_storage(args, {"deployment": {"spec": {"template": {"spec": {"volumes": []}}}}}, tmp_path / "state.json")
 
 
-def test_cluster_identity_is_bound_to_retry(args, mocker):
-    mocker.patch.object(migrate, "_command", return_value='{"clusters":[{"cluster":{"server":"https://cluster"}}]}')
+def test_entry_uses_shared_atomic_upgrade(args, mocker):
     automatic = mocker.patch.object(migrate, "automatic_upgrade")
     migrate_k8s.upgrade(args)
-    assert len(args.cluster_identity) == 64
     automatic.assert_called_once_with(args, source_resolver=migrate_k8s.source_target, storage_preserver=migrate_k8s.preserve_storage)
 
 
 def test_entry_routes_only_to_kubernetes_upgrade(mocker):
-    mocker.patch.object(migrate_k8s.sys, "argv", ["migrate_k8s.py", "--deploy-phase", "prepare"])
+    mocker.patch.object(migrate_k8s.sys, "argv", ["migrate_k8s.py", "--deploy", "--apply"])
     main = mocker.patch.object(migrate, "main", return_value=0)
     assert migrate_k8s.main() == 0
     assert migrate_k8s.sys.argv[-2:] == ["--deployment", "kubernetes"]

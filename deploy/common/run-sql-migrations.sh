@@ -17,10 +17,6 @@ POSTGRES_PASSWORD="${NEXENT_POSTGRES_PASSWORD:-${POSTGRES_PASSWORD:-}}"
 
 MODE="${NEXENT_SQL_STARTUP_MODE:-migrate}"
 case "${1:-}" in
-  --needs-version-upgrade)
-    MODE="version-upgrade"
-    UPGRADE_TARGET_VERSION="${2:-}"
-    ;;
   --migrate)
     MODE="migrate"
     shift
@@ -37,46 +33,6 @@ esac
 
 log() {
   printf '[sql-migrations] %s\n' "$*"
-}
-
-run_version_upgrade_mode() {
-  local version="${UPGRADE_TARGET_VERSION#v}"
-  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    log "ERROR: a numeric target migration version is required"
-    return 1
-  fi
-  local major minor patch
-  IFS=. read -r major minor patch <<< "$version"
-  local target
-  target="$(detect_app_version)"
-  if [[ ! "$target" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    log "ERROR: the target application version must be numeric"
-    return 1
-  fi
-  target="${target#v}"
-  local target_major target_minor target_patch
-  IFS=. read -r target_major target_minor target_patch <<< "$target"
-  # This is a read-only version query, independent of account contents and file
-  # checksums. An interrupted transition is resumed by deploy.sh's saved plan.
-  psql_base -qAt <<SQL
-SELECT to_regclass('"$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME"') IS NOT NULL AS has_history \gset
-\if :has_history
-WITH versions AS (
-  SELECT regexp_match(app_version, '^v?([0-9]+)\.([0-9]+)\.([0-9]+)') AS value
-  FROM "$MIGRATION_SCHEMA"."$MIGRATION_TABLE_NAME"
-  WHERE status IN ('applied','baselined')
-)
-SELECT CASE
-  WHEN ARRAY[$target_major,$target_minor,$target_patch] < ARRAY[$major,$minor,$patch] THEN 'skip'
-  WHEN EXISTS (SELECT 1 FROM versions WHERE value::int[] >= ARRAY[$major,$minor,$patch]) THEN 'skip'
-  WHEN EXISTS (SELECT 1 FROM versions WHERE value IS NOT NULL) THEN 'required'
-  WHEN EXISTS (SELECT 1 FROM versions) THEN 'unknown'
-  ELSE 'new'
-END;
-\else
-SELECT CASE WHEN ARRAY[$target_major,$target_minor,$target_patch] < ARRAY[$major,$minor,$patch] THEN 'skip' ELSE 'new' END;
-\endif
-SQL
 }
 
 sha256_file() {
@@ -304,9 +260,18 @@ SQL
 
 append_all_migrations_sql() {
   local migration_id checksum source_file
+  local account_compat="$MIGRATION_DIR/v2.9.0_002_account_availability.sql"
   while IFS="$MANIFEST_SEPARATOR" read -r migration_id checksum source_file; do
     [ -n "${migration_id:-}" ] || continue
+    if [ "$migration_id" = v2.9.0_001_local_user_accounts.sql ] && [ -f "$account_compat" ]; then
+      printf "BEGIN;\nSET LOCAL nexent.account_schema_replay='prepare';\n\\i '%s'\nSET LOCAL nexent.account_schema_replay='';\n" \
+        "$(escape_sql_literal "$account_compat")" >> "$MIGRATION_PLAN_FILE"
+    fi
     append_one_migration_sql "$migration_id" "$checksum" "$source_file"
+    if [ "$migration_id" = v2.9.0_002_account_availability.sql ]; then
+      # Cleanup also runs when the checksum check skipped both account files.
+      printf "\\i '%s'\nCOMMIT;\n" "$(escape_sql_literal "$account_compat")" >> "$MIGRATION_PLAN_FILE"
+    fi
   done < "$MIGRATION_MANIFEST_FILE"
 }
 
@@ -420,7 +385,7 @@ main() {
       log "SQL migration startup mode is off"
       return 0
       ;;
-    migrate|wait|version-upgrade)
+    migrate|wait)
       ;;
     *)
       log "ERROR: unsupported NEXENT_SQL_STARTUP_MODE: $MODE"
@@ -430,10 +395,6 @@ main() {
 
   wait_for_postgres
   split_migration_table
-  if [ "$MODE" = version-upgrade ]; then
-    run_version_upgrade_mode
-    return
-  fi
   APP_VERSION_VALUE="$(detect_app_version)"
   collect_manifest
   trap cleanup EXIT

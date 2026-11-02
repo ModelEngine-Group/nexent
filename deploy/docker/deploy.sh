@@ -1864,7 +1864,7 @@ main_deploy() {
 
   # Capture historical identities before application replacement or SQL changes.
   if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
-    deployment_upgrade_local_accounts prepare docker || exit 1
+    deployment_upgrade_local_accounts docker || exit 1
   fi
 
   # Configure HTTPS state before core services start so nexent-web is created
@@ -1898,9 +1898,6 @@ main_deploy() {
   echo "--------------------------------"
   echo ""
 
-  if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
-    deployment_upgrade_local_accounts apply docker || exit 1
-  fi
 
   # Create default super admin user
   if [ "$DEPLOYMENT_VERSION" = "full" ]; then

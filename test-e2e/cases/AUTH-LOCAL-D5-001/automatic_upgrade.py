@@ -38,7 +38,7 @@ def assert_automatic_upgrade(root, temporary):
     bash = "C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else "bash"
 
     def phase(name, success=True):
-        shell = 'source "$1/deploy/common/common.sh"; export DEPLOYMENT_ROOT_ENV="$2"; deployment_upgrade_local_accounts "$3" docker nexent "$4" "$5"'
+        shell = 'source "$1/deploy/common/common.sh"; export DEPLOYMENT_ROOT_ENV="$2"; deployment_upgrade_local_accounts docker nexent "$4" "$5"'
         result = subprocess.run([bash, "-c", shell, "case", root.as_posix(), env_file.as_posix(), name, target, worker],
                                 env=env, capture_output=True, text=True, check=False)
         assert result.returncode == (0 if success else 1), result.stdout + result.stderr
@@ -71,61 +71,64 @@ def assert_automatic_upgrade(root, temporary):
         docker("exec", "-i", names["db"], "psql", "-U", "postgres", "-v", "ON_ERROR_STOP=1",
                data="CREATE SCHEMA auth; CREATE TABLE auth.users (id uuid,email text,encrypted_password text);"
                     f"INSERT INTO auth.users VALUES ('{user_id}','auto@example.com','{encoded}');")
-        assert phase("prepare")["skipped"]  # No prior SQL version is a fresh installation.
+        assert phase("prepare")["new"]
         query("CREATE SCHEMA nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),tenant_id varchar(100),"
               "user_role varchar(30),user_email varchar(255),delete_flag varchar(1) DEFAULT 'N');"
               f"INSERT INTO nexent.user_tenant_t VALUES ('{user_id}','retained-tenant','SU','auto@example.com','N');")
         query("INSERT INTO nexent.user_tenant_t VALUES ('user_id','tenant_id','SPEED',NULL,'N');")
-        query("CREATE TABLE nexent.schema_migrations (migration_id text PRIMARY KEY,checksum text NOT NULL,status text NOT NULL DEFAULT 'applied',executed_at timestamptz DEFAULT now(),app_version text,source_file text); "
-              "INSERT INTO nexent.schema_migrations (migration_id,checksum,app_version) VALUES ('v2.8.3_001_previous.sql','synthetic','2.8.3')")
-        env["APP_VERSION"] = "2.8.3"
-        assert phase("prepare")["skipped"]
-        env["APP_VERSION"] = "2.9.0"
-        query("UPDATE nexent.schema_migrations SET app_version='latest'")
-        phase("prepare", success=False)
-        query("UPDATE nexent.schema_migrations SET app_version='2.8.3'")
         query("CREATE TABLE nexent.user_token_info_t (user_id varchar(100),delete_flag varchar(1)); "
               "INSERT INTO nexent.user_tenant_t VALUES ('api-only','api-tenant','USER',NULL,'N'); "
               "INSERT INTO nexent.user_token_info_t VALUES ('api-only','Y')")
         docker("stop", names["db"])
-        assert phase("prepare")["source"] == 1
-        snapshots = list((temporary / ".migration-state").glob("*.json"))
-        assert len(snapshots) == 1
-        assert json.loads(snapshots[0].read_text())["rows"][0]["encrypted_password"] == encoded
+        # A conflict fails after schema creation, rolling back both the new
+        # table and the removal of legacy profile fields. Retry starts fresh.
+        query(f"UPDATE nexent.user_tenant_t SET user_email='conflict@example.com' WHERE user_id='{user_id}'")
+        phase("prepare", success=False)
+        assert query("SELECT to_regclass('nexent.user_account_t') IS NULL") == "t"
+        assert query(f"SELECT user_role,user_email FROM nexent.user_tenant_t WHERE user_id='{user_id}'") == "SU|conflict@example.com"
+        assert all(name in docker("ps", "-a", "--format", "{{.Names}}").splitlines() for name in names.values())
+        assert not (temporary / ".migration-state").exists()
+        query(f"UPDATE nexent.user_tenant_t SET user_email='auto@example.com' WHERE user_id='{user_id}'")
+        assert phase("prepare")["updated"] == 1
+        assert query("SELECT source_metadata->>'system_identity' FROM nexent.user_account_t WHERE user_id='user_id'") == "speed"
         docker("exec", worker, "mkdir", "-p", "/tmp/auth-migrations")
-        docker("cp", str(sql_file), worker + ":/tmp/auth-migrations/" + sql_file.name)
+        for file in [sql_file, sql_file.with_name("v2.9.0_002_account_availability.sql")]:
+            docker("cp", str(file), worker + ":/tmp/auth-migrations/" + file.name)
         runner = (root / "deploy/common/run-sql-migrations.sh").read_text(encoding="utf-8")
         docker("exec", "-i", worker, "sh", "-c", "cat > /tmp/run-auth-sql.sh", data=runner)
         docker("exec", "-i", worker, "sh", "-c", "cat > /tmp/init-auth.sql", data="CREATE SCHEMA IF NOT EXISTS nexent;\n")
         sql_command = ["exec", "-e", "NEXENT_APP_VERSION=2.9.0", "-e", "NEXENT_SQL_MIGRATION_DIR=/tmp/auth-migrations", "-e", "NEXENT_SQL_INIT_FILE=/tmp/init-auth.sql",
                        worker, "bash", "/tmp/run-auth-sql.sh", "--migrate"]
         docker(*sql_command)
-        assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id='v2.9.0_001_local_user_accounts.sql'") == "1"
-        assert query("SELECT source_metadata->>'system_identity' FROM nexent.user_account_t WHERE user_id='user_id'") == "speed"
-        # An import failure after SQL completion must not create the data checkpoint.
-        query(f"UPDATE nexent.user_account_t SET user_email='conflicting@example.com' WHERE user_id='{user_id}'")
-        phase("apply", success=False)
-        assert snapshots[0].is_file()
-        assert not json.loads(snapshots[0].read_text()).get("imported")
-        assert all(name in docker("ps", "-a", "--format", "{{.Names}}").splitlines() for name in names.values())
-        query(f"UPDATE nexent.user_account_t SET user_email='auto@example.com' WHERE user_id='{user_id}'")
-        assert phase("prepare")["retained"]
-        assert phase("apply")["updated"] == 1
-        assert not snapshots[0].exists()
+        assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id='v2.9.0_002_account_availability.sql'") == "1"
+        # Normal startup must also support unchanged checksums and forced replay.
+        docker(*sql_command)
+        query("UPDATE nexent.schema_migrations SET checksum='force-replay' WHERE migration_id='v2.9.0_001_local_user_accounts.sql'")
+        docker(*sql_command)
+        assert query("SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name='account_status'") == "0"
+        # A failed historical replay must roll back its compatibility column,
+        # preserving the already committed accounts instead of deleting them.
+        query("ALTER TABLE nexent.user_tenant_t ADD COLUMN user_email varchar(255); "
+              f"UPDATE nexent.user_tenant_t SET user_email='conflict@example.com' WHERE user_id='{user_id}'; "
+              "UPDATE nexent.schema_migrations SET checksum='force-failure' WHERE migration_id='v2.9.0_001_local_user_accounts.sql'")
+        failed = subprocess.run(["docker", *sql_command], capture_output=True, check=False)
+        assert failed.returncode != 0
+        assert query("SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name='account_status'") == "0"
+        assert query(f"SELECT password_hash FROM nexent.user_account_t WHERE user_id='{user_id}'") == encoded
+        query("ALTER TABLE nexent.user_tenant_t DROP COLUMN user_email")
+        docker(*sql_command)
         assert all(name not in docker("ps", "-a", "--format", "{{.Names}}").splitlines() for name in names.values())
         stored = query(f"SELECT password_hash FROM nexent.user_account_t WHERE user_id='{user_id}'")
         assert stored == encoded and bcrypt.checkpw(b"original-password", stored.encode())
         assert query(f"SELECT tenant_id FROM nexent.user_tenant_t WHERE user_id='{user_id}'") == "retained-tenant"
-        assert query("SELECT account_status FROM nexent.user_account_t WHERE user_id='api-only'") == 'active'
+        assert query("SELECT delete_flag FROM nexent.user_account_t WHERE user_id='api-only'") == 'N'
         assert query("SELECT delete_flag FROM nexent.user_token_info_t WHERE user_id='api-only'") == 'Y'
-        # Same/later SQL versions must skip data migration regardless of account
-        # state or a schema checksum change. No source is rediscovered.
-        query("UPDATE nexent.user_account_t SET source_metadata='{\"credential_migration_pending\":true}'; "
-              "UPDATE nexent.schema_migrations SET checksum='different' WHERE migration_id='v2.9.0_001_local_user_accounts.sql'")
-        assert phase("prepare")["skipped"]
-        assert phase("apply")["skipped"]
-        query("INSERT INTO nexent.schema_migrations (migration_id,checksum,app_version) VALUES ('v3.0.0_001_future.sql','future','3.0.0')")
-        assert phase("prepare")["skipped"]
+        # Completion depends only on table existence, even with empty accounts,
+        # changed history or arbitrary application version settings.
+        query("DELETE FROM nexent.user_account_t; DROP TABLE nexent.schema_migrations")
+        env["APP_VERSION"] = "unreadable"
+        assert phase("prepare")["complete"]
+        assert not (temporary / ".migration-state").exists()
 
     finally:
         existing = docker("ps", "-a", "--format", "{{.Names}}").splitlines()

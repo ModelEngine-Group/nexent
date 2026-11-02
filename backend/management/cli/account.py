@@ -26,8 +26,6 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
         lock_account_keys(session, "super-admin-bootstrap", email)
         account = get_account_by_email(email, session)
         if account:
-            if (account.get("source_metadata") or {}).get("credential_migration_pending"):
-                raise AccountConflictError("Account credentials await migration; run the host migrate_docker.py --apply first")
             members = (
                 session.execute(
                     select(UserTenant).where(
@@ -39,7 +37,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
                 .all()
             )
             if (
-                account["account_status"] != "active"
+                account["delete_flag"] != "N"
                 or not members
                 or any(m.user_role != "SU" for m in members)
             ):
@@ -59,7 +57,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
         if session.execute(
             select(UserTenant.user_id).where(
                 UserTenant.delete_flag == "N",
-                UserTenant.user_id.notin_(select(UserAccount.user_id).where(UserAccount.delete_flag == "N")),
+                UserTenant.user_id.notin_(select(UserAccount.user_id)),
             )
         ).first():
             raise AccountConflictError("Active membership has no account profile; restore the original account before bootstrap")

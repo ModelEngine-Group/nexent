@@ -18,7 +18,7 @@ pytestmark = [pytest.mark.case_id("AUTH-LOCAL-D5-001"), pytest.mark.stage("D5")]
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "test-e2e/infra/automation"))
-from local_auth import disposable_database, initialize_target
+from local_auth import disposable_database
 from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
     MigrationConflict,
     import_users,
@@ -27,37 +27,33 @@ from deploy.sql.tools.supabase_to_postgres.migrate_docker import (
 from gateway.security.passwords import verify_password
 
 
+def availability_sql():
+    return (ROOT / "deploy/sql/migrations/v2.9.0_002_account_availability.sql").read_text(encoding="utf-8")
+
+
+def initialize_legacy(dsn):
+    with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
+        cursor.execute("CREATE SCHEMA nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),tenant_id varchar(100),user_role varchar(30),user_email varchar(255),delete_flag varchar(1) DEFAULT 'N')")
+
+
 def test_speed_seed_is_system_identity_and_replay_preserves_operator_changes():
     import re
-
-    sql = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
     historical = (ROOT / "deploy/sql/migrations/v1_merged_migrations.sql").read_text(encoding="utf-8")
     seed = re.search(r"INSERT INTO nexent.user_tenant_t \(user_id, tenant_id, user_role, user_email, created_by, updated_by\).*?DO NOTHING;", historical, re.S).group()
     with disposable_database() as dsn:
         with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
             cursor.execute("CREATE SCHEMA nexent; CREATE TABLE nexent.user_tenant_t (user_id varchar(100),tenant_id varchar(100),user_role varchar(30),user_email varchar(255),created_by varchar(100),updated_by varchar(100),delete_flag varchar(1) DEFAULT 'N',PRIMARY KEY(user_id,tenant_id))")
             cursor.execute(seed)
-            cursor.execute(sql)
-            cursor.execute(sql)
-            cursor.execute("SELECT user_id,user_role,account_status,password_login_enabled,password_hash,source_metadata FROM nexent.user_account_t")
-            assert cursor.fetchone() == ('user_id','SPEED','disabled',False,None,{'system_identity':'speed'})
+            assert import_users(connection, [], dry_run=False)["source"] == 0
+            cursor.execute("SELECT user_id,user_role,delete_flag,password_login_enabled,password_hash,source_metadata FROM nexent.user_account_t")
+            assert cursor.fetchone() == ('user_id','SPEED','Y',False,None,{'system_identity':'speed'})
             cursor.execute("SELECT tenant_id FROM nexent.user_tenant_t WHERE user_id='user_id'")
             assert cursor.fetchone() == ('tenant_id',)
-            # Repair a previously deployed pending placeholder, after columns were removed.
-            cursor.execute("UPDATE nexent.user_account_t SET source_metadata='{\"credential_migration_pending\":true}'")
-            cursor.execute(sql)
-            cursor.execute("SELECT source_metadata FROM nexent.user_account_t")
-            assert cursor.fetchone()[0] == {'system_identity':'speed'}
-            cursor.execute("UPDATE nexent.user_account_t SET updated_by='operator',source_metadata='{\"credential_migration_pending\":true}',token_version=3")
-            cursor.execute(sql)
-            cursor.execute("SELECT token_version,source_metadata FROM nexent.user_account_t")
-            assert cursor.fetchone() == (3,{'credential_migration_pending':True})
-            for uid, role in [(str(uuid4()), 'SPEED'), (str(uuid4()), 'USER')]:
-                cursor.execute("INSERT INTO nexent.user_account_t (user_id,user_role,account_status,source_metadata,updated_by) VALUES (%s,%s,'disabled','{\"credential_migration_pending\":true}','account-schema-migration')",(uid,role))
-                cursor.execute("INSERT INTO nexent.user_tenant_t (user_id,tenant_id) VALUES (%s,'tenant_id')",(uid,))
-                cursor.execute(sql)
-                cursor.execute("SELECT account_status,source_metadata FROM nexent.user_account_t WHERE user_id=%s",(uid,))
-                assert cursor.fetchone() == ('disabled',{'credential_migration_pending':True})
+            cursor.execute("UPDATE nexent.user_account_t SET updated_by='operator',token_version=3")
+            cursor.execute(availability_sql())
+            cursor.execute(availability_sql())
+            cursor.execute("SELECT token_version,delete_flag FROM nexent.user_account_t")
+            assert cursor.fetchone() == (3,'Y')
 
 
 def test_deployment_automatic_upgrade_retries_after_sql_success(tmp_path):
@@ -96,30 +92,24 @@ def test_legacy_api_only_keys_survive_upgrade_and_replay(monkeypatch):
                     cursor.execute("INSERT INTO nexent.user_token_info_t (token_id,access_key,user_id,delete_flag) VALUES (%s,%s,%s,%s)",
                                    (token_id, "nexent-original-" + uid, uid, "Y" if uid == "revoked" else "N"))
                 cursor.execute(sql)
-                cursor.execute("SELECT user_id,account_status,password_login_enabled,password_hash,user_email,source_metadata,delete_flag FROM nexent.user_account_t")
+                cursor.execute(availability_sql())
+                cursor.execute("SELECT user_id,delete_flag,password_login_enabled,password_hash,user_email,source_metadata,delete_flag FROM nexent.user_account_t")
                 rows = {r[0]: r[1:] for r in cursor.fetchall()}
-                assert rows["api"][:4] == rows["revoked"][:4] == ("active", False, None, None)
+                assert rows["api"][:4] == rows["revoked"][:4] == ("N", False, None, None)
                 assert rows["api"][4] == {"api_only": True}
-                assert all(rows[uid][0] == "disabled" for uid in ["normal", "unknown", "deleted", "admin"])
+                assert all(rows[uid][0] == "Y" for uid in ["normal", "unknown", "deleted", "admin"])
                 assert rows["deleted"][-1] == "Y"
-                # Repair a placeholder produced by the previous draft migration.
-                cursor.execute("UPDATE nexent.user_account_t SET account_status='disabled',source_metadata='{" + '"credential_migration_pending":true' + "}',updated_by='account-schema-migration' WHERE user_id='api'")
-                cursor.execute(sql)
-                cursor.execute("SELECT account_status FROM nexent.user_account_t WHERE user_id='api'")
-                assert cursor.fetchone()[0] == "active"
-                cursor.execute("UPDATE nexent.user_account_t SET account_status='disabled',source_metadata=%s,updated_by='operator' WHERE user_id='revoked'",
-                               (Json({"credential_migration_pending": True}),))
-                cursor.execute(sql)
-                cursor.execute("SELECT account_status FROM nexent.user_account_t WHERE user_id='revoked'")
-                assert cursor.fetchone()[0] == "disabled"
+                cursor.execute(availability_sql())
+                cursor.execute("UPDATE nexent.user_account_t SET delete_flag='Y',updated_by='operator' WHERE user_id='revoked'")
+                cursor.execute(availability_sql())
             with monkeypatch.context() as patch:
                 patch.setattr(db_client, "session_maker", sessionmaker(bind=engine))
                 assert northbound_auth.validate_bearer_token("nexent-original-api")[0]
                 assert not northbound_auth.validate_bearer_token("nexent-original-revoked")[0]
                 assert not northbound_auth.validate_bearer_token("nexent-original-deleted")[0]
                 with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
-                    cursor.execute("UPDATE nexent.user_account_t SET account_status='disabled',updated_by='operator' WHERE user_id='api'")
-                    cursor.execute(sql)
+                    cursor.execute("UPDATE nexent.user_account_t SET delete_flag='Y',updated_by='operator' WHERE user_id='api'")
+                    cursor.execute(availability_sql())
                 assert not northbound_auth.validate_bearer_token("nexent-original-api")[0]
             with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
                 cursor.execute("SELECT access_key,user_id FROM nexent.user_token_info_t ORDER BY user_id")
@@ -140,7 +130,7 @@ def test_successful_apply_reclaims_source_stack_and_retains_data(target):
 @pytest.fixture
 def target():
     with disposable_database() as dsn:
-        initialize_target(dsn)
+        initialize_legacy(dsn)
         yield dsn
 
 
@@ -161,20 +151,15 @@ def historical_user(**extra):
 
 def member(dsn, row):
     with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
-        cursor.execute(
-            "INSERT INTO nexent.user_tenant_t (user_id,tenant_id) VALUES (%s,'tenant')",
-            (row["id"],),
-        )
-        cursor.execute(
-            "INSERT INTO nexent.user_account_t (user_id,user_email,user_role,account_status,source_metadata) "
-            "VALUES (%s,%s,'USER','disabled',%s)",
-            (row["id"],row["email"],Json({"credential_migration_pending":True})),
-        )
+        cursor.execute("INSERT INTO nexent.user_tenant_t (user_id,tenant_id,user_role,user_email) VALUES (%s,'tenant','USER',%s)", (row["id"],row["email"]))
 
 
 def count(dsn):
     with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
-        cursor.execute("SELECT count(*) FROM nexent.user_account_t WHERE NOT (source_metadata ? 'credential_migration_pending')")
+        cursor.execute("SELECT to_regclass('nexent.user_account_t')")
+        if cursor.fetchone()[0] is None:
+            return 0
+        cursor.execute("SELECT count(*) FROM nexent.user_account_t")
         return cursor.fetchone()[0]
 
 
@@ -219,8 +204,8 @@ def test_account_migration_conflict_rolls_back_all_users(target):
     assert count(target) == 0
     with psycopg2.connect(target) as connection:
         import_users(connection, [first], dry_run=False)
-    with pytest.raises(MigrationConflict), psycopg2.connect(target) as connection:
-        import_users(connection, [conflict], dry_run=False)
+    with psycopg2.connect(target) as connection:
+        assert import_users(connection, [conflict], dry_run=False)["complete"]
     assert count(target) == 1
 
 
@@ -229,8 +214,8 @@ def test_account_migration_keeps_orphans_disabled(target):
     with psycopg2.connect(target) as connection:
         assert import_users(connection, [row], dry_run=False)["disabled_orphans"] == 1
     with psycopg2.connect(target) as connection, connection.cursor() as cursor:
-        cursor.execute("SELECT user_id,account_status FROM nexent.user_account_t")
-        assert cursor.fetchone() == (row["id"], "disabled")
+        cursor.execute("SELECT user_id,delete_flag FROM nexent.user_account_t")
+        assert cursor.fetchone() == (row["id"], "Y")
 
 
 def test_account_migration_source_snapshot_without_audit_import(target, capsys):
@@ -297,8 +282,8 @@ def test_account_migration_source_snapshot_without_audit_import(target, capsys):
         preview = run_cli()
         assert preview["dry_run"] is True and preview["updated"] == 1
         with psycopg2.connect(target) as connection, connection.cursor() as cursor:
-            cursor.execute("SELECT count(*) FROM nexent.user_account_t WHERE NOT (source_metadata ? 'credential_migration_pending')")
-            assert cursor.fetchone()[0] == 0
+            cursor.execute("SELECT to_regclass('nexent.user_account_t')")
+            assert cursor.fetchone()[0] is None
             cursor.execute("SELECT to_regclass('nexent.user_auth_history_t')")
             assert cursor.fetchone()[0] is None
         applied = run_cli("--apply")
@@ -319,17 +304,27 @@ def test_account_migration_source_snapshot_without_audit_import(target, capsys):
 
 
 def test_account_migration_database_error_rolls_back_partial_inserts(target):
-    first = historical_user()
-    second = historical_user()
+    first, second = historical_user(), historical_user()
     second["email"] = "reject@example.com"
     with psycopg2.connect(target) as connection, connection.cursor() as cursor:
         cursor.execute("""CREATE FUNCTION nexent.reject_test_row() RETURNS trigger LANGUAGE plpgsql AS $$
-            BEGIN IF NEW.user_email='reject@example.com' THEN RAISE EXCEPTION 'test rejection'; END IF; RETURN NEW; END $$;
-            CREATE TRIGGER reject_test_row BEFORE INSERT ON nexent.user_account_t
-            FOR EACH ROW EXECUTE PROCEDURE nexent.reject_test_row();""")
+          BEGIN IF NEW.user_email='reject@example.com' THEN RAISE EXCEPTION 'test rejection'; END IF; RETURN NEW; END $$;
+          CREATE FUNCTION nexent.attach_test_trigger() RETURNS event_trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            IF EXISTS (SELECT 1 FROM pg_event_trigger_ddl_commands() WHERE object_identity='nexent.user_account_t') THEN
+              CREATE TRIGGER reject_test_row BEFORE INSERT ON nexent.user_account_t
+              FOR EACH ROW EXECUTE PROCEDURE nexent.reject_test_row();
+            END IF;
+          END $$;
+          CREATE EVENT TRIGGER attach_test_trigger ON ddl_command_end WHEN TAG IN ('CREATE TABLE')
+          EXECUTE PROCEDURE nexent.attach_test_trigger();""")
     with pytest.raises(psycopg2.Error), psycopg2.connect(target) as connection:
         import_users(connection, [first, second], dry_run=False)
-    assert count(target) == 0
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT to_regclass('nexent.user_account_t')")
+        assert cursor.fetchone()[0] is None
+        cursor.execute("SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_tenant_t' AND column_name IN ('user_email','user_role')")
+        assert cursor.fetchone()[0] == 2
 
 
 def test_account_migration_serializes_online_creation_with_one_writer_lock(target):
@@ -345,45 +340,27 @@ def test_account_migration_serializes_online_creation_with_one_writer_lock(targe
 
 
 def test_account_profile_single_sql_upgrade_and_replay():
-    sql = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
     original = historical_user()
-    pending = historical_user()
-    pending["email"] = "pending@example.com"
     with disposable_database() as dsn:
+        initialize_legacy(dsn)
+        member(dsn, original)
         with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
-            cursor.execute("CREATE SCHEMA nexent")
-            cursor.execute(sql)
-            cursor.execute("ALTER TABLE nexent.user_account_t RENAME COLUMN user_email TO email; ALTER TABLE nexent.user_account_t DROP COLUMN user_role")
-            cursor.execute("CREATE TABLE nexent.user_tenant_t (user_id varchar(100),tenant_id varchar(100),user_role varchar(30),user_email varchar(255),delete_flag varchar(1) DEFAULT 'N')")
-            cursor.execute("INSERT INTO nexent.user_account_t (user_id,email,password_hash,token_version) VALUES (%s,%s,%s,7)",
-                           (original["id"],original["email"],original["encrypted_password"]))
-            cursor.execute("INSERT INTO nexent.user_tenant_t (user_id,tenant_id,user_role,user_email) VALUES (%s,'tenant','USER',%s),(%s,'tenant','SU',%s)",
-                           (original["id"],original["email"],pending["id"],pending["email"]))
-            cursor.execute("INSERT INTO nexent.user_tenant_t (user_id,tenant_id,user_role,user_email,delete_flag) VALUES ('deleted-identity','tenant','DEV','deleted@example.com','Y')")
-            cursor.execute(sql)
-            cursor.execute(sql)
+            assert import_users(connection,[original],dry_run=False)["updated"] == 1
+            cursor.execute("ALTER TABLE nexent.user_account_t ADD COLUMN account_status varchar(30) DEFAULT 'active'")
+            cursor.execute("INSERT INTO nexent.user_account_t (user_id,user_email,user_role,account_status,source_metadata) VALUES ('disabled-identity','disabled@example.com','DEV','disabled','{\"credential_migration_pending\":true}')")
+            cursor.execute(availability_sql())
+            cursor.execute(availability_sql())
             cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_tenant_t'")
             assert not {"user_role","user_email"} & {row[0] for row in cursor.fetchall()}
             cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t'")
             columns = {row[0] for row in cursor.fetchall()}
-            assert {"user_role","user_email"} <= columns and "email" not in columns
-            cursor.execute("SELECT password_hash,token_version,user_role FROM nexent.user_account_t WHERE user_id=%s",(original["id"],))
-            assert cursor.fetchone() == (original["encrypted_password"],7,"USER")
-            cursor.execute("SELECT password_hash,account_status,source_metadata FROM nexent.user_account_t WHERE user_id=%s",(pending["id"],))
-            placeholder = cursor.fetchone()
-            assert placeholder[0] is None and placeholder[1] == "disabled"
-            assert placeholder[2]["credential_migration_pending"] is True
-            cursor.execute("SELECT user_role,user_email,delete_flag,account_status FROM nexent.user_account_t WHERE user_id='deleted-identity'")
-            assert cursor.fetchone() == ("DEV","deleted@example.com","Y","disabled")
-        with psycopg2.connect(dsn) as connection:
-            assert import_users(connection,[pending],dry_run=False)["updated"] == 1
-        with psycopg2.connect(dsn) as connection, connection.cursor() as cursor:
-            cursor.execute("SELECT user_role,password_hash FROM nexent.user_account_t WHERE user_id=%s",(pending["id"],))
-            assert cursor.fetchone() == ("SU",pending["encrypted_password"])
-            cursor.execute("UPDATE nexent.user_account_t SET user_role='ADMIN',user_email='edited@example.com' WHERE user_id=%s",(original["id"],))
-            cursor.execute(sql)
-            cursor.execute("SELECT user_role,user_email,password_hash,token_version FROM nexent.user_account_t WHERE user_id=%s",(original["id"],))
-            assert cursor.fetchone() == ("ADMIN","edited@example.com",original["encrypted_password"],7)
+            assert {"user_role","user_email"} <= columns and not {"email","account_status"} & columns
+            cursor.execute("SELECT delete_flag,source_metadata FROM nexent.user_account_t WHERE user_id='disabled-identity'")
+            assert cursor.fetchone() == ('Y',{})
+            cursor.execute("UPDATE nexent.user_account_t SET user_role='ADMIN',user_email='edited@example.com',token_version=7,delete_flag='Y' WHERE user_id=%s",(original["id"],))
+            cursor.execute(availability_sql())
+            cursor.execute("SELECT user_role,user_email,password_hash,token_version,delete_flag FROM nexent.user_account_t WHERE user_id=%s",(original["id"],))
+            assert cursor.fetchone() == ("ADMIN","edited@example.com",original["encrypted_password"],7,'Y')
 
 
 @pytest.mark.parametrize("role,email", [("SU","same@example.com"),("USER","different@example.com")])

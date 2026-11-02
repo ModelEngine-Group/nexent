@@ -541,53 +541,12 @@ deployment_source_root_env() {
   set +a
 }
 
-deployment_account_version_transition() {
-  local mode="$1" namespace="$2" database="$3"
-  local common_dir target_version
-  common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  target_version="${DEPLOYMENT_APP_VERSION:-${APP_VERSION:-}}"
-  if [[ ! "$target_version" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    target_version="$(sed -n '1{s/[[:space:]]*$//;p;}' "$common_dir/../../VERSION")"
-  fi
-  local -a command
-  if [ "$mode" = docker ]; then
-    command=(docker exec -i "$database")
-  else
-    command=(kubectl --namespace "$namespace" exec -i "deployment/$database" --)
-  fi
-  MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "${command[@]}" env \
-    POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=5432 \
-    "POSTGRES_USER=${POSTGRES_USER:-root}" "POSTGRES_DB=${POSTGRES_DB:-nexent}" \
-    "NEXENT_APP_VERSION=$target_version" \
-    "NEXENT_SQL_MIGRATION_TABLE=${NEXENT_SQL_MIGRATION_TABLE:-nexent.schema_migrations}" \
-    bash -s -- --needs-version-upgrade 2.9.0 < "$common_dir/run-sql-migrations.sh"
-}
-
 deployment_upgrade_local_accounts() {
-  local phase="$1" mode="$2" namespace="${3:-nexent}"
-  local database="${4:-nexent-postgresql}" config="${5:-nexent-config}"
-  local common_dir script candidate interpreter="" env_file decision transition
+  local mode="$1" namespace="${2:-nexent}"
+  local database="${3:-nexent-postgresql}" config="${4:-nexent-config}"
+  local common_dir script candidate interpreter="" env_file
   common_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   env_file="${DEPLOYMENT_ROOT_ENV:-${ROOT_ENV_FILE:-$(deployment_env_dir)/.env}}"
-  transition="$(dirname "$env_file")/.migration-state/$mode-$namespace-account-version-transition"
-  if [ "$phase" = prepare ]; then
-    if [ -f "$transition" ]; then
-      decision=required
-    else
-      decision="$(deployment_account_version_transition "$mode" "$namespace" "$database")" || return 1
-      decision="${decision//$'\r'/}"
-    fi
-  elif [ -f "$transition" ]; then
-    decision=required
-  else
-    return 0
-  fi
-  case "$decision" in
-    skip|new) echo "Account data migration skipped by SQL version history ($decision)."; return 0 ;;
-    unknown) echo "ERROR: previous application version is missing from SQL migration history." >&2; return 1 ;;
-    required) ;;
-    *) echo "ERROR: SQL version upgrade decision is invalid." >&2; return 1 ;;
-  esac
   script="$common_dir/../sql/tools/supabase_to_postgres/migrate_docker.py"
   if [ "$mode" = kubernetes ]; then
     script="$common_dir/../sql/tools/supabase_to_postgres/migrate_k8s.py"
@@ -602,15 +561,8 @@ deployment_upgrade_local_accounts() {
     echo "ERROR: Python 3.8+ is required on the deployment host for account upgrade." >&2
     return 1
   fi
-  local -a arguments=(--deploy-phase "$phase" --deployment "$mode" --namespace "$namespace"
-    --database-target "$database" --config-target "$config" --env-file "$env_file" --wait-timeout 300)
-  if [ "$phase" = apply ]; then arguments+=(--apply); fi
-  "$interpreter" "$script" "${arguments[@]}" || return 1
-  if [ "$phase" = prepare ]; then
-    (umask 077; mkdir -p "$(dirname "$transition")"; printf 'pre-2.9.0 -> 2.9.0\n' > "$transition") || return 1
-  else
-    rm -f "$transition"
-  fi
+  "$interpreter" "$script" --deploy --apply --deployment "$mode" --namespace "$namespace" \
+    --database-target "$database" --config-target "$config" --env-file "$env_file" --wait-timeout 300
 }
 
 deployment_env_dir() {
