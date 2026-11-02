@@ -589,7 +589,7 @@ function AgentSetupContent({
                 }}
                 onOptimizePrompt={() => {
                   setIsGenerationVisible(true);
-                  nl2AgentChatPanelRef.current?.sendPrompt(
+                  nl2AgentChatPanelRef.current?.fillPrompt(
                     t("nl2agent.optimization.prompt.input")
                   );
                 }}

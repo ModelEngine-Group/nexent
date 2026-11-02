@@ -64,7 +64,7 @@ export interface Nl2AgentChatPanelProps {
 
 export interface Nl2AgentChatPanelHandle {
   cancelRun: () => void;
-  sendPrompt: (prompt: string) => void;
+  fillPrompt: (prompt: string) => void;
 }
 
 export const Nl2AgentChatPanel = forwardRef<
@@ -226,7 +226,7 @@ export const Nl2AgentChatPanel = forwardRef<
     ref,
     () => ({
       cancelRun: () => runtime.thread.cancelRun(),
-      sendPrompt: (prompt) => {
+      fillPrompt: (prompt) => {
         if (
           disabled ||
           restoring ||
@@ -236,10 +236,7 @@ export const Nl2AgentChatPanel = forwardRef<
           runtime.thread.getState().isRunning
         )
           return;
-        runtime.thread.append({
-          role: "user",
-          content: [{ type: "text", text: prompt.trim() }],
-        });
+        runtime.thread.composer.setText(prompt.trim());
       },
     }),
     [agentId, disabled, restoring, runtime, modelControls.canSend]
