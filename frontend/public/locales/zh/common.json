@@ -796,7 +796,6 @@
   "agent.error.fetchAgentList": "获取智能体列表失败",
   "agent.error.fetchAgentListRetry": "获取智能体列表失败，请稍后重试",
   "agent.debug.tryQuestions": "你可以这样问我：",
-  "agent.debug.disclaimer": "内容由AI生成，无法确保准确性和完整性，仅供参考。",
   "agent.debug.options": "调试选项",
   "agent.debug.maximize": "全屏调试",
   "agent.debug.restore": "还原调试布局",

@@ -182,6 +182,38 @@ function agentConfigTree() {
 }
 
 describe("configuration resource grouping and preserved workflow gates", () => {
+  it.each([0, 12, 16])(
+    "keeps the visible card spacing at 24px with a %ipx scrollbar",
+    (scrollbarWidth) => {
+      const offsetWidth = vi
+        .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+        .mockReturnValue(400);
+      const clientWidth = vi
+        .spyOn(HTMLElement.prototype, "clientWidth", "get")
+        .mockReturnValue(400 - scrollbarWidth);
+      const view = render(
+        <App>
+          <AgentConfig
+            debugVisible
+            debugPanel={<div data-testid="debug-panel" />}
+            canManualUnlock
+            onManualUnlock={mocks.onManualUnlock}
+            onToggleDebug={mocks.onToggleDebug}
+          />
+        </App>
+      );
+      try {
+        const scrollRegion = screen.getByTestId("agent-config-scroll-region");
+        const layout = scrollRegion.parentElement!;
+        expect(parseFloat(layout.style.columnGap) + scrollbarWidth).toBe(24);
+      } finally {
+        view.unmount();
+        offsetWidth.mockRestore();
+        clientWidth.mockRestore();
+      }
+    }
+  );
+
   beforeEach(() => {
     mocks.readOnly = false;
     mocks.state.agentId = 42;

@@ -301,6 +301,7 @@ export const Nl2AgentChatPanel = forwardRef<
               variant="embedded"
               welcomeContent={
                 <AgentWelcome
+                  className="h-auto min-h-full shrink-0 justify-evenly gap-8 py-8 [&>div]:shrink-0"
                   title={t("nl2agent.configuration.title")}
                   greeting={t("nl2agent.configuration.description")}
                 >

@@ -222,6 +222,26 @@ export default function AgentConfig({
   const searchParams = useSearchParams();
   const [form] = Form.useForm();
   const [isPublishModalOpen, setIsPublishModalOpen] = useState(false);
+  const [configScrollRegion, setConfigScrollRegion] =
+    useState<HTMLDivElement | null>(null);
+  const [configScrollbarWidth, setConfigScrollbarWidth] = useState(0);
+
+  useEffect(() => {
+    if (!configScrollRegion) return;
+
+    const updateScrollbarWidth = () => {
+      setConfigScrollbarWidth(
+        Math.max(
+          0,
+          configScrollRegion.offsetWidth - configScrollRegion.clientWidth
+        )
+      );
+    };
+    updateScrollbarWidth();
+    const observer = new ResizeObserver(updateScrollbarWidth);
+    observer.observe(configScrollRegion);
+    return () => observer.disconnect();
+  }, [configScrollRegion]);
   const publishIntentHandledForAgentRef = useRef<number | null>(null);
   const [isRefreshingAvailability, setIsRefreshingAvailability] =
     useState(false);
@@ -532,15 +552,21 @@ export default function AgentConfig({
           </ConfigProvider>
         )}
         <div
+          style={
+            debugVisible
+              ? { columnGap: Math.max(0, 24 - configScrollbarWidth) }
+              : undefined
+          }
           className={
             publicationVisible
               ? "hidden"
               : debugVisible
-                ? "flex min-h-0 min-w-0 flex-1 gap-5 px-4 pb-5"
+                ? "flex min-h-0 min-w-0 flex-1 gap-6 px-6 pb-5"
                 : "flex min-h-0 min-w-0 flex-1"
           }
         >
           <div
+            ref={setConfigScrollRegion}
             data-testid="agent-config-scroll-region"
             style={{
               containerType: "inline-size",
@@ -551,7 +577,7 @@ export default function AgentConfig({
                 ? "hidden"
                 : debugVisible
                   ? "flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto"
-                  : "flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto px-4 pb-6"
+                  : "flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto pl-6 pb-6"
             }
           >
             {unavailableReasonLabels.length > 0 && (

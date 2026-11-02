@@ -773,6 +773,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             newChatDesign && "relative !max-w-[922px] !px-4 !py-0",
             newChatDesign && !hasMessages && "!max-w-none",
             !hasMessages &&
+              variant !== "embedded" &&
               !workbenchLanding &&
               !debugLayout &&
               "!overflow-y-hidden",

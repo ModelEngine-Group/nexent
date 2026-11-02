@@ -796,7 +796,6 @@
   "agent.error.fetchAgentList": "Failed to get agent list",
   "agent.error.fetchAgentListRetry": "Failed to get agent list, please try again later",
   "agent.debug.tryQuestions": "You can ask me:",
-  "agent.debug.disclaimer": "AI-generated content may be inaccurate or incomplete. For reference only.",
   "agent.debug.options": "Debug options",
   "agent.debug.maximize": "Maximize debug",
   "agent.debug.restore": "Restore debug layout",

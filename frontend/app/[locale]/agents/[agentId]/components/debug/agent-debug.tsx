@@ -92,7 +92,6 @@ function DebugConversation({
 }) {
   const aui = useAui();
   const isRunning = useAuiState((state) => state.thread.isRunning);
-  const { t } = useTranslation("common");
   return (
     <Thread
       agent={agent}
@@ -115,9 +114,6 @@ function DebugConversation({
           disabled={isRunning}
           onSelectQuestion={(question) => aui.composer().setText(question)}
         />
-      }
-      footerContent={
-        <p className="agent-debug-disclaimer">{t("agent.debug.disclaimer")}</p>
       }
     />
   );
@@ -217,29 +213,24 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
     >
       <header className="agent-debug-header">
         <div className="flex min-w-0 items-center gap-4">
-          <span
-            className="agent-debug-header-title"
-            title={debugAgent.display_name || debugAgent.name}
-          >
-            {debugAgent.display_name || debugAgent.name}
+          <span className="agent-debug-header-title">
+            {t("agent.debug.title")}
           </span>
           <Tooltip title={t("agent.debug.toggleCompareMode")}>
             <Button
               type="text"
               aria-label={t("agent.debug.toggleCompareMode")}
               aria-pressed={isCompareMode}
-              icon={<Columns2 size={24} />}
+              icon={<Columns2 size={16} />}
               className="!size-6 shrink-0 !p-0 !text-[#4d4d4d]"
               onClick={() => onCompareModeChange?.(!isCompareMode)}
             />
           </Tooltip>
-        </div>
-        <div className="agent-debug-header-actions">
           <Tooltip title={t("agent.debug.clear")}>
             <Button
               type="text"
               aria-label={t("agent.debug.clear")}
-              icon={<SquarePen size={24} />}
+              icon={<SquarePen size={16} />}
               className="!size-6 !p-0 !text-[#4d4d4d]"
               onClick={() =>
                 isCompareMode
@@ -248,6 +239,8 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
               }
             />
           </Tooltip>
+        </div>
+        <div className="agent-debug-header-actions">
           <Tooltip
             title={t(
               isFullscreen ? "agent.debug.restore" : "agent.debug.maximize"
@@ -259,7 +252,7 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
                 isFullscreen ? "agent.debug.restore" : "agent.debug.maximize"
               )}
               icon={
-                isFullscreen ? <Minimize2 size={24} /> : <Maximize2 size={24} />
+                isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />
               }
               className="!size-6 !p-0 !text-[#4d4d4d]"
               onClick={onToggleFullscreen}
@@ -269,7 +262,7 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
             <Button
               type="text"
               aria-label={t("agent.page.panel.debug.closeAria")}
-              icon={<X size={24} />}
+              icon={<X size={14} />}
               className="!size-6 !p-0 !text-[#4d4d4d]"
               onClick={onClose}
             />
