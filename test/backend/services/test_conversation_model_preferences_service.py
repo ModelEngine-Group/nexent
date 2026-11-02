@@ -184,3 +184,16 @@ def test_su_ac_05_draft_rejects_dependency_conflicts(persistence, monkeypatch):
     monkeypatch.setattr(run_controls, "validate_selected_model", Mock())
     with pytest.raises(ModelOutletValidationError):
         service.validate_model_preferences({"42": {"enable_thinking": False, "reasoning_budget_tokens": 64}}, "tenant")
+
+
+@pytest.mark.parametrize("known", [True, False])
+def test_preference_view_preserves_the_outlet_reasoning_status(persistence, profile, known):
+    _, outlet = persistence
+    if not known:
+        profile, _ = build_outlet_draft(draft_request(request_model_id="unlisted-model",
+            provider_info={"base_url": "https://custom.invalid/v1"}), "tenant")
+    outlet.return_value = profile
+    original = profile.model_dump()
+    result = service.read_model_preference_view(1, 42, "owner", "tenant")
+    assert result["reasoning_status"] == profile.capabilities.reasoning.status
+    assert profile.model_dump() == original
