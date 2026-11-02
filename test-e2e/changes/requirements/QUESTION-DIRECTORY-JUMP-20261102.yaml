@@ -1,0 +1,54 @@
+schema_version: "1.0"
+change:
+  change_id: QUESTION-DIRECTORY-JUMP-20261102
+  change_type: requirement
+  requirement_id: QUESTION-DIRECTORY-JUMP-20261102
+  title: 会话内问题目录跳转
+  description:
+    'List every user question asked during a single agent conversation in a
+    directory popover ("问题目录") and jump the message viewport to the
+    selected turn. The entry renders as a floating chip when the surface has
+    no persistent header (main newchat flow) and as a header icon button on
+    surfaces that have one (workbench presentation, share mode, read-only
+    conversation page). Jumping locates the message root via its
+    data-message-id attribute, smooth-scrolls the viewport, and briefly
+    highlights the target. Navigation stays available while a run streams and
+    in read-only/share contexts.'
+  affected_features:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  traditional_ut:
+    decision: add
+    test_selectors:
+      - frontend/tests/component/questionDirectory.test.tsx
+    behaviors:
+      - collectQuestionDirectory extracts user messages in conversation order with
+        1-based indices, uses the first non-empty text part (first line, truncated
+        to 60 chars with ellipsis, full text preserved for the tooltip), falls
+        back to the first attachment name for attachment-only turns, and skips
+        assistant messages plus turns with neither text nor attachments.
+      - scrollThreadToMessage locates the message root through its
+        data-message-id attribute, smooth-scrolls it into view, flashes a
+        highlight, and reports missing or empty targets as false.
+      - QuestionDirectoryButton hides without questions, opens the directory
+        popover from the trigger, lists each question with its jump affordance,
+        invokes onJump with the target message id, and closes the popover after
+        an entry is clicked.
+    reason: |-
+      The feature is a frontend navigation layer over already-proven contracts:
+      thread message state comes from the existing runtime subscription, the
+      popover reuses the shared Radix-based popover component, and no new
+      inter-component, service, or protocol boundary is introduced. Per the D1
+      admission rules the targeted UT supplies the necessary component proof,
+      so no formal Case is added.
+  notes: |
+    Core scope confirmed by the user (popover form, header entry point,
+    attachment-name fallback, read-only support). Deferred: scroll-spy current
+    position indicator, per-question answer status, keyboard shortcut.

@@ -67,6 +67,7 @@ import {
   ConversationArtifactsButton,
   ConversationArtifactsPanel,
 } from "../ui/artifacts-panel";
+import { QuestionDirectoryButton } from "../ui/question-directory";
 import { markFileWithExistingUpload } from "../adapter/attachment-adapter";
 import {
   fetchArtifactFile,
@@ -74,6 +75,11 @@ import {
   type ArtifactAttachmentLike,
   type ConversationArtifact,
 } from "../utils/conversation-artifacts";
+import {
+  scrollThreadToMessage,
+  useQuestionDirectory,
+  type QuestionDirectoryEntry,
+} from "../utils/question-directory";
 import {
   SourcesPanelProvider,
   useSourcesPanel,
@@ -351,6 +357,9 @@ export const Thread: FC<ThreadProps> = ({
   // composer and the side panel it opens. Computed here so both the button and
   // the panel share one aggregation pass over the thread messages.
   const conversationArtifacts = useConversationArtifacts(messages);
+  // Conversation-wide user questions feed the question directory entry at the
+  // top of the thread. Same single-pass pattern as the artifacts aggregation.
+  const questionDirectory = useQuestionDirectory(messages);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
   const currentThreadTitle = useAuiState((s) => {
     const currentThread = s.threads.threadItems.find(
@@ -502,6 +511,7 @@ export const Thread: FC<ThreadProps> = ({
           conversationArtifacts={conversationArtifacts}
           artifactsOpen={artifactsOpen}
           onArtifactsOpenChange={setArtifactsOpen}
+          questionDirectory={questionDirectory}
         />
         <Dialog
           open={Boolean(manualShareUrl)}
@@ -611,6 +621,7 @@ interface ThreadViewProps {
   conversationArtifacts: ConversationArtifact[];
   artifactsOpen: boolean;
   onArtifactsOpenChange: (open: boolean) => void;
+  questionDirectory: QuestionDirectoryEntry[];
   variant: "default" | "embedded";
   skillFiles?: readonly SkillFileContent[];
   onSkillFileSelect?: (path: string) => void;
@@ -676,6 +687,7 @@ const ThreadView: FC<ThreadViewProps> = ({
   conversationArtifacts,
   artifactsOpen,
   onArtifactsOpenChange,
+  questionDirectory,
   variant,
   skillFiles,
   onSkillFileSelect,
@@ -750,6 +762,19 @@ const ThreadView: FC<ThreadViewProps> = ({
     [aui, t]
   );
 
+  // "Question directory": jump the viewport to the message with the clicked
+  // question. Navigation is safe in read-only and while a run is streaming.
+  const handleJumpToQuestion = useCallback((messageId: string) => {
+    if (!scrollThreadToMessage(messageId)) {
+      log.warn("[QuestionDirectory] Jump target not found:", messageId);
+    }
+  }, []);
+
+  const threadHeaderVisible = Boolean(
+    showConversationTitle &&
+    (isShareMode || (!newChatDesign && workbenchPresentation))
+  );
+
   return (
     <ThreadPrimitive.Root
       className={cn(
@@ -777,6 +802,11 @@ const ThreadView: FC<ThreadViewProps> = ({
                   <div className="flex min-w-0 flex-1 justify-center text-sm font-medium text-foreground">
                     {conversationTitle}
                   </div>
+                  <QuestionDirectoryButton
+                    questions={questionDirectory}
+                    onJump={handleJumpToQuestion}
+                    variant="header"
+                  />
                   <Button
                     variant="ghost"
                     size="icon"
@@ -827,10 +857,24 @@ const ThreadView: FC<ThreadViewProps> = ({
                       <Share2Icon className="size-4" />
                     </Button>
                   )}
+                  <QuestionDirectoryButton
+                    questions={questionDirectory}
+                    onJump={handleJumpToQuestion}
+                    variant="header"
+                  />
                 </>
               )}
             </header>
           )}
+
+        {newChatDesign && !threadHeaderVisible && (
+          <QuestionDirectoryButton
+            questions={questionDirectory}
+            onJump={handleJumpToQuestion}
+            variant="floating"
+            className="absolute right-4 top-3 z-10"
+          />
+        )}
 
         <ThreadPrimitive.Viewport
           className={cn(
@@ -1009,6 +1053,13 @@ export const ReadOnlyConversation: FC<{
   const [selection, setSelection] = useState<SourcesPanelSelection | null>(
     null
   );
+  const messages = useAuiState((s) => s.thread.messages);
+  const questionDirectory = useQuestionDirectory(messages);
+  const handleJumpToQuestion = useCallback((messageId: string) => {
+    if (!scrollThreadToMessage(messageId)) {
+      log.warn("[QuestionDirectory] Jump target not found:", messageId);
+    }
+  }, []);
   const open = useCallback(
     (payload: SourcesPanelSelection) => setSelection(payload),
     []
@@ -1037,11 +1088,19 @@ export const ReadOnlyConversation: FC<{
         )}
       >
         <main className="flex min-w-0 flex-1 flex-col">
-          <header className="mx-auto w-full max-w-[922px] border-b px-4 py-4">
-            <h1 className="text-lg font-semibold text-foreground">{title}</h1>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {t("chatInterface.shareReadOnly", "分享对话仅可查看")}
-            </p>
+          <header className="mx-auto flex w-full max-w-[922px] items-start justify-between gap-2 border-b px-4 py-4">
+            <div className="min-w-0">
+              <h1 className="text-lg font-semibold text-foreground">{title}</h1>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t("chatInterface.shareReadOnly", "分享对话仅可查看")}
+              </p>
+            </div>
+            <QuestionDirectoryButton
+              questions={questionDirectory}
+              onJump={handleJumpToQuestion}
+              variant="header"
+              className="shrink-0"
+            />
           </header>
           <ThreadPrimitive.Viewport className="mx-auto flex min-h-0 w-full max-w-[922px] flex-1 flex-col overflow-x-hidden overflow-y-auto px-4 py-6">
             <ThreadMessages agent={agent} readOnly />
