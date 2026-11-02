@@ -64,7 +64,8 @@ def test_deadline_interrupts_actual_http_and_releases_resources(mode):
     values["connection"].update(concurrency_limit=1, timeout_seconds=3)
     profile = type(profile).model_validate(values)
     service = ModelService(lambda _: HttpRequestSender(lambda _: {}), limiter=limiter)
-    request = ModelRequest(request_id="deadline-integration", config_revision=profile.config_revision,
+    request = ModelRequest(request_id="deadline-integration", outlet_id=profile.outlet_id,
+                           config_revision=profile.config_revision,
                            stream=mode.startswith("sse"), messages=[ModelMessage(semantic_role="user",
                            content_parts=[{"type": "text", "text": "controlled deadline fixture"}])])
     try:
