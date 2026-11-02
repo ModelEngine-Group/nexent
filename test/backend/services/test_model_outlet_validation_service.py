@@ -141,6 +141,25 @@ async def test_empty_response_is_unavailable(probe):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("draft", [False, True])
+async def test_refusal_completion_proves_connectivity_without_exposing_provider_content(probe, draft):
+    _, loader, invoke, update = probe
+    invoke.return_value = AssistantMessage(refusal="Controlled refusal", finish_reason="stop")
+    request = (ModelOutletValidationRequest(draft=ModelOutletCreateRequest(
+        **draft_request().model_dump(), api_key="controlled-key")) if draft
+        else ModelOutletValidationRequest(outlet_id=42))
+    result = await validate_model_outlet(request, "tenant")
+    assert result["ok"] is True and result["error"] is None
+    assert "Controlled refusal" not in repr(result)
+    invoke.assert_awaited_once()
+    if draft:
+        loader.assert_not_called()
+        update.assert_not_called()
+    else:
+        update.assert_called_once_with(42, "tenant", 1, "available")
+
+
+@pytest.mark.asyncio
 async def test_normalized_provider_failure_is_returned_without_raw_payload(probe):
     _, _, invoke, update = probe
     invoke.side_effect = ModelServiceError(ModelError(category="AUTHENTICATION_ERROR", scope="provider",

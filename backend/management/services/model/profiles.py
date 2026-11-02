@@ -526,7 +526,7 @@ async def probe_model_profile(profile, key, *, http_headers=None):
                 if event.type == "error":
                     error = _probe_diagnostic(event.error)
                 elif event.type == "message_completed":
-                    ok = bool(event.message.content_parts or event.message.tool_calls)
+                    ok = bool(event.message.content_parts or event.message.tool_calls or event.message.refusal)
         if not ok and error is None:
             error = {"category": "MODEL_EMPTY_RESPONSE", "scope": "model"}
     except ModelServiceError as failure:
