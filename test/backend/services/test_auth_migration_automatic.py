@@ -2,6 +2,8 @@
 """Table existence is the only completion marker; migration has one transaction."""
 import argparse
 import json
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
@@ -161,3 +163,24 @@ def test_duplicate_source_uuid_reports_its_id():
 def test_conflict_marker_inside_unrelated_sql_context_is_not_exposed():
     message='CONTEXT: SQL statement contains NEXENT_ACCOUNT_CONFLICT=["private-value"]'
     assert migration._migration_conflict(message) is None
+
+
+@pytest.mark.parametrize("payload", ['[]','[123]','[""]','["'+('x'*101)+'"]','["line\\nvalue"]','[invalid]'])
+def test_malformed_conflict_details_are_not_logged(payload):
+    assert migration._migration_conflict('NEXENT_ACCOUNT_CONFLICT='+payload) is None
+
+
+def test_import_conflict_preserves_ids_before_savepoint_rollback(mocker):
+    uid=str(uuid4())
+    failure=RuntimeError("private driver details")
+    failure.diag=SimpleNamespace(message_primary='NEXENT_ACCOUNT_CONFLICT='+json.dumps([uid]))
+    target=MagicMock()
+    cursor=target.cursor.return_value.__enter__.return_value
+    cursor.fetchone.return_value=(False,)
+    cursor.execute.side_effect=[None,None,None,failure,None,None]
+    mocker.patch.object(migration,"_account_import_sql",return_value="import-body")
+    with pytest.raises(migration.MigrationConflict,match=uid) as error:
+        migration.import_users(target,[],dry_run=False)
+    assert 'private driver details' not in str(error.value)
+    assert [call.args[0] for call in cursor.execute.call_args_list][-2:] == [
+        'ROLLBACK TO SAVEPOINT account_migration','RELEASE SAVEPOINT account_migration']
