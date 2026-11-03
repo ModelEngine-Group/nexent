@@ -66,6 +66,7 @@ import { SourcesPanel } from "../ui/sources-panel";
 import {
   SourcesPanelProvider,
   useSourcesPanel,
+  useSourcesPanelState,
   type SourcesPanelSelection,
 } from "../ui/sources-panel-context";
 import {
@@ -233,6 +234,8 @@ export interface ThreadProps {
   showComposer?: boolean;
   configurationLayout?: boolean;
   debugLayout?: boolean;
+  onSourcesPanelOpen?: () => void;
+  sourcesPanelCloseEpoch?: number;
   emptyFooterContent?: ReactNode;
   footerContent?: ReactNode;
   interactionContent?: ReactNode;
@@ -297,6 +300,8 @@ export const Thread: FC<ThreadProps> = ({
   showComposer = true,
   configurationLayout = false,
   debugLayout = false,
+  onSourcesPanelOpen,
+  sourcesPanelCloseEpoch,
   emptyFooterContent,
   footerContent,
   interactionContent,
@@ -378,35 +383,11 @@ export const Thread: FC<ThreadProps> = ({
   // each `group-source` button share a single source of truth. The selection
   // carries the snapshot of sources/images for the group that opened it,
   // letting the panel render even if the original message parts change.
-  const [selection, setSelection] = useState<SourcesPanelSelection | null>(
-    null
+  const panelContextValue = useSourcesPanelState(
+    onSourcesPanelOpen,
+    sourcesPanelCloseEpoch
   );
-
-  const open = useCallback((payload: SourcesPanelSelection) => {
-    setSelection(payload);
-  }, []);
-
-  const toggle = useCallback((payload: SourcesPanelSelection) => {
-    setSelection((current) => {
-      if (
-        current &&
-        current.messageId === payload.messageId &&
-        current.groupId === payload.groupId
-      ) {
-        return null;
-      }
-      return payload;
-    });
-  }, []);
-
-  const close = useCallback(() => {
-    setSelection(null);
-  }, []);
-
-  const panelContextValue = useMemo(
-    () => ({ selection, isOpen: selection !== null, open, toggle, close }),
-    [selection, open, toggle, close]
-  );
+  const { selection, close } = panelContextValue;
 
   return (
     <ConversationShareContext.Provider
@@ -691,6 +672,7 @@ const ThreadView: FC<ThreadViewProps> = ({
         newChatDesign && newChatStyles.font,
         configurationLayout && "!bg-transparent",
         debugLayout && "!bg-transparent",
+        debugLayout && selection !== null && "gap-6",
         variant === "embedded" &&
           "[&_.aui-assistant-action-bar-root]:hidden [&_.aui-user-action-bar-root]:hidden"
       )}
@@ -773,6 +755,7 @@ const ThreadView: FC<ThreadViewProps> = ({
             newChatDesign && "relative !max-w-[922px] !px-4 !py-0",
             newChatDesign && !hasMessages && "!max-w-none",
             !hasMessages &&
+              variant !== "embedded" &&
               !workbenchLanding &&
               !debugLayout &&
               "!overflow-y-hidden",

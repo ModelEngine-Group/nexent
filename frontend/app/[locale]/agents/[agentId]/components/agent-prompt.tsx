@@ -952,6 +952,9 @@ export default function AgentPrompt({
               }}
               onChange={(event) => updateDraft({ prompt: event.target.value })}
             />
+            <div className="absolute right-1 top-2 z-10">
+              {renderExpandButton("prompt")}
+            </div>
           </div>
           <ModelDrawer
             open={isModelSelectionOpen}
