@@ -261,6 +261,12 @@ def test_agent_session_dependency_layers_reach_provider(runtime, workbench, outl
     before, models_before = runtime.draft(), runtime.model_records()
     response = runtime.post("/api/agent/run", label="budget-B", generation=session_values,
                             workbench=workbench, version_no=0)
+    if workbench and not outlet_enabled:
+        # Generic Workbench uses its own root; a native Agent's overrides must not leak into it.
+        assert response.status_code == 422 and response.json()["detail"]["code"] == "model_controls_invalid"
+        assert not runtime.provider.wire
+        assert runtime.draft() == before and runtime.model_records() == models_before
+        return
     assert response.status_code == 200, response.text
     events = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
     assert not any(event.get("type") == "error" for event in events), response.text
