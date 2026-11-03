@@ -58,7 +58,7 @@ def test_existing_patch_keeps_only_explicit_session_values_and_clear_restores_ag
 
 @pytest.mark.parametrize("values", [
     {"enable_thinking": False, "reasoning_budget_tokens": 32},
-    {"reasoning_budget_tokens": -1},
+    {"reasoning_budget_tokens": "invalid"},
 ])
 def test_invalid_explicit_session_values_stay_invalid_in_read_and_patch(routing, persistence, values):
     store, _ = persistence
