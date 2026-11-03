@@ -488,7 +488,7 @@
   "chat.questions.jump": "Jump to question {{index}}",
   "chat.questions.search": "Search questions…",
   "chat.questions.noMatches": "No matching questions",
-  "chat.annotation.add": "Add to chat",
+  "chat.annotation.add": "Add annotation",
   "chat.annotation.commentPlaceholder": "Add an optional comment...",
   "chat.annotation.editPlaceholder": "Edit comment...",
   "chat.annotation.confirm": "Add annotation",
