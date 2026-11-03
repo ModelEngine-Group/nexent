@@ -3,7 +3,6 @@
 import ast
 import json
 import logging
-import os
 import re
 import time
 import uuid
@@ -24,7 +23,7 @@ from smolagents.agents import (
     RunResult,
     handle_agent_output_types,
 )
-from smolagents.memory import ActionStep, PlanningStep, FinalAnswerStep, ToolCall, TaskStep, SystemPromptStep
+from smolagents.memory import ActionStep, PlanningStep, FinalAnswerStep, ToolCall, TaskStep
 from smolagents.models import ChatMessage, CODEAGENT_RESPONSE_FORMAT, MessageRole
 from smolagents.monitoring import LogLevel, Timing, YELLOW_HEX, TokenUsage
 from smolagents.utils import AgentExecutionError, AgentGenerationError, truncate_content, AgentMaxStepsError, \
@@ -40,7 +39,6 @@ from ..utils.model_output_diagnostics import (
     bounded_rejected_output_preview,
     rejected_output_preview_enabled,
 )
-from jinja2 import Template, StrictUndefined
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:

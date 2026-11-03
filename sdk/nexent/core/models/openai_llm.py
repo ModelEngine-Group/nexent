@@ -13,7 +13,6 @@ from .response_diagnostics import ResponseDiagnostics
 from ..concurrency import RunCancellationScope, run_blocking
 import logging
 import threading
-import asyncio
 import importlib
 import time
 import json

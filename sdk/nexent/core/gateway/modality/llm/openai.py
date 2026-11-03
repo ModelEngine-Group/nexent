@@ -4,7 +4,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, AsyncIterator
 
 from nexent.core.concurrency import run_blocking

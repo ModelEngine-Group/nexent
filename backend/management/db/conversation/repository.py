@@ -1,12 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 from contracts.constants.constants import CHAT_MODE_VALUES, HISTORY_SUMMARY_UNIT_TYPE
-from contracts.conversation import ConversationHistory, ImageRecord, MessageRecord, SearchRecord
+from contracts.conversation import ConversationHistory
 from contracts.errors.exceptions import HistorySummaryPersistenceError
 import json
 from copy import deepcopy
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Sequence, Set, TypedDict
+from typing import Any, Dict, List, Optional, Sequence, Set
 
 from sqlalchemy import and_, asc, desc, func, insert, or_, select, text, update
 from sqlalchemy.orm import Session

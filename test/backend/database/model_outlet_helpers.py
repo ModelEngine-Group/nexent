@@ -7,7 +7,6 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType
-from unittest.mock import MagicMock
 
 import pytest
 from nexent.core.model_service.profiles.contracts import VersionedReference
@@ -19,7 +18,6 @@ from nexent.core.model_service.profiles.outlet_storage import (
 )
 from nexent.core.model_service.profiles.resolved_profile import ResolvedModelProfile
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.exc import SQLAlchemyError
 
 ROOT = Path(__file__).resolve().parents[3]
 REFERENCE = VersionedReference(ref="fixture_v1", version=1)
