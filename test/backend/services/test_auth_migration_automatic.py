@@ -133,3 +133,31 @@ def test_source_metadata_is_quoted_and_never_used_as_sql_template():
     assert "__dry_run__@example.com" in sql
     assert "__ROWS__ __DRY_RUN__ O''Reilly" in sql
     assert sql.startswith("SET LOCAL standard_conforming_strings=on;")
+
+
+@pytest.mark.parametrize("deployment", ["docker", "kubernetes"])
+def test_psql_conflict_keeps_ids_without_exposing_raw_error(upgrade, mocker, deployment):
+    args = upgrade[0]
+    args.deployment = deployment
+    ids = [str(uuid4()),str(uuid4())]
+    marker = 'ERROR: NEXENT_ACCOUNT_CONFLICT=' + json.dumps(ids)
+    mocker.patch.object(migration, "_database_environment", return_value={"POSTGRES_PASSWORD":"private-password"})
+    mocker.patch.object(migration.subprocess,"run",return_value=argparse.Namespace(
+        returncode=1,stdout=b'',stderr=(marker+'\nprivate-password raw SQL').encode()))
+    # The fixture's psql boundary is mocked for automatic-upgrade tests.
+    from deploy.sql.tools.supabase_to_postgres.migrate_docker import _command
+    with pytest.raises(migration.MigrationConflict) as error:
+        _command([deployment,'exec'])
+    assert all(value in str(error.value) for value in ids)
+    assert 'private-password' not in str(error.value) and 'raw SQL' not in str(error.value)
+
+
+def test_duplicate_source_uuid_reports_its_id():
+    uid=str(uuid4())
+    with pytest.raises(migration.MigrationConflict,match=uid):
+        migration._account_import_sql([{"id":uid,"email":"a@example.com"},{"id":uid,"email":"b@example.com"}])
+
+
+def test_conflict_marker_inside_unrelated_sql_context_is_not_exposed():
+    message='CONTEXT: SQL statement contains NEXENT_ACCOUNT_CONFLICT=["private-value"]'
+    assert migration._migration_conflict(message) is None

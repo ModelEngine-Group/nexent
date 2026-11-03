@@ -184,36 +184,62 @@ def read_source_users(source) -> list:
 def _account_import_sql(source_rows, *, dry_run=False):
     """Build one credential/schema transaction body, shared by host and psql."""
     rows = [map_source_user(row) for row in source_rows]
-    ids, emails = set(), set()
+    ids = set()
     for row in rows:
-        if row["user_id"] in ids or (row["delete_flag"] == "N" and row["email"] in emails):
-            raise MigrationConflict("Source has conflicting stable IDs or normalized emails")
+        if row["user_id"] in ids:
+            raise MigrationConflict("Account migration conflict IDs: " + json.dumps([row["user_id"]]))
         ids.add(row["user_id"])
-        if row["delete_flag"] == "N":
-            emails.add(row["email"])
         row["user_email"] = row.pop("email")
     encoded = json.dumps(rows, default=lambda value: value.isoformat()).replace("'", "''")
     schema = "\n".join((ROOT / "deploy/sql/migrations" / name).read_text(encoding="utf-8") for name in (
         "v2.9.0_001_local_user_accounts.sql", "v2.9.0_002_account_availability.sql"))
-    return "SET LOCAL standard_conforming_strings=on;\n" + schema + "\n" + r"""
+    # Preserve immutable 001's existing profile checks while attaching only IDs
+    # to their failures. Email values and credentials never enter the error.
+    legacy_checks = r"""
+DO $legacy_conflicts$
+DECLARE conflict_ids json;
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_tenant_t' AND column_name='user_email') THEN
+        SELECT json_agg(DISTINCT user_id ORDER BY user_id) INTO conflict_ids FROM nexent.user_tenant_t
+        WHERE delete_flag='N' AND nullif(lower(trim(user_email)),'') IN (
+            SELECT lower(trim(user_email)) FROM nexent.user_tenant_t
+            WHERE delete_flag='N' AND nullif(trim(user_email),'') IS NOT NULL
+            GROUP BY lower(trim(user_email)) HAVING count(DISTINCT user_id)>1);
+        IF conflict_ids IS NOT NULL THEN RAISE EXCEPTION 'NEXENT_ACCOUNT_CONFLICT=%',conflict_ids; END IF;
+    END IF;
+    IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_tenant_t' AND column_name IN ('user_email','user_role'))=2 THEN
+        SELECT json_agg(user_id ORDER BY user_id) INTO conflict_ids FROM (
+            SELECT u.user_id FROM nexent.user_tenant_t u
+            WHERE delete_flag='N' OR NOT EXISTS (SELECT 1 FROM nexent.user_tenant_t live WHERE live.user_id=u.user_id AND live.delete_flag='N')
+            GROUP BY u.user_id HAVING count(DISTINCT nullif(lower(trim(user_email)),''))>1
+                OR count(DISTINCT nullif(upper(trim(user_role)),''))>1
+        ) conflicts;
+        IF conflict_ids IS NOT NULL THEN RAISE EXCEPTION 'NEXENT_ACCOUNT_CONFLICT=%',conflict_ids; END IF;
+    END IF;
+END
+$legacy_conflicts$;
+"""
+    return "SET LOCAL standard_conforming_strings=on;\n" + legacy_checks + schema + "\n" + r"""
 CREATE TEMP TABLE account_import ON COMMIT DROP AS
 SELECT s.*, EXISTS (SELECT 1 FROM nexent.user_account_t a WHERE a.user_id=s.user_id) AS existing,
        NOT EXISTS (SELECT 1 FROM nexent.user_tenant_t u
                    WHERE u.user_id=s.user_id AND u.delete_flag='N') AS orphan
 FROM jsonb_populate_recordset(NULL::nexent.user_account_t, '__ROWS__'::jsonb) s;
+UPDATE account_import s SET delete_flag='Y'
+WHERE orphan OR NOT EXISTS (
+    SELECT 1 FROM nexent.user_account_t a WHERE a.user_id=s.user_id AND nullif(trim(a.user_role),'') IS NOT NULL);
 DO $validate$
+DECLARE conflict_ids json;
 BEGIN
-    IF EXISTS (SELECT 1 FROM account_import s JOIN nexent.user_account_t a
-               ON a.user_id=s.user_id WHERE a.user_email IS NOT NULL AND a.user_email<>s.user_email)
-       OR EXISTS (SELECT 1 FROM account_import s JOIN nexent.user_account_t a
-                  ON a.user_email=s.user_email WHERE a.user_id<>s.user_id) THEN
-        RAISE EXCEPTION 'Target account conflicts with a source identity';
+    SELECT json_agg(user_id ORDER BY user_id) INTO conflict_ids FROM (
+        SELECT DISTINCT s.user_id FROM account_import s JOIN nexent.user_account_t a ON a.user_id=s.user_id
+        WHERE s.delete_flag='N' AND a.user_email IS NOT NULL AND a.user_email<>s.user_email
+    ) conflicts;
+    IF conflict_ids IS NOT NULL THEN
+        RAISE EXCEPTION 'NEXENT_ACCOUNT_CONFLICT=%',conflict_ids;
     END IF;
 END
 $validate$;
-UPDATE account_import s SET delete_flag='Y'
-WHERE orphan OR (existing AND NOT EXISTS (
-    SELECT 1 FROM nexent.user_account_t a WHERE a.user_id=s.user_id AND nullif(trim(a.user_role),'') IS NOT NULL));
 UPDATE nexent.user_account_t a SET
     user_email=s.user_email,password_hash=s.password_hash,password_hash_scheme=s.password_hash_scheme,
     password_login_enabled=s.password_login_enabled,token_version=s.token_version,
@@ -225,9 +251,28 @@ INSERT INTO nexent.user_account_t
      email_confirmed_at,source_metadata,create_time,update_time,delete_flag,created_by,updated_by)
 SELECT user_id,user_email,password_hash,password_hash_scheme,password_login_enabled,token_version,
        email_confirmed_at,source_metadata,create_time,update_time,delete_flag,'auth-migration','auth-migration'
-FROM account_import WHERE NOT existing;
-SELECT json_build_object('source',count(*),'inserted',count(*) FILTER (WHERE NOT existing),
-                         'updated',count(*) FILTER (WHERE existing),'skipped',0,
+FROM account_import WHERE NOT existing AND delete_flag='N';
+DELETE FROM nexent.user_account_t WHERE delete_flag='Y'
+AND coalesce(source_metadata->>'system_identity','')<>'speed';
+DO $email_conflicts$
+DECLARE conflict_ids json;
+BEGIN
+    SELECT json_agg(user_id ORDER BY user_id) INTO conflict_ids
+    FROM nexent.user_account_t
+    WHERE delete_flag='N' AND lower(trim(user_email)) IN (
+        SELECT lower(trim(user_email)) FROM nexent.user_account_t
+        WHERE delete_flag='N' AND user_email IS NOT NULL
+        GROUP BY lower(trim(user_email)) HAVING count(*)>1
+    );
+    IF conflict_ids IS NOT NULL THEN
+        RAISE EXCEPTION 'NEXENT_ACCOUNT_CONFLICT=%',conflict_ids;
+    END IF;
+END
+$email_conflicts$;
+SELECT json_build_object('source',count(*),'inserted',count(*) FILTER (WHERE NOT existing AND delete_flag='N'),
+                         'updated',count(*) FILTER (WHERE existing AND delete_flag='N'),
+                         'skipped',count(*) FILTER (WHERE delete_flag='Y'),
+                         'excluded_inactive',count(*) FILTER (WHERE delete_flag='Y'),
                          'disabled_orphans',count(*) FILTER (WHERE orphan),'dry_run',__DRY_RUN__)
 FROM account_import;
 """.replace("__DRY_RUN__", "true" if dry_run else "false").replace("__ROWS__", encoded)
@@ -244,9 +289,12 @@ def import_users(target, source_rows: list, *, dry_run: bool = True) -> dict:
         try:
             cursor.execute(_account_import_sql(source_rows, dry_run=dry_run))
             result = cursor.fetchone()[0]
-        except Exception:
+        except Exception as exc:
+            conflict = _migration_conflict(getattr(getattr(exc, "diag", None), "message_primary", ""))
             cursor.execute("ROLLBACK TO SAVEPOINT account_migration")
             cursor.execute("RELEASE SAVEPOINT account_migration")
+            if conflict:
+                raise conflict from None
             raise
         if dry_run:
             cursor.execute("ROLLBACK TO SAVEPOINT account_migration")
@@ -420,6 +468,23 @@ def execute(action, values, *, with_auth=False, production=False):
     docker(args, values)
 
 
+def _migration_conflict(message):
+    """Extract only structured account identifiers, never raw database output."""
+    match = re.search(r'(?:^|ERROR:\s*)NEXENT_ACCOUNT_CONFLICT=(\[[^\r\n]*\])', message or '', re.M)
+    if not match:
+        return None
+    try:
+        ids = json.loads(match.group(1))
+        if not isinstance(ids, list) or not ids:
+            return None
+        if any(not isinstance(value,str) or not 0<len(value)<=100 or any(ord(c)<32 for c in value) for value in ids):
+            return None
+        ids = sorted(set(ids))
+    except (ValueError, TypeError, AttributeError):
+        return None
+    return MigrationConflict("Account migration conflict IDs: " + json.dumps(ids))
+
+
 def _command(command, *, data=None, env=None):
     try:
         result = subprocess.run(command, input=data.encode("utf-8") if data is not None else None,
@@ -427,6 +492,9 @@ def _command(command, *, data=None, env=None):
     except (OSError, subprocess.TimeoutExpired):
         raise MigrationSetupError("Deployment migration command is unavailable or timed out") from None
     if result.returncode:
+        conflict = _migration_conflict(result.stderr.decode("utf-8", errors="replace"))
+        if conflict:
+            raise conflict
         raise MigrationSetupError("Deployment migration command failed; inspect the selected database/workload readiness")
     return result.stdout.decode("utf-8").strip()
 

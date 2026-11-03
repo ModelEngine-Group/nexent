@@ -42,7 +42,7 @@ def test_empty_installation_check_still_reports_absent(mocker):
     assert bootstrap_super_admin("suadmin@nexent.com", "", check_only=True) == {"exists": False}
 
 
-def test_orphaned_membership_cannot_be_replaced_by_new_default_su(mocker):
+def test_inactive_historical_association_does_not_block_su_check(mocker):
     session = MagicMock()
     session.execute.return_value.first.side_effect = [None, ("original-identity",)]
 
@@ -54,6 +54,5 @@ def test_orphaned_membership_cannot_be_replaced_by_new_default_su(mocker):
     mocker.patch("management.db.identity.account.lock_account_keys")
     mocker.patch("management.db.identity.account.get_account_by_email", return_value=None)
     create = mocker.patch("management.db.identity.account.create_account")
-    with pytest.raises(AccountConflictError, match="original account"):
-        bootstrap_super_admin("suadmin@nexent.com", "", check_only=True)
+    assert bootstrap_super_admin("suadmin@nexent.com", "", check_only=True) == {"exists": False}
     create.assert_not_called()

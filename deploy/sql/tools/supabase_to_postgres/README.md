@@ -216,7 +216,7 @@ retaining source storage and storage-definition backups.
 | Identity/data | Migration behavior |
 | --- | --- |
 | Supabase password users | Preserve UUID, compatible bcrypt/scrypt hash, source timestamps, email confirmation and bounded provider metadata |
-| Banned/deleted/anonymous users and orphans | Preserve identity without granting access; `delete_flag='Y'`. No default role or tenant is synthesized |
+| Banned/deleted/anonymous users and orphans | Exclude from the new account table. Original Supabase records and membership rows remain; no role or tenant is synthesized |
 | API-only batch users | Active blank-email USER/DEV membership plus historical token evidence creates a passwordless account; preserve ID, original keys and revoked key state |
 | Default SPEED seed | Preserve `user_id` / `tenant_id`, mark `system_identity=speed`, keep unavailable for full-mode login. Speed mode retains its existing demo context |
 | Unknown/custom identities | Preserve without automatic activation when no recognized eligibility exists |
@@ -227,7 +227,7 @@ Canonical `user_email` and `user_role` move from `user_tenant_t` to the account;
 tenant, group, key and business ownership remain unchanged. Provider metadata
 never supplies an application role. `updated` counts hydrated legacy profiles,
 `inserted` counts source identities absent from those profiles, and
-`disabled_orphans` counts source users without active tenant membership. Repeat
+`disabled_orphans` counts excluded source users without active tenant membership; `excluded_inactive` counts all excluded source identities. Repeat
 imports skip the existing account table and preserve newer credentials/edits.
 
 Ordinary login uses signed JWTs without a server session table. The existing
@@ -244,6 +244,17 @@ The normal SU bootstrap uses `suadmin@nexent.com`, the configured
 `NEXENT_SUPER_ADMIN_PASSWORD` or the existing default. It prints credentials only
 after confirming a newly created account; existing/error/manual-hidden flows do
 not print them. Re-running deployment cannot recover a password from its hash.
+
+Email reuse is checked after final account eligibility is computed. Soft-deleted,
+banned, anonymous, orphaned or role-missing ordinary identities do not occupy an
+email in the new account table. Temporary schema-created unavailable profiles are
+removed in the same transaction, except the recognized SPEED system identity.
+Only final active duplicate emails fail; logs contain the conflicting account IDs
+without email values, hashes or connection details. Docker and Kubernetes preserve
+the same structured conflict through psql error transport. Existing completed
+account tables are still skipped, without retroactive deletion of local accounts.
+Historical associations without an eligible account cannot authenticate and no
+longer block SU preflight merely because the association row remains.
 
 ## Troubleshooting and recovery
 

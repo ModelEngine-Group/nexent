@@ -19,7 +19,7 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
     from management.db.identity.user_tenant import insert_user_tenant
     from infrastructure.security.passwords import hash_password
     from sqlalchemy import select
-    from management.db.models import UserTenant, UserAccount
+    from management.db.models import UserTenant
 
     email = email.strip().lower()
     with get_db_session() as session:
@@ -54,13 +54,8 @@ def bootstrap_super_admin(email: str, password: str, *, check_only=False):
             raise AccountConflictError(
                 "An SU membership already exists. Verify its account and email; if not migrated, run the host migrate_docker.py --apply against this PostgreSQL database first"
             )
-        if session.execute(
-            select(UserTenant.user_id).where(
-                UserTenant.delete_flag == "N",
-                UserTenant.user_id.notin_(select(UserAccount.user_id)),
-            )
-        ).first():
-            raise AccountConflictError("Active membership has no account profile; restore the original account before bootstrap")
+        # Historical inactive associations intentionally have no local account.
+        # Only an available account can reserve the current SU identity.
         if check_only:
             return {"exists": False}
         if (

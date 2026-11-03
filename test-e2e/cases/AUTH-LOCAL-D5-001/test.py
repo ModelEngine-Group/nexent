@@ -199,8 +199,11 @@ def test_account_migration_retains_original_password_and_repeat_safety(target):
 def test_account_migration_conflict_rolls_back_all_users(target):
     first = historical_user()
     conflict = historical_user()
-    with pytest.raises(MigrationConflict), psycopg2.connect(target) as connection:
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.executemany("INSERT INTO nexent.user_tenant_t (user_id,tenant_id,user_role) VALUES (%s,'tenant','USER')", [(first["id"],),(conflict["id"],)])
+    with pytest.raises(MigrationConflict) as error, psycopg2.connect(target) as connection:
         import_users(connection, [first, conflict], dry_run=False)
+    assert first["id"] in str(error.value) and conflict["id"] in str(error.value)
     assert count(target) == 0
     with psycopg2.connect(target) as connection:
         import_users(connection, [first], dry_run=False)
@@ -215,7 +218,76 @@ def test_account_migration_keeps_orphans_disabled(target):
         assert import_users(connection, [row], dry_run=False)["disabled_orphans"] == 1
     with psycopg2.connect(target) as connection, connection.cursor() as cursor:
         cursor.execute("SELECT user_id,delete_flag FROM nexent.user_account_t")
-        assert cursor.fetchone() == (row["id"], "Y")
+        assert cursor.fetchone() is None
+
+
+@pytest.mark.parametrize("source_history", ["absent", "deleted", "membership-deleted"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_email_reuse_excludes_inactive_identity_and_preserves_membership(target, source_history, reverse):
+    old, new = historical_user(), historical_user()
+    member(target, old)
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("UPDATE nexent.user_tenant_t SET delete_flag='Y' WHERE user_id=%s", (old["id"],))
+    member(target, new)
+    rows = [new]
+    if source_history != "absent":
+        if source_history == "deleted":
+            old["deleted_at"] = "2025-01-01T00:00:00Z"
+        rows.append(old)
+    if reverse:
+        rows.reverse()
+    with psycopg2.connect(target) as connection:
+        result = import_users(connection, rows, dry_run=False)
+        assert result["updated"] == 1
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT user_id,password_hash,delete_flag FROM nexent.user_account_t")
+        assert cursor.fetchall() == [(new["id"],new["encrypted_password"],"N")]
+        cursor.execute("SELECT user_id,delete_flag FROM nexent.user_tenant_t ORDER BY user_id")
+        assert dict(cursor.fetchall()) == {old["id"]:"Y",new["id"]:"N"}
+
+
+def test_all_inactive_email_reuse_creates_no_accounts(target):
+    rows = [historical_user(), historical_user()]
+    for row in rows:
+        member(target,row)
+        row["deleted_at"] = "2025-01-01T00:00:00Z"
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("UPDATE nexent.user_tenant_t SET delete_flag='Y'")
+    with psycopg2.connect(target) as connection:
+        result = import_users(connection,rows,dry_run=False)
+        assert result["excluded_inactive"] == 2
+    assert count(target) == 0
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT count(*) FROM nexent.user_tenant_t")
+        assert cursor.fetchone()[0] == 2
+
+
+def test_banned_account_excluded_with_original_active_association_and_su_preflight(target, monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from management.db.client import db_client
+    from infrastructure.security.account_cli import bootstrap_super_admin
+
+    old, new = historical_user(), historical_user()
+    old["banned_until"] = "2999-01-01T00:00:00Z"
+    member(target,old)
+    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+        cursor.execute("UPDATE nexent.user_tenant_t SET user_email=NULL WHERE user_id=%s",(old["id"],))
+    member(target,new)
+    with psycopg2.connect(target) as connection:
+        assert import_users(connection,[old,new],dry_run=False)["excluded_inactive"] == 1
+    engine = create_engine("postgresql+psycopg2://",connect_args=parse_dsn(target))
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(db_client,"session_maker",sessionmaker(bind=engine))
+            assert bootstrap_super_admin("suadmin@nexent.com","",check_only=True) == {"exists":False}
+        with psycopg2.connect(target) as connection, connection.cursor() as cursor:
+            cursor.execute("SELECT user_id FROM nexent.user_account_t")
+            assert cursor.fetchall() == [(new["id"],)]
+            cursor.execute("SELECT delete_flag FROM nexent.user_tenant_t WHERE user_id=%s",(old["id"],))
+            assert cursor.fetchone()[0] == "N"
+    finally:
+        engine.dispose()
 
 
 def test_account_migration_source_snapshot_without_audit_import(target, capsys):
@@ -306,6 +378,8 @@ def test_account_migration_source_snapshot_without_audit_import(target, capsys):
 def test_account_migration_database_error_rolls_back_partial_inserts(target):
     first, second = historical_user(), historical_user()
     second["email"] = "reject@example.com"
+    member(target, first)
+    member(target, second)
     with psycopg2.connect(target) as connection, connection.cursor() as cursor:
         cursor.execute("""CREATE FUNCTION nexent.reject_test_row() RETURNS trigger LANGUAGE plpgsql AS $$
           BEGIN IF NEW.user_email='reject@example.com' THEN RAISE EXCEPTION 'test rejection'; END IF; RETURN NEW; END $$;
