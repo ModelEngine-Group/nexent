@@ -41,6 +41,9 @@ if arguments[0] == "save":
     if os.environ["FAKE_REQUIRE_PLATFORM"] == "true" and "--platform" not in arguments:
         print("unable to create manifests file: amd64 content digest not found", file=sys.stderr)
         sys.exit(1)
+    if os.environ["FAKE_REJECT_PLATFORM"] == "true" and "--platform" in arguments:
+        print("no suitable export target found: specified platform (linux/amd64)", file=sys.stderr)
+        sys.exit(1)
     if int(os.environ["FAKE_SAVE_STATUS"]):
         print("synthetic image export failure", file=sys.stderr)
         sys.exit(int(os.environ["FAKE_SAVE_STATUS"]))
@@ -51,7 +54,8 @@ sys.exit(2)
     docker.chmod(0o755)
 
     def run(platform="arm64", client_api="1.54", server_api="1.54", *,
-            version_status=0, save_status=0, require_platform=False):
+            version_status=0, save_status=0, require_platform=False,
+            reject_platform=False, image="nexent/nexent:v2.8.3"):
         log_path = tmp_path / "docker.jsonl"
         output = tmp_path / "offline images.tar"
         environment = os.environ.copy()
@@ -63,10 +67,11 @@ sys.exit(2)
             FAKE_VERSION_STATUS=str(version_status),
             FAKE_SAVE_STATUS=str(save_status),
             FAKE_REQUIRE_PLATFORM=str(require_platform).lower(),
+            FAKE_REJECT_PLATFORM=str(reject_platform).lower(),
         )
         result = subprocess.run(
             ["bash", "-c", functions + '\nPLATFORM="$1"\nsave_image_to_tar "$2" "$3"',
-             "offline-export-test", platform, "nexent/nexent:v2.8.3", str(output)],
+             "offline-export-test", platform, image, str(output)],
             env=environment, capture_output=True, text=True, check=False,
         )
         calls = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
@@ -89,6 +94,63 @@ def test_exports_only_requested_platform_on_supported_docker(export_image, platf
     assert saves[0][saves[0].index("-o") + 1] == str(output)
     assert saves[0][-1] == "nexent/nexent:v2.8.3"
     assert output.read_bytes() == b"synthetic image tar"
+
+
+@pytest.mark.parametrize("platform", ["arm64", "amd64"])
+@pytest.mark.parametrize("image", [
+    "supabase/postgres:15.8.1.060",
+    "docker.io/supabase/postgres:15.8.1.060",
+    "docker.m.daocloud.io/supabase/postgres:15.8.1.060",
+    "registry.local:5000/team/supabase/postgres:15.8.1.060",
+    "supabase/postgres",
+    "registry.local:5000/supabase/postgres",
+    "supabase/postgres@sha256:" + "a" * 64,
+])
+def test_exports_supabase_postgres_without_platform_filter(export_image, platform, image):
+    result, calls, output = export_image(platform, image=image, reject_platform=True)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert [call for call in calls if call[0] == "save"] == [
+        ["save", "-o", str(output), image],
+    ]
+    assert output.read_bytes() == b"synthetic image tar"
+
+
+@pytest.mark.parametrize("platform", ["arm64", "amd64"])
+@pytest.mark.parametrize("image", [
+    "postgres:15-alpine",
+    "supabase/postgres-meta:v0.91.0",
+    "supabase/postgres-backup:latest",
+    "other-supabase/postgres:15.8.1.060",
+    "registry.local/supabase/postgres-tools:latest",
+    "registry.local/supabase/postgres/child:latest",
+])
+def test_other_repositories_keep_requested_platform(export_image, platform, image):
+    result, calls, output = export_image(platform, image=image, require_platform=True)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert [call for call in calls if call[0] == "save"] == [
+        ["save", "--platform", f"linux/{platform}", "-o", str(output), image],
+    ]
+    assert output.is_file()
+
+
+@pytest.mark.parametrize("api_version", ["1.39", "1.54"])
+def test_supabase_export_failure_is_reported_without_retry(export_image, api_version):
+    image = "supabase/postgres:15.8.1.060"
+    result, calls, output = export_image(
+        client_api=api_version, server_api=api_version,
+        image=image, reject_platform=True, save_status=1,
+    )
+
+    assert result.returncode != 0
+    assert "synthetic image export failure" in result.stderr
+    assert f"Failed to save image: {image}" in result.stdout
+    assert "Saved:" not in result.stdout
+    assert not output.exists()
+    assert [call for call in calls if call[0] == "save"] == [
+        ["save", "-o", str(output), image],
+    ]
 
 
 @pytest.mark.parametrize("client_api,server_api", [

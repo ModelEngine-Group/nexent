@@ -1,0 +1,69 @@
+schema_version: '1.0'
+change:
+  change_id: OFFLINE-SUPABASE-SAVE-20261103
+  change_type: bugfix
+  bug_id: OFFLINE-SUPABASE-SAVE-20261103
+  title: Export Supabase Postgres without a platform filter
+  description: >-
+    Exclude supabase/postgres from platform-filtered docker save commands,
+    including registry-prefixed, tagged and digest references. Keep the
+    existing API-version guard and requested platform for other images.
+  observed_behavior: >-
+    The reported export of supabase/postgres:15.8.1.060 fails with no suitable
+    export target for linux/amd64. save_image_to_tar adds a platform filter
+    to every image when both Docker APIs support version 1.48 or newer.
+  expected_behavior: >-
+    Export supabase/postgres without --platform as explicitly requested by
+    the user. Continue filtering other images on supported Docker APIs and
+    preserve legacy compatibility, output paths and export failure reporting.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: >-
+      Existing export UT covers API negotiation, platform selection and
+      errors for Nexent images, but has no Supabase Postgres inputs or
+      assertions distinguishing that repository from similarly named images.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-174]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    This change selects arguments at the local Docker executable boundary.
+    Strengthen the owning traditional UT rather than duplicate it as D1.
+    F-174 declares no required test stages. Its former deployment Cases were
+    removed by user request in D5-OFFLINE-CASES-REMOVAL-20261010 and remain
+    untouched. No formal execution or real containerd export is claimed.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Export Supabase Postgres without --platform for amd64 and arm64.
+      - Recognize registry prefixes, tags, digests and untagged references.
+      - Preserve platform filtering for other repositories and similar names.
+      - Retain old API compatibility and propagate Supabase export failures once.
+    reason: >-
+      Exercise the real Bash export functions with Docker isolated at the
+      executable boundary. Simulate the reported error when the Supabase
+      export incorrectly supplies a platform filter.
+    test_selectors:
+      - test/backend/deploy/test_offline_image_export.py
+  notes: >-
+    User-requested exception to OFFLINE-EXPORT-PLATFORM-20261102.
+    Scope: save_image_to_tar and its existing UT. Both save_all_images loops
+    already call this helper. Pull platform selection and workflows retain
+    their current contracts. AC-001: Supabase Postgres exports omit --platform
+    for direct and registry-prefixed references. AC-002: other repositories,
+    including lookalike names, retain API-gated platform selection. AC-003:
+    failed Supabase exports preserve failure reporting without another save.
+    F-174/F-174-RULE-01 is the unchanged owner. D1-D5 assets and generated
+    bindings need no changes for this argument-selection contract; runtime
+    verification on the failing runner is separate from UT proof. The sibling
+    nexent-doc directory and the previously referenced
+    offline-package-platform-safe-export SPEC are unavailable in this
+    checkout, so external SPEC maintenance remains blocked.

@@ -493,7 +493,8 @@ save_image_to_tar() {
   local output_file="$2"
   local save_args=(-o "$output_file")
 
-  if docker_supports_save_platform; then
+  # Supabase Postgres requires an unfiltered export, including registry-prefixed references.
+  if [[ ! "$image" =~ (^|/)supabase/postgres([:@]|$) ]] && docker_supports_save_platform; then
     save_args=(--platform "linux/$PLATFORM" "${save_args[@]}")
   fi
 
