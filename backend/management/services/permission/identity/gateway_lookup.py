@@ -9,7 +9,7 @@ def resolve_gateway_identity(query: dict) -> dict:
     from management.db.identity.token import get_token_by_access_key
     from management.db.identity.user_tenant import get_user_tenant_by_user_id
     from management.db.identity.cas_session import is_cas_session_active
-    from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID
+    from contracts.constants.constants import ASSET_OWNER_ROLE, ASSET_OWNER_TENANT_ID, DEFAULT_TENANT_ID
 
     kind = query.get("kind")
     token_id = None
@@ -39,6 +39,10 @@ def resolve_gateway_identity(query: dict) -> dict:
     tenant_id = membership.get("tenant_id")
     if kind == "session" and role == ASSET_OWNER_ROLE and not tenant_id:
         tenant_id = ASSET_OWNER_TENANT_ID
+    if kind == "session" and role == "SU" and not tenant_id:
+        # Bootstrap intentionally stores SU without a physical tenant. Preserve
+        # the established session context; ordinary roles and API keys stay strict.
+        tenant_id = DEFAULT_TENANT_ID
     if not tenant_id or not role:
         raise IdentityError("No active membership")
     return {"user_id": user_id, "tenant_id": tenant_id, "role": role, "token_id": token_id,

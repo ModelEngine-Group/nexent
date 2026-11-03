@@ -64,13 +64,18 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
     monkeypatch.setattr(environment, "JWT_SECRET", secret)
     monkeypatch.setattr(environment, "GATEWAY_SIGNING_SECRET", secret)
     monkeypatch.setattr(environment, "IS_SPEED_MODE", False)
-    accounts = {user: {"account_status": "active", "token_version": 3, "email": "fixture@example.test"}
-                for user in ("u1", "u2")}
+    accounts = {user: {"delete_flag": "N", "token_version": 3, "email": "fixture@example.test"}
+                for user in ("u1", "u2", "su")}
     key_record = {"user_id": "u1", "token_id": 7, "delete_flag": "N"}
     membership_queries = []
+    empty_tenant_users = set()
 
     def membership(user):
         membership_queries.append(user)
+        if user == "su":
+            return {"tenant_id": "", "user_role": "SU", "delete_flag": "N"}
+        if user in empty_tenant_users:
+            return {"tenant_id": "", "user_role": "USER", "delete_flag": "N"}
         return {"tenant_id": "t1" if user == "u1" else "t2", "user_role": "USER"}
 
     for name, values in {
@@ -134,6 +139,12 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
     async def bootstrap():
         assert identity_context.get() is None
         return {"bootstrap": "reachable"}
+
+    @management.get("/user/current_user_info")
+    async def current_user():
+        identity = identity_context.get()
+        reached.append(("current-user", identity["user_id"]))
+        return identity
 
     @runtime.post("/agent/internal/northbound/run")
     async def dispatch():
@@ -199,6 +210,24 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
                         "Authorization": "Bearer " + credential(user), IDENTITY_HEADER: "forged"})
                     assert response.status_code == 200 and response.json()["user_id"] == user
                 assert membership_queries == ["u1", "u2"]
+                from contracts.constants.constants import DEFAULT_TENANT_ID
+
+                response = await client.get(gateway_url + "/api/user/current_user_info", headers={
+                    "Authorization": "Bearer " + credential("su")})
+                assert response.status_code == 200
+                assert (response.json()["user_id"], response.json()["tenant_id"], response.json()["role"]) == (
+                    "su", DEFAULT_TENANT_ID, "SU")
+                protected_baseline = list(reached)
+                empty_tenant_users.add("u2")
+                response = await client.get(gateway_url + "/api/user/current_user_info", headers={
+                    "Authorization": "Bearer " + credential("u2")})
+                assert response.status_code == 401 and reached == protected_baseline
+                empty_tenant_users.clear()
+                key_record["user_id"] = "su"
+                response = await client.get(gateway_url + "/nb/v1/agents", headers={
+                    "Authorization": "Bearer fixture-api-key"})
+                assert response.status_code == 401 and reached == protected_baseline
+                key_record["user_id"] = "u1"
                 baseline = list(reached)
                 for headers in ({}, {IDENTITY_HEADER: "forged"}):
                     response = await client.post(gateway_url + "/api/agent/run", headers=headers)
@@ -252,4 +281,4 @@ async def test_gateway_authoritative_identity_and_signed_protocol_boundary(monke
                 assert ws.close_code == 1000
     assert identity_context.get() is None
     assert context_checks and all(context_checks)
-    assert reached == [("runtime", "u1"), ("runtime", "u2"), ("northbound", "u1"), ("dispatch", "u1"), ("voice", "u2")]
+    assert reached == [("runtime", "u1"), ("runtime", "u2"), ("current-user", "su"), ("northbound", "u1"), ("dispatch", "u1"), ("voice", "u2")]
