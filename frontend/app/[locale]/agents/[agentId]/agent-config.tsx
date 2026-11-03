@@ -571,16 +571,13 @@ export default function AgentConfig({
             style={{
               containerType: "inline-size",
               containerName: "agent-config",
-              paddingRight: debugVisible
-                ? undefined
-                : Math.max(0, 24 - configScrollbarWidth),
             }}
             className={
               debugExpanded && debugVisible
                 ? "hidden"
                 : debugVisible
                   ? "flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto"
-                  : "flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto pl-6 pb-6"
+                  : "flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto px-6 pb-6"
             }
           >
             {unavailableReasonLabels.length > 0 && (
