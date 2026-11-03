@@ -24,7 +24,7 @@ schema-and-credential transaction.
 | --- | --- | --- |
 | Database ready | Start selected infrastructure; PostgreSQL initializes only `deploy/sql/init.sql` on an empty data directory | Install/wait for infrastructure; its SQL ConfigMap contains only `init.sql` |
 | Historical account import | Host `migrate_docker.py --deploy --apply` runs before HTTPS/core service startup | Host `migrate_k8s.py --deploy --apply` runs before application Secret replacement and application Helm rollout |
-| Target transaction | Recheck table existence under the account-writer lock, run 001 and 002, transfer profiles and credentials, then commit | Same transaction through target PostgreSQL pod |
+| Target transaction | Recheck table existence under the account-writer lock, run consolidated 001, transfer profiles and credentials, then commit | Same transaction through target PostgreSQL pod |
 | Normal application SQL | Shared Workbench initialization and Config startup may run the normal SQL runner after import | Application Helm rollout runs SQL in Config or its bootstrap Job after import, then waits for business workloads |
 | Administrator bootstrap | Run only after core deployment and its SQL succeed | Run only after the application bootstrap/rollout succeeds |
 
@@ -40,13 +40,15 @@ preview rolls back the new account table, its sequence and temporary import data
 and restores the original membership columns/data. Retry reads the source again.
 There are no persistent credential snapshots, phase files or data checkpoints.
 
-001 remains immutable. New `v2.9.0_002_account_availability.sql` converts disabled
-legacy accounts to `delete_flag='Y'`, removes `account_status` and clears obsolete
-pending metadata. Runtime availability uses `delete_flag` alone. The normal SQL
-runner temporarily supplies 001's legacy input column inside its account-pair
-transaction when replaying history. It executes 002 cleanup before commit even
-when both account checksums matched. A failed replay rolls back that temporary
-column and preserves already completed accounts.
+`v2.9.0_001_local_user_accounts.sql` creates the final schema directly, without
+`account_status` or pending placeholders. Legacy status columns are converted to
+`delete_flag` and dropped inside the same transaction; ordinary replay never
+recreates them. Existing soft-deleted accounts, credentials and operator changes
+are preserved on replay. The former 002 is consolidated into 001; existing SQL
+execution history is retained. Transaction-local membership profiles supply roles
+and emails to the importer without persisting unavailable ordinary identities.
+Active CAS/OAuth bindings remain in the project database; provider-only accounts
+have no local password login, while actual local password credentials retain it.
 
 ## Prepare the upgrade
 
@@ -158,8 +160,8 @@ Preview can start the source and preserve its storage, but never commits account
 or deletes source workloads. The Docker `up/down` helpers do not manage Kubernetes.
 
 After successful manual import, run normal deployment. The regular SQL runner
-records/replays its migration history; it preserves the imported credentials and
-removes any transaction-scoped compatibility column before commit.
+records/replays consolidated 001; it preserves the imported credentials and
+never recreates the retired status column.
 
 ## Restore or remove the legacy Docker stack
 
@@ -219,8 +221,8 @@ retaining source storage and storage-definition backups.
 | Banned/deleted/anonymous users and orphans | Exclude from the new account table. Original Supabase records and membership rows remain; no role or tenant is synthesized |
 | API-only batch users | Active blank-email USER/DEV membership plus historical token evidence creates a passwordless account; preserve ID, original keys and revoked key state |
 | Default SPEED seed | Preserve `user_id` / `tenant_id`, mark `system_identity=speed`, keep unavailable for full-mode login. Speed mode retains its existing demo context |
-| Unknown/custom identities | Preserve without automatic activation when no recognized eligibility exists |
-| CAS/OAuth | Existing provider bindings and CAS sessions remain in business PostgreSQL. Historical registration also created Supabase project identities; import those original UUIDs. CAS-generated random passwords remain password-login disabled |
+| Unknown/custom identities | Exclude unrecognized identities from the local account table; retain their original records and never generate replacement IDs |
+| CAS/OAuth | Existing provider bindings and CAS sessions remain in business PostgreSQL. Preserve original IDs and valid bindings. Provider-only identities stay passwordless; accounts with actual local password credentials retain password login. Import Supabase credentials only where those source identities exist |
 | Audit and refresh data | Do not read/import `auth.audit_log_entries`, Supabase sessions, refresh tokens or recovery/confirmation secrets. No audit archive is created |
 
 Canonical `user_email` and `user_role` move from `user_tenant_t` to the account;

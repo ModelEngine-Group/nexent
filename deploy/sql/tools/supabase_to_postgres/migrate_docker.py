@@ -141,13 +141,12 @@ def map_source_user(row: dict) -> dict:
             or (banned and banned > datetime.now(timezone.utc).replace(tzinfo=None))
             or bool(row.get("is_anonymous"))
         )
-        cas_only = (row.get("raw_user_meta_data") or {}).get("provider") == "cas"
         return {
             "user_id": user_id,
             "email": email,
             "password_hash": encoded,
             "password_hash_scheme": scheme,
-            "password_login_enabled": bool(encoded) and not cas_only,
+            "password_login_enabled": bool(encoded),
             "token_version": 0,
             "email_confirmed_at": utc_time(row.get("email_confirmed_at")),
             "create_time": utc_time(row.get("created_at")) or datetime.now(timezone.utc).replace(tzinfo=None),
@@ -191,49 +190,24 @@ def _account_import_sql(source_rows, *, dry_run=False):
         ids.add(row["user_id"])
         row["user_email"] = row.pop("email")
     encoded = json.dumps(rows, default=lambda value: value.isoformat()).replace("'", "''")
-    schema = "\n".join((ROOT / "deploy/sql/migrations" / name).read_text(encoding="utf-8") for name in (
-        "v2.9.0_001_local_user_accounts.sql", "v2.9.0_002_account_availability.sql"))
-    # Preserve immutable 001's existing profile checks while attaching only IDs
-    # to their failures. Email values and credentials never enter the error.
-    legacy_checks = r"""
-DO $legacy_conflicts$
-DECLARE conflict_ids json;
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_tenant_t' AND column_name='user_email') THEN
-        SELECT json_agg(DISTINCT user_id ORDER BY user_id) INTO conflict_ids FROM nexent.user_tenant_t
-        WHERE delete_flag='N' AND nullif(lower(trim(user_email)),'') IN (
-            SELECT lower(trim(user_email)) FROM nexent.user_tenant_t
-            WHERE delete_flag='N' AND nullif(trim(user_email),'') IS NOT NULL
-            GROUP BY lower(trim(user_email)) HAVING count(DISTINCT user_id)>1);
-        IF conflict_ids IS NOT NULL THEN RAISE EXCEPTION 'NEXENT_ACCOUNT_CONFLICT=%',conflict_ids; END IF;
-    END IF;
-    IF (SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_tenant_t' AND column_name IN ('user_email','user_role'))=2 THEN
-        SELECT json_agg(user_id ORDER BY user_id) INTO conflict_ids FROM (
-            SELECT u.user_id FROM nexent.user_tenant_t u
-            WHERE delete_flag='N' OR NOT EXISTS (SELECT 1 FROM nexent.user_tenant_t live WHERE live.user_id=u.user_id AND live.delete_flag='N')
-            GROUP BY u.user_id HAVING count(DISTINCT nullif(lower(trim(user_email)),''))>1
-                OR count(DISTINCT nullif(upper(trim(user_role)),''))>1
-        ) conflicts;
-        IF conflict_ids IS NOT NULL THEN RAISE EXCEPTION 'NEXENT_ACCOUNT_CONFLICT=%',conflict_ids; END IF;
-    END IF;
-END
-$legacy_conflicts$;
-"""
-    return "SET LOCAL standard_conforming_strings=on;\n" + legacy_checks + schema + "\n" + r"""
+    schema = (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
+    return "SET LOCAL standard_conforming_strings=on;\nSET LOCAL nexent.account_import='on';\n" + schema + "\n" + r"""
 CREATE TEMP TABLE account_import ON COMMIT DROP AS
-SELECT s.*, EXISTS (SELECT 1 FROM nexent.user_account_t a WHERE a.user_id=s.user_id) AS existing,
+SELECT s.*, coalesce(p.role_value,a.user_role) AS role_value,
+       coalesce(p.email_value,a.user_email) AS profile_email,
+       (p.user_id IS NOT NULL OR a.user_id IS NOT NULL) AS existing,
        NOT EXISTS (SELECT 1 FROM nexent.user_tenant_t u
                    WHERE u.user_id=s.user_id AND u.delete_flag='N') AS orphan
-FROM jsonb_populate_recordset(NULL::nexent.user_account_t, '__ROWS__'::jsonb) s;
-UPDATE account_import s SET delete_flag='Y'
-WHERE orphan OR NOT EXISTS (
-    SELECT 1 FROM nexent.user_account_t a WHERE a.user_id=s.user_id AND nullif(trim(a.user_role),'') IS NOT NULL);
+FROM jsonb_populate_recordset(NULL::nexent.user_account_t, '__ROWS__'::jsonb) s
+LEFT JOIN pg_temp.account_migration_profiles p ON p.user_id=s.user_id
+LEFT JOIN nexent.user_account_t a ON a.user_id=s.user_id;
+UPDATE account_import SET delete_flag='Y' WHERE orphan OR nullif(trim(role_value),'') IS NULL;
 DO $validate$
 DECLARE conflict_ids json;
 BEGIN
     SELECT json_agg(user_id ORDER BY user_id) INTO conflict_ids FROM (
-        SELECT DISTINCT s.user_id FROM account_import s JOIN nexent.user_account_t a ON a.user_id=s.user_id
-        WHERE s.delete_flag='N' AND a.user_email IS NOT NULL AND a.user_email<>s.user_email
+        SELECT DISTINCT user_id FROM account_import
+        WHERE delete_flag='N' AND profile_email IS NOT NULL AND profile_email<>user_email
     ) conflicts;
     IF conflict_ids IS NOT NULL THEN
         RAISE EXCEPTION 'NEXENT_ACCOUNT_CONFLICT=%',conflict_ids;
@@ -241,17 +215,18 @@ BEGIN
 END
 $validate$;
 UPDATE nexent.user_account_t a SET
-    user_email=s.user_email,password_hash=s.password_hash,password_hash_scheme=s.password_hash_scheme,
+    user_email=s.user_email,user_role=s.role_value,password_hash=s.password_hash,password_hash_scheme=s.password_hash_scheme,
     password_login_enabled=s.password_login_enabled,token_version=s.token_version,
     email_confirmed_at=s.email_confirmed_at,source_metadata=s.source_metadata,
     create_time=s.create_time,update_time=s.update_time,delete_flag=s.delete_flag,updated_by='auth-migration'
 FROM account_import s WHERE a.user_id=s.user_id;
 INSERT INTO nexent.user_account_t
-    (user_id,user_email,password_hash,password_hash_scheme,password_login_enabled,token_version,
+    (user_id,user_email,user_role,password_hash,password_hash_scheme,password_login_enabled,token_version,
      email_confirmed_at,source_metadata,create_time,update_time,delete_flag,created_by,updated_by)
-SELECT user_id,user_email,password_hash,password_hash_scheme,password_login_enabled,token_version,
+SELECT user_id,user_email,role_value,password_hash,password_hash_scheme,password_login_enabled,token_version,
        email_confirmed_at,source_metadata,create_time,update_time,delete_flag,'auth-migration','auth-migration'
-FROM account_import WHERE NOT existing AND delete_flag='N';
+FROM account_import s WHERE delete_flag='N'
+AND NOT EXISTS (SELECT 1 FROM nexent.user_account_t a WHERE a.user_id=s.user_id);
 DELETE FROM nexent.user_account_t WHERE delete_flag='Y'
 AND coalesce(source_metadata->>'system_identity','')<>'speed';
 DO $email_conflicts$
@@ -269,6 +244,7 @@ BEGIN
     END IF;
 END
 $email_conflicts$;
+SET LOCAL nexent.account_import='off';
 SELECT json_build_object('source',count(*),'inserted',count(*) FILTER (WHERE NOT existing AND delete_flag='N'),
                          'updated',count(*) FILTER (WHERE existing AND delete_flag='N'),
                          'skipped',count(*) FILTER (WHERE delete_flag='Y'),

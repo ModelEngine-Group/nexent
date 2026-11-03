@@ -100,7 +100,7 @@ def assert_automatic_upgrade(root, temporary):
         assert phase("prepare")["updated"] == 1
         assert query("SELECT source_metadata->>'system_identity' FROM nexent.user_account_t WHERE user_id='user_id'") == "speed"
         docker("exec", worker, "mkdir", "-p", "/tmp/auth-migrations")
-        for file in [sql_file, sql_file.with_name("v2.9.0_002_account_availability.sql")]:
+        for file in [sql_file]:
             docker("cp", str(file), worker + ":/tmp/auth-migrations/" + file.name)
         runner = (root / "deploy/common/run-sql-migrations.sh").read_text(encoding="utf-8")
         docker("exec", "-i", worker, "sh", "-c", "cat > /tmp/run-auth-sql.sh", data=runner)
@@ -108,13 +108,16 @@ def assert_automatic_upgrade(root, temporary):
         sql_command = ["exec", "-e", "NEXENT_APP_VERSION=2.9.0", "-e", "NEXENT_SQL_MIGRATION_DIR=/tmp/auth-migrations", "-e", "NEXENT_SQL_INIT_FILE=/tmp/init-auth.sql",
                        worker, "bash", "/tmp/run-auth-sql.sh", "--migrate"]
         docker(*sql_command)
-        assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id='v2.9.0_002_account_availability.sql'") == "1"
+        assert query("SELECT count(*) FROM nexent.schema_migrations WHERE migration_id='v2.9.0_001_local_user_accounts.sql'") == "1"
+        # Old 002 execution records are retained even though the file is consolidated.
+        query("INSERT INTO nexent.schema_migrations (migration_id,checksum,status,app_version,source_file) VALUES ('v2.9.0_002_account_availability.sql','legacy','applied','2.9.0','legacy-002')")
         # Normal startup must also support unchanged checksums and forced replay.
         docker(*sql_command)
         query("UPDATE nexent.schema_migrations SET checksum='force-replay' WHERE migration_id='v2.9.0_001_local_user_accounts.sql'")
         docker(*sql_command)
         assert query("SELECT count(*) FROM information_schema.columns WHERE table_schema='nexent' AND table_name='user_account_t' AND column_name='account_status'") == "0"
-        # A failed historical replay must roll back its compatibility column,
+        assert query("SELECT checksum FROM nexent.schema_migrations WHERE migration_id='v2.9.0_002_account_availability.sql'") == "legacy"
+        # A failed historical replay must roll back its schema/data changes,
         # preserving the already committed accounts instead of deleting them.
         query("ALTER TABLE nexent.user_tenant_t ADD COLUMN user_email varchar(255); "
               f"UPDATE nexent.user_tenant_t SET user_email='conflict@example.com' WHERE user_id='{user_id}'; "

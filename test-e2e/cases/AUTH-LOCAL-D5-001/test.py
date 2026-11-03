@@ -28,7 +28,7 @@ from infrastructure.security.passwords import verify_password
 
 
 def availability_sql():
-    return (ROOT / "deploy/sql/migrations/v2.9.0_002_account_availability.sql").read_text(encoding="utf-8")
+    return (ROOT / "deploy/sql/migrations/v2.9.0_001_local_user_accounts.sql").read_text(encoding="utf-8")
 
 
 def initialize_legacy(dsn):
@@ -97,8 +97,7 @@ def test_legacy_api_only_keys_survive_upgrade_and_replay(monkeypatch):
                 rows = {r[0]: r[1:] for r in cursor.fetchall()}
                 assert rows["api"][:4] == rows["revoked"][:4] == ("N", False, None, None)
                 assert rows["api"][4] == {"api_only": True}
-                assert all(rows[uid][0] == "Y" for uid in ["normal", "unknown", "deleted", "admin"])
-                assert rows["deleted"][-1] == "Y"
+                assert set(rows) == {"api", "revoked"}
                 cursor.execute(availability_sql())
                 cursor.execute("UPDATE nexent.user_account_t SET delete_flag='Y',updated_by='operator' WHERE user_id='revoked'")
                 cursor.execute(availability_sql())
@@ -271,8 +270,6 @@ def test_banned_account_excluded_with_original_active_association_and_su_preflig
     old, new = historical_user(), historical_user()
     old["banned_until"] = "2999-01-01T00:00:00Z"
     member(target,old)
-    with psycopg2.connect(target) as connection, connection.cursor() as cursor:
-        cursor.execute("UPDATE nexent.user_tenant_t SET user_email=NULL WHERE user_id=%s",(old["id"],))
     member(target,new)
     with psycopg2.connect(target) as connection:
         assert import_users(connection,[old,new],dry_run=False)["excluded_inactive"] == 1
@@ -451,3 +448,13 @@ def test_account_profile_conflict_rolls_back_single_sql(role, email):
             assert cursor.fetchone()[0] is None
             cursor.execute("SELECT count(*) FROM nexent.user_tenant_t WHERE user_role IS NOT NULL AND user_email IS NOT NULL")
             assert cursor.fetchone()[0] == 2
+
+
+def test_consolidated_schema_provider_identities_and_final_email_conflicts():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("consolidated_schema_proof", Path(__file__).with_name("schema_upgrade.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.assert_consolidated_schema(ROOT)
+    module.assert_legacy_account_columns(ROOT)

@@ -49,6 +49,10 @@ def test_upgrade_runs_one_atomic_sql_command_before_cleanup(upgrade):
     command = sql.call_args.args[2]
     assert command.startswith("BEGIN;") and command.rstrip().endswith("COMMIT;")
     assert command.index("CREATE TABLE IF NOT EXISTS nexent.user_account_t") < command.index("CREATE TEMP TABLE")
+    assert "ADD COLUMN account_status" not in command
+    assert "account_status VARCHAR(30)" not in command
+    assert "account_schema_replay" not in command
+    assert "INSERT INTO pg_temp.account_migration_profiles" in command
     cleanup.assert_called_once_with({"owned": True})
     assert not (args.env_file.parent / ".migration-state").exists()
 
