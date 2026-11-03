@@ -14,7 +14,13 @@ change:
     presentation, share mode, read-only conversation page). Jumping locates
     the message root via its data-message-id attribute, smooth-scrolls the
     viewport, and briefly highlights the target. Navigation stays available
-    while a run streams and in read-only/share contexts.'
+    while a run streams and in read-only/share contexts. Hovering (or
+    focusing) a directory row opens a preview card with the full question and
+    an excerpt of its first assistant reply (capped at 400 chars, text-free
+    assistant messages skipped, "no reply yet" placeholder); the row the
+    viewport is currently scrolled to (last question above the viewport
+    midline, rAF-throttled capture-phase scroll tracking) is highlighted and
+    labelled as the current position.'
   affected_features:
     existing: []
     added: []
@@ -44,6 +50,19 @@ change:
         entry is clicked, filters entries by a case-insensitive keyword over the
         full question text (attachment turns included), shows an empty state
         for unmatched keywords, and resets the keyword when the popover closes.
+      - collectQuestionDirectory attaches an excerpt of the first assistant
+        reply that follows each question (text-free assistant messages do not
+        consume the pending reply, the excerpt is capped at 400 chars with an
+        ellipsis, and unanswered questions keep an empty excerpt).
+      - useActiveQuestionId reports the last question whose message top sits
+        above the viewport midline, recomputes rAF-throttled on scroll events
+        (capture phase, inner scroll containers included), and resolves an
+        empty question set to null.
+      - QuestionDirectoryButton highlights the row matching activeMessageId
+        (aria-current="location" plus a current-position label) and opens a
+        hover/focus preview card showing the full question and its reply
+        excerpt (or the no-reply placeholder); the card closes on mouse
+        leave/blur and when the popover closes.
     reason: |-
       The feature is a frontend navigation layer over already-proven contracts:
       thread message state comes from the existing runtime subscription, the
@@ -53,5 +72,8 @@ change:
       so no formal Case is added.
   notes: |
     Core scope confirmed by the user (popover form, header entry point,
-    attachment-name fallback, read-only support). Deferred: scroll-spy current
-    position indicator, per-question answer status, keyboard shortcut.
+    attachment-name fallback, read-only support). The scroll-spy current
+    position indicator and a Codex-style hover preview card (question plus
+    assistant reply excerpt) were added in the same branch after comparing
+    with Codex's conversation timeline; per-question answer status and a
+    keyboard shortcut remain deferred.

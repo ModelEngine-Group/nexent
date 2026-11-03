@@ -486,6 +486,8 @@
   "chat.questions.jump": "跳转到问题 {{index}}",
   "chat.questions.search": "搜索问题…",
   "chat.questions.noMatches": "没有匹配的问题",
+  "chat.questions.current": "当前",
+  "chat.questions.noReply": "暂无回复",
   "chat.annotation.add": "添加批注",
   "chat.annotation.commentPlaceholder": "添加可选批注…",
   "chat.annotation.editPlaceholder": "编辑批注…",

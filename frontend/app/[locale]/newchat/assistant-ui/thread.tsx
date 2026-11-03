@@ -87,6 +87,7 @@ import {
 } from "../utils/message-annotations";
 import {
   scrollThreadToMessage,
+  useActiveQuestionId,
   useQuestionDirectory,
   type QuestionDirectoryEntry,
 } from "../utils/question-directory";
@@ -927,6 +928,10 @@ const ThreadView: FC<ThreadViewProps> = ({
     }
   }, []);
 
+  // Question the viewport is currently scrolled to; highlights the matching
+  // directory row so long conversations show "where am I" at a glance.
+  const activeQuestionId = useActiveQuestionId(questionDirectory);
+
   const threadHeaderVisible = Boolean(
     showConversationTitle &&
     (isShareMode || (!newChatDesign && workbenchPresentation))
@@ -962,6 +967,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                   <QuestionDirectoryButton
                     questions={questionDirectory}
                     onJump={handleJumpToQuestion}
+                    activeMessageId={activeQuestionId}
                     variant="header"
                   />
                   <Button
@@ -1017,6 +1023,7 @@ const ThreadView: FC<ThreadViewProps> = ({
                   <QuestionDirectoryButton
                     questions={questionDirectory}
                     onJump={handleJumpToQuestion}
+                    activeMessageId={activeQuestionId}
                     variant="header"
                   />
                 </>
@@ -1028,6 +1035,7 @@ const ThreadView: FC<ThreadViewProps> = ({
           <QuestionDirectoryButton
             questions={questionDirectory}
             onJump={handleJumpToQuestion}
+            activeMessageId={activeQuestionId}
             variant="floating"
             className="absolute right-4 top-3 z-10"
           />
@@ -1223,6 +1231,9 @@ export const ReadOnlyConversation: FC<{
   );
   const messages = useAuiState((s) => s.thread.messages);
   const questionDirectory = useQuestionDirectory(messages);
+  // "Where am I" tracking for the read-only share view as well; the scroll
+  // listener is cheap and keeps the directory consistent across surfaces.
+  const activeQuestionId = useActiveQuestionId(questionDirectory);
   const handleJumpToQuestion = useCallback((messageId: string) => {
     if (!scrollThreadToMessage(messageId)) {
       log.warn("[QuestionDirectory] Jump target not found:", messageId);
@@ -1266,6 +1277,7 @@ export const ReadOnlyConversation: FC<{
             <QuestionDirectoryButton
               questions={questionDirectory}
               onJump={handleJumpToQuestion}
+              activeMessageId={activeQuestionId}
               variant="header"
               className="shrink-0"
             />
