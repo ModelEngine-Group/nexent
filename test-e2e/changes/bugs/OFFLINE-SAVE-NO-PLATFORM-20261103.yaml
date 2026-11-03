@@ -1,0 +1,66 @@
+schema_version: '1.0'
+change:
+  change_id: OFFLINE-SAVE-NO-PLATFORM-20261103
+  change_type: bugfix
+  bug_id: OFFLINE-SAVE-NO-PLATFORM-20261103
+  title: Save all offline images without a platform filter
+  description: >-
+    Remove platform filtering and API-version probing from docker save for
+    every offline image. Keep the requested platform on docker pull.
+  observed_behavior: >-
+    Supabase Postgres already saves without --platform, but other images
+    still receive that option when both Docker APIs support version 1.48.
+    The user requests an unfiltered save for all images after configuring
+    the packaging environment to use the classic Docker image store.
+  expected_behavior: >-
+    Always invoke docker save -o <output> <image> without --platform or a
+    version probe. Keep platform-specific pulls, quoted paths, image
+    references and single-attempt export failure reporting.
+  escaped_stage: D5
+  coverage_gap:
+    type: missing_assertion
+    description: >-
+      Existing UT requires platform filtering for non-Supabase images on
+      modern APIs. Replace that superseded expectation with the explicitly
+      requested unfiltered save contract and retain export error coverage.
+  feature_contract_changed: false
+  affected_features:
+    existing: [F-174]
+    added: []
+    modified: []
+    retired: []
+  affected_cases:
+    existing: []
+    added: []
+    modified: []
+    retired: []
+  no_case_change_reason: >-
+    This is a local Docker command argument contract covered by traditional
+    UT. F-174 declares no required stages; its former deployment Cases were
+    removed by user request in D5-OFFLINE-CASES-REMOVAL-20261010. Preserve
+    all formal assets. No formal execution or real CI packaging is claimed.
+  traditional_ut:
+    decision: strengthen
+    behaviors:
+      - Save every image without --platform or a Docker version query.
+      - Preserve output paths with spaces and tagged or prefixed references.
+      - Report save failures after exactly one export attempt.
+      - Continue pulling Nexent and Supabase images for the requested architecture.
+    reason: >-
+      Exercise the actual Bash save and pull helpers with a controlled
+      Docker executable. Replace obsolete API-negotiation assertions with
+      the new command contract rather than duplicate unit proof as D1.
+    test_selectors:
+      - test/backend/deploy/test_offline_image_export.py
+  notes: >-
+    Follow-up to OFFLINE-SUPABASE-SAVE-20261103 and
+    OFFLINE-EXPORT-PLATFORM-20261102; historical records remain unchanged.
+    Scope: save_image_to_tar, the now-unused docker_supports_save_platform
+    helper and their owning UT. Both save_all_images loops use this helper.
+    AC-001: all save commands omit --platform and API probing. AC-002:
+    failures retain the error and do not retry. AC-003: pull still includes
+    linux/<requested platform>. F-174/F-174-RULE-01 remains the owner.
+    Workflow and image-store configuration are outside this change. The
+    known containerd export failure is not claimed fixed by removing a flag.
+    The sibling nexent-doc directory is unavailable, so external SPEC
+    maintenance remains blocked; do not create a replacement product SPEC.
