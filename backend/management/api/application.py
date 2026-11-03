@@ -1,7 +1,6 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 from management.utils.app_factory import create_app
 from contracts.constants.constants import CONFIG_SERVICE_NAME
-import asyncio
 import logging
 from contextlib import asynccontextmanager
 

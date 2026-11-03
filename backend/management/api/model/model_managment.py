@@ -22,7 +22,6 @@ from contracts.model import BatchCreateModelsRequest, BackfillDefaultsRequest, C
 from contracts.errors.exceptions import TokenExpiredError, ModelProviderError
 from contracts.constants.constants import MODEL_CREATE_PERMISSION, MODEL_DELETE_PERMISSION, MODEL_READ_PERMISSION, MODEL_UPDATE_PERMISSION, _AUDIT_SAFE_MODEL_KEYS, _CATALOG_UNAVAILABLE_MESSAGE, _MANAGE_ALLOWED_ROLES
 from management.utils.app_factory import ModelCredentialRoute
-import asyncio
 import logging
 import re
 

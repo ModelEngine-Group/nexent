@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
-from contracts.errors.exceptions import ConversationNotFoundError
 
 from test.backend.database.test_model_outlet_db import database, load  # noqa: F401
 
