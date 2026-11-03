@@ -1,0 +1,14 @@
+schema_version: '1.0'
+case_id: MODEL-PROBE-D3-001
+implementations:
+- framework: pytest
+  file: test.py
+  selector: test_abandoned_probe
+  profiles: [mock]
+acceptance_bindings:
+  AC-CANCEL: [test_abandoned_probe]
+preparation:
+  families: []
+  anchors: false
+  special_assets: false
+  d4_groups: []

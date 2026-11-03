@@ -12,5 +12,6 @@ feature:
     description: 模型 Provider Gateway 的参数映射、错误标准化、超时/重试
   required_test_stages:
   - D1
+  - D3
   source:
     notes: Migrated from V5 01_代码功能清单 without changing the functional description.

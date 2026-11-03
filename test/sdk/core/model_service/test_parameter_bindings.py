@@ -137,3 +137,39 @@ def test_distinct_escaped_fields_and_siblings_remain_distinct():
         [rule("first", "/a~1b"), rule("second", "/a/b"), rule("third", "/a/c")]
     )
     assert set(bindings) == {"first", "second", "third"}
+
+
+@pytest.mark.parametrize("depth", [18, 2001])
+def test_binding_pointer_rejects_excessive_generated_nesting_before_storage(depth):
+    with pytest.raises(ParameterValidationError, match="PARAMETER_BINDING_INVALID") as caught:
+        validate([rule(path="/custom" + "/child" * (depth - 1))])
+    assert caught.value.path == "/parameter_rules/temperature/api_binding"
+
+
+def test_binding_pointer_depth_boundary_preserves_existing_single_parameter_nesting():
+    path = "/custom" + "/child" * 16
+    assert validate([rule(path=path)])["temperature"]["path"] == path
+
+
+
+def test_bound_structured_parameter_keeps_existing_value_depth_compatibility(openai_profile):
+    from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
+    from nexent.core.model_service.contracts import ModelMessage, ModelRequest
+
+    value = 0
+    for _ in range(40):
+        value = {"nested": value}
+    path = "/custom" + "/child" * 16
+    data = openai_profile.model_dump()
+    data["parameter_rules"] = [rule("structured", path, schema={"type":"object"})]
+    data["parameter_values"] = {"structured":value}
+    data["capabilities"]["reasoning"]["controls"] = None
+    saved = type(openai_profile).model_validate(data)
+    request = ModelRequest(request_id="structured-binding", outlet_id=saved.outlet_id,
+        config_revision=saved.config_revision, messages=[ModelMessage(semantic_role="user")])
+    wire = OpenAIChatAdapter().prepare_http_request(request, saved)
+    assert wire.body_bytes
+    current = wire.json_body["custom"]
+    for _ in range(16):
+        current = current["child"]
+    assert current == value

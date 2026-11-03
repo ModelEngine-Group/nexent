@@ -177,3 +177,28 @@ def test_invalid_json_containers_and_encoding_are_sanitized():
     ]:
         with pytest.raises(ParameterValidationError, match="PARAMETER_JSON_INVALID"):
             apply_extra_api_parameters(body, extras)
+
+
+@pytest.mark.parametrize("path_depth,value_depth", [(18, 0), (9, 9), (2001, 0)])
+def test_extra_depth_includes_pointer_segments_without_mutating_inputs(path_depth, value_depth):
+    value = 0
+    for _ in range(value_depth):
+        value = {"nested": value}
+    path = "/custom" + "/child" * (path_depth - 1)
+    body, extras = {"original": 1}, [extra(path, value)]
+    before = deepcopy(extras)
+    with pytest.raises(ParameterValidationError) as caught:
+        apply_extra_api_parameters(body, extras)
+    assert caught.value.category == "EXTRA_API_PARAMETERS_LIMIT"
+    assert caught.value.keyword == "depth"
+    assert body == {"original": 1} and extras == before
+
+
+@pytest.mark.parametrize("path_depth,value_depth", [(17, 0), (9, 8), (1, 16)])
+def test_extra_depth_boundary_keeps_sixteen_levels_under_the_top_level_parameter(path_depth, value_depth):
+    value = 0
+    for _ in range(value_depth):
+        value = {"nested": value}
+    path = "/custom" + "/child" * (path_depth - 1)
+    result = apply_extra_api_parameters({}, [extra(path, value)])
+    assert json.loads(json.dumps(result)) == result

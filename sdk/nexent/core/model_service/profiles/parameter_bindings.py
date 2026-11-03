@@ -10,7 +10,7 @@ from nexent.core.model_service.profiles._models_dev.reader import _freeze
 from nexent.core.model_service.profiles.contracts import VersionedReference
 from nexent.core.model_service.profiles.parameter_rules import CompiledParameterRules
 from nexent.core.model_service.profiles.parameter_schema import ParameterValidationError
-from nexent.core.model_service.profiles.request_parameters import _CONTROLLED_PATHS, _overlap, _tokens
+from nexent.core.model_service.profiles.request_parameters import _CONTROLLED_PATHS, _leaves, _overlap, _tokens
 
 
 def validate_parameter_bindings(
@@ -44,6 +44,7 @@ def validate_parameter_bindings(
             raise ParameterValidationError("PARAMETER_TRANSFORM_UNREGISTERED", location)
         try:
             tokens = _tokens(binding["path"])
+            _leaves(None, depth=len(tokens) - 1)
         except ParameterValidationError:
             raise ParameterValidationError("PARAMETER_BINDING_INVALID", location) from None
         if any(_overlap(tokens, path) for path in protected):
