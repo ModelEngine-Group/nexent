@@ -41,6 +41,38 @@ def read_model_preferences(conversation_id, user_id):
     }}
 
 
+def _conversation_agent_entry(conversation_id, outlet_id, user_id, tenant_id):
+    """Match the native runtime root while keeping Workbench/creator roots independent."""
+    from contracts.errors.exceptions import ConversationNotFoundError
+    from management.services.conversation.service import get_conversation_service
+
+    conversation = get_conversation_service(conversation_id, user_id, tenant_id)
+    if conversation is None:
+        raise ConversationNotFoundError("Conversation not found")
+    if (isinstance(conversation.get("workbench_config"), dict)
+            or conversation.get("target") is not None or not conversation.get("agent_id")):
+        return {}
+    from types import SimpleNamespace
+    from management.db.agent.repository import search_agent_info_by_agent_id
+    from management.services.model.run_controls import _agent_record_for_run
+
+    request = SimpleNamespace(agent_id=conversation["agent_id"], version_no=None, is_debug=False)
+    agent = _agent_record_for_run(request, tenant_id, search_agent_info_by_agent_id)
+    if agent.get("agent_origin") == "SYSTEM":
+        return {}
+    return (agent.get("model_params_override") or {}).get(str(outlet_id)) or {}
+
+
+def _merge_conversation_preferences(profile, entry, values):
+    from management.services.agent.model_parameters import merge_runtime_model_parameters
+
+    try:
+        return (merge_runtime_model_parameters(profile, entry, values) if entry
+                else merge_model_preferences(profile, values))
+    except ParameterValidationError as error:
+        raise ModelOutletValidationError(error.category, error.path) from None
+
+
 def patch_model_preferences(conversation_id, outlet_id, request, user_id, tenant_id):
     from management.db.conversation.model_preferences import model_preferences
     from management.db.model.outlets import get_resolved_model_record
@@ -48,6 +80,7 @@ def patch_model_preferences(conversation_id, outlet_id, request, user_id, tenant
 
     # Check conversation access before reading an outlet or validating its fields.
     read_model_preferences(conversation_id, user_id)
+    entry = _conversation_agent_entry(conversation_id, outlet_id, user_id, tenant_id)
     profile = get_resolved_model_record(outlet_id, tenant_id, registered_references=model_service_references())
     if profile is None or profile.identity.model_type != "llm":
         raise ModelOutletValidationError("MODEL_OUTLET_NOT_AVAILABLE")
@@ -64,7 +97,7 @@ def patch_model_preferences(conversation_id, outlet_id, request, user_id, tenant
         if not isinstance(saved, dict):
             raise ModelOutletValidationError("CONVERSATION_PREFERENCES_INVALID")
         updated = patch_parameter_values(without_outlet_token_limits(saved), request.parameter_values, deleted)
-        merge_model_preferences(profile, updated)
+        _merge_conversation_preferences(profile, entry, updated)
         return updated
 
     return model_preferences(conversation_id, user_id, outlet_id=outlet_id, resolve_values=resolve)
@@ -75,6 +108,7 @@ def read_model_preference_view(conversation_id, outlet_id, user_id, tenant_id):
     from nexent.core.model_service.registry import model_service_references
 
     saved = read_model_preferences(conversation_id, user_id)
+    entry = _conversation_agent_entry(conversation_id, outlet_id, user_id, tenant_id)
     profile = get_resolved_model_record(outlet_id, tenant_id, registered_references=model_service_references())
     if profile is None or profile.identity.model_type != "llm":
         raise ModelOutletValidationError("MODEL_OUTLET_NOT_AVAILABLE")
@@ -83,11 +117,16 @@ def read_model_preference_view(conversation_id, outlet_id, user_id, tenant_id):
     if isinstance(values, dict):
         values = without_outlet_token_limits(values)
     issues = []
+    defaults = profile.parameter_values
     try:
-        merge_model_preferences(profile, values)
-    except ModelOutletValidationError as error:
+        if entry:
+            from management.services.agent.model_parameters import merge_agent_model_parameters
+
+            defaults = merge_agent_model_parameters(profile, entry).parameter_values
+        _merge_conversation_preferences(profile, entry, values)
+    except (ModelOutletValidationError, ParameterValidationError) as error:
         issues.append({"category": error.category, "field": error.path})
-    return {"parameter_values": values, "defaults": profile.parameter_values,
+    return {"parameter_values": values, "defaults": defaults,
             "reasoning_status": profile.capabilities.reasoning.status,
             "output_limit": profile.capabilities.context.output_limit,
             "field_specs": profile.parameter_rules, "config_revision": profile.config_revision, "issues": issues}

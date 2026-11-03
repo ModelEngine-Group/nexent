@@ -56,6 +56,8 @@ def test_missing_saved_value_is_not_replaced_with_a_creation_default(profile):
 def persistence(monkeypatch, profile):
     import sys
 
+    from management.services.conversation import service as conversation_service
+    monkeypatch.setattr(conversation_service, "get_conversation_service", Mock(return_value={"agent_id": None}))
     store = ModuleType("management.db.conversation.model_preferences")
     store.model_preferences = Mock(return_value={"version": 4,
         "model_parameter_preferences": {"42": {"temperature": 0.2}, "43": {"max_output_tokens": 10}}})

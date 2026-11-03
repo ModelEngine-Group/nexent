@@ -76,6 +76,12 @@ def api_fixture(monkeypatch):
     })
     monkeypatch.setattr(agent_app_execution, "ENABLE_AGENT_WORKBENCH", True)
     monkeypatch.setattr(skill_app_creation, "ENABLE_AGENT_WORKBENCH", True)
+    def identity(authorization):
+        if not authorization:
+            raise HTTPException(status_code=401, detail="Not authenticated")
+        return "fixture-owner", "tenant"
+
+    monkeypatch.setattr(agent_app_execution, "get_current_user_id", identity)
     monkeypatch.setattr(agent_app_execution, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
     monkeypatch.setattr(skill_app_creation, "get_current_user_info", lambda *args: ("fixture-owner", "tenant", "en"))
 
@@ -97,8 +103,6 @@ def api_fixture(monkeypatch):
     async def stream(request, ordinary=False):
         if ordinary and request.entrypoint != "workbench" and request.model_id and request.model_id not in state.configured:
             raise ForbiddenError("The selected model is not configured for this Agent")
-        if ordinary and request.workbench:
-            request.model_id = request.workbench.model_id
         run_controls.preflight_turn_controls(request, "tenant")
         selected = lookup(request.model_id, "tenant") if request.model_id else records["effort"]
         from management.services.conversation.model_preferences import merge_model_preferences
@@ -118,6 +122,11 @@ def api_fixture(monkeypatch):
     async def creator_stream(request, **kwargs):
         return await stream(request)
 
+    async def creation_turn(request, *, kind, user_id, tenant_id, stream_factory):
+        return await stream_factory(request, None), 1
+
+    monkeypatch.setattr(agent_app_execution, "start_creation_turn", creation_turn)
+    monkeypatch.setattr(skill_app_creation, "start_creation_turn", creation_turn)
     monkeypatch.setattr(agent_app_execution, "run_agent_stream", agent_run_stream)
     monkeypatch.setattr(agent_app_execution, "create_nl2agent_stream", creator_stream)
     monkeypatch.setattr(skill_app_creation, "create_nl2skill_stream", creator_stream)

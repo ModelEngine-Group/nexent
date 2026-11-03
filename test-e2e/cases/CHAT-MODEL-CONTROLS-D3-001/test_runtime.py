@@ -276,3 +276,55 @@ def test_agent_session_dependency_layers_reach_provider(runtime, workbench, outl
     assert all(row["enable_thinking"] is expected_enabled for row in wire)
     assert all(row.get("thinking_budget") == (1024 if expected_enabled else None) for row in wire)
     assert runtime.draft() == before and runtime.model_records() == models_before
+
+
+def test_saved_preferences_use_native_agent_defaults_for_read_patch_and_continuation(runtime):
+    """AC-02: existing conversation validation uses the root Agent's effective defaults."""
+    from copy import deepcopy
+    from sqlalchemy import update
+    from management.db.models import AgentInfo
+
+    runtime.set_outlet_defaults("budget-B", lambda values: {
+        **{key: value for key, value in values.items() if key != "reasoning_budget_tokens"},
+        "enable_thinking": False,
+    })
+    overrides = deepcopy(runtime.draft()["model_params_override"])
+    identifier = runtime.models["budget-B"]
+    overrides[str(identifier)] = {"parameter_values": {"enable_thinking": True, "reasoning_budget_tokens": 1024}}
+    with runtime.storage["sessions"]() as session:
+        session.execute(update(AgentInfo).where(AgentInfo.agent_id == runtime.agent_id,
+            AgentInfo.version_no == 0).values(model_params_override=overrides))
+    before, models_before = runtime.draft(), runtime.model_records()
+    response = runtime.post("/api/agent/run", label="budget-B", version_no=0)
+    assert response.status_code == 200, response.text
+    conversation_id = int(response.headers["conversation_id"])
+    endpoint = f"/api/conversation/{conversation_id}/model_preferences/{identifier}"
+    headers = {"Authorization": "Bearer fixture-creator"}
+    initial = runtime.client.get(endpoint, headers=headers)
+    assert initial.status_code == 200, initial.text
+    view = initial.json()["data"]
+    assert view["defaults"]["enable_thinking"] is True and view["defaults"]["reasoning_budget_tokens"] == 1024
+    assert not view["issues"] and view["parameter_values"] == {}
+    patched = runtime.client.patch(endpoint, headers=headers, json={"parameter_values": {"reasoning_budget_tokens": 2048}})
+    assert patched.status_code == 200, patched.text
+    saved = runtime.client.get(endpoint, headers=headers).json()["data"]
+    assert not saved["issues"] and saved["parameter_values"] == {"reasoning_budget_tokens": 2048}
+    resumed = runtime.post("/api/agent/run", label="budget-B", conversation_id=conversation_id, version_no=0)
+    assert resumed.status_code == 200, resumed.text
+    assert runtime.provider.wire[-1]["thinking_budget"] == 2048
+    rejected = runtime.client.patch(endpoint, headers=headers, json={"parameter_values": {
+        "enable_thinking": False, "reasoning_budget_tokens": 2048}})
+    assert rejected.status_code == 422 and rejected.json()["detail"]["code"] == "PARAMETER_DEPENDENCY"
+    assert runtime.client.get(endpoint, headers=headers).json()["data"]["parameter_values"] == saved["parameter_values"]
+    cleared = runtime.client.patch(endpoint, headers=headers, json={"delete_parameters": ["reasoning_budget_tokens"]})
+    assert cleared.status_code == 200, cleared.text
+    cleared_view = runtime.client.get(endpoint, headers=headers).json()["data"]
+    assert cleared_view["parameter_values"] == {} and cleared_view["defaults"]["reasoning_budget_tokens"] == 1024
+    assert runtime.post("/api/agent/run", label="budget-B", conversation_id=conversation_id, version_no=0).status_code == 200
+    assert runtime.provider.wire[-1]["thinking_budget"] == 1024
+    off = runtime.client.patch(endpoint, headers=headers, json={"parameter_values": {"enable_thinking": False}})
+    assert off.status_code == 200, off.text
+    assert not runtime.client.get(endpoint, headers=headers).json()["data"]["issues"]
+    assert runtime.post("/api/agent/run", label="budget-B", conversation_id=conversation_id, version_no=0).status_code == 200
+    assert runtime.provider.wire[-1]["enable_thinking"] is False and "thinking_budget" not in runtime.provider.wire[-1]
+    assert runtime.draft() == before and runtime.model_records() == models_before
