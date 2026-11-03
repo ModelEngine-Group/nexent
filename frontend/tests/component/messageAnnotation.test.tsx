@@ -512,7 +512,7 @@ describe("MessageAnnotationCards", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  test("renders one card per annotation with quote, comment and source", () => {
+  test("shows a collapsed badge first and reveals cards on click", () => {
     const { container } = render(
       <MessageAnnotationCards
         annotations={[
@@ -522,6 +522,17 @@ describe("MessageAnnotationCards", () => {
       />
     );
 
+    const badge = screen.getByRole("button", {
+      name: "chat.annotation.chipLabel",
+    });
+    expect(badge.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      container.querySelectorAll("[data-slot='aui_message-annotation-card']")
+    ).toHaveLength(0);
+
+    fireEvent.click(badge);
+
+    expect(badge.getAttribute("aria-expanded")).toBe("true");
     const cards = container.querySelectorAll(
       "[data-slot='aui_message-annotation-card']"
     );
@@ -537,6 +548,10 @@ describe("MessageAnnotationCards", () => {
       <MessageAnnotationCards
         annotations={[{ quoted_text: "   " }, { quoted_text: "valid" }]}
       />
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "chat.annotation.chipLabel" })
     );
 
     expect(

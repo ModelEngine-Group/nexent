@@ -2057,10 +2057,10 @@ const UserMessage: FC<{
         <UserMessageAttachments />
 
         <div className="aui-user-message-content-wrapper relative self-end inline-block min-w-0">
+          {/* Reply annotations ("add to chat") render as a compact badge
+              above the message text; data rides the structured metadata. */}
+          <MessageAnnotationCards className="mb-1.5" />
           <UserMessageBubble>
-            {/* Reply annotations ("add to chat") render as cards above the
-                message text; data rides the structured message metadata. */}
-            <MessageAnnotationCards />
             <MessagePrimitive.Quote>
               {(quote) => <QuoteBlock {...quote} />}
             </MessagePrimitive.Quote>

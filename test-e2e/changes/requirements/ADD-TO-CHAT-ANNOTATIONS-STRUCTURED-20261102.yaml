@@ -18,8 +18,9 @@ change:
     History reads return the structured annotations field. On the frontend,
     a send with annotations and no in-flight uploads takes over the append
     (thread.append) so the optimistic user message carries the annotations as
-    message metadata and renders read-only reference cards (quoted text,
-    optional comment, source reply excerpt) above the message text; cards are
+    message metadata and renders a collapsed annotation badge above the
+    message text that expands to read-only reference cards (quoted text,
+    optional comment, source reply excerpt); cards are
     restored from history after reload. With in-flight uploads the send rides
     the library submission flow and carries annotations via the composer
     runConfig channel (no optimistic cards until reload). Ordinary sends
@@ -52,8 +53,9 @@ change:
       - createMessageAnnotation drops whitespace-only comments and applies
         the defensive caps; adding beyond the max count is rejected in the
         Thread with a localized warning.
-      - MessageAnnotationCards renders one read-only card per annotation
-        (quote, comment, source excerpt) and drops invalid entries.
+      - MessageAnnotationCards renders a collapsed count badge that expands
+        to one read-only card per annotation (quote, comment, source excerpt)
+        and drops invalid entries.
       - normalize_message_annotations validates, trims and drops unusable
         entries, rejects non-list payloads, returns None when nothing usable
         remains, and truncates oversized fields instead of rejecting them.
@@ -78,7 +80,7 @@ change:
       The upgrade spans the request payload (additive annotations field),
       unit persistence, prompt construction and the user bubble, all covered
       by targeted UT at their owning layers: frontend component/util tests
-      for the wire mapping, caps, takeover send and card rendering; backend
+      for the wire mapping, caps, takeover send and badge/card rendering; backend
       tests for contract normalization/formatting, service passthrough,
       history projection and repository persistence/merge against isolated
       SQLite rows. The model-facing merge is invisible to external protocol
