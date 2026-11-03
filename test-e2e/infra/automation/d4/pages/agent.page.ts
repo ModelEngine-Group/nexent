@@ -691,9 +691,12 @@ export class AgentPage {
     // old and new replies after the first round, so count each column separately.
     const selectors = debugPanel.getByRole("combobox");
     await expect(selectors).toHaveCount(2);
-    const columns = [0, 1].map((index) => selectors.nth(index).locator(
-      "xpath=ancestor::div[contains(@class, 'flex h-full w-full flex-col')][1]",
-    ));
+    const results = debugPanel.getByTestId("compare-results");
+    const columns = [
+      results.getByTestId("compare-result-left"),
+      results.getByTestId("compare-result-right"),
+    ];
+    for (const column of columns) await expect(column).toHaveCount(1);
     const histories = columns.map((column) => column.locator("[data-slot='aui_assistant-message-root']:visible"));
     const before = await Promise.all(histories.map((history) => history.count()));
     const composer = this.debugComposer();

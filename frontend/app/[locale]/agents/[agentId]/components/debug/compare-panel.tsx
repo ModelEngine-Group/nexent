@@ -347,7 +347,10 @@ export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
           className="flex min-h-0 flex-1 overflow-hidden"
           data-testid="compare-results"
         >
-          <div className="flex min-h-0 flex-1 flex-col border-r border-gray-200">
+          <div
+            className="flex min-h-0 flex-1 flex-col border-r border-gray-200"
+            data-testid="compare-result-left"
+          >
             {compareLeftModelId != null && (
               <SideThread
                 onSourcesPanelOpen={onSourcesPanelOpen}
@@ -366,7 +369,10 @@ export const AgentDebugComparePanel: FC<AgentDebugComparePanelProps> = ({
               />
             )}
           </div>
-          <div className="flex min-h-0 flex-1 flex-col">
+          <div
+            className="flex min-h-0 flex-1 flex-col"
+            data-testid="compare-result-right"
+          >
             {compareRightModelId != null && (
               <SideThread
                 onSourcesPanelOpen={onSourcesPanelOpen}

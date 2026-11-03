@@ -177,15 +177,30 @@ function ControlledPanel() {
   return (
     <>
       <style>{".hidden { display: none; }"}</style>
-      {open && (
+      <button onClick={() => setOpen(true)}>Reopen debug</button>
+      {["Configure", "Publish"].map((label) => (
+        <button
+          key={label}
+          onClick={() => {
+            setFullscreen(false);
+            setOpen(false);
+          }}
+        >
+          {label}
+        </button>
+      ))}
+      <div className={open ? "" : "hidden"}>
         <AgentDebugPanel
           isCompareMode={compare}
           isFullscreen={fullscreen}
           onToggleFullscreen={() => setFullscreen((value) => !value)}
           onCompareModeChange={setCompare}
-          onClose={() => setOpen(false)}
+          onClose={() => {
+            setFullscreen(false);
+            setOpen(false);
+          }}
         />
-      )}
+      </div>
     </>
   );
 }
@@ -283,8 +298,67 @@ it("closes debug from the rightmost X with its localized tooltip", async () => {
   fireEvent.mouseOver(close);
   expect(await screen.findByRole("tooltip")).toHaveTextContent("关闭调试");
   fireEvent.click(close);
-  expect(screen.queryByTestId("agent-debug-panel")).not.toBeInTheDocument();
+  expect(screen.getByTestId("agent-debug-panel")).not.toBeVisible();
 });
+
+it.each([false, true])(
+  "closes references on a parent fullscreen transition without a toggle callback (compare=%s)",
+  (compare) => {
+    const view = render(
+      <AgentDebugPanel isCompareMode={compare} isFullscreen />
+    );
+    const name = compare ? "compare" : "single";
+    fireEvent.click(
+      screen.getByRole("button", { name: `Show ${name} references` })
+    );
+    view.rerender(<AgentDebugPanel isCompareMode={compare} isFullscreen />);
+    expect(screen.getByTestId(`${name}-references`)).toBeVisible();
+    view.rerender(<AgentDebugPanel isCompareMode={compare} />);
+    expect(screen.queryByTestId(`${name}-references`)).not.toBeInTheDocument();
+    view.rerender(<AgentDebugPanel isCompareMode={compare} isFullscreen />);
+    expect(screen.queryByTestId(`${name}-references`)).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: `Show ${name} references` })
+    );
+    expect(screen.getByTestId(`${name}-references`)).toBeVisible();
+    expect(fixture.runtime.thread.reset).not.toHaveBeenCalled();
+    expect(fixture.runtime.thread.cancelRun).not.toHaveBeenCalled();
+  }
+);
+
+it.each(["关闭调试", "Configure", "Publish"])(
+  "closes mounted references after %s and reopening without resetting the draft",
+  (exit) => {
+    render(<ControlledPanel />);
+    const draft = screen.getByRole("textbox", { name: "Single draft" });
+    fireEvent.change(draft, { target: { value: "Keep this draft" } });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show single references" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: "切换对比模式" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show compare references" })
+    );
+    fireEvent.click(screen.getByRole("button", { name: exit }));
+    expect(screen.getByTestId("agent-debug-panel")).not.toBeVisible();
+    expect(screen.queryByTestId("single-references")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("compare-references")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Reopen debug" }));
+    expect(
+      screen.getByRole("button", { name: zh["agent.debug.maximize"] })
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "切换对比模式" }));
+    expect(draft).toBeVisible();
+    expect(draft).toHaveValue("Keep this draft");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Show single references" })
+    );
+    expect(screen.getByTestId("single-references")).toBeVisible();
+    expect(fixture.runtime.thread.reset).not.toHaveBeenCalled();
+    expect(fixture.runtime.thread.cancelRun).not.toHaveBeenCalled();
+    expect(remoteChatModelAdapter.run).not.toHaveBeenCalled();
+  }
+);
 
 it("keeps fullscreen controls and English labels", () => {
   fixture.locale = "en";

@@ -21,7 +21,7 @@ change:
     - Opening retrieval details requests fullscreen only in compact debug, including comparison mode.
     - Repeated opens and closing details preserve fullscreen; manual restore remains available.
     - Missing callbacks are safe and opening details does not reset the runtime or draft.
-    - Restoring debug closes all mounted source drawers without resetting drafts or runtime; maximizing again leaves them closed and explicit retrieval opens still work.
+    - Every fullscreen exit (restore, X close, configuration, publication or parent prop change) closes all mounted source drawers without resetting drafts or runtime; reopening or maximizing leaves them closed and explicit retrieval opens still work.
     test_selectors:
     - frontend/tests/workbench/AgentDebugHeader.test.tsx
     - frontend/tests/workbench/SourcesPanelState.test.tsx

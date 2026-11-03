@@ -145,10 +145,15 @@ const AgentDebugPanel: FC<AgentDebugPanelProps> = ({
   const [clearEpoch, setClearEpoch] = useState(0);
   const [compareClearEpoch, setCompareClearEpoch] = useState(0);
   const [sourcesPanelCloseEpoch, setSourcesPanelCloseEpoch] = useState(0);
+  const [previousFullscreen, setPreviousFullscreen] = useState(isFullscreen);
+  if (previousFullscreen !== isFullscreen) {
+    setPreviousFullscreen(isFullscreen);
+    if (previousFullscreen && !isFullscreen) {
+      setSourcesPanelCloseEpoch((value) => value + 1);
+    }
+  }
   const handleToggleFullscreen = () => {
-    if (!onToggleFullscreen) return;
-    if (isFullscreen) setSourcesPanelCloseEpoch((value) => value + 1);
-    onToggleFullscreen();
+    onToggleFullscreen?.();
   };
   const handleSourcesPanelOpen = () => {
     if (!isFullscreen) onToggleFullscreen?.();

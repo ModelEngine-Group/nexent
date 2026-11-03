@@ -18,7 +18,7 @@ change:
     modified: []
     retired: []
   affected_cases:
-    existing: []
+    existing: [PW-PROMPT-02]
     added: []
     modified: []
     retired: []
@@ -33,6 +33,7 @@ change:
     - Comparison selectors retain independent model selection and exclude the opposite model.
     - Both selectors occupy a fixed two-column row above the shared composer, outside the scrolling result columns.
     - Suggestions from either column populate the shared composer; comparison keeps its single composer without model selection.
+    - Stable left/right result containers each own exactly one thread independently of model selector placement.
     reason: Existing header tests mock the entire comparison panel and welcome tests only exercise the welcome component. Add focused frontend regression coverage. Python is unaffected; no additional D1 boundary is needed.
   notes: |
     SPEC: nexent-doc/docs/Developing/dev-agent-config-visual-spacing/changes/dev-agent-debug-compare-style/design.md.
@@ -40,7 +41,11 @@ change:
     PW-PROMPT-02 has no visual assertions and is not selected as proof of this presentation fix.
     No new D1-D5 Cases: local composition and selection contracts are tested in frontend UT.
     D2/D3/D5 are unaffected (no API, runtime protocol, persistence or deployment change).
-    D4 real-model journey is unchanged; local presentation verification does not certify that journey.
+    D4 real-model journey contract is unchanged; its shared sendDebugCompare helper must
+    locate stable per-side result containers rather than model-picker ancestors.
+    infra/tools/tests/test_prompt_browser_selectors.py exercises that helper in an isolated
+    Chromium fixture with the current layout and distinct left/right replies over two rounds.
+    Local presentation/helper verification does not certify the real-model journey.
     Verification 2026-11-02: 32/32 targeted frontend UT PASS; original comparison source fails
     two new regressions. TypeScript, format, copyright and whitespace checks PASS.
     Design and implementation formal validation PASS with --require-ut-change for this change.

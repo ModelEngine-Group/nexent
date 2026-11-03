@@ -99,6 +99,11 @@ it("uses the shared debug welcome/layout in both columns with one model-free com
   render(<AgentDebugComparePanel agentId={42} />);
   const threads = screen.getAllByTestId("thread");
   expect(threads).toHaveLength(2);
+  const results = screen.getByTestId("compare-results");
+  const left = within(results).getByTestId("compare-result-left");
+  const right = within(results).getByTestId("compare-result-right");
+  expect(within(left).getAllByTestId("thread")).toEqual([threads[0]]);
+  expect(within(right).getAllByTestId("thread")).toEqual([threads[1]]);
   for (const thread of threads) {
     expect(thread).toHaveAttribute("data-debug-layout", "true");
     expect(thread).toHaveAttribute("data-composer", "false");
