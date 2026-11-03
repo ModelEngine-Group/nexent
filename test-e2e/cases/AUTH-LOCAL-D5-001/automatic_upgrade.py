@@ -90,7 +90,8 @@ def assert_automatic_upgrade(root, temporary):
         # A conflict fails after schema creation, rolling back both the new
         # table and the removal of legacy profile fields. Retry starts fresh.
         query(f"UPDATE nexent.user_tenant_t SET user_email='conflict@example.com' WHERE user_id='{user_id}'")
-        phase("prepare", success=False)
+        rejected = phase("prepare", success=False)
+        assert user_id in rejected.stderr
         assert query("SELECT to_regclass('nexent.user_account_t') IS NULL") == "t"
         assert query(f"SELECT user_role,user_email FROM nexent.user_tenant_t WHERE user_id='{user_id}'") == "SU|conflict@example.com"
         assert all(name in docker("ps", "-a", "--format", "{{.Names}}").splitlines() for name in names.values())

@@ -13,7 +13,7 @@ feature:
     description: Native password/JWT authentication uses delete_flag alone for account availability; canonical role/email are account-owned. API-only identities remain active without email/password and batch creation is atomic across accounts, memberships, groups and keys.
   - rule_id: AUTH-LOCAL-RULE-02
     description: Atomic idempotent migration preserves IDs and compatible password
-      hashes without changing permissions; source audit records are neither read nor archived. Account table existence alone marks completion. Schema/profile/credential changes commit together and failure removes the new table while restoring legacy fields without persistent credential process files. Recognizable legacy API-only users retain working API keys; successful applied imports reclaim local Supabase containers while keeping data volumes and failures preserve the stack.
+      hashes without changing permissions; source audit records are neither read nor archived. Account table existence alone marks completion. Schema/profile/credential changes commit together and failure removes the new table while restoring legacy fields without persistent credential process files. Final unavailable ordinary identities stay in original records instead of local accounts; the default SPEED system identity is retained. Email uniqueness uses final available accounts and conflicts report IDs. Recognizable legacy API-only users retain working API keys; successful applied imports reclaim local Supabase containers while keeping data volumes and failures preserve the stack.
   required_test_stages:
   - D2
   - D5
