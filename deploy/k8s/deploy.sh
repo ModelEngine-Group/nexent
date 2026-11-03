@@ -1448,9 +1448,9 @@ apply() {
         SSH_PASSWORD="${SSH_PASSWORD:-nexent@2025}"
     fi
 
-    # Capture the source before replacing Secrets needed by a stopped old DB.
+    # Complete historical import before replacing source Secrets or starting application SQL.
     if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
-        deployment_upgrade_local_accounts prepare kubernetes "$NAMESPACE" || exit 1
+        deployment_upgrade_local_accounts kubernetes "$NAMESPACE" || exit 1
     fi
 
     render_runtime_secret_values
@@ -1467,9 +1467,6 @@ apply() {
         exit 1
     fi
 
-    if deployment_csv_contains "$DEPLOYMENT_COMPONENTS" application; then
-        deployment_upgrade_local_accounts apply kubernetes "$NAMESPACE" || exit 1
-    fi
 
     # Step 9: Create the super admin user after local account migrations.
     CREATE_SUADMIN_SCRIPT="$SCRIPT_DIR/create-suadmin.sh"

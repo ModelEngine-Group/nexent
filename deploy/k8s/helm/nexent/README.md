@@ -461,4 +461,4 @@ Released PVs are automatically cleaned during deployment. To manually clean:
 kubectl delete pv nexent-workspace-pv nexent-skills-pv nexent-project-config-pv nexent-elasticsearch-pv nexent-postgresql-pv nexent-redis-pv nexent-minio-pv
 ```
 
-Local authentication requires `nexent-common.secrets.jwtSecret`. The deploy script generates or reuses it. [Migration runbook](../../../../docs/local-authentication-migration.md) covers historical credentials and cutover.
+Local authentication requires `nexent-common.secrets.jwtSecret`. The deploy script generates or reuses it. [Migration runbook](../../../sql/tools/supabase_to_postgres/README.md) covers historical credentials and cutover.

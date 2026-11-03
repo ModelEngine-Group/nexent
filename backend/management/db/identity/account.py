@@ -81,7 +81,6 @@ def create_account(email: str | None, password_hash=None, *, user_id=None, db_se
             if password_hash
             else None,
             password_login_enabled=bool(password_hash),
-            account_status="active",
             token_version=0,
             email_confirmed_at=None if api_only else datetime.utcnow(),
             created_by=created_by or user_id,
@@ -101,7 +100,6 @@ def delete_account(user_id: str, db_session=None):
             .where(UserAccount.user_id == user_id, UserAccount.delete_flag == "N")
             .values(
                 delete_flag="Y",
-                account_status="disabled",
                 token_version=UserAccount.token_version + 1,
                 password_hash=None,
                 password_login_enabled=False,
@@ -121,7 +119,6 @@ def change_password(user_id: str, expected_hash: str, password_hash: str):
             .where(
                 UserAccount.user_id == user_id,
                 UserAccount.password_hash == expected_hash,
-                UserAccount.account_status == "active",
                 UserAccount.delete_flag == "N",
             )
             .values(

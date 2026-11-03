@@ -55,7 +55,8 @@ change:
     - test/backend/app/test_oauth_app.py
     - test/backend/app/test_cas_app.py
     behaviors:
-    - Deploy prepare/apply resumes private snapshots and records import/cleanup separately from versioned SQL; host mode needs no database packages.
+    - Account table existence alone marks completion. Host deployment atomically creates schema and imports credentials before rollout, with no version or private retry-state selection; local container mode needs no host database packages.
+    - Failed/preview migration restores legacy profile fields and leaves no account table or persistent credential process data. Consolidated 001 never creates account_status and removes existing legacy status columns; runtime availability uses delete_flag alone.
     - API-only null-email accounts remain passwordless; account/membership/group/key writes share a transaction.
     - Only committed local applies reclaim source DB/Auth/Kong; preview, failure and remote sources retain containers/data.
     - Password success/invalid/boundary and legacy hash compatibility.
