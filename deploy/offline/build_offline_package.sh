@@ -1,5 +1,4 @@
 #!/bin/bash
-# Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
 set -e
 
@@ -471,35 +470,13 @@ pull_all_images() {
   echo "✅ All images pulled successfully"
 }
 
-docker_supports_save_platform() {
-  local api_versions client_api server_api api
-
-  # Platform-specific image export requires API 1.48 on both ends. The client
-  # API also reflects an explicit DOCKER_API_VERSION compatibility override.
-  api_versions="$(docker version --format '{{.Client.APIVersion}} {{.Server.APIVersion}}' 2>/dev/null)" || return 1
-  read -r client_api server_api <<< "$api_versions"
-
-  for api in "$client_api" "$server_api"; do
-    [[ "$api" =~ ^([0-9]+)\.([0-9]+)$ ]] || return 1
-    if (( 10#${BASH_REMATCH[1]} < 1 || (10#${BASH_REMATCH[1]} == 1 && 10#${BASH_REMATCH[2]} < 48) )); then
-      return 1
-    fi
-  done
-  return 0
-}
-
 save_image_to_tar() {
   local image="$1"
   local output_file="$2"
-  local save_args=(-o "$output_file")
-
-  if docker_supports_save_platform; then
-    save_args=(--platform "linux/$PLATFORM" "${save_args[@]}")
-  fi
 
   echo "Saving image to tar: $output_file"
 
-  if docker save "${save_args[@]}" "$image"; then
+  if docker save -o "$output_file" "$image"; then
     echo "✅ Saved: $output_file"
     return 0
   else
