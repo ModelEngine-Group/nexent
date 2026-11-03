@@ -94,5 +94,9 @@ change:
     the payload on the composer runConfig and clears it once the run settles
     (ordinary sends, clarification cards and edit resends cannot carry stale
     annotations). The composeSend double-invocation guard of the fold era is
-    obsolete because the manual append is idempotent. Northbound API does
-    not transparently expose annotations; resume runs do not carry them.
+    obsolete because the manual append is idempotent. Annotation-only sends
+    (quoted reply without typed text) resolve the annotations before the
+    adapter's empty-query guard so the request goes out with an empty query
+    and the backend merges the quotes into the model-facing text.
+    Northbound API does not transparently expose annotations; resume runs do
+    not carry them.

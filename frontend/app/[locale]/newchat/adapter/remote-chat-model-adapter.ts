@@ -1464,7 +1464,26 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
       ? JSON.stringify(structuredNl2AgentInput)
       : visibleQuery;
 
-    if (!isResume && !query) {
+    // Reply annotations: prefer the structured metadata on the outgoing user
+    // message (manual append path and retries); fall back to the runConfig
+    // channel used when in-flight uploads keep the library submission flow
+    // in charge of the append. Resolved before the empty-query guard because
+    // an annotation-only send (quoted reply, no typed text) carries an empty
+    // query; the backend merges the quotes into the model-facing text.
+    const messageAnnotations = fromMessageAnnotationWireItems(
+      lastUserIndex >= 0
+        ? (
+            messages[lastUserIndex].metadata?.custom as
+              | { annotations?: unknown }
+              | undefined
+        )?.annotations
+        : undefined
+    );
+    const annotations = messageAnnotations.length
+      ? messageAnnotations
+      : fromMessageAnnotationWireItems(custom?.messageAnnotations);
+
+    if (!isResume && !query && !annotations.length) {
       log.warn("[ChatModelAdapter] No user query found in messages");
       return;
     }
@@ -1542,22 +1561,8 @@ export const remoteChatModelAdapter: ChatModelAdapter = {
     if (!isResume && !isNl2Agent && clarificationResponse) {
       requestBody.clarification_response = clarificationResponse;
     }
-    // Reply annotations: prefer the structured metadata on the outgoing user
-    // message (manual append path and retries); fall back to the runConfig
-    // channel used when in-flight uploads keep the library submission flow
-    // in charge of the append.
-    const messageAnnotations = fromMessageAnnotationWireItems(
-      lastUserIndex >= 0
-        ? (
-            messages[lastUserIndex].metadata?.custom as
-              | { annotations?: unknown }
-              | undefined
-        )?.annotations
-        : undefined
-    );
-    const annotations = messageAnnotations.length
-      ? messageAnnotations
-      : fromMessageAnnotationWireItems(custom?.messageAnnotations);
+    // Reply annotations travel as a structured request field; an
+    // annotation-only send keeps its empty query (see the guard above).
     if (!isResume && !isNl2Agent && annotations.length) {
       requestBody.annotations = annotations;
     }
