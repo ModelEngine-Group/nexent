@@ -80,7 +80,8 @@ def test_http_schema4_workbench_keeps_model_controls_outside_resources(api, path
     assert "model_id" not in api.calls[-1][resource_key]
     for key in ("model_id", "generation_config"):
         invalid = {**body, resource_key: {**config, key: identifier if key == "model_id" else {}}}
-        assert api.post(path, invalid).status_code == 422
+        expected = 422 if path == "/api/agent/run" else 400
+        assert api.post(path, invalid).status_code == expected
 
 
 @pytest.mark.parametrize("path", ["/api/agent/run", "/api/agent/nl2agent/run", "/api/skills/nl2skill/run"])

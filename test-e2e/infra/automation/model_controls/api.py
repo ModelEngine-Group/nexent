@@ -123,6 +123,10 @@ def api_fixture(monkeypatch):
         return await stream(request)
 
     async def creation_turn(request, *, kind, user_id, tenant_id, stream_factory):
+        # The real history service validates this resource declaration before saving it.
+        from contracts.agent import WorkbenchSessionConfig
+        if request.workbench_config is not None:
+            WorkbenchSessionConfig.model_validate(request.workbench_config)
         return await stream_factory(request, None), 1
 
     monkeypatch.setattr(agent_app_execution, "start_creation_turn", creation_turn)

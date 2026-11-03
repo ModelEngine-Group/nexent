@@ -50,7 +50,6 @@ vi.mock("@/hooks/model/useModelList", () => ({
   useModelList: () => ({
     llmModels: mocks.models,
     availableLlmModels: mocks.models,
-    availableLlmModels: mocks.models,
     isSuccess: mocks.modelListLoaded,
   }),
 }));

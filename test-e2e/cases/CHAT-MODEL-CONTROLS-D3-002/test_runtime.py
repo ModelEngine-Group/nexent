@@ -185,3 +185,20 @@ def test_empty_stop_recovery_never_restarts_as_protocol_repair(runtime, strict, 
     if not recover:
         assert "Recovered" not in response.text
     assert runtime.draft() == before and runtime.model_records() == models
+
+
+@pytest.mark.parametrize("path", [path for path, workbench in PATHS if workbench])
+def test_removed_model_fields_are_rejected_by_real_workbench_creation_validation(runtime, path):
+    config = {"schema_version": 4, "mode": "skill_create" if "skill" in path else
+              "agent_create" if "nl2" in path else "generic_chat", "agent_mounts": [], "skill_mounts": []}
+    for key, value in [("model_id", runtime.models["selected-B"]), ("generation_config", {})]:
+        body = {"query": "Reject invalid resource model fields", "model_id": runtime.models["selected-B"]}
+        if "agent" in path:
+            body["agent_id"] = runtime.agent_id
+        if path == "/api/agent/run":
+            body.update(entrypoint="workbench", workbench={**config, key: value})
+        else:
+            body["workbench_config"] = {**config, key: value}
+        response = runtime.client.post(path, json=body, headers={"Authorization": "Bearer fixture-creator"})
+        assert response.status_code == (422 if path == "/api/agent/run" else 400), response.text
+    assert not runtime.provider.wire
