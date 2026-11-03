@@ -507,7 +507,7 @@ def isolate_embedding_probe():
         yield
 
 
-def import_svc(module="management"):
+def import_svc(module="management", *, isolate_storage=True):
     """Import service under MinioClient patch to avoid real initialization."""
     minio_client_mock = mock.MagicMock()
     sys.modules["database"] = database_mod
@@ -525,6 +525,16 @@ def import_svc(module="management"):
     sys.modules["nexent.core.models.sampling"] = sampling_module
     with mock.patch("management.db.client.MinioClient", return_value=minio_client_mock):
         svc = importlib.import_module("management.services.model." + module)
+    if not isolate_storage:
+        return svc
+    # These tests own legacy preprocessing/orchestration. The resolved storage
+    # translator has its own unit and database suites and is a collaborator here.
+    svc._create_model_configuration = lambda data, user, tenant: svc.create_model_record(data, user, tenant)
+    def update_configuration(record, changes, user, tenant, *, scope_update=False):
+        if scope_update:
+            return svc.update_model_record(record["model_id"], changes, user, tenant)
+        return svc.update_model_record(record["model_id"], changes, user)
+    svc._update_model_configuration = update_configuration
     return svc
 
 

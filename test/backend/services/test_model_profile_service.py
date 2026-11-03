@@ -274,6 +274,33 @@ def test_custom_extra_parameter_is_preserved_without_capability_claim():
     assert "custom_option" not in profile.parameter_values
 
 
+def test_unknown_sampling_preserves_legacy_calls_and_explicit_top_p_controls():
+    from management.services.conversation.model_preferences import merge_model_preferences
+    from management.services.model.profiles import build_outlet_draft
+
+    from nexent.core.model_service.adapters.openai_chat import OpenAIChatAdapter
+    from nexent.core.model_service.compatibility.invocation_options import LegacyInvocationOptions
+    from nexent.core.model_service.contracts import ModelMessage, ModelRequest
+
+    profile, _ = build_outlet_draft(draft_request(request_model_id="unlisted",
+        provider_info={"base_url": "https://custom.invalid/v1"}), "tenant")
+    declarations = {rule["key"]: rule for rule in profile.parameter_rules}
+    assert profile.capabilities.sampling.temperature.status == "unknown"
+    assert "temperature" not in profile.parameter_values
+    assert declarations["temperature"]["visible"] is True
+    assert declarations["temperature"]["allowed_scopes"] == ["outlet", "conversation"]
+    assert declarations["top_p"]["visible"] is True
+    assert declarations["top_p"]["allowed_scopes"] == ["outlet", "conversation"]
+    assert "top_p" not in profile.parameter_values
+    assert profile.capabilities.sampling.top_p.status == "unknown"
+    assert merge_model_preferences(profile, {"top_p": 0.85}).parameter_values["top_p"] == 0.85
+    invocation = LegacyInvocationOptions({"temperature": 0.5, "top_p": 0}).resolve(profile)
+    request = ModelRequest(request_id="legacy-platform-call", outlet_id=profile.outlet_id,
+        config_revision=profile.config_revision,
+        messages=[ModelMessage(semantic_role="user", content_parts=[{"type": "text", "text": "title"}])])
+    body = OpenAIChatAdapter().prepare_http_request(request, invocation).json_body
+    assert body["temperature"] == 0.5 and body["top_p"] == 0
+    assert merge_model_preferences(profile, {"temperature": 0.5}).parameter_values["temperature"] == 0.5
 
 
 def test_preview_exposes_experience_defaults_before_user_overrides(monkeypatch):

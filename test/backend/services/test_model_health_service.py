@@ -1,11 +1,11 @@
 # Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
-from test.common.contract_stubs import install_shared_contract_stub
-from test.common.contract_stubs import install_business_constant_stubs, install_business_contract_stubs
+
 import os
 import sys
 import types
 from unittest import mock
 
+from test.common.contract_stubs import install_shared_contract_stub, install_business_constant_stubs, install_business_contract_stubs
 import httpx
 import pytest
 
@@ -630,7 +630,7 @@ async def test_check_model_connectivity_success():
             "model_id": "model123",
             "model_repo": "openai",
             "model_name": "gpt-4",
-            "model_type": "llm",
+            "model_type": "vlm",
             "base_url": "https://api.openai.com",
             "api_key": "test-key"
         }
@@ -649,7 +649,7 @@ async def test_check_model_connectivity_success():
         mock_update_model.assert_any_call(
             "model123", {"connect_status": "available"})
         mock_connectivity_check.assert_called_once_with(
-            "openai/gpt-4", "llm", "https://api.openai.com", "test-key", True,
+            "openai/gpt-4", "vlm", "https://api.openai.com", "test-key", True,
             None, None, None, "GPT-4", None,
         )
 
@@ -681,7 +681,7 @@ async def test_check_model_connectivity_failure():
         mock_get_model.return_value = {
             "model_id": "model123",
             "model_name": "gpt-4",
-            "model_type": "llm",
+            "model_type": "vlm",
             "base_url": "https://api.openai.com",
             "api_key": "test-key",
             "ssl_verify": False,  # Explicitly set to False to avoid fallback
@@ -714,7 +714,7 @@ async def test_check_model_connectivity_exception():
         mock_get_model.return_value = {
             "model_id": "model123",
             "model_name": "gpt-4",
-            "model_type": "llm",
+            "model_type": "vlm",
             "base_url": "https://api.openai.com",
             "api_key": "test-key"
         }
@@ -744,7 +744,7 @@ async def test_check_model_connectivity_probe_exception_returns_unavailable():
         mock_get_model.return_value = {
             "model_id": "model123",
             "model_name": "gpt-4",
-            "model_type": "llm",
+            "model_type": "vlm",
             "base_url": "https://api.openai.com",
             "api_key": "test-key"
         }
@@ -789,7 +789,7 @@ async def test_verify_model_config_connectivity_success():
 
         model_config = {
             "model_name": "gpt-4",
-            "model_type": "llm",
+            "model_type": "vlm",
             "base_url": "https://api.openai.com",
             "api_key": "test-key",
             "max_tokens": 2048
@@ -805,7 +805,7 @@ async def test_verify_model_config_connectivity_success():
         assert "error" not in response
 
         mock_connectivity_check.assert_called_once_with(
-            "gpt-4", "llm", "https://api.openai.com", "test-key", True,
+            "gpt-4", "vlm", "https://api.openai.com", "test-key", True,
             "openai", None, None, None, None,
             temperature=None, top_p=None, extra_params=None,
         )
@@ -820,7 +820,7 @@ async def test_verify_model_config_connectivity_failure():
 
         model_config = {
             "model_name": "gpt-4",
-            "model_type": "llm",
+            "model_type": "vlm",
             "base_url": "https://api.openai.com",
             "api_key": "test-key"
         }
@@ -871,7 +871,7 @@ async def test_verify_model_config_connectivity_exception():
 
         model_config = {
             "model_name": "gpt-4",
-            "model_type": "llm",
+            "model_type": "vlm",
             "base_url": "https://api.openai.com",
             "api_key": "test-key"
         }
@@ -1209,7 +1209,7 @@ async def test_check_model_connectivity_sets_monitoring_context():
             mock.patch("management.services.model.health.set_monitoring_context") as mock_set_ctx:
         mock_get_model.return_value = {
             "model_id": 1, "model_repo": "openai", "model_name": "gpt-4",
-            "model_type": "llm", "base_url": "https://api.openai.com",
+            "model_type": "vlm", "base_url": "https://api.openai.com",
             "api_key": "test-key", "ssl_verify": True,
         }
 
@@ -1384,7 +1384,7 @@ async def test_check_model_connectivity_ssl_verify_fallback():
             "model_id": "model123",
             "model_repo": "openai",
             "model_name": "gpt-4",
-            "model_type": "llm",
+            "model_type": "vlm",
             "base_url": "https://api.openai.com",
             "api_key": "test-key",
             "ssl_verify": True,
@@ -1398,12 +1398,12 @@ async def test_check_model_connectivity_ssl_verify_fallback():
         assert mock_connectivity.call_count == 2
         # First call with ssl_verify=True
         mock_connectivity.assert_any_call(
-            "openai/gpt-4", "llm", "https://api.openai.com", "test-key", True,
+            "openai/gpt-4", "vlm", "https://api.openai.com", "test-key", True,
             None, None, None, "GPT-4", None,
         )
         # Second call with ssl_verify=False (fallback)
         mock_connectivity.assert_any_call(
-            "openai/gpt-4", "llm", "https://api.openai.com", "test-key", False,
+            "openai/gpt-4", "vlm", "https://api.openai.com", "test-key", False,
             None, None, None, "GPT-4", None,
         )
         # Verify ssl_verify=False was saved to the record
@@ -1438,7 +1438,7 @@ async def test_verify_model_config_connectivity_ssl_verify_fallback():
 
         model_config = {
             "model_name": "gpt-4",
-            "model_type": "llm",
+            "model_type": "vlm",
             "base_url": "https://api.openai.com",
             "api_key": "test-key",
             "ssl_verify": True,
@@ -1449,12 +1449,12 @@ async def test_verify_model_config_connectivity_ssl_verify_fallback():
         assert result["connectivity"] is True
         assert mock_connectivity.call_count == 2
         mock_connectivity.assert_any_call(
-            "gpt-4", "llm", "https://api.openai.com", "test-key", True,
+            "gpt-4", "vlm", "https://api.openai.com", "test-key", True,
             "openai", None, None, None, None,
             temperature=None, top_p=None, extra_params=None,
         )
         mock_connectivity.assert_any_call(
-            "gpt-4", "llm", "https://api.openai.com", "test-key", False,
+            "gpt-4", "vlm", "https://api.openai.com", "test-key", False,
             "openai", None, None, None, None,
             temperature=None, top_p=None, extra_params=None,
         )
