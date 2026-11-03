@@ -21,6 +21,7 @@ acceptance_bindings:
   - test_account_migration_serializes_online_creation_with_one_writer_lock
   - test_account_profile_single_sql_upgrade_and_replay
   - test_account_profile_conflict_rolls_back_single_sql
+  - test_consolidated_schema_provider_identities_and_final_email_conflicts
 preparation:
   families: []
   anchors: false

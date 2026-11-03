@@ -260,18 +260,9 @@ SQL
 
 append_all_migrations_sql() {
   local migration_id checksum source_file
-  local account_compat="$MIGRATION_DIR/v2.9.0_002_account_availability.sql"
   while IFS="$MANIFEST_SEPARATOR" read -r migration_id checksum source_file; do
     [ -n "${migration_id:-}" ] || continue
-    if [ "$migration_id" = v2.9.0_001_local_user_accounts.sql ] && [ -f "$account_compat" ]; then
-      printf "BEGIN;\nSET LOCAL nexent.account_schema_replay='prepare';\n\\i '%s'\nSET LOCAL nexent.account_schema_replay='';\n" \
-        "$(escape_sql_literal "$account_compat")" >> "$MIGRATION_PLAN_FILE"
-    fi
     append_one_migration_sql "$migration_id" "$checksum" "$source_file"
-    if [ "$migration_id" = v2.9.0_002_account_availability.sql ]; then
-      # Cleanup also runs when the checksum check skipped both account files.
-      printf "\\i '%s'\nCOMMIT;\n" "$(escape_sql_literal "$account_compat")" >> "$MIGRATION_PLAN_FILE"
-    fi
   done < "$MIGRATION_MANIFEST_FILE"
 }
 
