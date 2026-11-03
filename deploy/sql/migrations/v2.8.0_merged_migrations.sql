@@ -315,6 +315,7 @@ COMMIT;
 
 -- Source migration: v2.7.1_007_conversation_activity_and_source.sql
 -- Source SHA-256: e39cd5cec55b34c1e0d7791aadd82809d533580f30d1008d68e070f3013599c5
+-- Deliberate simplification: classify only explicit run message references without scanning message units.
 
 -- Copyright (c) 2025-2026 Huawei Technologies Co., Ltd. All rights reserved.
 
@@ -328,34 +329,21 @@ COMMENT ON COLUMN nexent.conversation_message_t.message_source IS
 COMMENT ON COLUMN nexent.conversation_record_t.last_activity_time IS
     'Last committed visible message activity as a UTC timestamp; NULL falls back to conversation creation';
 
--- Classify explicit message identities, never an entire task conversation.
-UPDATE nexent.conversation_message_t AS message
+-- Classify explicit run message identities, never an entire task conversation.
+UPDATE nexent.conversation_message_t AS m
 SET message_source = 'AUTOMATION'
-WHERE message.message_source = 'CHAT'
-  AND (
-    EXISTS (
-        SELECT 1 FROM nexent.conversation_message_unit_t AS unit
-        WHERE unit.message_id = message.message_id
-          AND unit.unit_type = 'automation_prompt'
-    ) OR EXISTS (
-        SELECT 1 FROM nexent.agent_automation_run_t AS run
-        WHERE run.conversation_id = message.conversation_id
-          AND message.message_id IN (run.user_message_id, run.assistant_message_id)
-    )
-  );
+FROM nexent.agent_automation_run_t AS r
+CROSS JOIN LATERAL (
+    VALUES
+        (r.user_message_id),
+        (r.assistant_message_id)
+) AS v(message_id)
+WHERE v.message_id IS NOT NULL
+  AND m.conversation_id = r.conversation_id
+  AND m.message_id = v.message_id
+  AND m.message_source = 'CHAT';
 
--- Legacy audit timestamps include title/config changes, so use message creation.
-UPDATE nexent.conversation_record_t AS conversation
-SET last_activity_time = COALESCE(
-    (SELECT MAX(message.create_time)
-     FROM nexent.conversation_message_t AS message
-     WHERE message.conversation_id = conversation.conversation_id
-       AND message.delete_flag = 'N'
-       AND (message.message_role = 'user'
-            OR (message.message_role = 'assistant' AND message.message_content <> ''))),
-    conversation.create_time
-)
-WHERE conversation.last_activity_time IS NULL;
+-- Leave legacy activity NULL; creation time is used until the next visible message.
 
 CREATE INDEX IF NOT EXISTS idx_conversation_activity_order
     ON nexent.conversation_record_t
