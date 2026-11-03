@@ -74,13 +74,6 @@ jobs:
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-        with:
-          daemon-config: |
-            {
-              "features": {
-                "containerd-snapshotter": false
-              }
-            }
 
       - name: Set version and platform variables
         id: set-vars
