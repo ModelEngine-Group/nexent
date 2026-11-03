@@ -5,6 +5,7 @@ implementations:
     file: test_runtime.py
     selector: test_
 acceptance_bindings:
+  AC-04: [test_debug_uses_canonical_preferences_without_changing_definitions]
   AC-01: [test_selected_creator_runtime_wire]
   AC-02: [test_selected_creator_runtime_wire, test_reasoning_variants_preserve_independent_configuration, test_sampling_runtime_wire_and_persisted_intent]
   AC-03: [test_null_sampling_inherits_shared_defaults_and_matches_display_metadata]
